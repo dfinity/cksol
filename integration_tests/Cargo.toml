@@ -1,0 +1,21 @@
+[package]
+name = "cksol-int-tests"
+version = "0.1.0"
+authors.workspace = true
+edition.workspace = true
+repository.workspace = true
+homepage.workspace = true
+license.workspace = true
+
+[dependencies]
+candid = { workspace = true }
+cksol-types = { path = "../libs/types" }
+ic-canister-runtime = { workspace = true }
+ic-management-canister-types = { workspace = true }
+ic-pocket-canister-runtime = { workspace = true }
+ic-test-utilities-load-wasm = { workspace = true }
+pocket-ic = { workspace = true }
+serde = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
