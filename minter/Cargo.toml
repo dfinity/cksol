@@ -13,9 +13,9 @@ name = "cksol-minter"
 path = "src/main.rs"
 
 [dependencies]
-candid = {workspace = true}
-ic-cdk = {workspace = true}
-cksol-types =  {path = "../libs/types"}
+candid = { workspace = true }
+ic-cdk = { workspace = true }
+cksol-types = { path = "../libs/types" }
 
 [dev-dependencies]
-candid_parser = {workspace = true}
+candid_parser = { workspace = true }
