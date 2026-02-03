@@ -1,0 +1,21 @@
+[package]
+name = "cksol-minter"
+version = "0.1.0"
+description = "Chain-key SOL minter for the Internet Computer."
+authors.workspace = true
+edition.workspace = true
+repository.workspace = true
+homepage.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "cksol-minter"
+path = "src/main.rs"
+
+[dependencies]
+candid = { workspace = true }
+ic-cdk = { workspace = true }
+cksol-types = { path = "../libs/types" }
+
+[dev-dependencies]
+candid_parser = { workspace = true }

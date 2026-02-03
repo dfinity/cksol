@@ -1,2 +1,3 @@
-# cksol
+# ckSOL
+
 Chain Key Solana implementation
