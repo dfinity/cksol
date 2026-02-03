@@ -13,14 +13,21 @@ name = "cksol-minter"
 path = "src/main.rs"
 
 [dependencies]
+bincode = { workspace = true }
 bs58 = { workspace = true }
 candid = { workspace = true }
+cksol-types = { path = "../libs/types" }
 ic-cdk = { workspace = true }
 ic-dummy-getrandom-for-wasm = { workspace = true }
 ic-ed25519 = { workspace = true }
 icrc-ledger-types = { workspace = true }
-cksol-types = { path = "../libs/types" }
+sol_rpc_client = { workspace = true }
+sol_rpc_types = { workspace = true }
 solana-address = { workspace = true }
+solana-message = { workspace = true }
+solana-signature = { workspace = true }
+solana-system-interface = { workspace = true, features = ["bincode"] }
+solana-transaction-status-client-types = { workspace = true }
 
 [dev-dependencies]
 candid_parser = { workspace = true }
