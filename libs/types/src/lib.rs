@@ -3,22 +3,20 @@
 #![forbid(unsafe_code)]
 #![forbid(missing_docs)]
 
-#[cfg(test)]
-mod tests;
-
 use candid::CandidType;
+use ic_principal::Principal;
+use icrc_ledger_types::icrc1::account::Subaccount;
 use serde::{Deserialize, Serialize};
+pub use sol_rpc_types::Pubkey as Address;
 
-/// A dummy request
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
-pub struct DummyRequest {
-    /// Input
-    pub input: String,
-}
-
-/// A dummy response
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
-pub struct DummyResponse {
-    /// Output
-    pub output: String,
+/// Arguments for a request to the `getDepositAddress` ckSOL minter endpoint.
+#[derive(Clone, Eq, PartialEq, Debug, Default, CandidType, Deserialize, Serialize)]
+pub struct GetDepositAddressArgs {
+    /// The principal to deposit funds to.
+    ///
+    /// If not set, defaults to the caller's principal.
+    /// The resolved owner must be a non-anonymous principal.
+    pub owner: Option<Principal>,
+    /// The subaccount to deposit funds to.
+    pub subaccount: Option<Subaccount>,
 }

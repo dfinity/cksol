@@ -12,4 +12,7 @@ include = ["src", "Cargo.toml", "CHANGELOG.md", "LICENSE", "README.md"]
 
 [dependencies]
 candid = { workspace = true }
+ic_principal = { workspace = true }
+icrc-ledger-types = { workspace = true }
 serde = { workspace = true }
+sol_rpc_types = { workspace = true }

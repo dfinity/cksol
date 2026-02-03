@@ -16,6 +16,8 @@ ic-pocket-canister-runtime = { workspace = true }
 ic-test-utilities-load-wasm = { workspace = true }
 pocket-ic = { workspace = true }
 serde = { workspace = true }
+sol_rpc_types = { workspace = true }
+solana-address = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true }
