@@ -1,10 +1,15 @@
-use cksol_types::{DummyRequest, DummyResponse};
+use cksol_types::{DummyRequest, DummyResponse, GetSolAddressArgs};
 
 #[ic_cdk::query]
 fn greet(request: DummyRequest) -> DummyResponse {
     DummyResponse {
         output: format!("Hello, {}!", request.input),
     }
+}
+
+#[ic_cdk::query]
+fn get_sol_address(_request: GetSolAddressArgs) -> String {
+    String::new()
 }
 
 fn main() {}

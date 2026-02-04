@@ -6,7 +6,8 @@
 #[cfg(test)]
 mod tests;
 
-use candid::CandidType;
+use candid::{CandidType, Principal};
+use icrc_ledger_types::icrc1::account::Subaccount;
 use serde::{Deserialize, Serialize};
 
 /// A dummy request
@@ -21,4 +22,14 @@ pub struct DummyRequest {
 pub struct DummyResponse {
     /// Output
     pub output: String,
+}
+
+/// The argument to `get_sol_address` endpoint used to derive
+/// the Solana address for a given `Account`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
+pub struct GetSolAddressArgs {
+    /// The `Principal` that owns the `Account`
+    pub owner: Option<Principal>,
+    /// Subaccount
+    pub subaccount: Option<Subaccount>,
 }
