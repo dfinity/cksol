@@ -2,7 +2,6 @@ use ic_cdk::management_canister::{
     SchnorrAlgorithm, SchnorrKeyId, SchnorrPublicKeyArgs, SchnorrPublicKeyResult,
     schnorr_public_key,
 };
-use ic_ed25519::PublicKey;
 use std::{
     cell::RefCell,
     ops::{Deref, DerefMut},
