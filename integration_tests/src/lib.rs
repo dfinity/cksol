@@ -79,7 +79,7 @@ pub struct CkSolMinter<'a> {
 
 impl CkSolMinter<'_> {
     pub async fn get_deposit_address(&self, args: GetDepositAddressArgs) -> sol_rpc_types::Pubkey {
-        self.update_call("getDepositAddress", (args,)).await
+        self.update_call("get_deposit_address", (args,)).await
     }
 
     async fn update_call<In, Out>(&self, method: &str, args: In) -> Out
