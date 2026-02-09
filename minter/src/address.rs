@@ -76,9 +76,8 @@ fn derive_public_key(ed25519_public_key: &SchnorrPublicKeyResult, path: Vec<Vec<
 }
 
 fn derivation_path(account: &Account) -> Vec<Vec<u8>> {
-    const SCHEMA_V1: u8 = 1;
-    let mut result = vec![vec![SCHEMA_V1]];
-    result.push(account.owner.as_slice().to_vec());
-    result.push(account.effective_subaccount().to_vec());
-    result
+    vec![
+        account.owner.as_slice().to_vec(),
+        account.effective_subaccount().to_vec(),
+    ]
 }
