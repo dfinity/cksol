@@ -1,19 +1,17 @@
-use cksol_int_tests::Setup;
-use cksol_types::{DummyRequest, DummyResponse};
+use cksol_int_tests::SetupBuilder;
+use cksol_types::GetDepositAddressArgs;
+use solana_address::{Address, address};
+
+const DEPOSIT_ADDRESS: Address = address!("4Ddk4XxD8nwnnMApEAdJXLG3nf9UEvrDEP6B5bYZyzwn");
 
 #[tokio::test]
-async fn should_greet() {
-    let setup = Setup::new().await;
+async fn should_get_deposit_address() {
+    let setup = SetupBuilder::new().build().await;
 
-    let request = DummyRequest {
-        input: "world".to_string(),
-    };
-    let response: DummyResponse = setup.minter().query_call("greet", (request,)).await;
+    let deposit_address = setup
+        .minter()
+        .get_deposit_address(GetDepositAddressArgs::default())
+        .await;
 
-    assert_eq!(
-        response,
-        DummyResponse {
-            output: "Hello, world!".to_string()
-        }
-    );
+    assert_eq!(Address::from(deposit_address), DEPOSIT_ADDRESS);
 }

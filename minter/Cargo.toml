@@ -20,6 +20,7 @@ ic-dummy-getrandom-for-wasm = { workspace = true }
 ic-ed25519 = { workspace = true }
 icrc-ledger-types = { workspace = true }
 cksol-types = { path = "../libs/types" }
+solana-address = { workspace = true }
 
 [dev-dependencies]
 candid_parser = { workspace = true }
