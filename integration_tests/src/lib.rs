@@ -82,6 +82,16 @@ impl CkSolMinter<'_> {
         self.update_call("get_deposit_address", (args,)).await
     }
 
+    pub async fn get_deposit_address_result(
+        &self,
+        args: GetDepositAddressArgs,
+    ) -> Result<sol_rpc_types::Pubkey, String> {
+        self.runtime
+            .update_call(self.id, "get_deposit_address", (args,), 0)
+            .await
+            .map_err(|e| format!("{:?}", e))
+    }
+
     async fn update_call<In, Out>(&self, method: &str, args: In) -> Out
     where
         In: ArgumentEncoder + Send,
