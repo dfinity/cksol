@@ -2,6 +2,7 @@ use candid::Principal;
 use cksol_types::{Address, GetDepositAddressArgs};
 
 mod address;
+mod state;
 
 #[ic_cdk::update]
 async fn get_deposit_address(args: GetDepositAddressArgs) -> Address {
@@ -12,14 +13,9 @@ async fn get_deposit_address(args: GetDepositAddressArgs) -> Address {
         "the owner must be non-anonymous"
     );
 
-    address::get_deposit_address(owner, args.subaccount)
+    address::get_sol_address(owner, args.subaccount)
         .await
         .into()
-}
-
-#[ic_cdk::query]
-async fn get_sol_address(request: GetSolAddressArgs) -> String {
-    cksol_minter::get_sol_address(request).await
 }
 
 fn main() {}

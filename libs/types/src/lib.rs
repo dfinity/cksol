@@ -22,13 +22,3 @@ pub struct GetDepositAddressArgs {
     /// The subaccount to deposit funds to.
     pub subaccount: Option<Subaccount>,
 }
-
-/// The argument to `get_sol_address` endpoint used to derive
-/// the Solana address for a given `Account`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
-pub struct GetSolAddressArgs {
-    /// The `Principal` that owns the `Account`
-    pub owner: Option<Principal>,
-    /// Subaccount
-    pub subaccount: Option<Subaccount>,
-}
