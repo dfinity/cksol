@@ -93,6 +93,26 @@ async fn should_fail_for_anonymous_owner() {
 }
 
 #[tokio::test]
+async fn should_fail_for_anonymous_caller_and_owner() {
+    let setup = SetupBuilder::new()
+        .with_caller(Principal::anonymous())
+        .build()
+        .await;
+
+    let result = setup
+        .minter()
+        .get_deposit_address_result(GetDepositAddressArgs {
+            owner: None,
+            subaccount: None,
+        })
+        .await;
+
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(err.contains("the owner must be non-anonymous"));
+}
+
+#[tokio::test]
 async fn should_succeed_for_anonymous_caller_with_owner() {
     let setup = SetupBuilder::new()
         .with_caller(Principal::anonymous())
