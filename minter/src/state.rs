@@ -21,15 +21,15 @@ where
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct State {
-    pub ed25519_public_key: Option<SchnorrPublicKeyResult>,
-    pub ed25519_key_name: String,
+    pub master_public_key: Option<SchnorrPublicKeyResult>,
+    pub master_key_name: String,
 }
 
 impl Default for State {
     fn default() -> Self {
         Self {
-            ed25519_public_key: Default::default(),
-            ed25519_key_name: "dfx_test_key".to_string(),
+            master_public_key: Default::default(),
+            master_key_name: "dfx_test_key".to_string(),
         }
     }
 }
