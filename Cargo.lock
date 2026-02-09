@@ -446,7 +446,6 @@ dependencies = [
  "candid_parser",
  "cksol-types",
  "ic-cdk",
- "ic_principal",
  "icrc-ledger-types",
  "solana-address 2.1.0",
 ]
@@ -456,7 +455,6 @@ name = "cksol-types"
 version = "0.1.0"
 dependencies = [
  "candid",
- "ic_principal",
  "icrc-ledger-types",
  "serde",
  "sol_rpc_types",

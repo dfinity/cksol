@@ -17,7 +17,6 @@ candid = { workspace = true }
 cksol-types = { path = "../libs/types" }
 ic-cdk = { workspace = true }
 icrc-ledger-types = { workspace = true }
-ic_principal = { workspace = true }
 solana-address = { workspace = true }
 
 [dev-dependencies]

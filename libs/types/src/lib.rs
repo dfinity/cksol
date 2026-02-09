@@ -3,8 +3,7 @@
 #![forbid(unsafe_code)]
 #![forbid(missing_docs)]
 
-use candid::CandidType;
-use ic_principal::Principal;
+use candid::{CandidType, Principal};
 use icrc_ledger_types::icrc1::account::Subaccount;
 use serde::{Deserialize, Serialize};
 pub use sol_rpc_types::Pubkey as Address;

@@ -1,5 +1,5 @@
+use candid::Principal;
 use cksol_types::{Address, GetDepositAddressArgs};
-use ic_principal::Principal;
 
 mod address;
 

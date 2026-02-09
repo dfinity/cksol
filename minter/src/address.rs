@@ -1,5 +1,5 @@
+use candid::Principal;
 use ic_cdk::management_canister::{SchnorrAlgorithm, SchnorrKeyId, SchnorrPublicKeyArgs};
-use ic_principal::Principal;
 use icrc_ledger_types::icrc1::account::Subaccount;
 use solana_address::Address;
 
