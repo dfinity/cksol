@@ -80,6 +80,9 @@ pub enum InvalidTransaction {
     /// Transaction does not have a `meta` field. This might be because it is not confirmed.
     #[error("No transaction meta")]
     NoTransactionMeta,
+    /// Deposit address not part of transaction.
+    #[error("Deposit address not part of transaction")]
+    NotDepositToAddress,
 }
 
 /// The ID of one of the ICP root keys.

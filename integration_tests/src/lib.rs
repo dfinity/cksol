@@ -186,7 +186,7 @@ impl CkSolMinter<'_> {
     pub async fn update_balance(
         &self,
         args: UpdateBalanceArgs,
-    ) -> Result<Lamport, UpdateBalanceError> {
+    ) -> Result<Option<Lamport>, UpdateBalanceError> {
         self.update_call("updateBalance", (args,)).await
     }
 

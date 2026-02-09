@@ -1,11 +1,10 @@
 use cksol_types::{GetTransactionError, InvalidTransaction};
 use sol_rpc_types::{GetTransactionEncoding, Lamport, MultiRpcResult, Signature};
 use solana_address::Address;
-use solana_message::compiled_instruction::CompiledInstruction;
-use solana_system_interface::instruction::SystemInstruction;
-use solana_transaction_status_client_types::{
-    option_serializer::OptionSerializer, EncodedConfirmedTransactionWithStatusMeta, UiInstruction,
-};
+use solana_transaction_status_client_types::EncodedConfirmedTransactionWithStatusMeta;
+
+// TODO: Read this from state
+const MIN_DEPOSIT_THRESHOLD: Lamport = 100_000;
 
 pub async fn try_get_transaction(
     signature: Signature,
@@ -41,12 +40,10 @@ pub async fn try_get_transaction(
     }
 }
 
-pub fn extract_deposits_to_address(
+pub fn get_deposit_amount_to_address(
     transaction: EncodedConfirmedTransactionWithStatusMeta,
-    destination: Address,
-) -> Result<Vec<(InstructionIndex, SolTransfer)>, InvalidTransaction> {
-    let mut transfers = Vec::new();
-
+    deposit_address: Address,
+) -> Result<Option<Lamport>, InvalidTransaction> {
     let message = transaction
         .transaction
         .transaction
@@ -55,135 +52,31 @@ pub fn extract_deposits_to_address(
         .message;
     let account_keys = message.static_account_keys();
 
-    // Look at top-level instructions
-    for (index, instruction) in message.instructions().iter().enumerate() {
-        if let Some(transfer) = try_as_deposit_to(account_keys, instruction, &destination)? {
-            ic_cdk::println!(
-                "Found deposit to {:?} from {:?} at instruction {:?}: {:?} lamports",
-                transfer.from,
-                transfer.to,
-                index,
-                transfer.amount,
-            );
-            transfers.push((
-                InstructionIndex {
-                    index,
-                    inner_index: None,
-                },
-                transfer,
-            ));
-        }
+    let deposit_address_index = account_keys
+        .iter()
+        .position(|address| address == &deposit_address)
+        .ok_or(InvalidTransaction::NotDepositToAddress)?;
+    // TODO: Ensure writable an source is transaction
+    if message.is_signer(deposit_address_index) {
+        return Err(InvalidTransaction::NotDepositToAddress);
     }
 
-    // Get the transaction inner instructions
-    let inner_instructions = transaction
+    let meta = transaction
         .transaction
         .meta
-        .into_iter()
-        .flat_map(|meta| match meta.inner_instructions {
-            OptionSerializer::Some(inner_instructions) => Some(inner_instructions.into_iter()),
-            _ => None,
-        })
-        .flatten()
-        .flat_map(|inner_instruction| {
-            // Index of the top-level instruction containing this inner instruction
-            let index = inner_instruction.index as usize;
-            inner_instruction
-                .instructions
-                .into_iter()
-                .enumerate()
-                .filter_map(
-                    move |(inner_index, inner_instruction)| match inner_instruction {
-                        UiInstruction::Compiled(inner_instruction) => {
-                            let index = InstructionIndex {
-                                index,
-                                inner_index: Some(inner_index),
-                            };
-                            Some((index, inner_instruction))
-                        }
-                        // This should not happen when calling `getTransaction` with base64 encoding
-                        UiInstruction::Parsed(_) => None,
-                    },
-                )
-        });
+        .ok_or(InvalidTransaction::NoTransactionMeta)?;
+    let pre_balance = *meta
+        .pre_balances
+        .get(deposit_address_index)
+        .ok_or(InvalidTransaction::DecodingFailed)?;
+    let post_balance = *meta
+        .post_balances
+        .get(deposit_address_index)
+        .ok_or(InvalidTransaction::DecodingFailed)?;
 
-    for (index, inner_instruction) in inner_instructions {
-        let inner_instruction = CompiledInstruction {
-            program_id_index: inner_instruction.program_id_index,
-            accounts: inner_instruction.accounts,
-            data: bs58::decode(inner_instruction.data)
-                .into_vec()
-                .map_err(|_| InvalidTransaction::DecodingFailed)?,
-        };
-        if let Some(transfer) = try_as_deposit_to(account_keys, &inner_instruction, &destination)? {
-            ic_cdk::println!(
-                "Found deposit to {:?} from {:?} at instruction {:?} (inner instruction {:?}): {:?} lamports",
-                transfer.from,
-                transfer.to,
-                index.index,
-                index.inner_index.unwrap(),
-                transfer.amount,
-            );
-            transfers.push((index, transfer));
-        }
+    if post_balance >= pre_balance + MIN_DEPOSIT_THRESHOLD {
+        Ok(Some(post_balance.saturating_sub(pre_balance)))
+    } else {
+        Ok(None)
     }
-
-    Ok(transfers)
-}
-
-fn try_as_deposit_to(
-    account_keys: &[Address],
-    instruction: &CompiledInstruction,
-    destination: &Address,
-) -> Result<Option<SolTransfer>, InvalidTransaction> {
-    let program_id = account_keys
-        .get(instruction.program_id_index as usize)
-        .ok_or(InvalidTransaction::DecodingFailed)?;
-    if program_id != &solana_system_interface::program::id() {
-        return Ok(None);
-    }
-
-    let amount = match bincode::deserialize::<SystemInstruction>(&instruction.data) {
-        Ok(SystemInstruction::Transfer { lamports }) => lamports,
-        _ => return Ok(None),
-    };
-
-    let account_index = instruction
-        .accounts
-        .first()
-        .ok_or(InvalidTransaction::DecodingFailed)?;
-    let address = account_keys
-        .get(*account_index as usize)
-        .ok_or(InvalidTransaction::DecodingFailed)?;
-    let from = address;
-
-    let account_index = instruction
-        .accounts
-        .get(1)
-        .ok_or(InvalidTransaction::DecodingFailed)?;
-    let address = account_keys
-        .get(*account_index as usize)
-        .ok_or(InvalidTransaction::DecodingFailed)?;
-    let to = address;
-
-    if to != destination {
-        return Ok(None);
-    }
-
-    Ok(Some(SolTransfer {
-        from: *from,
-        to: *to,
-        amount,
-    }))
-}
-
-pub struct InstructionIndex {
-    pub index: usize,
-    pub inner_index: Option<usize>,
-}
-
-pub struct SolTransfer {
-    pub from: Address,
-    pub to: Address,
-    pub amount: Lamport,
 }

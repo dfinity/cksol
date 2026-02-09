@@ -8,7 +8,6 @@ use solana_client::rpc_config::CommitmentConfig;
 use solana_keypair::{Keypair, Signer};
 use solana_native_token::LAMPORTS_PER_SOL;
 use solana_signature::Signature;
-use solana_system_transaction;
 
 const SOLANA_VALIDATOR_URL: &str = "http://localhost:8899";
 const PRINCIPAL: Principal = Principal::from_slice(&[0x9d, 0xf7, 0x99]);
@@ -51,7 +50,7 @@ async fn should_update_balance_with_single_deposit() {
         })
         .await;
 
-    assert_eq!(balance, Ok(DEPOSIT_AMOUNT));
+    assert_eq!(balance, Ok(Some(DEPOSIT_AMOUNT)));
 }
 
 async fn send_deposit_to_address(deposit_address: Address, deposit_amount: u64) -> Signature {

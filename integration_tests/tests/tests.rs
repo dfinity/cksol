@@ -128,7 +128,7 @@ async fn should_update_balance_with_single_deposit() {
         })
         .await;
 
-    assert_eq!(balance, Ok(100_000_000));
+    assert_eq!(balance, Ok(Some(100_000_000)));
 }
 
 // Transaction obtained by executing the following with the Solana CLI:

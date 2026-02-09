@@ -25,6 +25,7 @@ sol_rpc_client = { workspace = true }
 sol_rpc_types = { workspace = true }
 solana-address = { workspace = true }
 solana-message = { workspace = true }
+solana-native-token = { workspace = true }
 solana-signature = { workspace = true }
 solana-system-interface = { workspace = true, features = ["bincode"] }
 solana-transaction-status-client-types = { workspace = true }

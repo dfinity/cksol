@@ -725,6 +725,7 @@ dependencies = [
  "sol_rpc_types",
  "solana-address 2.1.0",
  "solana-message",
+ "solana-native-token",
  "solana-signature",
  "solana-system-interface 3.0.0",
  "solana-transaction-status-client-types",

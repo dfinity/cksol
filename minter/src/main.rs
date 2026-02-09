@@ -22,7 +22,7 @@ async fn get_deposit_address(args: GetDepositAddressArgs) -> Address {
 }
 
 #[ic_cdk::update(hidden = true)]
-async fn update_balance(args: UpdateBalanceArgs) -> Result<Lamport, UpdateBalanceError> {
+async fn update_balance(args: UpdateBalanceArgs) -> Result<Option<Lamport>, UpdateBalanceError> {
     let owner = args.owner.unwrap_or_else(ic_cdk::api::msg_caller);
     assert_ne!(
         owner,
@@ -37,10 +37,10 @@ async fn update_balance(args: UpdateBalanceArgs) -> Result<Lamport, UpdateBalanc
         .map_err(UpdateBalanceError::GetTransactionError);
     let transaction = maybe_transaction?.ok_or(UpdateBalanceError::TransactionNotFound)?;
 
-    let deposits = transaction::extract_deposits_to_address(transaction, deposit_address)
+    let maybe_deposit = transaction::get_deposit_amount_to_address(transaction, deposit_address)
         .map_err(UpdateBalanceError::InvalidTransaction)?;
 
-    Ok(deposits.iter().map(|(_, transfer)| transfer.amount).sum())
+    Ok(maybe_deposit)
 }
 
 fn main() {}
