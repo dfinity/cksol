@@ -1,6 +1,26 @@
-type DummyRequest = record {input : text};
-type DummyResponse = record {output : text};
+// Address of a [Solana account][account].
+//
+// This is a base-58 encoded string with at most 44 characters.
+// Example: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+//
+// [account]: https://solana.com/docs/core/accounts
+type Address = text;
+
+// Arguments for a request to the `getDepositAddress` ckSOL minter endpoint.
+type GetDepositAddressArgs = record {
+    // The principal to deposit funds to.
+    ///
+    // If not set, defaults to the caller's principal.
+    // The resolved owner must be a non-anonymous principal.
+    owner: opt principal;
+    // The subaccount to deposit funds to.
+    subaccount: opt blob;
+};
 
 service : {
-    greet: (DummyRequest) -> (DummyResponse) query;
-}
+    // Returns the Solana address to which the owner should send SOL.
+    ///
+    // If the owner is not set, it defaults to the caller's principal.
+    // The resolved owner must be a non-anonymous principal.
+    get_deposit_address: (GetDepositAddressArgs) -> (Address);
+};

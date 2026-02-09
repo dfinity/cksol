@@ -1,10 +1,20 @@
-use cksol_types::{DummyRequest, DummyResponse};
+use candid::Principal;
+use cksol_types::{Address, GetDepositAddressArgs};
 
-#[ic_cdk::query]
-fn greet(request: DummyRequest) -> DummyResponse {
-    DummyResponse {
-        output: format!("Hello, {}!", request.input),
-    }
+mod address;
+
+#[ic_cdk::update]
+async fn get_deposit_address(args: GetDepositAddressArgs) -> Address {
+    let owner = args.owner.unwrap_or_else(ic_cdk::api::msg_caller);
+    assert_ne!(
+        owner,
+        Principal::anonymous(),
+        "the owner must be non-anonymous"
+    );
+
+    address::get_deposit_address(owner, args.subaccount)
+        .await
+        .into()
 }
 
 fn main() {}
