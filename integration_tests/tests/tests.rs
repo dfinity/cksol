@@ -3,7 +3,7 @@ use cksol_int_tests::SetupBuilder;
 use cksol_types::GetDepositAddressArgs;
 use solana_address::{Address, address};
 
-const DEPOSIT_ADDRESS: Address = address!("4Ddk4XxD8nwnnMApEAdJXLG3nf9UEvrDEP6B5bYZyzwn");
+const DEPOSIT_ADDRESS: Address = address!("Ge2aoiaTb6Tq2DQ4xs7qGhGud97pKtDmJCAQufTJeNSu");
 
 #[tokio::test]
 async fn should_get_deposit_address() {

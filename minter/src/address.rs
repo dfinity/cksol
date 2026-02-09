@@ -67,7 +67,9 @@ fn derive_public_key(master_public_key: &SchnorrPublicKeyResult, path: Vec<Vec<u
 }
 
 fn derivation_path(account: &Account) -> Vec<Vec<u8>> {
+    const SCHEMA_V1: u8 = 1;
     vec![
+        vec![SCHEMA_V1],
         account.owner.as_slice().to_vec(),
         account.effective_subaccount().to_vec(),
     ]
