@@ -40,7 +40,7 @@ async fn lazy_call_schnorr_public_key() -> SchnorrPublicKeyResult {
     };
     let response = schnorr_public_key(&arg)
         .await
-        .expect("failed to obtain the key");
+        .expect("failed to obtain the canister master key");
 
     mutate_state(|s| s.master_public_key = Some(response.clone()));
     response
