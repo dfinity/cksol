@@ -10,13 +10,11 @@ use icrc_ledger_types::icrc1::account::Subaccount;
 use solana_address::Address;
 
 pub async fn get_sol_address(principal: Principal, subaccount: Option<Subaccount>) -> Address {
-    lazy_call_schnorr_public_key().await;
+    let master_public_key = lazy_call_schnorr_public_key().await;
 
     let public_key = read_state(|s| {
         derive_public_key_from_account(
-            &s.ed25519_public_key
-                .clone()
-                .expect("master key should be initialized"),
+            &master_public_key,
             &Account {
                 owner: principal,
                 subaccount,
@@ -24,12 +22,7 @@ pub async fn get_sol_address(principal: Principal, subaccount: Option<Subaccount
         )
     });
 
-    Address::try_from(public_key.serialize_raw()).unwrap_or_else(|_| {
-        panic!(
-            "Expected Schnorr public key to be 32 bytes, but got: {:?} bytes",
-            public_key
-        )
-    })
+    Address::from(public_key.serialize_raw())
 }
 
 async fn lazy_call_schnorr_public_key() -> SchnorrPublicKeyResult {
@@ -63,7 +56,7 @@ fn derive_public_key_from_account(
 }
 
 fn derive_public_key(ed25519_public_key: &SchnorrPublicKeyResult, path: Vec<Vec<u8>>) -> PublicKey {
-    let public_key = PublicKey::deserialize_raw(&ed25519_public_key.public_key.as_slice())
+    let public_key = PublicKey::deserialize_raw(ed25519_public_key.public_key.as_slice())
         .expect("Failed to deserialize public key");
 
     let derivation_path = DerivationPath::new(path.into_iter().map(DerivationIndex).collect());
