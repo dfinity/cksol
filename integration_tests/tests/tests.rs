@@ -93,7 +93,7 @@ async fn should_fail_for_anonymous_owner() {
 }
 
 #[tokio::test]
-async fn should_fail_for_anonymous_caller_and_owner() {
+async fn should_fail_for_anonymous_caller_and_no_owner() {
     let setup = SetupBuilder::new()
         .with_caller(Principal::anonymous())
         .build()
