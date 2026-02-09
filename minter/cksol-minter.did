@@ -22,5 +22,5 @@ service : {
     ///
     // If the owner is not set, it defaults to the caller's principal.
     // The resolved owner must be a non-anonymous principal.
-    getDepositAddress: (GetDepositAddressArgs) -> (Address);
+    get_deposit_address: (GetDepositAddressArgs) -> (Address);
 };

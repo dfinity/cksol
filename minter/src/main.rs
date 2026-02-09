@@ -3,7 +3,7 @@ use cksol_types::{Address, GetDepositAddressArgs};
 
 mod address;
 
-#[ic_cdk::update(name = "getDepositAddress")]
+#[ic_cdk::update]
 async fn get_deposit_address(args: GetDepositAddressArgs) -> Address {
     let owner = args.owner.unwrap_or_else(ic_cdk::api::msg_caller);
     assert_ne!(
