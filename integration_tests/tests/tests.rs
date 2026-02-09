@@ -1,5 +1,5 @@
 use candid::Principal;
-use cksol_int_tests::SetupBuilder;
+use cksol_int_tests::{Setup, SetupBuilder};
 use cksol_types::GetDepositAddressArgs;
 use solana_address::{Address, address};
 
@@ -27,7 +27,7 @@ async fn should_get_deposit_address_for_explicit_owner() {
         .minter()
         .get_deposit_address(GetDepositAddressArgs {
             owner: Some(owner),
-            ..Default::default()
+            subaccount: None,
         })
         .await;
 
@@ -42,8 +42,8 @@ async fn should_get_deposit_address_with_subaccount() {
     let deposit_address = setup
         .minter()
         .get_deposit_address(GetDepositAddressArgs {
+            owner: None,
             subaccount: Some(subaccount),
-            ..Default::default()
         })
         .await;
 
@@ -59,16 +59,16 @@ async fn should_get_different_addresses_for_different_subaccounts() {
     let address1 = setup
         .minter()
         .get_deposit_address(GetDepositAddressArgs {
+            owner: None,
             subaccount: Some(subaccount1),
-            ..Default::default()
         })
         .await;
 
     let address2 = setup
         .minter()
         .get_deposit_address(GetDepositAddressArgs {
+            owner: None,
             subaccount: Some(subaccount2),
-            ..Default::default()
         })
         .await;
 
@@ -83,11 +83,29 @@ async fn should_fail_for_anonymous_owner() {
         .minter()
         .get_deposit_address_result(GetDepositAddressArgs {
             owner: Some(Principal::anonymous()),
-            ..Default::default()
+            subaccount: None,
         })
         .await;
 
     assert!(result.is_err());
     let err = result.unwrap_err();
     assert!(err.contains("the owner must be non-anonymous"));
+}
+
+#[tokio::test]
+async fn should_succeed_for_anonymous_caller_with_owner() {
+    let setup = SetupBuilder::new()
+        .with_caller(Principal::anonymous())
+        .build()
+        .await;
+
+    let deposit_address = setup
+        .minter()
+        .get_deposit_address(GetDepositAddressArgs {
+            owner: Some(Setup::DEFAULT_CALLER),
+            subaccount: None,
+        })
+        .await;
+
+    assert_eq!(Address::from(deposit_address), DEPOSIT_ADDRESS);
 }

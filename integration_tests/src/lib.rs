@@ -8,28 +8,36 @@ use serde::de::DeserializeOwned;
 use std::{env::var, path::PathBuf, sync::Arc};
 
 #[derive(Default)]
-pub struct SetupBuilder {}
+pub struct SetupBuilder {
+    caller: Option<Principal>,
+}
 
 impl SetupBuilder {
     pub fn new() -> Self {
         Self::default()
     }
 
+    pub fn with_caller(mut self, caller: Principal) -> Self {
+        self.caller = Some(caller);
+        self
+    }
+
     pub async fn build(self) -> Setup {
-        Setup::new().await
+        Setup::new(self.caller).await
     }
 }
 
 pub struct Setup {
     env: Arc<PocketIc>,
     minter_canister_id: CanisterId,
+    caller: Option<Principal>,
 }
 
 impl Setup {
     pub const DEFAULT_CONTROLLER: Principal = Principal::from_slice(&[0x9d, 0xf7, 0x01]);
     pub const DEFAULT_CALLER: Principal = Principal::from_slice(&[0x9d, 0xf7, 0x02]);
 
-    pub async fn new() -> Self {
+    pub async fn new(caller: Option<Principal>) -> Self {
         let env = PocketIcBuilder::new()
             .with_nns_subnet() //make_live requires NNS subnet.
             .with_fiduciary_subnet()
@@ -57,11 +65,15 @@ impl Setup {
         Self {
             env: Arc::new(env),
             minter_canister_id,
+            caller,
         }
     }
 
     pub fn runtime(&self) -> PocketIcRuntime<'_> {
-        PocketIcRuntime::new(self.env.as_ref(), Self::DEFAULT_CALLER)
+        PocketIcRuntime::new(
+            self.env.as_ref(),
+            self.caller.unwrap_or(Self::DEFAULT_CALLER),
+        )
     }
 
     pub fn minter(&self) -> CkSolMinter<'_> {
