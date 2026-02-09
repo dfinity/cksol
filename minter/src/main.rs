@@ -1,3 +1,4 @@
+use cksol_minter::get_sol_address;
 use cksol_types::{DummyRequest, DummyResponse, GetSolAddressArgs};
 
 #[ic_cdk::query]
@@ -8,8 +9,8 @@ fn greet(request: DummyRequest) -> DummyResponse {
 }
 
 #[ic_cdk::query]
-fn get_sol_address(_request: GetSolAddressArgs) -> String {
-    String::new()
+async fn get_sol_address(request: GetSolAddressArgs) -> String {
+    cksol_minter::get_sol_address(request).await
 }
 
 fn main() {}
