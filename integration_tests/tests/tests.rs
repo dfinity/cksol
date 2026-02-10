@@ -6,7 +6,7 @@ use solana_address::{Address, address};
 const DEPOSIT_ADDRESS: Address = address!("Ge2aoiaTb6Tq2DQ4xs7qGhGud97pKtDmJCAQufTJeNSu");
 
 #[tokio::test]
-async fn should_get_deposit_address() {
+async fn should_get_deposit_address_for_default_owner() {
     let setup = SetupBuilder::new().build().await;
 
     let deposit_address = setup
