@@ -1,8 +1,8 @@
+use crate::state::SchnorrPublicKey;
 use crate::state::{mutate_state, read_state};
 use candid::Principal;
 use ic_cdk::management_canister::{
-    SchnorrAlgorithm, SchnorrKeyId, SchnorrPublicKeyArgs, SchnorrPublicKeyResult,
-    schnorr_public_key,
+    SchnorrAlgorithm, SchnorrKeyId, SchnorrPublicKeyArgs, schnorr_public_key,
 };
 use ic_ed25519::{DerivationIndex, DerivationPath, PublicKey};
 use icrc_ledger_types::icrc1::account::Account;
@@ -23,7 +23,7 @@ pub async fn get_deposit_address(principal: Principal, subaccount: Option<Subacc
     Address::from(public_key.serialize_raw())
 }
 
-async fn lazy_get_schnorr_master_key() -> SchnorrPublicKeyResult {
+async fn lazy_get_schnorr_master_key() -> SchnorrPublicKey {
     if let Some(public_key) = read_state(|s| s.master_public_key.clone()) {
         return public_key;
     }
@@ -42,23 +42,27 @@ async fn lazy_get_schnorr_master_key() -> SchnorrPublicKeyResult {
         .await
         .expect("failed to obtain the canister master key");
 
-    mutate_state(|s| s.master_public_key = Some(response.clone()));
-    response
+    let public_key = PublicKey::deserialize_raw(response.public_key.as_slice())
+        .expect("Failed to deserialize public key");
+    let schnorr_public_key = SchnorrPublicKey {
+        public_key,
+        chain_code: response.chain_code,
+    };
+
+    mutate_state(|s| s.master_public_key = Some(schnorr_public_key.clone()));
+    schnorr_public_key
 }
 
 fn derive_public_key_from_account(
-    master_public_key: &SchnorrPublicKeyResult,
+    master_public_key: &SchnorrPublicKey,
     account: &Account,
 ) -> PublicKey {
     derive_public_key(master_public_key, derivation_path(account))
 }
 
-fn derive_public_key(master_public_key: &SchnorrPublicKeyResult, path: Vec<Vec<u8>>) -> PublicKey {
-    let public_key = PublicKey::deserialize_raw(master_public_key.public_key.as_slice())
-        .expect("Failed to deserialize public key");
-
+fn derive_public_key(master_public_key: &SchnorrPublicKey, path: Vec<Vec<u8>>) -> PublicKey {
     let derivation_path = DerivationPath::new(path.into_iter().map(DerivationIndex).collect());
-    let (public_key, _chain_code) = public_key.derive_subkey_with_chain_code(
+    let (public_key, _chain_code) = master_public_key.public_key.derive_subkey_with_chain_code(
         &derivation_path,
         &master_public_key.chain_code.as_slice().try_into().unwrap(),
     );

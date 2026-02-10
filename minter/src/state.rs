@@ -1,5 +1,5 @@
 use cksol_types::Ed25519KeyName;
-use ic_cdk::management_canister::SchnorrPublicKeyResult;
+use ic_ed25519::PublicKey;
 use std::{
     cell::RefCell,
     ops::{Deref, DerefMut},
@@ -22,6 +22,12 @@ where
 
 #[derive(Default, Debug, PartialEq, Eq)]
 pub struct State {
-    pub master_public_key: Option<SchnorrPublicKeyResult>,
+    pub master_public_key: Option<SchnorrPublicKey>,
     pub master_key_name: Ed25519KeyName,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SchnorrPublicKey {
+    pub public_key: PublicKey,
+    pub chain_code: Vec<u8>,
 }
