@@ -81,7 +81,7 @@ async fn should_fail_for_anonymous_owner() {
 
     let result = setup
         .minter()
-        .get_deposit_address_result(GetDepositAddressArgs {
+        .try_get_deposit_address(GetDepositAddressArgs {
             owner: Some(Principal::anonymous()),
             subaccount: None,
         })
@@ -101,7 +101,7 @@ async fn should_fail_for_anonymous_caller_and_no_owner() {
 
     let result = setup
         .minter()
-        .get_deposit_address_result(GetDepositAddressArgs {
+        .try_get_deposit_address(GetDepositAddressArgs {
             owner: None,
             subaccount: None,
         })

@@ -91,20 +91,19 @@ pub struct CkSolMinter<'a> {
 
 impl CkSolMinter<'_> {
     pub async fn get_deposit_address(&self, args: GetDepositAddressArgs) -> sol_rpc_types::Pubkey {
-        self.update_call("get_deposit_address", (args,)).await
+        self.try_update_call("get_deposit_address", (args,))
+            .await
+            .expect("get_deposit_address failed")
     }
 
-    pub async fn get_deposit_address_result(
+    pub async fn try_get_deposit_address(
         &self,
         args: GetDepositAddressArgs,
     ) -> Result<sol_rpc_types::Pubkey, String> {
-        self.runtime
-            .update_call(self.id, "get_deposit_address", (args,), 0)
-            .await
-            .map_err(|e| format!("{:?}", e))
+        self.try_update_call("get_deposit_address", (args,)).await
     }
 
-    async fn update_call<In, Out>(&self, method: &str, args: In) -> Out
+    async fn try_update_call<In, Out>(&self, method: &str, args: In) -> Result<Out, String>
     where
         In: ArgumentEncoder + Send,
         Out: CandidType + DeserializeOwned,
@@ -112,7 +111,7 @@ impl CkSolMinter<'_> {
         self.runtime
             .update_call(self.id, method, args, 0)
             .await
-            .expect("Update call failed")
+            .map_err(|e| format!("{:?}", e))
     }
 }
 
