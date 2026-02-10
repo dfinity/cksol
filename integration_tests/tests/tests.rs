@@ -3,7 +3,8 @@ use cksol_int_tests::{Setup, SetupBuilder};
 use cksol_types::GetDepositAddressArgs;
 use solana_address::{Address, address};
 
-const DEPOSIT_ADDRESS: Address = address!("Ge2aoiaTb6Tq2DQ4xs7qGhGud97pKtDmJCAQufTJeNSu");
+const DEFAULT_CALLER_DEPOSIT_ADDRESS: Address =
+    address!("Ge2aoiaTb6Tq2DQ4xs7qGhGud97pKtDmJCAQufTJeNSu");
 
 #[tokio::test]
 async fn should_get_deposit_address_for_default_owner() {
@@ -14,7 +15,10 @@ async fn should_get_deposit_address_for_default_owner() {
         .get_deposit_address(GetDepositAddressArgs::default())
         .await;
 
-    assert_eq!(Address::from(deposit_address), DEPOSIT_ADDRESS);
+    assert_eq!(
+        Address::from(deposit_address),
+        DEFAULT_CALLER_DEPOSIT_ADDRESS
+    );
 }
 
 #[tokio::test]
@@ -31,7 +35,10 @@ async fn should_get_deposit_address_for_explicit_owner() {
         })
         .await;
 
-    assert_ne!(Address::from(deposit_address), DEPOSIT_ADDRESS);
+    assert_ne!(
+        Address::from(deposit_address),
+        DEFAULT_CALLER_DEPOSIT_ADDRESS
+    );
 }
 
 #[tokio::test]
@@ -47,7 +54,10 @@ async fn should_get_deposit_address_with_subaccount() {
         })
         .await;
 
-    assert_ne!(Address::from(deposit_address), DEPOSIT_ADDRESS);
+    assert_ne!(
+        Address::from(deposit_address),
+        DEFAULT_CALLER_DEPOSIT_ADDRESS
+    );
 }
 
 #[tokio::test]
@@ -127,5 +137,8 @@ async fn should_succeed_for_anonymous_caller_with_owner() {
         })
         .await;
 
-    assert_eq!(Address::from(deposit_address), DEPOSIT_ADDRESS);
+    assert_eq!(
+        Address::from(deposit_address),
+        DEFAULT_CALLER_DEPOSIT_ADDRESS
+    );
 }
