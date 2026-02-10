@@ -10,7 +10,7 @@ use icrc_ledger_types::icrc1::account::Subaccount;
 use solana_address::Address;
 
 pub async fn get_deposit_address(principal: Principal, subaccount: Option<Subaccount>) -> Address {
-    let master_public_key = lazy_call_schnorr_public_key().await;
+    let master_public_key = lazy_get_schnorr_master_key().await;
 
     let public_key = derive_public_key_from_account(
         &master_public_key,
@@ -23,7 +23,7 @@ pub async fn get_deposit_address(principal: Principal, subaccount: Option<Subacc
     Address::from(public_key.serialize_raw())
 }
 
-async fn lazy_call_schnorr_public_key() -> SchnorrPublicKeyResult {
+async fn lazy_get_schnorr_master_key() -> SchnorrPublicKeyResult {
     if let Some(public_key) = read_state(|s| s.master_public_key.clone()) {
         return public_key;
     }
