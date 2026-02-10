@@ -2,10 +2,8 @@ mod get_deposit_address_tests {
     use candid::Principal;
     use cksol_int_tests::{Setup, SetupBuilder};
     use cksol_types::GetDepositAddressArgs;
-    use solana_address::{Address, address};
 
-    const DEFAULT_CALLER_DEPOSIT_ADDRESS: Address =
-        address!("Ge2aoiaTb6Tq2DQ4xs7qGhGud97pKtDmJCAQufTJeNSu");
+    const DEFAULT_CALLER_DEPOSIT_ADDRESS: &str = "Ge2aoiaTb6Tq2DQ4xs7qGhGud97pKtDmJCAQufTJeNSu";
 
     #[tokio::test]
     async fn should_get_deposit_address_for_default_owner() {
@@ -16,10 +14,7 @@ mod get_deposit_address_tests {
             .get_deposit_address(GetDepositAddressArgs::default())
             .await;
 
-        assert_eq!(
-            Address::from(deposit_address),
-            DEFAULT_CALLER_DEPOSIT_ADDRESS
-        );
+        assert_eq!(deposit_address.to_string(), DEFAULT_CALLER_DEPOSIT_ADDRESS);
     }
 
     #[tokio::test]
@@ -36,28 +31,9 @@ mod get_deposit_address_tests {
             })
             .await;
 
-        assert_ne!(
-            Address::from(deposit_address),
-            DEFAULT_CALLER_DEPOSIT_ADDRESS
-        );
-    }
-
-    #[tokio::test]
-    async fn should_get_deposit_address_with_subaccount() {
-        let setup = SetupBuilder::new().build().await;
-        let subaccount = [1; 32];
-
-        let deposit_address = setup
-            .minter()
-            .get_deposit_address(GetDepositAddressArgs {
-                owner: None,
-                subaccount: Some(subaccount),
-            })
-            .await;
-
-        assert_ne!(
-            Address::from(deposit_address),
-            DEFAULT_CALLER_DEPOSIT_ADDRESS
+        assert_eq!(
+            deposit_address.to_string(),
+            "9qvNPGSFQY8fvmr5A2jyCmSBfN7rrWBGJEAGgpN2TKeV"
         );
     }
 
@@ -74,6 +50,10 @@ mod get_deposit_address_tests {
                 subaccount: Some(subaccount1),
             })
             .await;
+        assert_eq!(
+            address1.to_string(),
+            "97eLNQ1sc7yQHscLWet7vq7AZ6TbxN5nx8D8LPSbYEJB"
+        );
 
         let address2 = setup
             .minter()
@@ -83,7 +63,10 @@ mod get_deposit_address_tests {
             })
             .await;
 
-        assert_ne!(address1, address2);
+        assert_eq!(
+            address2.to_string(),
+            "BiuUj1yMbtStuumWutpBajSjNDPbnE5dNEuTv7J1cjmB"
+        );
     }
 
     #[tokio::test]
@@ -138,9 +121,6 @@ mod get_deposit_address_tests {
             })
             .await;
 
-        assert_eq!(
-            Address::from(deposit_address),
-            DEFAULT_CALLER_DEPOSIT_ADDRESS
-        );
+        assert_eq!(deposit_address.to_string(), DEFAULT_CALLER_DEPOSIT_ADDRESS);
     }
 }
