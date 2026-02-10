@@ -1,3 +1,4 @@
+use cksol_types::Ed25519KeyName;
 use ic_cdk::management_canister::SchnorrPublicKeyResult;
 use std::{
     cell::RefCell,
@@ -19,17 +20,8 @@ where
     STATE.with(|s| f(s.borrow_mut().deref_mut()))
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Default, Debug, PartialEq, Eq)]
 pub struct State {
     pub master_public_key: Option<SchnorrPublicKeyResult>,
-    pub master_key_name: String,
-}
-
-impl Default for State {
-    fn default() -> Self {
-        Self {
-            master_public_key: Default::default(),
-            master_key_name: "dfx_test_key".to_string(),
-        }
-    }
+    pub master_key_name: Ed25519KeyName,
 }

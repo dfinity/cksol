@@ -28,7 +28,7 @@ async fn lazy_call_schnorr_public_key() -> SchnorrPublicKeyResult {
         return public_key;
     }
 
-    let key_name = read_state(|s| s.master_key_name.clone());
+    let key_name = read_state(|s| s.master_key_name.to_string());
 
     let arg = SchnorrPublicKeyArgs {
         canister_id: None,
