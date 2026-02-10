@@ -9,7 +9,7 @@ type Address = text;
 // Arguments for a request to the `getDepositAddress` ckSOL minter endpoint.
 type GetDepositAddressArgs = record {
     // The principal to deposit funds to.
-    ///
+    //
     // If not set, defaults to the caller's principal.
     // The resolved owner must be a non-anonymous principal.
     owner: opt principal;
@@ -17,10 +17,68 @@ type GetDepositAddressArgs = record {
     subaccount: opt blob;
 };
 
+// Ed25519 signature.
+// This is a base-58 encoded string with at most 88 characters.
+// Example: "5LrcE2f6uvydKRquEJ8xp19heGxSvqsVbcqUeFoiWbXe8JNip7ftPQNTAVPyTK7ijVdpkzmKKaAQR7MWMmujAhXD"
+type Signature = text;
+
+// Smallest denomination of SOL, the native token on Solana,
+// i.e. 1_000_000_000 Lamports is 1 SOL
+type Lamport = nat64;
+
+// Arguments for a request to the `update_balance` endpoint.
+type UpdateBalanceArgs = record {
+    // If provided, update the balance for this principal.
+    //
+    // If not set, defaults to the caller's principal.
+    // The resolved owner must be a non-anonymous principal.
+    owner: opt principal;
+    // The subaccount for which to update the balance.
+    subaccount: opt blob;
+    // Signature of the deposit transaction.
+    signature: Signature;
+};
+
+// An error from the `update_balance` ckSOL minter endpoint.
+type UpdateBalanceError = variant {
+    // A transient error occurred while fetching the Solana transaction for
+    // the given signature.
+    TransientRpcError;
+    // No matching transaction was found for the given signature.
+    //
+    // This can also happen if the transaction is not yet finalized.
+    TransactionNotFound;
+    // The Solana transaction with the given signature is not a valid
+    // deposit to the owner's deposit address.
+    InvalidDepositTransaction : InvalidDepositTransaction;
+};
+
+// The transaction for the given signature is not a valid deposit.
+type InvalidDepositTransaction = variant {
+    // Failed to decode transaction.
+    DecodingFailed;
+    // The transaction is not a valid transfer to the deposit address .
+    InvalidTransfer : text;
+    // The deposit amount is below the minimum deposit threshold.
+    InsufficientDepositAmount : record {
+        // The received deposit amount in lamports.
+        received: nat64;
+        // The minimum deposit amount in lamports.
+        minimum: nat64;
+    };
+};
+
+// Represents the result of a call to the `update_balance` endpoint.
+type UpdateBalanceResult = variant { Ok : Lamport; Err : UpdateBalanceError };
+
 service : {
     // Returns the Solana address to which the owner should send SOL.
-    ///
+    //
     // If the owner is not set, it defaults to the caller's principal.
     // The resolved owner must be a non-anonymous principal.
     get_deposit_address: (GetDepositAddressArgs) -> (Address);
+
+    // Update the ckSOL balance of the given owner with the funds
+    // deposited in a specific Solana transaction.
+    update_balance: (UpdateBalanceArgs) -> (UpdateBalanceResult);
 };

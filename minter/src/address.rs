@@ -1,16 +1,14 @@
-#[cfg(test)]
-mod tests;
-
-use crate::state::SchnorrPublicKey;
-use crate::state::{mutate_state, read_state};
+use crate::state::{SchnorrPublicKey, mutate_state, read_state};
 use candid::Principal;
 use ic_cdk::management_canister::{
     SchnorrAlgorithm, SchnorrKeyId, SchnorrPublicKeyArgs, schnorr_public_key,
 };
 use ic_ed25519::{DerivationIndex, DerivationPath, PublicKey};
-use icrc_ledger_types::icrc1::account::Account;
-use icrc_ledger_types::icrc1::account::Subaccount;
+use icrc_ledger_types::icrc1::account::{Account, Subaccount};
 use solana_address::Address;
+
+#[cfg(test)]
+mod tests;
 
 pub async fn get_deposit_address(principal: Principal, subaccount: Option<Subaccount>) -> Address {
     let master_public_key = lazy_get_schnorr_master_key().await;

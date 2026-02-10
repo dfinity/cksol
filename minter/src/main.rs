@@ -1,46 +1,50 @@
+use crate::logs::Priority;
 use candid::Principal;
+use canlog::log;
 use cksol_types::{Address, GetDepositAddressArgs, UpdateBalanceArgs, UpdateBalanceError};
+use icrc_ledger_types::icrc1::account::{Account, Subaccount};
 use sol_rpc_types::Lamport;
 use transaction::try_get_transaction;
 
 mod address;
+mod logs;
 mod state;
 mod transaction;
 
 #[ic_cdk::update]
 async fn get_deposit_address(args: GetDepositAddressArgs) -> Address {
-    let owner = args.owner.unwrap_or_else(ic_cdk::api::msg_caller);
-    assert_ne!(
-        owner,
-        Principal::anonymous(),
-        "the owner must be non-anonymous"
-    );
-
-    address::get_deposit_address(owner, args.subaccount)
-        .await
-        .into()
+    let account = assert_non_anonymous_account(args.owner, args.subaccount);
+    address::get_deposit_address(account).await.into()
 }
 
-#[ic_cdk::update(hidden = true)]
-async fn update_balance(args: UpdateBalanceArgs) -> Result<Option<Lamport>, UpdateBalanceError> {
-    let owner = args.owner.unwrap_or_else(ic_cdk::api::msg_caller);
+#[ic_cdk::update]
+async fn update_balance(args: UpdateBalanceArgs) -> Result<Lamport, UpdateBalanceError> {
+    let account = assert_non_anonymous_account(args.owner, args.subaccount);
+    let deposit_address = address::get_deposit_address(account).await;
+
+    let maybe_transaction = try_get_transaction(args.signature).await.map_err(|e| {
+        log!(Priority::Debug, "Error while fetching transaction: {e}");
+        UpdateBalanceError::TransientRpcError
+    });
+    let transaction = maybe_transaction?.ok_or(UpdateBalanceError::TransactionNotFound)?;
+
+    let deposit = transaction::get_deposit_amount_to_address(transaction, deposit_address)
+        .map_err(UpdateBalanceError::InvalidDepositTransaction)?;
+
+    Ok(deposit)
+}
+
+fn assert_non_anonymous_account(
+    owner: Option<Principal>,
+    subaccount: Option<Subaccount>,
+) -> Account {
+    let owner = owner.unwrap_or_else(ic_cdk::api::msg_caller);
     assert_ne!(
         owner,
         Principal::anonymous(),
         "the owner must be non-anonymous"
     );
-
-    let deposit_address = address::get_deposit_address(owner, args.subaccount).await;
-
-    let maybe_transaction = try_get_transaction(args.signature)
-        .await
-        .map_err(UpdateBalanceError::GetTransactionError);
-    let transaction = maybe_transaction?.ok_or(UpdateBalanceError::TransactionNotFound)?;
-
-    let maybe_deposit = transaction::get_deposit_amount_to_address(transaction, deposit_address)
-        .map_err(UpdateBalanceError::InvalidTransaction)?;
-
-    Ok(maybe_deposit)
+    Account { owner, subaccount }
 }
 
 fn main() {}
