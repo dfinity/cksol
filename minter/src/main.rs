@@ -13,7 +13,7 @@ async fn get_deposit_address(args: GetDepositAddressArgs) -> Address {
         "the owner must be non-anonymous"
     );
 
-    address::get_sol_address(owner, args.subaccount)
+    address::get_deposit_address(owner, args.subaccount)
         .await
         .into()
 }
