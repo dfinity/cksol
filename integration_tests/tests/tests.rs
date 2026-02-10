@@ -1,144 +1,146 @@
-use candid::Principal;
-use cksol_int_tests::{Setup, SetupBuilder};
-use cksol_types::GetDepositAddressArgs;
-use solana_address::{Address, address};
+mod get_deposit_address_tests {
+    use candid::Principal;
+    use cksol_int_tests::{Setup, SetupBuilder};
+    use cksol_types::GetDepositAddressArgs;
+    use solana_address::{Address, address};
 
-const DEFAULT_CALLER_DEPOSIT_ADDRESS: Address =
-    address!("Ge2aoiaTb6Tq2DQ4xs7qGhGud97pKtDmJCAQufTJeNSu");
+    const DEFAULT_CALLER_DEPOSIT_ADDRESS: Address =
+        address!("Ge2aoiaTb6Tq2DQ4xs7qGhGud97pKtDmJCAQufTJeNSu");
 
-#[tokio::test]
-async fn should_get_deposit_address_for_default_owner() {
-    let setup = SetupBuilder::new().build().await;
+    #[tokio::test]
+    async fn should_get_deposit_address_for_default_owner() {
+        let setup = SetupBuilder::new().build().await;
 
-    let deposit_address = setup
-        .minter()
-        .get_deposit_address(GetDepositAddressArgs::default())
-        .await;
+        let deposit_address = setup
+            .minter()
+            .get_deposit_address(GetDepositAddressArgs::default())
+            .await;
 
-    assert_eq!(
-        Address::from(deposit_address),
-        DEFAULT_CALLER_DEPOSIT_ADDRESS
-    );
-}
+        assert_eq!(
+            Address::from(deposit_address),
+            DEFAULT_CALLER_DEPOSIT_ADDRESS
+        );
+    }
 
-#[tokio::test]
-async fn should_get_deposit_address_for_explicit_owner() {
-    let setup = SetupBuilder::new().build().await;
-    // Using a different principal than the default caller
-    let owner = Principal::from_slice(&[1]);
+    #[tokio::test]
+    async fn should_get_deposit_address_for_explicit_owner() {
+        let setup = SetupBuilder::new().build().await;
+        // Using a different principal than the default caller
+        let owner = Principal::from_slice(&[1]);
 
-    let deposit_address = setup
-        .minter()
-        .get_deposit_address(GetDepositAddressArgs {
-            owner: Some(owner),
-            subaccount: None,
-        })
-        .await;
+        let deposit_address = setup
+            .minter()
+            .get_deposit_address(GetDepositAddressArgs {
+                owner: Some(owner),
+                subaccount: None,
+            })
+            .await;
 
-    assert_ne!(
-        Address::from(deposit_address),
-        DEFAULT_CALLER_DEPOSIT_ADDRESS
-    );
-}
+        assert_ne!(
+            Address::from(deposit_address),
+            DEFAULT_CALLER_DEPOSIT_ADDRESS
+        );
+    }
 
-#[tokio::test]
-async fn should_get_deposit_address_with_subaccount() {
-    let setup = SetupBuilder::new().build().await;
-    let subaccount = [1; 32];
+    #[tokio::test]
+    async fn should_get_deposit_address_with_subaccount() {
+        let setup = SetupBuilder::new().build().await;
+        let subaccount = [1; 32];
 
-    let deposit_address = setup
-        .minter()
-        .get_deposit_address(GetDepositAddressArgs {
-            owner: None,
-            subaccount: Some(subaccount),
-        })
-        .await;
+        let deposit_address = setup
+            .minter()
+            .get_deposit_address(GetDepositAddressArgs {
+                owner: None,
+                subaccount: Some(subaccount),
+            })
+            .await;
 
-    assert_ne!(
-        Address::from(deposit_address),
-        DEFAULT_CALLER_DEPOSIT_ADDRESS
-    );
-}
+        assert_ne!(
+            Address::from(deposit_address),
+            DEFAULT_CALLER_DEPOSIT_ADDRESS
+        );
+    }
 
-#[tokio::test]
-async fn should_get_different_addresses_for_different_subaccounts() {
-    let setup = SetupBuilder::new().build().await;
-    let subaccount1 = [1; 32];
-    let subaccount2 = [2; 32];
+    #[tokio::test]
+    async fn should_get_different_addresses_for_different_subaccounts() {
+        let setup = SetupBuilder::new().build().await;
+        let subaccount1 = [1; 32];
+        let subaccount2 = [2; 32];
 
-    let address1 = setup
-        .minter()
-        .get_deposit_address(GetDepositAddressArgs {
-            owner: None,
-            subaccount: Some(subaccount1),
-        })
-        .await;
+        let address1 = setup
+            .minter()
+            .get_deposit_address(GetDepositAddressArgs {
+                owner: None,
+                subaccount: Some(subaccount1),
+            })
+            .await;
 
-    let address2 = setup
-        .minter()
-        .get_deposit_address(GetDepositAddressArgs {
-            owner: None,
-            subaccount: Some(subaccount2),
-        })
-        .await;
+        let address2 = setup
+            .minter()
+            .get_deposit_address(GetDepositAddressArgs {
+                owner: None,
+                subaccount: Some(subaccount2),
+            })
+            .await;
 
-    assert_ne!(address1, address2);
-}
+        assert_ne!(address1, address2);
+    }
 
-#[tokio::test]
-async fn should_fail_for_anonymous_owner() {
-    let setup = SetupBuilder::new().build().await;
+    #[tokio::test]
+    async fn should_fail_for_anonymous_owner() {
+        let setup = SetupBuilder::new().build().await;
 
-    let result = setup
-        .minter()
-        .try_get_deposit_address(GetDepositAddressArgs {
-            owner: Some(Principal::anonymous()),
-            subaccount: None,
-        })
-        .await;
+        let result = setup
+            .minter()
+            .try_get_deposit_address(GetDepositAddressArgs {
+                owner: Some(Principal::anonymous()),
+                subaccount: None,
+            })
+            .await;
 
-    assert!(result.is_err());
-    let err = result.unwrap_err();
-    assert!(err.contains("the owner must be non-anonymous"));
-}
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.contains("the owner must be non-anonymous"));
+    }
 
-#[tokio::test]
-async fn should_fail_for_anonymous_caller_and_no_owner() {
-    let setup = SetupBuilder::new()
-        .with_caller(Principal::anonymous())
-        .build()
-        .await;
+    #[tokio::test]
+    async fn should_fail_for_anonymous_caller_and_no_owner() {
+        let setup = SetupBuilder::new()
+            .with_caller(Principal::anonymous())
+            .build()
+            .await;
 
-    let result = setup
-        .minter()
-        .try_get_deposit_address(GetDepositAddressArgs {
-            owner: None,
-            subaccount: None,
-        })
-        .await;
+        let result = setup
+            .minter()
+            .try_get_deposit_address(GetDepositAddressArgs {
+                owner: None,
+                subaccount: None,
+            })
+            .await;
 
-    assert!(result.is_err());
-    let err = result.unwrap_err();
-    assert!(err.contains("the owner must be non-anonymous"));
-}
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.contains("the owner must be non-anonymous"));
+    }
 
-#[tokio::test]
-async fn should_succeed_for_anonymous_caller_with_owner() {
-    let setup = SetupBuilder::new()
-        .with_caller(Principal::anonymous())
-        .build()
-        .await;
+    #[tokio::test]
+    async fn should_succeed_for_anonymous_caller_with_owner() {
+        let setup = SetupBuilder::new()
+            .with_caller(Principal::anonymous())
+            .build()
+            .await;
 
-    let deposit_address = setup
-        .minter()
-        .get_deposit_address(GetDepositAddressArgs {
-            owner: Some(Setup::DEFAULT_CALLER),
-            subaccount: None,
-        })
-        .await;
+        let deposit_address = setup
+            .minter()
+            .get_deposit_address(GetDepositAddressArgs {
+                owner: Some(Setup::DEFAULT_CALLER),
+                subaccount: None,
+            })
+            .await;
 
-    assert_eq!(
-        Address::from(deposit_address),
-        DEFAULT_CALLER_DEPOSIT_ADDRESS
-    );
+        assert_eq!(
+            Address::from(deposit_address),
+            DEFAULT_CALLER_DEPOSIT_ADDRESS
+        );
+    }
 }
