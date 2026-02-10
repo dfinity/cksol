@@ -439,7 +439,6 @@ dependencies = [
  "ic-test-utilities-load-wasm",
  "pocket-ic",
  "serde",
- "sol_rpc_types",
  "solana-address 2.1.0",
  "tokio",
 ]
