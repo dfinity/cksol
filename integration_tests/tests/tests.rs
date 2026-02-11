@@ -39,7 +39,6 @@ mod get_deposit_address_tests {
             get_deposit_address(&setup, None, Some([1; 32])).await,
             "97eLNQ1sc7yQHscLWet7vq7AZ6TbxN5nx8D8LPSbYEJB"
         );
-
         assert_eq!(
             get_deposit_address(&setup, None, Some([2; 32])).await,
             "BiuUj1yMbtStuumWutpBajSjNDPbnE5dNEuTv7J1cjmB"
