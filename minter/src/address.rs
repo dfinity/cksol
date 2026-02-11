@@ -1,3 +1,6 @@
+#[cfg(test)]
+mod tests;
+
 use crate::state::SchnorrPublicKey;
 use crate::state::{mutate_state, read_state};
 use candid::Principal;
