@@ -46,7 +46,7 @@ async fn lazy_get_schnorr_master_key() -> SchnorrPublicKey {
         .expect("Failed to deserialize public key");
     let schnorr_public_key = SchnorrPublicKey {
         public_key,
-        chain_code: response.chain_code,
+        chain_code: response.chain_code.as_slice().try_into().unwrap(),
     };
 
     mutate_state(|s| s.master_public_key = Some(schnorr_public_key.clone()));
@@ -62,10 +62,9 @@ fn derive_public_key_from_account(
 
 fn derive_public_key(master_public_key: &SchnorrPublicKey, path: Vec<Vec<u8>>) -> PublicKey {
     let derivation_path = DerivationPath::new(path.into_iter().map(DerivationIndex).collect());
-    let (public_key, _chain_code) = master_public_key.public_key.derive_subkey_with_chain_code(
-        &derivation_path,
-        &master_public_key.chain_code.as_slice().try_into().unwrap(),
-    );
+    let (public_key, _chain_code) = master_public_key
+        .public_key
+        .derive_subkey_with_chain_code(&derivation_path, &master_public_key.chain_code);
 
     public_key
 }

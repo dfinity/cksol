@@ -29,5 +29,5 @@ pub struct State {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SchnorrPublicKey {
     pub public_key: PublicKey,
-    pub chain_code: Vec<u8>,
+    pub chain_code: [u8; 32],
 }
