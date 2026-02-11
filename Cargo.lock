@@ -437,6 +437,7 @@ dependencies = [
  "ic-management-canister-types",
  "ic-pocket-canister-runtime",
  "ic-test-utilities-load-wasm",
+ "icrc-ledger-types",
  "pocket-ic",
  "serde",
  "solana-address 2.1.0",
