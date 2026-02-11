@@ -22,7 +22,7 @@ mod get_deposit_address_tests {
 
         const DEFAULT_CALLER_DEPOSIT_ADDRESS: &str = "Ge2aoiaTb6Tq2DQ4xs7qGhGud97pKtDmJCAQufTJeNSu";
 
-        // Owner is the DEFAULT_CALLER
+        // Owner is the default caller
         assert_eq!(
             get_deposit_address(&setup, None, None).await,
             DEFAULT_CALLER_DEPOSIT_ADDRESS
