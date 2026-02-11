@@ -5,11 +5,36 @@
 
 use candid::{CandidType, Principal};
 use icrc_ledger_types::icrc1::account::Subaccount;
+pub use lifecycle::InstallArgs;
+pub use memo::MintMemo;
 use serde::{Deserialize, Serialize};
+use sol_rpc_types::Lamport;
 pub use sol_rpc_types::Pubkey as Address;
-use sol_rpc_types::Signature;
-use thiserror::Error;
+pub use sol_rpc_types::Signature;
 use std::fmt;
+use thiserror::Error;
+
+mod lifecycle;
+mod memo;
+
+/// The outcome of processing a Solana deposit transaction.
+#[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize, Serialize)]
+pub enum DepositStatus {
+    /// The deposit amount does not cover the deposit fee.
+    ValueTooSmall(Signature),
+    /// The transaction is a valid deposit, but the minter failed to mint ckSOL on the ledger.
+    /// The caller should retry the `update_balance` call.
+    Checked(Signature),
+    /// The minter accepted the deposit and minted ckSOL tokens on the ledger.
+    Minted {
+        /// The MINT transaction index on the ledger.
+        block_index: u64,
+        /// The minted amount (deposit amount minus fees).
+        minted_amount: Lamport,
+        /// The UTXO that caused the balance update.
+        signature: Signature,
+    },
+}
 
 /// Arguments for a request to the `get_deposit_address` ckSOL minter endpoint.
 #[derive(Clone, Eq, PartialEq, Debug, Default, CandidType, Deserialize, Serialize)]
@@ -40,10 +65,9 @@ pub struct UpdateBalanceArgs {
 /// An error from the `update_balance` ckSOL minter endpoint.
 #[derive(Debug, Clone, PartialEq, CandidType, Deserialize, Error)]
 pub enum UpdateBalanceError {
-    /// A transient error occurred while fetching the Solana transaction for
-    /// the given signature.
-    #[error("An transient error occurred while fetching the transaction")]
-    TransientRpcError,
+    /// The minter experiences temporary issues, try the call again later.
+    #[error("Transient error, try the call again later: {0}")]
+    TemporarilyUnavailable(String),
     /// No matching transaction was found for the given signature.
     ///
     /// This can also happen if the transaction is not yet finalized.
@@ -51,27 +75,8 @@ pub enum UpdateBalanceError {
     TransactionNotFound,
     /// The Solana transaction with the given signature is not a valid
     /// deposit to the owner's deposit address.
-    #[error("Invalid deposit to the owner's address: {0}")]
-    InvalidDepositTransaction(InvalidDepositTransaction),
-}
-
-/// The transaction for the given signature is not a valid deposit.
-#[derive(Debug, Clone, PartialEq, CandidType, Deserialize, Error)]
-pub enum InvalidDepositTransaction {
-    /// Failed to decode transaction.
-    #[error("Failed to decode transaction")]
-    DecodingFailed,
-    /// The transaction is not a valid transfer to the deposit address .
-    #[error("Transaction not a transfer to the deposit address: {0}")]
-    InvalidTransfer(String),
-    /// The deposit amount is below the minimum deposit threshold.
-    #[error("Insufficient deposit amount, received: {received}, minimum: {minimum}")]
-    InsufficientDepositAmount {
-        /// The received deposit amount in lamports.
-        received: u64,
-        /// The minimum deposit amount in lamports.
-        minimum: u64,
-    },
+    #[error("The transaction is not a valid deposit: {0}")]
+    InvalidDepositTransaction(String),
 }
 
 /// The ID of one of the ICP root keys.

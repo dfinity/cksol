@@ -1,13 +1,21 @@
-use candid::{CandidType, Encode, Principal, encode_one, utils::ArgumentEncoder};
-use cksol_types::{Address, GetDepositAddressArgs, UpdateBalanceArgs, UpdateBalanceError};
+use crate::ledger::ledger_init_args;
+use candid::{CandidType, Encode, Nat, Principal, encode_one, utils::ArgumentEncoder};
+use cksol_types::{
+    Address, DepositStatus, Ed25519KeyName, GetDepositAddressArgs, InstallArgs, UpdateBalanceArgs,
+    UpdateBalanceError,
+};
 use ic_canister_runtime::Runtime;
 use ic_management_canister_types::{CanisterId, CanisterSettings};
 use ic_pocket_canister_runtime::{ExecuteHttpOutcallMocks, PocketIcRuntime};
+use icrc_ledger_types::icrc1::account::Account;
+use num_traits::ToPrimitive;
 use pocket_ic::{PocketIcBuilder, nonblocking::PocketIc};
 use serde::de::DeserializeOwned;
-use sol_rpc_client::{SOL_RPC_CANISTER, SolRpcClient};
+use sol_rpc_client::SolRpcClient;
 use sol_rpc_types::{Lamport, RpcAccess};
 use std::{env::var, fs, path::PathBuf, sync::Arc};
+
+mod ledger;
 
 #[derive(Default)]
 pub enum PocketIcMode {
@@ -55,11 +63,13 @@ impl SetupBuilder {
 
 pub struct Setup {
     env: Arc<PocketIc>,
-    minter_canister_id: CanisterId,
     caller: Option<Principal>,
+    minter_canister_id: CanisterId,
+    ledger_canister_id: CanisterId,
 }
 
 impl Setup {
+    pub const DEFAULT_DEPOSIT_FEE: Lamport = 10_000_000;
     pub const DEFAULT_CONTROLLER: Principal = Principal::from_slice(&[0x9d, 0xf7, 0x01]);
     pub const DEFAULT_CALLER: Principal = Principal::from_slice(&[0x9d, 0xf7, 0x02]);
 
@@ -79,34 +89,54 @@ impl Setup {
             ..CanisterSettings::default()
         };
 
-        // Setup ckSOL minter canister
-        let minter_canister_id = env
+        // Setup SOL RPC canister
+        let sol_rpc_canister_id = env
             .create_canister_with_settings(None, Some(canister_settings.clone()))
             .await;
-        env.add_cycles(minter_canister_id, u64::MAX as u128).await;
+        env.add_cycles(sol_rpc_canister_id, u64::MAX as u128).await;
         env.install_canister(
-            minter_canister_id,
-            cksol_minter_wasm(),
-            Encode!().unwrap(),
-            Some(Self::DEFAULT_CONTROLLER),
-        )
-        .await;
-
-        // Setup SOL RPC canister
-        env.create_canister_with_id(None, Some(canister_settings), SOL_RPC_CANISTER)
-            .await
-            .unwrap_or_else(|e| {
-                panic!("Could not create SOL RPC canister with ID {SOL_RPC_CANISTER:?}: {e:?}")
-            });
-        env.add_cycles(SOL_RPC_CANISTER, u64::MAX as u128).await;
-        env.install_canister(
-            SOL_RPC_CANISTER,
+            sol_rpc_canister_id,
             sol_rpc_wasm().await,
             Encode!(&sol_rpc_install_args).unwrap(),
             Some(Self::DEFAULT_CONTROLLER),
         )
         .await;
-        Self::mock_sol_rpc_api_keys(&env).await;
+        Self::mock_sol_rpc_api_keys(&env, sol_rpc_canister_id).await;
+
+        // Create ledger canister
+        let ledger_canister_id = env
+            .create_canister_with_settings(None, Some(canister_settings.clone()))
+            .await;
+        env.add_cycles(ledger_canister_id, u64::MAX as u128).await;
+
+        // Setup ckSOL minter canister
+        let minter_canister_id = env
+            .create_canister_with_settings(None, Some(canister_settings))
+            .await;
+        env.add_cycles(minter_canister_id, u64::MAX as u128).await;
+        env.install_canister(
+            minter_canister_id,
+            cksol_minter_wasm(),
+            Encode!(&InstallArgs {
+                sol_rpc_canister_id,
+                ledger_canister_id,
+                deposit_fee: Self::DEFAULT_DEPOSIT_FEE,
+                log_filter: None,
+                master_key_name: Ed25519KeyName::LocalDevelopment,
+            })
+            .unwrap(),
+            Some(Self::DEFAULT_CONTROLLER),
+        )
+        .await;
+
+        // Install ledger canister
+        env.install_canister(
+            ledger_canister_id,
+            ledger_wasm().await,
+            Encode!(&ledger_init_args(minter_canister_id)).unwrap(),
+            Some(Self::DEFAULT_CONTROLLER),
+        )
+        .await;
 
         let env = if let PocketIcMode::LiveMode = make_live {
             let mut env = env;
@@ -118,8 +148,9 @@ impl Setup {
 
         Self {
             env: Arc::new(env),
-            minter_canister_id,
             caller,
+            minter_canister_id,
+            ledger_canister_id,
         }
     }
 
@@ -131,17 +162,24 @@ impl Setup {
     }
 
     pub fn minter(&self) -> CkSolMinter<'_> {
-        CkSolMinter {
+        CkSolMinter(Canister {
             runtime: self.runtime(),
             id: self.minter_canister_id,
-        }
+        })
     }
 
-    async fn mock_sol_rpc_api_keys(env: &PocketIc) {
+    pub fn ledger(&self) -> Ledger<'_> {
+        Ledger(Canister {
+            runtime: self.runtime(),
+            id: self.ledger_canister_id,
+        })
+    }
+
+    async fn mock_sol_rpc_api_keys(env: &PocketIc, sol_rpc_canister_id: Principal) {
         const MOCK_API_KEY: &str = "mock-api-key";
 
         let runtime = PocketIcRuntime::new(env, Self::DEFAULT_CALLER);
-        let client = SolRpcClient::builder(runtime, SOL_RPC_CANISTER).build();
+        let client = SolRpcClient::builder(runtime, sol_rpc_canister_id).build();
 
         let providers = client.get_providers().await;
         let mut api_keys = Vec::new();
@@ -154,7 +192,7 @@ impl Setup {
             }
         }
         env.update_call(
-            SOL_RPC_CANISTER,
+            sol_rpc_canister_id,
             Self::DEFAULT_CONTROLLER,
             "updateApiKeys",
             encode_one(api_keys).unwrap(),
@@ -164,10 +202,7 @@ impl Setup {
     }
 }
 
-pub struct CkSolMinter<'a> {
-    runtime: PocketIcRuntime<'a>,
-    id: CanisterId,
-}
+pub struct CkSolMinter<'a>(Canister<'a>);
 
 impl CkSolMinter<'_> {
     pub async fn get_deposit_address(&self, args: GetDepositAddressArgs) -> Address {
@@ -180,17 +215,53 @@ impl CkSolMinter<'_> {
         &self,
         args: GetDepositAddressArgs,
     ) -> Result<Address, String> {
-        self.try_update_call("get_deposit_address", (args,)).await
+        self.0.try_update_call("get_deposit_address", (args,)).await
     }
 
     pub async fn update_balance(
         &self,
         args: UpdateBalanceArgs,
-    ) -> Result<Option<Lamport>, UpdateBalanceError> {
-        self.update_call("updateBalance", (args,)).await
+    ) -> Result<DepositStatus, UpdateBalanceError> {
+        self.0.update_call("update_balance", (args,)).await
     }
 
-    async fn try_update_call<In, Out>(&self, method: &str, args: In) -> Result<Out, String>
+    pub fn with_http_mocks(mut self, mocks: impl ExecuteHttpOutcallMocks + 'static) -> Self {
+        self.0 = self.0.with_http_mocks(mocks);
+        self
+    }
+}
+
+pub struct Ledger<'a>(Canister<'a>);
+
+impl Ledger<'_> {
+    pub async fn balance_of(&self, account: Account) -> u64 {
+        self.0
+            .update_call::<(Account,), Nat>("icrc1_balance_of", (account,))
+            .await
+            .0
+            .to_u64()
+            .unwrap()
+    }
+}
+
+pub struct Canister<'a> {
+    runtime: PocketIcRuntime<'a>,
+    id: CanisterId,
+}
+
+impl Canister<'_> {
+    pub async fn update_call<In, Out>(&self, method: &str, args: In) -> Out
+    where
+        In: ArgumentEncoder + Send,
+        Out: CandidType + DeserializeOwned,
+    {
+        self.runtime
+            .update_call(self.id, method, args, 0)
+            .await
+            .expect("Update call failed")
+    }
+
+    pub async fn try_update_call<In, Out>(&self, method: &str, args: In) -> Result<Out, String>
     where
         In: ArgumentEncoder + Send,
         Out: CandidType + DeserializeOwned,
@@ -215,20 +286,31 @@ fn cksol_minter_wasm() -> Vec<u8> {
     )
 }
 
+async fn ledger_wasm() -> Vec<u8> {
+    const DOWNLOAD_PATH: &str = "../wasms/ic-icrc1-ledger.wasm.gz";
+    const DOWNLOAD_URL: &str = "https://github.com/dfinity/ic/releases/download/ledger-suite-icrc-2026-02-02/ic-icrc1-ledger.wasm.gz";
+    canister_wasm(DOWNLOAD_PATH, DOWNLOAD_URL).await
+}
+
 async fn sol_rpc_wasm() -> Vec<u8> {
-    let path =
-        PathBuf::from(var("CARGO_MANIFEST_DIR").unwrap()).join("../wasms/sol_rpc_canister.wasm.gz");
+    const DOWNLOAD_PATH: &str = "../wasms/sol_rpc_canister.wasm.gz";
+    const DOWNLOAD_URL: &str = "https://github.com/dfinity/sol-rpc-canister/releases/latest/download/sol_rpc_canister.wasm.gz";
+    canister_wasm(DOWNLOAD_PATH, DOWNLOAD_URL).await
+}
+
+async fn canister_wasm(download_path: &str, url: &str) -> Vec<u8> {
+    let path = PathBuf::from(var("CARGO_MANIFEST_DIR").unwrap()).join(download_path);
 
     if let Ok(wasm) = fs::read(&path) {
         return wasm;
     }
 
-    let bytes = reqwest::get("https://github.com/dfinity/sol-rpc-canister/releases/latest/download/sol_rpc_canister.wasm.gz")
+    let bytes = reqwest::get(url)
         .await
-        .unwrap_or_else(|e| panic!("Failed to fetch SOL RPC canister WASM: {e:?}"))
+        .unwrap_or_else(|e| panic!("Failed to fetch canister WASM: {e:?}"))
         .bytes()
         .await
-        .unwrap_or_else(|e| panic!("Failed to read bytes from SOL RPC canister WASM: {e:?}"))
+        .unwrap_or_else(|e| panic!("Failed to read bytes from canister WASM: {e:?}"))
         .to_vec();
 
     let _ = fs::write(&path, &bytes);

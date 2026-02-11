@@ -41,9 +41,8 @@ type UpdateBalanceArgs = record {
 
 // An error from the `update_balance` ckSOL minter endpoint.
 type UpdateBalanceError = variant {
-    // A transient error occurred while fetching the Solana transaction for
-    // the given signature.
-    TransientRpcError;
+    // The minter experiences temporary issues, try the call again later.
+    TemporarilyUnavailable : text;
     // No matching transaction was found for the given signature.
     //
     // This can also happen if the transaction is not yet finalized.

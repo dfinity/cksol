@@ -1,17 +1,12 @@
+use assert_matches::assert_matches;
 use candid::Principal;
 use cksol_int_tests::{Setup, SetupBuilder};
-use cksol_types::{GetDepositAddressArgs, UpdateBalanceArgs};
+use cksol_types::{DepositStatus, GetDepositAddressArgs, UpdateBalanceArgs};
 use ic_pocket_canister_runtime::{JsonRpcRequestMatcher, JsonRpcResponse, MockHttpOutcallsBuilder};
-use icrc_ledger_types::icrc1::account::Subaccount;
+use icrc_ledger_types::icrc1::account::{Account, Subaccount};
 use serde_json::json;
-use sol_rpc_types::Signature;
-use solana_address::{Address, address};
+use sol_rpc_types::{Lamport, Signature};
 use std::str::FromStr;
-
-const DEPOSIT_ADDRESS: Address = address!("4Ddk4XxD8nwnnMApEAdJXLG3nf9UEvrDEP6B5bYZyzwn");
-// The signature for an actual Solana Devnnet transaction depositing 0.1 SOL to `DEPOSIT_ADDRESS`
-const DEPOSIT_TRANSACTION_SIGNATURE: &str =
-    "4wNdJmt8TiLDL52pMGodkJCt5MNTJe5kXh8BuJZ1Fcdt6BgkWzm5NLowqWeKeYsqN6WBBFQfNYVyvfvRDXzx59pC";
 
 mod get_deposit_address_tests {
     use super::*;
@@ -105,94 +100,126 @@ mod get_deposit_address_tests {
     }
 }
 
-#[tokio::test]
-async fn should_update_balance_with_single_deposit() {
-    let setup = SetupBuilder::new().build().await;
+mod update_balance_tests {
+    use super::*;
 
-    let mocks = MockHttpOutcallsBuilder::new()
-        .given(get_deposit_transaction_request().with_id(0))
-        .respond_with(get_deposit_transaction_response().with_id(0))
-        .given(get_deposit_transaction_request().with_id(1))
-        .respond_with(get_deposit_transaction_response().with_id(1))
-        .given(get_deposit_transaction_request().with_id(2))
-        .respond_with(get_deposit_transaction_response().with_id(2))
-        .build();
+    const DEPOSIT_AMOUNT: Lamport = 500_000_000;
+    // The signature for an actual Solana Devnnet transaction depositing 0.1 SOL to `DEPOSIT_ADDRESS`
+    const DEPOSIT_TRANSACTION_SIGNATURE: &str =
+        "4VZbtG9SyqkuJ4UFG4VJcMNQZ7Vvpsp5S8qe5Z9gQEasm2WMNKEaWvwuJZ5nUybTsNEiXUBYaxwekgiPHpdmFLKU";
 
-    let balance = setup
-        .minter()
-        .with_http_mocks(mocks)
-        .update_balance(UpdateBalanceArgs {
-            owner: None,
-            subaccount: None,
-            signature: Signature::from_str(DEPOSIT_TRANSACTION_SIGNATURE).unwrap(),
-        })
-        .await;
+    #[tokio::test]
+    async fn should_update_balance_with_single_deposit() {
+        let setup = SetupBuilder::new().build().await;
 
-    assert_eq!(balance, Ok(Some(100_000_000)));
-}
+        let balance_before = setup
+            .ledger()
+            .balance_of(Account {
+                owner: Setup::DEFAULT_CALLER,
+                subaccount: None,
+            })
+            .await;
+        assert_eq!(balance_before, 0);
 
-// Transaction obtained by executing the following with the Solana CLI:
-// $ solana transfer 4Ddk4XxD8nwnnMApEAdJXLG3nf9UEvrDEP6B5bYZyzwn 0.1 --allow-unfunded-recipient
-fn get_deposit_transaction_request() -> JsonRpcRequestMatcher {
-    JsonRpcRequestMatcher::with_method("getTransaction")
-        .with_params(json!([DEPOSIT_TRANSACTION_SIGNATURE, {"encoding": "base64"}]))
-        .with_id(0)
-}
+        let mocks = MockHttpOutcallsBuilder::new()
+            .given(get_deposit_transaction_request().with_id(0))
+            .respond_with(get_deposit_transaction_response().with_id(0))
+            .given(get_deposit_transaction_request().with_id(1))
+            .respond_with(get_deposit_transaction_response().with_id(1))
+            .given(get_deposit_transaction_request().with_id(2))
+            .respond_with(get_deposit_transaction_response().with_id(2))
+            .build();
 
-// Response to `getTransaction` Solana RPC method obtained with:
-// $ curl --location 'https://api.devnet.solana.com' \
-//  --header 'Content-Type: application/json' \
-//  --data '{
-//      "jsonrpc": "2.0",
-//      "id": 1,
-//      "method": "getTransaction",
-//      "params": [
-//          "4wNdJmt8TiLDL52pMGodkJCt5MNTJe5kXh8BuJZ1Fcdt6BgkWzm5NLowqWeKeYsqN6WBBFQfNYVyvfvRDXzx59pC",
-//          "base64"
-//      ]
-//  }'
-fn get_deposit_transaction_response() -> JsonRpcResponse {
-    JsonRpcResponse::from(json!({
-        "jsonrpc": "2.0",
-        "result": {
-            "blockTime": 1770283080,
-            "meta": {
-                "computeUnitsConsumed": 150,
-                "costUnits": 1481,
-                "err": null,
-                "fee": 5000,
-                "innerInstructions": [],
-                "loadedAddresses": {
-                    "readonly": [],
-                    "writable": []
+        let deposit_signature = Signature::from_str(DEPOSIT_TRANSACTION_SIGNATURE).unwrap();
+
+        let result = setup
+            .minter()
+            .with_http_mocks(mocks)
+            .update_balance(UpdateBalanceArgs {
+                owner: None,
+                subaccount: None,
+                signature: deposit_signature.clone(),
+            })
+            .await;
+        assert_matches!(result, Ok(DepositStatus::Minted {
+            minted_amount,
+            signature,
+            ..
+    }) if minted_amount == DEPOSIT_AMOUNT - Setup::DEFAULT_DEPOSIT_FEE && signature == deposit_signature);
+
+        let balance_after = setup
+            .ledger()
+            .balance_of(Account {
+                owner: Setup::DEFAULT_CALLER,
+                subaccount: None,
+            })
+            .await;
+        assert_eq!(balance_after, DEPOSIT_AMOUNT - Setup::DEFAULT_DEPOSIT_FEE);
+    }
+
+    // Transaction obtained by executing the following with the Solana CLI:
+    // $ solana transfer 5pGhcgcYFiH1XkX8sSDb73d3GUGLiqb1xFiPHe1Us5gd 0.5 --allow-unfunded-recipient
+    fn get_deposit_transaction_request() -> JsonRpcRequestMatcher {
+        JsonRpcRequestMatcher::with_method("getTransaction")
+            .with_params(json!([DEPOSIT_TRANSACTION_SIGNATURE, {"encoding": "base64"}]))
+            .with_id(0)
+    }
+
+    // Response to `getTransaction` Solana RPC method obtained with:
+    // $ curl --location 'https://api.devnet.solana.com' \
+    //  --header 'Content-Type: application/json' \
+    //  --data '{
+    //      "jsonrpc": "2.0",
+    //      "id": 1,
+    //      "method": "getTransaction",
+    //      "params": [
+    //          "3k59e3o79fFv86ZvQJat1MpbTUmRbocWfXwgx8139yyaenVGDPqoyUaJ3ieiRaUdWQ7pjpAUDqaohw9NyZkBjzkq",
+    //          "base64"
+    //      ]
+    //  }'
+    fn get_deposit_transaction_response() -> JsonRpcResponse {
+        JsonRpcResponse::from(json!({
+            "jsonrpc": "2.0",
+            "result": {
+                "blockTime": 1770823711,
+                "meta": {
+                    "computeUnitsConsumed": 150,
+                    "costUnits": 1481,
+                    "err": null,
+                    "fee": 5000,
+                    "innerInstructions": [],
+                    "loadedAddresses": {
+                        "readonly": [],
+                        "writable": []
+                    },
+                    "logMessages": [
+                        "Program 11111111111111111111111111111111 invoke [1]",
+                        "Program 11111111111111111111111111111111 success"
+                    ],
+                    "postBalances": [
+                        4895851440_u64,
+                        500000000,
+                        1
+                    ],
+                    "postTokenBalances": [],
+                    "preBalances": [
+                        5395856440_u64,
+                        0,
+                        1
+                    ],
+                    "preTokenBalances": [],
+                    "rewards": [],
+                    "status": {
+                        "Ok": null
+                    }
                 },
-                "logMessages": [
-                    "Program 11111111111111111111111111111111 invoke [1]",
-                    "Program 11111111111111111111111111111111 success"
-                ],
-                "postBalances": [
-                    899995000,
-                    100000000,
-                    1
-                ],
-                "postTokenBalances": [],
-                "preBalances": [
-                    1000000000,
-                    0,
-                    1
-                ],
-                "preTokenBalances": [],
-                "rewards": [],
-                "status": {
-                    "Ok": null
-                }
+                "slot": 441440019,
+                "transaction": [
+                    "AYktYGiT43PlVKQj4GkvJNEYsFf46SjZFlIIJfrwsC5+F9RSD7CmCEq9VZEUQhb8mstaW1kZq9YJC0qclWf+NwIBAAEDIg5JU11WGypQAKfOpxcE0+UIiKney1G6hf+6GRXcmsdHisxOqffyzXZdIsfZqk+EH/pXAFqikE3sCFw3rfo5SgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAtkASUDT5PLxRnNxUcWC1DKt8jbIVXIzaEWXKr6vu+IBAgIAAQwCAAAAAGXNHQAAAAA=",
+                    "base64"
+                ]
             },
-            "slot": 440020244,
-            "transaction": [
-                "AcTwqYvGkHl+JjvHbD7qpOh6LPkIoo8mxqTaYy8tHQqCZLg2CiAVlPd2Vju7TFmd9nD1r+IoRXj6oRaKpSW+LwEBAAEDIg5JU11WGypQAKfOpxcE0+UIiKney1G6hf+6GRXcmscvz5NF7LCEgURaSxTPefsEeC7ZrQLXo+OAz22/UKN9DQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAReCQC5ZB9usfqnL8V0GdoMJ1/rj/0yBE/wqOR62tapIBAgIAAQwCAAAAAOH1BQAAAAA=",
-                "base64"
-            ]
-        },
-        "id": 1
-    }))
+            "id": 1
+        }))
+    }
 }

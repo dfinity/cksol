@@ -1,6 +1,8 @@
+use assert_matches::assert_matches;
 use candid::Principal;
-use cksol_int_tests::SetupBuilder;
-use cksol_types::{GetDepositAddressArgs, UpdateBalanceArgs};
+use cksol_int_tests::{Setup, SetupBuilder};
+use cksol_types::{DepositStatus, GetDepositAddressArgs, UpdateBalanceArgs};
+use icrc_ledger_types::icrc1::account::Account;
 use sol_rpc_types::{InstallArgs, OverrideProvider, RegexSubstitution};
 use solana_address::Address;
 use solana_client::rpc_client::RpcClient;
@@ -30,6 +32,15 @@ async fn should_update_balance_with_single_deposit() {
         .build()
         .await;
 
+    let balance_before = setup
+        .ledger()
+        .balance_of(Account {
+            owner: PRINCIPAL,
+            subaccount: None,
+        })
+        .await;
+    assert_eq!(balance_before, 0);
+
     let deposit_address = setup
         .minter()
         .get_deposit_address(GetDepositAddressArgs {
@@ -41,7 +52,7 @@ async fn should_update_balance_with_single_deposit() {
 
     let deposit_signature = send_deposit_to_address(deposit_address, DEPOSIT_AMOUNT).await;
 
-    let balance = setup
+    let result = setup
         .minter()
         .update_balance(UpdateBalanceArgs {
             owner: Some(PRINCIPAL),
@@ -49,8 +60,20 @@ async fn should_update_balance_with_single_deposit() {
             signature: deposit_signature.into(),
         })
         .await;
+    assert_matches!(result, Ok(DepositStatus::Minted {
+            minted_amount,
+            signature,
+            ..
+    }) if minted_amount == DEPOSIT_AMOUNT - Setup::DEFAULT_DEPOSIT_FEE && signature == deposit_signature.into());
 
-    assert_eq!(balance, Ok(Some(DEPOSIT_AMOUNT)));
+    let balance_after = setup
+        .ledger()
+        .balance_of(Account {
+            owner: PRINCIPAL,
+            subaccount: None,
+        })
+        .await;
+    assert_eq!(balance_after, DEPOSIT_AMOUNT - Setup::DEFAULT_DEPOSIT_FEE);
 }
 
 async fn send_deposit_to_address(deposit_address: Address, deposit_amount: u64) -> Signature {

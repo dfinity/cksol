@@ -686,6 +686,7 @@ dependencies = [
 name = "cksol-int-tests"
 version = "0.1.0"
 dependencies = [
+ "assert_matches",
  "candid",
  "cksol-types",
  "ic-canister-runtime",
@@ -693,6 +694,7 @@ dependencies = [
  "ic-pocket-canister-runtime",
  "ic-test-utilities-load-wasm",
  "icrc-ledger-types",
+ "num-traits",
  "pocket-ic",
  "reqwest 0.13.2",
  "serde",
@@ -721,6 +723,8 @@ dependencies = [
  "ic-dummy-getrandom-for-wasm",
  "ic-ed25519",
  "icrc-ledger-types",
+ "minicbor",
+ "num-traits",
  "serde",
  "sol_rpc_client",
  "sol_rpc_types",
@@ -734,7 +738,9 @@ name = "cksol-types"
 version = "0.1.0"
 dependencies = [
  "candid",
+ "canlog",
  "icrc-ledger-types",
+ "minicbor",
  "serde",
  "sol_rpc_types",
  "thiserror 2.0.18",
