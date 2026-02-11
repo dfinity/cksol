@@ -49,28 +49,70 @@ type UpdateBalanceError = variant {
     TransactionNotFound;
     // The Solana transaction with the given signature is not a valid
     // deposit to the owner's deposit address.
-    InvalidDepositTransaction : InvalidDepositTransaction;
+    InvalidDepositTransaction : text;
 };
 
-// The transaction for the given signature is not a valid deposit.
-type InvalidDepositTransaction = variant {
-    // Failed to decode transaction.
-    DecodingFailed;
-    // The transaction is not a valid transfer to the deposit address .
-    InvalidTransfer : text;
-    // The deposit amount is below the minimum deposit threshold.
-    InsufficientDepositAmount : record {
-        // The received deposit amount in lamports.
-        received: nat64;
-        // The minimum deposit amount in lamports.
-        minimum: nat64;
+// The outcome of processing a Solana deposit transaction.
+type DepositStatus = variant {
+    // The deposit amount does not cover the deposit fee.
+    ValueTooSmall: Signature;
+    // The transaction is a valid deposit, but the minter failed to mint ckSOL on the ledger.
+    // The caller should retry the `update_balance` call.
+    Checked : Signature;
+    // The minter accepted the deposit and minted ckSOL tokens on the ledger.
+    Minted : record {
+        // The MINT transaction index on the ledger.
+        block_index: nat64;
+        // The minted amount (deposit amount minus fees).
+        minted_amount: Lamport;
+        // The UTXO that caused the balance update.
+        signature: Signature;
     };
 };
 
 // Represents the result of a call to the `update_balance` endpoint.
-type UpdateBalanceResult = variant { Ok : Lamport; Err : UpdateBalanceError };
+type UpdateBalanceResult = variant { Ok : DepositStatus; Err : UpdateBalanceError };
 
-service : {
+// The installation args for the ckSOL minter canister.
+type InstallArgs = record {
+    // Only log entries matching this filter will be recorded.
+    // Default is `LogFilter::ShowAll`.
+    log_filter: opt LogFilter;
+    // The canister ID of the SOL RPC canister.
+    sol_rpc_canister_id: principal;
+    // The canister ID of the ckSOL ledger canister.
+    ledger_canister_id: principal;
+    // The deposit fee in lamports.
+    deposit_fee: Lamport;
+    // The master Ed25519 key name.
+    master_key_name: Ed25519KeyName;
+};
+
+// A filter for log entries.
+type LogFilter = variant {
+  ShowAll;
+  HideAll;
+  ShowPattern : Regex;
+  HidePattern : Regex;
+};
+
+// A string used as a regex pattern.
+type Regex = text;
+
+// The ID of one of the ICP root keys.
+// See the [tEdDSA documentation][tEdDSA] for more details.
+//
+// [tEdDSA]: https://internetcomputer.org/docs/building-apps/network-features/signatures/t-schnorr#signing-messages-and-transactions
+type Ed25519KeyName = variant {
+    // For local development with `dfx`.
+    LocalDevelopment;
+    // For testing with the Internet Computer's test key.
+    MainnetTestKey1;
+    // For running the canister in a production environment using the Internet Computer's production key.
+    MainnetProdKey1;
+};
+
+service : (InstallArgs) -> {
     // Returns the Solana address to which the owner should send SOL.
     //
     // If the owner is not set, it defaults to the caller's principal.
