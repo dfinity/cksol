@@ -91,7 +91,7 @@ pub struct CkSolMinter<'a> {
 
 impl CkSolMinter<'_> {
     pub async fn get_deposit_address(&self, args: GetDepositAddressArgs) -> Address {
-        self.try_update_call("get_deposit_address", (args,))
+        self.try_get_deposit_address(args)
             .await
             .expect("get_deposit_address failed")
     }
