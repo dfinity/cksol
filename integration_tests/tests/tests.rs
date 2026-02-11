@@ -34,7 +34,7 @@ mod get_deposit_address_tests {
             "9qvNPGSFQY8fvmr5A2jyCmSBfN7rrWBGJEAGgpN2TKeV"
         );
 
-        // Owner is the DEFAULT_CALLER, but different subaccounts specified
+        // Owner is the default caller, but different subaccounts specified
         assert_eq!(
             get_deposit_address(&setup, None, Some([1; 32])).await,
             "97eLNQ1sc7yQHscLWet7vq7AZ6TbxN5nx8D8LPSbYEJB"
