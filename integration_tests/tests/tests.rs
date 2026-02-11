@@ -60,7 +60,7 @@ mod get_deposit_address_tests {
     async fn should_fail_for_anonymous_owner() {
         let setup = SetupBuilder::new().build().await;
 
-        // Caller is DEFAULT_CALLER, but the owner is specified explicitly to anonymous
+        // Caller is default caller, but the owner is specified explicitly to anonymous
         let result = setup
             .minter()
             .try_get_deposit_address(GetDepositAddressArgs {
