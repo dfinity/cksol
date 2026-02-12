@@ -15,11 +15,11 @@ path = "src/main.rs"
 [dependencies]
 bs58 = { workspace = true }
 candid = { workspace = true }
+cksol-types = { path = "../libs/types", features = ["lifecycle"] }
 ic-cdk = { workspace = true }
 ic-dummy-getrandom-for-wasm = { workspace = true }
 ic-ed25519 = { workspace = true }
 icrc-ledger-types = { workspace = true }
-cksol-types = { path = "../libs/types", features = ["lifecycle"] }
 solana-address = { workspace = true }
 
 [dev-dependencies]

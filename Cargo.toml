@@ -1,10 +1,6 @@
 [workspace]
 resolver = "2"
-members = [
-    "minter",
-    "integration_tests",
-    "libs/types",
-]
+members = ["integration_tests", "libs/types", "minter"]
 
 [workspace.package]
 authors = ["DFINITY Stiftung"]
@@ -14,22 +10,12 @@ homepage = "https://github.com/dfinity/cksol#readme"
 license = "Apache-2.0"
 readme = "README.md"
 
-[profile.release]
-debug = false
-lto = true
-strip = true
-opt-level = 's'
-
-# Required by `ic-test-utilities-load-wasm`
-[profile.canister-release]
-inherits = "release"
-
 [workspace.dependencies]
 bs58 = "0.5.1"
 candid = "0.10.20"
 candid_parser = "0.3.0"
-ic-cdk = "0.19.0"
 ic-canister-runtime = "0.1.2"
+ic-cdk = "0.19.0"
 ic-dummy-getrandom-for-wasm = "0.1.0"
 ic-ed25519 = "0.6.0"
 ic-management-canister-types = "0.5.0"
@@ -41,3 +27,13 @@ serde = "1.0.228"
 sol_rpc_types = "3.1.0"
 solana-address = "2.0.0"
 tokio = "1.49.0"
+
+[profile.release]
+debug = false
+lto = true
+strip = true
+opt-level = 's'
+
+# Required by `ic-test-utilities-load-wasm`
+[profile.canister-release]
+inherits = "release"
