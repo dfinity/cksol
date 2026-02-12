@@ -7,6 +7,15 @@ use serde::{Deserialize, Serialize};
 use sol_rpc_types::Lamport;
 use std::fmt;
 
+/// The ckSOL minter service arguments.
+#[derive(Clone, Debug, CandidType, Deserialize)]
+pub enum MinterArg {
+    /// Initialization arguments.
+    Init(InitArgs),
+    /// Upgrade arguments.
+    Upgrade(UpgradeArgs),
+}
+
 /// The installation args for the ckSOL minter canister.
 #[derive(Clone, Debug, CandidType, Deserialize)]
 pub struct InitArgs {
@@ -21,6 +30,7 @@ pub struct InitArgs {
 }
 
 /// The upgrade args for the ckSOL minter canister.
+#[derive(Clone, Debug, CandidType, Deserialize)]
 pub struct UpgradeArgs {
     /// The new deposit fee in lamports.
     pub deposit_fee: Option<Lamport>,
