@@ -455,6 +455,7 @@ dependencies = [
  "ic-cdk",
  "ic-dummy-getrandom-for-wasm",
  "ic-ed25519",
+ "icrc-cbor",
  "icrc-ledger-types",
  "minicbor 2.2.0",
  "serde",

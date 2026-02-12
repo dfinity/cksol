@@ -5,6 +5,8 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
+pub mod event;
+
 thread_local! {
     pub static STATE: RefCell<State> = RefCell::default();
 }
