@@ -1,4 +1,4 @@
-use cksol_types::Ed25519KeyName;
+use cksol_types::lifecycle::Ed25519KeyName;
 use ic_ed25519::PublicKey;
 use std::{
     cell::RefCell,
