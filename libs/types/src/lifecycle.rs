@@ -2,9 +2,29 @@
 //!
 //! Types in this module are unstable and breaking changes do not break the canister API.
 
-use candid::CandidType;
+use candid::{CandidType, Principal};
 use serde::{Deserialize, Serialize};
+use sol_rpc_types::Lamport;
 use std::fmt;
+
+/// The installation args for the ckSOL minter canister.
+#[derive(Clone, Debug, CandidType, Deserialize)]
+pub struct InitArgs {
+    /// The canister ID of the SOL RPC canister.
+    pub sol_rpc_canister_id: Principal,
+    /// The canister ID of the ckSOL ledger canister.
+    pub ledger_canister_id: Principal,
+    /// The deposit fee in lamports.
+    pub deposit_fee: Lamport,
+    /// The master Ed25519 key name.
+    pub master_key_name: Ed25519KeyName,
+}
+
+/// The upgrade args for the ckSOL minter canister.
+pub struct UpgradeArgs {
+    /// The new deposit fee in lamports.
+    pub deposit_fee: Option<Lamport>,
+}
 
 /// The ID of one of the ICP root keys.
 /// See the [tEdDSA documentation](https://internetcomputer.org/docs/building-apps/network-features/signatures/t-schnorr#signing-messages-and-transactions)
