@@ -3,10 +3,11 @@
 #![forbid(unsafe_code)]
 #![forbid(missing_docs)]
 
+pub use sol_rpc_types::{Lamport, Pubkey as Address};
+
 use candid::{CandidType, Principal};
 use icrc_ledger_types::icrc1::account::Subaccount;
 use serde::{Deserialize, Serialize};
-pub use sol_rpc_types::Pubkey as Address;
 use std::fmt;
 
 /// Arguments for a request to the `getDepositAddress` ckSOL minter endpoint.

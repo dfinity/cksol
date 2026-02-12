@@ -19,7 +19,9 @@ ic-cdk = { workspace = true }
 ic-dummy-getrandom-for-wasm = { workspace = true }
 ic-ed25519 = { workspace = true }
 icrc-ledger-types = { workspace = true }
+minicbor = { workspace = true, features = ["derive"] }
 cksol-types = { path = "../libs/types" }
+serde = { workspace = true }
 solana-address = { workspace = true }
 
 [dev-dependencies]
