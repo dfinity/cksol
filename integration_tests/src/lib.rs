@@ -1,5 +1,5 @@
 use candid::{CandidType, Encode, Principal, utils::ArgumentEncoder};
-use cksol_types::GetDepositAddressArgs;
+use cksol_types::{Address, GetDepositAddressArgs};
 use ic_canister_runtime::Runtime;
 use ic_management_canister_types::{CanisterId, CanisterSettings};
 use ic_pocket_canister_runtime::PocketIcRuntime;
@@ -8,28 +8,36 @@ use serde::de::DeserializeOwned;
 use std::{env::var, path::PathBuf, sync::Arc};
 
 #[derive(Default)]
-pub struct SetupBuilder {}
+pub struct SetupBuilder {
+    caller: Option<Principal>,
+}
 
 impl SetupBuilder {
     pub fn new() -> Self {
         Self::default()
     }
 
+    pub fn with_caller(mut self, caller: Principal) -> Self {
+        self.caller = Some(caller);
+        self
+    }
+
     pub async fn build(self) -> Setup {
-        Setup::new().await
+        Setup::new(self.caller).await
     }
 }
 
 pub struct Setup {
     env: Arc<PocketIc>,
     minter_canister_id: CanisterId,
+    caller: Option<Principal>,
 }
 
 impl Setup {
     pub const DEFAULT_CONTROLLER: Principal = Principal::from_slice(&[0x9d, 0xf7, 0x01]);
     pub const DEFAULT_CALLER: Principal = Principal::from_slice(&[0x9d, 0xf7, 0x02]);
 
-    pub async fn new() -> Self {
+    pub async fn new(caller: Option<Principal>) -> Self {
         let env = PocketIcBuilder::new()
             .with_nns_subnet() //make_live requires NNS subnet.
             .with_fiduciary_subnet()
@@ -57,11 +65,15 @@ impl Setup {
         Self {
             env: Arc::new(env),
             minter_canister_id,
+            caller,
         }
     }
 
     pub fn runtime(&self) -> PocketIcRuntime<'_> {
-        PocketIcRuntime::new(self.env.as_ref(), Self::DEFAULT_CALLER)
+        PocketIcRuntime::new(
+            self.env.as_ref(),
+            self.caller.unwrap_or(Self::DEFAULT_CALLER),
+        )
     }
 
     pub fn minter(&self) -> CkSolMinter<'_> {
@@ -78,11 +90,20 @@ pub struct CkSolMinter<'a> {
 }
 
 impl CkSolMinter<'_> {
-    pub async fn get_deposit_address(&self, args: GetDepositAddressArgs) -> sol_rpc_types::Pubkey {
-        self.update_call("get_deposit_address", (args,)).await
+    pub async fn get_deposit_address(&self, args: GetDepositAddressArgs) -> Address {
+        self.try_get_deposit_address(args)
+            .await
+            .expect("get_deposit_address failed")
     }
 
-    async fn update_call<In, Out>(&self, method: &str, args: In) -> Out
+    pub async fn try_get_deposit_address(
+        &self,
+        args: GetDepositAddressArgs,
+    ) -> Result<Address, String> {
+        self.try_update_call("get_deposit_address", (args,)).await
+    }
+
+    async fn try_update_call<In, Out>(&self, method: &str, args: In) -> Result<Out, String>
     where
         In: ArgumentEncoder + Send,
         Out: CandidType + DeserializeOwned,
@@ -90,7 +111,7 @@ impl CkSolMinter<'_> {
         self.runtime
             .update_call(self.id, method, args, 0)
             .await
-            .expect("Update call failed")
+            .map_err(|e| format!("{:?}", e))
     }
 }
 

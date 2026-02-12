@@ -2,6 +2,7 @@ use candid::Principal;
 use cksol_types::{Address, GetDepositAddressArgs};
 
 mod address;
+mod state;
 
 #[ic_cdk::update]
 async fn get_deposit_address(args: GetDepositAddressArgs) -> Address {
