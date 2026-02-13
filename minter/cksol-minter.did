@@ -6,6 +6,13 @@
 // [account]: https://solana.com/docs/core/accounts
 type Address = text;
 
+// The ID of one of the ICP root keys.
+type Ed25519KeyName = variant {
+    MainnetTestKey1;
+    LocalDevelopment;
+    MainnetProdKey1;
+};
+
 // Arguments for a request to the `getDepositAddress` ckSOL minter endpoint.
 type GetDepositAddressArgs = record {
     // The principal to deposit funds to.
@@ -17,7 +24,26 @@ type GetDepositAddressArgs = record {
     subaccount: opt blob;
 };
 
-service : {
+// The installation args for the ckSOL minter canister.
+type InitArgs = record {
+    sol_rpc_canister_id : principal;
+    ledger_canister_id : principal;
+    master_key_name : Ed25519KeyName;
+    deposit_fee : nat64;
+};
+
+// The ckSOL minter service arguments.
+type MinterArg = variant {
+    Upgrade : UpgradeArgs;
+    Init : InitArgs;
+};
+
+// The upgrade args for the ckSOL minter canister.
+type UpgradeArgs = record {
+    deposit_fee : opt nat64;
+};
+
+service : (MinterArg) -> {
     // Returns the Solana address to which the owner should send SOL.
     ///
     // If the owner is not set, it defaults to the caller's principal.

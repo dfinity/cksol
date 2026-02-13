@@ -19,11 +19,18 @@ jobs:
     steps:
       - name: 'Checkout'
         uses: actions/checkout@v4
+
       - name: 'Check code'
         run: |
           cargo fmt --all -- --check
           cargo clippy --locked --verbose --tests --benches --workspace -- -D clippy::all
           cargo clippy --locked --verbose --target wasm32-unknown-unknown -p cksol-minter -- -D clippy::all
+
+      - name: 'Install cargo-sort'
+        run: cargo install cargo-sort
+
+      - name: 'Check Cargo.toml'
+        run: cargo sort --workspace --check
 
   reproducible-build:
     runs-on: ubuntu-22.04
