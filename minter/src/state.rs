@@ -24,6 +24,7 @@ where
 pub struct State {
     pub master_public_key: Option<SchnorrPublicKey>,
     pub master_key_name: Ed25519KeyName,
+    pub deposit_fee: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

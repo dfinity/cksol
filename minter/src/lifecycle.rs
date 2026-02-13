@@ -9,7 +9,9 @@ pub fn init(args: InitArgs) {
 }
 
 pub fn post_upgrade(args: Option<UpgradeArgs>) {
-    if let Some(_args) = args {
-        // apply upgrade args
+    if let Some(UpgradeArgs { deposit_fee }) = args {
+        if let Some(deposit_fee) = deposit_fee {
+            mutate_state(|s| s.deposit_fee = deposit_fee);
+        }
     }
 }
