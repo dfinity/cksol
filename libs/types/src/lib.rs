@@ -6,7 +6,7 @@
 use candid::{CandidType, Principal};
 use icrc_ledger_types::icrc1::account::Subaccount;
 pub use lifecycle::InstallArgs;
-pub use memo::MintMemo;
+pub use memo::{Memo, MintMemo};
 use serde::{Deserialize, Serialize};
 use sol_rpc_types::Lamport;
 pub use sol_rpc_types::Pubkey as Address;

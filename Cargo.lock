@@ -739,10 +739,12 @@ version = "0.1.0"
 dependencies = [
  "candid",
  "canlog",
+ "derive_more",
  "icrc-ledger-types",
  "minicbor",
  "serde",
  "sol_rpc_types",
+ "solana-signature",
  "thiserror 2.0.18",
 ]
 

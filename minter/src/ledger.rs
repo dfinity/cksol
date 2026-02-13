@@ -5,7 +5,7 @@ use cksol_types::{DepositStatus, MintMemo, UpdateBalanceError};
 use ic_canister_runtime::{IcError, Runtime};
 use icrc_ledger_types::icrc1::{
     account::Account,
-    transfer::{BlockIndex, Memo, NumTokens, TransferArg, TransferError},
+    transfer::{BlockIndex, NumTokens, TransferArg, TransferError},
 };
 use minicbor::Encoder;
 use num_traits::cast::ToPrimitive;
@@ -17,16 +17,14 @@ pub async fn mint<R: Runtime>(
     deposit_amount: Lamport,
     deposit_transaction: Signature,
 ) -> Result<DepositStatus, UpdateBalanceError> {
-    let mint_memo = MintMemo::Convert {
-        signature: deposit_transaction.as_ref(),
-    };
+    let mint_memo = MintMemo::convert(deposit_transaction.clone());
     let mint_result = LedgerClient::new(runtime, read_state(|state| state.ledger_canister_id))
         .transfer(TransferArg {
             from_subaccount: None,
             to: account,
             fee: None,
             created_at_time: None,
-            memo: Some(encode(&mint_memo)),
+            memo: Some(encode_memo(mint_memo)),
             amount: NumTokens::from(deposit_amount),
         })
         .await
@@ -81,8 +79,9 @@ impl<R: Runtime> LedgerClient<R> {
 }
 
 // Encodes minter memo as a binary blob.
-fn encode<T: minicbor::Encode<()>>(t: &T) -> Memo {
+fn encode_memo(memo: impl Into<cksol_types::Memo>) -> icrc_ledger_types::icrc1::transfer::Memo {
     let mut encoder = Encoder::new(Vec::new());
-    encoder.encode(t).expect("minicbor encoding failed");
-    Memo::from(encoder.into_writer())
+    let memo = memo.into();
+    encoder.encode(&memo).expect("minicbor encoding failed");
+    icrc_ledger_types::icrc1::transfer::Memo::from(encoder.into_writer())
 }
