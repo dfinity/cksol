@@ -1,0 +1,14 @@
+[package]
+name = "cksol-types-internal"
+version = "0.1.0"
+description = "Internal types used by the ckSOL minter canister"
+authors.workspace = true
+edition.workspace = true
+repository.workspace = true
+homepage.workspace = true
+license.workspace = true
+
+[dependencies]
+candid = { workspace = true }
+serde = { workspace = true }
+sol_rpc_types = { workspace = true }

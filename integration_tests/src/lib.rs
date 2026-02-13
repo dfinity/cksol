@@ -1,9 +1,9 @@
 use crate::ledger::ledger_init_args;
 use candid::{CandidType, Encode, Nat, Principal, encode_one, utils::ArgumentEncoder};
 use cksol_types::{
-    Address, DepositStatus, Ed25519KeyName, GetDepositAddressArgs, InstallArgs, UpdateBalanceArgs,
-    UpdateBalanceError,
+    Address, DepositStatus, GetDepositAddressArgs, UpdateBalanceArgs, UpdateBalanceError,
 };
+use cksol_types_internal::{Ed25519KeyName, InitArgs, MinterArg};
 use ic_canister_runtime::Runtime;
 use ic_management_canister_types::{CanisterId, CanisterSettings};
 use ic_pocket_canister_runtime::{ExecuteHttpOutcallMocks, PocketIcRuntime};
@@ -117,13 +117,10 @@ impl Setup {
         env.install_canister(
             minter_canister_id,
             cksol_minter_wasm(),
-            Encode!(&InstallArgs {
+            Encode!(&cksol_minter_init_args(
                 sol_rpc_canister_id,
-                ledger_canister_id,
-                deposit_fee: Self::DEFAULT_DEPOSIT_FEE,
-                log_filter: None,
-                master_key_name: Ed25519KeyName::LocalDevelopment,
-            })
+                ledger_canister_id
+            ))
             .unwrap(),
             Some(Self::DEFAULT_CONTROLLER),
         )
@@ -284,6 +281,18 @@ fn cksol_minter_wasm() -> Vec<u8> {
         "cksol-minter",
         &[],
     )
+}
+
+fn cksol_minter_init_args(
+    sol_rpc_canister_id: Principal,
+    ledger_canister_id: Principal,
+) -> MinterArg {
+    MinterArg::Init(InitArgs {
+        sol_rpc_canister_id,
+        ledger_canister_id,
+        deposit_fee: Setup::DEFAULT_DEPOSIT_FEE,
+        master_key_name: Ed25519KeyName::MainnetProdKey1,
+    })
 }
 
 async fn ledger_wasm() -> Vec<u8> {

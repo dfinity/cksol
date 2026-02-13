@@ -1,6 +1,5 @@
 use candid::Principal;
-use canlog::LogFilter;
-use cksol_types::Ed25519KeyName;
+use cksol_types_internal::Ed25519KeyName;
 use ic_ed25519::PublicKey;
 use sol_rpc_client::SOL_RPC_CANISTER;
 use sol_rpc_types::Lamport;
@@ -31,7 +30,6 @@ pub struct State {
     pub sol_rpc_canister_id: Principal,
     pub ledger_canister_id: Principal,
     pub deposit_fee: Lamport,
-    pub log_filter: LogFilter,
 }
 
 impl Default for State {
@@ -42,9 +40,9 @@ impl Default for State {
             master_public_key: None,
             master_key_name: Ed25519KeyName::default(),
             sol_rpc_canister_id: SOL_RPC_CANISTER,
+            // TODO DEFI-XXXX: Replace this with the prod ledger canister ID
             ledger_canister_id: Principal::anonymous(),
             deposit_fee: DEFAULT_DEPOSIT_FEE,
-            log_filter: LogFilter::default(),
         }
     }
 }

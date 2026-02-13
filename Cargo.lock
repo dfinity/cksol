@@ -704,6 +704,7 @@ dependencies = [
  "assert_matches",
  "candid",
  "cksol-types",
+ "cksol-types-internal",
  "ic-canister-runtime",
  "ic-management-canister-types",
  "ic-pocket-canister-runtime",
@@ -733,6 +734,7 @@ dependencies = [
  "candid_parser",
  "canlog",
  "cksol-types",
+ "cksol-types-internal",
  "ic-canister-runtime",
  "ic-cdk",
  "ic-dummy-getrandom-for-wasm",
@@ -762,6 +764,15 @@ dependencies = [
  "sol_rpc_types",
  "solana-signature",
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "cksol-types-internal"
+version = "0.1.0"
+dependencies = [
+ "candid",
+ "serde",
+ "sol_rpc_types",
 ]
 
 [[package]]

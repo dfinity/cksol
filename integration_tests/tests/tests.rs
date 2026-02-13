@@ -27,7 +27,7 @@ mod get_deposit_address_tests {
     async fn should_get_deposit_address() {
         let setup = SetupBuilder::new().build().await;
 
-        const DEFAULT_CALLER_DEPOSIT_ADDRESS: &str = "8HPUHYAArmzwYuAhHqdVNtE2u9cXmzUo46d1T5pKPAaK";
+        const DEFAULT_CALLER_DEPOSIT_ADDRESS: &str = "3fnbpmbdVhcvLMAgyGirs64B4BFFftmmSpeq7tuDD6tY";
 
         // Owner is the default caller
         assert_eq!(
@@ -38,17 +38,17 @@ mod get_deposit_address_tests {
         // Different owner
         assert_eq!(
             get_deposit_address(&setup, Some(Principal::from_slice(&[1])), None).await,
-            "6CaTQyPCb7XcaT17RH8H6Z5RYQPPZBL5upvYU82y5qUC"
+            "Dyh5A77LtkkYan5NJH4vvCji7WJKBQEqCDupPtmUpxoE"
         );
 
         // Owner is the default caller, but different subaccounts specified
         assert_eq!(
             get_deposit_address(&setup, None, Some([1; 32])).await,
-            "AwSsRpyV9SSeCr3BmHm2GrFQaYoeKTxZJ1Kfgv9e5gqJ"
+            "HB8XFVocoLig1KKpp5w41noDi4QN7SUx6HPWV7CKsaVR"
         );
         assert_eq!(
             get_deposit_address(&setup, None, Some([2; 32])).await,
-            "4VuHTKGG2CPd2godqGwPvsKqNzehUwte1SZpaVsVbRor"
+            "Hu9cz6aPzLcyJWexefTthALmKBKZTiqt5TomTg2qwD2N"
         );
 
         // Caller is anonymous, but we specify the owner explicitly
@@ -105,7 +105,7 @@ mod update_balance_tests {
     const DEPOSIT_AMOUNT: Lamport = 500_000_000;
     // The signature for an actual Solana Devnnet transaction depositing 0.1 SOL to `DEFAULT_CALLER_DEPOSIT_ADDRESS`
     const DEPOSIT_TRANSACTION_SIGNATURE: &str =
-        "5pf5fC9WRhdvE5y6eUkxons4btM3Tfi7koj4W1Q2kLztP8oZoLVn516XuuvG7cY61wLoyVAoakm1wz1z8V67rvh";
+        "4basP1hZDqgt1BYwh29mURz4zr8BcJgya2Y4AjmzXB5vtViLG6hZRxF9iypkxkfCJXhJTFW7jU1PyG8rHXvYd4Zp";
 
     #[tokio::test]
     async fn should_update_balance_with_single_deposit() {
@@ -144,7 +144,7 @@ mod update_balance_tests {
             minted_amount,
             signature,
             ..
-    }) if minted_amount == DEPOSIT_AMOUNT - Setup::DEFAULT_DEPOSIT_FEE && signature == deposit_signature);
+        }) if minted_amount == DEPOSIT_AMOUNT - Setup::DEFAULT_DEPOSIT_FEE && signature == deposit_signature);
 
         let balance_after = setup
             .ledger()
@@ -157,10 +157,13 @@ mod update_balance_tests {
     }
 
     // Transaction obtained by executing the following with the Solana CLI:
-    // $ solana transfer 5pGhcgcYFiH1XkX8sSDb73d3GUGLiqb1xFiPHe1Us5gd 0.5 --allow-unfunded-recipient
+    // $ solana transfer 3fnbpmbdVhcvLMAgyGirs64B4BFFftmmSpeq7tuDD6tY 0.5 --allow-unfunded-recipient
     fn get_deposit_transaction_request() -> JsonRpcRequestMatcher {
         JsonRpcRequestMatcher::with_method("getTransaction")
-            .with_params(json!([DEPOSIT_TRANSACTION_SIGNATURE, {"encoding": "base64", "commitment": "finalized"}]))
+            .with_params(json!([
+                DEPOSIT_TRANSACTION_SIGNATURE,
+                {"encoding": "base64", "commitment": "finalized"}
+            ]))
             .with_id(0)
     }
 
@@ -172,7 +175,7 @@ mod update_balance_tests {
     //      "id": 1,
     //      "method": "getTransaction",
     //      "params": [
-    //          "5pf5fC9WRhdvE5y6eUkxons4btM3Tfi7koj4W1Q2kLztP8oZoLVn516XuuvG7cY61wLoyVAoakm1wz1z8V67rvh",
+    //          "4basP1hZDqgt1BYwh29mURz4zr8BcJgya2Y4AjmzXB5vtViLG6hZRxF9iypkxkfCJXhJTFW7jU1PyG8rHXvYd4Zp",
     //          "base64"
     //      ]
     //  }'
@@ -180,7 +183,7 @@ mod update_balance_tests {
         JsonRpcResponse::from(json!({
             "jsonrpc": "2.0",
             "result": {
-                "blockTime": 1770829384,
+                "blockTime": 1770997258,
                 "meta": {
                     "computeUnitsConsumed": 150,
                     "costUnits": 1481,
@@ -196,13 +199,13 @@ mod update_balance_tests {
                         "Program 11111111111111111111111111111111 success"
                     ],
                     "postBalances": [
-                        3895841440_u64,
+                        3395836440_u64,
                         500000000,
                         1
                     ],
                     "postTokenBalances": [],
                     "preBalances": [
-                        4395846440_u64,
+                        3895841440_u64,
                         0,
                         1
                     ],
@@ -212,9 +215,9 @@ mod update_balance_tests {
                         "Ok": null
                     }
                 },
-                "slot": 441454923,
+                "slot": 441894876,
                 "transaction": [
-                    "AQQodAsYZ/rNCJtfA1V3qsr4h/8gISyLlrDJMWj5as/oCsvMd70sOu0GmIEdl1X3zAWmWKNSChDWJRI07O39UA4BAAEDIg5JU11WGypQAKfOpxcE0+UIiKney1G6hf+6GRXcmsdsNIJCpcZ4w5fUrCU/EIGm44JT0WDXRYke95KWjUa+wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA8+o9nl8C79kpdA6ssskxPGKUOFpDuWFxsjyNQOoSeHcBAgIAAQwCAAAAAGXNHQAAAAA=",
+                    "AbPf97eQzgIgQGGFzEA2zvWWbaNdZxVOsN+Zem/HooxKiAzkImkLy/qXv56MOq0kQ9yJYWw4ZTOGP8mTemI6MgsBAAEDIg5JU11WGypQAKfOpxcE0+UIiKney1G6hf+6GRXcmscnpwFQ/UrMJ1PeTEdnddpynJZVZBAGM5/4YyiEZlx8QQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA/ojmZ6HPuhM7YU56uETXnzzzvzHc55RxGfYTOIsoFu0BAgIAAQwCAAAAAGXNHQAAAAA=",
                     "base64"
                 ]
             },

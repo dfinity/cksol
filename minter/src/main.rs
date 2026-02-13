@@ -1,33 +1,41 @@
-use crate::logs::Priority;
-use crate::state::{State, mutate_state, read_state};
 use candid::Principal;
 use canlog::log;
-use cksol_types::{
-    Address, DepositStatus, GetDepositAddressArgs, InstallArgs, UpdateBalanceArgs,
-    UpdateBalanceError,
+use cksol_minter::{
+    address, ledger, logs::Priority, state::read_state, transaction,
+    transaction::try_get_transaction,
 };
+use cksol_types::{
+    Address, DepositStatus, GetDepositAddressArgs, UpdateBalanceArgs, UpdateBalanceError,
+};
+use cksol_types_internal::MinterArg;
 use ic_canister_runtime::IcRuntime;
 use icrc_ledger_types::icrc1::account::{Account, Subaccount};
-use transaction::try_get_transaction;
-
-mod address;
-mod ledger;
-mod logs;
-mod state;
-mod transaction;
 
 #[ic_cdk::init]
-async fn init(args: InstallArgs) {
-    mutate_state(|state| {
-        *state = State {
-            master_public_key: None,
-            master_key_name: args.master_key_name,
-            sol_rpc_canister_id: args.sol_rpc_canister_id,
-            ledger_canister_id: args.ledger_canister_id,
-            deposit_fee: args.deposit_fee,
-            log_filter: args.log_filter.unwrap_or_default(),
+fn init(args: MinterArg) {
+    match args {
+        MinterArg::Init(init) => {
+            cksol_minter::lifecycle::init(init);
         }
-    })
+        MinterArg::Upgrade(_) => {
+            ic_cdk::trap("cannot init canister state with upgrade args");
+        }
+    }
+}
+
+#[ic_cdk::post_upgrade]
+fn post_upgrade(args: Option<MinterArg>) {
+    match args {
+        Some(MinterArg::Init(_)) => {
+            ic_cdk::trap("cannot upgrade canister state with init args");
+        }
+        Some(MinterArg::Upgrade(args)) => {
+            cksol_minter::lifecycle::post_upgrade(Some(args));
+        }
+        None => {
+            cksol_minter::lifecycle::post_upgrade(None);
+        }
+    }
 }
 
 #[ic_cdk::update]

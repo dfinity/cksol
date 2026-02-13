@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["integration_tests", "libs/types", "minter"]
+members = ["integration_tests", "libs/types", "libs/types-internal", "minter"]
 
 [workspace.package]
 authors = ["DFINITY Stiftung"]
