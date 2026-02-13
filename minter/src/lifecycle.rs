@@ -1,28 +1,25 @@
-use candid::{CandidType, Deserialize, Principal};
-use cksol_types::{Ed25519KeyName, Lamport};
-use minicbor::{Decode, Encode};
+use cksol_types_internal::{InitArgs, UpgradeArgs};
 
-/// The installation args for the ckSOL minter canister.
-#[derive(Clone, Debug, Eq, PartialEq, CandidType, Decode, Deserialize, Encode)]
-pub struct InitArgs {
-    /// The canister ID of the SOL RPC canister.
-    #[cbor(n(0), with = "icrc_cbor::principal")]
-    pub sol_rpc_canister_id: Principal,
-    /// The canister ID of the ckSOL ledger canister.
-    #[cbor(n(1), with = "icrc_cbor::principal")]
-    pub ledger_canister_id: Principal,
-    /// The deposit fee in lamports.
-    #[n(2)]
-    pub deposit_fee: Lamport,
-    /// The master Ed25519 key name.
-    #[n(3)]
-    pub master_key_name: Ed25519KeyName,
+use crate::state::mutate_state;
+
+pub fn init(
+    InitArgs {
+        sol_rpc_canister_id: _,
+        ledger_canister_id: _,
+        deposit_fee,
+        master_key_name,
+    }: InitArgs,
+) {
+    mutate_state(|s| {
+        s.master_key_name = master_key_name;
+        s.deposit_fee = deposit_fee;
+    });
 }
 
-/// The upgrade args for the ckSOL minter canister.
-#[derive(Clone, Debug, Eq, PartialEq, CandidType, Decode, Deserialize, Encode)]
-pub struct UpgradeArgs {
-    /// The new deposit fee in lamports.
-    #[n(0)]
-    pub deposit_fee: Option<Lamport>,
+pub fn post_upgrade(args: Option<UpgradeArgs>) {
+    if let Some(UpgradeArgs { deposit_fee }) = args
+        && let Some(deposit_fee) = deposit_fee
+    {
+        mutate_state(|s| s.deposit_fee = deposit_fee);
+    }
 }

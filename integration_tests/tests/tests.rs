@@ -20,7 +20,7 @@ mod get_deposit_address_tests {
     async fn should_get_deposit_address() {
         let setup = SetupBuilder::new().build().await;
 
-        const DEFAULT_CALLER_DEPOSIT_ADDRESS: &str = "Ge2aoiaTb6Tq2DQ4xs7qGhGud97pKtDmJCAQufTJeNSu";
+        const DEFAULT_CALLER_DEPOSIT_ADDRESS: &str = "6sCCyJVCPgzu6VEgeqJyxhW9X2W6ijAAReCRTfD5iecH";
 
         // Owner is the default caller
         assert_eq!(
@@ -31,17 +31,17 @@ mod get_deposit_address_tests {
         // Different owner
         assert_eq!(
             get_deposit_address(&setup, Some(Principal::from_slice(&[1])), None).await,
-            "9qvNPGSFQY8fvmr5A2jyCmSBfN7rrWBGJEAGgpN2TKeV"
+            "E4MpwNnMWs2XtW5gVrxZvyS7fMq31QD5HvbxmwP45Tz3"
         );
 
         // Owner is the default caller, but different subaccounts specified
         assert_eq!(
             get_deposit_address(&setup, None, Some([1; 32])).await,
-            "97eLNQ1sc7yQHscLWet7vq7AZ6TbxN5nx8D8LPSbYEJB"
+            "2HFvz11FCjQzezfnm8BEN5XbCmxva1vyrZzs7p3ZvWNC"
         );
         assert_eq!(
             get_deposit_address(&setup, None, Some([2; 32])).await,
-            "BiuUj1yMbtStuumWutpBajSjNDPbnE5dNEuTv7J1cjmB"
+            "2VP5Kmg7cZm8GA599LeA3j9M3QcpSCdwfdqNdFskyA2u"
         );
 
         // Caller is anonymous, but we specify the owner explicitly

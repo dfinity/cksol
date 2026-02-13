@@ -1,5 +1,33 @@
 use candid::Principal;
 use cksol_types::{Address, GetDepositAddressArgs};
+use cksol_types_internal::MinterArg;
+
+#[ic_cdk::init]
+fn init(args: MinterArg) {
+    match args {
+        MinterArg::Init(init) => {
+            cksol_minter::lifecycle::init(init);
+        }
+        MinterArg::Upgrade(_) => {
+            ic_cdk::trap("cannot init canister state with upgrade args");
+        }
+    }
+}
+
+#[ic_cdk::post_upgrade]
+fn post_upgrade(args: Option<MinterArg>) {
+    match args {
+        Some(MinterArg::Init(_)) => {
+            ic_cdk::trap("cannot upgrade canister state with init args");
+        }
+        Some(MinterArg::Upgrade(args)) => {
+            cksol_minter::lifecycle::post_upgrade(Some(args));
+        }
+        None => {
+            cksol_minter::lifecycle::post_upgrade(None);
+        }
+    }
+}
 
 #[ic_cdk::update]
 async fn get_deposit_address(args: GetDepositAddressArgs) -> Address {
