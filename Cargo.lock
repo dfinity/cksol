@@ -433,6 +433,7 @@ version = "0.1.0"
 dependencies = [
  "candid",
  "cksol-types",
+ "cksol-types-internal",
  "ic-canister-runtime",
  "ic-management-canister-types",
  "ic-pocket-canister-runtime",
@@ -452,6 +453,7 @@ dependencies = [
  "candid",
  "candid_parser",
  "cksol-types",
+ "cksol-types-internal",
  "ic-cdk",
  "ic-dummy-getrandom-for-wasm",
  "ic-ed25519",
@@ -465,6 +467,15 @@ version = "0.1.0"
 dependencies = [
  "candid",
  "icrc-ledger-types",
+ "serde",
+ "sol_rpc_types",
+]
+
+[[package]]
+name = "cksol-types-internal"
+version = "0.1.0"
+dependencies = [
+ "candid",
  "serde",
  "sol_rpc_types",
 ]

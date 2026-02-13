@@ -1,5 +1,5 @@
 use candid::Principal;
-use cksol_types::lifecycle::MinterArg;
+use cksol_types_internal::MinterArg;
 use cksol_types::{Address, GetDepositAddressArgs};
 
 #[ic_cdk::init]

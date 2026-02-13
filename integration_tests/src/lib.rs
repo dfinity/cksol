@@ -123,14 +123,14 @@ fn cksol_minter_wasm() -> Vec<u8> {
     )
 }
 
-fn cksol_minter_init_args() -> cksol_types::lifecycle::MinterArg {
-    use cksol_types::lifecycle;
-    lifecycle::MinterArg::Init(lifecycle::InitArgs {
+fn cksol_minter_init_args() -> cksol_types_internal::MinterArg {
+    use cksol_types_internal::{Ed25519KeyName, InitArgs, MinterArg};
+    MinterArg::Init(InitArgs {
         // TODO DEFI-2643: Fix me!
         sol_rpc_canister_id: Principal::anonymous(),
         // TODO DEFI-2643: Fix me!
         ledger_canister_id: Principal::anonymous(),
         deposit_fee: 0,
-        master_key_name: lifecycle::Ed25519KeyName::MainnetProdKey1,
+        master_key_name: Ed25519KeyName::MainnetProdKey1,
     })
 }

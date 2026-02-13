@@ -2,6 +2,9 @@
 //!
 //! Types in this module are unstable and breaking changes do not break the canister API.
 
+#![forbid(unsafe_code)]
+#![forbid(missing_docs)]
+
 use candid::{CandidType, Principal};
 use serde::{Deserialize, Serialize};
 use sol_rpc_types::Lamport;

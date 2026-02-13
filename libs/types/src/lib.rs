@@ -3,9 +3,6 @@
 #![forbid(unsafe_code)]
 #![forbid(missing_docs)]
 
-#[cfg(feature = "lifecycle")]
-pub mod lifecycle;
-
 use candid::{CandidType, Principal};
 use icrc_ledger_types::icrc1::account::Subaccount;
 use serde::{Deserialize, Serialize};

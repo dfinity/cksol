@@ -10,9 +10,6 @@ license.workspace = true
 readme = "README.md"
 include = ["src", "Cargo.toml", "CHANGELOG.md", "LICENSE", "README.md"]
 
-[features]
-lifecycle = []
-
 [dependencies]
 candid = { workspace = true }
 icrc-ledger-types = { workspace = true }

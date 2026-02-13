@@ -1,4 +1,4 @@
-use cksol_types::lifecycle::{InitArgs, UpgradeArgs};
+use cksol_types_internal::{InitArgs, UpgradeArgs};
 
 use crate::state::mutate_state;
 
