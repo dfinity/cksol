@@ -4,30 +4,37 @@ use candid::{CandidType, Deserialize, Nat, Principal};
 use icrc_ledger_types::{icrc::generic_value::Value, icrc1::account::Account};
 use serde::Serialize;
 
+const LEDGER_TRANSFER_FEE: u64 = 100_000;
+const NNS_ROOT_PRINCIPAL: Principal = Principal::from_slice(&[0_u8]);
+const FEE_COLLECTOR_SUBACCOUNT: [u8; 32] = [
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x0f,
+    0xee,
+];
+
 pub fn ledger_init_args(minter_canister_id: Principal) -> LedgerArgument {
     LedgerArgument::Init(InitArgs {
-        minting_account: Account {
+        minting_account: Account::from(minter_canister_id),
+        fee_collector_account: Some(Account {
             owner: minter_canister_id,
-            subaccount: None,
-        },
-        fee_collector_account: None,
+            subaccount: Some(FEE_COLLECTOR_SUBACCOUNT),
+        }),
         initial_balances: vec![],
-        transfer_fee: 0_u64.into(),
-        decimals: None,
+        transfer_fee: Nat::from(LEDGER_TRANSFER_FEE),
+        decimals: Some(9),
         token_name: "ckSOL".to_string(),
         token_symbol: "ckSOL".to_string(),
         metadata: vec![],
         archive_options: ArchiveOptions {
-            trigger_threshold: 0,
-            num_blocks_to_archive: 0,
-            node_max_memory_size_bytes: None,
+            trigger_threshold: 2_000,
+            num_blocks_to_archive: 1_0000,
+            node_max_memory_size_bytes: Some(3_221_225_472),
             max_message_size_bytes: None,
-            controller_id: minter_canister_id,
+            controller_id: NNS_ROOT_PRINCIPAL,
             more_controller_ids: None,
-            cycles_for_archive_creation: None,
+            cycles_for_archive_creation: Some(100_000_000_000_000),
             max_transactions_per_response: None,
         },
-        max_memo_length: Some(100),
+        max_memo_length: Some(80),
         feature_flags: None,
         index_principal: None,
     })
