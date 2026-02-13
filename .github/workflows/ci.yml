@@ -11,6 +11,7 @@ on:
       - "README.md"
 env:
   CARGO_TERM_COLOR: always
+  SOLANA_CLI_VERSION: "2.1.15"
   RUSTFLAGS: "-Dwarnings"
 
 jobs:
