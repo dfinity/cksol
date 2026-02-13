@@ -20,7 +20,7 @@ mod tests;
 ///     signature: signature.into()
 /// });
 ///
-/// assert!(Icrc1Memo::from(memo).0.len() <= MAX_SERIALIZED_MEMO_BYTES)
+/// assert!(Icrc1Memo::from(memo).0.len() <= MAX_SERIALIZED_MEMO_BYTES as usize)
 /// ```
 ///
 /// [ICRC-1 memo]: icrc_ledger_types::icrc1::transfer::Memo
