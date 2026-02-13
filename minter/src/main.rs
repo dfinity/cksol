@@ -1,6 +1,6 @@
 use candid::Principal;
-use cksol_types_internal::MinterArg;
 use cksol_types::{Address, GetDepositAddressArgs};
+use cksol_types_internal::MinterArg;
 
 #[ic_cdk::init]
 fn init(args: MinterArg) {
