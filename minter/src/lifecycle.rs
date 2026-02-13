@@ -2,9 +2,17 @@ use cksol_types_internal::{InitArgs, UpgradeArgs};
 
 use crate::state::mutate_state;
 
-pub fn init(args: InitArgs) {
+pub fn init(
+    InitArgs {
+        sol_rpc_canister_id: _,
+        ledger_canister_id: _,
+        deposit_fee,
+        master_key_name,
+    }: InitArgs,
+) {
     mutate_state(|s| {
-        s.master_key_name = args.master_key_name;
+        s.master_key_name = master_key_name;
+        s.deposit_fee = deposit_fee;
     });
 }
 
