@@ -42,11 +42,11 @@ pub struct UpgradeArgs {
 #[derive(Clone, Eq, PartialEq, Debug, Default, CandidType, Deserialize, Serialize)]
 pub enum Ed25519KeyName {
     /// Only available on the local development environment started by `dfx`.
-    #[default]
     LocalDevelopment,
     /// Test key available on the ICP mainnet.
     MainnetTestKey1,
     /// Production key available on the ICP mainnet.
+    #[default]
     MainnetProdKey1,
 }
 

@@ -9,7 +9,7 @@ license.workspace = true
 
 [dependencies]
 candid = { workspace = true }
-cksol-types = { path = "../libs/types" }
+cksol-types = { path = "../libs/types", features = ["lifecycle"] }
 ic-canister-runtime = { workspace = true }
 ic-management-canister-types = { workspace = true }
 ic-pocket-canister-runtime = { workspace = true }

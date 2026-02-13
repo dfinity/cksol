@@ -57,7 +57,7 @@ impl Setup {
         env.install_canister(
             minter_canister_id,
             cksol_minter_wasm(),
-            Encode!().unwrap(),
+            Encode!(&cksol_minter_init_args()).unwrap(),
             Some(Self::DEFAULT_CONTROLLER),
         )
         .await;
@@ -121,4 +121,16 @@ fn cksol_minter_wasm() -> Vec<u8> {
         "cksol-minter",
         &[],
     )
+}
+
+fn cksol_minter_init_args() -> cksol_types::lifecycle::MinterArg {
+    use cksol_types::lifecycle;
+    lifecycle::MinterArg::Init(lifecycle::InitArgs {
+        // TODO DEFI-2643: Fix me!
+        sol_rpc_canister_id: Principal::anonymous(),
+        // TODO DEFI-2643: Fix me!
+        ledger_canister_id: Principal::anonymous(),
+        deposit_fee: 0,
+        master_key_name: lifecycle::Ed25519KeyName::MainnetProdKey1,
+    })
 }
