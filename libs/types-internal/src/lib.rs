@@ -52,7 +52,7 @@ pub struct UpgradeArgs {
 /// The ID of one of the ICP root keys.
 /// See the [tEdDSA documentation](https://internetcomputer.org/docs/building-apps/network-features/signatures/t-schnorr#signing-messages-and-transactions)
 /// for more details.
-#[derive(Clone, Eq, PartialEq, Debug, Default, CandidType, Deserialize, Serialize)]
+#[derive(Clone, Copy,  Eq, PartialEq, Debug, Default, CandidType, Deserialize, Serialize)]
 #[cfg_attr(feature = "minicbor", derive(minicbor::Encode, minicbor::Decode))]
 pub enum Ed25519KeyName {
     /// Only available on the local development environment started by `dfx`.
