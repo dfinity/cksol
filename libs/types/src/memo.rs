@@ -13,6 +13,7 @@ mod tests;
 /// use cksol_types::{Memo, MintMemo, MAX_SERIALIZED_MEMO_BYTES};
 /// use icrc_ledger_types::icrc1::transfer::Memo as Icrc1Memo;
 /// use solana_signature::Signature;
+/// use std::str::FromStr;
 ///
 /// let signature = Signature::from_str("5pf5fC9WRhdvE5y6eUkxons4btM3Tfi7koj4W1Q2kLztP8oZoLVn516XuuvG7cY61wLoyVAoakm1wz1z8V67rvh").unwrap();
 ///
