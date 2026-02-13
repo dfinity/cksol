@@ -58,7 +58,7 @@ async fn update_balance(args: UpdateBalanceArgs) -> Result<DepositStatus, Update
             Priority::Info,
             "Error parsing deposit transaction with signature {signature}: {e}"
         );
-        UpdateBalanceError::InvalidDepositTransaction(e)
+        UpdateBalanceError::InvalidDepositTransaction(e.to_string())
     })?;
 
     let deposit_fee = read_state(|state| state.deposit_fee);

@@ -3,6 +3,7 @@
 use candid::{CandidType, Deserialize, Nat, Principal};
 use icrc_ledger_types::{icrc::generic_value::Value, icrc1::account::Account};
 use serde::Serialize;
+use cksol_types::MAX_SERIALIZED_MEMO_BYTES;
 
 const LEDGER_TRANSFER_FEE: u64 = 100_000;
 const NNS_ROOT_PRINCIPAL: Principal = Principal::from_slice(&[0_u8]);
@@ -34,7 +35,7 @@ pub fn ledger_init_args(minter_canister_id: Principal) -> LedgerArgument {
             cycles_for_archive_creation: Some(100_000_000_000_000),
             max_transactions_per_response: None,
         },
-        max_memo_length: Some(80),
+        max_memo_length: Some(MAX_SERIALIZED_MEMO_BYTES),
         feature_flags: None,
         index_principal: None,
     })

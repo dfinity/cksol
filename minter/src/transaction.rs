@@ -5,6 +5,7 @@ use sol_rpc_client::SolRpcClient;
 use sol_rpc_types::{CommitmentLevel, GetTransactionEncoding, Lamport, MultiRpcResult};
 use solana_address::Address;
 use solana_transaction_status_client_types::EncodedConfirmedTransactionWithStatusMeta;
+use thiserror::Error;
 
 pub async fn try_get_transaction(
     runtime: impl Runtime,
@@ -38,12 +39,12 @@ pub async fn try_get_transaction(
 pub fn get_deposit_amount_to_address(
     transaction: EncodedConfirmedTransactionWithStatusMeta,
     deposit_address: Address,
-) -> Result<Lamport, String> {
+) -> Result<Lamport, GetDepositAmountError> {
     let message = transaction
         .transaction
         .transaction
         .decode()
-        .ok_or("Transaction decoding failed".to_string())?
+        .ok_or(GetDepositAmountError::TransactionDecodingFailed)?
         .message;
 
     // Search only static account keys, which guarantees the deposit address
@@ -53,29 +54,47 @@ pub fn get_deposit_amount_to_address(
     let deposit_address_index = account_keys
         .iter()
         .position(|address| address == &deposit_address)
-        .ok_or("Deposit address not part of transaction account keys".to_string())?;
+        .ok_or(GetDepositAmountError::DepositAddressNotInAccountKeys)?;
 
     // The deposit address must be writable (to receive funds) but must not
     // be a signer (it's controlled by the minter, not the depositor).
     if !message.is_maybe_writable(deposit_address_index, None) {
-        return Err("Deposit address must be writable".to_string());
+        return Err(GetDepositAmountError::DepositAddressNotWriteable);
     }
     if message.is_signer(deposit_address_index) {
-        return Err("Deposit address cannot be a signer".to_string());
+        return Err(GetDepositAmountError::DepositAddressSigner);
     }
 
     let meta = transaction
         .transaction
         .meta
-        .ok_or("'getTransaction' RPC response has no 'meta' field")?;
-    let pre_balance = *meta
-        .pre_balances
-        .get(deposit_address_index)
-        .ok_or("Deposit address index out of bounds for pre balances")?;
-    let post_balance = *meta
-        .post_balances
-        .get(deposit_address_index)
-        .ok_or("Deposit address index out of bounds for post balances")?;
+        .ok_or(GetDepositAmountError::NullMetaField)?;
+    let pre_balance = *meta.pre_balances.get(deposit_address_index).ok_or(
+        GetDepositAmountError::IndexOutOfBounds(
+            "Cannot get deposit address pre-balance".to_string(),
+        ),
+    )?;
+    let post_balance = *meta.post_balances.get(deposit_address_index).ok_or(
+        GetDepositAmountError::IndexOutOfBounds(
+            "Cannot get deposit address post-balance".to_string(),
+        ),
+    )?;
 
     Ok(post_balance.saturating_sub(pre_balance))
+}
+
+#[derive(Debug, Error)]
+pub enum GetDepositAmountError {
+    #[error("Deposit address not part of transaction account keys")]
+    DepositAddressNotInAccountKeys,
+    #[error("Deposit address must be writable")]
+    DepositAddressNotWriteable,
+    #[error("Deposit address cannot be a signer")]
+    DepositAddressSigner,
+    #[error("Index out of bounds: {0}")]
+    IndexOutOfBounds(String),
+    #[error("'getTransaction' RPC response has no 'meta' field")]
+    NullMetaField,
+    #[error("Transaction decoding failed")]
+    TransactionDecodingFailed,
 }

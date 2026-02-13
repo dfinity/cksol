@@ -20,3 +20,6 @@ serde = { workspace = true }
 sol_rpc_types = { workspace = true }
 solana-signature = { workspace = true }
 thiserror = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
