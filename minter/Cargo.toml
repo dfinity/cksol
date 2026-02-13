@@ -16,14 +16,13 @@ path = "src/main.rs"
 bs58 = { workspace = true }
 candid = { workspace = true }
 cksol-types = { path = "../libs/types" }
-cksol-types-internal = { path = "../libs/types-internal" }
+cksol-types-internal = { path = "../libs/types-internal", features = ["minicbor"] }
 ic-cdk = { workspace = true }
 ic-dummy-getrandom-for-wasm = { workspace = true }
 ic-ed25519 = { workspace = true }
 icrc-ledger-types = { workspace = true }
 icrc-cbor = {workspace = true}
 minicbor = { workspace = true, features = ["derive"] }
-cksol-types = { path = "../libs/types" }
 serde = { workspace = true }
 solana-address = { workspace = true }
 

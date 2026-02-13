@@ -1,4 +1,4 @@
-use crate::lifecycle::{InitArgs, UpgradeArgs};
+use cksol_types_internal::{InitArgs, UpgradeArgs};
 use minicbor::{Decode, Encode};
 
 #[derive(Eq, PartialEq, Debug, Decode, Encode)]

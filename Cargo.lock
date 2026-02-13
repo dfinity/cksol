@@ -459,7 +459,7 @@ dependencies = [
  "ic-ed25519",
  "icrc-cbor",
  "icrc-ledger-types",
- "minicbor 2.2.0",
+ "minicbor",
  "serde",
  "solana-address 2.1.0",
 ]
@@ -479,6 +479,8 @@ name = "cksol-types-internal"
 version = "0.1.0"
 dependencies = [
  "candid",
+ "icrc-cbor",
+ "minicbor",
  "serde",
  "sol_rpc_types",
 ]
@@ -1504,7 +1506,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "90569d2894d9536c5416943556ac6339df249f06611b3c41029196b39e0dd119"
 dependencies = [
  "candid",
- "minicbor 0.19.1",
+ "minicbor",
  "num-bigint",
  "num-traits",
 ]
@@ -1522,7 +1524,7 @@ dependencies = [
  "ic-stable-structures",
  "icrc-cbor",
  "itertools 0.12.1",
- "minicbor 0.19.1",
+ "minicbor",
  "num-bigint",
  "num-traits",
  "serde",
@@ -1908,16 +1910,7 @@ version = "0.19.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d7005aaf257a59ff4de471a9d5538ec868a21586534fff7f85dd97d4043a6139"
 dependencies = [
- "minicbor-derive 0.13.0",
-]
-
-[[package]]
-name = "minicbor"
-version = "2.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "22b95c464ffa47c47d1a101546b1b5170dac5ffe72c1aab5ff13a63f69c94d76"
-dependencies = [
- "minicbor-derive 0.19.2",
+ "minicbor-derive",
 ]
 
 [[package]]
@@ -1929,17 +1922,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 1.0.109",
-]
-
-[[package]]
-name = "minicbor-derive"
-version = "0.19.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6b3e1b176cfd1b03e2d3ceeaa430f34879f8955e10ab57b4c1e7393787651143"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.114",
 ]
 
 [[package]]
