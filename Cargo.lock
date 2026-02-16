@@ -432,15 +432,18 @@ name = "cksol-int-tests"
 version = "0.1.0"
 dependencies = [
  "candid",
+ "canlog",
  "cksol-types",
  "cksol-types-internal",
  "ic-canister-runtime",
+ "ic-http-types",
  "ic-management-canister-types",
  "ic-pocket-canister-runtime",
  "ic-test-utilities-load-wasm",
  "icrc-ledger-types",
  "pocket-ic",
  "serde",
+ "serde_json",
  "solana-address 2.1.0",
  "tokio",
 ]

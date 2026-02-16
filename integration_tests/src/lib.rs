@@ -1,6 +1,8 @@
 use candid::{CandidType, Encode, Principal, utils::ArgumentEncoder};
+use canlog::{Log, LogEntry};
 use cksol_types::{Address, GetDepositAddressArgs};
 use ic_canister_runtime::Runtime;
+use ic_http_types::{HttpRequest, HttpResponse};
 use ic_management_canister_types::{CanisterId, CanisterSettings};
 use ic_pocket_canister_runtime::PocketIcRuntime;
 use pocket_ic::{PocketIcBuilder, nonblocking::PocketIc};
@@ -112,6 +114,23 @@ impl CkSolMinter<'_> {
             .update_call(self.id, method, args, 0)
             .await
             .map_err(|e| format!("{:?}", e))
+    }
+
+    pub async fn retrieve_logs(&self, priority: &str) -> Vec<LogEntry<Priority>> {
+        let request = HttpRequest {
+            method: "POST".to_string(),
+            url: format!("/logs?priority={priority}"),
+            headers: vec![],
+            body: Default::default(),
+        };
+        let response: HttpResponse = self
+            .runtime
+            .query_call(self.id, "http_request", (request,))
+            .await
+            .unwrap();
+        serde_json::from_slice::<Log<Priority>>(&response.body)
+            .expect("failed to parse SOL RPC canister log")
+            .entries
     }
 }
 
