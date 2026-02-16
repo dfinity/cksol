@@ -87,19 +87,6 @@ pub enum TxFinalizedStatus {
         /// The fee that was payed by the user.
         effective_transaction_fee: Option<Nat>,
     },
-
-    /// Transaction failed and will be reimbursed.
-    PendingReimbursement(SolTransaction),
-
-    /// Transaction failed, user got reimbursed.
-    Reimbursed {
-        /// The Solana transaction hash.
-        transaction_hash: String,
-        /// The amount in Lamports that was returned to the user.
-        reimbursed_amount: Nat,
-        /// The ckSOL ledger block containing the reimbursment transaction.
-        reimbursed_in_block: Nat,
-    },
 }
 
 /// Retrieve the status of a withdrawal request.
