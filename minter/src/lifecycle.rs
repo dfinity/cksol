@@ -1,6 +1,6 @@
-use cksol_types_internal::log::Priority;
 use crate::state::mutate_state;
 use canlog::log;
+use cksol_types_internal::log::Priority;
 use cksol_types_internal::{InitArgs, UpgradeArgs};
 
 pub fn init(args: InitArgs) {
