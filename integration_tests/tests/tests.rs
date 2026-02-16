@@ -54,6 +54,8 @@ mod get_deposit_address_tests {
             get_deposit_address(&setup, Some(Setup::DEFAULT_CALLER), None).await,
             DEFAULT_CALLER_DEPOSIT_ADDRESS
         );
+
+        setup.drop().await;
     }
 
     #[tokio::test]
@@ -90,6 +92,8 @@ mod get_deposit_address_tests {
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(err.contains("the owner must be non-anonymous"));
+
+        setup.drop().await;
     }
 }
 

@@ -8,7 +8,7 @@ use ic_management_canister_types::{CanisterId, CanisterSettings};
 use ic_pocket_canister_runtime::PocketIcRuntime;
 use pocket_ic::{PocketIcBuilder, nonblocking::PocketIc};
 use serde::de::DeserializeOwned;
-use std::{env::var, path::PathBuf, sync::Arc};
+use std::{env::var, path::PathBuf};
 
 #[derive(Default)]
 pub struct SetupBuilder {
@@ -31,7 +31,7 @@ impl SetupBuilder {
 }
 
 pub struct Setup {
-    env: Arc<PocketIc>,
+    env: Option<PocketIc>,
     minter_canister_id: CanisterId,
     caller: Option<Principal>,
 }
@@ -40,7 +40,7 @@ impl Setup {
     pub const DEFAULT_CONTROLLER: Principal = Principal::from_slice(&[0x9d, 0xf7, 0x01]);
     pub const DEFAULT_CALLER: Principal = Principal::from_slice(&[0x9d, 0xf7, 0x02]);
 
-    pub async fn new(caller: Option<Principal>) -> Self {
+    async fn new(caller: Option<Principal>) -> Self {
         let env = PocketIcBuilder::new()
             .with_nns_subnet() //make_live requires NNS subnet.
             .with_fiduciary_subnet()
@@ -66,7 +66,7 @@ impl Setup {
         .await;
 
         Self {
-            env: Arc::new(env),
+            env: Some(env),
             minter_canister_id,
             caller,
         }
@@ -74,7 +74,7 @@ impl Setup {
 
     pub fn runtime(&self) -> PocketIcRuntime<'_> {
         PocketIcRuntime::new(
-            self.env.as_ref(),
+            self.env.as_ref().unwrap(),
             self.caller.unwrap_or(Self::DEFAULT_CALLER),
         )
     }
@@ -83,6 +83,21 @@ impl Setup {
         CkSolMinter {
             runtime: self.runtime(),
             id: self.minter_canister_id,
+        }
+    }
+
+    pub async fn drop(self) {
+        let mut setup = self;
+        if let Some(env) = setup.env.take() {
+            env.drop().await
+        }
+    }
+}
+
+impl Drop for Setup {
+    fn drop(&mut self) {
+        if self.env.is_some() {
+            panic!("Setup was not dropped properly. Call Setup::drop().await to clean up.");
         }
     }
 }
