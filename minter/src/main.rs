@@ -1,6 +1,7 @@
 use candid::Principal;
-use cksol_types::{Address, GetDepositAddressArgs};
+use cksol_types::{Address, GetDepositAddressArgs, MinterInfo};
 use cksol_types_internal::MinterArg;
+use ic_http_types::{HttpRequest, HttpResponse};
 
 #[ic_cdk::init]
 fn init(args: MinterArg) {
@@ -41,6 +42,81 @@ async fn get_deposit_address(args: GetDepositAddressArgs) -> Address {
     cksol_minter::address::get_deposit_address(owner, args.subaccount)
         .await
         .into()
+}
+
+#[ic_cdk::query]
+fn get_minter_info() -> MinterInfo {
+    cksol_minter::state::read_state(|s| MinterInfo {
+        deposit_fee: s.deposit_fee(),
+    })
+}
+
+#[ic_cdk::query(hidden = true)]
+fn http_request(request: HttpRequest) -> HttpResponse {
+    use canlog::{Log, Sort};
+    use cksol_types_internal::log::Priority;
+    use ic_http_types::HttpResponseBuilder;
+    use std::str::FromStr;
+
+    match request.path() {
+        "/metrics" => {
+            todo!("DEFI-2670: add metrics")
+        }
+        "/logs" => {
+            let max_skip_timestamp = match request.raw_query_param("time") {
+                Some(arg) => match u64::from_str(arg) {
+                    Ok(value) => value,
+                    Err(_) => {
+                        return HttpResponseBuilder::bad_request()
+                            .with_body_and_content_length("failed to parse the 'time' parameter")
+                            .build();
+                    }
+                },
+                None => 0,
+            };
+
+            let mut log: Log<Priority> = Default::default();
+
+            match request.raw_query_param("priority").map(Priority::from_str) {
+                Some(Ok(priority)) => match priority {
+                    Priority::Info => log.push_logs(Priority::Info),
+                    Priority::Debug => log.push_logs(Priority::Debug),
+                },
+                Some(Err(_)) | None => {
+                    log.push_logs(Priority::Info);
+                    log.push_logs(Priority::Debug);
+                }
+            }
+
+            log.entries
+                .retain(|entry| entry.timestamp >= max_skip_timestamp);
+
+            fn ordering_from_query_params(sort: Option<&str>, max_skip_timestamp: u64) -> Sort {
+                match sort.map(Sort::from_str) {
+                    Some(Ok(order)) => order,
+                    Some(Err(_)) | None => {
+                        if max_skip_timestamp == 0 {
+                            Sort::Ascending
+                        } else {
+                            Sort::Descending
+                        }
+                    }
+                }
+            }
+
+            log.sort_logs(ordering_from_query_params(
+                request.raw_query_param("sort"),
+                max_skip_timestamp,
+            ));
+
+            const MAX_BODY_SIZE: usize = 2_000_000;
+            HttpResponseBuilder::ok()
+                .header("Content-Type", "application/json; charset=utf-8")
+                .with_body_and_content_length(log.serialize_logs(MAX_BODY_SIZE))
+                .build()
+        }
+        _ => HttpResponseBuilder::not_found().build(),
+    }
 }
 
 fn main() {}

@@ -70,6 +70,10 @@ impl State {
         self.master_key_name
     }
 
+    pub fn deposit_fee(&self) -> u64 {
+        self.deposit_fee
+    }
+
     fn upgrade(
         &mut self,
         UpgradeArgs { deposit_fee }: UpgradeArgs,
@@ -97,7 +101,7 @@ impl TryFrom<InitArgs> for State {
             master_key_name,
         }: InitArgs,
     ) -> Result<Self, Self::Error> {
-        let mut canister_ids: BTreeSet<_> = [sol_rpc_canister_id, ledger_canister_id]
+        let canister_ids: BTreeSet<_> = [sol_rpc_canister_id, ledger_canister_id]
             .into_iter()
             .collect();
         if canister_ids.contains(&Principal::anonymous()) {

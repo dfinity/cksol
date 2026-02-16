@@ -1,12 +1,15 @@
 use candid::{CandidType, Encode, Principal, utils::ArgumentEncoder};
-use cksol_types::{Address, GetDepositAddressArgs};
+use canlog::{Log, LogEntry};
+use cksol_types::{Address, GetDepositAddressArgs, MinterInfo};
 use cksol_types_internal::MinterArg;
+use cksol_types_internal::log::Priority;
 use ic_canister_runtime::Runtime;
+use ic_http_types::{HttpRequest, HttpResponse};
 use ic_management_canister_types::{CanisterId, CanisterSettings};
 use ic_pocket_canister_runtime::PocketIcRuntime;
 use pocket_ic::{PocketIcBuilder, RejectResponse, nonblocking::PocketIc};
 use serde::de::DeserializeOwned;
-use std::{env::var, path::PathBuf, sync::Arc};
+use std::{env::var, path::PathBuf};
 
 #[derive(Default)]
 pub struct SetupBuilder {
@@ -29,7 +32,7 @@ impl SetupBuilder {
 }
 
 pub struct Setup {
-    env: Arc<PocketIc>,
+    env: Option<PocketIc>,
     minter_canister_id: CanisterId,
     caller: Option<Principal>,
 }
@@ -38,7 +41,7 @@ impl Setup {
     pub const DEFAULT_CONTROLLER: Principal = Principal::from_slice(&[0x9d, 0xf7, 0x01]);
     pub const DEFAULT_CALLER: Principal = Principal::from_slice(&[0x9d, 0xf7, 0x02]);
 
-    pub async fn new(caller: Option<Principal>) -> Self {
+    async fn new(caller: Option<Principal>) -> Self {
         let env = PocketIcBuilder::new()
             .with_nns_subnet() //make_live requires NNS subnet.
             .with_fiduciary_subnet()
@@ -64,7 +67,7 @@ impl Setup {
         .await;
 
         Self {
-            env: Arc::new(env),
+            env: Some(env),
             minter_canister_id,
             caller,
         }
@@ -72,7 +75,7 @@ impl Setup {
 
     pub fn runtime(&self) -> PocketIcRuntime<'_> {
         PocketIcRuntime::new(
-            self.env.as_ref(),
+            self.env.as_ref().unwrap(),
             self.caller.unwrap_or(Self::DEFAULT_CALLER),
         )
     }
@@ -89,6 +92,8 @@ impl Setup {
         upgrade_args: cksol_types_internal::UpgradeArgs,
     ) -> Result<(), RejectResponse> {
         self.env
+            .as_ref()
+            .unwrap()
             .upgrade_canister(
                 self.minter_canister_id,
                 cksol_minter_wasm(),
@@ -96,6 +101,21 @@ impl Setup {
                 Some(Self::DEFAULT_CONTROLLER),
             )
             .await
+    }
+
+    pub async fn drop(self) {
+        let mut setup = self;
+        if let Some(env) = setup.env.take() {
+            env.drop().await
+        }
+    }
+}
+
+impl Drop for Setup {
+    fn drop(&mut self) {
+        if self.env.is_some() {
+            panic!("Setup was not dropped properly. Call Setup::drop().await to clean up.");
+        }
     }
 }
 
@@ -127,6 +147,30 @@ impl CkSolMinter<'_> {
             .update_call(self.id, method, args, 0)
             .await
             .map_err(|e| format!("{:?}", e))
+    }
+
+    pub async fn get_minter_info(&self) -> MinterInfo {
+        self.runtime
+            .query_call(self.id, "get_minter_info", ())
+            .await
+            .expect("get_minter_info failed")
+    }
+
+    pub async fn retrieve_logs(&self, priority: &Priority) -> Vec<LogEntry<Priority>> {
+        let request = HttpRequest {
+            method: "POST".to_string(),
+            url: format!("/logs?priority={priority}"),
+            headers: vec![],
+            body: Default::default(),
+        };
+        let response: HttpResponse = self
+            .runtime
+            .query_call(self.id, "http_request", (request,))
+            .await
+            .unwrap();
+        serde_json::from_slice::<Log<Priority>>(&response.body)
+            .expect("failed to parse SOL RPC canister log")
+            .entries
     }
 }
 

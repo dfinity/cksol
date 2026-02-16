@@ -432,15 +432,18 @@ name = "cksol-int-tests"
 version = "0.1.0"
 dependencies = [
  "candid",
+ "canlog",
  "cksol-types",
  "cksol-types-internal",
  "ic-canister-runtime",
+ "ic-http-types",
  "ic-management-canister-types",
  "ic-pocket-canister-runtime",
  "ic-test-utilities-load-wasm",
  "icrc-ledger-types",
  "pocket-ic",
  "serde",
+ "serde_json",
  "solana-address 2.1.0",
  "tokio",
 ]
@@ -452,12 +455,14 @@ dependencies = [
  "bs58",
  "candid",
  "candid_parser",
+ "canlog",
  "cksol-types",
  "cksol-types-internal",
  "hex",
  "ic-cdk",
  "ic-dummy-getrandom-for-wasm",
  "ic-ed25519",
+ "ic-http-types",
  "ic-stable-structures 0.7.2",
  "icrc-cbor",
  "icrc-ledger-types",
@@ -481,6 +486,7 @@ name = "cksol-types-internal"
 version = "0.1.0"
 dependencies = [
  "candid",
+ "canlog",
  "icrc-cbor",
  "minicbor",
  "serde",
@@ -1413,6 +1419,17 @@ dependencies = [
  "serde",
  "strum 0.26.3",
  "strum_macros 0.26.4",
+]
+
+[[package]]
+name = "ic-http-types"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "207166ed1477b107f56c3d98f6c9ea771ed84be407567bc7099db907d98490a3"
+dependencies = [
+ "candid",
+ "serde",
+ "serde_bytes",
 ]
 
 [[package]]

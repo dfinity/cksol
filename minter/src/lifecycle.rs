@@ -1,13 +1,15 @@
-use cksol_types_internal::{InitArgs, UpgradeArgs};
-
+use crate::state::audit::{process_event, replay_events};
 use crate::state::event::EventType;
 use crate::state::{State, init_once_state, mutate_state};
-use crate::state::audit::{process_event, replay_events};
 use crate::storage::{record_event, total_event_count, with_event_iter};
+use canlog::log;
+use cksol_types_internal::{InitArgs, UpgradeArgs, log::Priority};
 
 pub fn init(init_args: InitArgs) {
-    // TODO DEFI-2665: logging
-    // log!(INFO, "[init]: initialized minter with arg: {:?}", init_arg);
+    log!(
+        Priority::Info,
+        "[init]: initialized minter with arg: {init_args:?}"
+    );
     init_once_state(State::try_from(init_args.clone()).expect("ERROR: invalid init args"));
     record_event(EventType::Init(init_args));
 }
@@ -25,10 +27,9 @@ pub fn post_upgrade(upgrade_args: Option<UpgradeArgs>) {
     let event_count = total_event_count();
     let instructions_consumed = end - start;
 
-    // TODO DEFI-2665: logging
-    // log!(
-    //     INFO,
-    //     "[upgrade]: replaying {event_count} events consumed {instructions_consumed} instructions ({} instructions per event on average)",
-    //     instructions_consumed / event_count
-    // );
+    log!(
+        Priority::Info,
+        "[upgrade]: replaying {event_count} events consumed {instructions_consumed} instructions ({} instructions per event on average)",
+        instructions_consumed / event_count
+    );
 }
