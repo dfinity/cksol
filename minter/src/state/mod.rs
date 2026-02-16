@@ -1,5 +1,5 @@
 use candid::Principal;
-use cksol_types_internal::{Ed25519KeyName, InitArgs};
+use cksol_types_internal::{Ed25519KeyName, InitArgs, UpgradeArgs};
 use ic_ed25519::PublicKey;
 use std::cell::RefCell;
 use std::collections::BTreeSet;
@@ -15,8 +15,13 @@ pub fn read_state<R>(f: impl FnOnce(&State) -> R) -> R {
     STATE.with(|s| f(s.borrow().as_ref().expect("BUG: state is not initialized")))
 }
 
-pub fn init_state(state: State) {
-    STATE.with(|s| *s.borrow_mut() = Some(state));
+pub fn init_once_state(state: State) {
+    STATE.with(|s| {
+        if s.borrow().is_some() {
+            panic!("BUG: state is already initialized");
+        }
+        *s.borrow_mut() = Some(state);
+    });
 }
 
 pub fn mutate_state<F, R>(f: F) -> R
@@ -63,6 +68,16 @@ impl State {
 
     pub fn master_key_name(&self) -> Ed25519KeyName {
         self.master_key_name
+    }
+
+    fn upgrade(
+        &mut self,
+        UpgradeArgs { deposit_fee }: UpgradeArgs,
+    ) -> Result<(), InvalidStateError> {
+        if let Some(deposit_fee) = deposit_fee {
+            self.deposit_fee = deposit_fee;
+        }
+        Ok(())
     }
 }
 
