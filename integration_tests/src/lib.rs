@@ -186,9 +186,9 @@ fn cksol_minter_init_args() -> cksol_types_internal::MinterArg {
     use cksol_types_internal::{Ed25519KeyName, InitArgs, MinterArg};
     MinterArg::Init(InitArgs {
         // TODO DEFI-2643: Fix me!
-        sol_rpc_canister_id: Principal::anonymous(),
+        sol_rpc_canister_id: Principal::from_slice(&[42_u8]),
         // TODO DEFI-2643: Fix me!
-        ledger_canister_id: Principal::anonymous(),
+        ledger_canister_id: Principal::from_slice(&[43_u8]),
         deposit_fee: 0,
         master_key_name: Ed25519KeyName::MainnetProdKey1,
     })

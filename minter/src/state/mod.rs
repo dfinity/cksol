@@ -1,3 +1,6 @@
+#[cfg(test)]
+mod tests;
+
 use candid::Principal;
 use cksol_types_internal::{Ed25519KeyName, InitArgs, UpgradeArgs};
 use ic_ed25519::PublicKey;
