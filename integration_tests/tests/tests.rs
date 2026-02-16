@@ -100,12 +100,13 @@ mod get_deposit_address_tests {
 mod lifecycle {
     use cksol_int_tests::SetupBuilder;
     use cksol_types::MinterInfo;
+    use cksol_types_internal::log::Priority;
 
     #[tokio::test]
     async fn should_get_logs() {
         let setup = SetupBuilder::new().build().await;
 
-        let logs = setup.minter().retrieve_logs("INFO").await;
+        let logs = setup.minter().retrieve_logs(&Priority::Info).await;
 
         assert!(logs[0].message.contains("[init]"));
 

@@ -139,7 +139,7 @@ impl CkSolMinter<'_> {
             .expect("get_minter_info failed")
     }
 
-    pub async fn retrieve_logs(&self, priority: &str) -> Vec<LogEntry<Priority>> {
+    pub async fn retrieve_logs(&self, priority: &Priority) -> Vec<LogEntry<Priority>> {
         let request = HttpRequest {
             method: "POST".to_string(),
             url: format!("/logs?priority={priority}"),

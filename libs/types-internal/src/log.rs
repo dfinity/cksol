@@ -2,6 +2,8 @@
 
 use canlog::{GetLogFilter, LogFilter, LogPriorityLevels};
 use serde::{Deserialize, Serialize};
+use std::fmt;
+use std::fmt::Formatter;
 use std::str::FromStr;
 
 /// The priority level of a log entry.
@@ -29,6 +31,15 @@ impl FromStr for Priority {
             "info" => Ok(Priority::Info),
             "debug" => Ok(Priority::Debug),
             _ => Err("could not recognize priority".to_string()),
+        }
+    }
+}
+
+impl fmt::Display for Priority {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Priority::Info => write!(f, "INFO"),
+            Priority::Debug => write!(f, "DEBUG"),
         }
     }
 }
