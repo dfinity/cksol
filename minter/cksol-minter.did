@@ -66,7 +66,7 @@ type RetrieveSolError = variant {
     // The payload contains the minimal withdrawal amount in Lamports.
     AmountTooLow : Lamport;
     // The minter failed to parse the destination address.
-    MalformedAddress : text;
+    MalformedAddress : Address;
     // The ckSOL balance of the withdrawal account is too low.
     InsufficientFunds : record { balance : nat64 };
     // The minter is overloaded, retry the request.
