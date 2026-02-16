@@ -19,6 +19,7 @@ ic-canister-runtime = "0.1.2"
 ic-cdk = "0.19.0"
 ic-dummy-getrandom-for-wasm = "0.1.0"
 ic-ed25519 = "0.6.0"
+ic-http-types = "0.1.0"
 ic-management-canister-types = "0.5.0"
 ic-pocket-canister-runtime = "0.3.0"
 ic-test-utilities-load-wasm = { git = "https://github.com/dfinity/ic", tag = "release-2026-01-29_23-28-base" }
