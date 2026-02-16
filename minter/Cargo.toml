@@ -17,11 +17,13 @@ bs58 = { workspace = true }
 candid = { workspace = true }
 cksol-types = { path = "../libs/types" }
 cksol-types-internal = { path = "../libs/types-internal", features = ["minicbor"] }
+hex = { workspace = true }
 ic-cdk = { workspace = true }
 ic-dummy-getrandom-for-wasm = { workspace = true }
 ic-ed25519 = { workspace = true }
+ic-stable-structures = { workspace = true }
 icrc-ledger-types = { workspace = true }
-icrc-cbor = {workspace = true}
+icrc-cbor = { workspace = true }
 minicbor = { workspace = true, features = ["derive"] }
 serde = { workspace = true }
 solana-address = { workspace = true }

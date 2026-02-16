@@ -8,11 +8,15 @@ pub mod audit;
 pub mod event;
 
 thread_local! {
-    pub static STATE: RefCell<Option<State>> = RefCell::default();
+    static STATE: RefCell<Option<State>> = RefCell::default();
 }
 
 pub fn read_state<R>(f: impl FnOnce(&State) -> R) -> R {
     STATE.with(|s| f(s.borrow().as_ref().expect("BUG: state is not initialized")))
+}
+
+pub fn init_state(state: State) {
+    STATE.with(|s| *s.borrow_mut() = Some(state));
 }
 
 pub fn mutate_state<F, R>(f: F) -> R
@@ -62,6 +66,7 @@ impl State {
     }
 }
 
+#[derive(Debug)]
 pub enum InvalidStateError {
     InvalidCanisterId(String),
 }
