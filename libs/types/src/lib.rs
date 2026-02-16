@@ -19,3 +19,10 @@ pub struct GetDepositAddressArgs {
     /// The subaccount to deposit funds to.
     pub subaccount: Option<Subaccount>,
 }
+
+/// Information about the ckSOL minter canister.
+#[derive(Clone, Debug, Eq, PartialEq, CandidType, Deserialize, Serialize)]
+pub struct MinterInfo {
+    /// Fee deducted from each deposit (SOL -> ckSOL).
+    pub deposit_fee: u64,
+}

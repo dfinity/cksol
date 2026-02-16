@@ -1,5 +1,5 @@
 use candid::Principal;
-use cksol_types::{Address, GetDepositAddressArgs};
+use cksol_types::{Address, GetDepositAddressArgs, MinterInfo};
 use cksol_types_internal::MinterArg;
 
 #[ic_cdk::init]
@@ -41,6 +41,13 @@ async fn get_deposit_address(args: GetDepositAddressArgs) -> Address {
     cksol_minter::address::get_deposit_address(owner, args.subaccount)
         .await
         .into()
+}
+
+#[ic_cdk::query]
+fn get_minter_info() -> MinterInfo {
+    cksol_minter::state::read_state(|s| MinterInfo {
+        deposit_fee: s.deposit_fee,
+    })
 }
 
 fn main() {}
