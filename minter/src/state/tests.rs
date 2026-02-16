@@ -3,7 +3,7 @@ use proptest::prelude::*;
 use std::borrow::Cow;
 
 use super::event::Event;
-use crate::test_fixtures::arb_event;
+use crate::test_fixtures::arb::arb_event;
 
 proptest! {
     #[test]
