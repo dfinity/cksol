@@ -6,6 +6,9 @@
 // [account]: https://solana.com/docs/core/accounts
 type Address = text;
 
+// Base unit of SOL, i.e., 1 SOL = 10^9 Lamports
+type Lamport = nat64;
+
 // The ID of one of the ICP root keys.
 type Ed25519KeyName = variant {
     MainnetTestKey1;
@@ -32,6 +35,11 @@ type InitArgs = record {
     deposit_fee : nat64;
 };
 
+// Information about the ckSOL minter canister.
+type MinterInfo = record {
+    deposit_fee : nat64;
+};
+
 // The ckSOL minter service arguments.
 type MinterArg = variant {
     Upgrade : UpgradeArgs;
@@ -40,7 +48,7 @@ type MinterArg = variant {
 
 // The upgrade args for the ckSOL minter canister.
 type UpgradeArgs = record {
-    deposit_fee : opt nat64;
+    deposit_fee : opt Lamport;
 };
 
 service : (MinterArg) -> {
@@ -49,4 +57,6 @@ service : (MinterArg) -> {
     // If the owner is not set, it defaults to the caller's principal.
     // The resolved owner must be a non-anonymous principal.
     get_deposit_address: (GetDepositAddressArgs) -> (Address);
+    // Returns information about the ckSOL minter canister.
+    get_minter_info: () -> (MinterInfo) query;
 };

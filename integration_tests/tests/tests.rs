@@ -44,6 +44,8 @@ mod get_deposit_address_tests {
             "2VP5Kmg7cZm8GA599LeA3j9M3QcpSCdwfdqNdFskyA2u"
         );
 
+        setup.drop().await;
+
         // Caller is anonymous, but we specify the owner explicitly
         let setup = SetupBuilder::new()
             .with_caller(Principal::anonymous())
@@ -54,6 +56,8 @@ mod get_deposit_address_tests {
             get_deposit_address(&setup, Some(Setup::DEFAULT_CALLER), None).await,
             DEFAULT_CALLER_DEPOSIT_ADDRESS
         );
+
+        setup.drop().await;
     }
 
     #[tokio::test]
@@ -73,6 +77,8 @@ mod get_deposit_address_tests {
         let err = result.unwrap_err();
         assert!(err.contains("the owner must be non-anonymous"));
 
+        setup.drop().await;
+
         // Anonymous caller and owner not specified
         let setup = SetupBuilder::new()
             .with_caller(Principal::anonymous())
@@ -90,5 +96,35 @@ mod get_deposit_address_tests {
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(err.contains("the owner must be non-anonymous"));
+
+        setup.drop().await;
+    }
+}
+
+mod lifecycle {
+    use cksol_int_tests::SetupBuilder;
+    use cksol_types::MinterInfo;
+    use cksol_types_internal::log::Priority;
+
+    #[tokio::test]
+    async fn should_get_logs() {
+        let setup = SetupBuilder::new().build().await;
+
+        let logs = setup.minter().retrieve_logs(&Priority::Info).await;
+
+        assert!(logs[0].message.contains("[init]"));
+
+        setup.drop().await;
+    }
+
+    #[tokio::test]
+    async fn should_get_minter_info() {
+        let setup = SetupBuilder::new().build().await;
+
+        let minter_info = setup.minter().get_minter_info().await;
+
+        assert_eq!(minter_info, MinterInfo { deposit_fee: 0 });
+
+        setup.drop().await;
     }
 }

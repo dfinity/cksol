@@ -9,14 +9,17 @@ license.workspace = true
 
 [dependencies]
 candid = { workspace = true }
+canlog = { workspace = true }
 cksol-types = { path = "../libs/types" }
-cksol-types-internal = { path = "../libs/types-internal" }
+cksol-types-internal = { path = "../libs/types-internal", features = ["log"] }
 ic-canister-runtime = { workspace = true }
+ic-http-types = { workspace = true }
 ic-management-canister-types = { workspace = true }
 ic-pocket-canister-runtime = { workspace = true }
 ic-test-utilities-load-wasm = { workspace = true }
 pocket-ic = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 solana-address = { workspace = true }
 
 [dev-dependencies]

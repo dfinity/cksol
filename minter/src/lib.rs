@@ -1,3 +1,3 @@
 pub mod address;
 pub mod lifecycle;
-mod state;
+pub mod state;

@@ -1,15 +1,20 @@
+use crate::state::mutate_state;
+use canlog::log;
+use cksol_types_internal::log::Priority;
 use cksol_types_internal::{InitArgs, UpgradeArgs};
 
-use crate::state::mutate_state;
-
-pub fn init(
-    InitArgs {
+pub fn init(args: InitArgs) {
+    log!(
+        Priority::Info,
+        "[init]: initialized ckSOL minter with args: {:?}",
+        args
+    );
+    let InitArgs {
         sol_rpc_canister_id: _,
         ledger_canister_id: _,
         deposit_fee,
         master_key_name,
-    }: InitArgs,
-) {
+    } = args;
     mutate_state(|s| {
         s.master_key_name = master_key_name;
         s.deposit_fee = deposit_fee;
