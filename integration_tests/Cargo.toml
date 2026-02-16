@@ -23,5 +23,6 @@ serde_json = { workspace = true }
 solana-address = { workspace = true }
 
 [dev-dependencies]
+assert_matches = { workspace = true }
 icrc-ledger-types = { workspace = true }
 tokio = { workspace = true }

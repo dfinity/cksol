@@ -1,6 +1,9 @@
 use candid::{CandidType, Encode, Principal, utils::ArgumentEncoder};
 use canlog::{Log, LogEntry};
-use cksol_types::{Address, GetDepositAddressArgs, MinterInfo};
+use cksol_types::{
+    Address, GetDepositAddressArgs, MinterInfo, RetrieveSolArgs, RetrieveSolError, RetrieveSolOk,
+    RetrieveSolStatus,
+};
 use cksol_types_internal::log::Priority;
 use ic_canister_runtime::Runtime;
 use ic_http_types::{HttpRequest, HttpResponse};
@@ -119,6 +122,21 @@ impl CkSolMinter<'_> {
         args: GetDepositAddressArgs,
     ) -> Result<Address, String> {
         self.try_update_call("get_deposit_address", (args,)).await
+    }
+
+    pub async fn retrieve_sol(
+        &self,
+        args: RetrieveSolArgs,
+    ) -> Result<RetrieveSolOk, RetrieveSolError> {
+        self.try_update_call("retrieve_sol", (args,))
+            .await
+            .expect("retrieve_sol failed")
+    }
+
+    pub async fn retrieve_sol_status(&self, block_index: u64) -> RetrieveSolStatus {
+        self.try_update_call("retrieve_sol_status", (block_index,))
+            .await
+            .expect("retrieve_sol_status failed")
     }
 
     async fn try_update_call<In, Out>(&self, method: &str, args: In) -> Result<Out, String>
