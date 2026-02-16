@@ -98,7 +98,7 @@ mod get_deposit_address_tests {
 mod retrieve_sol_tests {
     use super::*;
     use assert_matches::assert_matches;
-    use cksol_types::{RetrieveSolArgs, RetrieveSolError};
+    use cksol_types::{RetrieveSolArgs, RetrieveSolError, RetrieveSolStatus};
 
     #[tokio::test]
     async fn should_validate_solana_address() {
@@ -123,5 +123,13 @@ mod retrieve_sol_tests {
         let result = setup.minter().retrieve_sol(args).await;
         let err = result.unwrap_err();
         assert_matches!(err, RetrieveSolError::InsufficientFunds { balance: 0 });
+    }
+
+    #[tokio::test]
+    async fn should_return_not_found_status() {
+        let setup = SetupBuilder::new().build().await;
+
+        let status = setup.minter().retrieve_sol_status(u64::MAX).await;
+        assert_eq!(status, RetrieveSolStatus::NotFound);
     }
 }

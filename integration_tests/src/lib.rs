@@ -1,6 +1,7 @@
 use candid::{CandidType, Encode, Principal, utils::ArgumentEncoder};
 use cksol_types::{
     Address, GetDepositAddressArgs, RetrieveSolArgs, RetrieveSolError, RetrieveSolOk,
+    RetrieveSolStatus,
 };
 use ic_canister_runtime::Runtime;
 use ic_management_canister_types::{CanisterId, CanisterSettings};
@@ -112,6 +113,12 @@ impl CkSolMinter<'_> {
         self.try_update_call("retrieve_sol", (args,))
             .await
             .expect("retrieve_sol failed")
+    }
+
+    pub async fn retrieve_sol_status(&self, block_index: u64) -> RetrieveSolStatus {
+        self.try_update_call("retrieve_sol_status", (block_index,))
+            .await
+            .expect("retrieve_sol_status failed")
     }
 
     async fn try_update_call<In, Out>(&self, method: &str, args: In) -> Result<Out, String>

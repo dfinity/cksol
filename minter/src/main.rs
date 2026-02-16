@@ -3,6 +3,7 @@ use std::str::FromStr;
 use candid::Principal;
 use cksol_types::{
     Address, GetDepositAddressArgs, RetrieveSolArgs, RetrieveSolError, RetrieveSolOk,
+    RetrieveSolStatus,
 };
 use cksol_types_internal::MinterArg;
 
@@ -52,6 +53,11 @@ async fn retrieve_sol(args: RetrieveSolArgs) -> Result<RetrieveSolOk, RetrieveSo
     let _solana_address = Address::from_str(&args.address)
         .map_err(|e| return RetrieveSolError::MalformedAddress(e.to_string()))?;
     Err(RetrieveSolError::InsufficientFunds { balance: 0 })
+}
+
+#[ic_cdk::update]
+async fn retrieve_sol_status(_block_index: u64) -> RetrieveSolStatus {
+    RetrieveSolStatus::NotFound
 }
 
 fn main() {}
