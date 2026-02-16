@@ -452,12 +452,14 @@ dependencies = [
  "bs58",
  "candid",
  "candid_parser",
+ "canlog",
  "cksol-types",
  "cksol-types-internal",
  "ic-cdk",
  "ic-dummy-getrandom-for-wasm",
  "ic-ed25519",
  "icrc-ledger-types",
+ "serde",
  "solana-address 2.1.0",
 ]
 
