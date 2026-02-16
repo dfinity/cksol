@@ -35,6 +35,11 @@ type InitArgs = record {
     deposit_fee : nat64;
 };
 
+// Information about the ckSOL minter canister.
+type MinterInfo = record {
+    deposit_fee : nat64;
+};
+
 // The ckSOL minter service arguments.
 type MinterArg = variant {
     Upgrade : UpgradeArgs;
@@ -43,7 +48,7 @@ type MinterArg = variant {
 
 // The upgrade args for the ckSOL minter canister.
 type UpgradeArgs = record {
-    deposit_fee : opt nat64;
+    deposit_fee : opt Lamport;
 };
 
 type RetrieveSolArgs = record {
@@ -121,4 +126,7 @@ service : (MinterArg) -> {
 
     // Retrieve the status of a Solana withdrawal request.
     retrieve_sol_status : (nat64) -> (RetrieveSolStatus);
+    
+    // Returns information about the ckSOL minter canister.
+    get_minter_info: () -> (MinterInfo) query;
 };
