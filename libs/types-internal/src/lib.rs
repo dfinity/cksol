@@ -41,7 +41,7 @@ pub struct InitArgs {
 }
 
 /// The upgrade args for the ckSOL minter canister.
-#[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize)]
+#[derive(Clone, Default, Eq, PartialEq, Debug, CandidType, Deserialize)]
 #[cfg_attr(feature = "minicbor", derive(minicbor::Encode, minicbor::Decode))]
 pub struct UpgradeArgs {
     /// The new deposit fee in lamports.

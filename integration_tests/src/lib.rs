@@ -1,9 +1,10 @@
 use candid::{CandidType, Encode, Principal, utils::ArgumentEncoder};
 use cksol_types::{Address, GetDepositAddressArgs};
+use cksol_types_internal::MinterArg;
 use ic_canister_runtime::Runtime;
 use ic_management_canister_types::{CanisterId, CanisterSettings};
 use ic_pocket_canister_runtime::PocketIcRuntime;
-use pocket_ic::{PocketIcBuilder, nonblocking::PocketIc};
+use pocket_ic::{PocketIcBuilder, RejectResponse, nonblocking::PocketIc};
 use serde::de::DeserializeOwned;
 use std::{env::var, path::PathBuf, sync::Arc};
 
@@ -81,6 +82,20 @@ impl Setup {
             runtime: self.runtime(),
             id: self.minter_canister_id,
         }
+    }
+
+    pub async fn upgrade_minter(
+        &self,
+        upgrade_args: cksol_types_internal::UpgradeArgs,
+    ) -> Result<(), RejectResponse> {
+        self.env
+            .upgrade_canister(
+                self.minter_canister_id,
+                cksol_minter_wasm(),
+                Encode!(&MinterArg::Upgrade(upgrade_args)).unwrap(),
+                Some(Self::DEFAULT_CONTROLLER),
+            )
+            .await
     }
 }
 

@@ -92,3 +92,7 @@ mod get_deposit_address_tests {
         assert!(err.contains("the owner must be non-anonymous"));
     }
 }
+
+mod lifecycle {
+    
+}
