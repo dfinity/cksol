@@ -40,7 +40,7 @@ impl Default for State {
             master_public_key: None,
             master_key_name: Ed25519KeyName::default(),
             sol_rpc_canister_id: SOL_RPC_CANISTER,
-            // TODO DEFI-XXXX: Replace this with the prod ledger canister ID
+            // TODO DEFI-2645: Replace this with the prod ledger canister ID
             ledger_canister_id: Principal::anonymous(),
             deposit_fee: DEFAULT_DEPOSIT_FEE,
         }
