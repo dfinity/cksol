@@ -36,7 +36,7 @@ pub struct RetrieveSolArgs {
 /// The successful result of calling the `retrieve_sol` endpoint.
 #[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize)]
 pub struct RetrieveSolOk {
-    /// The index of the burn block on the ckSOL ledger
+    /// The index of the burn block on the ckSOL ledger.
     pub block_index: u64,
 }
 
@@ -87,8 +87,10 @@ pub enum TxFinalizedStatus {
         /// The fee that was payed by the user.
         effective_transaction_fee: Option<Nat>,
     },
+
     /// Transaction failed and will be reimbursed.
     PendingReimbursement(SolTransaction),
+
     /// Transaction failed, user got reimbursed.
     Reimbursed {
         /// The Solana transaction hash.
@@ -105,13 +107,17 @@ pub enum TxFinalizedStatus {
 pub enum RetrieveSolStatus {
     /// Withdrawal request is not found.
     NotFound,
+
     /// Withdrawal request is waiting to be processed.
     Pending,
+
     /// Transaction fees were estimated and a Solana transaction was created.
     /// Transaction is not signed yet.    
     TxCreated,
+
     /// Solana transaction was signed and is sent to the network.
     TxSent(SolTransaction),
+
     /// Solana transaction is finalized.
     TxFinalized(TxFinalizedStatus),
 }
