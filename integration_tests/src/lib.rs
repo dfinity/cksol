@@ -1,5 +1,7 @@
 use candid::{CandidType, Encode, Principal, utils::ArgumentEncoder};
-use cksol_types::{Address, GetDepositAddressArgs};
+use cksol_types::{
+    Address, GetDepositAddressArgs, RetrieveSolArgs, RetrieveSolError, RetrieveSolOk,
+};
 use ic_canister_runtime::Runtime;
 use ic_management_canister_types::{CanisterId, CanisterSettings};
 use ic_pocket_canister_runtime::PocketIcRuntime;
@@ -101,6 +103,15 @@ impl CkSolMinter<'_> {
         args: GetDepositAddressArgs,
     ) -> Result<Address, String> {
         self.try_update_call("get_deposit_address", (args,)).await
+    }
+
+    pub async fn retrieve_sol(
+        &self,
+        args: RetrieveSolArgs,
+    ) -> Result<RetrieveSolOk, RetrieveSolError> {
+        self.try_update_call("retrieve_sol", (args,))
+            .await
+            .expect("retrieve_sol failed")
     }
 
     async fn try_update_call<In, Out>(&self, method: &str, args: In) -> Result<Out, String>

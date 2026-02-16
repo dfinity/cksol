@@ -1,5 +1,9 @@
+use std::str::FromStr;
+
 use candid::Principal;
-use cksol_types::{Address, GetDepositAddressArgs};
+use cksol_types::{
+    Address, GetDepositAddressArgs, RetrieveSolArgs, RetrieveSolError, RetrieveSolOk,
+};
 use cksol_types_internal::MinterArg;
 
 #[ic_cdk::init]
@@ -41,6 +45,13 @@ async fn get_deposit_address(args: GetDepositAddressArgs) -> Address {
     cksol_minter::address::get_deposit_address(owner, args.subaccount)
         .await
         .into()
+}
+
+#[ic_cdk::update]
+async fn retrieve_sol(args: RetrieveSolArgs) -> Result<RetrieveSolOk, RetrieveSolError> {
+    let _solana_address = Address::from_str(&args.address)
+        .map_err(|e| return RetrieveSolError::MalformedAddress(e.to_string()))?;
+    Err(RetrieveSolError::InsufficientFunds { balance: 0 })
 }
 
 fn main() {}

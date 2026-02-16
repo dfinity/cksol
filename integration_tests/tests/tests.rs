@@ -1,6 +1,8 @@
+use cksol_int_tests::{Setup, SetupBuilder};
+
 mod get_deposit_address_tests {
+    use super::*;
     use candid::Principal;
-    use cksol_int_tests::{Setup, SetupBuilder};
     use cksol_types::GetDepositAddressArgs;
     use icrc_ledger_types::icrc1::account::Subaccount;
 
@@ -90,5 +92,36 @@ mod get_deposit_address_tests {
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(err.contains("the owner must be non-anonymous"));
+    }
+}
+
+mod retrieve_sol_tests {
+    use super::*;
+    use assert_matches::assert_matches;
+    use cksol_types::{RetrieveSolArgs, RetrieveSolError};
+
+    #[tokio::test]
+    async fn should_validate_solana_address() {
+        let setup = SetupBuilder::new().build().await;
+
+        let args = RetrieveSolArgs {
+            from_subaccount: None,
+            amount: u64::MAX,
+            address: "InvalidAddress".to_string(),
+        };
+
+        let result = setup.minter().retrieve_sol(args).await;
+        let err = result.unwrap_err();
+        assert_matches!(err, RetrieveSolError::MalformedAddress(_));
+
+        let args = RetrieveSolArgs {
+            from_subaccount: None,
+            amount: u64::MAX,
+            address: "E4MpwNnMWs2XtW5gVrxZvyS7fMq31QD5HvbxmwP45Tz3".to_string(),
+        };
+
+        let result = setup.minter().retrieve_sol(args).await;
+        let err = result.unwrap_err();
+        assert_matches!(err, RetrieveSolError::InsufficientFunds { balance: 0 });
     }
 }
