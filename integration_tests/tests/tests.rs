@@ -44,6 +44,8 @@ mod get_deposit_address_tests {
             "2VP5Kmg7cZm8GA599LeA3j9M3QcpSCdwfdqNdFskyA2u"
         );
 
+        setup.drop().await;
+
         // Caller is anonymous, but we specify the owner explicitly
         let setup = SetupBuilder::new()
             .with_caller(Principal::anonymous())
@@ -74,6 +76,8 @@ mod get_deposit_address_tests {
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(err.contains("the owner must be non-anonymous"));
+
+        setup.drop().await;
 
         // Anonymous caller and owner not specified
         let setup = SetupBuilder::new()
