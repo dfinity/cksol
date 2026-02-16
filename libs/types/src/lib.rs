@@ -6,6 +6,7 @@
 use candid::{CandidType, Principal};
 use icrc_ledger_types::icrc1::account::Subaccount;
 use serde::{Deserialize, Serialize};
+use sol_rpc_types::Lamport;
 pub use sol_rpc_types::Pubkey as Address;
 
 /// Arguments for a request to the `getDepositAddress` ckSOL minter endpoint.
@@ -24,5 +25,5 @@ pub struct GetDepositAddressArgs {
 #[derive(Clone, Debug, Eq, PartialEq, CandidType, Deserialize, Serialize)]
 pub struct MinterInfo {
     /// Fee deducted from each deposit (SOL -> ckSOL).
-    pub deposit_fee: u64,
+    pub deposit_fee: Lamport,
 }
