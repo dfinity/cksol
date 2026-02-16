@@ -482,6 +482,7 @@ name = "cksol-types-internal"
 version = "0.1.0"
 dependencies = [
  "candid",
+ "canlog",
  "serde",
  "sol_rpc_types",
 ]

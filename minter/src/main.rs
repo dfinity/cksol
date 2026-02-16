@@ -54,7 +54,7 @@ fn get_minter_info() -> MinterInfo {
 #[ic_cdk::query(hidden = true)]
 fn http_request(request: HttpRequest) -> HttpResponse {
     use canlog::{Log, Sort};
-    use cksol_minter::logs::Priority;
+    use cksol_types_internal::log::Priority;
     use ic_http_types::HttpResponseBuilder;
     use std::str::FromStr;
 
