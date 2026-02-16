@@ -51,7 +51,7 @@ async fn get_deposit_address(args: GetDepositAddressArgs) -> Address {
 #[ic_cdk::update]
 async fn retrieve_sol(args: RetrieveSolArgs) -> Result<RetrieveSolOk, RetrieveSolError> {
     let _solana_address = Address::from_str(&args.address)
-        .map_err(|e| return RetrieveSolError::MalformedAddress(e.to_string()))?;
+        .map_err(|e| RetrieveSolError::MalformedAddress(e.to_string()))?;
     Err(RetrieveSolError::InsufficientFunds { balance: 0 })
 }
 
