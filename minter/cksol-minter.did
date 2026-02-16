@@ -47,7 +47,7 @@ type RetrieveSolArgs = record {
     // The subaccount to burn ckSOL from.
     from_subaccount : opt blob;
     // The amount of ckSOL in Lamports that the client wants to withdraw.
-    amount : nat64;
+    amount : Lamport;
     // The address to which the ckSOL minter should deposit Solana tokens.
     address : Address;
 };
