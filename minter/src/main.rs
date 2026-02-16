@@ -1,14 +1,9 @@
 use candid::Principal;
-use canlog::log;
-use cksol_minter::{
-    address, ledger, logs::Priority, state::read_state, transaction,
-    transaction::try_get_transaction,
-};
+use cksol_minter::address;
 use cksol_types::{
     Address, DepositStatus, GetDepositAddressArgs, UpdateBalanceArgs, UpdateBalanceError,
 };
 use cksol_types_internal::MinterArg;
-use ic_canister_runtime::IcRuntime;
 use icrc_ledger_types::icrc1::account::{Account, Subaccount};
 
 #[ic_cdk::init]
@@ -46,36 +41,10 @@ async fn get_deposit_address(args: GetDepositAddressArgs) -> Address {
 
 #[ic_cdk::update]
 async fn update_balance(args: UpdateBalanceArgs) -> Result<DepositStatus, UpdateBalanceError> {
-    let account = assert_non_anonymous_account(args.owner, args.subaccount);
-    let deposit_address = address::get_deposit_address(account).await;
-    let signature = args.signature;
-
-    let transaction = try_get_transaction(IcRuntime::new(), signature.clone().into())
-        .await
-        .map_err(|e| {
-            log!(
-                Priority::Info,
-                "Error fetching transaction with signature {signature}: {e}"
-            );
-            e
-        })?;
-
-    let deposit_amount = transaction::get_deposit_amount_to_address(transaction, deposit_address)
-        .map_err(|e| {
-        log!(
-            Priority::Info,
-            "Error parsing deposit transaction with signature {signature}: {e}"
-        );
-        UpdateBalanceError::InvalidDepositTransaction(e.to_string())
-    })?;
-
-    let deposit_fee = read_state(|state| state.deposit_fee);
-    if deposit_amount < deposit_fee {
-        return Ok(DepositStatus::ValueTooSmall(signature));
-    }
-    let mint_amount = deposit_amount - deposit_fee;
-
-    ledger::mint(IcRuntime::new(), account, mint_amount, signature).await
+    let _account = assert_non_anonymous_account(args.owner, args.subaccount);
+    Err(UpdateBalanceError::TemporarilyUnavailable(
+        "Not yet implemented!".to_string(),
+    ))
 }
 
 fn assert_non_anonymous_account(
@@ -95,7 +64,7 @@ fn main() {}
 
 #[test]
 fn check_candid_interface_compatibility() {
-    use candid_parser::utils::{CandidSource, service_equal};
+    use candid_parser::utils::{service_equal, CandidSource};
 
     candid::export_service!();
 

@@ -13,7 +13,6 @@ pub enum Priority {
 }
 
 impl GetLogFilter for Priority {
-    // TODO DEFI-2643: Fetch log filter from state
     fn get_log_filter() -> LogFilter {
         LogFilter::ShowAll
     }

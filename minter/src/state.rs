@@ -34,15 +34,14 @@ pub struct State {
 
 impl Default for State {
     fn default() -> Self {
-        // 10 million lamports = 0.01 SOL
-        const DEFAULT_DEPOSIT_FEE: Lamport = 10_000_000;
+        // TODO DEFI-2645: Replace with mainnet ledger canister ID
+        const DEFAULT_LEDGER_CANISTER_ID: Principal = Principal::anonymous();
         Self {
             master_public_key: None,
             master_key_name: Ed25519KeyName::default(),
             sol_rpc_canister_id: SOL_RPC_CANISTER,
-            // TODO DEFI-2645: Replace this with the prod ledger canister ID
-            ledger_canister_id: Principal::anonymous(),
-            deposit_fee: DEFAULT_DEPOSIT_FEE,
+            ledger_canister_id: DEFAULT_LEDGER_CANISTER_ID,
+            deposit_fee: 0,
         }
     }
 }
