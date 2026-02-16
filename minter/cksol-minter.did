@@ -64,7 +64,7 @@ type RetrieveSolError = variant {
     AlreadyProcessing;
     // The withdrawal amount is too low.
     // The payload contains the minimal withdrawal amount in Lamports.
-    AmountTooLow : nat64;
+    AmountTooLow : Lamport;
     // The minter failed to parse the destination address.
     MalformedAddress : text;
     // The ckSOL balance of the withdrawal account is too low.
