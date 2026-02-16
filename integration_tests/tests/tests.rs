@@ -92,3 +92,30 @@ mod get_deposit_address_tests {
         assert!(err.contains("the owner must be non-anonymous"));
     }
 }
+
+mod lifecycle {
+    use cksol_int_tests::SetupBuilder;
+    use cksol_types::MinterInfo;
+
+    #[tokio::test]
+    async fn should_get_logs() {
+        let setup = SetupBuilder::new().build().await;
+
+        let logs = setup.minter().retrieve_logs("INFO").await;
+
+        assert!(logs[0].message.contains("[init]"));
+
+        setup.drop().await;
+    }
+
+    #[tokio::test]
+    async fn should_get_minter_info() {
+        let setup = SetupBuilder::new().build().await;
+
+        let minter_info = setup.minter().get_minter_info().await;
+
+        assert_eq!(minter_info, MinterInfo { deposit_fee: 0 });
+
+        setup.drop().await;
+    }
+}

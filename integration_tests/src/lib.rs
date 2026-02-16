@@ -1,6 +1,7 @@
 use candid::{CandidType, Encode, Principal, utils::ArgumentEncoder};
 use canlog::{Log, LogEntry};
-use cksol_types::{Address, GetDepositAddressArgs};
+use cksol_types::{Address, GetDepositAddressArgs, MinterInfo};
+use cksol_types_internal::log::Priority;
 use ic_canister_runtime::Runtime;
 use ic_http_types::{HttpRequest, HttpResponse};
 use ic_management_canister_types::{CanisterId, CanisterSettings};
@@ -114,6 +115,13 @@ impl CkSolMinter<'_> {
             .update_call(self.id, method, args, 0)
             .await
             .map_err(|e| format!("{:?}", e))
+    }
+
+    pub async fn get_minter_info(&self) -> MinterInfo {
+        self.runtime
+            .query_call(self.id, "get_minter_info", ())
+            .await
+            .expect("get_minter_info failed")
     }
 
     pub async fn retrieve_logs(&self, priority: &str) -> Vec<LogEntry<Priority>> {
