@@ -1,6 +1,8 @@
+use cksol_int_tests::{Setup, SetupBuilder};
+
 mod get_deposit_address_tests {
+    use super::*;
     use candid::Principal;
-    use cksol_int_tests::{Setup, SetupBuilder};
     use cksol_types::GetDepositAddressArgs;
     use icrc_ledger_types::icrc1::account::Subaccount;
 
@@ -140,6 +142,49 @@ mod lifecycle {
                 deposit_fee: new_deposit_fee
             }
         );
+
+        setup.drop().await;
+    }
+}
+
+mod retrieve_sol_tests {
+    use super::*;
+    use assert_matches::assert_matches;
+    use cksol_types::{RetrieveSolArgs, RetrieveSolError, RetrieveSolStatus};
+
+    #[tokio::test]
+    async fn should_validate_solana_address() {
+        let setup = SetupBuilder::new().build().await;
+
+        let args = RetrieveSolArgs {
+            from_subaccount: None,
+            amount: u64::MAX,
+            address: "InvalidAddress".to_string(),
+        };
+
+        let result = setup.minter().retrieve_sol(args).await;
+        let err = result.unwrap_err();
+        assert_matches!(err, RetrieveSolError::MalformedAddress(_));
+
+        let args = RetrieveSolArgs {
+            from_subaccount: None,
+            amount: u64::MAX,
+            address: "E4MpwNnMWs2XtW5gVrxZvyS7fMq31QD5HvbxmwP45Tz3".to_string(),
+        };
+
+        let result = setup.minter().retrieve_sol(args).await;
+        let err = result.unwrap_err();
+        assert_matches!(err, RetrieveSolError::InsufficientFunds { balance: 0 });
+
+        setup.drop().await;
+    }
+
+    #[tokio::test]
+    async fn should_return_not_found_status() {
+        let setup = SetupBuilder::new().build().await;
+
+        let status = setup.minter().retrieve_sol_status(u64::MAX).await;
+        assert_eq!(status, RetrieveSolStatus::NotFound);
 
         setup.drop().await;
     }
