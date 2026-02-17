@@ -13,6 +13,8 @@ use pocket_ic::{PocketIcBuilder, nonblocking::PocketIc};
 use serde::de::DeserializeOwned;
 use std::{env::var, path::PathBuf};
 
+pub mod fixtures;
+
 #[derive(Default)]
 pub struct SetupBuilder {
     caller: Option<Principal>,

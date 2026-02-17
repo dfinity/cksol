@@ -57,12 +57,12 @@ type UpdateBalanceError = variant {
     // The Solana transaction with the given signature is not a valid
     // deposit to the owner's deposit address.
     InvalidDepositTransaction : text;
+    // The deposit amount does not cover the deposit fee.
+    ValueTooSmall;
 };
 
 // The outcome of processing a Solana deposit transaction.
 type DepositStatus = variant {
-    // The deposit amount does not cover the deposit fee.
-    ValueTooSmall: Signature;
     // The transaction is a valid deposit, but the minter failed to mint ckSOL on the ledger.
     // The caller should retry the `update_balance` call.
     Checked : Signature;

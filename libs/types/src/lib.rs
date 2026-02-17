@@ -13,10 +13,7 @@ use thiserror::Error;
 /// The outcome of processing a Solana deposit transaction.
 #[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize, Serialize)]
 pub enum DepositStatus {
-    /// The deposit amount does not cover the deposit fee.
-    ValueTooSmall(Signature),
     /// The transaction is a valid deposit, but the minter failed to mint ckSOL on the ledger.
-    /// The caller should retry the `update_balance` call.
     Checked(Signature),
     /// The minter accepted the deposit and minted ckSOL tokens on the ledger.
     Minted {
@@ -63,13 +60,17 @@ pub enum UpdateBalanceError {
     TemporarilyUnavailable(String),
     /// No matching transaction was found for the given signature.
     ///
-    /// This can also happen if the transaction is not yet finalized.
+    /// This can also happen if the transaction is not yet finalized, in which case trying
+    /// this call again later may result in a successful mint.
     #[error("No transaction found for the given signature")]
     TransactionNotFound,
     /// The Solana transaction with the given signature is not a valid
     /// deposit to the owner's deposit address.
     #[error("The transaction is not a valid deposit: {0}")]
     InvalidDepositTransaction(String),
+    /// The deposit amount does not cover the deposit fee.
+    #[error("The deposit amount does not cover the deposit fee")]
+    ValueTooSmall,
 }
 
 /// Arguments for a request to the `retrieve_sol` ckSOL minter endpoint.

@@ -1,16 +1,13 @@
 use assert_matches::assert_matches;
 use candid::Principal;
+use cksol_int_tests::fixtures::{default_update_balance_args, some_signature};
 use cksol_int_tests::{Setup, SetupBuilder};
 use cksol_types::{
     GetDepositAddressArgs, MinterInfo, RetrieveSolArgs, RetrieveSolError, RetrieveSolStatus,
-    Signature, UpdateBalanceArgs, UpdateBalanceError,
+    UpdateBalanceArgs, UpdateBalanceError,
 };
 use cksol_types_internal::log::Priority;
 use icrc_ledger_types::icrc1::account::Subaccount;
-use std::str::FromStr;
-
-const SOME_SIGNATURE: &str =
-    "4basP1hZDqgt1BYwh29mURz4zr8BcJgya2Y4AjmzXB5vtViLG6hZRxF9iypkxkfCJXhJTFW7jU1PyG8rHXvYd4Zp";
 
 mod get_deposit_address_tests {
     use super::*;
@@ -148,11 +145,7 @@ mod update_balance_tests {
 
         let result = setup
             .minter()
-            .update_balance(UpdateBalanceArgs {
-                owner: None,
-                subaccount: None,
-                signature: some_signature(),
-            })
+            .update_balance(default_update_balance_args())
             .await;
 
         assert_matches!(result, Err(UpdateBalanceError::TemporarilyUnavailable(s)) => {
@@ -201,8 +194,4 @@ mod anonymous_caller_tests {
 
         setup.drop().await;
     }
-}
-
-fn some_signature() -> Signature {
-    Signature::from_str(SOME_SIGNATURE).unwrap()
 }
