@@ -45,10 +45,8 @@ async fn get_deposit_address(args: GetDepositAddressArgs) -> Address {
 
 #[ic_cdk::update]
 async fn update_balance(args: UpdateBalanceArgs) -> Result<DepositStatus, UpdateBalanceError> {
-    let _account = assert_non_anonymous_account(args.owner, args.subaccount);
-    Err(UpdateBalanceError::TemporarilyUnavailable(
-        "Not yet implemented!".to_string(),
-    ))
+    let account = assert_non_anonymous_account(args.owner, args.subaccount);
+    cksol_minter::update_balance::update_balance(account, args.signature.into()).await
 }
 
 fn assert_non_anonymous_account(

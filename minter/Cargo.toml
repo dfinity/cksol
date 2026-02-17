@@ -26,6 +26,7 @@ serde = { workspace = true }
 sol_rpc_client = { workspace = true }
 sol_rpc_types = { workspace = true }
 solana-address = { workspace = true }
+solana-signature = { workspace = true }
 
 [dev-dependencies]
 candid_parser = { workspace = true }
