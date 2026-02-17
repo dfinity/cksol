@@ -14,12 +14,13 @@ path = "src/main.rs"
 
 [dependencies]
 candid = { workspace = true }
-canlog = { workspace = true }
+canlog = { workspace = true, features = ["derive"] }
 cksol-types = { path = "../libs/types" }
-cksol-types-internal = { path = "../libs/types-internal" }
+cksol-types-internal = { path = "../libs/types-internal", features = ["log"] }
 ic-cdk = { workspace = true }
 ic-dummy-getrandom-for-wasm = { workspace = true }
 ic-ed25519 = { workspace = true }
+ic-http-types = { workspace = true }
 icrc-ledger-types = { workspace = true }
 serde = { workspace = true }
 sol_rpc_client = { workspace = true }

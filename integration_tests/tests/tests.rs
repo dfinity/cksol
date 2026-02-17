@@ -1,7 +1,11 @@
 use assert_matches::assert_matches;
 use candid::Principal;
 use cksol_int_tests::{Setup, SetupBuilder};
-use cksol_types::{GetDepositAddressArgs, Signature, UpdateBalanceArgs, UpdateBalanceError};
+use cksol_types::{
+    GetDepositAddressArgs, MinterInfo, RetrieveSolArgs, RetrieveSolError, RetrieveSolStatus,
+    Signature, UpdateBalanceArgs, UpdateBalanceError,
+};
+use cksol_types_internal::log::Priority;
 use icrc_ledger_types::icrc1::account::Subaccount;
 use std::str::FromStr;
 
@@ -51,6 +55,8 @@ mod get_deposit_address_tests {
             "2VP5Kmg7cZm8GA599LeA3j9M3QcpSCdwfdqNdFskyA2u"
         );
 
+        setup.drop().await;
+
         // Caller is anonymous, but we specify the owner explicitly
         let setup = SetupBuilder::new()
             .with_caller(Principal::anonymous())
@@ -61,42 +67,75 @@ mod get_deposit_address_tests {
             get_deposit_address(&setup, Some(Setup::DEFAULT_CALLER), None).await,
             DEFAULT_CALLER_DEPOSIT_ADDRESS
         );
+
+        setup.drop().await;
+    }
+}
+
+mod lifecycle {
+    use super::*;
+
+    #[tokio::test]
+    async fn should_get_logs() {
+        let setup = SetupBuilder::new().build().await;
+
+        let logs = setup.minter().retrieve_logs(&Priority::Info).await;
+
+        assert!(logs[0].message.contains("[init]"));
+
+        setup.drop().await;
     }
 
     #[tokio::test]
-    async fn should_fail_for_anonymous_owner() {
+    async fn should_get_minter_info() {
         let setup = SetupBuilder::new().build().await;
 
-        // Caller is default caller, but the owner is specified explicitly to anonymous
-        let result = setup
-            .minter()
-            .try_get_deposit_address(GetDepositAddressArgs {
-                owner: Some(Principal::anonymous()),
-                subaccount: None,
-            })
-            .await;
+        let minter_info = setup.minter().get_minter_info().await;
 
-        assert!(result.is_err());
+        assert_eq!(minter_info, MinterInfo { deposit_fee: 0 });
+
+        setup.drop().await;
+    }
+}
+
+mod retrieve_sol_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn should_validate_solana_address() {
+        let setup = SetupBuilder::new().build().await;
+
+        let args = RetrieveSolArgs {
+            from_subaccount: None,
+            amount: u64::MAX,
+            address: "InvalidAddress".to_string(),
+        };
+
+        let result = setup.minter().retrieve_sol(args).await;
         let err = result.unwrap_err();
-        assert!(err.contains("the owner must be non-anonymous"));
+        assert_matches!(err, RetrieveSolError::MalformedAddress(_));
 
-        // Anonymous caller and owner not specified
-        let setup = SetupBuilder::new()
-            .with_caller(Principal::anonymous())
-            .build()
-            .await;
+        let args = RetrieveSolArgs {
+            from_subaccount: None,
+            amount: u64::MAX,
+            address: "E4MpwNnMWs2XtW5gVrxZvyS7fMq31QD5HvbxmwP45Tz3".to_string(),
+        };
 
-        let result = setup
-            .minter()
-            .try_get_deposit_address(GetDepositAddressArgs {
-                owner: None,
-                subaccount: None,
-            })
-            .await;
-
-        assert!(result.is_err());
+        let result = setup.minter().retrieve_sol(args).await;
         let err = result.unwrap_err();
-        assert!(err.contains("the owner must be non-anonymous"));
+        assert_matches!(err, RetrieveSolError::InsufficientFunds { balance: 0 });
+
+        setup.drop().await;
+    }
+
+    #[tokio::test]
+    async fn should_return_not_found_status() {
+        let setup = SetupBuilder::new().build().await;
+
+        let status = setup.minter().retrieve_sol_status(u64::MAX).await;
+        assert_eq!(status, RetrieveSolStatus::NotFound);
+
+        setup.drop().await;
     }
 }
 
@@ -118,7 +157,9 @@ mod update_balance_tests {
 
         assert_matches!(result, Err(UpdateBalanceError::TemporarilyUnavailable(s)) => {
             assert!(s.contains("Not yet implemented!"))
-        })
+        });
+
+        setup.drop().await;
     }
 }
 
@@ -157,6 +198,8 @@ mod anonymous_caller_tests {
                 .await;
             assert_matches!(result, Err(s) => s.contains("the owner must be non-anonymous"));
         }
+
+        setup.drop().await;
     }
 }
 

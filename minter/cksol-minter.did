@@ -88,6 +88,11 @@ type InitArgs = record {
     deposit_fee : nat64;
 };
 
+// Information about the ckSOL minter canister.
+type MinterInfo = record {
+    deposit_fee : nat64;
+};
+
 // The ckSOL minter service arguments.
 type MinterArg = variant {
     Upgrade : UpgradeArgs;
@@ -98,7 +103,70 @@ type MinterArg = variant {
 type UpgradeArgs = record {
     sol_rpc_canister_id : opt principal;
     ledger_canister_id : opt principal;
-    deposit_fee : opt nat64;
+    deposit_fee : opt Lamport;
+};
+
+type RetrieveSolArgs = record {
+    // The subaccount to burn ckSOL from.
+    from_subaccount : opt blob;
+    // The amount of ckSOL in Lamports that the client wants to withdraw.
+    amount : Lamport;
+    // The address to which the ckSOL minter should deposit Solana tokens.
+    address : Address;
+};
+
+type RetrieveSolOk = record {
+    // Returns the burn transaction index corresponding to the withdrawal.
+    // You can use this index to query the withdrawal status.
+    block_index : nat64
+};
+
+type RetrieveSolError = variant {
+    // The minter is already processing another retrieval request for the same
+    // principal.
+    AlreadyProcessing;
+    // The withdrawal amount is too low.
+    // The payload contains the minimal withdrawal amount in Lamports.
+    AmountTooLow : Lamport;
+    // The minter failed to parse the destination address.
+    MalformedAddress : Address;
+    // The ckSOL balance of the withdrawal account is too low.
+    InsufficientFunds : record { balance : nat64 };
+    // The minter is overloaded, retry the request.
+    // The payload contains a human-readable message explaining what caused the unavailability.
+    TemporarilyUnavailable : text;
+    // A generic error reserved for future extensions.
+    GenericError : record { error_message : text; error_code : nat64 };
+};
+
+type SolTransaction = record { transaction_hash : text };
+
+// Status of a finalized transaction.
+type TxFinalizedStatus = variant {
+    // Transaction was successful.
+    Success : record {
+        transaction_hash : text;
+        effective_transaction_fee: opt nat;
+    };
+};
+
+// Retrieve the status of a withdrawal request.
+type RetrieveSolStatus = variant {
+    // Withdrawal request is not found.
+    NotFound;
+
+    // Withdrawal request is waiting to be processed.
+    Pending;
+
+    // Transaction fees were estimated and a Solana transaction was created.
+    // Transaction is not signed yet.
+    TxCreated;
+
+    // Solana transaction was signed and is sent to the network.
+    TxSent : SolTransaction;
+
+    // Solana transaction is finalized.
+    TxFinalized : TxFinalizedStatus;
 };
 
 service : (MinterArg) -> {
@@ -111,4 +179,13 @@ service : (MinterArg) -> {
     // Update the ckSOL balance of the given owner with the funds
     // deposited in a specific Solana transaction.
     update_balance: (UpdateBalanceArgs) -> (UpdateBalanceResult);
+
+    // Submits a request to convert ckSOL to Solana.
+    retrieve_sol : (RetrieveSolArgs) -> (variant { Ok : RetrieveSolOk; Err : RetrieveSolError });
+
+    // Retrieve the status of a Solana withdrawal request.
+    retrieve_sol_status : (nat64) -> (RetrieveSolStatus);
+
+    // Returns information about the ckSOL minter canister.
+    get_minter_info: () -> (MinterInfo) query;
 };

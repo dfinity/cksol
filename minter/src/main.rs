@@ -1,9 +1,13 @@
+use std::str::FromStr;
+
 use candid::Principal;
 use cksol_minter::address;
 use cksol_types::{
-    Address, DepositStatus, GetDepositAddressArgs, UpdateBalanceArgs, UpdateBalanceError,
+    Address, DepositStatus, GetDepositAddressArgs, MinterInfo, RetrieveSolArgs, RetrieveSolError,
+    RetrieveSolOk, RetrieveSolStatus, UpdateBalanceArgs, UpdateBalanceError,
 };
 use cksol_types_internal::MinterArg;
+use ic_http_types::{HttpRequest, HttpResponse};
 use icrc_ledger_types::icrc1::account::{Account, Subaccount};
 
 #[ic_cdk::init]
@@ -60,11 +64,98 @@ fn assert_non_anonymous_account(
     Account { owner, subaccount }
 }
 
+#[ic_cdk::update]
+async fn retrieve_sol(args: RetrieveSolArgs) -> Result<RetrieveSolOk, RetrieveSolError> {
+    let _solana_address = Address::from_str(&args.address)
+        .map_err(|e| RetrieveSolError::MalformedAddress(e.to_string()))?;
+    Err(RetrieveSolError::InsufficientFunds { balance: 0 })
+}
+
+#[ic_cdk::update]
+async fn retrieve_sol_status(_block_index: u64) -> RetrieveSolStatus {
+    RetrieveSolStatus::NotFound
+}
+
+#[ic_cdk::query]
+fn get_minter_info() -> MinterInfo {
+    cksol_minter::state::read_state(|s| MinterInfo {
+        deposit_fee: s.deposit_fee,
+    })
+}
+
+#[ic_cdk::query(hidden = true)]
+fn http_request(request: HttpRequest) -> HttpResponse {
+    use canlog::{Log, Sort};
+    use cksol_types_internal::log::Priority;
+    use ic_http_types::HttpResponseBuilder;
+    use std::str::FromStr;
+
+    match request.path() {
+        "/metrics" => {
+            todo!("DEFI-2670: add metrics")
+        }
+        "/logs" => {
+            let max_skip_timestamp = match request.raw_query_param("time") {
+                Some(arg) => match u64::from_str(arg) {
+                    Ok(value) => value,
+                    Err(_) => {
+                        return HttpResponseBuilder::bad_request()
+                            .with_body_and_content_length("failed to parse the 'time' parameter")
+                            .build();
+                    }
+                },
+                None => 0,
+            };
+
+            let mut log: Log<Priority> = Default::default();
+
+            match request.raw_query_param("priority").map(Priority::from_str) {
+                Some(Ok(priority)) => match priority {
+                    Priority::Info => log.push_logs(Priority::Info),
+                    Priority::Debug => log.push_logs(Priority::Debug),
+                },
+                Some(Err(_)) | None => {
+                    log.push_logs(Priority::Info);
+                    log.push_logs(Priority::Debug);
+                }
+            }
+
+            log.entries
+                .retain(|entry| entry.timestamp >= max_skip_timestamp);
+
+            fn ordering_from_query_params(sort: Option<&str>, max_skip_timestamp: u64) -> Sort {
+                match sort.map(Sort::from_str) {
+                    Some(Ok(order)) => order,
+                    Some(Err(_)) | None => {
+                        if max_skip_timestamp == 0 {
+                            Sort::Ascending
+                        } else {
+                            Sort::Descending
+                        }
+                    }
+                }
+            }
+
+            log.sort_logs(ordering_from_query_params(
+                request.raw_query_param("sort"),
+                max_skip_timestamp,
+            ));
+
+            const MAX_BODY_SIZE: usize = 2_000_000;
+            HttpResponseBuilder::ok()
+                .header("Content-Type", "application/json; charset=utf-8")
+                .with_body_and_content_length(log.serialize_logs(MAX_BODY_SIZE))
+                .build()
+        }
+        _ => HttpResponseBuilder::not_found().build(),
+    }
+}
+
 fn main() {}
 
 #[test]
 fn check_candid_interface_compatibility() {
-    use candid_parser::utils::{service_equal, CandidSource};
+    use candid_parser::utils::{CandidSource, service_equal};
 
     candid::export_service!();
 
