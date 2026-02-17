@@ -38,6 +38,20 @@ where
     })
 }
 
+/// State of the minter.
+///
+/// # Design
+///
+/// The state is transient and not preserved across canister upgrades.
+/// Relevant state changes are recorded in an append-only event log
+/// (see [`crate::state::audit::process_event`]),
+/// and replaying this log upon canister upgrade will re-create an equivalent state.
+///
+/// That means in particular:
+/// * Methods mutating the state should generally not be accessible outside the state crate,
+///   to ensure that the state is only mutating through events.
+/// * Having public methods mutating the state may be acceptable for transient data (e.g. guards)
+///   that do not need to be preserved across canister upgrades.
 #[derive(Debug, PartialEq, Eq)]
 pub struct State {
     minter_public_key: Option<SchnorrPublicKey>,
