@@ -14,7 +14,7 @@ use thiserror::Error;
 #[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize, Serialize)]
 pub enum DepositStatus {
     /// The transaction is a valid deposit, but the minter failed to mint ckSOL on the ledger.
-    Checked(Signature),
+    Processing(Signature),
     /// The minter accepted the deposit and minted ckSOL tokens on the ledger.
     Minted {
         /// The MINT transaction index on the ledger.

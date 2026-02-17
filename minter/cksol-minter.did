@@ -65,7 +65,7 @@ type UpdateBalanceError = variant {
 type DepositStatus = variant {
     // The transaction is a valid deposit, but the minter failed to mint ckSOL on the ledger.
     // The caller should retry the `update_balance` call.
-    Checked : Signature;
+    Processing : Signature;
     // The minter accepted the deposit and minted ckSOL tokens on the ledger.
     Minted : record {
         // The MINT transaction index on the ledger.
