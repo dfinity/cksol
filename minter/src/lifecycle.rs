@@ -19,7 +19,10 @@ pub fn post_upgrade(upgrade_args: Option<UpgradeArgs>) {
 
     init_once_state(with_event_iter(|events| replay_events(events)));
     if let Some(args) = upgrade_args {
-        log!(Priority::Info, "[upgrade]: upgrading minter with arg: {args:?}");
+        log!(
+            Priority::Info,
+            "[upgrade]: upgrading minter with arg: {args:?}"
+        );
         mutate_state(|s| process_event(s, EventType::Upgrade(args)))
     }
 
