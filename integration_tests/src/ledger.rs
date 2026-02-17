@@ -6,7 +6,7 @@ use icrc_ledger_types::{icrc::generic_value::Value, icrc1::account::Account};
 use serde::Serialize;
 
 const LEDGER_TRANSFER_FEE: u64 = 50;
-const NNS_ROOT_PRINCIPAL: Principal = Principal::from_slice(&[0_u8]);
+const NNS_ROOT_PRINCIPAL: Principal = Principal::from_slice(&[0_u8, 0, 0, 0, 0, 0, 0, 3, 1, 1]);
 const FEE_COLLECTOR_SUBACCOUNT: [u8; 32] = [
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x0f,
     0xee,
