@@ -10,7 +10,7 @@ license.workspace = true
 
 [features]
 log = ["dep:canlog"]
-minicbor = ["dep:icrc-cbor", "dep:minicbor"]
+event = ["dep:icrc-cbor", "dep:minicbor"]
 
 [dependencies]
 candid = { workspace = true }
