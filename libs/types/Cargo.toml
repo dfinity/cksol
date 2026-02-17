@@ -16,5 +16,3 @@ icrc-ledger-types = { workspace = true }
 serde = { workspace = true }
 sol_rpc_types = { workspace = true }
 thiserror = { workspace = true }
-
-[dev-dependencies]

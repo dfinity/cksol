@@ -10,8 +10,8 @@ on:
     paths-ignore:
       - "README.md"
 env:
+  POCKET_IC_SERVER_VERSION: "12.0.0"
   CARGO_TERM_COLOR: always
-  SOLANA_CLI_VERSION: "2.1.15"
   RUSTFLAGS: "-Dwarnings"
 
 jobs:
@@ -83,17 +83,7 @@ jobs:
       - name: 'Install PocketIC server'
         uses: dfinity/pocketic@main
         with:
-          pocket-ic-server-version: "12.0.0"
-
-      - name: 'Install Solana CLI'
-        run: |
-          sh -c "$(curl -sSfL https://release.anza.xyz/v${SOLANA_CLI_VERSION}/install)"
-          echo "/home/runner/.local/share/solana/install/active_release/bin" >> $GITHUB_PATH
-        shell: bash
-
-      - name: 'Start Solana test validator'
-        run: |
-          solana-test-validator &
+          pocket-ic-server-version: ${{ env.POCKET_IC_SERVER_VERSION }}
 
       - name: 'Cargo test'
         run: cargo test --package cksol-int-tests -- --test-threads 2 --nocapture
