@@ -1,8 +1,8 @@
 use candid::{CandidType, Encode, Principal, utils::ArgumentEncoder};
 use canlog::{Log, LogEntry};
 use cksol_types::{
-    Address, GetDepositAddressArgs, MinterInfo, RetrieveSolArgs, RetrieveSolError, RetrieveSolOk,
-    RetrieveSolStatus,
+    Address, DepositStatus, GetDepositAddressArgs, MinterInfo, RetrieveSolArgs, RetrieveSolError,
+    RetrieveSolOk, RetrieveSolStatus, UpdateBalanceArgs, UpdateBalanceError,
 };
 use cksol_types_internal::log::Priority;
 use ic_canister_runtime::Runtime;
@@ -12,6 +12,8 @@ use ic_pocket_canister_runtime::PocketIcRuntime;
 use pocket_ic::{PocketIcBuilder, nonblocking::PocketIc};
 use serde::de::DeserializeOwned;
 use std::{env::var, path::PathBuf};
+
+pub mod fixtures;
 
 #[derive(Default)]
 pub struct SetupBuilder {
@@ -89,6 +91,11 @@ impl Setup {
         }
     }
 
+    pub fn with_caller(mut self, caller: Principal) -> Self {
+        self.caller = Some(caller);
+        self
+    }
+
     pub async fn drop(self) {
         let mut setup = self;
         if let Some(env) = setup.env.take() {
@@ -122,6 +129,22 @@ impl CkSolMinter<'_> {
         args: GetDepositAddressArgs,
     ) -> Result<Address, String> {
         self.try_update_call("get_deposit_address", (args,)).await
+    }
+
+    pub async fn update_balance(
+        &self,
+        args: UpdateBalanceArgs,
+    ) -> Result<DepositStatus, UpdateBalanceError> {
+        self.try_update_balance(args)
+            .await
+            .expect("update_balance failed")
+    }
+
+    pub async fn try_update_balance(
+        &self,
+        args: UpdateBalanceArgs,
+    ) -> Result<Result<DepositStatus, UpdateBalanceError>, String> {
+        self.try_update_call("update_balance", (args,)).await
     }
 
     pub async fn retrieve_sol(

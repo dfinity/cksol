@@ -13,7 +13,6 @@ name = "cksol-minter"
 path = "src/main.rs"
 
 [dependencies]
-bs58 = { workspace = true }
 candid = { workspace = true }
 canlog = { workspace = true, features = ["derive"] }
 cksol-types = { path = "../libs/types" }
@@ -24,7 +23,10 @@ ic-ed25519 = { workspace = true }
 ic-http-types = { workspace = true }
 icrc-ledger-types = { workspace = true }
 serde = { workspace = true }
+sol_rpc_client = { workspace = true }
+sol_rpc_types = { workspace = true }
 solana-address = { workspace = true }
+solana-signature = { workspace = true }
 
 [dev-dependencies]
 candid_parser = { workspace = true }

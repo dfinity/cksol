@@ -10,6 +10,7 @@ on:
     paths-ignore:
       - "README.md"
 env:
+  POCKET_IC_SERVER_VERSION: "12.0.0"
   CARGO_TERM_COLOR: always
   RUSTFLAGS: "-Dwarnings"
 
@@ -82,7 +83,7 @@ jobs:
       - name: 'Install PocketIC server'
         uses: dfinity/pocketic@main
         with:
-          pocket-ic-server-version: "12.0.0"
+          pocket-ic-server-version: ${{ env.POCKET_IC_SERVER_VERSION }}
 
       - name: 'Cargo test'
         run: cargo test --package cksol-int-tests -- --test-threads 2 --nocapture

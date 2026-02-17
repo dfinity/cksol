@@ -1,10 +1,16 @@
+use assert_matches::assert_matches;
+use candid::Principal;
+use cksol_int_tests::fixtures::{default_update_balance_args, some_signature};
 use cksol_int_tests::{Setup, SetupBuilder};
+use cksol_types::{
+    GetDepositAddressArgs, MinterInfo, RetrieveSolArgs, RetrieveSolError, RetrieveSolStatus,
+    UpdateBalanceArgs, UpdateBalanceError,
+};
+use cksol_types_internal::log::Priority;
+use icrc_ledger_types::icrc1::account::Subaccount;
 
 mod get_deposit_address_tests {
     use super::*;
-    use candid::Principal;
-    use cksol_types::GetDepositAddressArgs;
-    use icrc_ledger_types::icrc1::account::Subaccount;
 
     async fn get_deposit_address(
         setup: &Setup,
@@ -61,52 +67,10 @@ mod get_deposit_address_tests {
 
         setup.drop().await;
     }
-
-    #[tokio::test]
-    async fn should_fail_for_anonymous_owner() {
-        let setup = SetupBuilder::new().build().await;
-
-        // Caller is default caller, but the owner is specified explicitly to anonymous
-        let result = setup
-            .minter()
-            .try_get_deposit_address(GetDepositAddressArgs {
-                owner: Some(Principal::anonymous()),
-                subaccount: None,
-            })
-            .await;
-
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        assert!(err.contains("the owner must be non-anonymous"));
-
-        setup.drop().await;
-
-        // Anonymous caller and owner not specified
-        let setup = SetupBuilder::new()
-            .with_caller(Principal::anonymous())
-            .build()
-            .await;
-
-        let result = setup
-            .minter()
-            .try_get_deposit_address(GetDepositAddressArgs {
-                owner: None,
-                subaccount: None,
-            })
-            .await;
-
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        assert!(err.contains("the owner must be non-anonymous"));
-
-        setup.drop().await;
-    }
 }
 
 mod lifecycle {
-    use cksol_int_tests::SetupBuilder;
-    use cksol_types::MinterInfo;
-    use cksol_types_internal::log::Priority;
+    use super::*;
 
     #[tokio::test]
     async fn should_get_logs() {
@@ -133,8 +97,6 @@ mod lifecycle {
 
 mod retrieve_sol_tests {
     use super::*;
-    use assert_matches::assert_matches;
-    use cksol_types::{RetrieveSolArgs, RetrieveSolError, RetrieveSolStatus};
 
     #[tokio::test]
     async fn should_validate_solana_address() {
@@ -169,6 +131,66 @@ mod retrieve_sol_tests {
 
         let status = setup.minter().retrieve_sol_status(u64::MAX).await;
         assert_eq!(status, RetrieveSolStatus::NotFound);
+
+        setup.drop().await;
+    }
+}
+
+mod update_balance_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn should_update_balance() {
+        let setup = SetupBuilder::new().build().await;
+
+        let result = setup
+            .minter()
+            .update_balance(default_update_balance_args())
+            .await;
+
+        assert_matches!(result, Err(UpdateBalanceError::TemporarilyUnavailable(s)) => {
+            assert!(s.contains("Not yet implemented!"))
+        });
+
+        setup.drop().await;
+    }
+}
+
+mod anonymous_caller_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn should_fail_for_anonymous_owner() {
+        let mut setup = SetupBuilder::new().build().await;
+
+        for (caller, owner) in [
+            // Caller is default caller, but the owner is specified explicitly to anonymous
+            (Setup::DEFAULT_CALLER, Some(Principal::anonymous())),
+            // Anonymous caller and owner not specified
+            (Principal::anonymous(), None),
+        ] {
+            setup = setup.with_caller(caller);
+            let minter = setup.minter();
+
+            // `get_deposit_address` endpoint
+            let result = minter
+                .try_get_deposit_address(GetDepositAddressArgs {
+                    owner,
+                    subaccount: None,
+                })
+                .await;
+            assert_matches!(result, Err(s) => s.contains("the owner must be non-anonymous"));
+
+            // `update_balance` endpoint
+            let result = minter
+                .try_update_balance(UpdateBalanceArgs {
+                    owner,
+                    subaccount: None,
+                    signature: some_signature(),
+                })
+                .await;
+            assert_matches!(result, Err(s) => s.contains("the owner must be non-anonymous"));
+        }
 
         setup.drop().await;
     }

@@ -37,6 +37,10 @@ pub struct InitArgs {
 /// The upgrade args for the ckSOL minter canister.
 #[derive(Clone, Debug, CandidType, Deserialize)]
 pub struct UpgradeArgs {
+    /// The canister ID of the SOL RPC canister.
+    pub sol_rpc_canister_id: Option<Principal>,
+    /// The canister ID of the ckSOL ledger canister.
+    pub ledger_canister_id: Option<Principal>,
     /// The new deposit fee in lamports.
     pub deposit_fee: Option<Lamport>,
 }

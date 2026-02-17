@@ -1,12 +1,14 @@
 use std::str::FromStr;
 
 use candid::Principal;
+use cksol_minter::address;
 use cksol_types::{
-    Address, GetDepositAddressArgs, MinterInfo, RetrieveSolArgs, RetrieveSolError, RetrieveSolOk,
-    RetrieveSolStatus,
+    Address, DepositStatus, GetDepositAddressArgs, MinterInfo, RetrieveSolArgs, RetrieveSolError,
+    RetrieveSolOk, RetrieveSolStatus, UpdateBalanceArgs, UpdateBalanceError,
 };
 use cksol_types_internal::MinterArg;
 use ic_http_types::{HttpRequest, HttpResponse};
+use icrc_ledger_types::icrc1::account::{Account, Subaccount};
 
 #[ic_cdk::init]
 fn init(args: MinterArg) {
@@ -37,16 +39,27 @@ fn post_upgrade(args: Option<MinterArg>) {
 
 #[ic_cdk::update]
 async fn get_deposit_address(args: GetDepositAddressArgs) -> Address {
-    let owner = args.owner.unwrap_or_else(ic_cdk::api::msg_caller);
+    let account = assert_non_anonymous_account(args.owner, args.subaccount);
+    address::get_deposit_address(account).await.into()
+}
+
+#[ic_cdk::update]
+async fn update_balance(args: UpdateBalanceArgs) -> Result<DepositStatus, UpdateBalanceError> {
+    let account = assert_non_anonymous_account(args.owner, args.subaccount);
+    cksol_minter::update_balance::update_balance(account, args.signature.into()).await
+}
+
+fn assert_non_anonymous_account(
+    owner: Option<Principal>,
+    subaccount: Option<Subaccount>,
+) -> Account {
+    let owner = owner.unwrap_or_else(ic_cdk::api::msg_caller);
     assert_ne!(
         owner,
         Principal::anonymous(),
         "the owner must be non-anonymous"
     );
-
-    cksol_minter::address::get_deposit_address(owner, args.subaccount)
-        .await
-        .into()
+    Account { owner, subaccount }
 }
 
 #[ic_cdk::update]

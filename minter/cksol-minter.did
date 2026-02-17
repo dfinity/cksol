@@ -6,9 +6,6 @@
 // [account]: https://solana.com/docs/core/accounts
 type Address = text;
 
-// Base unit of SOL, i.e., 1 SOL = 10^9 Lamports
-type Lamport = nat64;
-
 // The ID of one of the ICP root keys.
 type Ed25519KeyName = variant {
     MainnetTestKey1;
@@ -19,13 +16,69 @@ type Ed25519KeyName = variant {
 // Arguments for a request to the `getDepositAddress` ckSOL minter endpoint.
 type GetDepositAddressArgs = record {
     // The principal to deposit funds to.
-    ///
+    //
     // If not set, defaults to the caller's principal.
     // The resolved owner must be a non-anonymous principal.
     owner: opt principal;
     // The subaccount to deposit funds to.
     subaccount: opt blob;
 };
+
+// Ed25519 signature.
+// This is a base-58 encoded string with at most 88 characters.
+// Example: "5LrcE2f6uvydKRquEJ8xp19heGxSvqsVbcqUeFoiWbXe8JNip7ftPQNTAVPyTK7ijVdpkzmKKaAQR7MWMmujAhXD"
+type Signature = text;
+
+// Smallest denomination of SOL, the native token on Solana,
+// i.e. 1_000_000_000 Lamports is 1 SOL
+type Lamport = nat64;
+
+// Arguments for a request to the `update_balance` endpoint.
+type UpdateBalanceArgs = record {
+    // If provided, update the balance for this principal.
+    //
+    // If not set, defaults to the caller's principal.
+    // The resolved owner must be a non-anonymous principal.
+    owner: opt principal;
+    // The subaccount for which to update the balance.
+    subaccount: opt blob;
+    // Signature of the deposit transaction.
+    signature: Signature;
+};
+
+// An error from the `update_balance` ckSOL minter endpoint.
+type UpdateBalanceError = variant {
+    // The minter experiences temporary issues, try the call again later.
+    TemporarilyUnavailable : text;
+    // No matching transaction was found for the given signature.
+    //
+    // This can also happen if the transaction is not yet finalized.
+    TransactionNotFound;
+    // The Solana transaction with the given signature is not a valid
+    // deposit to the owner's deposit address.
+    InvalidDepositTransaction : text;
+    // The deposit amount does not cover the deposit fee.
+    ValueTooSmall;
+};
+
+// The outcome of processing a Solana deposit transaction.
+type DepositStatus = variant {
+    // The transaction is a valid deposit, but the minter failed to mint ckSOL on the ledger.
+    // The caller should retry the `update_balance` call.
+    Processing : Signature;
+    // The minter accepted the deposit and minted ckSOL tokens on the ledger.
+    Minted : record {
+        // The MINT transaction index on the ledger.
+        block_index: nat64;
+        // The minted amount (deposit amount minus fees).
+        minted_amount: Lamport;
+        // The UTXO that caused the balance update.
+        signature: Signature;
+    };
+};
+
+// Represents the result of a call to the `update_balance` endpoint.
+type UpdateBalanceResult = variant { Ok : DepositStatus; Err : UpdateBalanceError };
 
 // The installation args for the ckSOL minter canister.
 type InitArgs = record {
@@ -48,6 +101,8 @@ type MinterArg = variant {
 
 // The upgrade args for the ckSOL minter canister.
 type UpgradeArgs = record {
+    sol_rpc_canister_id : opt principal;
+    ledger_canister_id : opt principal;
     deposit_fee : opt Lamport;
 };
 
@@ -116,17 +171,21 @@ type RetrieveSolStatus = variant {
 
 service : (MinterArg) -> {
     // Returns the Solana address to which the owner should send SOL.
-    ///
+    //
     // If the owner is not set, it defaults to the caller's principal.
     // The resolved owner must be a non-anonymous principal.
     get_deposit_address: (GetDepositAddressArgs) -> (Address);
+
+    // Update the ckSOL balance of the given owner with the funds
+    // deposited in a specific Solana transaction.
+    update_balance: (UpdateBalanceArgs) -> (UpdateBalanceResult);
 
     // Submits a request to convert ckSOL to Solana.
     retrieve_sol : (RetrieveSolArgs) -> (variant { Ok : RetrieveSolOk; Err : RetrieveSolError });
 
     // Retrieve the status of a Solana withdrawal request.
     retrieve_sol_status : (nat64) -> (RetrieveSolStatus);
-    
+
     // Returns information about the ckSOL minter canister.
     get_minter_info: () -> (MinterInfo) query;
 };

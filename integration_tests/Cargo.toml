@@ -20,7 +20,6 @@ ic-test-utilities-load-wasm = { workspace = true }
 pocket-ic = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-solana-address = { workspace = true }
 
 [dev-dependencies]
 assert_matches = { workspace = true }
