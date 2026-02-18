@@ -5,12 +5,9 @@
 
 use candid::{CandidType, Nat, Principal};
 use icrc_ledger_types::icrc1::account::Subaccount;
-pub use memo::{MAX_SERIALIZED_MEMO_BYTES, Memo, MintMemo};
 use serde::{Deserialize, Serialize};
 pub use sol_rpc_types::{Lamport, Pubkey as Address, Signature};
 use thiserror::Error;
-
-mod memo;
 
 /// The outcome of processing a Solana deposit transaction.
 #[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize, Serialize)]
