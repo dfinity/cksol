@@ -468,6 +468,7 @@ dependencies = [
 name = "cksol-minter"
 version = "0.1.0"
 dependencies = [
+ "assert_matches",
  "bs58",
  "candid",
  "candid_parser",

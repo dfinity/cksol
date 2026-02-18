@@ -1,3 +1,25 @@
+use candid::Principal;
+use cksol_types_internal::{Ed25519KeyName, InitArgs};
+
+pub const DEPOSIT_FEE: u64 = 50;
+
+pub fn sol_rpc_canister_id() -> Principal {
+    Principal::from_slice(&[1_u8; 20])
+}
+
+pub fn ledger_canister_id() -> Principal {
+    Principal::from_slice(&[2_u8; 20])
+}
+
+pub fn valid_init_args() -> InitArgs {
+    InitArgs {
+        sol_rpc_canister_id: sol_rpc_canister_id(),
+        ledger_canister_id: ledger_canister_id(),
+        deposit_fee: DEPOSIT_FEE,
+        master_key_name: Ed25519KeyName::default(),
+    }
+}
+
 pub mod arb {
     use crate::state::event::{Event, EventType};
     use cksol_types_internal::{Ed25519KeyName, InitArgs, UpgradeArgs};

@@ -31,5 +31,6 @@ serde = { workspace = true }
 solana-address = { workspace = true }
 
 [dev-dependencies]
+assert_matches = { workspace = true }
 candid_parser = { workspace = true }
 proptest = { workspace = true }
