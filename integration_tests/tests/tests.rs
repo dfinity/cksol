@@ -167,7 +167,8 @@ mod update_balance_tests {
             .await;
 
         assert_matches!(result, Err(UpdateBalanceError::TemporarilyUnavailable(s)) => {
-            assert!(s.contains("Not yet implemented!"))
+            // SOL RPC canister is currently not installed so the call to `getTransaction` fails
+            assert!(s.contains("Inter-canister call rejected"))
         });
 
         setup.drop().await;
