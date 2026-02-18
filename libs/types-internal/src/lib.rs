@@ -46,6 +46,10 @@ pub struct InitArgs {
 #[derive(Clone, Default, Eq, PartialEq, Debug, CandidType, Deserialize)]
 #[cfg_attr(feature = "event", derive(minicbor::Encode, minicbor::Decode))]
 pub struct UpgradeArgs {
+    /// The canister ID of the SOL RPC canister.
+    pub sol_rpc_canister_id: Option<Principal>,
+    /// The canister ID of the ckSOL ledger canister.
+    pub ledger_canister_id: Option<Principal>,
     /// The new deposit fee in lamports.
     #[cfg_attr(feature = "event", n(0))]
     pub deposit_fee: Option<Lamport>,
