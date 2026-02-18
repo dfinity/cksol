@@ -3,8 +3,8 @@ use ic_stable_structures::memory_manager::{MemoryId, MemoryManager, VirtualMemor
 use ic_stable_structures::{DefaultMemoryImpl, StableLog};
 use std::cell::RefCell;
 
-const LOG_INDEX_MEMORY_ID: MemoryId = MemoryId::new(0);
-const LOG_DATA_MEMORY_ID: MemoryId = MemoryId::new(1);
+const EVENT_LOG_INDEX_MEMORY_ID: MemoryId = MemoryId::new(0);
+const EVENT_LOG_DATA_MEMORY_ID: MemoryId = MemoryId::new(1);
 
 type VMem = VirtualMemory<DefaultMemoryImpl>;
 type EventLog = StableLog<Event, VMem, VMem>;
@@ -19,8 +19,8 @@ thread_local! {
         .with(|m|
               RefCell::new(
                   StableLog::init(
-                      m.borrow().get(LOG_INDEX_MEMORY_ID),
-                      m.borrow().get(LOG_DATA_MEMORY_ID)
+                      m.borrow().get(EVENT_LOG_INDEX_MEMORY_ID),
+                      m.borrow().get(EVENT_LOG_DATA_MEMORY_ID)
                   )
               )
         );
