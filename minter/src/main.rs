@@ -79,6 +79,7 @@ async fn retrieve_sol_status(_block_index: u64) -> RetrieveSolStatus {
 fn get_minter_info() -> MinterInfo {
     cksol_minter::state::read_state(|s| MinterInfo {
         deposit_fee: s.deposit_fee(),
+        minimum_withdrawal_amount: s.minimum_withdrawal_amount(),
     })
 }
 

@@ -90,12 +90,20 @@ mod lifecycle {
         let setup = SetupBuilder::new().build().await;
 
         let minter_info = setup.minter().get_minter_info().await;
-        assert_eq!(minter_info, MinterInfo { deposit_fee: 0 });
+        assert_eq!(
+            minter_info,
+            MinterInfo {
+                deposit_fee: 0,
+                minimum_withdrawal_amount: 0
+            }
+        );
 
         let new_deposit_fee = 10;
+        let new_minimum_withdrawal_amount = 20;
         setup
             .upgrade_minter(UpgradeArgs {
                 deposit_fee: Some(new_deposit_fee),
+                minimum_withdrawal_amount: Some(new_minimum_withdrawal_amount),
                 ..Default::default()
             })
             .await
@@ -105,7 +113,8 @@ mod lifecycle {
         assert_eq!(
             minter_info,
             MinterInfo {
-                deposit_fee: new_deposit_fee
+                deposit_fee: new_deposit_fee,
+                minimum_withdrawal_amount: new_minimum_withdrawal_amount,
             }
         );
 

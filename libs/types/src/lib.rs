@@ -167,4 +167,6 @@ pub enum RetrieveSolStatus {
 pub struct MinterInfo {
     /// Fee deducted from each deposit (SOL -> ckSOL).
     pub deposit_fee: Lamport,
+    /// Minimum withdrawal amount in lamports.
+    pub minimum_withdrawal_amount: Lamport,
 }

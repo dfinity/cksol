@@ -92,6 +92,7 @@ type InitArgs = record {
 // Information about the ckSOL minter canister.
 type MinterInfo = record {
     deposit_fee : Lamport;
+    minimum_withdrawal_amount : Lamport;
 };
 
 // The ckSOL minter service arguments.
