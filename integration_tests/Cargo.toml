@@ -18,8 +18,11 @@ ic-management-canister-types = { workspace = true }
 ic-pocket-canister-runtime = { workspace = true }
 ic-test-utilities-load-wasm = { workspace = true }
 pocket-ic = { workspace = true }
+reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+sol_rpc_client = { workspace = true }
+sol_rpc_types = { workspace = true }
 
 [dev-dependencies]
 assert_matches = { workspace = true }
