@@ -4,12 +4,12 @@ use cksol_types::{
     Address, DepositStatus, GetDepositAddressArgs, MinterInfo, RetrieveSolArgs, RetrieveSolError,
     RetrieveSolOk, RetrieveSolStatus, UpdateBalanceArgs, UpdateBalanceError,
 };
-use cksol_types_internal::log::Priority;
+use cksol_types_internal::{MinterArg, log::Priority};
 use ic_canister_runtime::Runtime;
 use ic_http_types::{HttpRequest, HttpResponse};
 use ic_management_canister_types::{CanisterId, CanisterSettings};
 use ic_pocket_canister_runtime::PocketIcRuntime;
-use pocket_ic::{PocketIcBuilder, nonblocking::PocketIc};
+use pocket_ic::{PocketIcBuilder, RejectResponse, nonblocking::PocketIc};
 use serde::de::DeserializeOwned;
 use std::{env::var, path::PathBuf};
 
@@ -89,6 +89,22 @@ impl Setup {
             runtime: self.runtime(),
             id: self.minter_canister_id,
         }
+    }
+
+    pub async fn upgrade_minter(
+        &self,
+        upgrade_args: cksol_types_internal::UpgradeArgs,
+    ) -> Result<(), RejectResponse> {
+        self.env
+            .as_ref()
+            .unwrap()
+            .upgrade_canister(
+                self.minter_canister_id,
+                cksol_minter_wasm(),
+                Encode!(&MinterArg::Upgrade(upgrade_args)).unwrap(),
+                Some(Self::DEFAULT_CONTROLLER),
+            )
+            .await
     }
 
     pub fn with_caller(mut self, caller: Principal) -> Self {
@@ -210,9 +226,9 @@ fn cksol_minter_init_args() -> cksol_types_internal::MinterArg {
     use cksol_types_internal::{Ed25519KeyName, InitArgs, MinterArg};
     MinterArg::Init(InitArgs {
         // TODO DEFI-2643: Fix me!
-        sol_rpc_canister_id: Principal::anonymous(),
+        sol_rpc_canister_id: Principal::from_slice(&[42_u8]),
         // TODO DEFI-2643: Fix me!
-        ledger_canister_id: Principal::anonymous(),
+        ledger_canister_id: Principal::from_slice(&[43_u8]),
         deposit_fee: 0,
         master_key_name: Ed25519KeyName::MainnetProdKey1,
     })

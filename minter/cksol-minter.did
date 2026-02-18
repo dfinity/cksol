@@ -102,7 +102,6 @@ type MinterArg = variant {
 // The upgrade args for the ckSOL minter canister.
 type UpgradeArgs = record {
     sol_rpc_canister_id : opt principal;
-    ledger_canister_id : opt principal;
     deposit_fee : opt Lamport;
 };
 

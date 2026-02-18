@@ -1,43 +1,39 @@
-use crate::state::mutate_state;
+use crate::state::audit::{process_event, replay_events};
+use crate::state::event::EventType;
+use crate::state::{State, init_once_state, mutate_state};
+use crate::storage::{record_event, total_event_count, with_event_iter};
 use canlog::log;
-use cksol_types_internal::log::Priority;
-use cksol_types_internal::{InitArgs, UpgradeArgs};
+use cksol_types_internal::{InitArgs, UpgradeArgs, log::Priority};
 
-pub fn init(args: InitArgs) {
+pub fn init(init_args: InitArgs) {
     log!(
         Priority::Info,
-        "[init]: initialized ckSOL minter with args: {:?}",
-        args
+        "[init]: initialized minter with arg: {init_args:?}"
     );
-    let InitArgs {
-        sol_rpc_canister_id,
-        ledger_canister_id,
-        deposit_fee,
-        master_key_name,
-    } = args;
-    mutate_state(|s| {
-        s.sol_rpc_canister_id = sol_rpc_canister_id;
-        s.ledger_canister_id = ledger_canister_id;
-        s.master_key_name = master_key_name;
-        s.deposit_fee = deposit_fee;
-    });
+    init_once_state(State::try_from(init_args.clone()).expect("ERROR: invalid init args"));
+    record_event(EventType::Init(init_args));
 }
 
-pub fn post_upgrade(args: Option<UpgradeArgs>) {
-    if let Some(UpgradeArgs {
-        deposit_fee,
-        ledger_canister_id,
-        sol_rpc_canister_id,
-    }) = args
-    {
-        if let Some(deposit_fee) = deposit_fee {
-            mutate_state(|s| s.deposit_fee = deposit_fee);
-        }
-        if let Some(sol_rpc_canister_id) = sol_rpc_canister_id {
-            mutate_state(|s| s.sol_rpc_canister_id = sol_rpc_canister_id);
-        }
-        if let Some(ledger_canister_id) = ledger_canister_id {
-            mutate_state(|s| s.ledger_canister_id = ledger_canister_id);
-        }
+pub fn post_upgrade(upgrade_args: Option<UpgradeArgs>) {
+    let start = ic_cdk::api::instruction_counter();
+
+    init_once_state(with_event_iter(|events| replay_events(events)));
+    if let Some(args) = upgrade_args {
+        log!(
+            Priority::Info,
+            "[upgrade]: upgrading minter with arg: {args:?}"
+        );
+        mutate_state(|s| process_event(s, EventType::Upgrade(args)))
     }
+
+    let end = ic_cdk::api::instruction_counter();
+
+    let event_count = total_event_count();
+    let instructions_consumed = end - start;
+
+    log!(
+        Priority::Info,
+        "[upgrade]: replaying {event_count} events consumed {instructions_consumed} instructions ({} instructions per event on average)",
+        instructions_consumed / event_count
+    );
 }

@@ -3,10 +3,9 @@ use candid::Principal;
 use cksol_int_tests::fixtures::{default_update_balance_args, some_signature};
 use cksol_int_tests::{Setup, SetupBuilder};
 use cksol_types::{
-    GetDepositAddressArgs, MinterInfo, RetrieveSolArgs, RetrieveSolError, RetrieveSolStatus,
-    UpdateBalanceArgs, UpdateBalanceError,
+    GetDepositAddressArgs, RetrieveSolArgs, RetrieveSolError, RetrieveSolStatus, UpdateBalanceArgs,
+    UpdateBalanceError,
 };
-use cksol_types_internal::log::Priority;
 use icrc_ledger_types::icrc1::account::Subaccount;
 
 mod get_deposit_address_tests {
@@ -70,7 +69,10 @@ mod get_deposit_address_tests {
 }
 
 mod lifecycle {
-    use super::*;
+    use cksol_int_tests::SetupBuilder;
+    use cksol_types::MinterInfo;
+    use cksol_types_internal::UpgradeArgs;
+    use cksol_types_internal::log::Priority;
 
     #[tokio::test]
     async fn should_get_logs() {
@@ -84,12 +86,28 @@ mod lifecycle {
     }
 
     #[tokio::test]
-    async fn should_get_minter_info() {
+    async fn should_get_minter_info_and_upgrade() {
         let setup = SetupBuilder::new().build().await;
 
         let minter_info = setup.minter().get_minter_info().await;
-
         assert_eq!(minter_info, MinterInfo { deposit_fee: 0 });
+
+        let new_deposit_fee = 10;
+        setup
+            .upgrade_minter(UpgradeArgs {
+                deposit_fee: Some(new_deposit_fee),
+                ..Default::default()
+            })
+            .await
+            .expect("upgrade failed");
+
+        let minter_info = setup.minter().get_minter_info().await;
+        assert_eq!(
+            minter_info,
+            MinterInfo {
+                deposit_fee: new_deposit_fee
+            }
+        );
 
         setup.drop().await;
     }

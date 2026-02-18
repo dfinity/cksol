@@ -77,7 +77,7 @@ async fn retrieve_sol_status(_block_index: u64) -> RetrieveSolStatus {
 #[ic_cdk::query]
 fn get_minter_info() -> MinterInfo {
     cksol_minter::state::read_state(|s| MinterInfo {
-        deposit_fee: s.deposit_fee,
+        deposit_fee: s.deposit_fee(),
     })
 }
 

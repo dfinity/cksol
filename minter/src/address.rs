@@ -18,18 +18,18 @@ pub async fn get_deposit_address(account: Account) -> Address {
 }
 
 async fn lazy_get_schnorr_master_key() -> SchnorrPublicKey {
-    if let Some(public_key) = read_state(|s| s.master_public_key.clone()) {
+    if let Some(public_key) = read_state(|s| s.minter_public_key().cloned()) {
         return public_key;
     }
 
-    let key_name = read_state(|s| s.master_key_name.to_string());
+    let key_name = read_state(|s| s.master_key_name());
 
     let arg = SchnorrPublicKeyArgs {
         canister_id: None,
         derivation_path: vec![],
         key_id: SchnorrKeyId {
             algorithm: SchnorrAlgorithm::Ed25519,
-            name: key_name,
+            name: key_name.to_string(),
         },
     };
     let response = schnorr_public_key(&arg)
@@ -43,7 +43,7 @@ async fn lazy_get_schnorr_master_key() -> SchnorrPublicKey {
         chain_code: response.chain_code.as_slice().try_into().unwrap(),
     };
 
-    mutate_state(|s| s.master_public_key = Some(schnorr_public_key.clone()));
+    mutate_state(|s| s.set_once_minter_public_key(schnorr_public_key.clone()));
     schnorr_public_key
 }
 
