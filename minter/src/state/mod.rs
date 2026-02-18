@@ -71,16 +71,12 @@ impl State {
     /// This is expected to happen only when the minter was freshly installed or after a canister upgrade.
     ///
     /// # Panics
-    /// This method will panic if the provided public key has a different value than the one already set.
+    /// This method will panic if the public key was already set
     pub fn set_once_minter_public_key(&mut self, public_key: SchnorrPublicKey) {
-        match &self.minter_public_key {
-            Some(previous_public_key) if previous_public_key != &public_key => {
-                panic!("BUG: minter public key is already set")
-            }
-            Some(_) | None => {
-                self.minter_public_key = Some(public_key);
-            }
+        if self.minter_public_key.is_some() {
+            panic!("BUG: minter public key is already set")
         }
+        self.minter_public_key = Some(public_key);
     }
 
     pub fn master_key_name(&self) -> Ed25519KeyName {
