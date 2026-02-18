@@ -123,6 +123,8 @@ mod lifecycle {
 }
 
 mod retrieve_sol_tests {
+    use cksol_types_internal::UpgradeArgs;
+
     use super::*;
 
     #[tokio::test]
@@ -147,7 +149,50 @@ mod retrieve_sol_tests {
 
         let result = setup.minter().retrieve_sol(args).await;
         let err = result.unwrap_err();
-        assert_matches!(err, RetrieveSolError::InsufficientFunds { balance: 0 });
+        assert_eq!(err, RetrieveSolError::InsufficientFunds { balance: 0 });
+
+        setup.drop().await;
+    }
+
+    #[tokio::test]
+    async fn should_check_minimum_withdrawal_amount() {
+        let setup = SetupBuilder::new().build().await;
+
+        let args = RetrieveSolArgs {
+            from_subaccount: None,
+            amount: 1,
+            address: "E4MpwNnMWs2XtW5gVrxZvyS7fMq31QD5HvbxmwP45Tz3".to_string(),
+        };
+
+        let result = setup.minter().retrieve_sol(args.clone()).await;
+        let err = result.unwrap_err();
+        assert_eq!(err, RetrieveSolError::InsufficientFunds { balance: 0 });
+
+        let new_minimum_withdrawal_amount = 33;
+        setup
+            .upgrade_minter(UpgradeArgs {
+                minimum_withdrawal_amount: Some(new_minimum_withdrawal_amount),
+                ..Default::default()
+            })
+            .await
+            .expect("upgrade failed");
+
+        let result = setup.minter().retrieve_sol(args).await;
+        let err = result.unwrap_err();
+        assert_eq!(
+            err,
+            RetrieveSolError::AmountTooLow(new_minimum_withdrawal_amount)
+        );
+
+        let args = RetrieveSolArgs {
+            from_subaccount: None,
+            amount: new_minimum_withdrawal_amount,
+            address: "E4MpwNnMWs2XtW5gVrxZvyS7fMq31QD5HvbxmwP45Tz3".to_string(),
+        };
+
+        let result = setup.minter().retrieve_sol(args).await;
+        let err = result.unwrap_err();
+        assert_eq!(err, RetrieveSolError::InsufficientFunds { balance: 0 });
 
         setup.drop().await;
     }

@@ -1,7 +1,7 @@
 use std::str::FromStr;
 
 use candid::Principal;
-use cksol_minter::address;
+use cksol_minter::{address, state::read_state};
 use cksol_types::{
     Address, DepositStatus, GetDepositAddressArgs, MinterInfo, RetrieveSolArgs, RetrieveSolError,
     RetrieveSolOk, RetrieveSolStatus, UpdateBalanceArgs, UpdateBalanceError,
@@ -64,9 +64,14 @@ fn assert_non_anonymous_account(
 
 #[ic_cdk::update]
 async fn retrieve_sol(args: RetrieveSolArgs) -> Result<RetrieveSolOk, RetrieveSolError> {
-    let _from_account = assert_non_anonymous_account(None, args.from_subaccount);
     let _solana_address = Address::from_str(&args.address)
         .map_err(|e| RetrieveSolError::MalformedAddress(e.to_string()))?;
+
+    let minimum_withdrawal_amount = read_state(|s| s.minimum_withdrawal_amount());
+    if args.amount < minimum_withdrawal_amount {
+        return Err(RetrieveSolError::AmountTooLow(minimum_withdrawal_amount));
+    }
+
     Err(RetrieveSolError::InsufficientFunds { balance: 0 })
 }
 
