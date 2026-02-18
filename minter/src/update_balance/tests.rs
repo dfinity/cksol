@@ -73,9 +73,9 @@ async fn should_fail_if_deposit_too_small() {
     init_schnorr_master_key();
 
     let mut transaction = deposit_transaction();
-    transaction.transaction.meta.as_mut().map(|meta| {
+    if let Some(meta) = transaction.transaction.meta.as_mut() {
         meta.post_balances[1] = meta.pre_balances[1] + 1; // 1 lamport deposit
-    });
+    }
 
     let get_transaction_response =
         GetTransactionResult::Consistent(Ok(Some(transaction.try_into().unwrap())));
