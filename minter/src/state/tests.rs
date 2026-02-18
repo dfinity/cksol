@@ -17,7 +17,8 @@ proptest! {
 mod state_from_init_args {
     use super::super::*;
     use crate::test_fixtures::{
-        DEPOSIT_FEE, ledger_canister_id, sol_rpc_canister_id, valid_init_args,
+        DEPOSIT_FEE, MINIMUM_WITHDRAWAL_AMOUNT, ledger_canister_id, sol_rpc_canister_id,
+        valid_init_args,
     };
     use assert_matches::assert_matches;
     use cksol_types_internal::{Ed25519KeyName, InitArgs};
@@ -34,6 +35,7 @@ mod state_from_init_args {
                 ledger_canister_id: ledger_canister_id(),
                 sol_rpc_canister_id: sol_rpc_canister_id(),
                 deposit_fee: DEPOSIT_FEE,
+                minimum_withdrawal_amount: MINIMUM_WITHDRAWAL_AMOUNT,
             }
         );
     }

@@ -64,6 +64,7 @@ fn assert_non_anonymous_account(
 
 #[ic_cdk::update]
 async fn retrieve_sol(args: RetrieveSolArgs) -> Result<RetrieveSolOk, RetrieveSolError> {
+    let _from_account = assert_non_anonymous_account(None, args.from_subaccount);
     let _solana_address = Address::from_str(&args.address)
         .map_err(|e| RetrieveSolError::MalformedAddress(e.to_string()))?;
     Err(RetrieveSolError::InsufficientFunds { balance: 0 })

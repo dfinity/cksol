@@ -40,6 +40,9 @@ pub struct InitArgs {
     /// The master Ed25519 key name.
     #[cfg_attr(feature = "event", n(3))]
     pub master_key_name: Ed25519KeyName,
+    /// Minimum withdrawal amount in lamports.
+    #[cfg_attr(feature = "event", n(4))]
+    pub minimum_withdrawal_amount: Lamport,    
 }
 
 /// The upgrade args for the ckSOL minter canister.
@@ -52,6 +55,9 @@ pub struct UpgradeArgs {
     /// The new deposit fee in lamports.
     #[cfg_attr(feature = "event", n(1))]
     pub deposit_fee: Option<Lamport>,
+    /// The new minimum withdrawal amount in lamports.
+    #[cfg_attr(feature = "event", n(2))]
+    pub minimum_withdrawal_amount: Option<Lamport>,
 }
 
 /// The ID of one of the ICP root keys.

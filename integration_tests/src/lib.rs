@@ -231,5 +231,6 @@ fn cksol_minter_init_args() -> cksol_types_internal::MinterArg {
         ledger_canister_id: Principal::from_slice(&[43_u8]),
         deposit_fee: 0,
         master_key_name: Ed25519KeyName::MainnetProdKey1,
+        minimum_withdrawal_amount: 0,
     })
 }
