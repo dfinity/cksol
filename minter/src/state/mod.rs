@@ -89,8 +89,14 @@ impl State {
 
     fn upgrade(
         &mut self,
-        UpgradeArgs { deposit_fee }: UpgradeArgs,
+        UpgradeArgs {
+            sol_rpc_canister_id,
+            deposit_fee,
+        }: UpgradeArgs,
     ) -> Result<(), InvalidStateError> {
+        if let Some(sol_rpc_canister_id) = sol_rpc_canister_id {
+            self.sol_rpc_canister_id = sol_rpc_canister_id;
+        }
         if let Some(deposit_fee) = deposit_fee {
             self.deposit_fee = deposit_fee;
         }

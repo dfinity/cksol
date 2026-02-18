@@ -58,7 +58,14 @@ pub mod arb {
     }
 
     pub fn arb_upgrade_args() -> impl Strategy<Value = UpgradeArgs> {
-        prop::option::of(any::<u64>()).prop_map(|deposit_fee| UpgradeArgs { deposit_fee })
+        (
+            prop::option::of(arb_principal()),
+            prop::option::of(any::<u64>()),
+        )
+            .prop_map(|(sol_rpc_canister_id, deposit_fee)| UpgradeArgs {
+                sol_rpc_canister_id,
+                deposit_fee,
+            })
     }
 
     pub fn arb_event_type() -> impl Strategy<Value = EventType> {
