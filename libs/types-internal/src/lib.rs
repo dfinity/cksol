@@ -42,7 +42,7 @@ pub struct InitArgs {
     pub master_key_name: Ed25519KeyName,
     /// Minimum withdrawal amount in lamports.
     #[cfg_attr(feature = "event", n(4))]
-    pub minimum_withdrawal_amount: Lamport,    
+    pub minimum_withdrawal_amount: Lamport,
 }
 
 /// The upgrade args for the ckSOL minter canister.
