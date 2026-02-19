@@ -8,6 +8,7 @@ use crate::{
 use ic_canister_runtime::{IcError, StubRuntime};
 use sol_rpc_types::{HttpOutcallError, RpcError, RpcSource, SupportedRpcProviderId};
 
+// TODO DEFI-2643: Test behavior with cycles
 mod get_transaction_tests {
     use super::*;
 
