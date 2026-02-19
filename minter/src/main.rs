@@ -64,7 +64,8 @@ fn assert_non_anonymous_account(
 
 #[ic_cdk::update]
 async fn retrieve_sol(args: RetrieveSolArgs) -> Result<RetrieveSolOk, RetrieveSolError> {
-    let _solana_address = Address::from_str(&args.address)
+    let from = assert_non_anonymous_account(None, args.from_subaccount);
+    let solana_address = Address::from_str(&args.address)
         .map_err(|e| RetrieveSolError::MalformedAddress(e.to_string()))?;
 
     let minimum_withdrawal_amount = read_state(|s| s.minimum_withdrawal_amount());
@@ -72,7 +73,7 @@ async fn retrieve_sol(args: RetrieveSolArgs) -> Result<RetrieveSolOk, RetrieveSo
         return Err(RetrieveSolError::AmountTooLow(minimum_withdrawal_amount));
     }
 
-    Err(RetrieveSolError::InsufficientFunds { balance: 0 })
+    cksol_minter::retrieve_sol::retrieve_sol(from, args.amount, solana_address).await
 }
 
 #[ic_cdk::update]

@@ -482,6 +482,7 @@ dependencies = [
  "ic-http-types",
  "ic-stable-structures 0.7.2",
  "icrc-cbor",
+ "icrc-ledger-client-cdk",
  "icrc-ledger-types",
  "minicbor",
  "proptest",
@@ -1559,6 +1560,29 @@ dependencies = [
  "minicbor",
  "num-bigint",
  "num-traits",
+]
+
+[[package]]
+name = "icrc-ledger-client"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6662452c60a8636cd8f1293246de3fdc4652ff2a37af6c7e2522fb567efe67b2"
+dependencies = [
+ "async-trait",
+ "candid",
+ "icrc-ledger-types",
+]
+
+[[package]]
+name = "icrc-ledger-client-cdk"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ee6695bfcc035596d9f3dc191c9c88886067f11d00b86c70aafee43e31130829"
+dependencies = [
+ "async-trait",
+ "candid",
+ "ic-cdk",
+ "icrc-ledger-client",
 ]
 
 [[package]]
