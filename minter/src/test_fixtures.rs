@@ -112,13 +112,14 @@ pub mod deposit {
         subaccount: None,
     };
 
+    // https://explorer.solana.com/tx/41MZzSM5aXRFBbPdaFyqueRPhp6VJbFHESvfKRvhXXnqB5hkhDpyRqdAPE8mTgbpfUPxP7bjhQK7JdUuykKtk2Xh?cluster=devnet
     pub fn deposit_transaction_signature() -> solana_signature::Signature {
         const SIGNATURE: &str = "41MZzSM5aXRFBbPdaFyqueRPhp6VJbFHESvfKRvhXXnqB5hkhDpyRqdAPE8mTgbpfUPxP7bjhQK7JdUuykKtk2Xh";
         solana_signature::Signature::from_str(SIGNATURE).unwrap()
     }
 
-    // Transfer from Solana address 3HwVowmCYKPWjRvkqfEfYFWetZLPmZW6LCnLEQDHqpJJ to
-    // BQc4UB4yuhHRT5r6jyQFnUi54W5ZoXW8Lvfd6VaKoQfc on the Solana Devnet
+    // 0.5 SOL transfer to DEPOSITOR_ACCOUNT's deposit address (BQc4UB4yuhHRT5r6jyQFnUi54W5ZoXW8Lvfd6VaKoQfc)
+    // https://explorer.solana.com/tx/41MZzSM5aXRFBbPdaFyqueRPhp6VJbFHESvfKRvhXXnqB5hkhDpyRqdAPE8mTgbpfUPxP7bjhQK7JdUuykKtk2Xh?cluster=devnet
     pub fn deposit_transaction() -> EncodedConfirmedTransactionWithStatusMeta {
         const ENCODED_DEPOSIT_TRANSACTION: &str = "AZZbWHQKwAkndrT0gmTPUn6tfnTAFYqJE8HTh+0OQ1f4dX1l/ah54VdJ/O9j1jNSZorH8+2BalrdbeONiWyxuwABAAEDIg5JU11WGypQAKfOpxcE0+UIiKney1G6hf+6GRXcmseaoN6/9tbZrK9zoPY+wNeEqI5eps8+kDCZ3zXX9UB+awAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAXfitZAvU6Mv/pQabeVthGg5LZFYn4GS4UMLpNalqt+4BAgIAAQwCAAAAAGXNHQAAAAA=";
         EncodedConfirmedTransactionWithStatusMeta {
