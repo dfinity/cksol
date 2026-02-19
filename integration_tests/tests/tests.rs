@@ -69,7 +69,7 @@ mod get_deposit_address_tests {
 }
 
 mod lifecycle {
-    use cksol_int_tests::SetupBuilder;
+    use cksol_int_tests::{Setup, SetupBuilder};
     use cksol_types::MinterInfo;
     use cksol_types_internal::UpgradeArgs;
     use cksol_types_internal::log::Priority;
@@ -94,7 +94,7 @@ mod lifecycle {
             minter_info,
             MinterInfo {
                 deposit_fee: 0,
-                minimum_withdrawal_amount: 0
+                minimum_withdrawal_amount: Setup::DEFAULT_MININUM_WITHDRAWAL_AMOUNT
             }
         );
 
@@ -160,7 +160,7 @@ mod retrieve_sol_tests {
 
         let args = RetrieveSolArgs {
             from_subaccount: None,
-            amount: 1,
+            amount: Setup::DEFAULT_MININUM_WITHDRAWAL_AMOUNT,
             address: "E4MpwNnMWs2XtW5gVrxZvyS7fMq31QD5HvbxmwP45Tz3".to_string(),
         };
 
@@ -168,7 +168,7 @@ mod retrieve_sol_tests {
         let err = result.unwrap_err();
         assert_eq!(err, RetrieveSolError::InsufficientFunds { balance: 0 });
 
-        let new_minimum_withdrawal_amount = 33;
+        let new_minimum_withdrawal_amount = Setup::DEFAULT_MININUM_WITHDRAWAL_AMOUNT + 1;
         setup
             .upgrade_minter(UpgradeArgs {
                 minimum_withdrawal_amount: Some(new_minimum_withdrawal_amount),
