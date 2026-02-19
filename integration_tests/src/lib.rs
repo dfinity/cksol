@@ -1,4 +1,4 @@
-use candid::{CandidType, Encode, Principal, encode_one, utils::ArgumentEncoder};
+use candid::{CandidType, Encode, Principal, utils::ArgumentEncoder};
 use canlog::{Log, LogEntry};
 use cksol_types::{
     Address, DepositStatus, GetDepositAddressArgs, MinterInfo, RetrieveSolArgs, RetrieveSolError,
@@ -113,7 +113,7 @@ impl Setup {
             sol_rpc_canister_id,
             Self::DEFAULT_CONTROLLER,
             "updateApiKeys",
-            encode_one(api_keys).unwrap(),
+            Encode!(&api_keys).unwrap(),
         )
         .await
         .expect("BUG: Failed to call updateApiKeys");
