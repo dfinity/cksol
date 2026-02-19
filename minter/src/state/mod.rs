@@ -82,7 +82,7 @@ impl State {
 
     pub fn ledger_canister_id(&self) -> Principal {
         self.ledger_canister_id
-    }    
+    }
 
     pub fn master_key_name(&self) -> Ed25519KeyName {
         self.master_key_name
