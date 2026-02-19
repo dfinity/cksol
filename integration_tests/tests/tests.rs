@@ -75,7 +75,7 @@ mod get_deposit_address_tests {
 }
 
 mod lifecycle {
-    use cksol_int_tests::SetupBuilder;
+    use cksol_int_tests::{Setup, SetupBuilder};
     use cksol_types::MinterInfo;
     use cksol_types_internal::UpgradeArgs;
     use cksol_types_internal::log::Priority;
@@ -96,7 +96,12 @@ mod lifecycle {
         let setup = SetupBuilder::new().build().await;
 
         let minter_info = setup.minter().get_minter_info().await;
-        assert_eq!(minter_info, MinterInfo { deposit_fee: 0 });
+        assert_eq!(
+            minter_info,
+            MinterInfo {
+                deposit_fee: Setup::DEFAULT_DEPOSIT_FEE
+            }
+        );
 
         let new_deposit_fee = 10;
         setup
