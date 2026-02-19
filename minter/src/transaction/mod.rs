@@ -2,24 +2,29 @@ use crate::state::read_state;
 use cksol_types::UpdateBalanceError;
 use ic_canister_runtime::{IcError, Runtime};
 use sol_rpc_client::SolRpcClient;
-use sol_rpc_types::{CommitmentLevel, GetTransactionEncoding, MultiRpcResult, RpcError};
+use sol_rpc_types::{
+    CommitmentLevel, ConsensusStrategy, GetTransactionEncoding, MultiRpcResult, RpcError,
+    RpcSources, SolanaCluster,
+};
 use solana_transaction_status_client_types::EncodedConfirmedTransactionWithStatusMeta;
 use thiserror::Error;
 
 #[cfg(test)]
 mod tests;
 
+// The amount of cycles we attach for a single `getTransaction` call to the SOL RPC canister.
+// TODO DEFI-2643: Move this to `State` and set during init/upgrade.
+const CYCLES_TO_ATTACH_FOR_GET_TRANSACTION: u128 = 1_000_000_000_000;
+
 pub async fn try_get_transaction<R: Runtime>(
     runtime: R,
     signature: solana_signature::Signature,
 ) -> Result<Option<EncodedConfirmedTransactionWithStatusMeta>, GetTransactionError> {
-    let client =
-        SolRpcClient::builder(runtime, read_state(|state| state.sol_rpc_canister_id())).build();
-    let result = client
+    let result = sol_rpc_client(runtime)
         .get_transaction(signature)
         .with_encoding(GetTransactionEncoding::Base64)
         .with_commitment(CommitmentLevel::Finalized)
-        .with_cycles(10_000_000_000_000)
+        .with_cycles(CYCLES_TO_ATTACH_FOR_GET_TRANSACTION)
         .try_send()
         .await;
     match result.map_err(GetTransactionError::IcError)? {
@@ -27,6 +32,21 @@ pub async fn try_get_transaction<R: Runtime>(
         MultiRpcResult::Consistent(Err(e)) => Err(GetTransactionError::RpcError(e)),
         MultiRpcResult::Inconsistent(_) => Err(GetTransactionError::InconsistentRpcResults),
     }
+}
+
+fn sol_rpc_client<R: Runtime>(runtime: R) -> SolRpcClient<R> {
+    // The maximum size of an HTTPs outcall response is 2MB:
+    // https://docs.internetcomputer.org/references/ic-interface-spec#ic-http_request
+    const MAX_RESPONSE_BYTES: u64 = 2_000_000;
+
+    SolRpcClient::builder(runtime, read_state(|state| state.sol_rpc_canister_id()))
+        .with_rpc_sources(RpcSources::Default(SolanaCluster::Mainnet))
+        .with_response_size_estimate(MAX_RESPONSE_BYTES)
+        .with_consensus_strategy(ConsensusStrategy::Threshold {
+            min: 3,
+            total: Some(4),
+        })
+        .build()
 }
 
 #[derive(Debug, PartialEq, Error)]
