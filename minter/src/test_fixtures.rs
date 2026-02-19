@@ -3,7 +3,6 @@ use candid::Principal;
 use cksol_types_internal::{Ed25519KeyName, InitArgs};
 use ic_ed25519::{PocketIcMasterPublicKeyId, PublicKey};
 use icrc_ledger_types::icrc1::account::Account;
-use sol_rpc_client::SOL_RPC_CANISTER;
 use solana_transaction_status_client_types::{
     EncodedConfirmedTransactionWithStatusMeta, EncodedTransaction,
     EncodedTransactionWithStatusMeta, TransactionBinaryEncoding, UiLoadedAddresses,
@@ -37,7 +36,7 @@ pub fn init_state() {
 pub fn init_schnorr_master_key() {
     mutate_state(|s| {
         s.set_once_minter_public_key(SchnorrPublicKey {
-            public_key: PublicKey::pocketic_key(PocketIcMasterPublicKeyId::DfxTestKey),
+            public_key: PublicKey::pocketic_key(PocketIcMasterPublicKeyId::Key1),
             chain_code: [1; 32],
         })
     });
