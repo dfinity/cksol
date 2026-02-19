@@ -7,12 +7,16 @@ use cksol_int_tests::{
     },
 };
 use cksol_types::{
-    GetDepositAddressArgs, RetrieveSolArgs, RetrieveSolError, RetrieveSolStatus, UpdateBalanceArgs,
-    UpdateBalanceError,
+    GetDepositAddressArgs, MinterInfo, RetrieveSolArgs, RetrieveSolError, RetrieveSolStatus,
+    UpdateBalanceArgs, UpdateBalanceError,
 };
-use ic_pocket_canister_runtime::{JsonRpcRequestMatcher, JsonRpcResponse, MockHttpOutcallsBuilder};
+use cksol_types_internal::{UpgradeArgs, log::Priority};
+use ic_pocket_canister_runtime::{
+    JsonRpcRequestMatcher, JsonRpcResponse, MockHttpOutcalls, MockHttpOutcallsBuilder,
+};
 use icrc_ledger_types::icrc1::account::Subaccount;
 use serde_json::json;
+use tokio::join;
 
 mod get_deposit_address_tests {
     use super::*;
@@ -75,10 +79,7 @@ mod get_deposit_address_tests {
 }
 
 mod lifecycle {
-    use cksol_int_tests::SetupBuilder;
-    use cksol_types::MinterInfo;
-    use cksol_types_internal::UpgradeArgs;
-    use cksol_types_internal::log::Priority;
+    use super::*;
 
     #[tokio::test]
     async fn should_get_logs() {
@@ -164,25 +165,19 @@ mod update_balance_tests {
     use super::*;
 
     #[tokio::test]
-    async fn should_not_update_balance_if_transaction_not_found() {
+    async fn should_fail_if_transaction_not_found() {
         fn transaction_not_found_response() -> JsonRpcResponse {
             JsonRpcResponse::from(json!({"jsonrpc": "2.0", "result": null, "id": 0}))
         }
 
         let setup = SetupBuilder::new().build().await;
 
-        let mocks = MockHttpOutcallsBuilder::new()
-            .given(get_deposit_transaction_request().with_id(0))
-            .respond_with(transaction_not_found_response().with_id(0))
-            .given(get_deposit_transaction_request().with_id(1))
-            .respond_with(transaction_not_found_response().with_id(1))
-            .given(get_deposit_transaction_request().with_id(2))
-            .respond_with(transaction_not_found_response().with_id(2))
-            .build();
-
         let result = setup
             .minter()
-            .with_http_mocks(mocks)
+            .with_http_mocks(mocks_for_single_sol_rpc_outcall(
+                get_deposit_transaction_request,
+                transaction_not_found_response,
+            ))
             .update_balance(default_update_balance_args())
             .await;
 
@@ -192,21 +187,41 @@ mod update_balance_tests {
     }
 
     #[tokio::test]
+    async fn should_fail_for_concurrent_access() {
+        let setup = SetupBuilder::new().build().await;
+
+        let minter1 = setup
+            .minter()
+            .with_http_mocks(mocks_for_single_sol_rpc_outcall(
+                get_deposit_transaction_request,
+                get_deposit_transaction_response,
+            ));
+        let minter2 = setup.minter();
+        let (result1, result2) = join!(
+            minter1.update_balance(default_update_balance_args()),
+            minter2.update_balance(default_update_balance_args())
+        );
+
+        // TODO DEFI-2643: Change once deposit logic is implemented
+        assert_matches!(result1, Err(UpdateBalanceError::TemporarilyUnavailable(s)) => {
+            assert!(s.contains("Not yet implemented!"))
+        });
+
+        assert_eq!(result2, Err(UpdateBalanceError::AlreadyProcessing));
+
+        setup.drop().await;
+    }
+
+    #[tokio::test]
     async fn should_update_balance() {
         let setup = SetupBuilder::new().build().await;
 
-        let mocks = MockHttpOutcallsBuilder::new()
-            .given(get_deposit_transaction_request().with_id(0))
-            .respond_with(get_deposit_transaction_response().with_id(0))
-            .given(get_deposit_transaction_request().with_id(1))
-            .respond_with(get_deposit_transaction_response().with_id(1))
-            .given(get_deposit_transaction_request().with_id(2))
-            .respond_with(get_deposit_transaction_response().with_id(2))
-            .build();
-
         let result = setup
             .minter()
-            .with_http_mocks(mocks)
+            .with_http_mocks(mocks_for_single_sol_rpc_outcall(
+                get_deposit_transaction_request,
+                get_deposit_transaction_response,
+            ))
             .update_balance(default_update_balance_args())
             .await;
 
@@ -216,6 +231,20 @@ mod update_balance_tests {
         });
 
         setup.drop().await;
+    }
+
+    fn mocks_for_single_sol_rpc_outcall(
+        request: impl Fn() -> JsonRpcRequestMatcher,
+        response: impl Fn() -> JsonRpcResponse,
+    ) -> MockHttpOutcalls {
+        MockHttpOutcallsBuilder::new()
+            .given(request().with_id(0))
+            .respond_with(response().with_id(0))
+            .given(request().with_id(1))
+            .respond_with(response().with_id(1))
+            .given(request().with_id(2))
+            .respond_with(response().with_id(2))
+            .build()
     }
 
     fn get_deposit_transaction_request() -> JsonRpcRequestMatcher {

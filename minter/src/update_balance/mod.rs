@@ -1,3 +1,4 @@
+use crate::guard::update_balance_guard;
 use crate::transaction::try_get_transaction;
 use canlog::log;
 use cksol_types::{DepositStatus, UpdateBalanceError};
@@ -10,9 +11,11 @@ mod tests;
 
 pub async fn update_balance<R: Runtime + Clone>(
     runtime: R,
-    _account: Account,
+    account: Account,
     signature: solana_signature::Signature,
 ) -> Result<DepositStatus, UpdateBalanceError> {
+    let _guard = update_balance_guard(account)?;
+
     let maybe_transaction = try_get_transaction(runtime.clone(), signature)
         .await
         .map_err(|e| {

@@ -4,6 +4,7 @@ mod tests;
 use candid::Principal;
 use cksol_types_internal::{Ed25519KeyName, InitArgs, UpgradeArgs};
 use ic_ed25519::PublicKey;
+use icrc_ledger_types::icrc1::account::Account;
 use std::cell::RefCell;
 use std::collections::BTreeSet;
 
@@ -59,6 +60,7 @@ pub struct State {
     ledger_canister_id: Principal,
     sol_rpc_canister_id: Principal,
     deposit_fee: u64,
+    pending_update_balance_requests: BTreeSet<Account>,
 }
 
 impl State {
@@ -93,6 +95,10 @@ impl State {
 
     pub fn deposit_fee(&self) -> u64 {
         self.deposit_fee
+    }
+
+    pub fn pending_update_balance_requests_mut(&mut self) -> &mut BTreeSet<Account> {
+        &mut self.pending_update_balance_requests
     }
 
     fn upgrade(
@@ -148,6 +154,7 @@ impl TryFrom<InitArgs> for State {
             ledger_canister_id,
             sol_rpc_canister_id,
             deposit_fee,
+            pending_update_balance_requests: BTreeSet::new(),
         })
     }
 }

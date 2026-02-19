@@ -1,4 +1,5 @@
 pub mod address;
+mod guard;
 pub mod lifecycle;
 pub mod state;
 mod storage;
