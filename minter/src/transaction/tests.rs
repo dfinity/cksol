@@ -1,9 +1,20 @@
 use crate::{
-    test_fixtures::{deposit::deposit_transaction_signature, init_state},
-    transaction::{GetTransactionError, try_get_transaction},
+    test_fixtures::{
+        deposit::{
+            DEPOSIT_ADDRESS, DEPOSIT_AMOUNT, deposit_transaction, deposit_transaction_signature,
+            deposit_transaction_to_wrong_address,
+        },
+        init_state,
+    },
+    transaction::{
+        GetDepositAmountError, GetTransactionError, get_deposit_amount_to_address,
+        try_get_transaction,
+    },
 };
+use assert_matches::assert_matches;
 use ic_canister_runtime::{IcError, StubRuntime};
 use sol_rpc_types::{HttpOutcallError, RpcError, RpcSource, SupportedRpcProviderId};
+use solana_transaction_status_client_types::{EncodedTransaction, TransactionBinaryEncoding};
 
 mod get_transaction_tests {
     use super::*;
@@ -86,5 +97,54 @@ mod get_transaction_tests {
         let result = try_get_transaction(runtime, deposit_transaction_signature()).await;
 
         assert_eq!(result, Ok(None))
+    }
+}
+
+mod get_deposit_amount_tests {
+    use super::*;
+
+    #[test]
+    fn should_fail_if_transaction_decoding_fails() {
+        let mut transaction = deposit_transaction();
+        transaction.transaction.transaction =
+            EncodedTransaction::Binary("invalid".to_string(), TransactionBinaryEncoding::Base64);
+
+        let result = get_deposit_amount_to_address(transaction, DEPOSIT_ADDRESS);
+
+        assert_matches!(
+            result,
+            Err(GetDepositAmountError::TransactionParsingFailed(e)) => assert!(e.contains("Transaction decoding failed"))
+        );
+    }
+
+    #[test]
+    fn should_fail_if_transaction_has_no_meta() {
+        let mut transaction = deposit_transaction();
+        transaction.transaction.meta = None;
+
+        let result = get_deposit_amount_to_address(transaction, DEPOSIT_ADDRESS);
+
+        assert_eq!(result, Err(GetDepositAmountError::NoMetaField));
+    }
+
+    #[test]
+    fn should_fail_if_transaction_deposit_to_wrong_address() {
+        let transaction = deposit_transaction_to_wrong_address();
+
+        let result = get_deposit_amount_to_address(transaction, DEPOSIT_ADDRESS);
+
+        assert_eq!(
+            result,
+            Err(GetDepositAmountError::DepositAddressNotInAccountKeys)
+        );
+    }
+
+    #[test]
+    fn should_succeed_for_valid_deposit() {
+        let transaction = deposit_transaction();
+
+        let result = get_deposit_amount_to_address(transaction, DEPOSIT_ADDRESS);
+
+        assert_eq!(result, Ok(DEPOSIT_AMOUNT));
     }
 }
