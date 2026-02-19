@@ -59,6 +59,7 @@ pub struct State {
     ledger_canister_id: Principal,
     sol_rpc_canister_id: Principal,
     deposit_fee: u64,
+    minimum_withdrawal_amount: u64,
 }
 
 impl State {
@@ -87,11 +88,16 @@ impl State {
         self.deposit_fee
     }
 
+    pub fn minimum_withdrawal_amount(&self) -> u64 {
+        self.minimum_withdrawal_amount
+    }
+
     fn upgrade(
         &mut self,
         UpgradeArgs {
             sol_rpc_canister_id,
             deposit_fee,
+            minimum_withdrawal_amount,
         }: UpgradeArgs,
     ) -> Result<(), InvalidStateError> {
         if let Some(sol_rpc_canister_id) = sol_rpc_canister_id {
@@ -99,6 +105,9 @@ impl State {
         }
         if let Some(deposit_fee) = deposit_fee {
             self.deposit_fee = deposit_fee;
+        }
+        if let Some(minimum_withdrawal_amount) = minimum_withdrawal_amount {
+            self.minimum_withdrawal_amount = minimum_withdrawal_amount;
         }
         Ok(())
     }
@@ -118,6 +127,7 @@ impl TryFrom<InitArgs> for State {
             ledger_canister_id,
             deposit_fee,
             master_key_name,
+            minimum_withdrawal_amount,
         }: InitArgs,
     ) -> Result<Self, Self::Error> {
         let canister_ids: BTreeSet<_> = [sol_rpc_canister_id, ledger_canister_id]
@@ -140,6 +150,7 @@ impl TryFrom<InitArgs> for State {
             ledger_canister_id,
             sol_rpc_canister_id,
             deposit_fee,
+            minimum_withdrawal_amount,
         })
     }
 }

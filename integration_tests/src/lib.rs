@@ -44,6 +44,7 @@ pub struct Setup {
 impl Setup {
     pub const DEFAULT_CONTROLLER: Principal = Principal::from_slice(&[0x9d, 0xf7, 0x01]);
     pub const DEFAULT_CALLER: Principal = Principal::from_slice(&[0x9d, 0xf7, 0x02]);
+    pub const DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT: u64 = 10000000;
 
     async fn new(caller: Option<Principal>) -> Self {
         let env = PocketIcBuilder::new()
@@ -231,5 +232,6 @@ fn cksol_minter_init_args() -> cksol_types_internal::MinterArg {
         ledger_canister_id: Principal::from_slice(&[43_u8]),
         deposit_fee: 0,
         master_key_name: Ed25519KeyName::MainnetProdKey1,
+        minimum_withdrawal_amount: Setup::DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT,
     })
 }
