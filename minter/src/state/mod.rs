@@ -3,7 +3,10 @@ mod tests;
 
 use candid::Principal;
 use cksol_types_internal::{Ed25519KeyName, InitArgs, UpgradeArgs};
+use ic_canister_runtime::Runtime;
 use ic_ed25519::PublicKey;
+use sol_rpc_client::SolRpcClient;
+use sol_rpc_types::{ConsensusStrategy, RpcSources, SolanaCluster};
 use std::cell::RefCell;
 use std::collections::BTreeSet;
 
@@ -93,6 +96,20 @@ impl State {
 
     pub fn deposit_fee(&self) -> u64 {
         self.deposit_fee
+    }
+
+    pub fn sol_rpc_client<R: Runtime>(&self, runtime: R) -> SolRpcClient<R> {
+        // The maximum size of an HTTPs outcall response is 2MB:
+        // https://docs.internetcomputer.org/references/ic-interface-spec#ic-http_request
+        const MAX_RESPONSE_BYTES: u64 = 2_000_000;
+        SolRpcClient::builder(runtime, self.sol_rpc_canister_id)
+            .with_rpc_sources(RpcSources::Default(SolanaCluster::Mainnet))
+            .with_response_size_estimate(MAX_RESPONSE_BYTES)
+            .with_consensus_strategy(ConsensusStrategy::Threshold {
+                min: 3,
+                total: Some(4),
+            })
+            .build()
     }
 
     fn upgrade(
