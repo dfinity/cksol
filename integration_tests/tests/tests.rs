@@ -232,6 +232,8 @@ mod update_balance_tests {
             .respond_with(transaction_not_found_response().with_id(1))
             .given(get_deposit_transaction_request().with_id(2))
             .respond_with(transaction_not_found_response().with_id(2))
+            .given(get_deposit_transaction_request().with_id(3))
+            .respond_with(transaction_not_found_response().with_id(3))
             .build();
 
         let result = setup
@@ -256,6 +258,8 @@ mod update_balance_tests {
             .respond_with(get_deposit_transaction_response().with_id(1))
             .given(get_deposit_transaction_request().with_id(2))
             .respond_with(get_deposit_transaction_response().with_id(2))
+            .given(get_deposit_transaction_request().with_id(3))
+            .respond_with(get_deposit_transaction_response().with_id(3))
             .build();
 
         let result = setup
