@@ -20,6 +20,7 @@ pub async fn try_get_transaction<R: Runtime>(
     runtime: R,
     signature: solana_signature::Signature,
 ) -> Result<Option<EncodedConfirmedTransactionWithStatusMeta>, GetTransactionError> {
+    // TODO DEFI-2643: Make sure caller has sufficiently many cycles attached
     let result = sol_rpc_client(runtime)
         .get_transaction(signature)
         .with_encoding(GetTransactionEncoding::Base64)
@@ -27,6 +28,7 @@ pub async fn try_get_transaction<R: Runtime>(
         .with_cycles(CYCLES_TO_ATTACH_FOR_GET_TRANSACTION)
         .try_send()
         .await;
+    // TODO DEFI-2643: Take (cost of call to SOL RPC canister + overhead) cycles from caller
     match result.map_err(GetTransactionError::IcError)? {
         MultiRpcResult::Consistent(Ok(maybe_transaction)) => Ok(maybe_transaction),
         MultiRpcResult::Consistent(Err(e)) => Err(GetTransactionError::RpcError(e)),

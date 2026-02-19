@@ -13,6 +13,9 @@ pub async fn update_balance<R: Runtime + Clone>(
     _account: Account,
     signature: solana_signature::Signature,
 ) -> Result<DepositStatus, UpdateBalanceError> {
+    // TODO DEFI-2643: Add guard to prevent concurrent calls
+    // TODO DEFI-2643: Check state to see if transaction is known
+
     let maybe_transaction = try_get_transaction(runtime.clone(), signature)
         .await
         .map_err(|e| {
