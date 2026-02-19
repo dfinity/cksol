@@ -4,6 +4,11 @@ use cksol_types_internal::{Ed25519KeyName, InitArgs};
 use ic_ed25519::{PocketIcMasterPublicKeyId, PublicKey};
 use icrc_ledger_types::icrc1::account::Account;
 use sol_rpc_client::SOL_RPC_CANISTER;
+use solana_transaction_status_client_types::{
+    EncodedConfirmedTransactionWithStatusMeta, EncodedTransaction,
+    EncodedTransactionWithStatusMeta, TransactionBinaryEncoding, UiLoadedAddresses,
+    UiTransactionStatusMeta, option_serializer::OptionSerializer,
+};
 use std::str::FromStr;
 
 pub const DEPOSIT_FEE: u64 = 50;
@@ -119,5 +124,44 @@ pub mod deposit {
     pub fn deposit_transaction_signature() -> solana_signature::Signature {
         const SIGNATURE: &str = "41MZzSM5aXRFBbPdaFyqueRPhp6VJbFHESvfKRvhXXnqB5hkhDpyRqdAPE8mTgbpfUPxP7bjhQK7JdUuykKtk2Xh";
         solana_signature::Signature::from_str(SIGNATURE).unwrap()
+    }
+
+    // Transfer from Solana address 3HwVowmCYKPWjRvkqfEfYFWetZLPmZW6LCnLEQDHqpJJ to
+    // BQc4UB4yuhHRT5r6jyQFnUi54W5ZoXW8Lvfd6VaKoQfc on the Solana Devnet
+    pub fn deposit_transaction() -> EncodedConfirmedTransactionWithStatusMeta {
+        const ENCODED_DEPOSIT_TRANSACTION: &str = "AZZbWHQKwAkndrT0gmTPUn6tfnTAFYqJE8HTh+0OQ1f4dX1l/ah54VdJ/O9j1jNSZorH8+2BalrdbeONiWyxuwABAAEDIg5JU11WGypQAKfOpxcE0+UIiKney1G6hf+6GRXcmseaoN6/9tbZrK9zoPY+wNeEqI5eps8+kDCZ3zXX9UB+awAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAXfitZAvU6Mv/pQabeVthGg5LZFYn4GS4UMLpNalqt+4BAgIAAQwCAAAAAGXNHQAAAAA=";
+        EncodedConfirmedTransactionWithStatusMeta {
+            slot: 443005390,
+            transaction: EncodedTransactionWithStatusMeta {
+                transaction: EncodedTransaction::Binary(
+                    ENCODED_DEPOSIT_TRANSACTION.to_string(),
+                    TransactionBinaryEncoding::Base64,
+                ),
+                meta: Some(UiTransactionStatusMeta {
+                    compute_units_consumed: OptionSerializer::Some(150),
+                    cost_units: OptionSerializer::Some(1481),
+                    err: None,
+                    fee: 5000,
+                    inner_instructions: OptionSerializer::Some(vec![]),
+                    loaded_addresses: OptionSerializer::Some(UiLoadedAddresses {
+                        writable: vec![],
+                        readonly: vec![],
+                    }),
+                    log_messages: OptionSerializer::Some(vec![
+                        "Program 11111111111111111111111111111111 invoke [1]".to_string(),
+                        "Program 11111111111111111111111111111111 success".to_string(),
+                    ]),
+                    post_balances: vec![1895821440, 500000000, 1],
+                    post_token_balances: OptionSerializer::Some(vec![]),
+                    pre_balances: vec![2395826440, 0, 1],
+                    pre_token_balances: OptionSerializer::Some(vec![]),
+                    rewards: OptionSerializer::None,
+                    status: Ok(()),
+                    return_data: OptionSerializer::Skip,
+                }),
+                version: None,
+            },
+            block_time: Some(1771421567),
+        }
     }
 }

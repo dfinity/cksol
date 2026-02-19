@@ -1,5 +1,8 @@
 use crate::{
-    test_fixtures::{deposit::deposit_transaction_signature, init_state},
+    test_fixtures::{
+        deposit::{deposit_transaction, deposit_transaction_signature},
+        init_state,
+    },
     transaction::{GetTransactionError, try_get_transaction},
 };
 use ic_canister_runtime::{IcError, StubRuntime};
@@ -81,10 +84,12 @@ mod get_transaction_tests {
     async fn should_return_transaction() {
         init_state();
 
-        let runtime = StubRuntime::new().add_stub_response(MultiRpcResult::Consistent(Ok(None)));
+        let runtime = StubRuntime::new().add_stub_response(MultiRpcResult::Consistent(Ok(Some(
+            deposit_transaction().try_into().unwrap(),
+        ))));
 
         let result = try_get_transaction(runtime, deposit_transaction_signature()).await;
 
-        assert_eq!(result, Ok(None))
+        assert_eq!(result, Ok(Some(deposit_transaction())))
     }
 }
