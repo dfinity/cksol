@@ -31,15 +31,7 @@ pub fn valid_init_args() -> InitArgs {
 }
 
 pub fn init_state() {
-    init_once_state(
-        State::try_from(InitArgs {
-            sol_rpc_canister_id: SOL_RPC_CANISTER,
-            ledger_canister_id: Principal::from_text("uxrrr-q7777-77774-qaaaq-cai").unwrap(),
-            deposit_fee: DEPOSIT_FEE,
-            master_key_name: Ed25519KeyName::LocalDevelopment,
-        })
-        .expect("Invalid init args"),
-    );
+    init_once_state(State::try_from(valid_init_args()).expect("Invalid init args"));
 }
 
 pub fn init_schnorr_master_key() {
