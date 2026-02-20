@@ -2,9 +2,7 @@
 
 use canlog::{GetLogFilter, LogFilter, LogPriorityLevels};
 use serde::{Deserialize, Serialize};
-use std::fmt;
-use std::fmt::Formatter;
-use std::str::FromStr;
+use std::{fmt, fmt::Formatter, str::FromStr};
 
 /// The priority level of a log entry.
 #[derive(LogPriorityLevels, Serialize, Deserialize, PartialEq, Debug, Copy, Clone)]

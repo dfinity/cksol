@@ -2,6 +2,7 @@ pub mod address;
 pub mod lifecycle;
 pub mod state;
 pub mod storage;
+pub mod transaction;
 pub mod update_balance;
 
 #[cfg(test)]
