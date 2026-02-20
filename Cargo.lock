@@ -487,6 +487,7 @@ dependencies = [
  "ic-pocket-canister-runtime",
  "ic-test-utilities-load-wasm",
  "icrc-ledger-types",
+ "num-traits",
  "pocket-ic",
  "reqwest 0.13.2",
  "serde",
@@ -506,6 +507,7 @@ dependencies = [
  "canlog",
  "cksol-types",
  "cksol-types-internal",
+ "derive_more",
  "hex",
  "ic-canister-runtime",
  "ic-cdk",
@@ -533,9 +535,13 @@ name = "cksol-types"
 version = "0.1.0"
 dependencies = [
  "candid",
+ "derive_more",
  "icrc-ledger-types",
+ "minicbor",
+ "proptest",
  "serde",
  "sol_rpc_types",
+ "solana-signature",
  "thiserror 2.0.18",
 ]
 

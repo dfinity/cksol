@@ -1,5 +1,6 @@
 use crate::{runtime::CanisterRuntime, state::read_state};
 use cksol_types::UpdateBalanceError;
+use derive_more::From;
 use ic_canister_runtime::IcError;
 use sol_rpc_types::{CommitmentLevel, GetTransactionEncoding, Lamport, MultiRpcResult, RpcError};
 use solana_address::Address;
@@ -14,7 +15,7 @@ mod tests;
 const CYCLES_TO_ATTACH_FOR_GET_TRANSACTION: u128 = 1_000_000_000_000;
 
 pub async fn try_get_transaction<R: CanisterRuntime>(
-    runtime: R,
+    runtime: &R,
     signature: solana_signature::Signature,
 ) -> Result<Option<EncodedConfirmedTransactionWithStatusMeta>, GetTransactionError> {
     // TODO DEFI-2643: Make sure caller has sufficiently many cycles attached
@@ -26,14 +27,14 @@ pub async fn try_get_transaction<R: CanisterRuntime>(
         .try_send()
         .await;
     // TODO DEFI-2643: Take (cost of call to SOL RPC canister + overhead) cycles from caller
-    match result.map_err(GetTransactionError::IcError)? {
+    match result? {
         MultiRpcResult::Consistent(Ok(maybe_transaction)) => Ok(maybe_transaction),
         MultiRpcResult::Consistent(Err(e)) => Err(GetTransactionError::RpcError(e)),
         MultiRpcResult::Inconsistent(_) => Err(GetTransactionError::InconsistentRpcResults),
     }
 }
 
-#[derive(Debug, PartialEq, Error)]
+#[derive(Debug, PartialEq, Error, From)]
 pub enum GetTransactionError {
     #[error("Error while calling SOL RPC canister: {0}")]
     IcError(IcError),

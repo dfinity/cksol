@@ -1,5 +1,6 @@
 use crate::{
     address::get_deposit_address,
+    ledger::mint,
     runtime::CanisterRuntime,
     state::read_state,
     transaction::{get_deposit_amount_to_address, try_get_transaction},
@@ -20,13 +21,15 @@ pub async fn update_balance<R: CanisterRuntime>(
     // TODO DEFI-2643: Add guard to prevent concurrent calls
     // TODO DEFI-2643: Check state to see if transaction is known
 
-    let maybe_transaction = try_get_transaction(runtime, signature).await.map_err(|e| {
-        log!(
-            Priority::Info,
-            "Error fetching transaction with signature {signature}: {e}"
-        );
-        UpdateBalanceError::from(e)
-    })?;
+    let maybe_transaction = try_get_transaction(&runtime, signature)
+        .await
+        .map_err(|e| {
+            log!(
+                Priority::Info,
+                "Error fetching transaction with signature {signature}: {e}"
+            );
+            UpdateBalanceError::from(e)
+        })?;
 
     let transaction = match maybe_transaction {
         Some(transaction) => Ok(transaction),
@@ -47,6 +50,18 @@ pub async fn update_balance<R: CanisterRuntime>(
     if deposit_amount < deposit_fee {
         return Err(UpdateBalanceError::ValueTooSmall);
     }
+    let amount_to_mint = deposit_amount - deposit_fee;
 
-    Ok(DepositStatus::Processing(signature.into()))
+    // TODO DEFI-2643: Record event for processed deposit
+
+    match mint(&runtime, account, amount_to_mint, signature.into()).await {
+        Ok(deposit_status) => Ok(deposit_status),
+        Err(e) => {
+            log!(
+                Priority::Info,
+                "Error minting tokens for deposit transaction with signature {signature}: {e}"
+            );
+            Ok(DepositStatus::Processing(signature.into()))
+        }
+    }
 }
