@@ -4165,7 +4165,7 @@ dependencies = [
  "solana-reward-info",
  "solana-sdk-ids",
  "solana-signature",
- "solana-system-interface 3.0.0",
+ "solana-system-interface 3.1.0",
  "solana-transaction-error",
  "solana-transaction-status-client-types",
  "strum 0.27.2",
