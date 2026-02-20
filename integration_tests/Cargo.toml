@@ -11,7 +11,7 @@ license.workspace = true
 candid = { workspace = true }
 canlog = { workspace = true }
 cksol-types = { path = "../libs/types" }
-cksol-types-internal = { path = "../libs/types-internal", features = ["log"] }
+cksol-types-internal = { path = "../libs/types-internal", features = ["log", "event"] }
 ic-canister-runtime = { workspace = true }
 ic-http-types = { workspace = true }
 ic-management-canister-types = { workspace = true }
@@ -22,6 +22,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 
 [dev-dependencies]
+assert2 = { workspace = true }
 assert_matches = { workspace = true }
 icrc-ledger-types = { workspace = true }
 tokio = { workspace = true }

@@ -60,6 +60,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "assert2"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a1f7e619706e24555d32d89b4446960bec3d085d1f488c659874b0929998bc28"
+dependencies = [
+ "assert2-macros",
+ "diff",
+ "terminal_size",
+ "unicode-width 0.2.2",
+ "yansi",
+]
+
+[[package]]
+name = "assert2-macros"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "347ba98d9bd5467cf7e5b5ea0a90b509d9b589060b302fcc0d9ae6268ff7e02e"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "rustc_version",
+ "syn 2.0.114",
+]
+
+[[package]]
 name = "assert_matches"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -448,6 +473,7 @@ checksum = "613afe47fcd5fac7ccf1db93babcb082c5994d996f20b8b159f2ad1658eb5724"
 name = "cksol-int-tests"
 version = "0.1.0"
 dependencies = [
+ "assert2",
  "assert_matches",
  "candid",
  "canlog",
@@ -804,6 +830,12 @@ dependencies = [
  "rustc_version",
  "syn 2.0.114",
 ]
+
+[[package]]
+name = "diff"
+version = "0.1.13"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "56254986775e3233ffa9c4d7d3faaf6d36a2c09d30b20687e9f88bc8bafc16c8"
 
 [[package]]
 name = "digest"
@@ -3881,6 +3913,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "terminal_size"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "60b8cb979cb11c32ce1603f8137b22262a9d131aaa5c37b5678025f22b8becd0"
+dependencies = [
+ "rustix",
+ "windows-sys 0.60.2",
+]
+
+[[package]]
 name = "thiserror"
 version = "1.0.69"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4779,6 +4821,12 @@ name = "wslpath"
 version = "0.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "04a2ecdf2cc4d33a6a93d71bcfbc00bb1f635cdb8029a2cc0709204a045ec7a3"
+
+[[package]]
+name = "yansi"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cfe53a6657fd280eaa890a3bc59152892ffa3e30101319d168b781ed6529b049"
 
 [[package]]
 name = "yoke"
