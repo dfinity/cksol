@@ -1,12 +1,18 @@
 use assert_matches::assert_matches;
 use candid::Principal;
-use cksol_int_tests::fixtures::{default_update_balance_args, some_signature};
-use cksol_int_tests::{Setup, SetupBuilder};
+use cksol_int_tests::{
+    Setup, SetupBuilder,
+    fixtures::{
+        DEPOSIT_TRANSACTION_SIGNATURE, default_update_balance_args, deposit_transaction_signature,
+    },
+};
 use cksol_types::{
     GetDepositAddressArgs, RetrieveSolArgs, RetrieveSolError, RetrieveSolStatus, UpdateBalanceArgs,
     UpdateBalanceError,
 };
+use ic_pocket_canister_runtime::{JsonRpcRequestMatcher, JsonRpcResponse, MockHttpOutcallsBuilder};
 use icrc_ledger_types::icrc1::account::Subaccount;
+use serde_json::json;
 
 mod get_deposit_address_tests {
     use super::*;
@@ -27,7 +33,7 @@ mod get_deposit_address_tests {
     async fn should_get_deposit_address() {
         let setup = SetupBuilder::new().build().await;
 
-        const DEFAULT_CALLER_DEPOSIT_ADDRESS: &str = "6sCCyJVCPgzu6VEgeqJyxhW9X2W6ijAAReCRTfD5iecH";
+        const DEFAULT_CALLER_DEPOSIT_ADDRESS: &str = "Bp4HGmh5yPKB364FnKCfR8yVcMopLBTpJ8uCwqSKHH8H";
 
         // Owner is the default caller
         assert_eq!(
@@ -38,17 +44,17 @@ mod get_deposit_address_tests {
         // Different owner
         assert_eq!(
             get_deposit_address(&setup, Some(Principal::from_slice(&[1])), None).await,
-            "E4MpwNnMWs2XtW5gVrxZvyS7fMq31QD5HvbxmwP45Tz3"
+            "2fKa3spdjRZoCZ2hCzs5KEWM5RkVASCKdHpM2stuWgBV"
         );
 
         // Owner is the default caller, but different subaccounts specified
         assert_eq!(
             get_deposit_address(&setup, None, Some([1; 32])).await,
-            "2HFvz11FCjQzezfnm8BEN5XbCmxva1vyrZzs7p3ZvWNC"
+            "64MdjAMBn5YnL5iE5K5UifTqA4XjHW1xb7u7861wBjcf"
         );
         assert_eq!(
             get_deposit_address(&setup, None, Some([2; 32])).await,
-            "2VP5Kmg7cZm8GA599LeA3j9M3QcpSCdwfdqNdFskyA2u"
+            "244iFvwwqfX1PSvvGPBnsEnXV1MKEnNHfFTkUVsdtp1n"
         );
 
         setup.drop().await;
@@ -101,7 +107,8 @@ mod lifecycle {
         let new_deposit_fee = 10;
         let new_minimum_withdrawal_amount = 20;
         setup
-            .upgrade_minter(UpgradeArgs {
+            .minter()
+            .upgrade(UpgradeArgs {
                 deposit_fee: Some(new_deposit_fee),
                 minimum_withdrawal_amount: Some(new_minimum_withdrawal_amount),
                 ..Default::default()
@@ -170,7 +177,8 @@ mod retrieve_sol_tests {
 
         let new_minimum_withdrawal_amount = Setup::DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT + 1;
         setup
-            .upgrade_minter(UpgradeArgs {
+            .minter()
+            .upgrade(UpgradeArgs {
                 minimum_withdrawal_amount: Some(new_minimum_withdrawal_amount),
                 ..Default::default()
             })
@@ -212,19 +220,117 @@ mod update_balance_tests {
     use super::*;
 
     #[tokio::test]
-    async fn should_update_balance() {
+    async fn should_not_update_balance_if_transaction_not_found() {
+        fn transaction_not_found_response() -> JsonRpcResponse {
+            JsonRpcResponse::from(json!({"jsonrpc": "2.0", "result": null, "id": 0}))
+        }
+
         let setup = SetupBuilder::new().build().await;
+
+        let mocks = MockHttpOutcallsBuilder::new()
+            .given(get_deposit_transaction_request().with_id(0))
+            .respond_with(transaction_not_found_response().with_id(0))
+            .given(get_deposit_transaction_request().with_id(1))
+            .respond_with(transaction_not_found_response().with_id(1))
+            .given(get_deposit_transaction_request().with_id(2))
+            .respond_with(transaction_not_found_response().with_id(2))
+            .given(get_deposit_transaction_request().with_id(3))
+            .respond_with(transaction_not_found_response().with_id(3))
+            .build();
 
         let result = setup
             .minter()
+            .with_http_mocks(mocks)
             .update_balance(default_update_balance_args())
             .await;
 
+        assert_eq!(result, Err(UpdateBalanceError::TransactionNotFound));
+
+        setup.drop().await;
+    }
+
+    #[tokio::test]
+    async fn should_update_balance() {
+        let setup = SetupBuilder::new().build().await;
+
+        let mocks = MockHttpOutcallsBuilder::new()
+            .given(get_deposit_transaction_request().with_id(0))
+            .respond_with(get_deposit_transaction_response().with_id(0))
+            .given(get_deposit_transaction_request().with_id(1))
+            .respond_with(get_deposit_transaction_response().with_id(1))
+            .given(get_deposit_transaction_request().with_id(2))
+            .respond_with(get_deposit_transaction_response().with_id(2))
+            .given(get_deposit_transaction_request().with_id(3))
+            .respond_with(get_deposit_transaction_response().with_id(3))
+            .build();
+
+        let result = setup
+            .minter()
+            .with_http_mocks(mocks)
+            .update_balance(default_update_balance_args())
+            .await;
+
+        // TODO DEFI-2643: Change once deposit logic is implemented
         assert_matches!(result, Err(UpdateBalanceError::TemporarilyUnavailable(s)) => {
             assert!(s.contains("Not yet implemented!"))
         });
 
         setup.drop().await;
+    }
+
+    fn get_deposit_transaction_request() -> JsonRpcRequestMatcher {
+        JsonRpcRequestMatcher::with_method("getTransaction")
+            .with_params(json!([
+                DEPOSIT_TRANSACTION_SIGNATURE,
+                {"encoding": "base64", "commitment": "finalized"}
+            ]))
+            .with_id(0)
+    }
+
+    fn get_deposit_transaction_response() -> JsonRpcResponse {
+        JsonRpcResponse::from(json!({
+            "jsonrpc": "2.0",
+            "result": {
+                "blockTime": 1770997258,
+                "meta": {
+                    "computeUnitsConsumed": 150,
+                    "costUnits": 1481,
+                    "err": null,
+                    "fee": 5000,
+                    "innerInstructions": [],
+                    "loadedAddresses": {
+                        "readonly": [],
+                        "writable": []
+                    },
+                    "logMessages": [
+                        "Program 11111111111111111111111111111111 invoke [1]",
+                        "Program 11111111111111111111111111111111 success"
+                    ],
+                    "postBalances": [
+                        3395836440_u64,
+                        500000000,
+                        1
+                    ],
+                    "postTokenBalances": [],
+                    "preBalances": [
+                        3895841440_u64,
+                        0,
+                        1
+                    ],
+                    "preTokenBalances": [],
+                    "rewards": [],
+                    "status": {
+                        "Ok": null
+                    }
+                },
+                "slot": 441894876,
+                "transaction": [
+                    "AbPf97eQzgIgQGGFzEA2zvWWbaNdZxVOsN+Zem/HooxKiAzkImkLy/qXv56MOq0kQ9yJYWw4ZTOGP8mTemI6MgsBAAEDIg5JU11WGypQAKfOpxcE0+UIiKney1G6hf+6GRXcmscnpwFQ/UrMJ1PeTEdnddpynJZVZBAGM5/4YyiEZlx8QQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA/ojmZ6HPuhM7YU56uETXnzzzvzHc55RxGfYTOIsoFu0BAgIAAQwCAAAAAGXNHQAAAAA=",
+                    "base64"
+                ]
+            },
+            "id": 1
+        }))
     }
 }
 
@@ -258,7 +364,7 @@ mod anonymous_caller_tests {
                 .try_update_balance(UpdateBalanceArgs {
                     owner,
                     subaccount: None,
-                    signature: some_signature(),
+                    signature: deposit_transaction_signature(),
                 })
                 .await;
             assert_matches!(result, Err(s) => s.contains("the owner must be non-anonymous"));

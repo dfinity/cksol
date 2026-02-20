@@ -3,6 +3,7 @@ pub mod lifecycle;
 pub mod retrieve_sol;
 pub mod state;
 mod storage;
+pub mod transaction;
 pub mod update_balance;
 
 #[cfg(test)]

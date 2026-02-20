@@ -18,6 +18,7 @@ canlog = { workspace = true, features = ["derive"] }
 cksol-types = { path = "../libs/types" }
 cksol-types-internal = { path = "../libs/types-internal", features = ["event", "log"] }
 hex = { workspace = true }
+ic-canister-runtime = { workspace = true }
 ic-cdk = { workspace = true }
 ic-dummy-getrandom-for-wasm = { workspace = true }
 ic-ed25519 = { workspace = true }
@@ -27,13 +28,17 @@ icrc-cbor = { workspace = true }
 icrc-ledger-client-cdk = { workspace = true }
 icrc-ledger-types = { workspace = true }
 minicbor = { workspace = true, features = ["derive"] }
+num-traits = { workspace = true }
 serde = { workspace = true }
 sol_rpc_client = { workspace = true }
 sol_rpc_types = { workspace = true }
 solana-address = { workspace = true }
 solana-signature = { workspace = true }
+solana-transaction-status-client-types = { workspace = true }
+thiserror = { workspace = true }
 
 [dev-dependencies]
 assert_matches = { workspace = true }
 candid_parser = { workspace = true }
 proptest = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
