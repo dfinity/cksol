@@ -134,22 +134,6 @@ impl Setup {
         }
     }
 
-    pub async fn upgrade_minter(
-        &self,
-        upgrade_args: cksol_types_internal::UpgradeArgs,
-    ) -> Result<(), RejectResponse> {
-        self.env
-            .as_ref()
-            .unwrap()
-            .upgrade_canister(
-                self.minter_canister_id,
-                cksol_minter_wasm(),
-                Encode!(&MinterArg::Upgrade(upgrade_args)).unwrap(),
-                Some(Self::DEFAULT_CONTROLLER),
-            )
-            .await
-    }
-
     pub fn with_caller(mut self, caller: Principal) -> Self {
         self.caller = Some(caller);
         self
@@ -254,6 +238,21 @@ impl CkSolMinter<'_> {
         serde_json::from_slice::<Log<Priority>>(&response.body)
             .expect("failed to parse SOL RPC canister log")
             .entries
+    }
+
+    pub async fn upgrade(
+        &self,
+        upgrade_args: cksol_types_internal::UpgradeArgs,
+    ) -> Result<(), RejectResponse> {
+        self.runtime
+            .as_ref()
+            .upgrade_canister(
+                self.id,
+                cksol_minter_wasm(),
+                Encode!(&MinterArg::Upgrade(upgrade_args)).unwrap(),
+                Some(Setup::DEFAULT_CONTROLLER),
+            )
+            .await
     }
 
     pub fn with_http_mocks(mut self, mocks: impl ExecuteHttpOutcallMocks + 'static) -> Self {
