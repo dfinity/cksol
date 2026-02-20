@@ -1,5 +1,6 @@
 use candid::Principal;
 use canlog::{Log, Sort};
+use cksol_minter::state::read_state;
 use cksol_types::{
     Address, DepositStatus, GetDepositAddressArgs, MinterInfo, RetrieveSolArgs, RetrieveSolError,
     RetrieveSolOk, RetrieveSolStatus, UpdateBalanceArgs, UpdateBalanceError,
@@ -57,6 +58,12 @@ async fn update_balance(args: UpdateBalanceArgs) -> Result<DepositStatus, Update
 async fn retrieve_sol(args: RetrieveSolArgs) -> Result<RetrieveSolOk, RetrieveSolError> {
     let _solana_address = Address::from_str(&args.address)
         .map_err(|e| RetrieveSolError::MalformedAddress(e.to_string()))?;
+
+    let minimum_withdrawal_amount = read_state(|s| s.minimum_withdrawal_amount());
+    if args.amount < minimum_withdrawal_amount {
+        return Err(RetrieveSolError::AmountTooLow(minimum_withdrawal_amount));
+    }
+
     Err(RetrieveSolError::InsufficientFunds { balance: 0 })
 }
 
@@ -69,6 +76,7 @@ async fn retrieve_sol_status(_block_index: u64) -> RetrieveSolStatus {
 fn get_minter_info() -> MinterInfo {
     cksol_minter::state::read_state(|s| MinterInfo {
         deposit_fee: s.deposit_fee(),
+        minimum_withdrawal_amount: s.minimum_withdrawal_amount(),
     })
 }
 

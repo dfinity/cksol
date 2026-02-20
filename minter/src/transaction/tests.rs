@@ -16,6 +16,7 @@ use ic_canister_runtime::{IcError, StubRuntime};
 use sol_rpc_types::{HttpOutcallError, RpcError, RpcSource, SupportedRpcProviderId};
 use solana_transaction_status_client_types::{EncodedTransaction, TransactionBinaryEncoding};
 
+// TODO DEFI-2643: Test behavior with cycles
 mod get_transaction_tests {
     use super::*;
 
@@ -92,11 +93,13 @@ mod get_transaction_tests {
     async fn should_return_transaction() {
         init_state();
 
-        let runtime = StubRuntime::new().add_stub_response(MultiRpcResult::Consistent(Ok(None)));
+        let runtime = StubRuntime::new().add_stub_response(MultiRpcResult::Consistent(Ok(Some(
+            deposit_transaction().try_into().unwrap(),
+        ))));
 
         let result = try_get_transaction(runtime, deposit_transaction_signature()).await;
 
-        assert_eq!(result, Ok(None))
+        assert_eq!(result, Ok(Some(deposit_transaction())))
     }
 }
 

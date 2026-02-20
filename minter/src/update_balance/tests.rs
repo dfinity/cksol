@@ -1,15 +1,16 @@
 use crate::{
     test_fixtures::{
         deposit::{
-            DEPOSITOR_ACCOUNT, deposit_transaction, deposit_transaction_signature,
+            DEPOSIT_AMOUNT, DEPOSITOR_ACCOUNT, deposit_transaction, deposit_transaction_signature,
             deposit_transaction_to_wrong_address, deposit_transaction_to_wrong_address_signature,
         },
-        init_schnorr_master_key, init_state,
+        init_schnorr_master_key, init_state, init_state_with_args, valid_init_args,
     },
     update_balance::update_balance,
 };
 use assert_matches::assert_matches;
 use cksol_types::{DepositStatus, UpdateBalanceError};
+use cksol_types_internal::InitArgs;
 use ic_canister_runtime::{IcError, StubRuntime};
 use sol_rpc_types::{EncodedConfirmedTransactionWithStatusMeta, MultiRpcResult};
 
@@ -67,16 +68,14 @@ async fn should_return_error_if_transaction_not_valid_deposit() {
 
 #[tokio::test]
 async fn should_fail_if_deposit_too_small() {
-    init_state();
+    init_state_with_args(InitArgs {
+        deposit_fee: 2 * DEPOSIT_AMOUNT,
+        ..valid_init_args()
+    });
     init_schnorr_master_key();
 
-    let mut transaction = deposit_transaction();
-    if let Some(meta) = transaction.transaction.meta.as_mut() {
-        meta.post_balances[1] = meta.pre_balances[1] + 1; // 1 lamport deposit
-    }
-
     let get_transaction_response =
-        GetTransactionResult::Consistent(Ok(Some(transaction.try_into().unwrap())));
+        GetTransactionResult::Consistent(Ok(Some(deposit_transaction().try_into().unwrap())));
     let runtime = StubRuntime::new().add_stub_response(get_transaction_response);
 
     let result = update_balance(runtime, DEPOSITOR_ACCOUNT, deposit_transaction_signature()).await;
