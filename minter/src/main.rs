@@ -81,6 +81,41 @@ async fn retrieve_sol_status(_block_index: u64) -> RetrieveSolStatus {
 }
 
 #[ic_cdk::query]
+fn get_events(
+    args: cksol_types_internal::event::GetEventsArgs,
+) -> cksol_types_internal::event::GetEventsResult {
+    use cksol_minter::state::event::{Event, EventType};
+    use cksol_types_internal::event;
+
+    const MAX_EVENTS_PER_RESPONSE: u64 = 2_000;
+
+    fn map_event(event: Event) -> event::Event {
+        event::Event {
+            timestamp: event.timestamp,
+            payload: map_event_type(event.payload),
+        }
+    }
+
+    fn map_event_type(event_type: EventType) -> event::EventType {
+        match event_type {
+            EventType::Init(args) => event::EventType::Init(args),
+            EventType::Upgrade(args) => event::EventType::Upgrade(args),
+        }
+    }
+
+    let events = cksol_minter::storage::with_event_iter(|it| {
+        it.skip(args.start as usize)
+            .take(args.length.min(MAX_EVENTS_PER_RESPONSE) as usize)
+            .map(map_event)
+            .collect()
+    });
+    event::GetEventsResult {
+        events,
+        total_event_count: cksol_minter::storage::total_event_count(),
+    }
+}
+
+#[ic_cdk::query]
 fn get_minter_info() -> MinterInfo {
     cksol_minter::state::read_state(|s| MinterInfo {
         deposit_fee: s.deposit_fee(),

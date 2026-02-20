@@ -171,6 +171,30 @@ type RetrieveSolStatus = variant {
     TxFinalized : TxFinalizedStatus;
 };
 
+// A minter event payload.
+type EventType = variant {
+    Init : InitArgs;
+    Upgrade : UpgradeArgs;
+};
+
+// A minter event.
+type Event = record {
+    timestamp : nat64;
+    payload : EventType;
+};
+
+// Arguments for the `get_events` endpoint.
+type GetEventsArgs = record {
+    start : nat64;
+    length : nat64;
+};
+
+// The result of a `get_events` call.
+type GetEventsResult = record {
+    events : vec Event;
+    total_event_count : nat64;
+};
+
 service : (MinterArg) -> {
     // Returns the Solana address to which the owner should send SOL.
     //
@@ -187,6 +211,11 @@ service : (MinterArg) -> {
 
     // Retrieve the status of a Solana withdrawal request.
     retrieve_sol_status : (nat64) -> (RetrieveSolStatus);
+
+    // *WARNING*: This is a debug endpoint, backwards-compatibility is not guaranteed.
+    // Returns events from the event log starting at the given index.
+    // The response contains at most 2000 events.
+    get_events: (GetEventsArgs) -> (GetEventsResult) query;
 
     // Returns information about the ckSOL minter canister.
     get_minter_info: () -> (MinterInfo) query;
