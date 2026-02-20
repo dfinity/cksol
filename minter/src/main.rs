@@ -1,14 +1,16 @@
-use std::str::FromStr;
-
 use candid::Principal;
-use cksol_minter::{address, state::read_state};
+use canlog::{Log, Sort};
+use cksol_minter::state::read_state;
 use cksol_types::{
     Address, DepositStatus, GetDepositAddressArgs, MinterInfo, RetrieveSolArgs, RetrieveSolError,
     RetrieveSolOk, RetrieveSolStatus, UpdateBalanceArgs, UpdateBalanceError,
 };
-use cksol_types_internal::MinterArg;
+use cksol_types_internal::{MinterArg, log::Priority};
+use ic_canister_runtime::IcRuntime;
+use ic_http_types::HttpResponseBuilder;
 use ic_http_types::{HttpRequest, HttpResponse};
 use icrc_ledger_types::icrc1::account::{Account, Subaccount};
+use std::str::FromStr;
 
 #[ic_cdk::init]
 fn init(args: MinterArg) {
@@ -40,26 +42,16 @@ fn post_upgrade(args: Option<MinterArg>) {
 #[ic_cdk::update]
 async fn get_deposit_address(args: GetDepositAddressArgs) -> Address {
     let account = assert_non_anonymous_account(args.owner, args.subaccount);
-    address::get_deposit_address(account).await.into()
+    cksol_minter::address::get_deposit_address(account)
+        .await
+        .into()
 }
 
 #[ic_cdk::update]
 async fn update_balance(args: UpdateBalanceArgs) -> Result<DepositStatus, UpdateBalanceError> {
     let account = assert_non_anonymous_account(args.owner, args.subaccount);
-    cksol_minter::update_balance::update_balance(account, args.signature.into()).await
-}
-
-fn assert_non_anonymous_account(
-    owner: Option<Principal>,
-    subaccount: Option<Subaccount>,
-) -> Account {
-    let owner = owner.unwrap_or_else(ic_cdk::api::msg_caller);
-    assert_ne!(
-        owner,
-        Principal::anonymous(),
-        "the owner must be non-anonymous"
-    );
-    Account { owner, subaccount }
+    cksol_minter::update_balance::update_balance(IcRuntime::new(), account, args.signature.into())
+        .await
 }
 
 #[ic_cdk::update]
@@ -90,11 +82,6 @@ fn get_minter_info() -> MinterInfo {
 
 #[ic_cdk::query(hidden = true)]
 fn http_request(request: HttpRequest) -> HttpResponse {
-    use canlog::{Log, Sort};
-    use cksol_types_internal::log::Priority;
-    use ic_http_types::HttpResponseBuilder;
-    use std::str::FromStr;
-
     match request.path() {
         "/metrics" => {
             todo!("DEFI-2670: add metrics")
@@ -154,6 +141,19 @@ fn http_request(request: HttpRequest) -> HttpResponse {
         }
         _ => HttpResponseBuilder::not_found().build(),
     }
+}
+
+fn assert_non_anonymous_account(
+    owner: Option<Principal>,
+    subaccount: Option<Subaccount>,
+) -> Account {
+    let owner = owner.unwrap_or_else(ic_cdk::api::msg_caller);
+    assert_ne!(
+        owner,
+        Principal::anonymous(),
+        "the owner must be non-anonymous"
+    );
+    Account { owner, subaccount }
 }
 
 fn main() {}
