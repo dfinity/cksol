@@ -14,7 +14,15 @@ impl MinterEventAssert {
     where
         F: Fn(&[EventType]),
     {
+        let debug_guard = scopeguard::guard((), |()| {
+            eprintln!(
+                "ERROR: assertion on minter events failed. Events: {:?}",
+                self.events
+            )
+        });
         check(&self.events);
+        // check did not panic, defuse guard
+        scopeguard::ScopeGuard::into_inner(debug_guard);
         self
     }
 }

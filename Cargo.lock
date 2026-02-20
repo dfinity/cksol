@@ -486,6 +486,7 @@ dependencies = [
  "ic-test-utilities-load-wasm",
  "icrc-ledger-types",
  "pocket-ic",
+ "scopeguard",
  "serde",
  "serde_json",
  "tokio",
