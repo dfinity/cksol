@@ -1,14 +1,12 @@
 use candid::Principal;
 use canlog::{Log, Sort};
-use cksol_minter::state::read_state;
+use cksol_minter::{runtime::IcCanisterRuntime, state::read_state};
 use cksol_types::{
     Address, DepositStatus, GetDepositAddressArgs, MinterInfo, RetrieveSolArgs, RetrieveSolError,
     RetrieveSolOk, RetrieveSolStatus, UpdateBalanceArgs, UpdateBalanceError,
 };
 use cksol_types_internal::{MinterArg, log::Priority};
-use ic_canister_runtime::IcRuntime;
-use ic_http_types::HttpResponseBuilder;
-use ic_http_types::{HttpRequest, HttpResponse};
+use ic_http_types::{HttpRequest, HttpResponse, HttpResponseBuilder};
 use icrc_ledger_types::icrc1::account::{Account, Subaccount};
 use std::str::FromStr;
 
@@ -16,7 +14,7 @@ use std::str::FromStr;
 fn init(args: MinterArg) {
     match args {
         MinterArg::Init(init) => {
-            cksol_minter::lifecycle::init(init);
+            cksol_minter::lifecycle::init(init, IcCanisterRuntime::new());
         }
         MinterArg::Upgrade(_) => {
             ic_cdk::trap("cannot init canister state with upgrade args");
@@ -31,10 +29,10 @@ fn post_upgrade(args: Option<MinterArg>) {
             ic_cdk::trap("cannot upgrade canister state with init args");
         }
         Some(MinterArg::Upgrade(args)) => {
-            cksol_minter::lifecycle::post_upgrade(Some(args));
+            cksol_minter::lifecycle::post_upgrade(Some(args), IcCanisterRuntime::new());
         }
         None => {
-            cksol_minter::lifecycle::post_upgrade(None);
+            cksol_minter::lifecycle::post_upgrade(None, IcCanisterRuntime::new());
         }
     }
 }
@@ -50,8 +48,12 @@ async fn get_deposit_address(args: GetDepositAddressArgs) -> Address {
 #[ic_cdk::update]
 async fn update_balance(args: UpdateBalanceArgs) -> Result<DepositStatus, UpdateBalanceError> {
     let account = assert_non_anonymous_account(args.owner, args.subaccount);
-    cksol_minter::update_balance::update_balance(IcRuntime::new(), account, args.signature.into())
-        .await
+    cksol_minter::update_balance::update_balance(
+        IcCanisterRuntime::new(),
+        account,
+        args.signature.into(),
+    )
+    .await
 }
 
 #[ic_cdk::update]
@@ -74,7 +76,7 @@ async fn retrieve_sol_status(_block_index: u64) -> RetrieveSolStatus {
 
 #[ic_cdk::query]
 fn get_minter_info() -> MinterInfo {
-    cksol_minter::state::read_state(|s| MinterInfo {
+    read_state(|s| MinterInfo {
         deposit_fee: s.deposit_fee(),
         minimum_withdrawal_amount: s.minimum_withdrawal_amount(),
     })

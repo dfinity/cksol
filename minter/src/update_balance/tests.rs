@@ -1,4 +1,5 @@
 use crate::{
+    runtime::TestCanisterRuntime,
     test_fixtures::{
         deposit::{DEPOSITOR_ACCOUNT, deposit_transaction_signature},
         init_schnorr_master_key, init_state,
@@ -7,7 +8,7 @@ use crate::{
 };
 use assert_matches::assert_matches;
 use cksol_types::UpdateBalanceError;
-use ic_canister_runtime::{IcError, StubRuntime};
+use ic_canister_runtime::IcError;
 use sol_rpc_types::{EncodedConfirmedTransactionWithStatusMeta, MultiRpcResult};
 
 type GetTransactionResult = MultiRpcResult<Option<EncodedConfirmedTransactionWithStatusMeta>>;
@@ -17,7 +18,7 @@ async fn should_return_error_if_get_transaction_fails() {
     init_state();
     init_schnorr_master_key();
 
-    let runtime = StubRuntime::new().add_stub_error(IcError::CallPerformFailed);
+    let runtime = TestCanisterRuntime::new().add_stub_error(IcError::CallPerformFailed);
 
     let result = update_balance(runtime, DEPOSITOR_ACCOUNT, deposit_transaction_signature()).await;
 
@@ -32,7 +33,8 @@ async fn should_return_error_if_transaction_not_found() {
     init_state();
     init_schnorr_master_key();
 
-    let runtime = StubRuntime::new().add_stub_response(GetTransactionResult::Consistent(Ok(None)));
+    let runtime =
+        TestCanisterRuntime::new().add_stub_response(GetTransactionResult::Consistent(Ok(None)));
 
     let result = update_balance(runtime, DEPOSITOR_ACCOUNT, deposit_transaction_signature()).await;
 
