@@ -1,7 +1,6 @@
 use crate::state::read_state;
 use cksol_types::UpdateBalanceError;
 use ic_canister_runtime::{IcError, Runtime};
-use sol_rpc_client::SolRpcClient;
 use sol_rpc_types::{CommitmentLevel, GetTransactionEncoding, Lamport, MultiRpcResult, RpcError};
 use solana_address::Address;
 use solana_transaction_status_client_types::EncodedConfirmedTransactionWithStatusMeta;
@@ -10,19 +9,23 @@ use thiserror::Error;
 #[cfg(test)]
 mod tests;
 
+// The amount of cycles we attach for a single `getTransaction` call to the SOL RPC canister.
+// TODO DEFI-2643: Move this to `State` and set during init/upgrade.
+const CYCLES_TO_ATTACH_FOR_GET_TRANSACTION: u128 = 1_000_000_000_000;
+
 pub async fn try_get_transaction<R: Runtime>(
     runtime: R,
     signature: solana_signature::Signature,
 ) -> Result<Option<EncodedConfirmedTransactionWithStatusMeta>, GetTransactionError> {
-    let client =
-        SolRpcClient::builder(runtime, read_state(|state| state.sol_rpc_canister_id())).build();
-    let result = client
+    // TODO DEFI-2643: Make sure caller has sufficiently many cycles attached
+    let result = read_state(|state| state.sol_rpc_client(runtime))
         .get_transaction(signature)
         .with_encoding(GetTransactionEncoding::Base64)
         .with_commitment(CommitmentLevel::Finalized)
-        .with_cycles(10_000_000_000_000)
+        .with_cycles(CYCLES_TO_ATTACH_FOR_GET_TRANSACTION)
         .try_send()
         .await;
+    // TODO DEFI-2643: Take (cost of call to SOL RPC canister + overhead) cycles from caller
     match result.map_err(GetTransactionError::IcError)? {
         MultiRpcResult::Consistent(Ok(maybe_transaction)) => Ok(maybe_transaction),
         MultiRpcResult::Consistent(Err(e)) => Err(GetTransactionError::RpcError(e)),

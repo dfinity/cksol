@@ -75,7 +75,7 @@ mod get_deposit_address_tests {
 }
 
 mod lifecycle {
-    use cksol_int_tests::SetupBuilder;
+    use cksol_int_tests::{Setup, SetupBuilder};
     use cksol_types::MinterInfo;
     use cksol_types_internal::UpgradeArgs;
     use cksol_types_internal::log::Priority;
@@ -96,12 +96,21 @@ mod lifecycle {
         let setup = SetupBuilder::new().build().await;
 
         let minter_info = setup.minter().get_minter_info().await;
-        assert_eq!(minter_info, MinterInfo { deposit_fee: 0 });
+        assert_eq!(
+            minter_info,
+            MinterInfo {
+                deposit_fee: 0,
+                minimum_withdrawal_amount: Setup::DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT
+            }
+        );
 
         let new_deposit_fee = 10;
+        let new_minimum_withdrawal_amount = 20;
         setup
-            .upgrade_minter(UpgradeArgs {
+            .minter()
+            .upgrade(UpgradeArgs {
                 deposit_fee: Some(new_deposit_fee),
+                minimum_withdrawal_amount: Some(new_minimum_withdrawal_amount),
                 ..Default::default()
             })
             .await
@@ -111,7 +120,8 @@ mod lifecycle {
         assert_eq!(
             minter_info,
             MinterInfo {
-                deposit_fee: new_deposit_fee
+                deposit_fee: new_deposit_fee,
+                minimum_withdrawal_amount: new_minimum_withdrawal_amount,
             }
         );
 
@@ -120,6 +130,8 @@ mod lifecycle {
 }
 
 mod retrieve_sol_tests {
+    use cksol_types_internal::UpgradeArgs;
+
     use super::*;
 
     #[tokio::test]
@@ -144,7 +156,51 @@ mod retrieve_sol_tests {
 
         let result = setup.minter().retrieve_sol(args).await;
         let err = result.unwrap_err();
-        assert_matches!(err, RetrieveSolError::InsufficientFunds { balance: 0 });
+        assert_eq!(err, RetrieveSolError::InsufficientFunds { balance: 0 });
+
+        setup.drop().await;
+    }
+
+    #[tokio::test]
+    async fn should_check_minimum_withdrawal_amount() {
+        let setup = SetupBuilder::new().build().await;
+
+        let args = RetrieveSolArgs {
+            from_subaccount: None,
+            amount: Setup::DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT,
+            address: "E4MpwNnMWs2XtW5gVrxZvyS7fMq31QD5HvbxmwP45Tz3".to_string(),
+        };
+
+        let result = setup.minter().retrieve_sol(args.clone()).await;
+        let err = result.unwrap_err();
+        assert_eq!(err, RetrieveSolError::InsufficientFunds { balance: 0 });
+
+        let new_minimum_withdrawal_amount = Setup::DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT + 1;
+        setup
+            .minter()
+            .upgrade(UpgradeArgs {
+                minimum_withdrawal_amount: Some(new_minimum_withdrawal_amount),
+                ..Default::default()
+            })
+            .await
+            .expect("upgrade failed");
+
+        let result = setup.minter().retrieve_sol(args).await;
+        let err = result.unwrap_err();
+        assert_eq!(
+            err,
+            RetrieveSolError::AmountTooLow(new_minimum_withdrawal_amount)
+        );
+
+        let args = RetrieveSolArgs {
+            from_subaccount: None,
+            amount: new_minimum_withdrawal_amount,
+            address: "E4MpwNnMWs2XtW5gVrxZvyS7fMq31QD5HvbxmwP45Tz3".to_string(),
+        };
+
+        let result = setup.minter().retrieve_sol(args).await;
+        let err = result.unwrap_err();
+        assert_eq!(err, RetrieveSolError::InsufficientFunds { balance: 0 });
 
         setup.drop().await;
     }
@@ -178,6 +234,8 @@ mod update_balance_tests {
             .respond_with(transaction_not_found_response().with_id(1))
             .given(get_deposit_transaction_request().with_id(2))
             .respond_with(transaction_not_found_response().with_id(2))
+            .given(get_deposit_transaction_request().with_id(3))
+            .respond_with(transaction_not_found_response().with_id(3))
             .build();
 
         let result = setup
@@ -202,6 +260,8 @@ mod update_balance_tests {
             .respond_with(get_deposit_transaction_response().with_id(1))
             .given(get_deposit_transaction_request().with_id(2))
             .respond_with(get_deposit_transaction_response().with_id(2))
+            .given(get_deposit_transaction_request().with_id(3))
+            .respond_with(get_deposit_transaction_response().with_id(3))
             .build();
 
         let result = setup
