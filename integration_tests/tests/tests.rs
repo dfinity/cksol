@@ -101,7 +101,8 @@ mod lifecycle {
         let new_deposit_fee = 10;
         let new_minimum_withdrawal_amount = 20;
         setup
-            .upgrade_minter(UpgradeArgs {
+            .minter()
+            .upgrade(UpgradeArgs {
                 deposit_fee: Some(new_deposit_fee),
                 minimum_withdrawal_amount: Some(new_minimum_withdrawal_amount),
                 ..Default::default()
@@ -170,7 +171,8 @@ mod retrieve_sol_tests {
 
         let new_minimum_withdrawal_amount = Setup::DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT + 1;
         setup
-            .upgrade_minter(UpgradeArgs {
+            .minter()
+            .upgrade(UpgradeArgs {
                 minimum_withdrawal_amount: Some(new_minimum_withdrawal_amount),
                 ..Default::default()
             })
