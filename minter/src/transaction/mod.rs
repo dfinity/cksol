@@ -66,19 +66,21 @@ pub fn get_deposit_amount_to_address(
     // is sourced from the transaction itself (not an address lookup table).
     let account_keys = message.static_account_keys();
 
+    // The deposit transaction must transfer funds to the deposit address, meaning
+    // the deposit address must be in the account keys and it must be writable.
     let deposit_address_index = account_keys
         .iter()
         .position(|address| address == &deposit_address)
         .ok_or(GetDepositAmountError::DepositAddressNotInAccountKeys)?;
-
-    // The deposit address must be writable (to receive funds) but must not
-    // be a signer (it's controlled by the minter, not the depositor).
     if !message.is_maybe_writable(deposit_address_index, None) {
         return Err(GetDepositAmountError::DepositAddressNotWriteable);
     }
-    if message.is_signer(deposit_address_index) {
-        return Err(GetDepositAmountError::DepositAddressSigner);
-    }
+
+    // The deposit address must not be a signer (it's controlled by the minter, not the depositor).
+    assert!(
+        !message.is_signer(deposit_address_index),
+        "Deposit address must not be a signer!"
+    );
 
     let meta = transaction
         .transaction
@@ -104,8 +106,6 @@ pub enum GetDepositAmountError {
     DepositAddressNotInAccountKeys,
     #[error("Deposit address must be writable")]
     DepositAddressNotWriteable,
-    #[error("Deposit address must not be a signer")]
-    DepositAddressSigner,
     #[error("'getTransaction' RPC response has no 'meta' field")]
     NoMetaField,
     #[error("Invalid transaction: {0}")]
