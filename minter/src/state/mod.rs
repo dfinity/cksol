@@ -3,8 +3,11 @@ mod tests;
 
 use candid::Principal;
 use cksol_types_internal::{Ed25519KeyName, InitArgs, UpgradeArgs};
+use ic_canister_runtime::Runtime;
 use ic_ed25519::PublicKey;
 use icrc_ledger_types::icrc1::account::Account;
+use sol_rpc_client::SolRpcClient;
+use sol_rpc_types::{ConsensusStrategy, RpcSources, SolanaCluster};
 use std::cell::RefCell;
 use std::collections::BTreeSet;
 
@@ -60,6 +63,7 @@ pub struct State {
     ledger_canister_id: Principal,
     sol_rpc_canister_id: Principal,
     deposit_fee: u64,
+    minimum_withdrawal_amount: u64,
     pending_update_balance_requests: BTreeSet<Account>,
 }
 
@@ -97,6 +101,24 @@ impl State {
         self.deposit_fee
     }
 
+    pub fn minimum_withdrawal_amount(&self) -> u64 {
+        self.minimum_withdrawal_amount
+    }
+
+    pub fn sol_rpc_client<R: Runtime>(&self, runtime: R) -> SolRpcClient<R> {
+        // The maximum size of an HTTPs outcall response is 2MB:
+        // https://docs.internetcomputer.org/references/ic-interface-spec#ic-http_request
+        const MAX_RESPONSE_BYTES: u64 = 2_000_000;
+        SolRpcClient::builder(runtime, self.sol_rpc_canister_id)
+            .with_rpc_sources(RpcSources::Default(SolanaCluster::Mainnet))
+            .with_response_size_estimate(MAX_RESPONSE_BYTES)
+            .with_consensus_strategy(ConsensusStrategy::Threshold {
+                min: 3,
+                total: Some(4),
+            })
+            .build()
+    }
+
     pub fn pending_update_balance_requests_mut(&mut self) -> &mut BTreeSet<Account> {
         &mut self.pending_update_balance_requests
     }
@@ -106,6 +128,7 @@ impl State {
         UpgradeArgs {
             sol_rpc_canister_id,
             deposit_fee,
+            minimum_withdrawal_amount,
         }: UpgradeArgs,
     ) -> Result<(), InvalidStateError> {
         if let Some(sol_rpc_canister_id) = sol_rpc_canister_id {
@@ -113,6 +136,9 @@ impl State {
         }
         if let Some(deposit_fee) = deposit_fee {
             self.deposit_fee = deposit_fee;
+        }
+        if let Some(minimum_withdrawal_amount) = minimum_withdrawal_amount {
+            self.minimum_withdrawal_amount = minimum_withdrawal_amount;
         }
         Ok(())
     }
@@ -132,6 +158,7 @@ impl TryFrom<InitArgs> for State {
             ledger_canister_id,
             deposit_fee,
             master_key_name,
+            minimum_withdrawal_amount,
         }: InitArgs,
     ) -> Result<Self, Self::Error> {
         let canister_ids: BTreeSet<_> = [sol_rpc_canister_id, ledger_canister_id]
@@ -154,6 +181,7 @@ impl TryFrom<InitArgs> for State {
             ledger_canister_id,
             sol_rpc_canister_id,
             deposit_fee,
+            minimum_withdrawal_amount,
             pending_update_balance_requests: BTreeSet::new(),
         })
     }

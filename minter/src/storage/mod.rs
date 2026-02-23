@@ -1,6 +1,11 @@
-use crate::state::event::{Event, EventType};
-use ic_stable_structures::memory_manager::{MemoryId, MemoryManager, VirtualMemory};
-use ic_stable_structures::{DefaultMemoryImpl, StableLog};
+use crate::{
+    runtime::CanisterRuntime,
+    state::event::{Event, EventType},
+};
+use ic_stable_structures::{
+    DefaultMemoryImpl, StableLog,
+    memory_manager::{MemoryId, MemoryManager, VirtualMemory},
+};
 use std::cell::RefCell;
 
 const EVENT_LOG_INDEX_MEMORY_ID: MemoryId = MemoryId::new(0);
@@ -27,11 +32,11 @@ thread_local! {
 }
 
 /// Appends the event to the event log.
-pub fn record_event(payload: EventType) {
+pub fn record_event<R: CanisterRuntime>(payload: EventType, runtime: &R) {
     EVENTS
         .with(|events| {
             events.borrow().append(&Event {
-                timestamp: ic_cdk::api::time(),
+                timestamp: runtime.time(),
                 payload,
             })
         })

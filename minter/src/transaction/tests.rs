@@ -1,10 +1,15 @@
 use crate::{
-    test_fixtures::{deposit::deposit_transaction_signature, init_state},
+    runtime::TestCanisterRuntime,
+    test_fixtures::{
+        deposit::{deposit_transaction, deposit_transaction_signature},
+        init_state,
+    },
     transaction::{GetTransactionError, try_get_transaction},
 };
-use ic_canister_runtime::{IcError, StubRuntime};
+use ic_canister_runtime::IcError;
 use sol_rpc_types::{HttpOutcallError, RpcError, RpcSource, SupportedRpcProviderId};
 
+// TODO DEFI-2643: Test behavior with cycles
 mod get_transaction_tests {
     use super::*;
 
@@ -16,7 +21,7 @@ mod get_transaction_tests {
     async fn should_fail_if_get_transaction_fails() {
         init_state();
 
-        let runtime = StubRuntime::new().add_stub_error(IcError::CallPerformFailed);
+        let runtime = TestCanisterRuntime::new().add_stub_error(IcError::CallPerformFailed);
 
         let result = try_get_transaction(runtime, deposit_transaction_signature()).await;
 
@@ -36,7 +41,7 @@ mod get_transaction_tests {
             parsing_error: None,
         });
 
-        let runtime = StubRuntime::new()
+        let runtime = TestCanisterRuntime::new()
             .add_stub_response(MultiRpcResult::Consistent(Err(rpc_error.clone())));
 
         let result = try_get_transaction(runtime, deposit_transaction_signature()).await;
@@ -59,7 +64,8 @@ mod get_transaction_tests {
             ),
         ];
 
-        let runtime = StubRuntime::new().add_stub_response(MultiRpcResult::Inconsistent(results));
+        let runtime =
+            TestCanisterRuntime::new().add_stub_response(MultiRpcResult::Inconsistent(results));
 
         let result = try_get_transaction(runtime, deposit_transaction_signature()).await;
 
@@ -70,7 +76,8 @@ mod get_transaction_tests {
     async fn should_return_empty_if_transaction_not_found() {
         init_state();
 
-        let runtime = StubRuntime::new().add_stub_response(MultiRpcResult::Consistent(Ok(None)));
+        let runtime =
+            TestCanisterRuntime::new().add_stub_response(MultiRpcResult::Consistent(Ok(None)));
 
         let result = try_get_transaction(runtime, deposit_transaction_signature()).await;
 
@@ -81,10 +88,12 @@ mod get_transaction_tests {
     async fn should_return_transaction() {
         init_state();
 
-        let runtime = StubRuntime::new().add_stub_response(MultiRpcResult::Consistent(Ok(None)));
+        let runtime = TestCanisterRuntime::new().add_stub_response(MultiRpcResult::Consistent(Ok(
+            Some(deposit_transaction().try_into().unwrap()),
+        )));
 
         let result = try_get_transaction(runtime, deposit_transaction_signature()).await;
 
-        assert_eq!(result, Ok(None))
+        assert_eq!(result, Ok(Some(deposit_transaction())))
     }
 }

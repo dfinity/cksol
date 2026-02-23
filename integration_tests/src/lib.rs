@@ -1,4 +1,4 @@
-use candid::{CandidType, Encode, Principal, encode_one, utils::ArgumentEncoder};
+use candid::{CandidType, Encode, Principal, utils::ArgumentEncoder};
 use canlog::{Log, LogEntry};
 use cksol_types::{
     Address, DepositStatus, GetDepositAddressArgs, MinterInfo, RetrieveSolArgs, RetrieveSolError,
@@ -46,6 +46,7 @@ pub struct Setup {
 impl Setup {
     pub const DEFAULT_CONTROLLER: Principal = Principal::from_slice(&[0x9d, 0xf7, 0x01]);
     pub const DEFAULT_CALLER: Principal = Principal::from_slice(&[0x9d, 0xf7, 0x02]);
+    pub const DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT: u64 = 10000000;
 
     async fn new(caller: Option<Principal>) -> Self {
         let env = PocketIcBuilder::new()
@@ -113,7 +114,7 @@ impl Setup {
             sol_rpc_canister_id,
             Self::DEFAULT_CONTROLLER,
             "updateApiKeys",
-            encode_one(api_keys).unwrap(),
+            Encode!(&api_keys).unwrap(),
         )
         .await
         .expect("BUG: Failed to call updateApiKeys");
@@ -131,22 +132,6 @@ impl Setup {
             runtime: self.runtime(),
             id: self.minter_canister_id,
         }
-    }
-
-    pub async fn upgrade_minter(
-        &self,
-        upgrade_args: cksol_types_internal::UpgradeArgs,
-    ) -> Result<(), RejectResponse> {
-        self.env
-            .as_ref()
-            .unwrap()
-            .upgrade_canister(
-                self.minter_canister_id,
-                cksol_minter_wasm(),
-                Encode!(&MinterArg::Upgrade(upgrade_args)).unwrap(),
-                Some(Self::DEFAULT_CONTROLLER),
-            )
-            .await
     }
 
     pub fn with_caller(mut self, caller: Principal) -> Self {
@@ -255,6 +240,21 @@ impl CkSolMinter<'_> {
             .entries
     }
 
+    pub async fn upgrade(
+        &self,
+        upgrade_args: cksol_types_internal::UpgradeArgs,
+    ) -> Result<(), RejectResponse> {
+        self.runtime
+            .as_ref()
+            .upgrade_canister(
+                self.id,
+                cksol_minter_wasm(),
+                Encode!(&MinterArg::Upgrade(upgrade_args)).unwrap(),
+                Some(Setup::DEFAULT_CONTROLLER),
+            )
+            .await
+    }
+
     pub fn with_http_mocks(mut self, mocks: impl ExecuteHttpOutcallMocks + 'static) -> Self {
         self.runtime = self.runtime.with_http_mocks(mocks);
         self
@@ -277,6 +277,7 @@ fn cksol_minter_init_args(sol_rpc_canister_id: Principal) -> MinterArg {
         ledger_canister_id: Principal::from_slice(&[43_u8]),
         deposit_fee: 0,
         master_key_name: Ed25519KeyName::MainnetProdKey1,
+        minimum_withdrawal_amount: Setup::DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT,
     })
 }
 
