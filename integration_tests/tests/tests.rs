@@ -7,8 +7,8 @@ use cksol_int_tests::{
     },
 };
 use cksol_types::{
-    GetDepositAddressArgs, RetrieveSolArgs, RetrieveSolError, RetrieveSolStatus, UpdateBalanceArgs,
-    UpdateBalanceError,
+    DepositStatus, GetDepositAddressArgs, RetrieveSolArgs, RetrieveSolError, RetrieveSolStatus,
+    UpdateBalanceArgs, UpdateBalanceError,
 };
 use ic_pocket_canister_runtime::{JsonRpcRequestMatcher, JsonRpcResponse, MockHttpOutcallsBuilder};
 use icrc_ledger_types::icrc1::account::Subaccount;
@@ -271,9 +271,10 @@ mod update_balance_tests {
             .await;
 
         // TODO DEFI-2643: Change once deposit logic is implemented
-        assert_matches!(result, Err(UpdateBalanceError::TemporarilyUnavailable(s)) => {
-            assert!(s.contains("Not yet implemented!"))
-        });
+        assert_eq!(
+            result,
+            Ok(DepositStatus::Processing(deposit_transaction_signature()))
+        );
 
         setup.drop().await;
     }
@@ -291,7 +292,7 @@ mod update_balance_tests {
         JsonRpcResponse::from(json!({
             "jsonrpc": "2.0",
             "result": {
-                "blockTime": 1770997258,
+                "blockTime": 1771484921,
                 "meta": {
                     "computeUnitsConsumed": 150,
                     "costUnits": 1481,
@@ -307,13 +308,13 @@ mod update_balance_tests {
                         "Program 11111111111111111111111111111111 success"
                     ],
                     "postBalances": [
-                        3395836440_u64,
+                        1395816440,
                         500000000,
                         1
                     ],
                     "postTokenBalances": [],
                     "preBalances": [
-                        3895841440_u64,
+                        1895821440,
                         0,
                         1
                     ],
@@ -323,9 +324,9 @@ mod update_balance_tests {
                         "Ok": null
                     }
                 },
-                "slot": 441894876,
+                "slot": 443170403,
                 "transaction": [
-                    "AbPf97eQzgIgQGGFzEA2zvWWbaNdZxVOsN+Zem/HooxKiAzkImkLy/qXv56MOq0kQ9yJYWw4ZTOGP8mTemI6MgsBAAEDIg5JU11WGypQAKfOpxcE0+UIiKney1G6hf+6GRXcmscnpwFQ/UrMJ1PeTEdnddpynJZVZBAGM5/4YyiEZlx8QQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA/ojmZ6HPuhM7YU56uETXnzzzvzHc55RxGfYTOIsoFu0BAgIAAQwCAAAAAGXNHQAAAAA=",
+                    "Ae8DcFCR+fISEfOEbPxoc4LVpEhkZBZIbfR17dUMX69x2xAuXybl0rAzVr4FBptL51oOjtQblMI78wjxgzvF3wgBAAEDIg5JU11WGypQAKfOpxcE0+UIiKney1G6hf+6GRXcmsegouBqKPunkGhY/5zzw2dzMFAJHrH4tQ8/OqJSAzQIJgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAE5C8ZKc/bqTlyknK2gJl0byFYySUUjKhGH8Uwb9hkJYBAgIAAQwCAAAAAGXNHQAAAAA=",
                     "base64"
                 ]
             },
