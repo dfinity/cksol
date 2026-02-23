@@ -1,6 +1,6 @@
-use crate::state::read_state;
+use crate::{runtime::CanisterRuntime, state::read_state};
 use cksol_types::UpdateBalanceError;
-use ic_canister_runtime::{IcError, Runtime};
+use ic_canister_runtime::IcError;
 use sol_rpc_types::{CommitmentLevel, GetTransactionEncoding, Lamport, MultiRpcResult, RpcError};
 use solana_address::Address;
 use solana_transaction_status_client_types::EncodedConfirmedTransactionWithStatusMeta;
@@ -13,12 +13,12 @@ mod tests;
 // TODO DEFI-2643: Move this to `State` and set during init/upgrade.
 const CYCLES_TO_ATTACH_FOR_GET_TRANSACTION: u128 = 1_000_000_000_000;
 
-pub async fn try_get_transaction<R: Runtime>(
+pub async fn try_get_transaction<R: CanisterRuntime>(
     runtime: R,
     signature: solana_signature::Signature,
 ) -> Result<Option<EncodedConfirmedTransactionWithStatusMeta>, GetTransactionError> {
     // TODO DEFI-2643: Make sure caller has sufficiently many cycles attached
-    let result = read_state(|state| state.sol_rpc_client(runtime))
+    let result = read_state(|state| state.sol_rpc_client(runtime.inter_canister_call_runtime()))
         .get_transaction(signature)
         .with_encoding(GetTransactionEncoding::Base64)
         .with_commitment(CommitmentLevel::Finalized)
