@@ -270,11 +270,8 @@ mod update_balance_tests {
             minter2.update_balance(default_update_balance_args())
         );
 
-        // TODO DEFI-2643: Change once deposit logic is implemented
-        assert_matches!(result1, Err(UpdateBalanceError::TemporarilyUnavailable(s)) => {
-            assert!(s.contains("Not yet implemented!"))
-        });
-
+        // TODO DEFI-2643: Update once deposit logic is implemented
+        assert_matches!(result1, Ok(DepositStatus::Processing(_)));
         assert_eq!(result2, Err(UpdateBalanceError::AlreadyProcessing));
 
         setup.drop().await;
