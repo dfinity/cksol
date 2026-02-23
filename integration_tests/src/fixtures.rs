@@ -15,7 +15,8 @@ pub const DEFAULT_CALLER_DEPOSIT_ADDRESS: &str = "3fnbpmbdVhcvLMAgyGirs64B4BFFft
 
 pub const DEPOSIT_AMOUNT: Lamport = 500_000_000;
 
-/// [`DEPOSIT_AMOUNT`] lamport transfer to [`DEFAULT_CALLER_DEPOSIT_ADDRESS`].
+/// Signature for a Solana transaction depositing [`DEPOSIT_AMOUNT`] lamports to
+/// the address [`DEFAULT_CALLER_DEPOSIT_ADDRESS`].
 /// Explorer link to transaction on Solana Devnet [here].
 ///
 /// [here]: https://explorer.solana.com/tx/5b5QLKzj24LtvBLSyKkQCrdSDp9Y66y48ns2vxbp4qTHnRSYd1jtFW9vwKXjbyLFFNpNupcRdvhsCpHTc7g6E77U?cluster=devnet
