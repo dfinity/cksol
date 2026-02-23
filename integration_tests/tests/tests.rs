@@ -11,9 +11,7 @@ use cksol_types::{
     UpdateBalanceArgs, UpdateBalanceError,
 };
 use cksol_types_internal::{UpgradeArgs, log::Priority};
-use ic_pocket_canister_runtime::{
-    JsonRpcRequestMatcher, JsonRpcResponse, MockHttpOutcalls, MockHttpOutcallsBuilder,
-};
+use ic_pocket_canister_runtime::{JsonRpcRequestMatcher, JsonRpcResponse, MockHttpOutcallsBuilder};
 use icrc_ledger_types::icrc1::account::Subaccount;
 use serde_json::json;
 use tokio::join;
