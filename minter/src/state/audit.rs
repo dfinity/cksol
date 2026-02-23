@@ -1,11 +1,16 @@
-use crate::state::State;
-use crate::state::event::{Event, EventType};
-use crate::storage;
+use crate::{
+    runtime::CanisterRuntime,
+    state::{
+        State,
+        event::{Event, EventType},
+    },
+    storage,
+};
 
 /// Records the given event payload in the event log and updates the state to reflect the change.
-pub fn process_event(state: &mut State, payload: EventType) {
+pub fn process_event<R: CanisterRuntime>(state: &mut State, payload: EventType, runtime: &R) {
     apply_state_transition(state, &payload);
-    storage::record_event(payload);
+    storage::record_event(payload, runtime);
 }
 
 /// Updates the state to reflect the given state transition.
