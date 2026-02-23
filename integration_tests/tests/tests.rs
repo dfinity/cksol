@@ -254,12 +254,18 @@ mod update_balance_tests {
     async fn should_fail_for_concurrent_access() {
         let setup = SetupBuilder::new().build().await;
 
-        let minter1 = setup
-            .minter()
-            .with_http_mocks(mocks_for_single_sol_rpc_outcall(
-                get_deposit_transaction_request,
-                get_deposit_transaction_response,
-            ));
+        let mocks = MockHttpOutcallsBuilder::new()
+            .given(get_deposit_transaction_request().with_id(0))
+            .respond_with(get_deposit_transaction_response().with_id(0))
+            .given(get_deposit_transaction_request().with_id(1))
+            .respond_with(get_deposit_transaction_response().with_id(1))
+            .given(get_deposit_transaction_request().with_id(2))
+            .respond_with(get_deposit_transaction_response().with_id(2))
+            .given(get_deposit_transaction_request().with_id(3))
+            .respond_with(get_deposit_transaction_response().with_id(3))
+            .build();
+
+        let minter1 = setup.minter().with_http_mocks(mocks);
         let minter2 = setup.minter();
         let (result1, result2) = join!(
             minter1.update_balance(default_update_balance_args()),
@@ -303,20 +309,6 @@ mod update_balance_tests {
         });
 
         setup.drop().await;
-    }
-
-    fn mocks_for_single_sol_rpc_outcall(
-        request: impl Fn() -> JsonRpcRequestMatcher,
-        response: impl Fn() -> JsonRpcResponse,
-    ) -> MockHttpOutcalls {
-        MockHttpOutcallsBuilder::new()
-            .given(request().with_id(0))
-            .respond_with(response().with_id(0))
-            .given(request().with_id(1))
-            .respond_with(response().with_id(1))
-            .given(request().with_id(2))
-            .respond_with(response().with_id(2))
-            .build()
     }
 
     fn get_deposit_transaction_request() -> JsonRpcRequestMatcher {
