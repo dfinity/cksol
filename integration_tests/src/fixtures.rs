@@ -2,7 +2,7 @@ use cksol_types::{Signature, UpdateBalanceArgs};
 use std::str::FromStr;
 
 pub const DEPOSIT_TRANSACTION_SIGNATURE: &str =
-    "4basP1hZDqgt1BYwh29mURz4zr8BcJgya2Y4AjmzXB5vtViLG6hZRxF9iypkxkfCJXhJTFW7jU1PyG8rHXvYd4Zp";
+    "5nAMoTjRdRw4ah4WS7FPipqn3HYqZz9FMTLheVmN6mnJjgqFfComsZeAgBa6FBbX3bf5TNMegPjPE3PYQPCHup2s";
 
 pub fn default_update_balance_args() -> UpdateBalanceArgs {
     UpdateBalanceArgs {
