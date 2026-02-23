@@ -6,7 +6,7 @@ use std::borrow::Cow;
 
 #[derive(Eq, PartialEq, Debug, Decode, Encode)]
 pub struct Event {
-    /// The canister runtime at which the minter generated this event.
+    /// The canister time at which the minter generated this event.
     #[n(0)]
     pub timestamp: u64,
     /// The event type.
