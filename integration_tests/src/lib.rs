@@ -308,7 +308,7 @@ pub struct Ledger<'a>(Canister<'a>);
 impl Ledger<'_> {
     pub async fn balance_of(&self, account: Account) -> u64 {
         self.0
-            .update_call::<(Account,), Nat>("icrc1_balance_of", (account,))
+            .update_call::<_, Nat>("icrc1_balance_of", (account,))
             .await
             .0
             .to_u64()
