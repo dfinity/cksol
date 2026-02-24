@@ -702,6 +702,7 @@ name = "cksol-int-tests"
 version = "0.1.0"
 dependencies = [
  "assert_matches",
+ "async-trait",
  "candid",
  "canlog",
  "cksol-types",

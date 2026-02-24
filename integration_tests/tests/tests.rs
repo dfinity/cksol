@@ -4,7 +4,7 @@ use cksol_int_tests::{
     Setup, SetupBuilder,
     fixtures::{
         DEFAULT_CALLER_ACCOUNT, DEFAULT_CALLER_DEPOSIT_ADDRESS, DEPOSIT_AMOUNT,
-        default_update_balance_args, deposit_transaction_signature,
+        SharedMockHttpOutcalls, default_update_balance_args, deposit_transaction_signature,
         get_deposit_transaction_request, get_deposit_transaction_response,
     },
 };
@@ -241,18 +241,35 @@ mod update_balance_tests {
     async fn should_fail_for_concurrent_access() {
         let setup = SetupBuilder::new().build().await;
 
-        let minter1 = setup
-            .minter()
-            .with_http_mocks(get_transaction_http_mocks(get_deposit_transaction_response));
-        let minter2 = setup.minter();
+        // Both minters use the same mocks, whichever gets the guard first will consume them
+        let mocks = SharedMockHttpOutcalls::new(get_transaction_http_mocks(
+            get_deposit_transaction_response,
+        ));
 
-        let (result1, result2) = join!(minter1.update_balance(default_update_balance_args()), {
-            setup.tick().await;
+        let minter1 = setup.minter().with_http_mocks(mocks.clone());
+        let minter2 = setup.minter().with_http_mocks(mocks.clone());
+
+        let (result1, result2) = join!(
+            minter1.update_balance(default_update_balance_args()),
             minter2.update_balance(default_update_balance_args())
-        });
+        );
 
-        assert_matches!(result1, Ok(DepositStatus::Minted { .. }));
-        assert_eq!(result2, Err(UpdateBalanceError::AlreadyProcessing));
+        // One should succeed, one should fail with AlreadyProcessing (order is non-deterministic)
+        let results = [&result1, &result2];
+        assert!(
+            results
+                .iter()
+                .any(|r| matches!(r, Ok(DepositStatus::Minted { .. }))),
+            "Expected one Minted result, got: {:?}",
+            results
+        );
+        assert!(
+            results
+                .iter()
+                .any(|r| matches!(r, Err(UpdateBalanceError::AlreadyProcessing))),
+            "Expected one AlreadyProcessing result, got: {:?}",
+            results
+        );
 
         setup.drop().await;
     }
