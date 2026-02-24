@@ -239,6 +239,7 @@ mod retrieve_sol_tests {
 
 mod update_balance_tests {
     use super::*;
+    use sol_rpc_types::Lamport;
 
     #[tokio::test]
     async fn should_fail_if_transaction_not_found() {
@@ -282,7 +283,7 @@ mod update_balance_tests {
             _ => panic!("Expected one success and one error, but got: {result1:?} and {result2:?}"),
         };
 
-        // One should succeed, one should fail with AlreadyProcessing (order is non-deterministic)
+        // One should succeed, one should fail with `AlreadyProcessing` (order is non-deterministic)
         let results = [&result1, &result2];
         assert!(
             results
@@ -310,9 +311,21 @@ mod update_balance_tests {
 
         let deposit_signature = deposit_transaction_signature();
 
+        // First call to `update_balance` fails due to minting error
         let result = setup
             .minter()
             .with_http_mocks(get_transaction_http_mocks(get_deposit_transaction_response))
+            .update_balance(default_update_balance_args())
+            .await;
+        assert_eq!(
+            result,
+            Ok(DepositStatus::Processing(deposit_signature.clone()))
+        );
+
+        // Second call to `update_balance` should return the same status without making any
+        // new JSON-RPC calls or trying to mint again
+        let result = setup
+            .minter()
             .update_balance(default_update_balance_args())
             .await;
         assert_eq!(result, Ok(DepositStatus::Processing(deposit_signature)));
@@ -321,7 +334,9 @@ mod update_balance_tests {
     }
 
     #[tokio::test]
-    async fn should_update_balance_with_single_deposit() {
+    async fn should_update_balance_only_once_with_same_deposit() {
+        const EXPECTED_MINT_AMOUNT: Lamport = DEPOSIT_AMOUNT - Setup::DEFAULT_DEPOSIT_FEE;
+
         let setup = SetupBuilder::new().build().await;
 
         let balance_before = setup.ledger().balance_of(DEFAULT_CALLER_ACCOUNT).await;
@@ -329,20 +344,34 @@ mod update_balance_tests {
 
         let deposit_signature = deposit_transaction_signature();
 
+        // First call to `update_balance` should result in mint
         let result = setup
             .minter()
             .with_http_mocks(get_transaction_http_mocks(get_deposit_transaction_response))
             .update_balance(default_update_balance_args())
             .await;
-        let expected_minted_amount = DEPOSIT_AMOUNT - Setup::DEFAULT_DEPOSIT_FEE;
         assert_matches!(result, Ok(DepositStatus::Minted {
             minted_amount,
             signature,
             block_index: _,
-        }) if minted_amount == expected_minted_amount && signature == deposit_signature);
+        }) if minted_amount == EXPECTED_MINT_AMOUNT && signature == deposit_signature);
 
         let balance_after = setup.ledger().balance_of(DEFAULT_CALLER_ACCOUNT).await;
-        assert_eq!(balance_after, expected_minted_amount);
+        assert_eq!(balance_after, EXPECTED_MINT_AMOUNT);
+
+        // Second call to `update_balance` should not result in any JSON-RPC calls or mint
+        let result = setup
+            .minter()
+            .update_balance(default_update_balance_args())
+            .await;
+        assert_matches!(result, Ok(DepositStatus::Minted {
+            minted_amount,
+            signature,
+            block_index: _,
+        }) if minted_amount == EXPECTED_MINT_AMOUNT && signature == deposit_signature);
+
+        let balance_after = setup.ledger().balance_of(DEFAULT_CALLER_ACCOUNT).await;
+        assert_eq!(balance_after, EXPECTED_MINT_AMOUNT);
 
         setup.drop().await;
     }

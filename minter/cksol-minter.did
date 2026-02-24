@@ -6,6 +6,12 @@
 // [account]: https://solana.com/docs/core/accounts
 type Address = text;
 
+// Represents an account on the ckSOL ledger.
+type Account = record {
+    owner: principal;
+    subaccount: opt blob;
+};
+
 // The ID of one of the ICP root keys.
 type Ed25519KeyName = variant {
     MainnetTestKey1;
@@ -175,8 +181,30 @@ type RetrieveSolStatus = variant {
 
 // A minter event payload.
 type EventType = variant {
+    /// The minter initialization event.
+    /// Must be the first event in the log.
     Init : InitArgs;
+    /// The minter upgraded with the specified arguments.
     Upgrade : UpgradeArgs;
+    /// The minter discovered a Solana transaction that is a valid ckSOL
+    /// deposit for the given account.
+    AcceptedDeposit : record {
+        /// The signature of the Solana deposit transaction.
+        signature: Signature;
+        /// The account to which the minter should mint ckSOL.
+        account: Account;
+        /// The deposit amount in lamports.
+        amount: Lamport;
+    };
+    /// The minter minted ckSOL in response to a deposit.
+    Minted : record {
+        /// The signature of the Solana deposit transaction.
+        signature: Signature;
+        /// The account to which the minter minted ckSOL.
+        account: Account;
+        /// The transaction index on the ckSOL ledger.
+        mint_block_index: nat64;
+    };
 };
 
 // A minter event.

@@ -1,3 +1,6 @@
+use crate::state::audit::process_event;
+use crate::state::event::{AcceptedDepositEvent, EventType};
+use crate::state::mutate_state;
 use crate::{
     address::get_deposit_address,
     guard::update_balance_guard,
@@ -19,8 +22,11 @@ pub async fn update_balance<R: CanisterRuntime>(
     account: Account,
     signature: solana_signature::Signature,
 ) -> Result<DepositStatus, UpdateBalanceError> {
-    // TODO DEFI-2643: Check state to see if transaction is known
     let _guard = update_balance_guard(account)?;
+
+    if let Some(deposit_status) = read_state(|state| state.deposit_status(&(account, signature))) {
+        return Ok(deposit_status);
+    }
 
     let maybe_transaction = try_get_transaction(&runtime, signature)
         .await
@@ -51,11 +57,26 @@ pub async fn update_balance<R: CanisterRuntime>(
     if deposit_amount < deposit_fee {
         return Err(UpdateBalanceError::ValueTooSmall);
     }
-    let amount_to_mint = deposit_amount - deposit_fee;
 
-    // TODO DEFI-2643: Record event for processed deposit
+    let deposit_event = AcceptedDepositEvent {
+        signature,
+        account,
+        amount: deposit_amount,
+    };
+    mutate_state(|state| {
+        process_event(
+            state,
+            EventType::AcceptedDeposit(deposit_event.clone()),
+            &runtime,
+        )
+    });
 
-    match mint(&runtime, account, amount_to_mint, signature.into()).await {
+    // TODO DEFI-2643: If minting fails, we should try again later automatically (i.e. set up a
+    //  timer that checks events to mint.
+    // TODO DEFI-2643: Handle the case where the timer execution triggers while we are awaiting the
+    //  response from the ledger and we concurrently try to mint for the same `AcceptedDeposit`
+    //  event, i.e. watch out for race conditions!
+    match mint(&runtime, deposit_event).await {
         Ok(deposit_status) => Ok(deposit_status),
         Err(e) => {
             log!(

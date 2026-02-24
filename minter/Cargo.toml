@@ -13,6 +13,7 @@ name = "cksol-minter"
 path = "src/main.rs"
 
 [dependencies]
+assert_matches = { workspace = true }
 candid = { workspace = true }
 canlog = { workspace = true, features = ["derive"] }
 cksol-types = { path = "../libs/types" }
@@ -29,6 +30,7 @@ icrc-cbor = { workspace = true }
 icrc-ledger-types = { workspace = true }
 minicbor = { workspace = true, features = ["derive"] }
 num-traits = { workspace = true }
+phantom_newtype = { workspace = true }
 serde = { workspace = true }
 sol_rpc_client = { workspace = true }
 sol_rpc_types = { workspace = true }
@@ -38,7 +40,6 @@ solana-transaction-status-client-types = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
-assert_matches = { workspace = true }
 candid_parser = { workspace = true }
 proptest = { workspace = true }
 tokio = { workspace = true, features = ["full"] }

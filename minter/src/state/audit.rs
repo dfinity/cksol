@@ -24,6 +24,12 @@ fn apply_state_transition(state: &mut State, payload: &EventType) {
                 .upgrade(upgrade_arg.clone())
                 .expect("applying upgrade event should succeed");
         }
+        EventType::AcceptedDeposit(event) => {
+            state.record_event_to_mint(event);
+        }
+        EventType::Minted(event) => {
+            state.record_successful_mint(event);
+        }
     }
 }
 

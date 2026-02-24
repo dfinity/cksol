@@ -1,16 +1,24 @@
 #[cfg(test)]
 mod tests;
 
-use crate::ledger::client::LedgerClient;
+use crate::{
+    ledger::client::LedgerClient,
+    state::event::{AcceptedDepositEvent, MintedEvent},
+};
+use assert_matches::assert_matches;
 use candid::Principal;
+use cksol_types::DepositStatus;
 use cksol_types_internal::{Ed25519KeyName, InitArgs, UpgradeArgs};
 use ic_canister_runtime::Runtime;
 use ic_ed25519::PublicKey;
 use icrc_ledger_types::icrc1::account::Account;
 use sol_rpc_client::SolRpcClient;
-use sol_rpc_types::{ConsensusStrategy, RpcSources, SolanaCluster};
-use std::cell::RefCell;
-use std::collections::BTreeSet;
+use sol_rpc_types::{ConsensusStrategy, Lamport, RpcSources, SolanaCluster};
+use solana_signature::Signature;
+use std::{
+    cell::RefCell,
+    collections::{BTreeMap, BTreeSet},
+};
 
 pub mod audit;
 pub mod event;
@@ -63,9 +71,11 @@ pub struct State {
     master_key_name: Ed25519KeyName,
     ledger_canister_id: Principal,
     sol_rpc_canister_id: Principal,
-    deposit_fee: u64,
-    minimum_withdrawal_amount: u64,
+    deposit_fee: Lamport,
+    minimum_withdrawal_amount: Lamport,
     pending_update_balance_requests: BTreeSet<Account>,
+    events_to_mint: BTreeMap<(Account, Signature), AcceptedDepositEvent>,
+    minted_events: BTreeMap<(Account, Signature), MintedEvent>,
 }
 
 impl State {
@@ -104,6 +114,35 @@ impl State {
 
     pub fn minimum_withdrawal_amount(&self) -> u64 {
         self.minimum_withdrawal_amount
+    }
+
+    pub fn events_to_mint(&self) -> &BTreeMap<(Account, Signature), AcceptedDepositEvent> {
+        &self.events_to_mint
+    }
+
+    pub fn minted_events(&self) -> &BTreeMap<(Account, Signature), MintedEvent> {
+        &self.minted_events
+    }
+
+    pub fn deposit_status(&self, deposit: &(Account, Signature)) -> Option<DepositStatus> {
+        let maybe_deposit_event = self.events_to_mint().get(deposit);
+        let maybe_mint_event = self.minted_events().get(deposit);
+
+        match (maybe_deposit_event, maybe_mint_event) {
+            (None, None) => None,
+            (Some(deposit_event), None) => {
+                Some(DepositStatus::Processing(deposit_event.signature.into()))
+            }
+            (None, Some(minted_event)) => Some(DepositStatus::Minted {
+                block_index: *minted_event.mint_block_index.get(),
+                minted_amount: minted_event.minted_amount,
+                signature: minted_event.deposit_event.signature.into(),
+            }),
+            (Some(_), Some(_)) => panic!(
+                "Found both event to mint and minted event for deposit with account {:?} and signature {:?}",
+                deposit.0, deposit.1
+            ),
+        }
     }
 
     pub fn sol_rpc_client<R: Runtime>(&self, runtime: R) -> SolRpcClient<R> {
@@ -147,6 +186,36 @@ impl State {
         }
         Ok(())
     }
+
+    fn record_event_to_mint(&mut self, event: &AcceptedDepositEvent) {
+        let account = event.account;
+        let signature = event.signature;
+        assert!(
+            !self.events_to_mint.contains_key(&(account, signature)),
+            "There must not be two different events to mint for the same account and signature"
+        );
+        assert!(!self.minted_events.contains_key(&(account, signature)));
+        self.events_to_mint
+            .insert((account, signature), event.clone());
+    }
+
+    fn record_successful_mint(&mut self, event: &MintedEvent) {
+        let account = event.deposit_event.account;
+        let signature = event.deposit_event.signature.clone();
+        assert_matches!(
+            self.events_to_mint.remove(&(account, signature)),
+            Some(_),
+            "Attempted to mint ckSOL for an unknown event {:?}",
+            event.deposit_event
+        );
+        assert_eq!(
+            self.minted_events
+                .insert((account, signature), event.clone()),
+            None,
+            "Attempted to mint ckSOL twice for the same event {:?}",
+            event.deposit_event
+        );
+    }
 }
 
 #[derive(Debug)]
@@ -188,6 +257,8 @@ impl TryFrom<InitArgs> for State {
             deposit_fee,
             minimum_withdrawal_amount,
             pending_update_balance_requests: BTreeSet::new(),
+            events_to_mint: BTreeMap::new(),
+            minted_events: BTreeMap::new(),
         })
     }
 }

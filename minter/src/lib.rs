@@ -2,6 +2,7 @@ pub mod address;
 mod guard;
 mod ledger;
 pub mod lifecycle;
+mod numeric;
 pub mod runtime;
 pub mod state;
 pub mod storage;

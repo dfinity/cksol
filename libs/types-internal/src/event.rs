@@ -2,7 +2,9 @@
 
 use crate::{InitArgs, UpgradeArgs};
 use candid::CandidType;
+use icrc_ledger_types::icrc1::account::Account;
 use serde::Deserialize;
+use sol_rpc_types::{Lamport, Signature};
 
 /// A minter event that can be serialized to Candid.
 #[derive(Clone, Debug, CandidType, Deserialize)]
@@ -21,6 +23,25 @@ pub enum EventType {
     Init(InitArgs),
     /// The minter upgraded with the specified arguments.
     Upgrade(UpgradeArgs),
+    /// The minter discovered a Solana transaction that is a valid ckSOL
+    /// deposit for the given account.
+    AcceptedDeposit {
+        /// The signature of the Solana deposit transaction.
+        signature: Signature,
+        /// The account to which the minter should mint ckSOL.
+        account: Account,
+        /// The deposit amount in lamports.
+        amount: Lamport,
+    },
+    /// The minter minted ckSOL in response to a deposit.
+    Minted {
+        /// The signature of the Solana deposit transaction.
+        signature: Signature,
+        /// The account to which the minter minted ckSOL.
+        account: Account,
+        /// The transaction index on the ckSOL ledger.
+        mint_block_index: u64,
+    },
 }
 
 /// Arguments for the `get_events` endpoint.

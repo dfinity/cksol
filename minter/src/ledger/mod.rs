@@ -1,43 +1,57 @@
-use crate::{runtime::CanisterRuntime, state::read_state};
+use crate::{
+    runtime::CanisterRuntime,
+    state::read_state,
+    state::{
+        audit::process_event,
+        event::{AcceptedDepositEvent, EventType, MintedEvent},
+        mutate_state,
+    },
+};
 use cksol_types::{DepositStatus, Memo, MintMemo};
 use derive_more::From;
 use ic_canister_runtime::IcError;
-use icrc_ledger_types::icrc1::{
-    account::Account,
-    transfer::{NumTokens, TransferArg, TransferError},
-};
-use num_traits::cast::ToPrimitive;
-use sol_rpc_types::{Lamport, Signature};
+use icrc_ledger_types::icrc1::transfer::{NumTokens, TransferArg, TransferError};
 use thiserror::Error;
 
 pub mod client;
 
 pub async fn mint<R: CanisterRuntime>(
     runtime: &R,
-    account: Account,
-    deposit_amount: Lamport,
-    deposit_transaction: Signature,
+    deposit_event: AcceptedDepositEvent,
 ) -> Result<DepositStatus, MintError> {
-    let mint_memo = MintMemo::convert(deposit_transaction.clone());
+    let signature = deposit_event.signature;
+    let mint_memo = MintMemo::convert(signature);
+
+    let minted_amount = deposit_event.amount - read_state(|state| state.deposit_fee());
+
     let block_index =
         read_state(|state| state.ledger_client(runtime.inter_canister_call_runtime()))
             .transfer(TransferArg {
                 from_subaccount: None,
-                to: account,
+                to: deposit_event.account,
                 fee: None,
                 created_at_time: Some(runtime.time()),
                 memo: Some(Memo::from(mint_memo).into()),
-                amount: NumTokens::from(deposit_amount),
+                amount: NumTokens::from(minted_amount),
             })
             .await??;
-    // TODO DEFI-2643: Record mint event
+
+    mutate_state(|s| {
+        process_event(
+            s,
+            EventType::Minted(MintedEvent {
+                deposit_event,
+                minted_amount,
+                mint_block_index: block_index,
+            }),
+            runtime,
+        )
+    });
+
     Ok(DepositStatus::Minted {
-        block_index: block_index
-            .0
-            .to_u64()
-            .expect("ledger block index does not fit into u64"),
-        minted_amount: deposit_amount,
-        signature: deposit_transaction,
+        block_index: *block_index.get(),
+        minted_amount,
+        signature: signature.into(),
     })
 }
 

@@ -94,6 +94,16 @@ fn get_events(
         match event_type {
             EventType::Init(args) => event::EventType::Init(args),
             EventType::Upgrade(args) => event::EventType::Upgrade(args),
+            EventType::AcceptedDeposit(deposit_event) => event::EventType::AcceptedDeposit {
+                signature: deposit_event.signature.into(),
+                account: deposit_event.account,
+                amount: deposit_event.amount,
+            },
+            EventType::Minted(minted_event) => event::EventType::Minted {
+                signature: minted_event.deposit_event.signature.into(),
+                account: minted_event.deposit_event.account,
+                mint_block_index: *minted_event.mint_block_index.get(),
+            },
         }
     }
 

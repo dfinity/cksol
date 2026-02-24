@@ -1,17 +1,20 @@
 use crate::{
     runtime::TestCanisterRuntime,
+    state::event::EventType,
     test_fixtures::{
-        DEPOSIT_FEE,
+        BLOCK_INDEX, EventsAssert,
         deposit::{
-            DEPOSIT_AMOUNT, DEPOSITOR_ACCOUNT, deposit_transaction, deposit_transaction_signature,
+            DEPOSIT_AMOUNT, DEPOSITOR_ACCOUNT, accepted_deposit_event, deposit_status_minted,
+            deposit_status_processing, deposit_transaction, deposit_transaction_signature,
             deposit_transaction_to_wrong_address, deposit_transaction_to_wrong_address_signature,
+            minted_event,
         },
         init_schnorr_master_key, init_state, init_state_with_args, valid_init_args,
     },
     update_balance::update_balance,
 };
 use assert_matches::assert_matches;
-use cksol_types::{DepositStatus, UpdateBalanceError};
+use cksol_types::UpdateBalanceError;
 use cksol_types_internal::InitArgs;
 use ic_canister_runtime::IcError;
 use icrc_ledger_types::icrc1::transfer::{BlockIndex, TransferError};
@@ -32,6 +35,7 @@ async fn should_return_error_if_get_transaction_fails() {
         result,
         Err(UpdateBalanceError::TemporarilyUnavailable(e)) => assert!(e.contains("Inter-canister call perform failed"))
     );
+    EventsAssert::assert_no_events_recorded();
 }
 
 #[tokio::test]
@@ -44,7 +48,8 @@ async fn should_return_error_if_transaction_not_found() {
 
     let result = update_balance(runtime, DEPOSITOR_ACCOUNT, deposit_transaction_signature()).await;
 
-    assert_eq!(result, Err(UpdateBalanceError::TransactionNotFound))
+    assert_eq!(result, Err(UpdateBalanceError::TransactionNotFound));
+    EventsAssert::assert_no_events_recorded();
 }
 
 #[tokio::test]
@@ -68,6 +73,7 @@ async fn should_return_error_if_transaction_not_valid_deposit() {
         result,
         Err(UpdateBalanceError::InvalidDepositTransaction(e)) => assert!(e.contains("Transaction must target deposit address"))
     );
+    EventsAssert::assert_no_events_recorded();
 }
 
 #[tokio::test]
@@ -85,6 +91,7 @@ async fn should_fail_if_deposit_too_small() {
     let result = update_balance(runtime, DEPOSITOR_ACCOUNT, deposit_transaction_signature()).await;
 
     assert_eq!(result, Err(UpdateBalanceError::ValueTooSmall));
+    EventsAssert::assert_no_events_recorded();
 }
 
 #[tokio::test]
@@ -95,7 +102,7 @@ async fn should_return_processing_if_mint_fails() {
     let get_transaction_response =
         GetTransactionResult::Consistent(Ok(Some(deposit_transaction().try_into().unwrap())));
     let runtime = TestCanisterRuntime::new()
-        .add_stub_time(0)
+        .with_increasing_time()
         .add_stub_response(get_transaction_response)
         .add_stub_response(Err::<BlockIndex, TransferError>(
             TransferError::TemporarilyUnavailable,
@@ -103,12 +110,38 @@ async fn should_return_processing_if_mint_fails() {
 
     let result = update_balance(runtime, DEPOSITOR_ACCOUNT, deposit_transaction_signature()).await;
 
-    assert_eq!(
-        result,
-        Ok(DepositStatus::Processing(
-            deposit_transaction_signature().into()
-        ))
-    )
+    assert_eq!(result, Ok(deposit_status_processing()));
+
+    EventsAssert::from_recorded()
+        .expect_event_eq(EventType::AcceptedDeposit(accepted_deposit_event()))
+        .assert_no_more_events();
+}
+
+#[tokio::test]
+async fn should_return_processing_again_on_second_call() {
+    init_state();
+    init_schnorr_master_key();
+
+    // First call: makes JSON-RPC call and attempts to mint
+    let get_transaction_response =
+        GetTransactionResult::Consistent(Ok(Some(deposit_transaction().try_into().unwrap())));
+    let runtime = TestCanisterRuntime::new()
+        .with_increasing_time()
+        .add_stub_response(get_transaction_response)
+        .add_stub_response(Err::<BlockIndex, TransferError>(
+            TransferError::TemporarilyUnavailable,
+        ));
+    let result = update_balance(runtime, DEPOSITOR_ACCOUNT, deposit_transaction_signature()).await;
+    assert_eq!(result, Ok(deposit_status_processing()));
+
+    // Second call: fetches status from minter state, no JSON-RPC or minter calls
+    let runtime = TestCanisterRuntime::new();
+    let result = update_balance(runtime, DEPOSITOR_ACCOUNT, deposit_transaction_signature()).await;
+    assert_eq!(result, Ok(deposit_status_processing()));
+
+    EventsAssert::from_recorded()
+        .expect_event_eq(EventType::AcceptedDeposit(accepted_deposit_event()))
+        .assert_no_more_events();
 }
 
 #[tokio::test]
@@ -121,18 +154,43 @@ async fn should_succeed_with_valid_deposit_transaction() {
     let get_transaction_response =
         GetTransactionResult::Consistent(Ok(Some(deposit_transaction().try_into().unwrap())));
     let runtime = TestCanisterRuntime::new()
-        .add_stub_time(0)
+        .with_increasing_time()
         .add_stub_response(get_transaction_response)
         .add_stub_response(Ok::<BlockIndex, TransferError>(BLOCK_INDEX.into()));
 
     let result = update_balance(runtime, DEPOSITOR_ACCOUNT, deposit_transaction_signature()).await;
 
-    assert_eq!(
-        result,
-        Ok(DepositStatus::Minted {
-            block_index: BLOCK_INDEX,
-            minted_amount: DEPOSIT_AMOUNT - DEPOSIT_FEE,
-            signature: deposit_transaction_signature().into(),
-        })
-    )
+    assert_eq!(result, Ok(deposit_status_minted()));
+
+    EventsAssert::from_recorded()
+        .expect_event_eq(EventType::AcceptedDeposit(accepted_deposit_event()))
+        .expect_event_eq(EventType::Minted(minted_event(BLOCK_INDEX)))
+        .assert_no_more_events();
+}
+
+#[tokio::test]
+async fn should_not_double_mint() {
+    init_state();
+    init_schnorr_master_key();
+
+    // Successful mint
+    let get_transaction_response =
+        GetTransactionResult::Consistent(Ok(Some(deposit_transaction().try_into().unwrap())));
+    let runtime = TestCanisterRuntime::new()
+        .with_increasing_time()
+        .add_stub_response(get_transaction_response)
+        .add_stub_response(Ok::<BlockIndex, TransferError>(BLOCK_INDEX.into()));
+    let result = update_balance(runtime, DEPOSITOR_ACCOUNT, deposit_transaction_signature()).await;
+    assert_eq!(result, Ok(deposit_status_minted()));
+
+    // Second call: returns the same status
+    let runtime = TestCanisterRuntime::new();
+    let result = update_balance(runtime, DEPOSITOR_ACCOUNT, deposit_transaction_signature()).await;
+    assert_eq!(result, Ok(deposit_status_minted()));
+
+    // Only one mint event recorded
+    EventsAssert::from_recorded()
+        .expect_event_eq(EventType::AcceptedDeposit(accepted_deposit_event()))
+        .expect_event_eq(EventType::Minted(minted_event(BLOCK_INDEX)))
+        .assert_no_more_events();
 }

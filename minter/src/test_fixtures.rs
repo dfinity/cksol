@@ -1,5 +1,13 @@
-use crate::state::{SchnorrPublicKey, State, init_once_state, mutate_state};
+use crate::{
+    state::{
+        SchnorrPublicKey, State,
+        event::{AcceptedDepositEvent, Event, EventType},
+        init_once_state, mutate_state,
+    },
+    storage::with_event_iter,
+};
 use candid::Principal;
+use cksol_types::DepositStatus;
 use cksol_types_internal::{Ed25519KeyName, InitArgs};
 use ic_ed25519::{PocketIcMasterPublicKeyId, PublicKey};
 use icrc_ledger_types::icrc1::account::Account;
@@ -10,8 +18,9 @@ use solana_transaction_status_client_types::{
     EncodedTransactionWithStatusMeta, TransactionBinaryEncoding, UiLoadedAddresses,
     UiTransactionStatusMeta, option_serializer::OptionSerializer,
 };
-use std::str::FromStr;
+use std::{collections::VecDeque, str::FromStr};
 
+pub const BLOCK_INDEX: u64 = 98763_u64;
 pub const DEPOSIT_FEE: Lamport = 10_000_000; // 0.01 SOL
 pub const MINIMUM_WITHDRAWAL_AMOUNT: Lamport = 10_000_000; // 0.01 SOL
 
@@ -125,6 +134,8 @@ pub mod arb {
 
 pub mod deposit {
     use super::*;
+    use crate::numeric::LedgerMintIndex;
+    use crate::state::event::MintedEvent;
 
     pub const DEPOSIT_AMOUNT: Lamport = 500_000_000;
     pub const DEPOSIT_ADDRESS: Address = address!("BVH7GZXRdqyZLSLBS4cm1Yom8Yvekw6ytgSFz9y9on4e");
@@ -133,6 +144,34 @@ pub mod deposit {
         owner: DEPOSITOR_PRINCIPAL,
         subaccount: None,
     };
+
+    pub fn deposit_status_processing() -> DepositStatus {
+        DepositStatus::Processing(deposit_transaction_signature().into())
+    }
+
+    pub fn deposit_status_minted() -> DepositStatus {
+        DepositStatus::Minted {
+            block_index: BLOCK_INDEX,
+            minted_amount: DEPOSIT_AMOUNT - DEPOSIT_FEE,
+            signature: deposit_transaction_signature().into(),
+        }
+    }
+
+    pub fn minted_event(mint_block_index: impl Into<LedgerMintIndex>) -> MintedEvent {
+        MintedEvent {
+            deposit_event: accepted_deposit_event(),
+            minted_amount: DEPOSIT_AMOUNT - DEPOSIT_FEE,
+            mint_block_index: mint_block_index.into(),
+        }
+    }
+
+    pub fn accepted_deposit_event() -> AcceptedDepositEvent {
+        AcceptedDepositEvent {
+            signature: deposit_transaction_signature(),
+            account: DEPOSITOR_ACCOUNT,
+            amount: DEPOSIT_AMOUNT,
+        }
+    }
 
     // https://explorer.solana.com/tx/49aFRmEtgnVN3UetkKHJbz3ZMcDY6pgS9oDoN4Y4NQYfHSx4nsDsx3PSKubxfmY69URcosJj3CWu4aypeddduZYX?cluster=devnet
     pub fn deposit_transaction_signature() -> solana_signature::Signature {
@@ -222,5 +261,36 @@ pub mod deposit {
             },
             block_time: Some(1771421240),
         }
+    }
+}
+
+pub struct EventsAssert(VecDeque<Event>);
+
+impl EventsAssert {
+    pub fn from_recorded() -> Self {
+        Self(with_event_iter(|events| events.collect()))
+    }
+
+    pub fn assert_no_events_recorded() {
+        Self::from_recorded().assert_no_more_events();
+    }
+
+    pub fn expect_event<F>(mut self, check: F) -> Self
+    where
+        F: Fn(EventType),
+    {
+        let event = self.0.pop_front().expect("No more events!");
+        check(event.payload);
+        self
+    }
+
+    pub fn expect_event_eq(mut self, expected: EventType) -> Self {
+        let event = self.0.pop_front().expect("No more events!");
+        assert_eq!(event.payload, expected);
+        self
+    }
+
+    pub fn assert_no_more_events(&self) {
+        assert!(self.0.is_empty());
     }
 }

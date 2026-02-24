@@ -1,8 +1,14 @@
+use crate::numeric::LedgerMintIndex;
 use cksol_types_internal::{InitArgs, UpgradeArgs};
 use ic_stable_structures::Storable;
 use ic_stable_structures::storable::Bound;
+use icrc_ledger_types::icrc1::account::Account;
 use minicbor::{Decode, Encode};
+use sol_rpc_types::Lamport;
+use solana_signature::Signature;
 use std::borrow::Cow;
+
+mod cbor;
 
 #[derive(Eq, PartialEq, Debug, Decode, Encode)]
 pub struct Event {
@@ -23,6 +29,33 @@ pub enum EventType {
     /// The minter upgraded with the specified arguments.
     #[n(1)]
     Upgrade(#[n(0)] UpgradeArgs),
+    /// The minter discovered a Solana transaction that is a valid ckSOL
+    /// deposit for the given account.
+    #[n(2)]
+    AcceptedDeposit(#[n(0)] AcceptedDepositEvent),
+    /// The minter minted ckSOL in response to a deposit.
+    #[n(3)]
+    Minted(#[n(0)] MintedEvent),
+}
+
+#[derive(Clone, Eq, Ord, PartialEq, PartialOrd, Debug, Decode, Encode)]
+pub struct AcceptedDepositEvent {
+    #[cbor(n(0), with = "cbor::signature")]
+    pub signature: Signature,
+    #[n(1)]
+    pub account: Account,
+    #[n(2)]
+    pub amount: Lamport,
+}
+
+#[derive(Clone, Eq, Ord, PartialEq, PartialOrd, Debug, Decode, Encode)]
+pub struct MintedEvent {
+    #[n(0)]
+    pub deposit_event: AcceptedDepositEvent,
+    #[n(1)]
+    pub minted_amount: Lamport,
+    #[cbor(n(2), with = "cbor::id")]
+    pub mint_block_index: LedgerMintIndex,
 }
 
 impl Storable for Event {
