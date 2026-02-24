@@ -1,18 +1,18 @@
 use crate::ledger_init_args::ledger_init_args;
-use candid::{utils::ArgumentEncoder, CandidType, Encode, Nat, Principal};
+use candid::{CandidType, Encode, Nat, Principal, utils::ArgumentEncoder};
 use canlog::{Log, LogEntry};
 use cksol_types::{
     Address, DepositStatus, GetDepositAddressArgs, MinterInfo, RetrieveSolArgs, RetrieveSolError,
     RetrieveSolOk, RetrieveSolStatus, UpdateBalanceArgs, UpdateBalanceError,
 };
-use cksol_types_internal::{log::Priority, MinterArg};
+use cksol_types_internal::{MinterArg, log::Priority};
 use ic_canister_runtime::Runtime;
 use ic_http_types::{HttpRequest, HttpResponse};
 use ic_management_canister_types::{CanisterId, CanisterSettings};
 use ic_pocket_canister_runtime::{ExecuteHttpOutcallMocks, PocketIcRuntime};
 use icrc_ledger_types::icrc1::account::Account;
 use num_traits::cast::ToPrimitive;
-use pocket_ic::{nonblocking::PocketIc, PocketIcBuilder, RejectResponse};
+use pocket_ic::{PocketIcBuilder, RejectResponse, nonblocking::PocketIc};
 use serde::de::DeserializeOwned;
 use sol_rpc_client::SolRpcClient;
 use sol_rpc_types::{Lamport, RpcAccess};
