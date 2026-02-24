@@ -12,14 +12,23 @@ use ic_pocket_canister_runtime::{ExecuteHttpOutcallMocks, PocketIcRuntime};
 use pocket_ic::{PocketIcBuilder, RejectResponse, nonblocking::PocketIc};
 use serde::de::DeserializeOwned;
 use sol_rpc_client::SolRpcClient;
-use sol_rpc_types::RpcAccess;
+use sol_rpc_types::{Lamport, RpcAccess};
 use std::{env::var, fs, path::PathBuf};
 
 pub mod fixtures;
 
 #[derive(Default)]
+pub enum PocketIcMode {
+    LiveMode,
+    #[default]
+    NonLiveMode,
+}
+
+#[derive(Default)]
 pub struct SetupBuilder {
     caller: Option<Principal>,
+    make_live: Option<PocketIcMode>,
+    sol_rpc_install_args: Option<sol_rpc_types::InstallArgs>,
 }
 
 impl SetupBuilder {
@@ -32,8 +41,23 @@ impl SetupBuilder {
         self
     }
 
+    pub fn with_pocket_ic_live_mode(mut self) -> Self {
+        self.make_live = Some(PocketIcMode::LiveMode);
+        self
+    }
+
+    pub fn with_sol_rpc_install_args(mut self, args: sol_rpc_types::InstallArgs) -> Self {
+        self.sol_rpc_install_args = Some(args);
+        self
+    }
+
     pub async fn build(self) -> Setup {
-        Setup::new(self.caller).await
+        Setup::new(
+            self.caller,
+            self.make_live.unwrap_or_default(),
+            self.sol_rpc_install_args.unwrap_or_default(),
+        )
+        .await
     }
 }
 
@@ -44,11 +68,16 @@ pub struct Setup {
 }
 
 impl Setup {
+    pub const DEFAULT_DEPOSIT_FEE: Lamport = 10_000_000; // 0.01 SOL
     pub const DEFAULT_CONTROLLER: Principal = Principal::from_slice(&[0x9d, 0xf7, 0x01]);
     pub const DEFAULT_CALLER: Principal = Principal::from_slice(&[0x9d, 0xf7, 0x02]);
-    pub const DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT: u64 = 10000000;
+    pub const DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT: Lamport = 10_000_000; // 0.01 SOL
 
-    async fn new(caller: Option<Principal>) -> Self {
+    pub async fn new(
+        caller: Option<Principal>,
+        make_live: PocketIcMode,
+        sol_rpc_install_args: sol_rpc_types::InstallArgs,
+    ) -> Self {
         let env = PocketIcBuilder::new()
             .with_nns_subnet() //make_live requires NNS subnet.
             .with_fiduciary_subnet()
@@ -68,7 +97,7 @@ impl Setup {
         env.install_canister(
             sol_rpc_canister_id,
             sol_rpc_wasm().await,
-            Encode!(&sol_rpc_types::InstallArgs::default()).unwrap(),
+            Encode!(&sol_rpc_install_args).unwrap(),
             Some(Self::DEFAULT_CONTROLLER),
         )
         .await;
@@ -82,10 +111,22 @@ impl Setup {
         env.install_canister(
             minter_canister_id,
             cksol_minter_wasm(),
-            Encode!(&cksol_minter_init_args(sol_rpc_canister_id)).unwrap(),
+            Encode!(&cksol_minter_init_args(
+                sol_rpc_canister_id,
+                Self::DEFAULT_DEPOSIT_FEE
+            ))
+            .unwrap(),
             Some(Self::DEFAULT_CONTROLLER),
         )
         .await;
+
+        let env = if let PocketIcMode::LiveMode = make_live {
+            let mut env = env;
+            let _ = env.make_live(None).await;
+            env
+        } else {
+            env
+        };
 
         Self {
             env: Some(env),
@@ -269,13 +310,13 @@ fn cksol_minter_wasm() -> Vec<u8> {
     )
 }
 
-fn cksol_minter_init_args(sol_rpc_canister_id: Principal) -> MinterArg {
+fn cksol_minter_init_args(sol_rpc_canister_id: Principal, deposit_fee: Lamport) -> MinterArg {
     use cksol_types_internal::{Ed25519KeyName, InitArgs, MinterArg};
     MinterArg::Init(InitArgs {
         sol_rpc_canister_id,
         // TODO DEFI-2643: Fix me!
         ledger_canister_id: Principal::from_slice(&[43_u8]),
-        deposit_fee: 0,
+        deposit_fee,
         master_key_name: Ed25519KeyName::MainnetProdKey1,
         minimum_withdrawal_amount: Setup::DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT,
     })
