@@ -12,7 +12,7 @@ use cksol_types::{
     DepositStatus, GetDepositAddressArgs, MinterInfo, RetrieveSolArgs, RetrieveSolError,
     RetrieveSolStatus, UpdateBalanceArgs, UpdateBalanceError,
 };
-use cksol_types_internal::{UpgradeArgs, log::Priority};
+use cksol_types_internal::{UpgradeArgs, event::EventType, log::Priority};
 use ic_pocket_canister_runtime::{JsonRpcRequestMatcher, JsonRpcResponse, MockHttpOutcallsBuilder};
 use icrc_ledger_types::icrc1::account::Subaccount;
 use serde_json::json;
