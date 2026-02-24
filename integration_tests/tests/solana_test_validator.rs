@@ -1,6 +1,5 @@
 use assert_matches::assert_matches;
 use candid::Principal;
-use cksol_int_tests::fixtures::DEFAULT_CALLER_ACCOUNT;
 use cksol_int_tests::{Setup, SetupBuilder};
 use cksol_types::{DepositStatus, GetDepositAddressArgs, UpdateBalanceArgs};
 use icrc_ledger_types::icrc1::account::Account;
