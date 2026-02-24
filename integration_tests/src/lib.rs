@@ -1,22 +1,21 @@
 use crate::ledger_init_args::ledger_init_args;
-use candid::{CandidType, Encode, Nat, Principal, utils::ArgumentEncoder};
+use candid::{utils::ArgumentEncoder, CandidType, Encode, Nat, Principal};
 use canlog::{Log, LogEntry};
 use cksol_types::{
     Address, DepositStatus, GetDepositAddressArgs, MinterInfo, RetrieveSolArgs, RetrieveSolError,
     RetrieveSolOk, RetrieveSolStatus, UpdateBalanceArgs, UpdateBalanceError,
 };
-use cksol_types_internal::{MinterArg, log::Priority};
+use cksol_types_internal::{log::Priority, MinterArg};
 use ic_canister_runtime::Runtime;
 use ic_http_types::{HttpRequest, HttpResponse};
 use ic_management_canister_types::{CanisterId, CanisterSettings};
 use ic_pocket_canister_runtime::{ExecuteHttpOutcallMocks, PocketIcRuntime};
 use icrc_ledger_types::icrc1::account::Account;
 use num_traits::cast::ToPrimitive;
-use pocket_ic::{PocketIcBuilder, RejectResponse, nonblocking::PocketIc};
+use pocket_ic::{nonblocking::PocketIc, PocketIcBuilder, RejectResponse};
 use serde::de::DeserializeOwned;
 use sol_rpc_client::SolRpcClient;
 use sol_rpc_types::{Lamport, RpcAccess};
-use std::time::Duration;
 use std::{env::var, fs, path::PathBuf};
 
 pub mod fixtures;
@@ -173,8 +172,8 @@ impl Setup {
         self
     }
 
-    pub async fn advance_time(&self, duration: Duration) -> () {
-        self.env.as_ref().unwrap().advance_time(duration).await
+    pub async fn tick(&self) -> () {
+        self.env.as_ref().unwrap().tick().await
     }
 
     pub async fn drop(self) {

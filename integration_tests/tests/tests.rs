@@ -3,9 +3,9 @@ use candid::Principal;
 use cksol_int_tests::{
     Setup, SetupBuilder,
     fixtures::{
-        DEFAULT_CALLER_DEPOSIT_ADDRESS, DEPOSIT_AMOUNT, default_update_balance_args,
-        deposit_transaction_signature, get_deposit_transaction_request,
-        get_deposit_transaction_response,
+        DEFAULT_CALLER_ACCOUNT, DEFAULT_CALLER_DEPOSIT_ADDRESS, DEPOSIT_AMOUNT,
+        default_update_balance_args, deposit_transaction_signature,
+        get_deposit_transaction_request, get_deposit_transaction_response,
     },
 };
 use cksol_types::{
@@ -217,8 +217,6 @@ mod retrieve_sol_tests {
 
 mod update_balance_tests {
     use super::*;
-    use cksol_int_tests::fixtures::DEFAULT_CALLER_ACCOUNT;
-    use std::time::Duration;
 
     #[tokio::test]
     async fn should_fail_if_transaction_not_found() {
@@ -249,7 +247,7 @@ mod update_balance_tests {
         let minter2 = setup.minter();
 
         let (result1, result2) = join!(minter1.update_balance(default_update_balance_args()), {
-            setup.advance_time(Duration::from_millis(500)).await;
+            setup.tick().await;
             minter2.update_balance(default_update_balance_args())
         });
 
