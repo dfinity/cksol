@@ -3,7 +3,8 @@ use candid::Principal;
 use cksol_int_tests::{
     Setup, SetupBuilder,
     fixtures::{
-        DEPOSIT_TRANSACTION_SIGNATURE, default_update_balance_args, deposit_transaction_signature,
+        DEPOSIT_TRANSACTION_SIGNATURE, SharedMockHttpOutcalls, default_update_balance_args,
+        deposit_transaction_signature,
     },
 };
 use cksol_types::{
@@ -252,23 +253,33 @@ mod update_balance_tests {
     async fn should_fail_for_concurrent_access() {
         let setup = SetupBuilder::new().build().await;
 
-        let mocks = MockHttpOutcallsBuilder::new()
-            .given(get_deposit_transaction_request().with_id(0))
-            .respond_with(get_deposit_transaction_response().with_id(0))
-            .given(get_deposit_transaction_request().with_id(1))
-            .respond_with(get_deposit_transaction_response().with_id(1))
-            .given(get_deposit_transaction_request().with_id(2))
-            .respond_with(get_deposit_transaction_response().with_id(2))
-            .given(get_deposit_transaction_request().with_id(3))
-            .respond_with(get_deposit_transaction_response().with_id(3))
-            .build();
+        // Both minters use the same mocks, whichever gets the guard first will consume them
+        let mocks = SharedMockHttpOutcalls::new(
+            MockHttpOutcallsBuilder::new()
+                .given(get_deposit_transaction_request().with_id(0))
+                .respond_with(get_deposit_transaction_response().with_id(0))
+                .given(get_deposit_transaction_request().with_id(1))
+                .respond_with(get_deposit_transaction_response().with_id(1))
+                .given(get_deposit_transaction_request().with_id(2))
+                .respond_with(get_deposit_transaction_response().with_id(2))
+                .given(get_deposit_transaction_request().with_id(3))
+                .respond_with(get_deposit_transaction_response().with_id(3))
+                .build(),
+        );
 
-        let minter1 = setup.minter().with_http_mocks(mocks);
-        let minter2 = setup.minter();
+        let minter1 = setup.minter().with_http_mocks(mocks.clone());
+        let minter2 = setup.minter().with_http_mocks(mocks.clone());
+
         let (result1, result2) = join!(
             minter1.update_balance(default_update_balance_args()),
             minter2.update_balance(default_update_balance_args())
         );
+
+        let (result1, result2) = match (&result1, &result2) {
+            (Ok(_), Err(_)) => (result1, result2),
+            (Err(_), Ok(_)) => (result2, result1),
+            _ => panic!("Expected one success and one error, but got: {result1:?} and {result2:?}"),
+        };
 
         // TODO DEFI-2643: Update once deposit logic is implemented
         assert_matches!(result1, Ok(DepositStatus::Processing(_)));
