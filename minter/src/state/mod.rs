@@ -6,6 +6,7 @@ use candid::Principal;
 use cksol_types_internal::{Ed25519KeyName, InitArgs, UpgradeArgs};
 use ic_canister_runtime::Runtime;
 use ic_ed25519::PublicKey;
+use icrc_ledger_types::icrc1::account::Account;
 use sol_rpc_client::SolRpcClient;
 use sol_rpc_types::{ConsensusStrategy, RpcSources, SolanaCluster};
 use std::cell::RefCell;
@@ -64,6 +65,7 @@ pub struct State {
     sol_rpc_canister_id: Principal,
     deposit_fee: u64,
     minimum_withdrawal_amount: u64,
+    pending_update_balance_requests: BTreeSet<Account>,
 }
 
 impl State {
@@ -120,6 +122,10 @@ impl State {
 
     pub fn ledger_client<R: Runtime>(&self, runtime: R) -> LedgerClient<R> {
         LedgerClient::new(runtime, self.ledger_canister_id)
+    }
+
+    pub fn pending_update_balance_requests_mut(&mut self) -> &mut BTreeSet<Account> {
+        &mut self.pending_update_balance_requests
     }
 
     fn upgrade(
@@ -181,6 +187,7 @@ impl TryFrom<InitArgs> for State {
             sol_rpc_canister_id,
             deposit_fee,
             minimum_withdrawal_amount,
+            pending_update_balance_requests: BTreeSet::new(),
         })
     }
 }

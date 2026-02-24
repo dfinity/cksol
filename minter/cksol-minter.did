@@ -50,6 +50,8 @@ type UpdateBalanceArgs = record {
 type UpdateBalanceError = variant {
     // The minter experiences temporary issues, try the call again later.
     TemporarilyUnavailable : text;
+    // There is already a concurrent `update_balance` invocation from the same caller.
+    AlreadyProcessing;
     // No matching transaction was found for the given signature.
     //
     // This can also happen if the transaction is not yet finalized.

@@ -60,6 +60,9 @@ pub enum UpdateBalanceError {
     /// The minter experiences temporary issues, try the call again later.
     #[error("Transient error, try the call again later: {0}")]
     TemporarilyUnavailable(String),
+    /// There is already a concurrent `update_balance` invocation from the same caller.
+    #[error("There is already a concurrent `update_balance` invocation from the same caller")]
+    AlreadyProcessing,
     /// No matching transaction was found for the given signature.
     ///
     /// This can also happen if the transaction is not yet finalized, in which case trying

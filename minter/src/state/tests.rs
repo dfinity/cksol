@@ -1,9 +1,13 @@
+use super::{event::*, *};
+use crate::test_fixtures::{
+    DEPOSIT_FEE, MINIMUM_WITHDRAWAL_AMOUNT, arb::arb_event, ledger_canister_id,
+    sol_rpc_canister_id, valid_init_args,
+};
+use assert_matches::assert_matches;
+use cksol_types_internal::{Ed25519KeyName, InitArgs};
 use ic_stable_structures::Storable;
 use proptest::prelude::*;
 use std::borrow::Cow;
-
-use super::event::Event;
-use crate::test_fixtures::arb::arb_event;
 
 proptest! {
     #[test]
@@ -15,13 +19,7 @@ proptest! {
 }
 
 mod state_from_init_args {
-    use super::super::*;
-    use crate::test_fixtures::{
-        DEPOSIT_FEE, MINIMUM_WITHDRAWAL_AMOUNT, ledger_canister_id, sol_rpc_canister_id,
-        valid_init_args,
-    };
-    use assert_matches::assert_matches;
-    use cksol_types_internal::{Ed25519KeyName, InitArgs};
+    use super::*;
 
     #[test]
     fn should_succeed_with_valid_args() {
@@ -36,6 +34,7 @@ mod state_from_init_args {
                 sol_rpc_canister_id: sol_rpc_canister_id(),
                 deposit_fee: DEPOSIT_FEE,
                 minimum_withdrawal_amount: MINIMUM_WITHDRAWAL_AMOUNT,
+                pending_update_balance_requests: BTreeSet::new(),
             }
         );
     }

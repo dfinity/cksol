@@ -16,6 +16,7 @@ use cksol_types_internal::{UpgradeArgs, log::Priority};
 use ic_pocket_canister_runtime::{JsonRpcResponse, MockHttpOutcalls, MockHttpOutcallsBuilder};
 use icrc_ledger_types::icrc1::account::Subaccount;
 use serde_json::json;
+use tokio::join;
 
 mod get_deposit_address_tests {
     use super::*;
@@ -219,7 +220,7 @@ mod update_balance_tests {
     use cksol_int_tests::fixtures::DEFAULT_CALLER_ACCOUNT;
 
     #[tokio::test]
-    async fn should_not_update_balance_if_transaction_not_found() {
+    async fn should_fail_if_transaction_not_found() {
         fn transaction_not_found_response() -> JsonRpcResponse {
             JsonRpcResponse::from(json!({"jsonrpc": "2.0", "result": null, "id": 0}))
         }
@@ -233,6 +234,35 @@ mod update_balance_tests {
             .await;
 
         assert_eq!(result, Err(UpdateBalanceError::TransactionNotFound));
+
+        setup.drop().await;
+    }
+
+    #[tokio::test]
+    async fn should_fail_for_concurrent_access() {
+        let setup = SetupBuilder::new().build().await;
+
+        let mocks = MockHttpOutcallsBuilder::new()
+            .given(get_deposit_transaction_request().with_id(0))
+            .respond_with(get_deposit_transaction_response().with_id(0))
+            .given(get_deposit_transaction_request().with_id(1))
+            .respond_with(get_deposit_transaction_response().with_id(1))
+            .given(get_deposit_transaction_request().with_id(2))
+            .respond_with(get_deposit_transaction_response().with_id(2))
+            .given(get_deposit_transaction_request().with_id(3))
+            .respond_with(get_deposit_transaction_response().with_id(3))
+            .build();
+
+        let minter1 = setup.minter().with_http_mocks(mocks);
+        let minter2 = setup.minter();
+        let (result1, result2) = join!(
+            minter1.update_balance(default_update_balance_args()),
+            minter2.update_balance(default_update_balance_args())
+        );
+
+        // TODO DEFI-2643: Update once deposit logic is implemented
+        assert_matches!(result1, Ok(DepositStatus::Processing(_)));
+        assert_eq!(result2, Err(UpdateBalanceError::AlreadyProcessing));
 
         setup.drop().await;
     }

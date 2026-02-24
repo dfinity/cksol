@@ -1,5 +1,6 @@
 use crate::{
     address::get_deposit_address,
+    guard::update_balance_guard,
     ledger::mint,
     runtime::CanisterRuntime,
     state::read_state,
@@ -18,8 +19,8 @@ pub async fn update_balance<R: CanisterRuntime>(
     account: Account,
     signature: solana_signature::Signature,
 ) -> Result<DepositStatus, UpdateBalanceError> {
-    // TODO DEFI-2643: Add guard to prevent concurrent calls
     // TODO DEFI-2643: Check state to see if transaction is known
+    let _guard = update_balance_guard(account)?;
 
     let maybe_transaction = try_get_transaction(&runtime, signature)
         .await
