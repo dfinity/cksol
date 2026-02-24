@@ -72,6 +72,7 @@ impl Setup {
     pub const DEFAULT_CONTROLLER: Principal = Principal::from_slice(&[0x9d, 0xf7, 0x01]);
     pub const DEFAULT_CALLER: Principal = Principal::from_slice(&[0x9d, 0xf7, 0x02]);
     pub const DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT: Lamport = 10_000_000; // 0.01 SOL
+    pub const DEFAULT_MINIMUM_DEPOSIT_AMOUNT: Lamport = 10_000_000; // 0.01 SOL
 
     pub async fn new(
         caller: Option<Principal>,
@@ -319,6 +320,7 @@ fn cksol_minter_init_args(sol_rpc_canister_id: Principal, deposit_fee: Lamport) 
         deposit_fee,
         master_key_name: Ed25519KeyName::MainnetProdKey1,
         minimum_withdrawal_amount: Setup::DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT,
+        minimum_deposit_amount: Setup::DEFAULT_MINIMUM_DEPOSIT_AMOUNT,
     })
 }
 

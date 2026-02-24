@@ -100,6 +100,7 @@ mod lifecycle {
             MinterInfo {
                 deposit_fee: Setup::DEFAULT_DEPOSIT_FEE,
                 minimum_withdrawal_amount: Setup::DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT,
+                minimum_deposit_amount: Setup::DEFAULT_MINIMUM_DEPOSIT_AMOUNT,
             }
         );
 
@@ -121,6 +122,7 @@ mod lifecycle {
             MinterInfo {
                 deposit_fee: new_deposit_fee,
                 minimum_withdrawal_amount: new_minimum_withdrawal_amount,
+                minimum_deposit_amount: Setup::DEFAULT_MINIMUM_DEPOSIT_AMOUNT,
             }
         );
 
