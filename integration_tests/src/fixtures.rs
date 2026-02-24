@@ -1,5 +1,5 @@
 use crate::Setup;
-use cksol_types::{Signature, UpdateBalanceArgs};
+use cksol_types::{GetDepositAddressArgs, Signature, UpdateBalanceArgs};
 use ic_pocket_canister_runtime::{JsonRpcRequestMatcher, JsonRpcResponse};
 use icrc_ledger_types::icrc1::account::Account;
 use serde_json::json;
@@ -25,6 +25,13 @@ pub const DEPOSIT_TRANSACTION_SIGNATURE: &str =
 
 pub fn deposit_transaction_signature() -> Signature {
     Signature::from_str(DEPOSIT_TRANSACTION_SIGNATURE).unwrap()
+}
+
+pub fn default_get_deposit_address_args() -> GetDepositAddressArgs {
+    GetDepositAddressArgs {
+        owner: None,
+        subaccount: None,
+    }
 }
 
 pub fn default_update_balance_args() -> UpdateBalanceArgs {
