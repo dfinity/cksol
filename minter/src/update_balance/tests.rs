@@ -70,10 +70,9 @@ async fn should_return_error_if_transaction_not_valid_deposit() {
 
 #[tokio::test]
 async fn should_fail_if_deposit_too_small() {
-    let deposit_fee = 2 * DEPOSIT_AMOUNT;
     init_state_with_args(InitArgs {
-        deposit_fee,
-        minimum_deposit_amount: deposit_fee,
+        deposit_fee: 2 * DEPOSIT_AMOUNT,
+        minimum_deposit_amount: 2 * DEPOSIT_AMOUNT,
         ..valid_init_args()
     });
     init_schnorr_master_key();

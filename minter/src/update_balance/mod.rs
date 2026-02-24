@@ -44,8 +44,7 @@ pub async fn update_balance<R: CanisterRuntime>(
             UpdateBalanceError::InvalidDepositTransaction(e.to_string())
         })?;
 
-    let deposit_fee = read_state(|state| state.deposit_fee());
-    if deposit_amount < deposit_fee {
+    if deposit_amount < read_state(|state| state.minimum_deposit_amount()) {
         return Err(UpdateBalanceError::ValueTooSmall);
     }
 
