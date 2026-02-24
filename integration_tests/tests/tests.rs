@@ -1,4 +1,5 @@
 use assert_matches::assert_matches;
+use assert2::check;
 use candid::Principal;
 use cksol_int_tests::{
     Setup, SetupBuilder,
@@ -11,7 +12,7 @@ use cksol_types::{
     DepositStatus, GetDepositAddressArgs, MinterInfo, RetrieveSolArgs, RetrieveSolError,
     RetrieveSolStatus, UpdateBalanceArgs, UpdateBalanceError,
 };
-use cksol_types_internal::{UpgradeArgs, log::Priority};
+use cksol_types_internal::{UpgradeArgs, event::EventType, log::Priority};
 use ic_pocket_canister_runtime::{JsonRpcRequestMatcher, JsonRpcResponse, MockHttpOutcallsBuilder};
 use icrc_ledger_types::icrc1::account::Subaccount;
 use serde_json::json;
@@ -124,6 +125,27 @@ mod lifecycle {
                 minimum_withdrawal_amount: new_minimum_withdrawal_amount,
             }
         );
+
+        setup.drop().await;
+    }
+
+    #[tokio::test]
+    async fn should_get_events() {
+        let setup = SetupBuilder::new().build().await;
+        let minter = setup.minter();
+
+        minter.assert_that_events().await.satisfy(|events| {
+            check!(events.len() == 1 && matches!(events[0], EventType::Init(_)));
+        });
+
+        minter
+            .upgrade(Default::default())
+            .await
+            .expect("upgrade failed");
+
+        minter.assert_that_events().await.satisfy(|events| {
+            check!(events.len() == 2 && matches!(events[1], EventType::Upgrade(_)));
+        });
 
         setup.drop().await;
     }
