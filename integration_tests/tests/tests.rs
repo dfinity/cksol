@@ -3,16 +3,19 @@ use candid::Principal;
 use cksol_int_tests::{
     Setup, SetupBuilder,
     fixtures::{
-        DEPOSIT_TRANSACTION_SIGNATURE, default_update_balance_args, deposit_transaction_signature,
+        DEPOSIT_TRANSACTION_SIGNATURE, SharedMockHttpOutcalls, default_update_balance_args,
+        deposit_transaction_signature,
     },
 };
 use cksol_types::{
-    GetDepositAddressArgs, RetrieveSolArgs, RetrieveSolError, RetrieveSolStatus, UpdateBalanceArgs,
-    UpdateBalanceError,
+    DepositStatus, GetDepositAddressArgs, MinterInfo, RetrieveSolArgs, RetrieveSolError,
+    RetrieveSolStatus, UpdateBalanceArgs, UpdateBalanceError,
 };
+use cksol_types_internal::{UpgradeArgs, log::Priority};
 use ic_pocket_canister_runtime::{JsonRpcRequestMatcher, JsonRpcResponse, MockHttpOutcallsBuilder};
 use icrc_ledger_types::icrc1::account::Subaccount;
 use serde_json::json;
+use tokio::join;
 
 mod get_deposit_address_tests {
     use super::*;
@@ -75,12 +78,7 @@ mod get_deposit_address_tests {
 }
 
 mod lifecycle {
-    use assert2::check;
-    use cksol_int_tests::{Setup, SetupBuilder};
-    use cksol_types::MinterInfo;
-    use cksol_types_internal::UpgradeArgs;
-    use cksol_types_internal::event::EventType;
-    use cksol_types_internal::log::Priority;
+    use super::*;
 
     #[tokio::test]
     async fn should_get_logs() {
@@ -101,8 +99,8 @@ mod lifecycle {
         assert_eq!(
             minter_info,
             MinterInfo {
-                deposit_fee: 0,
-                minimum_withdrawal_amount: Setup::DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT
+                deposit_fee: Setup::DEFAULT_DEPOSIT_FEE,
+                minimum_withdrawal_amount: Setup::DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT,
             }
         );
 
@@ -243,7 +241,7 @@ mod update_balance_tests {
     use super::*;
 
     #[tokio::test]
-    async fn should_not_update_balance_if_transaction_not_found() {
+    async fn should_fail_if_transaction_not_found() {
         fn transaction_not_found_response() -> JsonRpcResponse {
             JsonRpcResponse::from(json!({"jsonrpc": "2.0", "result": null, "id": 0}))
         }
@@ -273,6 +271,45 @@ mod update_balance_tests {
     }
 
     #[tokio::test]
+    async fn should_fail_for_concurrent_access() {
+        let setup = SetupBuilder::new().build().await;
+
+        // Both minters use the same mocks, whichever gets the guard first will consume them
+        let mocks = SharedMockHttpOutcalls::new(
+            MockHttpOutcallsBuilder::new()
+                .given(get_deposit_transaction_request().with_id(0))
+                .respond_with(get_deposit_transaction_response().with_id(0))
+                .given(get_deposit_transaction_request().with_id(1))
+                .respond_with(get_deposit_transaction_response().with_id(1))
+                .given(get_deposit_transaction_request().with_id(2))
+                .respond_with(get_deposit_transaction_response().with_id(2))
+                .given(get_deposit_transaction_request().with_id(3))
+                .respond_with(get_deposit_transaction_response().with_id(3))
+                .build(),
+        );
+
+        let minter1 = setup.minter().with_http_mocks(mocks.clone());
+        let minter2 = setup.minter().with_http_mocks(mocks.clone());
+
+        let (result1, result2) = join!(
+            minter1.update_balance(default_update_balance_args()),
+            minter2.update_balance(default_update_balance_args())
+        );
+
+        let (result1, result2) = match (&result1, &result2) {
+            (Ok(_), Err(_)) => (result1, result2),
+            (Err(_), Ok(_)) => (result2, result1),
+            _ => panic!("Expected one success and one error, but got: {result1:?} and {result2:?}"),
+        };
+
+        // TODO DEFI-2643: Update once deposit logic is implemented
+        assert_matches!(result1, Ok(DepositStatus::Processing(_)));
+        assert_eq!(result2, Err(UpdateBalanceError::AlreadyProcessing));
+
+        setup.drop().await;
+    }
+
+    #[tokio::test]
     async fn should_update_balance() {
         let setup = SetupBuilder::new().build().await;
 
@@ -294,9 +331,10 @@ mod update_balance_tests {
             .await;
 
         // TODO DEFI-2643: Change once deposit logic is implemented
-        assert_matches!(result, Err(UpdateBalanceError::TemporarilyUnavailable(s)) => {
-            assert!(s.contains("Not yet implemented!"))
-        });
+        assert_eq!(
+            result,
+            Ok(DepositStatus::Processing(deposit_transaction_signature()))
+        );
 
         setup.drop().await;
     }
@@ -314,7 +352,7 @@ mod update_balance_tests {
         JsonRpcResponse::from(json!({
             "jsonrpc": "2.0",
             "result": {
-                "blockTime": 1770997258,
+                "blockTime": 1771484921,
                 "meta": {
                     "computeUnitsConsumed": 150,
                     "costUnits": 1481,
@@ -330,13 +368,13 @@ mod update_balance_tests {
                         "Program 11111111111111111111111111111111 success"
                     ],
                     "postBalances": [
-                        3395836440_u64,
+                        1395816440,
                         500000000,
                         1
                     ],
                     "postTokenBalances": [],
                     "preBalances": [
-                        3895841440_u64,
+                        1895821440,
                         0,
                         1
                     ],
@@ -346,9 +384,9 @@ mod update_balance_tests {
                         "Ok": null
                     }
                 },
-                "slot": 441894876,
+                "slot": 443170403,
                 "transaction": [
-                    "AbPf97eQzgIgQGGFzEA2zvWWbaNdZxVOsN+Zem/HooxKiAzkImkLy/qXv56MOq0kQ9yJYWw4ZTOGP8mTemI6MgsBAAEDIg5JU11WGypQAKfOpxcE0+UIiKney1G6hf+6GRXcmscnpwFQ/UrMJ1PeTEdnddpynJZVZBAGM5/4YyiEZlx8QQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA/ojmZ6HPuhM7YU56uETXnzzzvzHc55RxGfYTOIsoFu0BAgIAAQwCAAAAAGXNHQAAAAA=",
+                    "Ae8DcFCR+fISEfOEbPxoc4LVpEhkZBZIbfR17dUMX69x2xAuXybl0rAzVr4FBptL51oOjtQblMI78wjxgzvF3wgBAAEDIg5JU11WGypQAKfOpxcE0+UIiKney1G6hf+6GRXcmsegouBqKPunkGhY/5zzw2dzMFAJHrH4tQ8/OqJSAzQIJgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAE5C8ZKc/bqTlyknK2gJl0byFYySUUjKhGH8Uwb9hkJYBAgIAAQwCAAAAAGXNHQAAAAA=",
                     "base64"
                 ]
             },

@@ -3,6 +3,8 @@ use candid::Principal;
 use cksol_types_internal::{Ed25519KeyName, InitArgs};
 use ic_ed25519::{PocketIcMasterPublicKeyId, PublicKey};
 use icrc_ledger_types::icrc1::account::Account;
+use sol_rpc_types::Lamport;
+use solana_address::{Address, address};
 use solana_transaction_status_client_types::{
     EncodedConfirmedTransactionWithStatusMeta, EncodedTransaction,
     EncodedTransactionWithStatusMeta, TransactionBinaryEncoding, UiLoadedAddresses,
@@ -10,8 +12,8 @@ use solana_transaction_status_client_types::{
 };
 use std::str::FromStr;
 
-pub const DEPOSIT_FEE: u64 = 50;
-pub const MINIMUM_WITHDRAWAL_AMOUNT: u64 = 50;
+pub const DEPOSIT_FEE: Lamport = 10_000_000; // 0.01 SOL
+pub const MINIMUM_WITHDRAWAL_AMOUNT: Lamport = 10_000_000; // 0.01 SOL
 
 pub fn sol_rpc_canister_id() -> Principal {
     Principal::from_slice(&[1_u8; 20])
@@ -32,7 +34,11 @@ pub fn valid_init_args() -> InitArgs {
 }
 
 pub fn init_state() {
-    init_once_state(State::try_from(valid_init_args()).expect("Invalid init args"));
+    init_state_with_args(valid_init_args());
+}
+
+pub fn init_state_with_args(init_args: InitArgs) {
+    init_once_state(State::try_from(init_args).expect("Invalid init args"));
 }
 
 pub fn init_schnorr_master_key() {
@@ -120,24 +126,26 @@ pub mod arb {
 pub mod deposit {
     use super::*;
 
+    pub const DEPOSIT_AMOUNT: Lamport = 500_000_000;
+    pub const DEPOSIT_ADDRESS: Address = address!("BVH7GZXRdqyZLSLBS4cm1Yom8Yvekw6ytgSFz9y9on4e");
     pub const DEPOSITOR_PRINCIPAL: Principal = Principal::from_slice(&[0x9d, 0xf7, 0x02]);
     pub const DEPOSITOR_ACCOUNT: Account = Account {
         owner: DEPOSITOR_PRINCIPAL,
         subaccount: None,
     };
 
-    // https://explorer.solana.com/tx/41MZzSM5aXRFBbPdaFyqueRPhp6VJbFHESvfKRvhXXnqB5hkhDpyRqdAPE8mTgbpfUPxP7bjhQK7JdUuykKtk2Xh?cluster=devnet
+    // https://explorer.solana.com/tx/49aFRmEtgnVN3UetkKHJbz3ZMcDY6pgS9oDoN4Y4NQYfHSx4nsDsx3PSKubxfmY69URcosJj3CWu4aypeddduZYX?cluster=devnet
     pub fn deposit_transaction_signature() -> solana_signature::Signature {
-        const SIGNATURE: &str = "41MZzSM5aXRFBbPdaFyqueRPhp6VJbFHESvfKRvhXXnqB5hkhDpyRqdAPE8mTgbpfUPxP7bjhQK7JdUuykKtk2Xh";
+        const SIGNATURE: &str = "49aFRmEtgnVN3UetkKHJbz3ZMcDY6pgS9oDoN4Y4NQYfHSx4nsDsx3PSKubxfmY69URcosJj3CWu4aypeddduZYX";
         solana_signature::Signature::from_str(SIGNATURE).unwrap()
     }
 
-    // 0.5 SOL transfer to DEPOSITOR_ACCOUNT's deposit address (BQc4UB4yuhHRT5r6jyQFnUi54W5ZoXW8Lvfd6VaKoQfc)
-    // https://explorer.solana.com/tx/41MZzSM5aXRFBbPdaFyqueRPhp6VJbFHESvfKRvhXXnqB5hkhDpyRqdAPE8mTgbpfUPxP7bjhQK7JdUuykKtk2Xh?cluster=devnet
+    // 0.5 SOL transfer to DEPOSITOR_ACCOUNT's deposit address (BVH7GZXRdqyZLSLBS4cm1Yom8Yvekw6ytgSFz9y9on4e)
+    // https://explorer.solana.com/tx/49aFRmEtgnVN3UetkKHJbz3ZMcDY6pgS9oDoN4Y4NQYfHSx4nsDsx3PSKubxfmY69URcosJj3CWu4aypeddduZYX?cluster=devnet
     pub fn deposit_transaction() -> EncodedConfirmedTransactionWithStatusMeta {
-        const ENCODED_DEPOSIT_TRANSACTION: &str = "AZZbWHQKwAkndrT0gmTPUn6tfnTAFYqJE8HTh+0OQ1f4dX1l/ah54VdJ/O9j1jNSZorH8+2BalrdbeONiWyxuwABAAEDIg5JU11WGypQAKfOpxcE0+UIiKney1G6hf+6GRXcmseaoN6/9tbZrK9zoPY+wNeEqI5eps8+kDCZ3zXX9UB+awAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAXfitZAvU6Mv/pQabeVthGg5LZFYn4GS4UMLpNalqt+4BAgIAAQwCAAAAAGXNHQAAAAA=";
+        const ENCODED_DEPOSIT_TRANSACTION: &str = "AZ1xufshIEi/hzGnwqjbgjUqDzcH3dfZQs3hZUbR8iHESSc+4eGeOwll0PMlDtORri5YQi433FjgQ5YK138CXQQBAAEDIg5JU11WGypQAKfOpxcE0+UIiKney1G6hf+6GRXcmseb01hqfWVQEn6n64lX4Uby5n5lTlmSpsWgEH1gv7LbVwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA/S7SHgiiNOkFs7RGKc0VhLBrkHbCp47AK4FytcYYlDgBAgIAAQwCAAAAAGXNHQAAAAA=";
         EncodedConfirmedTransactionWithStatusMeta {
-            slot: 443005390,
+            slot: 443421331,
             transaction: EncodedTransactionWithStatusMeta {
                 transaction: EncodedTransaction::Binary(
                     ENCODED_DEPOSIT_TRANSACTION.to_string(),
@@ -157,9 +165,9 @@ pub mod deposit {
                         "Program 11111111111111111111111111111111 invoke [1]".to_string(),
                         "Program 11111111111111111111111111111111 success".to_string(),
                     ]),
-                    post_balances: vec![1895821440, 500000000, 1],
+                    post_balances: vec![895811440, 500000000, 1],
                     post_token_balances: OptionSerializer::Some(vec![]),
-                    pre_balances: vec![2395826440, 0, 1],
+                    pre_balances: vec![1395816440, 0, 1],
                     pre_token_balances: OptionSerializer::Some(vec![]),
                     rewards: OptionSerializer::None,
                     status: Ok(()),
@@ -167,7 +175,52 @@ pub mod deposit {
                 }),
                 version: None,
             },
-            block_time: Some(1771421567),
+            block_time: Some(1771582425),
+        }
+    }
+
+    // https://explorer.solana.com/tx/3wuW2SB8BzrMZSL1KNuibQ17NKTAjS565mnMvt86smJXaMq99mPsD9QpCRXSfNRziXaxwrt9k1wDE1WFahPv4GgA?cluster=devnet
+    pub fn deposit_transaction_to_wrong_address_signature() -> solana_signature::Signature {
+        const SIGNATURE: &str = "3wuW2SB8BzrMZSL1KNuibQ17NKTAjS565mnMvt86smJXaMq99mPsD9QpCRXSfNRziXaxwrt9k1wDE1WFahPv4GgA";
+        solana_signature::Signature::from_str(SIGNATURE).unwrap()
+    }
+
+    // 0.5 SOL transfer to 6sCCyJVCPgzu6VEgeqJyxhW9X2W6ijAAReCRTfD5iecH
+    // https://explorer.solana.com/tx/3wuW2SB8BzrMZSL1KNuibQ17NKTAjS565mnMvt86smJXaMq99mPsD9QpCRXSfNRziXaxwrt9k1wDE1WFahPv4GgA?cluster=devnet
+    pub fn deposit_transaction_to_wrong_address() -> EncodedConfirmedTransactionWithStatusMeta {
+        const ENCODED_DEPOSIT_TRANSACTION: &str = "AZNh0+eJqGMu6d/1B6we8EPvCIQzZRV+VwGmaUsRncA9vy9LpqYzvs7XCzDZFvqUf0nmZPbLJxNsf/+MtMKdyQMBAAEDIg5JU11WGypQAKfOpxcE0+UIiKney1G6hf+6GRXcmsdXJiVs5okiCEmlhqTw1NKb4zDN/LDw/Yn6SZn3ERUu2gAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAfYVT4I2211RPtd7dum+9C2LuW1CxTsXdP5SBBrw5HE4BAgIAAQwCAAAAAGXNHQAAAAA=";
+        EncodedConfirmedTransactionWithStatusMeta {
+            slot: 443004539,
+            transaction: EncodedTransactionWithStatusMeta {
+                transaction: EncodedTransaction::Binary(
+                    ENCODED_DEPOSIT_TRANSACTION.to_string(),
+                    TransactionBinaryEncoding::Base64,
+                ),
+                meta: Some(UiTransactionStatusMeta {
+                    compute_units_consumed: OptionSerializer::Some(150),
+                    cost_units: OptionSerializer::Some(1481),
+                    err: None,
+                    fee: 5000,
+                    inner_instructions: OptionSerializer::Some(vec![]),
+                    loaded_addresses: OptionSerializer::Some(UiLoadedAddresses {
+                        writable: vec![],
+                        readonly: vec![],
+                    }),
+                    log_messages: OptionSerializer::Some(vec![
+                        "Program 11111111111111111111111111111111 invoke [1]".to_string(),
+                        "Program 11111111111111111111111111111111 success".to_string(),
+                    ]),
+                    post_balances: vec![2895831440, 500000000, 1],
+                    post_token_balances: OptionSerializer::Some(vec![]),
+                    pre_balances: vec![3395836440, 0, 1],
+                    pre_token_balances: OptionSerializer::Some(vec![]),
+                    rewards: OptionSerializer::None,
+                    status: Ok(()),
+                    return_data: OptionSerializer::None,
+                }),
+                version: None,
+            },
+            block_time: Some(1771421240),
         }
     }
 }
