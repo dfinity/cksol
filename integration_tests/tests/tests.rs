@@ -218,6 +218,7 @@ mod retrieve_sol_tests {
 mod update_balance_tests {
     use super::*;
     use cksol_int_tests::fixtures::DEFAULT_CALLER_ACCOUNT;
+    use std::time::Duration;
 
     #[tokio::test]
     async fn should_fail_if_transaction_not_found() {
@@ -242,26 +243,17 @@ mod update_balance_tests {
     async fn should_fail_for_concurrent_access() {
         let setup = SetupBuilder::new().build().await;
 
-        let mocks = MockHttpOutcallsBuilder::new()
-            .given(get_deposit_transaction_request().with_id(0))
-            .respond_with(get_deposit_transaction_response().with_id(0))
-            .given(get_deposit_transaction_request().with_id(1))
-            .respond_with(get_deposit_transaction_response().with_id(1))
-            .given(get_deposit_transaction_request().with_id(2))
-            .respond_with(get_deposit_transaction_response().with_id(2))
-            .given(get_deposit_transaction_request().with_id(3))
-            .respond_with(get_deposit_transaction_response().with_id(3))
-            .build();
-
-        let minter1 = setup.minter().with_http_mocks(mocks);
+        let minter1 = setup
+            .minter()
+            .with_http_mocks(get_transaction_http_mocks(get_deposit_transaction_response));
         let minter2 = setup.minter();
-        let (result1, result2) = join!(
-            minter1.update_balance(default_update_balance_args()),
-            minter2.update_balance(default_update_balance_args())
-        );
 
-        // TODO DEFI-2643: Update once deposit logic is implemented
-        assert_matches!(result1, Ok(DepositStatus::Processing(_)));
+        let (result1, result2) = join!(minter1.update_balance(default_update_balance_args()), {
+            setup.advance_time(Duration::from_millis(500)).await;
+            minter2.update_balance(default_update_balance_args())
+        });
+
+        assert_matches!(result1, Ok(DepositStatus::Minted { .. }));
         assert_eq!(result2, Err(UpdateBalanceError::AlreadyProcessing));
 
         setup.drop().await;
@@ -303,7 +295,7 @@ mod update_balance_tests {
         assert_matches!(result, Ok(DepositStatus::Minted {
             minted_amount,
             signature,
-            ..
+            block_index: _,
         }) if minted_amount == expected_minted_amount && signature == deposit_signature);
 
         let balance_after = setup.ledger().balance_of(DEFAULT_CALLER_ACCOUNT).await;

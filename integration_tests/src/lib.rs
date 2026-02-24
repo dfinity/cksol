@@ -16,6 +16,7 @@ use pocket_ic::{PocketIcBuilder, RejectResponse, nonblocking::PocketIc};
 use serde::de::DeserializeOwned;
 use sol_rpc_client::SolRpcClient;
 use sol_rpc_types::{Lamport, RpcAccess};
+use std::time::Duration;
 use std::{env::var, fs, path::PathBuf};
 
 pub mod fixtures;
@@ -170,6 +171,10 @@ impl Setup {
     pub fn with_caller(mut self, caller: Principal) -> Self {
         self.caller = Some(caller);
         self
+    }
+
+    pub async fn advance_time(&self, duration: Duration) -> () {
+        self.env.as_ref().unwrap().advance_time(duration).await
     }
 
     pub async fn drop(self) {
