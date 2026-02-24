@@ -320,7 +320,7 @@ mod update_balance_tests {
         }) if minted_amount == expected_minted_amount && signature == deposit_signature);
 
         let balance_after = setup.ledger().balance_of(DEFAULT_CALLER_ACCOUNT).await;
-        assert_eq!(balance_after, DEPOSIT_AMOUNT - Setup::DEFAULT_DEPOSIT_FEE);
+        assert_eq!(balance_after, expected_minted_amount);
 
         setup.drop().await;
     }
