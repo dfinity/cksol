@@ -1,4 +1,5 @@
 use assert_matches::assert_matches;
+use assert2::check;
 use candid::Principal;
 use cksol_int_tests::{
     Setup, SetupBuilder,
