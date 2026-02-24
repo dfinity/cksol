@@ -1,7 +1,7 @@
 use candid::Principal;
 use cksol_int_tests::SetupBuilder;
 use cksol_types::{DepositStatus, GetDepositAddressArgs, UpdateBalanceArgs};
-use sol_rpc_types::{InstallArgs, OverrideProvider, RegexSubstitution};
+use sol_rpc_types::{InstallArgs, Lamport, OverrideProvider, RegexSubstitution};
 use solana_address::Address;
 use solana_client::{rpc_client::RpcClient, rpc_config::CommitmentConfig};
 use solana_keypair::{Keypair, Signer};
@@ -13,7 +13,7 @@ const PRINCIPAL: Principal = Principal::from_slice(&[0x9d, 0xf7, 0x99]);
 
 #[tokio::test(flavor = "multi_thread")]
 async fn should_update_balance_with_single_deposit() {
-    const DEPOSIT_AMOUNT: u64 = 2 * LAMPORTS_PER_SOL;
+    const DEPOSIT_AMOUNT: Lamport = 2 * LAMPORTS_PER_SOL;
 
     let setup = SetupBuilder::new()
         .with_pocket_ic_live_mode()

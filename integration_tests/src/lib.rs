@@ -71,7 +71,7 @@ impl Setup {
     pub const DEFAULT_DEPOSIT_FEE: Lamport = 50;
     pub const DEFAULT_CONTROLLER: Principal = Principal::from_slice(&[0x9d, 0xf7, 0x01]);
     pub const DEFAULT_CALLER: Principal = Principal::from_slice(&[0x9d, 0xf7, 0x02]);
-    pub const DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT: u64 = 10000000;
+    pub const DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT: Lamport = 10_000_000;
 
     pub async fn new(
         caller: Option<Principal>,
