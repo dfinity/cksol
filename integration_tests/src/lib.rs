@@ -1,5 +1,5 @@
-use crate::events::MinterEventAssert;
-use candid::{CandidType, Decode, Encode, Principal, utils::ArgumentEncoder};
+use crate::{events::MinterEventAssert, ledger_init_args::ledger_init_args};
+use candid::{CandidType, Decode, Encode, Nat, Principal, utils::ArgumentEncoder};
 use canlog::{Log, LogEntry};
 use cksol_types::{
     Address, DepositStatus, GetDepositAddressArgs, MinterInfo, RetrieveSolArgs, RetrieveSolError,
@@ -11,6 +11,8 @@ use ic_canister_runtime::Runtime;
 use ic_http_types::{HttpRequest, HttpResponse};
 use ic_management_canister_types::{CanisterId, CanisterSettings};
 use ic_pocket_canister_runtime::{ExecuteHttpOutcallMocks, PocketIcRuntime};
+use icrc_ledger_types::icrc1::account::Account;
+use num_traits::cast::ToPrimitive;
 use pocket_ic::{PocketIcBuilder, RejectResponse, nonblocking::PocketIc};
 use serde::de::DeserializeOwned;
 use sol_rpc_client::SolRpcClient;
@@ -19,6 +21,7 @@ use std::{env::var, fs, path::PathBuf};
 
 pub mod events;
 pub mod fixtures;
+pub mod ledger_init_args;
 
 #[derive(Default)]
 pub enum PocketIcMode {
@@ -67,6 +70,7 @@ impl SetupBuilder {
 pub struct Setup {
     env: Option<PocketIc>,
     minter_canister_id: CanisterId,
+    ledger_canister_id: CanisterId,
     caller: Option<Principal>,
 }
 
@@ -106,6 +110,12 @@ impl Setup {
         .await;
         Self::mock_sol_rpc_api_keys(&env, sol_rpc_canister_id).await;
 
+        // Create ledger canister
+        let ledger_canister_id = env
+            .create_canister_with_settings(None, Some(canister_settings.clone()))
+            .await;
+        env.add_cycles(ledger_canister_id, u64::MAX as u128).await;
+
         // Setup ckSOL minter canister
         let minter_canister_id = env
             .create_canister_with_settings(None, Some(canister_settings.clone()))
@@ -116,9 +126,18 @@ impl Setup {
             cksol_minter_wasm(),
             Encode!(&cksol_minter_init_args(
                 sol_rpc_canister_id,
-                Self::DEFAULT_DEPOSIT_FEE
+                ledger_canister_id,
             ))
             .unwrap(),
+            Some(Self::DEFAULT_CONTROLLER),
+        )
+        .await;
+
+        // Install ledger canister
+        env.install_canister(
+            ledger_canister_id,
+            ledger_wasm().await,
+            Encode!(&ledger_init_args(minter_canister_id)).unwrap(),
             Some(Self::DEFAULT_CONTROLLER),
         )
         .await;
@@ -134,6 +153,7 @@ impl Setup {
         Self {
             env: Some(env),
             minter_canister_id,
+            ledger_canister_id,
             caller,
         }
     }
@@ -172,15 +192,26 @@ impl Setup {
     }
 
     pub fn minter(&self) -> CkSolMinter<'_> {
-        CkSolMinter {
+        CkSolMinter(Canister {
             runtime: self.runtime(),
             id: self.minter_canister_id,
-        }
+        })
+    }
+
+    pub fn ledger(&self) -> Ledger<'_> {
+        Ledger(Canister {
+            runtime: self.runtime(),
+            id: self.ledger_canister_id,
+        })
     }
 
     pub fn with_caller(mut self, caller: Principal) -> Self {
         self.caller = Some(caller);
         self
+    }
+
+    pub async fn tick(&self) -> () {
+        self.env.as_ref().unwrap().tick().await
     }
 
     pub async fn drop(self) {
@@ -199,10 +230,7 @@ impl Drop for Setup {
     }
 }
 
-pub struct CkSolMinter<'a> {
-    runtime: PocketIcRuntime<'a>,
-    id: CanisterId,
-}
+pub struct CkSolMinter<'a>(Canister<'a>);
 
 impl CkSolMinter<'_> {
     pub async fn get_deposit_address(&self, args: GetDepositAddressArgs) -> Address {
@@ -215,7 +243,7 @@ impl CkSolMinter<'_> {
         &self,
         args: GetDepositAddressArgs,
     ) -> Result<Address, String> {
-        self.try_update_call("get_deposit_address", (args,)).await
+        self.0.try_update_call("get_deposit_address", (args,)).await
     }
 
     pub async fn update_balance(
@@ -231,40 +259,24 @@ impl CkSolMinter<'_> {
         &self,
         args: UpdateBalanceArgs,
     ) -> Result<Result<DepositStatus, UpdateBalanceError>, String> {
-        self.try_update_call("update_balance", (args,)).await
+        self.0.try_update_call("update_balance", (args,)).await
     }
 
     pub async fn retrieve_sol(
         &self,
         args: RetrieveSolArgs,
     ) -> Result<RetrieveSolOk, RetrieveSolError> {
-        self.try_update_call("retrieve_sol", (args,))
-            .await
-            .expect("retrieve_sol failed")
+        self.0.update_call("retrieve_sol", (args,)).await
     }
 
     pub async fn retrieve_sol_status(&self, block_index: u64) -> RetrieveSolStatus {
-        self.try_update_call("retrieve_sol_status", (block_index,))
+        self.0
+            .update_call("retrieve_sol_status", (block_index,))
             .await
-            .expect("retrieve_sol_status failed")
-    }
-
-    async fn try_update_call<In, Out>(&self, method: &str, args: In) -> Result<Out, String>
-    where
-        In: ArgumentEncoder + Send,
-        Out: CandidType + DeserializeOwned,
-    {
-        self.runtime
-            .update_call(self.id, method, args, 0)
-            .await
-            .map_err(|e| format!("{:?}", e))
     }
 
     pub async fn get_minter_info(&self) -> MinterInfo {
-        self.runtime
-            .query_call(self.id, "get_minter_info", ())
-            .await
-            .expect("get_minter_info failed")
+        self.0.query_call("get_minter_info", ()).await
     }
 
     pub async fn retrieve_logs(&self, priority: &Priority) -> Vec<LogEntry<Priority>> {
@@ -274,29 +286,10 @@ impl CkSolMinter<'_> {
             headers: vec![],
             body: Default::default(),
         };
-        let response: HttpResponse = self
-            .runtime
-            .query_call(self.id, "http_request", (request,))
-            .await
-            .unwrap();
+        let response: HttpResponse = self.0.query_call("http_request", (request,)).await;
         serde_json::from_slice::<Log<Priority>>(&response.body)
             .expect("failed to parse SOL RPC canister log")
             .entries
-    }
-
-    pub async fn upgrade(
-        &self,
-        upgrade_args: cksol_types_internal::UpgradeArgs,
-    ) -> Result<(), RejectResponse> {
-        self.runtime
-            .as_ref()
-            .upgrade_canister(
-                self.id,
-                cksol_minter_wasm(),
-                Encode!(&MinterArg::Upgrade(upgrade_args)).unwrap(),
-                Some(Setup::DEFAULT_CONTROLLER),
-            )
-            .await
     }
 
     pub async fn assert_that_events(&self) -> MinterEventAssert {
@@ -323,10 +316,11 @@ impl CkSolMinter<'_> {
         use cksol_types_internal::event::GetEventsArgs;
 
         let call_result = self
+            .0
             .runtime
             .as_ref()
             .query_call(
-                self.id,
+                self.0.id,
                 Principal::anonymous(),
                 "get_events",
                 Encode!(&GetEventsArgs { start, length }).unwrap(),
@@ -334,6 +328,107 @@ impl CkSolMinter<'_> {
             .await
             .expect("BUG: failed to call get_events");
         Decode!(&call_result, GetEventsResult).unwrap()
+    }
+
+    pub async fn upgrade(
+        &self,
+        upgrade_args: cksol_types_internal::UpgradeArgs,
+    ) -> Result<(), RejectResponse> {
+        self.0.upgrade(upgrade_args).await
+    }
+
+    pub fn with_http_mocks(mut self, mocks: impl ExecuteHttpOutcallMocks + 'static) -> Self {
+        self.0 = self.0.with_http_mocks(mocks);
+        self
+    }
+}
+
+pub struct Ledger<'a>(Canister<'a>);
+
+impl Ledger<'_> {
+    pub async fn balance_of(&self, account: Account) -> u64 {
+        self.0
+            .update_call::<_, Nat>("icrc1_balance_of", (account,))
+            .await
+            .0
+            .to_u64()
+            .unwrap()
+    }
+
+    pub async fn stop(&self) {
+        self.0.stop().await;
+    }
+}
+
+pub struct Canister<'a> {
+    runtime: PocketIcRuntime<'a>,
+    id: CanisterId,
+}
+
+impl Canister<'_> {
+    async fn update_call<In, Out>(&self, method: &str, args: In) -> Out
+    where
+        In: ArgumentEncoder + Send,
+        Out: CandidType + DeserializeOwned,
+    {
+        self.try_update_call(method, args)
+            .await
+            .unwrap_or_else(|e| panic!("Update call failed: {e}"))
+    }
+
+    async fn try_update_call<In, Out>(&self, method: &str, args: In) -> Result<Out, String>
+    where
+        In: ArgumentEncoder + Send,
+        Out: CandidType + DeserializeOwned,
+    {
+        self.runtime
+            .update_call(self.id, method, args, 0)
+            .await
+            .map_err(|e| format!("{:?}", e))
+    }
+
+    async fn query_call<In, Out>(&self, method: &str, args: In) -> Out
+    where
+        In: ArgumentEncoder + Send,
+        Out: CandidType + DeserializeOwned,
+    {
+        self.try_query_call(method, args)
+            .await
+            .unwrap_or_else(|e| panic!("Query call failed: {e}"))
+    }
+
+    async fn try_query_call<In, Out>(&self, method: &str, args: In) -> Result<Out, String>
+    where
+        In: ArgumentEncoder + Send,
+        Out: CandidType + DeserializeOwned,
+    {
+        self.runtime
+            .query_call(self.id, method, args)
+            .await
+            .map_err(|e| format!("{:?}", e))
+    }
+
+    pub async fn upgrade(
+        &self,
+        upgrade_args: cksol_types_internal::UpgradeArgs,
+    ) -> Result<(), RejectResponse> {
+        self.runtime
+            .as_ref()
+            .upgrade_canister(
+                self.id,
+                cksol_minter_wasm(),
+                Encode!(&MinterArg::Upgrade(upgrade_args)).unwrap(),
+                Some(Setup::DEFAULT_CONTROLLER),
+            )
+            .await
+    }
+
+    pub async fn stop(&self) {
+        self.runtime
+            .as_ref()
+            .stop_canister(self.id, Some(Setup::DEFAULT_CONTROLLER))
+            .await
+            .expect("Failed to stop canister");
     }
 
     pub fn with_http_mocks(mut self, mocks: impl ExecuteHttpOutcallMocks + 'static) -> Self {
@@ -350,13 +445,15 @@ fn cksol_minter_wasm() -> Vec<u8> {
     )
 }
 
-fn cksol_minter_init_args(sol_rpc_canister_id: Principal, deposit_fee: Lamport) -> MinterArg {
+fn cksol_minter_init_args(
+    sol_rpc_canister_id: Principal,
+    ledger_canister_id: Principal,
+) -> MinterArg {
     use cksol_types_internal::{Ed25519KeyName, InitArgs, MinterArg};
     MinterArg::Init(InitArgs {
         sol_rpc_canister_id,
-        // TODO DEFI-2643: Fix me!
-        ledger_canister_id: Principal::from_slice(&[43_u8]),
-        deposit_fee,
+        ledger_canister_id,
+        deposit_fee: Setup::DEFAULT_DEPOSIT_FEE,
         master_key_name: Ed25519KeyName::MainnetProdKey1,
         minimum_withdrawal_amount: Setup::DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT,
     })
@@ -365,6 +462,12 @@ fn cksol_minter_init_args(sol_rpc_canister_id: Principal, deposit_fee: Lamport) 
 async fn sol_rpc_wasm() -> Vec<u8> {
     const DOWNLOAD_PATH: &str = "../wasms/sol_rpc_canister.wasm.gz";
     const DOWNLOAD_URL: &str = "https://github.com/dfinity/sol-rpc-canister/releases/latest/download/sol_rpc_canister.wasm.gz";
+    canister_wasm(DOWNLOAD_PATH, DOWNLOAD_URL).await
+}
+
+async fn ledger_wasm() -> Vec<u8> {
+    const DOWNLOAD_PATH: &str = "../wasms/ic-icrc1-ledger.wasm.gz";
+    const DOWNLOAD_URL: &str = "https://github.com/dfinity/ic/releases/download/ledger-suite-icrc-2026-02-02/ic-icrc1-ledger.wasm.gz";
     canister_wasm(DOWNLOAD_PATH, DOWNLOAD_URL).await
 }
 
