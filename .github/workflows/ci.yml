@@ -85,6 +85,5 @@ jobs:
         with:
           pocket-ic-server-version: ${{ env.POCKET_IC_SERVER_VERSION }}
 
-      # TODO DEBUGGING
       - name: 'Cargo test'
-        run: cargo test --package cksol-int-tests should_fail_for_concurrent_access -- --test-threads 2 --nocapture
+        run: cargo test --package cksol-int-tests -- --test-threads 2 --nocapture
