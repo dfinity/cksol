@@ -22,8 +22,17 @@ pub mod fixtures;
 pub mod ledger_init_args;
 
 #[derive(Default)]
+pub enum PocketIcMode {
+    LiveMode,
+    #[default]
+    NonLiveMode,
+}
+
+#[derive(Default)]
 pub struct SetupBuilder {
     caller: Option<Principal>,
+    make_live: Option<PocketIcMode>,
+    sol_rpc_install_args: Option<sol_rpc_types::InstallArgs>,
 }
 
 impl SetupBuilder {
@@ -36,8 +45,23 @@ impl SetupBuilder {
         self
     }
 
+    pub fn with_pocket_ic_live_mode(mut self) -> Self {
+        self.make_live = Some(PocketIcMode::LiveMode);
+        self
+    }
+
+    pub fn with_sol_rpc_install_args(mut self, args: sol_rpc_types::InstallArgs) -> Self {
+        self.sol_rpc_install_args = Some(args);
+        self
+    }
+
     pub async fn build(self) -> Setup {
-        Setup::new(self.caller).await
+        Setup::new(
+            self.caller,
+            self.make_live.unwrap_or_default(),
+            self.sol_rpc_install_args.unwrap_or_default(),
+        )
+        .await
     }
 }
 
@@ -49,12 +73,16 @@ pub struct Setup {
 }
 
 impl Setup {
+    pub const DEFAULT_DEPOSIT_FEE: Lamport = 10_000_000; // 0.01 SOL
     pub const DEFAULT_CONTROLLER: Principal = Principal::from_slice(&[0x9d, 0xf7, 0x01]);
     pub const DEFAULT_CALLER: Principal = Principal::from_slice(&[0x9d, 0xf7, 0x02]);
-    pub const DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT: u64 = 10_000_000;
-    pub const DEFAULT_DEPOSIT_FEE: Lamport = 50;
+    pub const DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT: Lamport = 10_000_000; // 0.01 SOL
 
-    async fn new(caller: Option<Principal>) -> Self {
+    pub async fn new(
+        caller: Option<Principal>,
+        make_live: PocketIcMode,
+        sol_rpc_install_args: sol_rpc_types::InstallArgs,
+    ) -> Self {
         let env = PocketIcBuilder::new()
             .with_nns_subnet() //make_live requires NNS subnet.
             .with_fiduciary_subnet()
@@ -74,7 +102,7 @@ impl Setup {
         env.install_canister(
             sol_rpc_canister_id,
             sol_rpc_wasm().await,
-            Encode!(&sol_rpc_types::InstallArgs::default()).unwrap(),
+            Encode!(&sol_rpc_install_args).unwrap(),
             Some(Self::DEFAULT_CONTROLLER),
         )
         .await;
@@ -96,7 +124,7 @@ impl Setup {
             cksol_minter_wasm(),
             Encode!(&cksol_minter_init_args(
                 sol_rpc_canister_id,
-                ledger_canister_id
+                ledger_canister_id,
             ))
             .unwrap(),
             Some(Self::DEFAULT_CONTROLLER),
@@ -111,6 +139,14 @@ impl Setup {
             Some(Self::DEFAULT_CONTROLLER),
         )
         .await;
+
+        let env = if let PocketIcMode::LiveMode = make_live {
+            let mut env = env;
+            let _ = env.make_live(None).await;
+            env
+        } else {
+            env
+        };
 
         Self {
             env: Some(env),

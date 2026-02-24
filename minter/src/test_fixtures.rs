@@ -12,8 +12,8 @@ use solana_transaction_status_client_types::{
 };
 use std::str::FromStr;
 
-pub const DEPOSIT_FEE: u64 = 50;
-pub const MINIMUM_WITHDRAWAL_AMOUNT: u64 = 50;
+pub const DEPOSIT_FEE: Lamport = 10_000_000; // 0.01 SOL
+pub const MINIMUM_WITHDRAWAL_AMOUNT: Lamport = 10_000_000; // 0.01 SOL
 
 pub fn sol_rpc_canister_id() -> Principal {
     Principal::from_slice(&[1_u8; 20])

@@ -99,7 +99,7 @@ mod lifecycle {
             minter_info,
             MinterInfo {
                 deposit_fee: Setup::DEFAULT_DEPOSIT_FEE,
-                minimum_withdrawal_amount: Setup::DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT
+                minimum_withdrawal_amount: Setup::DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT,
             }
         );
 
