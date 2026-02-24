@@ -1,10 +1,11 @@
-use crate::ledger_init_args::ledger_init_args;
-use candid::{CandidType, Encode, Nat, Principal, utils::ArgumentEncoder};
+use crate::{events::MinterEventAssert, ledger_init_args::ledger_init_args};
+use candid::{CandidType, Decode, Encode, Nat, Principal, utils::ArgumentEncoder};
 use canlog::{Log, LogEntry};
 use cksol_types::{
     Address, DepositStatus, GetDepositAddressArgs, MinterInfo, RetrieveSolArgs, RetrieveSolError,
     RetrieveSolOk, RetrieveSolStatus, UpdateBalanceArgs, UpdateBalanceError,
 };
+use cksol_types_internal::event::{Event, GetEventsResult};
 use cksol_types_internal::{MinterArg, log::Priority};
 use ic_canister_runtime::Runtime;
 use ic_http_types::{HttpRequest, HttpResponse};
@@ -18,6 +19,7 @@ use sol_rpc_client::SolRpcClient;
 use sol_rpc_types::{Lamport, RpcAccess};
 use std::{env::var, fs, path::PathBuf};
 
+pub mod events;
 pub mod fixtures;
 pub mod ledger_init_args;
 
@@ -288,6 +290,44 @@ impl CkSolMinter<'_> {
         serde_json::from_slice::<Log<Priority>>(&response.body)
             .expect("failed to parse SOL RPC canister log")
             .entries
+    }
+
+    pub async fn assert_that_events(&self) -> MinterEventAssert {
+        MinterEventAssert::new(self.get_all_events().await)
+    }
+
+    pub async fn get_all_events(&self) -> Vec<Event> {
+        const FIRST_BATCH_SIZE: u64 = 100;
+
+        let GetEventsResult {
+            mut events,
+            total_event_count,
+        } = self.get_events(0, FIRST_BATCH_SIZE).await;
+        while events.len() < total_event_count as usize {
+            let mut next_batch = self
+                .get_events(events.len() as u64, total_event_count - events.len() as u64)
+                .await;
+            events.append(&mut next_batch.events);
+        }
+        events
+    }
+
+    async fn get_events(&self, start: u64, length: u64) -> GetEventsResult {
+        use cksol_types_internal::event::GetEventsArgs;
+
+        let call_result = self
+            .0
+            .runtime
+            .as_ref()
+            .query_call(
+                self.0.id,
+                Principal::anonymous(),
+                "get_events",
+                Encode!(&GetEventsArgs { start, length }).unwrap(),
+            )
+            .await
+            .expect("BUG: failed to call get_events");
+        Decode!(&call_result, GetEventsResult).unwrap()
     }
 
     pub async fn upgrade(
