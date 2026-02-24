@@ -254,6 +254,12 @@ mod update_balance_tests {
             minter2.update_balance(default_update_balance_args())
         );
 
+        let (result1, result2) = match (&result1, &result2) {
+            (Ok(_), Err(_)) => (result1, result2),
+            (Err(_), Ok(_)) => (result2, result1),
+            _ => panic!("Expected one success and one error, but got: {result1:?} and {result2:?}"),
+        };
+
         // One should succeed, one should fail with AlreadyProcessing (order is non-deterministic)
         let results = [&result1, &result2];
         assert!(
