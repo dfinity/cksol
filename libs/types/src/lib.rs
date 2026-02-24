@@ -5,9 +5,12 @@
 
 use candid::{CandidType, Nat, Principal};
 use icrc_ledger_types::icrc1::account::Subaccount;
+pub use memo::{MAX_SERIALIZED_MEMO_BYTES, Memo, MintMemo};
 use serde::{Deserialize, Serialize};
 pub use sol_rpc_types::{Lamport, Pubkey as Address, Signature};
 use thiserror::Error;
+
+mod memo;
 
 /// The outcome of processing a Solana deposit transaction.
 #[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize, Serialize)]
@@ -16,11 +19,11 @@ pub enum DepositStatus {
     Processing(Signature),
     /// The minter accepted the deposit and minted ckSOL tokens on the ledger.
     Minted {
-        /// The MINT transaction index on the ledger.
+        /// The mint transaction index on the ledger.
         block_index: u64,
         /// The minted amount (deposit amount minus fees).
         minted_amount: Lamport,
-        /// The UTXO that caused the balance update.
+        /// The Solana transaction that caused the balance update.
         signature: Signature,
     },
 }
@@ -57,6 +60,9 @@ pub enum UpdateBalanceError {
     /// The minter experiences temporary issues, try the call again later.
     #[error("Transient error, try the call again later: {0}")]
     TemporarilyUnavailable(String),
+    /// There is already a concurrent `update_balance` invocation from the same caller.
+    #[error("There is already a concurrent `update_balance` invocation from the same caller")]
+    AlreadyProcessing,
     /// No matching transaction was found for the given signature.
     ///
     /// This can also happen if the transaction is not yet finalized, in which case trying
