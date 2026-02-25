@@ -80,6 +80,30 @@ mod lifecycle {
     use super::*;
 
     #[tokio::test]
+    async fn should_rollback_if_upgrading_fails() {
+        let setup = SetupBuilder::new().build().await;
+        let minter = setup.minter();
+
+        let minter_info_before = minter.get_minter_info().await;
+
+        // Setting a deposit fee higher than the minimum withdrawal amount should fail!
+        let result = minter
+            .upgrade(UpgradeArgs {
+                minimum_withdrawal_amount: Some(5_000_000),
+                deposit_fee: Some(20_000_000),
+                ..UpgradeArgs::default()
+            })
+            .await;
+        assert_matches!(result, Err(_));
+
+        let minter_info_after = minter.get_minter_info().await;
+
+        assert_eq!(minter_info_before, minter_info_after);
+
+        setup.drop().await;
+    }
+
+    #[tokio::test]
     async fn should_get_logs() {
         let setup = SetupBuilder::new().build().await;
 

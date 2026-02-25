@@ -1,7 +1,11 @@
 use super::{event::*, *};
-use crate::test_fixtures::{
-    DEPOSIT_FEE, MINIMUM_DEPOSIT_AMOUNT, MINIMUM_WITHDRAWAL_AMOUNT, arb::arb_event,
-    ledger_canister_id, sol_rpc_canister_id, valid_init_args,
+use crate::{
+    runtime::TestCanisterRuntime,
+    state::audit::process_event,
+    test_fixtures::{
+        DEPOSIT_FEE, MINIMUM_DEPOSIT_AMOUNT, MINIMUM_WITHDRAWAL_AMOUNT, arb::arb_event,
+        ledger_canister_id, sol_rpc_canister_id, valid_init_args,
+    },
 };
 use assert_matches::assert_matches;
 use cksol_types_internal::{Ed25519KeyName, InitArgs, UpgradeArgs};
@@ -230,5 +234,22 @@ mod state_upgrade {
             .unwrap();
 
         assert_eq!(state.minimum_deposit_amount(), DEPOSIT_FEE);
+    }
+
+    // This test ensures the canister state is rolled back after a failed upgrade
+    #[test]
+    #[should_panic = "InvalidMinimumDepositAmount"]
+    fn should_panic_when_upgrade_fails() {
+        let mut state = initial_state();
+        let new_minimum_deposit_amount = DEPOSIT_FEE - 1;
+
+        process_event(
+            &mut state,
+            EventType::Upgrade(UpgradeArgs {
+                minimum_deposit_amount: Some(new_minimum_deposit_amount),
+                ..Default::default()
+            }),
+            &TestCanisterRuntime::new(),
+        );
     }
 }
