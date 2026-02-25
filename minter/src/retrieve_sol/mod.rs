@@ -12,6 +12,8 @@ pub async fn retrieve_sol<R: CanisterRuntime>(
 ) -> Result<RetrieveSolOk, RetrieveSolError> {
     // TODO DEFI-2671 Do we need a guard here? Since we burn the ledger balance first,
     // multiple withdrawals to the same address should be fine?
+    // If we don't deduplicate at all, we probably also don't need
+    // the RetrieveSolError::AlreadyProcessing error.
     let block_index = burn(&runtime, from, amount, to)
         .await
         .map_err(|e| match e {
@@ -31,9 +33,6 @@ pub async fn retrieve_sol<R: CanisterRuntime>(
                         RetrieveSolError::InsufficientAllowance {
                             allowance: allowance.0.to_u64().expect("allowance should fit in u64"),
                         }
-                    }
-                    TransferFromError::Duplicate { duplicate_of: _ } => {
-                        RetrieveSolError::AlreadyProcessing
                     }
                     TransferFromError::TemporarilyUnavailable => {
                         RetrieveSolError::TemporarilyUnavailable(

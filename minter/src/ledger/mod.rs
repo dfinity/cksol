@@ -60,7 +60,9 @@ pub async fn burn<R: CanisterRuntime>(
                 from,
                 to: minter_account,
                 fee: None,
-                created_at_time: Some(runtime.time()),
+                // TODO DEFI-2671 If we deduplicate we probably want to do it on the Account level with a guard
+                // and not using the ledger deduplication mechanism.
+                created_at_time: None,
                 memo: Some(Memo::from(burn_memo).into()),
                 amount: NumTokens::from(burn_amount),
             })
