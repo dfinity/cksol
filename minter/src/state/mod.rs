@@ -1,6 +1,7 @@
 #[cfg(test)]
 mod tests;
 
+use crate::ledger::client::LedgerClient;
 use candid::Principal;
 use cksol_types_internal::{Ed25519KeyName, InitArgs, UpgradeArgs};
 use ic_canister_runtime::Runtime;
@@ -122,6 +123,10 @@ impl State {
                 total: Some(4),
             })
             .build()
+    }
+
+    pub fn ledger_client<R: Runtime>(&self, runtime: R) -> LedgerClient<R> {
+        LedgerClient::new(runtime, self.ledger_canister_id)
     }
 
     pub fn pending_update_balance_requests_mut(&mut self) -> &mut BTreeSet<Account> {

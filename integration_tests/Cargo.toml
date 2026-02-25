@@ -8,17 +8,21 @@ homepage.workspace = true
 license.workspace = true
 
 [dependencies]
+async-trait = { workspace = true }
 candid = { workspace = true }
 canlog = { workspace = true }
 cksol-types = { path = "../libs/types" }
-cksol-types-internal = { path = "../libs/types-internal", features = ["log"] }
+cksol-types-internal = { path = "../libs/types-internal", features = ["log", "event"] }
 ic-canister-runtime = { workspace = true }
 ic-http-types = { workspace = true }
 ic-management-canister-types = { workspace = true }
 ic-pocket-canister-runtime = { workspace = true }
 ic-test-utilities-load-wasm = { workspace = true }
+icrc-ledger-types = { workspace = true }
+num-traits = { workspace = true }
 pocket-ic = { workspace = true }
 reqwest = { workspace = true }
+scopeguard = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sol_rpc_client = { workspace = true }
@@ -29,8 +33,9 @@ solana-keypair = { workspace = true }
 solana-native-token = { workspace = true }
 solana-signature = { workspace = true }
 solana-system-transaction = { workspace = true }
+tokio = { workspace = true }
 
 [dev-dependencies]
+assert2 = { workspace = true }
 assert_matches = { workspace = true }
 icrc-ledger-types = { workspace = true }
-tokio = { workspace = true }

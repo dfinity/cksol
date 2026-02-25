@@ -1,9 +1,10 @@
 pub mod address;
 mod guard;
+mod ledger;
 pub mod lifecycle;
 pub mod runtime;
 pub mod state;
-mod storage;
+pub mod storage;
 pub mod transaction;
 pub mod update_balance;
 

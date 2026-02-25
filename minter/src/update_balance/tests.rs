@@ -1,6 +1,7 @@
 use crate::{
     runtime::TestCanisterRuntime,
     test_fixtures::{
+        DEPOSIT_FEE,
         deposit::{
             DEPOSIT_AMOUNT, DEPOSITOR_ACCOUNT, deposit_transaction, deposit_transaction_signature,
             deposit_transaction_to_wrong_address, deposit_transaction_to_wrong_address_signature,
@@ -13,6 +14,7 @@ use assert_matches::assert_matches;
 use cksol_types::{DepositStatus, UpdateBalanceError};
 use cksol_types_internal::InitArgs;
 use ic_canister_runtime::IcError;
+use icrc_ledger_types::icrc1::transfer::{BlockIndex, TransferError};
 use sol_rpc_types::{EncodedConfirmedTransactionWithStatusMeta, MultiRpcResult};
 
 type GetTransactionResult = MultiRpcResult<Option<EncodedConfirmedTransactionWithStatusMeta>>;
@@ -86,13 +88,18 @@ async fn should_fail_if_deposit_amount_is_below_minimum() {
 }
 
 #[tokio::test]
-async fn should_return_processing() {
+async fn should_return_processing_if_mint_fails() {
     init_state();
     init_schnorr_master_key();
 
     let get_transaction_response =
         GetTransactionResult::Consistent(Ok(Some(deposit_transaction().try_into().unwrap())));
-    let runtime = TestCanisterRuntime::new().add_stub_response(get_transaction_response);
+    let runtime = TestCanisterRuntime::new()
+        .add_stub_time(0)
+        .add_stub_response(get_transaction_response)
+        .add_stub_response(Err::<BlockIndex, TransferError>(
+            TransferError::TemporarilyUnavailable,
+        ));
 
     let result = update_balance(runtime, DEPOSITOR_ACCOUNT, deposit_transaction_signature()).await;
 
@@ -101,5 +108,31 @@ async fn should_return_processing() {
         Ok(DepositStatus::Processing(
             deposit_transaction_signature().into()
         ))
-    );
+    )
+}
+
+#[tokio::test]
+async fn should_succeed_with_valid_deposit_transaction() {
+    const BLOCK_INDEX: u64 = 98763_u64;
+
+    init_state();
+    init_schnorr_master_key();
+
+    let get_transaction_response =
+        GetTransactionResult::Consistent(Ok(Some(deposit_transaction().try_into().unwrap())));
+    let runtime = TestCanisterRuntime::new()
+        .add_stub_time(0)
+        .add_stub_response(get_transaction_response)
+        .add_stub_response(Ok::<BlockIndex, TransferError>(BLOCK_INDEX.into()));
+
+    let result = update_balance(runtime, DEPOSITOR_ACCOUNT, deposit_transaction_signature()).await;
+
+    assert_eq!(
+        result,
+        Ok(DepositStatus::Minted {
+            block_index: BLOCK_INDEX,
+            minted_amount: DEPOSIT_AMOUNT - DEPOSIT_FEE,
+            signature: deposit_transaction_signature().into(),
+        })
+    )
 }

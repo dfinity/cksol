@@ -1,17 +1,20 @@
 use assert_matches::assert_matches;
+use assert2::check;
 use candid::Principal;
 use cksol_int_tests::{
     Setup, SetupBuilder,
     fixtures::{
-        DEPOSIT_TRANSACTION_SIGNATURE, default_update_balance_args, deposit_transaction_signature,
+        DEFAULT_CALLER_ACCOUNT, DEFAULT_CALLER_DEPOSIT_ADDRESS, DEPOSIT_AMOUNT,
+        SharedMockHttpOutcalls, default_update_balance_args, deposit_transaction_signature,
+        get_deposit_transaction_request, get_deposit_transaction_response,
     },
 };
 use cksol_types::{
     DepositStatus, GetDepositAddressArgs, MinterInfo, RetrieveSolArgs, RetrieveSolError,
     RetrieveSolStatus, UpdateBalanceArgs, UpdateBalanceError,
 };
-use cksol_types_internal::{UpgradeArgs, log::Priority};
-use ic_pocket_canister_runtime::{JsonRpcRequestMatcher, JsonRpcResponse, MockHttpOutcallsBuilder};
+use cksol_types_internal::{UpgradeArgs, event::EventType, log::Priority};
+use ic_pocket_canister_runtime::{JsonRpcResponse, MockHttpOutcalls, MockHttpOutcallsBuilder};
 use icrc_ledger_types::icrc1::account::Subaccount;
 use serde_json::json;
 use tokio::join;
@@ -35,8 +38,6 @@ mod get_deposit_address_tests {
     async fn should_get_deposit_address() {
         let setup = SetupBuilder::new().build().await;
 
-        const DEFAULT_CALLER_DEPOSIT_ADDRESS: &str = "Bp4HGmh5yPKB364FnKCfR8yVcMopLBTpJ8uCwqSKHH8H";
-
         // Owner is the default caller
         assert_eq!(
             get_deposit_address(&setup, None, None).await,
@@ -46,17 +47,17 @@ mod get_deposit_address_tests {
         // Different owner
         assert_eq!(
             get_deposit_address(&setup, Some(Principal::from_slice(&[1])), None).await,
-            "2fKa3spdjRZoCZ2hCzs5KEWM5RkVASCKdHpM2stuWgBV"
+            "Dyh5A77LtkkYan5NJH4vvCji7WJKBQEqCDupPtmUpxoE"
         );
 
         // Owner is the default caller, but different subaccounts specified
         assert_eq!(
             get_deposit_address(&setup, None, Some([1; 32])).await,
-            "64MdjAMBn5YnL5iE5K5UifTqA4XjHW1xb7u7861wBjcf"
+            "HB8XFVocoLig1KKpp5w41noDi4QN7SUx6HPWV7CKsaVR"
         );
         assert_eq!(
             get_deposit_address(&setup, None, Some([2; 32])).await,
-            "244iFvwwqfX1PSvvGPBnsEnXV1MKEnNHfFTkUVsdtp1n"
+            "Hu9cz6aPzLcyJWexefTthALmKBKZTiqt5TomTg2qwD2N"
         );
 
         setup.drop().await;
@@ -149,6 +150,27 @@ mod lifecycle {
                 minimum_deposit_amount: Setup::DEFAULT_MINIMUM_DEPOSIT_AMOUNT,
             }
         );
+
+        setup.drop().await;
+    }
+
+    #[tokio::test]
+    async fn should_get_events() {
+        let setup = SetupBuilder::new().build().await;
+        let minter = setup.minter();
+
+        minter.assert_that_events().await.satisfy(|events| {
+            check!(events.len() == 1 && matches!(events[0], EventType::Init(_)));
+        });
+
+        minter
+            .upgrade(Default::default())
+            .await
+            .expect("upgrade failed");
+
+        minter.assert_that_events().await.satisfy(|events| {
+            check!(events.len() == 2 && matches!(events[1], EventType::Upgrade(_)));
+        });
 
         setup.drop().await;
     }
@@ -252,20 +274,9 @@ mod update_balance_tests {
 
         let setup = SetupBuilder::new().build().await;
 
-        let mocks = MockHttpOutcallsBuilder::new()
-            .given(get_deposit_transaction_request().with_id(0))
-            .respond_with(transaction_not_found_response().with_id(0))
-            .given(get_deposit_transaction_request().with_id(1))
-            .respond_with(transaction_not_found_response().with_id(1))
-            .given(get_deposit_transaction_request().with_id(2))
-            .respond_with(transaction_not_found_response().with_id(2))
-            .given(get_deposit_transaction_request().with_id(3))
-            .respond_with(transaction_not_found_response().with_id(3))
-            .build();
-
         let result = setup
             .minter()
-            .with_http_mocks(mocks)
+            .with_http_mocks(get_transaction_http_mocks(transaction_not_found_response))
             .update_balance(default_update_balance_args())
             .await;
 
@@ -278,114 +289,101 @@ mod update_balance_tests {
     async fn should_fail_for_concurrent_access() {
         let setup = SetupBuilder::new().build().await;
 
-        let mocks = MockHttpOutcallsBuilder::new()
-            .given(get_deposit_transaction_request().with_id(0))
-            .respond_with(get_deposit_transaction_response().with_id(0))
-            .given(get_deposit_transaction_request().with_id(1))
-            .respond_with(get_deposit_transaction_response().with_id(1))
-            .given(get_deposit_transaction_request().with_id(2))
-            .respond_with(get_deposit_transaction_response().with_id(2))
-            .given(get_deposit_transaction_request().with_id(3))
-            .respond_with(get_deposit_transaction_response().with_id(3))
-            .build();
+        // Both minters use the same mocks, whichever gets the guard first will consume them
+        let mocks = SharedMockHttpOutcalls::new(get_transaction_http_mocks(
+            get_deposit_transaction_response,
+        ));
 
-        let minter1 = setup.minter().with_http_mocks(mocks);
-        let minter2 = setup.minter();
+        let minter1 = setup.minter().with_http_mocks(mocks.clone());
+        let minter2 = setup.minter().with_http_mocks(mocks.clone());
+
         let (result1, result2) = join!(
             minter1.update_balance(default_update_balance_args()),
             minter2.update_balance(default_update_balance_args())
         );
 
-        // TODO DEFI-2643: Update once deposit logic is implemented
-        assert_matches!(result1, Ok(DepositStatus::Processing(_)));
-        assert_eq!(result2, Err(UpdateBalanceError::AlreadyProcessing));
+        let (result1, result2) = match (&result1, &result2) {
+            (Ok(_), Err(_)) => (result1, result2),
+            (Err(_), Ok(_)) => (result2, result1),
+            _ => panic!("Expected one success and one error, but got: {result1:?} and {result2:?}"),
+        };
 
-        setup.drop().await;
-    }
-
-    #[tokio::test]
-    async fn should_update_balance() {
-        let setup = SetupBuilder::new().build().await;
-
-        let mocks = MockHttpOutcallsBuilder::new()
-            .given(get_deposit_transaction_request().with_id(0))
-            .respond_with(get_deposit_transaction_response().with_id(0))
-            .given(get_deposit_transaction_request().with_id(1))
-            .respond_with(get_deposit_transaction_response().with_id(1))
-            .given(get_deposit_transaction_request().with_id(2))
-            .respond_with(get_deposit_transaction_response().with_id(2))
-            .given(get_deposit_transaction_request().with_id(3))
-            .respond_with(get_deposit_transaction_response().with_id(3))
-            .build();
-
-        let result = setup
-            .minter()
-            .with_http_mocks(mocks)
-            .update_balance(default_update_balance_args())
-            .await;
-
-        // TODO DEFI-2643: Change once deposit logic is implemented
-        assert_eq!(
-            result,
-            Ok(DepositStatus::Processing(deposit_transaction_signature()))
+        // One should succeed, one should fail with AlreadyProcessing (order is non-deterministic)
+        let results = [&result1, &result2];
+        assert!(
+            results
+                .iter()
+                .any(|r| matches!(r, Ok(DepositStatus::Minted { .. }))),
+            "Expected one Minted result, got: {:?}",
+            results
+        );
+        assert!(
+            results
+                .iter()
+                .any(|r| matches!(r, Err(UpdateBalanceError::AlreadyProcessing))),
+            "Expected one AlreadyProcessing result, got: {:?}",
+            results
         );
 
         setup.drop().await;
     }
 
-    fn get_deposit_transaction_request() -> JsonRpcRequestMatcher {
-        JsonRpcRequestMatcher::with_method("getTransaction")
-            .with_params(json!([
-                DEPOSIT_TRANSACTION_SIGNATURE,
-                {"encoding": "base64", "commitment": "finalized"}
-            ]))
-            .with_id(0)
+    #[tokio::test]
+    async fn should_return_processing_if_minting_fails() {
+        let setup = SetupBuilder::new().build().await;
+
+        setup.ledger().stop().await;
+
+        let deposit_signature = deposit_transaction_signature();
+
+        let result = setup
+            .minter()
+            .with_http_mocks(get_transaction_http_mocks(get_deposit_transaction_response))
+            .update_balance(default_update_balance_args())
+            .await;
+        assert_eq!(result, Ok(DepositStatus::Processing(deposit_signature)));
+
+        setup.drop().await;
     }
 
-    fn get_deposit_transaction_response() -> JsonRpcResponse {
-        JsonRpcResponse::from(json!({
-            "jsonrpc": "2.0",
-            "result": {
-                "blockTime": 1771484921,
-                "meta": {
-                    "computeUnitsConsumed": 150,
-                    "costUnits": 1481,
-                    "err": null,
-                    "fee": 5000,
-                    "innerInstructions": [],
-                    "loadedAddresses": {
-                        "readonly": [],
-                        "writable": []
-                    },
-                    "logMessages": [
-                        "Program 11111111111111111111111111111111 invoke [1]",
-                        "Program 11111111111111111111111111111111 success"
-                    ],
-                    "postBalances": [
-                        1395816440,
-                        500000000,
-                        1
-                    ],
-                    "postTokenBalances": [],
-                    "preBalances": [
-                        1895821440,
-                        0,
-                        1
-                    ],
-                    "preTokenBalances": [],
-                    "rewards": [],
-                    "status": {
-                        "Ok": null
-                    }
-                },
-                "slot": 443170403,
-                "transaction": [
-                    "Ae8DcFCR+fISEfOEbPxoc4LVpEhkZBZIbfR17dUMX69x2xAuXybl0rAzVr4FBptL51oOjtQblMI78wjxgzvF3wgBAAEDIg5JU11WGypQAKfOpxcE0+UIiKney1G6hf+6GRXcmsegouBqKPunkGhY/5zzw2dzMFAJHrH4tQ8/OqJSAzQIJgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAE5C8ZKc/bqTlyknK2gJl0byFYySUUjKhGH8Uwb9hkJYBAgIAAQwCAAAAAGXNHQAAAAA=",
-                    "base64"
-                ]
-            },
-            "id": 1
-        }))
+    #[tokio::test]
+    async fn should_update_balance_with_single_deposit() {
+        let setup = SetupBuilder::new().build().await;
+
+        let balance_before = setup.ledger().balance_of(DEFAULT_CALLER_ACCOUNT).await;
+        assert_eq!(balance_before, 0);
+
+        let deposit_signature = deposit_transaction_signature();
+
+        let result = setup
+            .minter()
+            .with_http_mocks(get_transaction_http_mocks(get_deposit_transaction_response))
+            .update_balance(default_update_balance_args())
+            .await;
+        let expected_minted_amount = DEPOSIT_AMOUNT - Setup::DEFAULT_DEPOSIT_FEE;
+        assert_matches!(result, Ok(DepositStatus::Minted {
+            minted_amount,
+            signature,
+            block_index: _,
+        }) if minted_amount == expected_minted_amount && signature == deposit_signature);
+
+        let balance_after = setup.ledger().balance_of(DEFAULT_CALLER_ACCOUNT).await;
+        assert_eq!(balance_after, expected_minted_amount);
+
+        setup.drop().await;
+    }
+
+    fn get_transaction_http_mocks(response: impl Fn() -> JsonRpcResponse) -> MockHttpOutcalls {
+        MockHttpOutcallsBuilder::new()
+            .given(get_deposit_transaction_request().with_id(0))
+            .respond_with(response().with_id(0))
+            .given(get_deposit_transaction_request().with_id(1))
+            .respond_with(response().with_id(1))
+            .given(get_deposit_transaction_request().with_id(2))
+            .respond_with(response().with_id(2))
+            .given(get_deposit_transaction_request().with_id(3))
+            .respond_with(response().with_id(3))
+            .build()
     }
 }
 
