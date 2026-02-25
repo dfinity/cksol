@@ -116,6 +116,12 @@ pub enum RetrieveSolError {
         balance: u64,
     },
 
+    /// The minter is not approved to transfer the requested amount.
+    InsufficientAllowance {
+        /// The current allowance for the minter.
+        allowance: u64,
+    },
+
     /// There are too many concurrent requests, retry later.
     TemporarilyUnavailable(String),
 

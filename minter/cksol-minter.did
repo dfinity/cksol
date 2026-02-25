@@ -136,6 +136,8 @@ type RetrieveSolError = variant {
     MalformedAddress : Address;
     // The ckSOL balance of the withdrawal account is too low.
     InsufficientFunds : record { balance : nat64 };
+    // The minter is not approved to transfer the requested amount.
+    InsufficientAllowance : record { allowance : nat64 };
     // The minter is overloaded, retry the request.
     // The payload contains a human-readable message explaining what caused the unavailability.
     TemporarilyUnavailable : text;

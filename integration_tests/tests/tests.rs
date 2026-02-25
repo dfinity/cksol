@@ -177,7 +177,7 @@ mod retrieve_sol_tests {
 
         let result = setup.minter().retrieve_sol(args).await;
         let err = result.unwrap_err();
-        assert_eq!(err, RetrieveSolError::InsufficientFunds { balance: 0 });
+        assert_eq!(err, RetrieveSolError::InsufficientAllowance { allowance: 0 });
 
         setup.drop().await;
     }
@@ -194,7 +194,7 @@ mod retrieve_sol_tests {
 
         let result = setup.minter().retrieve_sol(args.clone()).await;
         let err = result.unwrap_err();
-        assert_eq!(err, RetrieveSolError::InsufficientFunds { balance: 0 });
+        assert_eq!(err, RetrieveSolError::InsufficientAllowance { allowance: 0 });
 
         let new_minimum_withdrawal_amount = Setup::DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT + 1;
         setup
@@ -221,7 +221,7 @@ mod retrieve_sol_tests {
 
         let result = setup.minter().retrieve_sol(args).await;
         let err = result.unwrap_err();
-        assert_eq!(err, RetrieveSolError::InsufficientFunds { balance: 0 });
+        assert_eq!(err, RetrieveSolError::InsufficientAllowance { allowance: 0 });
 
         setup.drop().await;
     }
