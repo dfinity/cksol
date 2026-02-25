@@ -201,7 +201,7 @@ impl State {
 
     fn record_successful_mint(&mut self, event: &MintedEvent) {
         let account = event.deposit_event.account;
-        let signature = event.deposit_event.signature.clone();
+        let signature = event.deposit_event.signature;
         assert_matches!(
             self.events_to_mint.remove(&(account, signature)),
             Some(_),
