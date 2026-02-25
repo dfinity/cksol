@@ -1,3 +1,4 @@
+use crate::Address;
 use derive_more::From;
 use minicbor::{Decode, Encode, Encoder};
 use solana_signature::SIGNATURE_BYTES;
@@ -33,6 +34,9 @@ pub enum Memo {
     /// The minter minted some ckSOL tokens.
     #[n(0)]
     Mint(#[n(0)] MintMemo),
+    /// The minter burned some ckSOL tokens.
+    #[n(1)]
+    Burn(#[n(1)] BurnMemo),
 }
 
 /// The minter minted some ckSOL tokens.
@@ -47,6 +51,18 @@ pub enum MintMemo {
     },
 }
 
+/// The minter burned some ckSOL tokens.
+#[derive(Clone, Eq, PartialEq, Debug, Decode, Encode)]
+pub enum BurnMemo {
+    /// The minter burned ckSOL to initiate the withdrawal.
+    #[n(0)]
+    Convert {
+        /// The solana withdrawal address.
+        #[cbor(n(0))]
+        to_address: String,
+    },
+}
+
 impl MintMemo {
     /// Create a [`MintMemo::Convert`] memo instance from a [`Signature`].
     ///
@@ -54,6 +70,17 @@ impl MintMemo {
     pub fn convert(signature: impl Into<solana_signature::Signature>) -> Self {
         Self::Convert {
             signature: <[u8; SIGNATURE_BYTES]>::from(signature.into()),
+        }
+    }
+}
+
+impl BurnMemo {
+    /// Create a [`BurnMemo::Convert`] memo instance from an [`Address`].
+    ///
+    /// [`Address`]: to_address::Address
+    pub fn convert(to_address: Address) -> Self {
+        Self::Convert {
+            to_address: to_address.to_string(),
         }
     }
 }

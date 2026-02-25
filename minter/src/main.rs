@@ -67,7 +67,13 @@ async fn retrieve_sol(args: RetrieveSolArgs) -> Result<RetrieveSolOk, RetrieveSo
         return Err(RetrieveSolError::AmountTooLow(minimum_withdrawal_amount));
     }
 
-    cksol_minter::retrieve_sol::retrieve_sol(from, args.amount, solana_address).await
+    cksol_minter::retrieve_sol::retrieve_sol(
+        IcCanisterRuntime::new(),
+        from,
+        args.amount,
+        solana_address,
+    )
+    .await
 }
 
 #[ic_cdk::update]
