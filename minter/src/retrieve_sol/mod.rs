@@ -10,6 +10,8 @@ pub async fn retrieve_sol<R: CanisterRuntime>(
     amount: u64,
     to: Address,
 ) -> Result<RetrieveSolOk, RetrieveSolError> {
+    // TODO DEFI-2671 Do we need a guard here? Since we burn the ledger balance first,
+    // multiple withdrawals to the same address should be fine?
     let block_index = burn(&runtime, from, amount, to)
         .await
         .map_err(|e| match e {
@@ -51,6 +53,6 @@ pub async fn retrieve_sol<R: CanisterRuntime>(
         })?;
 
     // TODO DEFI-2671 record event for processed withdrawal burn
-    
+
     Ok(RetrieveSolOk { block_index })
 }
