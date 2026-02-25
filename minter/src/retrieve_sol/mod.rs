@@ -49,5 +49,8 @@ pub async fn retrieve_sol<R: CanisterRuntime>(
                 }
             }
         })?;
+
+    // TODO DEFI-2671 record event for processed withdrawal burn
+    
     Ok(RetrieveSolOk { block_index })
 }

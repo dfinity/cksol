@@ -52,6 +52,7 @@ pub async fn burn<R: CanisterRuntime>(
 ) -> Result<u64, BurnError> {
     let burn_memo = BurnMemo::convert(to_address);
     let minter_account: Account = ic_cdk::api::canister_self().into();
+
     let block_index =
         read_state(|state| state.ledger_client(runtime.inter_canister_call_runtime()))
             .transfer_from(TransferFromArgs {
@@ -64,8 +65,6 @@ pub async fn burn<R: CanisterRuntime>(
                 amount: NumTokens::from(burn_amount),
             })
             .await??;
-
-    // TODO record burn event
 
     Ok(block_index
         .0
