@@ -153,6 +153,7 @@ mod lifecycle {
 mod retrieve_sol_tests {
     use candid::Nat;
     use cksol_int_tests::ledger_init_args::LEDGER_TRANSFER_FEE;
+    use cksol_types::RetrieveSolOk;
     use cksol_types_internal::UpgradeArgs;
     use icrc_ledger_types::icrc1::account::Account;
 
@@ -345,8 +346,43 @@ mod retrieve_sol_tests {
 
     #[tokio::test]
     async fn should_burn_sol_successfully() {
-        // TODO
-        // also check balances in the other tests
+        const WITHDRAWAL_AMOUNT: u64 = 100_000_000;
+        let initial_balance = 10 * WITHDRAWAL_AMOUNT;
+
+        let setup = SetupBuilder::new()
+            .with_initial_balances(vec![(DEFAULT_CALLER_ACCOUNT, Nat::from(initial_balance))])
+            .build()
+            .await;
+
+        setup
+            .ledger()
+            .approve(
+                WITHDRAWAL_AMOUNT,
+                Account {
+                    owner: setup.minter_canister_id,
+                    subaccount: None,
+                },
+            )
+            .await;
+
+        let result = setup
+            .minter()
+            .retrieve_sol(RetrieveSolArgs {
+                from_subaccount: None,
+                amount: WITHDRAWAL_AMOUNT,
+                address: "E4MpwNnMWs2XtW5gVrxZvyS7fMq31QD5HvbxmwP45Tz3".to_string(),
+            })
+            .await;
+
+        assert_eq!(result, Ok(RetrieveSolOk { block_index: 2 }));
+
+        let balance = setup.ledger().balance_of(DEFAULT_CALLER_ACCOUNT).await;
+        assert_eq!(
+            balance,
+            initial_balance - LEDGER_TRANSFER_FEE - WITHDRAWAL_AMOUNT
+        );
+
+        setup.drop().await;
     }
 }
 
