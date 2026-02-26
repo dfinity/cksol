@@ -151,7 +151,10 @@ mod lifecycle {
 }
 
 mod retrieve_sol_tests {
+    use candid::Nat;
+    use cksol_int_tests::ledger_init_args::LEDGER_TRANSFER_FEE;
     use cksol_types_internal::UpgradeArgs;
+    use icrc_ledger_types::icrc1::account::Account;
 
     use super::*;
 
@@ -243,6 +246,105 @@ mod retrieve_sol_tests {
         assert_eq!(status, RetrieveSolStatus::NotFound);
 
         setup.drop().await;
+    }
+
+    #[tokio::test]
+    async fn should_fail_if_insufficient_funds() {
+        const WITHDRAWAL_AMOUNT: u64 = 100_000_000;
+
+        let setup = SetupBuilder::new()
+            .with_initial_balances(vec![(DEFAULT_CALLER_ACCOUNT, Nat::from(WITHDRAWAL_AMOUNT))])
+            .build()
+            .await;
+
+        setup
+            .ledger()
+            .approve(
+                u64::MAX,
+                Account {
+                    owner: setup.minter_canister_id,
+                    subaccount: None,
+                },
+            )
+            .await;
+
+        let result = setup
+            .minter()
+            .retrieve_sol(RetrieveSolArgs {
+                from_subaccount: None,
+                amount: WITHDRAWAL_AMOUNT,
+                address: "E4MpwNnMWs2XtW5gVrxZvyS7fMq31QD5HvbxmwP45Tz3".to_string(),
+            })
+            .await;
+
+        assert_eq!(
+            result,
+            Err(RetrieveSolError::InsufficientFunds {
+                balance: WITHDRAWAL_AMOUNT - LEDGER_TRANSFER_FEE
+            })
+        );
+
+        setup.drop().await;
+    }
+
+    #[tokio::test]
+    async fn should_fail_if_insufficient_allowance() {
+        let setup = SetupBuilder::new()
+            .with_initial_balances(vec![(DEFAULT_CALLER_ACCOUNT, Nat::from(u64::MAX))])
+            .build()
+            .await;
+
+        const WITHDRAWAL_AMOUNT: u64 = 100_000_000;
+        let result = setup
+            .minter()
+            .retrieve_sol(RetrieveSolArgs {
+                from_subaccount: None,
+                amount: WITHDRAWAL_AMOUNT,
+                address: "E4MpwNnMWs2XtW5gVrxZvyS7fMq31QD5HvbxmwP45Tz3".to_string(),
+            })
+            .await;
+
+        assert_eq!(
+            result,
+            Err(RetrieveSolError::InsufficientAllowance { allowance: 0 })
+        );
+
+        let approve_amount = WITHDRAWAL_AMOUNT - 1;
+
+        setup
+            .ledger()
+            .approve(
+                approve_amount,
+                Account {
+                    owner: setup.minter_canister_id,
+                    subaccount: None,
+                },
+            )
+            .await;
+
+        let result = setup
+            .minter()
+            .retrieve_sol(RetrieveSolArgs {
+                from_subaccount: None,
+                amount: WITHDRAWAL_AMOUNT,
+                address: "E4MpwNnMWs2XtW5gVrxZvyS7fMq31QD5HvbxmwP45Tz3".to_string(),
+            })
+            .await;
+
+        assert_eq!(
+            result,
+            Err(RetrieveSolError::InsufficientAllowance {
+                allowance: approve_amount
+            })
+        );
+
+        setup.drop().await;
+    }
+
+    #[tokio::test]
+    async fn should_burn_sol_successfully() {
+        // TODO
+        // also check balances in the other tests
     }
 }
 

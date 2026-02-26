@@ -12,11 +12,14 @@ use ic_http_types::{HttpRequest, HttpResponse};
 use ic_management_canister_types::{CanisterId, CanisterSettings};
 use ic_pocket_canister_runtime::{ExecuteHttpOutcallMocks, PocketIcRuntime};
 use icrc_ledger_types::icrc1::account::Account;
+use icrc_ledger_types::icrc2::allowance::{Allowance, AllowanceArgs};
+use icrc_ledger_types::icrc2::approve::{ApproveArgs, ApproveError};
 use num_traits::cast::ToPrimitive;
 use pocket_ic::{PocketIcBuilder, RejectResponse, nonblocking::PocketIc};
 use serde::de::DeserializeOwned;
 use sol_rpc_client::SolRpcClient;
 use sol_rpc_types::{Lamport, RpcAccess};
+use std::vec;
 use std::{env::var, fs, path::PathBuf};
 
 pub mod events;
@@ -35,6 +38,7 @@ pub struct SetupBuilder {
     caller: Option<Principal>,
     make_live: Option<PocketIcMode>,
     sol_rpc_install_args: Option<sol_rpc_types::InstallArgs>,
+    initial_balances: Option<Vec<(Account, Nat)>>,
 }
 
 impl SetupBuilder {
@@ -44,6 +48,11 @@ impl SetupBuilder {
 
     pub fn with_caller(mut self, caller: Principal) -> Self {
         self.caller = Some(caller);
+        self
+    }
+
+    pub fn with_initial_balances(mut self, initial_balances: Vec<(Account, Nat)>) -> Self {
+        self.initial_balances = Some(initial_balances);
         self
     }
 
@@ -62,6 +71,7 @@ impl SetupBuilder {
             self.caller,
             self.make_live.unwrap_or_default(),
             self.sol_rpc_install_args.unwrap_or_default(),
+            self.initial_balances,
         )
         .await
     }
@@ -69,7 +79,7 @@ impl SetupBuilder {
 
 pub struct Setup {
     env: Option<PocketIc>,
-    minter_canister_id: CanisterId,
+    pub minter_canister_id: CanisterId,
     ledger_canister_id: CanisterId,
     caller: Option<Principal>,
 }
@@ -84,6 +94,7 @@ impl Setup {
         caller: Option<Principal>,
         make_live: PocketIcMode,
         sol_rpc_install_args: sol_rpc_types::InstallArgs,
+        initial_balances: Option<Vec<(Account, Nat)>>,
     ) -> Self {
         let env = PocketIcBuilder::new()
             .with_nns_subnet() //make_live requires NNS subnet.
@@ -137,7 +148,11 @@ impl Setup {
         env.install_canister(
             ledger_canister_id,
             ledger_wasm().await,
-            Encode!(&ledger_init_args(minter_canister_id)).unwrap(),
+            Encode!(&ledger_init_args(
+                minter_canister_id,
+                initial_balances.unwrap_or(vec![])
+            ))
+            .unwrap(),
             Some(Self::DEFAULT_CONTROLLER),
         )
         .await;
@@ -350,6 +365,40 @@ impl Ledger<'_> {
         self.0
             .update_call::<_, Nat>("icrc1_balance_of", (account,))
             .await
+            .0
+            .to_u64()
+            .unwrap()
+    }
+
+    pub async fn approve(&self, amount: u64, spender: Account) -> u64 {
+        let args = ApproveArgs {
+            from_subaccount: None,
+            spender,
+            amount: Nat::from(amount),
+            expected_allowance: None,
+            expires_at: None,
+            fee: None,
+            memo: None,
+            created_at_time: None,
+        };
+        self.0
+            .update_call::<_, Result<Nat, ApproveError>>("icrc2_approve", (args,))
+            .await
+            .expect("approve call failed")
+            .0
+            .to_u64()
+            .unwrap()
+    }
+
+    pub async fn allowance(&self, from: Account, spender: Account) -> u64 {
+        let args = AllowanceArgs {
+            account: from,
+            spender,
+        };
+        self.0
+            .update_call::<_, Allowance>("icrc2_allowance", (args,))
+            .await
+            .allowance
             .0
             .to_u64()
             .unwrap()
