@@ -277,24 +277,23 @@ mod retrieve_sol_tests {
             })
             .await;
 
-        assert_eq!(
-            result,
-            Err(RetrieveSolError::InsufficientFunds {
-                balance: WITHDRAWAL_AMOUNT - LEDGER_TRANSFER_FEE
-            })
-        );
+        let balance = setup.ledger().balance_of(DEFAULT_CALLER_ACCOUNT).await;
+        assert_eq!(balance, WITHDRAWAL_AMOUNT - LEDGER_TRANSFER_FEE);
+        assert_eq!(result, Err(RetrieveSolError::InsufficientFunds { balance }));
 
         setup.drop().await;
     }
 
     #[tokio::test]
     async fn should_fail_if_insufficient_allowance() {
+        const WITHDRAWAL_AMOUNT: u64 = 100_000_000;
+        let initial_balance = 10 * WITHDRAWAL_AMOUNT;
+
         let setup = SetupBuilder::new()
-            .with_initial_balances(vec![(DEFAULT_CALLER_ACCOUNT, Nat::from(u64::MAX))])
+            .with_initial_balances(vec![(DEFAULT_CALLER_ACCOUNT, Nat::from(initial_balance))])
             .build()
             .await;
 
-        const WITHDRAWAL_AMOUNT: u64 = 100_000_000;
         let result = setup
             .minter()
             .retrieve_sol(RetrieveSolArgs {
@@ -337,6 +336,9 @@ mod retrieve_sol_tests {
                 allowance: approve_amount
             })
         );
+
+        let balance = setup.ledger().balance_of(DEFAULT_CALLER_ACCOUNT).await;
+        assert_eq!(balance, initial_balance - LEDGER_TRANSFER_FEE);
 
         setup.drop().await;
     }
