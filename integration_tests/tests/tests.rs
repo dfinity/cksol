@@ -151,11 +151,14 @@ mod lifecycle {
 }
 
 mod retrieve_sol_tests {
+    use std::str::FromStr;
+
     use candid::Nat;
     use cksol_int_tests::ledger_init_args::LEDGER_TRANSFER_FEE;
-    use cksol_types::RetrieveSolOk;
+    use cksol_types::{BurnMemo, Memo, RetrieveSolOk};
     use cksol_types_internal::UpgradeArgs;
-    use icrc_ledger_types::icrc1::account::Account;
+    use icrc_ledger_types::{icrc::generic_value::Value, icrc1::account::Account};
+    use solana_address::Address;
 
     use super::*;
 
@@ -347,6 +350,8 @@ mod retrieve_sol_tests {
     #[tokio::test]
     async fn should_burn_sol_successfully() {
         const WITHDRAWAL_AMOUNT: u64 = 100_000_000;
+        const WITHDRAWAL_ADDRESS: &str = "E4MpwNnMWs2XtW5gVrxZvyS7fMq31QD5HvbxmwP45Tz3";
+
         let initial_balance = 10 * WITHDRAWAL_AMOUNT;
 
         let setup = SetupBuilder::new()
@@ -370,17 +375,32 @@ mod retrieve_sol_tests {
             .retrieve_sol(RetrieveSolArgs {
                 from_subaccount: None,
                 amount: WITHDRAWAL_AMOUNT,
-                address: "E4MpwNnMWs2XtW5gVrxZvyS7fMq31QD5HvbxmwP45Tz3".to_string(),
+                address: WITHDRAWAL_ADDRESS.to_string(),
             })
             .await;
 
-        assert_eq!(result, Ok(RetrieveSolOk { block_index: 2 }));
+        let block_index = 2;
+
+        assert_eq!(result, Ok(RetrieveSolOk { block_index }));
 
         let balance = setup.ledger().balance_of(DEFAULT_CALLER_ACCOUNT).await;
         assert_eq!(
             balance,
             initial_balance - LEDGER_TRANSFER_FEE - WITHDRAWAL_AMOUNT
         );
+
+        let block = setup.ledger().get_block(block_index).await;
+        let block: Value = block.into();
+        let block_map = block.as_map().expect("should be a map");
+        let tx = block_map.get("tx").expect("should have a tx");
+        let tx_map = tx.clone().as_map().expect("should be a map");
+        let memo = tx_map.get("memo").expect("should have a memo");
+        let memo_blob = memo.clone().as_blob().expect("memo should be a blob");
+        let memo = minicbor::decode::<Memo>(&memo_blob).expect("failed to decode memo");
+        let expected_memo = BurnMemo::convert(
+            Address::from_str(WITHDRAWAL_ADDRESS).expect("failed to parse address"),
+        );
+        assert_eq!(memo, Memo::from(expected_memo));
 
         setup.drop().await;
     }

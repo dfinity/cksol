@@ -739,6 +739,7 @@ dependencies = [
  "ic-pocket-canister-runtime",
  "ic-test-utilities-load-wasm",
  "icrc-ledger-types",
+ "minicbor",
  "num-traits",
  "pocket-ic",
  "reqwest 0.13.2",
