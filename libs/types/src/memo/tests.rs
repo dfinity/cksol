@@ -4,7 +4,6 @@ use crate::{
 };
 use icrc_ledger_types::icrc1::transfer::Memo as Icrc1Memo;
 use proptest::prelude::*;
-use solana_address::Address;
 
 proptest! {
     #[test]
