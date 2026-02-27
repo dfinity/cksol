@@ -199,4 +199,13 @@ pub struct MinterInfo {
     pub minimum_deposit_amount: Lamport,
     /// Fee deducted from each withdrawal (ckSOL -> SOL).
     pub withdrawal_fee: Lamport,
+    /// Minimum cycles the caller must attach when calling `update_balance`.
+    pub update_balance_required_cycles: u128,
+    /// Collateral cycles per subnet node for the `update_balance` call.
+    /// The total collateral is `update_balance_collateral_cycles_per_node * num_subnet_nodes`.
+    pub update_balance_collateral_cycles_per_node: u128,
+    /// Cycles attached to each inter-canister call to the SOL RPC canister.
+    pub cycles_per_rpc_call: u128,
+    /// Number of subnet nodes, used to calculate total collateral for `update_balance`.
+    pub num_subnet_nodes: u32,
 }

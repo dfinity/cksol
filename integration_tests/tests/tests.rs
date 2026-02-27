@@ -10,8 +10,8 @@ use cksol_int_tests::{
     },
 };
 use cksol_types::{
-    DepositStatus, GetDepositAddressArgs, MinterInfo, UpdateBalanceArgs, UpdateBalanceError,
-    WithdrawSolArgs, WithdrawSolError, WithdrawSolStatus,
+    DepositStatus, GetDepositAddressArgs, Lamport, MinterInfo, UpdateBalanceArgs,
+    UpdateBalanceError, WithdrawSolArgs, WithdrawSolError, WithdrawSolStatus,
 };
 use cksol_types_internal::{UpgradeArgs, event::EventType, log::Priority};
 use ic_pocket_canister_runtime::{JsonRpcResponse, MockHttpOutcalls, MockHttpOutcallsBuilder};
@@ -127,6 +127,11 @@ mod lifecycle {
                 minimum_withdrawal_amount: Setup::DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT,
                 minimum_deposit_amount: Setup::DEFAULT_MINIMUM_DEPOSIT_AMOUNT,
                 withdrawal_fee: Setup::DEFAULT_WITHDRAWAL_FEE,
+                update_balance_required_cycles: Setup::DEFAULT_UPDATE_BALANCE_REQUIRED_CYCLES,
+                update_balance_collateral_cycles_per_node:
+                    Setup::DEFAULT_UPDATE_BALANCE_COLLATERAL_CYCLES_PER_NODE,
+                cycles_per_rpc_call: Setup::DEFAULT_CYCLES_PER_RPC_CALL,
+                num_subnet_nodes: Setup::DEFAULT_NUM_SUBNET_NODES,
             }
         );
 
@@ -152,6 +157,11 @@ mod lifecycle {
                 minimum_withdrawal_amount: new_minimum_withdrawal_amount,
                 minimum_deposit_amount: Setup::DEFAULT_MINIMUM_DEPOSIT_AMOUNT,
                 withdrawal_fee: new_withdrawal_fee,
+                update_balance_required_cycles: Setup::DEFAULT_UPDATE_BALANCE_REQUIRED_CYCLES,
+                update_balance_collateral_cycles_per_node:
+                    Setup::DEFAULT_UPDATE_BALANCE_COLLATERAL_CYCLES_PER_NODE,
+                cycles_per_rpc_call: Setup::DEFAULT_CYCLES_PER_RPC_CALL,
+                num_subnet_nodes: Setup::DEFAULT_NUM_SUBNET_NODES,
             }
         );
 
@@ -504,7 +514,6 @@ mod withdraw_sol_tests {
 
 mod update_balance_tests {
     use super::*;
-    use sol_rpc_types::Lamport;
 
     #[tokio::test]
     async fn should_fail_if_transaction_not_found() {

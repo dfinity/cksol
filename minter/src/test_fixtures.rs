@@ -9,9 +9,10 @@ use crate::{
 };
 use candid::Principal;
 use cksol_types::DepositStatus;
-use cksol_types_internal::{Ed25519KeyName, InitArgs};
+use cksol_types_internal::{Ed25519KeyName, InitArgs, UpgradeArgs};
 use ic_ed25519::{PocketIcMasterPublicKeyId, PublicKey};
 use icrc_ledger_types::icrc1::account::Account;
+use proptest::prelude::{Just, Strategy, any, prop, prop_oneof};
 use sol_rpc_types::Lamport;
 use solana_address::{Address, address};
 use solana_transaction_status_client_types::{
@@ -30,6 +31,10 @@ pub const MINTER_ACCOUNT: Account = Account {
     subaccount: None,
 };
 pub const MINIMUM_DEPOSIT_AMOUNT: Lamport = 10_000_000; // 0.01 SOL
+pub const UPDATE_BALANCE_REQUIRED_CYCLES: u128 = 1_000_000_000_000;
+pub const UPDATE_BALANCE_COLLATERAL_CYCLES_PER_NODE: u128 = 10_000_000;
+pub const CYCLES_PER_RPC_CALL: u128 = 1_000_000_000_000;
+pub const NUM_SUBNET_NODES: u32 = 34;
 
 pub fn sol_rpc_canister_id() -> Principal {
     Principal::from_slice(&[1_u8; 20])
@@ -48,6 +53,10 @@ pub fn valid_init_args() -> InitArgs {
         minimum_withdrawal_amount: MINIMUM_WITHDRAWAL_AMOUNT,
         minimum_deposit_amount: MINIMUM_DEPOSIT_AMOUNT,
         withdrawal_fee: WITHDRAWAL_FEE,
+        update_balance_required_cycles: UPDATE_BALANCE_REQUIRED_CYCLES,
+        update_balance_collateral_cycles_per_node: UPDATE_BALANCE_COLLATERAL_CYCLES_PER_NODE,
+        num_subnet_nodes: NUM_SUBNET_NODES,
+        cycles_per_rpc_call: CYCLES_PER_RPC_CALL,
     }
 }
 
@@ -69,9 +78,7 @@ pub fn init_schnorr_master_key() {
 }
 
 pub mod arb {
-    use crate::state::event::{Event, EventType};
-    use cksol_types_internal::{Ed25519KeyName, InitArgs, UpgradeArgs};
-    use proptest::prelude::{Just, Strategy, any, prop, prop_oneof};
+    use super::*;
 
     pub fn arb_principal() -> impl Strategy<Value = candid::Principal> {
         prop::collection::vec(any::<u8>(), 0..=29)
@@ -95,6 +102,10 @@ pub mod arb {
             any::<u64>(),
             any::<u64>(),
             any::<u64>(),
+            any::<u128>(),
+            any::<u128>(),
+            any::<u128>(),
+            any::<u32>(),
         )
             .prop_map(
                 |(
@@ -105,6 +116,10 @@ pub mod arb {
                     minimum_withdrawal_amount,
                     minimum_deposit_amount,
                     withdrawal_fee,
+                    update_balance_required_cycles,
+                    update_balance_collateral_cycles_per_node,
+                    cycles_per_rpc_call,
+                    num_subnet_nodes,
                 )| {
                     InitArgs {
                         sol_rpc_canister_id,
@@ -114,6 +129,10 @@ pub mod arb {
                         minimum_withdrawal_amount,
                         minimum_deposit_amount,
                         withdrawal_fee,
+                        update_balance_required_cycles,
+                        update_balance_collateral_cycles_per_node,
+                        cycles_per_rpc_call,
+                        num_subnet_nodes,
                     }
                 },
             )
@@ -126,6 +145,10 @@ pub mod arb {
             prop::option::of(any::<u64>()),
             prop::option::of(any::<u64>()),
             prop::option::of(any::<u64>()),
+            prop::option::of(any::<u128>()),
+            prop::option::of(any::<u128>()),
+            prop::option::of(any::<u128>()),
+            prop::option::of(any::<u32>()),
         )
             .prop_map(
                 |(
@@ -134,12 +157,20 @@ pub mod arb {
                     minimum_withdrawal_amount,
                     minimum_deposit_amount,
                     withdrawal_fee,
+                    update_balance_required_cycles,
+                    update_balance_collateral_cycles_per_node,
+                    cycles_per_rpc_call,
+                    num_subnet_nodes,
                 )| UpgradeArgs {
                     sol_rpc_canister_id,
                     deposit_fee,
                     minimum_withdrawal_amount,
                     minimum_deposit_amount,
                     withdrawal_fee,
+                    update_balance_required_cycles,
+                    update_balance_collateral_cycles_per_node,
+                    cycles_per_rpc_call,
+                    num_subnet_nodes,
                 },
             )
     }

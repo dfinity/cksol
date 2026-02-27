@@ -94,6 +94,13 @@ impl Setup {
     pub const DEFAULT_CALLER: Principal = Principal::from_slice(&[0x9d, 0xf7, 0x02]);
     pub const DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT: Lamport = 10_000_000; // 0.01 SOL
     pub const DEFAULT_MINIMUM_DEPOSIT_AMOUNT: Lamport = 10_000_000; // 0.01 SOL
+    pub const DEFAULT_UPDATE_BALANCE_REQUIRED_CYCLES: u128 = 1_000_000_000_000;
+    pub const DEFAULT_UPDATE_BALANCE_COLLATERAL_CYCLES_PER_NODE: u128 = 10_000_000;
+    pub const DEFAULT_CYCLES_PER_RPC_CALL: u128 = 1_000_000_000_000;
+    pub const DEFAULT_NUM_SUBNET_NODES: u32 = 34;
+    pub const DEFAULT_UPDATE_BALANCE_COLLATERAL_CYCLES: u128 = (Self::DEFAULT_NUM_SUBNET_NODES
+        as u128)
+        * Self::DEFAULT_UPDATE_BALANCE_COLLATERAL_CYCLES_PER_NODE;
 
     pub async fn new(
         caller: Option<Principal>,
@@ -518,6 +525,11 @@ fn cksol_minter_init_args(
         minimum_withdrawal_amount: Setup::DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT,
         minimum_deposit_amount: Setup::DEFAULT_MINIMUM_DEPOSIT_AMOUNT,
         withdrawal_fee: Setup::DEFAULT_WITHDRAWAL_FEE,
+        update_balance_required_cycles: Setup::DEFAULT_UPDATE_BALANCE_REQUIRED_CYCLES,
+        update_balance_collateral_cycles_per_node:
+            Setup::DEFAULT_UPDATE_BALANCE_COLLATERAL_CYCLES_PER_NODE,
+        num_subnet_nodes: Setup::DEFAULT_NUM_SUBNET_NODES,
+        cycles_per_rpc_call: Setup::DEFAULT_CYCLES_PER_RPC_CALL,
     })
 }
 

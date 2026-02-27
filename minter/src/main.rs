@@ -143,6 +143,10 @@ fn get_minter_info() -> MinterInfo {
         minimum_withdrawal_amount: s.minimum_withdrawal_amount(),
         minimum_deposit_amount: s.minimum_deposit_amount(),
         withdrawal_fee: s.withdrawal_fee(),
+        update_balance_required_cycles: s.update_balance_required_cycles(),
+        update_balance_collateral_cycles_per_node: s.update_balance_collateral_cycles_per_node(),
+        cycles_per_rpc_call: s.cycles_per_rpc_call(),
+        num_subnet_nodes: s.num_subnet_nodes(),
     })
 }
 
