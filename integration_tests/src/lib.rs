@@ -79,7 +79,7 @@ impl SetupBuilder {
 
 pub struct Setup {
     env: Option<PocketIc>,
-    pub minter_canister_id: CanisterId,
+    minter_canister_id: CanisterId,
     ledger_canister_id: CanisterId,
     caller: Option<Principal>,
 }
@@ -211,6 +211,10 @@ impl Setup {
             runtime: self.runtime(),
             id: self.minter_canister_id,
         })
+    }
+
+    pub fn minter_canister_id(&self) -> Principal {
+        self.minter_canister_id
     }
 
     pub fn ledger(&self) -> Ledger<'_> {

@@ -263,7 +263,7 @@ mod retrieve_sol_tests {
             .approve(
                 u64::MAX,
                 Account {
-                    owner: setup.minter_canister_id,
+                    owner: setup.minter_canister_id(),
                     subaccount: None,
                 },
             )
@@ -316,7 +316,7 @@ mod retrieve_sol_tests {
             .approve(
                 approve_amount,
                 Account {
-                    owner: setup.minter_canister_id,
+                    owner: setup.minter_canister_id(),
                     subaccount: None,
                 },
             )
@@ -359,7 +359,7 @@ mod retrieve_sol_tests {
             .approve(
                 WITHDRAWAL_AMOUNT,
                 Account {
-                    owner: setup.minter_canister_id,
+                    owner: setup.minter_canister_id(),
                     subaccount: None,
                 },
             )
