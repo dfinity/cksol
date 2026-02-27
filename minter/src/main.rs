@@ -71,7 +71,7 @@ async fn retrieve_sol(args: RetrieveSolArgs) -> Result<RetrieveSolOk, RetrieveSo
         IcCanisterRuntime::new(),
         from,
         args.amount,
-        solana_address,
+        solana_address.into(),
     )
     .await
 }

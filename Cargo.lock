@@ -801,6 +801,7 @@ dependencies = [
  "proptest",
  "serde",
  "sol_rpc_types",
+ "solana-address 2.2.0",
  "solana-signature",
  "thiserror 2.0.18",
 ]

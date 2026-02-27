@@ -1,6 +1,7 @@
-use cksol_types::{Address, RetrieveSolError, RetrieveSolOk};
+use cksol_types::{RetrieveSolError, RetrieveSolOk};
 use icrc_ledger_types::{icrc1::account::Account, icrc2::transfer_from::TransferFromError};
 use num_traits::ToPrimitive;
+use solana_address::Address;
 
 use crate::{ledger::burn, runtime::CanisterRuntime};
 

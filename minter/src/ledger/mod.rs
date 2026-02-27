@@ -1,5 +1,5 @@
 use crate::{runtime::CanisterRuntime, state::read_state};
-use cksol_types::{Address, BurnMemo, DepositStatus, Memo, MintMemo};
+use cksol_types::{BurnMemo, DepositStatus, Memo, MintMemo};
 use derive_more::From;
 use ic_canister_runtime::IcError;
 use icrc_ledger_types::{
@@ -11,6 +11,7 @@ use icrc_ledger_types::{
 };
 use num_traits::cast::ToPrimitive;
 use sol_rpc_types::{Lamport, Signature};
+use solana_address::Address;
 use thiserror::Error;
 
 pub mod client;

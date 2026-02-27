@@ -1,6 +1,6 @@
-use crate::Address;
 use derive_more::From;
 use minicbor::{Decode, Encode, Encoder};
+use solana_address::Address;
 use solana_signature::SIGNATURE_BYTES;
 
 #[cfg(test)]
@@ -58,8 +58,8 @@ pub enum BurnMemo {
     #[n(0)]
     Convert {
         /// The solana withdrawal address.
-        #[cbor(n(0))]
-        to_address: String,
+        #[cbor(n(0), with = "minicbor::bytes")]
+        to_address: [u8; 32],
     },
 }
 
@@ -80,7 +80,7 @@ impl BurnMemo {
     /// [`Address`]: to_address::Address
     pub fn convert(to_address: Address) -> Self {
         Self::Convert {
-            to_address: to_address.to_string(),
+            to_address: to_address.to_bytes(),
         }
     }
 }
