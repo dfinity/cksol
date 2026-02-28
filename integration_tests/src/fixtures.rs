@@ -4,7 +4,10 @@ use cksol_types::{GetDepositAddressArgs, Signature, UpdateBalanceArgs};
 use ic_pocket_canister_runtime::{
     ExecuteHttpOutcallMocks, JsonRpcRequestMatcher, JsonRpcResponse, MockHttpOutcalls,
 };
-use icrc_ledger_types::{icrc::generic_value::{ICRC3Value, Value}, icrc1::account::Account};
+use icrc_ledger_types::{
+    icrc::generic_value::{ICRC3Value, Value},
+    icrc1::account::Account,
+};
 use pocket_ic::nonblocking::PocketIc;
 use serde_json::json;
 use sol_rpc_types::Lamport;
