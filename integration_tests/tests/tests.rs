@@ -154,10 +154,10 @@ mod retrieve_sol_tests {
     use std::str::FromStr;
 
     use candid::Nat;
-    use cksol_int_tests::ledger_init_args::LEDGER_TRANSFER_FEE;
+    use cksol_int_tests::{fixtures::get_memo, ledger_init_args::LEDGER_TRANSFER_FEE};
     use cksol_types::{BurnMemo, Memo, RetrieveSolOk};
     use cksol_types_internal::UpgradeArgs;
-    use icrc_ledger_types::{icrc::generic_value::Value, icrc1::account::Account};
+    use icrc_ledger_types::icrc1::account::Account;
     use solana_address::Address;
 
     use super::*;
@@ -390,12 +390,7 @@ mod retrieve_sol_tests {
         );
 
         let block = setup.ledger().get_block(block_index).await;
-        let block: Value = block.into();
-        let block_map = block.as_map().expect("should be a map");
-        let tx = block_map.get("tx").expect("should have a tx");
-        let tx_map = tx.clone().as_map().expect("should be a map");
-        let memo = tx_map.get("memo").expect("should have a memo");
-        let memo_blob = memo.clone().as_blob().expect("memo should be a blob");
+        let memo_blob = get_memo(block);
         let memo = minicbor::decode::<Memo>(&memo_blob).expect("failed to decode memo");
         let expected_memo = BurnMemo::convert(
             Address::from_str(WITHDRAWAL_ADDRESS).expect("failed to parse address"),
