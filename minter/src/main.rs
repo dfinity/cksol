@@ -69,6 +69,7 @@ async fn retrieve_sol(args: RetrieveSolArgs) -> Result<RetrieveSolOk, RetrieveSo
 
     cksol_minter::retrieve_sol::retrieve_sol(
         IcCanisterRuntime::new(),
+        // add minter account as param,
         from,
         args.amount,
         solana_address.into(),

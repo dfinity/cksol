@@ -155,7 +155,7 @@ mod retrieve_sol_tests {
 
     use candid::Nat;
     use cksol_int_tests::{fixtures::get_memo, ledger_init_args::LEDGER_TRANSFER_FEE};
-    use cksol_types::{BurnMemo, Memo, RetrieveSolOk};
+    use cksol_types::{BurnMemo, Memo};
     use cksol_types_internal::UpgradeArgs;
     use icrc_ledger_types::icrc1::account::Account;
     use solana_address::Address;
@@ -379,15 +379,7 @@ mod retrieve_sol_tests {
             })
             .await;
 
-        let block_index = 2;
-
-        assert_eq!(result, Ok(RetrieveSolOk { block_index }));
-
-        let balance = setup.ledger().balance_of(DEFAULT_CALLER_ACCOUNT).await;
-        assert_eq!(
-            balance,
-            initial_balance - LEDGER_TRANSFER_FEE - WITHDRAWAL_AMOUNT
-        );
+        let block_index = result.expect("burn should succeed").block_index;
 
         let block = setup.ledger().get_block(block_index).await;
         let memo_blob = get_memo(block);
@@ -396,6 +388,12 @@ mod retrieve_sol_tests {
             Address::from_str(WITHDRAWAL_ADDRESS).expect("failed to parse address"),
         );
         assert_eq!(memo, Memo::from(expected_memo));
+
+        let balance = setup.ledger().balance_of(DEFAULT_CALLER_ACCOUNT).await;
+        assert_eq!(
+            balance,
+            initial_balance - LEDGER_TRANSFER_FEE - WITHDRAWAL_AMOUNT
+        );
 
         setup.drop().await;
     }
