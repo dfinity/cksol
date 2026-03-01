@@ -384,9 +384,11 @@ mod retrieve_sol_tests {
         let block = setup.ledger().get_block(block_index).await;
         let memo_blob = get_memo(block);
         let memo = minicbor::decode::<Memo>(&memo_blob).expect("failed to decode memo");
-        let expected_memo = BurnMemo::convert(
-            Address::from_str(WITHDRAWAL_ADDRESS).expect("failed to parse address"),
-        );
+        let expected_memo = BurnMemo::Convert {
+            to_address: Address::from_str(WITHDRAWAL_ADDRESS)
+                .expect("failed to decode address")
+                .to_bytes(),
+        };
         assert_eq!(memo, Memo::from(expected_memo));
 
         let balance = setup.ledger().balance_of(DEFAULT_CALLER_ACCOUNT).await;
