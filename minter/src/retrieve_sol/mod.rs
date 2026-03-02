@@ -1,5 +1,9 @@
+use std::str::FromStr;
+
+use candid::Principal;
 use cksol_types::{RetrieveSolError, RetrieveSolOk};
-use icrc_ledger_types::{icrc1::account::Account, icrc2::transfer_from::TransferFromError};
+use icrc_ledger_types::icrc1::account::{Account, Subaccount};
+use icrc_ledger_types::icrc2::transfer_from::TransferFromError;
 use num_traits::ToPrimitive;
 use solana_address::Address;
 
@@ -11,15 +15,28 @@ mod tests;
 pub async fn retrieve_sol<R: CanisterRuntime>(
     runtime: R,
     minter_account: Account,
-    from: Account,
+    caller: Principal,
+    from_subaccount: Option<Subaccount>,
     amount: u64,
-    to: Address,
+    address: String,
 ) -> Result<RetrieveSolOk, RetrieveSolError> {
+    assert_ne!(
+        caller,
+        Principal::anonymous(),
+        "the owner must be non-anonymous"
+    );
+    let from = Account {
+        owner: caller,
+        subaccount: from_subaccount,
+    };
+    let solana_address = Address::from_str(&address)
+        .map_err(|e| RetrieveSolError::MalformedAddress(e.to_string()))?;
+
     // TODO DEFI-2671 Do we need a guard here? Since we burn the ledger balance first,
     // multiple withdrawals to the same address should be fine?
     // If we don't deduplicate at all, we probably also don't need
     // the RetrieveSolError::AlreadyProcessing error.
-    let block_index = burn(&runtime, minter_account, from, amount, to)
+    let block_index = burn(&runtime, minter_account, from, amount, solana_address)
         .await
         .map_err(|e| match e {
             crate::ledger::BurnError::IcError(ic_error) => {

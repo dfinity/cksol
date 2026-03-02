@@ -58,10 +58,6 @@ async fn update_balance(args: UpdateBalanceArgs) -> Result<DepositStatus, Update
 
 #[ic_cdk::update]
 async fn retrieve_sol(args: RetrieveSolArgs) -> Result<RetrieveSolOk, RetrieveSolError> {
-    let from = assert_non_anonymous_account(None, args.from_subaccount);
-    let solana_address = Address::from_str(&args.address)
-        .map_err(|e| RetrieveSolError::MalformedAddress(e.to_string()))?;
-
     let minimum_withdrawal_amount = read_state(|s| s.minimum_withdrawal_amount());
     if args.amount < minimum_withdrawal_amount {
         return Err(RetrieveSolError::AmountTooLow(minimum_withdrawal_amount));
@@ -72,9 +68,10 @@ async fn retrieve_sol(args: RetrieveSolArgs) -> Result<RetrieveSolOk, RetrieveSo
     cksol_minter::retrieve_sol::retrieve_sol(
         IcCanisterRuntime::new(),
         minter_account,
-        from,
+        ic_cdk::api::msg_caller(),
+        args.from_subaccount,
         args.amount,
-        solana_address.into(),
+        args.address,
     )
     .await
 }

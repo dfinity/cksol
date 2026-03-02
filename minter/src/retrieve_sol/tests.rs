@@ -4,7 +4,12 @@ use candid::{Nat, Principal};
 use cksol_types::{RetrieveSolError, RetrieveSolOk};
 use ic_canister_runtime::IcError;
 use icrc_ledger_types::icrc2::transfer_from::TransferFromError;
-use solana_address::Address;
+
+const VALID_ADDRESS: &str = "E4MpwNnMWs2XtW5gVrxZvyS7fMq31QD5HvbxmwP45Tz3";
+
+fn test_caller() -> Principal {
+    Principal::from_slice(&[1_u8; 20])
+}
 
 #[tokio::test]
 async fn should_return_error_if_calling_ledger_fails() {
@@ -12,9 +17,17 @@ async fn should_return_error_if_calling_ledger_fails() {
 
     let runtime = TestCanisterRuntime::new().add_stub_error(IcError::CallPerformFailed);
 
-    let account = Principal::anonymous().into();
+    let minter_account = Principal::anonymous().into();
 
-    let result = retrieve_sol(runtime, account, account, 1, Address::default()).await;
+    let result = retrieve_sol(
+        runtime,
+        minter_account,
+        test_caller(),
+        None,
+        1,
+        VALID_ADDRESS.to_string(),
+    )
+    .await;
 
     assert_matches!(
         result,
@@ -30,9 +43,17 @@ async fn should_return_error_if_ledger_unavailable() {
         TransferFromError::TemporarilyUnavailable,
     ));
 
-    let account = Principal::anonymous().into();
+    let minter_account = Principal::anonymous().into();
 
-    let result = retrieve_sol(runtime, account, account, 1, Address::default()).await;
+    let result = retrieve_sol(
+        runtime,
+        minter_account,
+        test_caller(),
+        None,
+        1,
+        VALID_ADDRESS.to_string(),
+    )
+    .await;
 
     assert_eq!(
         result,
@@ -52,9 +73,17 @@ async fn should_return_error_if_insufficient_allowance() {
         },
     ));
 
-    let account = Principal::anonymous().into();
+    let minter_account = Principal::anonymous().into();
 
-    let result = retrieve_sol(runtime, account, account, 1, Address::default()).await;
+    let result = retrieve_sol(
+        runtime,
+        minter_account,
+        test_caller(),
+        None,
+        1,
+        VALID_ADDRESS.to_string(),
+    )
+    .await;
 
     assert_eq!(
         result,
@@ -72,9 +101,17 @@ async fn should_return_error_if_insufficient_funds() {
         },
     ));
 
-    let account = Principal::anonymous().into();
+    let minter_account = Principal::anonymous().into();
 
-    let result = retrieve_sol(runtime, account, account, 1, Address::default()).await;
+    let result = retrieve_sol(
+        runtime,
+        minter_account,
+        test_caller(),
+        None,
+        1,
+        VALID_ADDRESS.to_string(),
+    )
+    .await;
 
     assert_eq!(
         result,
@@ -93,9 +130,17 @@ async fn should_return_generic_error() {
         },
     ));
 
-    let account = Principal::anonymous().into();
+    let minter_account = Principal::anonymous().into();
 
-    let result = retrieve_sol(runtime, account, account, 1, Address::default()).await;
+    let result = retrieve_sol(
+        runtime,
+        minter_account,
+        test_caller(),
+        None,
+        1,
+        VALID_ADDRESS.to_string(),
+    )
+    .await;
 
     assert_eq!(
         result,
@@ -113,9 +158,17 @@ async fn should_return_ok_if_burn_succeeds() {
     let runtime = TestCanisterRuntime::new()
         .add_stub_response(Ok::<Nat, TransferFromError>(Nat::from(123u64)));
 
-    let account = Principal::anonymous().into();
+    let minter_account = Principal::anonymous().into();
 
-    let result = retrieve_sol(runtime, account, account, 1, Address::default()).await;
+    let result = retrieve_sol(
+        runtime,
+        minter_account,
+        test_caller(),
+        None,
+        1,
+        VALID_ADDRESS.to_string(),
+    )
+    .await;
 
     assert_eq!(
         result,
@@ -123,4 +176,43 @@ async fn should_return_ok_if_burn_succeeds() {
             block_index: 123u64
         })
     );
+}
+
+#[tokio::test]
+async fn should_return_error_if_address_malformed() {
+    init_state();
+
+    let runtime = TestCanisterRuntime::new();
+    let minter_account = Principal::anonymous().into();
+
+    let result = retrieve_sol(
+        runtime,
+        minter_account,
+        test_caller(),
+        None,
+        1,
+        "not-a-valid-address".to_string(),
+    )
+    .await;
+
+    assert_matches!(result, Err(RetrieveSolError::MalformedAddress(_)));
+}
+
+#[tokio::test]
+#[should_panic(expected = "the owner must be non-anonymous")]
+async fn should_panic_if_caller_is_anonymous() {
+    init_state();
+
+    let runtime = TestCanisterRuntime::new();
+    let minter_account = Principal::anonymous().into();
+
+    let _ = retrieve_sol(
+        runtime,
+        minter_account,
+        Principal::anonymous(),
+        None,
+        1,
+        VALID_ADDRESS.to_string(),
+    )
+    .await;
 }
