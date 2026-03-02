@@ -262,6 +262,70 @@ pub mod deposit {
             block_time: Some(1771421240),
         }
     }
+
+    // https://explorer.solana.com/tx/56LyqGhjJV4epkZbn9Q1bW1Qf6L5jP1oF7rRkSt9zWtDPpxdyBVxc73NfQxADBhdXjshGQi8WQJokGWjT9Z8z97v?cluster=devnet
+    pub fn deposit_transaction_to_multiple_accounts_signature() -> solana_signature::Signature {
+        const SIGNATURE: &str = "56LyqGhjJV4epkZbn9Q1bW1Qf6L5jP1oF7rRkSt9zWtDPpxdyBVxc73NfQxADBhdXjshGQi8WQJokGWjT9Z8z97v";
+        solana_signature::Signature::from_str(SIGNATURE).unwrap()
+    }
+
+    // Single transaction that transfers funds to multiple accounts:
+    //  - 0.1 SOL to BVH7GZXRdqyZLSLBS4cm1Yom8Yvekw6ytgSFz9y9on4e
+    //  - 0.2 SOL to 36nNQ1JxjZ9tSN8WWqGPjV9H3FexvsMC5gEnkmUhigpY
+    //  - 0.3 SOL to 75H1btFeRrFySZuKyZGPpvYcy3uDkcMoj5EL2mpsFUvr
+    // https://explorer.solana.com/tx/56LyqGhjJV4epkZbn9Q1bW1Qf6L5jP1oF7rRkSt9zWtDPpxdyBVxc73NfQxADBhdXjshGQi8WQJokGWjT9Z8z97v?cluster=devnet
+    pub fn deposit_transaction_to_multiple_accounts() -> EncodedConfirmedTransactionWithStatusMeta {
+        const ENCODED_DEPOSIT_TRANSACTION: &str = "AcytR2Rq+c0hM6m/Fka99Q4d7R4Nin2Ic4z/c1DLSmPLkhiLffSIvYlQLLKH/zvcy3JgP/umG5TN9TLv9oSUYAkBAAEFIg5JU11WGypQAKfOpxcE0+UIiKney1G6hf+6GRXcmscfMpOhqUYjXIxXvJp/bhOwZFCsImXzz5iVqw/g+bBPiVo+jDsfe97gI2/mJd+TXE7nJj+D6zIOZsV4YmKTgeUvm9NYan1lUBJ+p+uJV+FG8uZ+ZU5ZkqbFoBB9YL+y21cAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAN9p0fDGOCOG2Vh6Cbo7MPuOUKoG2zX1iTCguRzb3oKRAwQCAAMMAgAAAADh9QUAAAAABAIAAQwCAAAAAMLrCwAAAAAEAgACDAIAAAAAo+ERAAAAAA==";
+        EncodedConfirmedTransactionWithStatusMeta {
+            slot: 445682829,
+            transaction: EncodedTransactionWithStatusMeta {
+                transaction: EncodedTransaction::Binary(
+                    ENCODED_DEPOSIT_TRANSACTION.to_string(),
+                    TransactionBinaryEncoding::Base64,
+                ),
+                meta: Some(UiTransactionStatusMeta {
+                    compute_units_consumed: OptionSerializer::Some(450),
+                    cost_units: OptionSerializer::Some(2387),
+                    err: None,
+                    fee: 5000,
+                    inner_instructions: OptionSerializer::Some(vec![]),
+                    loaded_addresses: OptionSerializer::Some(UiLoadedAddresses {
+                        writable: vec![],
+                        readonly: vec![],
+                    }),
+                    log_messages: OptionSerializer::Some(vec![
+                        "Program 11111111111111111111111111111111 invoke [1]".to_string(),
+                        "Program 11111111111111111111111111111111 success".to_string(),
+                        "Program 11111111111111111111111111111111 invoke [1]".to_string(),
+                        "Program 11111111111111111111111111111111 success".to_string(),
+                        "Program 11111111111111111111111111111111 invoke [1]".to_string(),
+                        "Program 11111111111111111111111111111111 success".to_string()
+                    ]),
+                    post_balances: vec![
+                        4295796440,
+                        200000000,
+                        300000000,
+                        600000000,
+                        1
+                    ],
+                    post_token_balances: OptionSerializer::Some(vec![]),
+                    pre_balances: vec![
+                        4895801440,
+                        0,
+                        0,
+                        500000000,
+                        1
+                    ],
+                    pre_token_balances: OptionSerializer::Some(vec![]),
+                    rewards: OptionSerializer::None,
+                    status: Ok(()),
+                    return_data: OptionSerializer::Skip,
+                }),
+                version: None,
+            },
+            block_time: Some(1772447561),
+        }
+    }
 }
 
 pub struct EventsAssert(VecDeque<Event>);
