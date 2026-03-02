@@ -174,4 +174,6 @@ pub struct MinterInfo {
     pub deposit_fee: Lamport,
     /// Minimum withdrawal amount in lamports.
     pub minimum_withdrawal_amount: Lamport,
+    /// Minimum deposit amount in lamports.
+    pub minimum_deposit_amount: Lamport,
 }

@@ -1,12 +1,13 @@
-use crate::state::audit::process_event;
-use crate::state::event::{AcceptedDepositEvent, EventType};
-use crate::state::mutate_state;
 use crate::{
     address::get_deposit_address,
     guard::update_balance_guard,
     ledger::mint,
     runtime::CanisterRuntime,
-    state::read_state,
+    state::{
+        audit::process_event,
+        event::{AcceptedDepositEvent, EventType},
+        mutate_state, read_state,
+    },
     transaction::{get_deposit_amount_to_address, try_get_transaction},
 };
 use canlog::log;
@@ -53,8 +54,7 @@ pub async fn update_balance<R: CanisterRuntime>(
             UpdateBalanceError::InvalidDepositTransaction(e.to_string())
         })?;
 
-    let deposit_fee = read_state(|state| state.deposit_fee());
-    if deposit_amount < deposit_fee {
+    if deposit_amount < read_state(|state| state.minimum_deposit_amount()) {
         return Err(UpdateBalanceError::ValueTooSmall);
     }
 

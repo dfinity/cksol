@@ -73,6 +73,7 @@ pub struct State {
     sol_rpc_canister_id: Principal,
     deposit_fee: Lamport,
     minimum_withdrawal_amount: Lamport,
+    minimum_deposit_amount: u64,
     pending_update_balance_requests: BTreeSet<Account>,
     events_to_mint: BTreeMap<(Account, Signature), AcceptedDepositEvent>,
     minted_events: BTreeMap<(Account, Signature), MintedEvent>,
@@ -114,6 +115,10 @@ impl State {
 
     pub fn minimum_withdrawal_amount(&self) -> u64 {
         self.minimum_withdrawal_amount
+    }
+
+    pub fn minimum_deposit_amount(&self) -> u64 {
+        self.minimum_deposit_amount
     }
 
     pub fn events_to_mint(&self) -> &BTreeMap<(Account, Signature), AcceptedDepositEvent> {
@@ -167,12 +172,36 @@ impl State {
         &mut self.pending_update_balance_requests
     }
 
+    fn validate(&self) -> Result<(), InvalidStateError> {
+        let canister_ids: BTreeSet<_> = [self.sol_rpc_canister_id, self.ledger_canister_id]
+            .into_iter()
+            .collect();
+        if canister_ids.contains(&Principal::anonymous()) {
+            return Err(InvalidStateError::InvalidCanisterId(
+                "ERROR: anonymous principal is not accepted!".to_string(),
+            ));
+        }
+        if canister_ids.len() < 2 {
+            return Err(InvalidStateError::InvalidCanisterId(
+                "ERROR: provided canister IDs are not distinct!".to_string(),
+            ));
+        }
+        if self.minimum_deposit_amount < self.deposit_fee {
+            return Err(InvalidStateError::InvalidMinimumDepositAmount {
+                minimum_deposit_amount: self.minimum_deposit_amount,
+                deposit_fee: self.deposit_fee,
+            });
+        }
+        Ok(())
+    }
+
     fn upgrade(
         &mut self,
         UpgradeArgs {
             sol_rpc_canister_id,
             deposit_fee,
             minimum_withdrawal_amount,
+            minimum_deposit_amount,
         }: UpgradeArgs,
     ) -> Result<(), InvalidStateError> {
         if let Some(sol_rpc_canister_id) = sol_rpc_canister_id {
@@ -184,7 +213,10 @@ impl State {
         if let Some(minimum_withdrawal_amount) = minimum_withdrawal_amount {
             self.minimum_withdrawal_amount = minimum_withdrawal_amount;
         }
-        Ok(())
+        if let Some(minimum_deposit_amount) = minimum_deposit_amount {
+            self.minimum_deposit_amount = minimum_deposit_amount;
+        }
+        self.validate()
     }
 
     fn record_event_to_mint(&mut self, event: &AcceptedDepositEvent) {
@@ -221,6 +253,10 @@ impl State {
 #[derive(Debug)]
 pub enum InvalidStateError {
     InvalidCanisterId(String),
+    InvalidMinimumDepositAmount {
+        minimum_deposit_amount: u64,
+        deposit_fee: u64,
+    },
 }
 
 impl TryFrom<InitArgs> for State {
@@ -233,33 +269,23 @@ impl TryFrom<InitArgs> for State {
             deposit_fee,
             master_key_name,
             minimum_withdrawal_amount,
+            minimum_deposit_amount,
         }: InitArgs,
     ) -> Result<Self, Self::Error> {
-        let canister_ids: BTreeSet<_> = [sol_rpc_canister_id, ledger_canister_id]
-            .into_iter()
-            .collect();
-        if canister_ids.contains(&Principal::anonymous()) {
-            return Err(InvalidStateError::InvalidCanisterId(
-                "ERROR: anonymous principal is not accepted!".to_string(),
-            ));
-        }
-        if canister_ids.len() < 2 {
-            return Err(InvalidStateError::InvalidCanisterId(
-                "ERROR: provided canister IDs are not distinct!".to_string(),
-            ));
-        }
-
-        Ok(Self {
+        let state = Self {
             minter_public_key: None,
             master_key_name,
             ledger_canister_id,
             sol_rpc_canister_id,
             deposit_fee,
             minimum_withdrawal_amount,
+            minimum_deposit_amount,
             pending_update_balance_requests: BTreeSet::new(),
             events_to_mint: BTreeMap::new(),
             minted_events: BTreeMap::new(),
-        })
+        };
+        state.validate()?;
+        Ok(state)
     }
 }
 
