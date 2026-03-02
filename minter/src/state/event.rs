@@ -32,26 +32,28 @@ pub enum EventType {
     /// The minter discovered a Solana transaction that is a valid ckSOL
     /// deposit for the given account.
     #[n(2)]
-    AcceptedDeposit(#[n(0)] AcceptedDepositEvent),
+    AcceptedDeposit(#[n(0)] DepositEvent),
     /// The minter minted ckSOL in response to a deposit.
     #[n(3)]
     Minted(#[n(0)] MintedEvent),
 }
 
 #[derive(Clone, Eq, Ord, PartialEq, PartialOrd, Debug, Decode, Encode)]
-pub struct AcceptedDepositEvent {
+pub struct DepositEvent {
     #[cbor(n(0), with = "cbor::signature")]
     pub signature: Signature,
     #[n(1)]
     pub account: Account,
     #[n(2)]
-    pub amount: Lamport,
+    pub deposit_amount: Lamport,
+    #[n(3)]
+    pub amount_to_mint: Lamport,
 }
 
 #[derive(Clone, Eq, Ord, PartialEq, PartialOrd, Debug, Decode, Encode)]
 pub struct MintedEvent {
     #[n(0)]
-    pub deposit_event: AcceptedDepositEvent,
+    pub deposit_event: DepositEvent,
     #[n(1)]
     pub minted_amount: Lamport,
     #[cbor(n(2), with = "cbor::id")]

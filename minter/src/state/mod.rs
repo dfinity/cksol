@@ -3,7 +3,7 @@ mod tests;
 
 use crate::{
     ledger::client::LedgerClient,
-    state::event::{AcceptedDepositEvent, MintedEvent},
+    state::event::{DepositEvent, MintedEvent},
 };
 use assert_matches::assert_matches;
 use candid::Principal;
@@ -75,7 +75,7 @@ pub struct State {
     minimum_withdrawal_amount: Lamport,
     minimum_deposit_amount: u64,
     pending_update_balance_requests: BTreeSet<Account>,
-    events_to_mint: BTreeMap<(Account, Signature), AcceptedDepositEvent>,
+    events_to_mint: BTreeMap<(Account, Signature), DepositEvent>,
     minted_events: BTreeMap<(Account, Signature), MintedEvent>,
 }
 
@@ -121,7 +121,7 @@ impl State {
         self.minimum_deposit_amount
     }
 
-    pub fn events_to_mint(&self) -> &BTreeMap<(Account, Signature), AcceptedDepositEvent> {
+    pub fn events_to_mint(&self) -> &BTreeMap<(Account, Signature), DepositEvent> {
         &self.events_to_mint
     }
 
@@ -219,7 +219,7 @@ impl State {
         self.validate()
     }
 
-    fn record_event_to_mint(&mut self, event: &AcceptedDepositEvent) {
+    fn record_event_to_mint(&mut self, event: &DepositEvent) {
         let account = event.account;
         let signature = event.signature;
         assert!(

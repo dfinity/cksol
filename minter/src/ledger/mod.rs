@@ -3,7 +3,7 @@ use crate::{
     state::read_state,
     state::{
         audit::process_event,
-        event::{AcceptedDepositEvent, EventType, MintedEvent},
+        event::{DepositEvent, EventType, MintedEvent},
         mutate_state,
     },
 };
@@ -17,17 +17,11 @@ pub mod client;
 
 pub async fn mint<R: CanisterRuntime>(
     runtime: &R,
-    deposit_event: AcceptedDepositEvent,
+    deposit_event: DepositEvent,
 ) -> Result<DepositStatus, MintError> {
     let signature = deposit_event.signature;
     let mint_memo = MintMemo::convert(signature);
-
-    let deposit_fee = read_state(|state| state.deposit_fee());
-    assert!(
-        deposit_event.amount > deposit_fee,
-        "Deposit amount is less than fee!"
-    );
-    let minted_amount = deposit_event.amount - deposit_fee;
+    let minted_amount = deposit_event.amount_to_mint;
 
     let block_index =
         read_state(|state| state.ledger_client(runtime.inter_canister_call_runtime()))

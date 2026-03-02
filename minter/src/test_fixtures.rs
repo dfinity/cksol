@@ -1,7 +1,7 @@
 use crate::{
     state::{
         SchnorrPublicKey, State,
-        event::{AcceptedDepositEvent, Event, EventType},
+        event::{DepositEvent, Event, EventType},
         init_once_state, mutate_state,
     },
     storage::with_event_iter,
@@ -177,11 +177,12 @@ pub mod deposit {
         }
     }
 
-    pub fn accepted_deposit_event() -> AcceptedDepositEvent {
-        AcceptedDepositEvent {
+    pub fn accepted_deposit_event() -> DepositEvent {
+        DepositEvent {
             signature: deposit_transaction_signature(),
             account: DEPOSITOR_ACCOUNT,
-            amount: DEPOSIT_AMOUNT,
+            deposit_amount: DEPOSIT_AMOUNT,
+            amount_to_mint: DEPOSIT_AMOUNT - DEPOSIT_FEE,
         }
     }
 

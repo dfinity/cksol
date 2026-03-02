@@ -5,7 +5,7 @@ use crate::{
     runtime::CanisterRuntime,
     state::{
         audit::process_event,
-        event::{AcceptedDepositEvent, EventType},
+        event::{DepositEvent, EventType},
         mutate_state, read_state,
     },
     transaction::{get_deposit_amount_to_address, try_get_transaction},
@@ -53,15 +53,18 @@ pub async fn update_balance<R: CanisterRuntime>(
             );
             UpdateBalanceError::InvalidDepositTransaction(e.to_string())
         })?;
-
     if deposit_amount < read_state(|state| state.minimum_deposit_amount()) {
         return Err(UpdateBalanceError::ValueTooSmall);
     }
+    let amount_to_mint = deposit_amount
+        .checked_sub(read_state(|state| state.deposit_fee()))
+        .expect("BUG: deposit amount is less than deposit fee");
 
-    let deposit_event = AcceptedDepositEvent {
+    let deposit_event = DepositEvent {
         signature,
         account,
-        amount: deposit_amount,
+        deposit_amount,
+        amount_to_mint,
     };
     mutate_state(|state| {
         process_event(

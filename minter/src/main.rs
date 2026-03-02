@@ -97,7 +97,7 @@ fn get_events(
             EventType::AcceptedDeposit(deposit_event) => event::EventType::AcceptedDeposit {
                 signature: deposit_event.signature.into(),
                 account: deposit_event.account,
-                amount: deposit_event.amount,
+                amount: deposit_event.deposit_amount,
             },
             EventType::Minted(minted_event) => event::EventType::Minted {
                 signature: minted_event.deposit_event.signature.into(),
