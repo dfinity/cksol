@@ -65,6 +65,7 @@ pub struct State {
     sol_rpc_canister_id: Principal,
     deposit_fee: u64,
     minimum_withdrawal_amount: u64,
+    minimum_deposit_amount: u64,
     pending_update_balance_requests: BTreeSet<Account>,
 }
 
@@ -106,6 +107,10 @@ impl State {
         self.minimum_withdrawal_amount
     }
 
+    pub fn minimum_deposit_amount(&self) -> u64 {
+        self.minimum_deposit_amount
+    }
+
     pub fn sol_rpc_client<R: Runtime>(&self, runtime: R) -> SolRpcClient<R> {
         // The maximum size of an HTTPs outcall response is 2MB:
         // https://docs.internetcomputer.org/references/ic-interface-spec#ic-http_request
@@ -128,45 +133,8 @@ impl State {
         &mut self.pending_update_balance_requests
     }
 
-    fn upgrade(
-        &mut self,
-        UpgradeArgs {
-            sol_rpc_canister_id,
-            deposit_fee,
-            minimum_withdrawal_amount,
-        }: UpgradeArgs,
-    ) -> Result<(), InvalidStateError> {
-        if let Some(sol_rpc_canister_id) = sol_rpc_canister_id {
-            self.sol_rpc_canister_id = sol_rpc_canister_id;
-        }
-        if let Some(deposit_fee) = deposit_fee {
-            self.deposit_fee = deposit_fee;
-        }
-        if let Some(minimum_withdrawal_amount) = minimum_withdrawal_amount {
-            self.minimum_withdrawal_amount = minimum_withdrawal_amount;
-        }
-        Ok(())
-    }
-}
-
-#[derive(Debug)]
-pub enum InvalidStateError {
-    InvalidCanisterId(String),
-}
-
-impl TryFrom<InitArgs> for State {
-    type Error = InvalidStateError;
-
-    fn try_from(
-        InitArgs {
-            sol_rpc_canister_id,
-            ledger_canister_id,
-            deposit_fee,
-            master_key_name,
-            minimum_withdrawal_amount,
-        }: InitArgs,
-    ) -> Result<Self, Self::Error> {
-        let canister_ids: BTreeSet<_> = [sol_rpc_canister_id, ledger_canister_id]
+    fn validate(&self) -> Result<(), InvalidStateError> {
+        let canister_ids: BTreeSet<_> = [self.sol_rpc_canister_id, self.ledger_canister_id]
             .into_iter()
             .collect();
         if canister_ids.contains(&Principal::anonymous()) {
@@ -179,16 +147,74 @@ impl TryFrom<InitArgs> for State {
                 "ERROR: provided canister IDs are not distinct!".to_string(),
             ));
         }
+        if self.minimum_deposit_amount < self.deposit_fee {
+            return Err(InvalidStateError::InvalidMinimumDepositAmount {
+                minimum_deposit_amount: self.minimum_deposit_amount,
+                deposit_fee: self.deposit_fee,
+            });
+        }
+        Ok(())
+    }
 
-        Ok(Self {
+    fn upgrade(
+        &mut self,
+        UpgradeArgs {
+            sol_rpc_canister_id,
+            deposit_fee,
+            minimum_withdrawal_amount,
+            minimum_deposit_amount,
+        }: UpgradeArgs,
+    ) -> Result<(), InvalidStateError> {
+        if let Some(sol_rpc_canister_id) = sol_rpc_canister_id {
+            self.sol_rpc_canister_id = sol_rpc_canister_id;
+        }
+        if let Some(deposit_fee) = deposit_fee {
+            self.deposit_fee = deposit_fee;
+        }
+        if let Some(minimum_withdrawal_amount) = minimum_withdrawal_amount {
+            self.minimum_withdrawal_amount = minimum_withdrawal_amount;
+        }
+        if let Some(minimum_deposit_amount) = minimum_deposit_amount {
+            self.minimum_deposit_amount = minimum_deposit_amount;
+        }
+        self.validate()
+    }
+}
+
+#[derive(Debug)]
+pub enum InvalidStateError {
+    InvalidCanisterId(String),
+    InvalidMinimumDepositAmount {
+        minimum_deposit_amount: u64,
+        deposit_fee: u64,
+    },
+}
+
+impl TryFrom<InitArgs> for State {
+    type Error = InvalidStateError;
+
+    fn try_from(
+        InitArgs {
+            sol_rpc_canister_id,
+            ledger_canister_id,
+            deposit_fee,
+            master_key_name,
+            minimum_withdrawal_amount,
+            minimum_deposit_amount,
+        }: InitArgs,
+    ) -> Result<Self, Self::Error> {
+        let state = Self {
             minter_public_key: None,
             master_key_name,
             ledger_canister_id,
             sol_rpc_canister_id,
             deposit_fee,
             minimum_withdrawal_amount,
+            minimum_deposit_amount,
             pending_update_balance_requests: BTreeSet::new(),
-        })
+        };
+        state.validate()?;
+        Ok(state)
     }
 }
 
