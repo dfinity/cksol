@@ -345,30 +345,26 @@ mod update_balance_tests {
         let deposit_signature = deposit_transaction_signature();
 
         // First call to `update_balance` should result in mint
-        let result = setup
+        let first_result = setup
             .minter()
             .with_http_mocks(get_transaction_http_mocks(get_deposit_transaction_response))
             .update_balance(default_update_balance_args())
             .await;
-        assert_matches!(result, Ok(DepositStatus::Minted {
+        assert_matches!(&first_result, Ok(DepositStatus::Minted {
             minted_amount,
             signature,
             block_index: _,
-        }) if minted_amount == EXPECTED_MINT_AMOUNT && signature == deposit_signature);
+        }) if minted_amount == &EXPECTED_MINT_AMOUNT && signature == &deposit_signature);
 
         let balance_after = setup.ledger().balance_of(DEFAULT_CALLER_ACCOUNT).await;
         assert_eq!(balance_after, EXPECTED_MINT_AMOUNT);
 
         // Second call to `update_balance` should not result in any JSON-RPC calls or mint
-        let result = setup
+        let second_result = setup
             .minter()
             .update_balance(default_update_balance_args())
             .await;
-        assert_matches!(result, Ok(DepositStatus::Minted {
-            minted_amount,
-            signature,
-            block_index: _,
-        }) if minted_amount == EXPECTED_MINT_AMOUNT && signature == deposit_signature);
+        assert_eq!(second_result, first_result);
 
         let balance_after = setup.ledger().balance_of(DEFAULT_CALLER_ACCOUNT).await;
         assert_eq!(balance_after, EXPECTED_MINT_AMOUNT);
