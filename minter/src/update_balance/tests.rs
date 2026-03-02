@@ -1,3 +1,4 @@
+use crate::state::event::DepositId;
 use crate::{
     runtime::TestCanisterRuntime,
     state::event::{DepositEvent, EventType, MintedEvent},
@@ -257,8 +258,10 @@ async fn should_allow_deposits_to_multiple_accounts_with_single_transaction() {
     let mut events_assert = EventsAssert::from_recorded();
     for i in 0..3 {
         let accepted_deposit_event = DepositEvent {
-            signature: deposit_transaction_to_multiple_accounts_signature(),
-            account: ACCOUNTS[i],
+            deposit_id: DepositId {
+                signature: deposit_transaction_to_multiple_accounts_signature(),
+                account: ACCOUNTS[i],
+            },
             deposit_amount: DEPOSIT_AMOUNTS[i],
             amount_to_mint: DEPOSIT_AMOUNTS[i] - DEPOSIT_FEE,
         };

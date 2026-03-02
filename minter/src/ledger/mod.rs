@@ -19,7 +19,7 @@ pub async fn mint<R: CanisterRuntime>(
     runtime: &R,
     deposit_event: DepositEvent,
 ) -> Result<DepositStatus, MintError> {
-    let signature = deposit_event.signature;
+    let signature = deposit_event.deposit_id.signature;
     let mint_memo = MintMemo::convert(signature);
     let minted_amount = deposit_event.amount_to_mint;
 
@@ -27,7 +27,7 @@ pub async fn mint<R: CanisterRuntime>(
         read_state(|state| state.ledger_client(runtime.inter_canister_call_runtime()))
             .transfer(TransferArg {
                 from_subaccount: None,
-                to: deposit_event.account,
+                to: deposit_event.deposit_id.account,
                 fee: None,
                 created_at_time: Some(runtime.time()),
                 memo: Some(Memo::from(mint_memo).into()),

@@ -147,7 +147,7 @@ pub mod arb {
 pub mod deposit {
     use super::*;
     use crate::numeric::LedgerMintIndex;
-    use crate::state::event::MintedEvent;
+    use crate::state::event::{DepositId, MintedEvent};
 
     pub const DEPOSIT_AMOUNT: Lamport = 500_000_000;
     pub const DEPOSIT_ADDRESS: Address = address!("BVH7GZXRdqyZLSLBS4cm1Yom8Yvekw6ytgSFz9y9on4e");
@@ -179,8 +179,10 @@ pub mod deposit {
 
     pub fn accepted_deposit_event() -> DepositEvent {
         DepositEvent {
-            signature: deposit_transaction_signature(),
-            account: DEPOSITOR_ACCOUNT,
+            deposit_id: DepositId {
+                signature: deposit_transaction_signature(),
+                account: DEPOSITOR_ACCOUNT,
+            },
             deposit_amount: DEPOSIT_AMOUNT,
             amount_to_mint: DEPOSIT_AMOUNT - DEPOSIT_FEE,
         }

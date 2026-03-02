@@ -48,15 +48,21 @@ pub enum EventType {
     Minted(#[n(0)] MintedEvent),
 }
 
-#[derive(Clone, Eq, Ord, PartialEq, PartialOrd, Debug, Decode, Encode)]
-pub struct DepositEvent {
+#[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd, Debug, Decode, Encode)]
+pub struct DepositId {
     #[cbor(n(0), with = "cbor::signature")]
     pub signature: Signature,
     #[n(1)]
     pub account: Account,
-    #[n(2)]
+}
+
+#[derive(Clone, Eq, Ord, PartialEq, PartialOrd, Debug, Decode, Encode)]
+pub struct DepositEvent {
+    #[n(0)]
+    pub deposit_id: DepositId,
+    #[n(1)]
     pub deposit_amount: Lamport,
-    #[n(3)]
+    #[n(2)]
     pub amount_to_mint: Lamport,
 }
 

@@ -27,6 +27,9 @@ fn apply_state_transition(state: &mut State, payload: &EventType) {
         EventType::AcceptedDeposit(event) => {
             state.record_event_to_mint(event);
         }
+        EventType::QuarantinedDeposit(_event) => {
+            // TODO DEFI-2643
+        }
         EventType::Minted(event) => {
             state.record_successful_mint(event);
         }

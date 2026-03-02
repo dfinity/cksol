@@ -3,7 +3,7 @@ mod tests;
 
 use crate::{
     ledger::client::LedgerClient,
-    state::event::{DepositEvent, MintedEvent},
+    state::event::{DepositEvent, DepositId, MintedEvent},
 };
 use assert_matches::assert_matches;
 use candid::Principal;
@@ -14,7 +14,6 @@ use ic_ed25519::PublicKey;
 use icrc_ledger_types::icrc1::account::Account;
 use sol_rpc_client::SolRpcClient;
 use sol_rpc_types::{ConsensusStrategy, Lamport, RpcSources, SolanaCluster};
-use solana_signature::Signature;
 use std::{
     cell::RefCell,
     collections::{BTreeMap, BTreeSet},
@@ -75,8 +74,8 @@ pub struct State {
     minimum_withdrawal_amount: Lamport,
     minimum_deposit_amount: u64,
     pending_update_balance_requests: BTreeSet<Account>,
-    events_to_mint: BTreeMap<(Account, Signature), DepositEvent>,
-    minted_events: BTreeMap<(Account, Signature), MintedEvent>,
+    events_to_mint: BTreeMap<DepositId, DepositEvent>,
+    minted_events: BTreeMap<DepositId, MintedEvent>,
 }
 
 impl State {
@@ -121,31 +120,31 @@ impl State {
         self.minimum_deposit_amount
     }
 
-    pub fn events_to_mint(&self) -> &BTreeMap<(Account, Signature), DepositEvent> {
+    pub fn events_to_mint(&self) -> &BTreeMap<DepositId, DepositEvent> {
         &self.events_to_mint
     }
 
-    pub fn minted_events(&self) -> &BTreeMap<(Account, Signature), MintedEvent> {
+    pub fn minted_events(&self) -> &BTreeMap<DepositId, MintedEvent> {
         &self.minted_events
     }
 
-    pub fn deposit_status(&self, deposit: &(Account, Signature)) -> Option<DepositStatus> {
+    pub fn deposit_status(&self, deposit: &DepositId) -> Option<DepositStatus> {
         let maybe_deposit_event = self.events_to_mint().get(deposit);
         let maybe_mint_event = self.minted_events().get(deposit);
 
         match (maybe_deposit_event, maybe_mint_event) {
             (None, None) => None,
-            (Some(deposit_event), None) => {
-                Some(DepositStatus::Processing(deposit_event.signature.into()))
-            }
+            (Some(deposit_event), None) => Some(DepositStatus::Processing(
+                deposit_event.deposit_id.signature.into(),
+            )),
             (None, Some(minted_event)) => Some(DepositStatus::Minted {
                 block_index: *minted_event.mint_block_index.get(),
                 minted_amount: minted_event.minted_amount,
-                signature: minted_event.deposit_event.signature.into(),
+                signature: minted_event.deposit_event.deposit_id.signature.into(),
             }),
             (Some(_), Some(_)) => panic!(
                 "Found both event to mint and minted event for deposit with account {:?} and signature {:?}",
-                deposit.0, deposit.1
+                deposit.account, deposit.signature
             ),
         }
     }
@@ -220,29 +219,24 @@ impl State {
     }
 
     fn record_event_to_mint(&mut self, event: &DepositEvent) {
-        let account = event.account;
-        let signature = event.signature;
         assert!(
-            !self.events_to_mint.contains_key(&(account, signature)),
+            !self.events_to_mint.contains_key(&event.deposit_id),
             "There must not be two different events to mint for the same account and signature"
         );
-        assert!(!self.minted_events.contains_key(&(account, signature)));
-        self.events_to_mint
-            .insert((account, signature), event.clone());
+        assert!(!self.minted_events.contains_key(&event.deposit_id));
+        self.events_to_mint.insert(event.deposit_id, event.clone());
     }
 
     fn record_successful_mint(&mut self, event: &MintedEvent) {
-        let account = event.deposit_event.account;
-        let signature = event.deposit_event.signature;
         assert_matches!(
-            self.events_to_mint.remove(&(account, signature)),
+            self.events_to_mint.remove(&event.deposit_event.deposit_id),
             Some(_),
             "Attempted to mint ckSOL for an unknown event {:?}",
             event.deposit_event
         );
         assert_eq!(
             self.minted_events
-                .insert((account, signature), event.clone()),
+                .insert(event.deposit_event.deposit_id, event.clone()),
             None,
             "Attempted to mint ckSOL twice for the same event {:?}",
             event.deposit_event

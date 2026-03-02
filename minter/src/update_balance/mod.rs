@@ -5,7 +5,7 @@ use crate::{
     runtime::CanisterRuntime,
     state::{
         audit::process_event,
-        event::{DepositEvent, EventType},
+        event::{DepositEvent, DepositId, EventType},
         mutate_state, read_state,
     },
     transaction::{get_deposit_amount_to_address, try_get_transaction},
@@ -25,7 +25,8 @@ pub async fn update_balance<R: CanisterRuntime>(
 ) -> Result<DepositStatus, UpdateBalanceError> {
     let _guard = update_balance_guard(account)?;
 
-    if let Some(deposit_status) = read_state(|state| state.deposit_status(&(account, signature))) {
+    let deposit_id = DepositId { account, signature };
+    if let Some(deposit_status) = read_state(|state| state.deposit_status(&deposit_id)) {
         return Ok(deposit_status);
     }
 
@@ -61,8 +62,7 @@ pub async fn update_balance<R: CanisterRuntime>(
         .expect("BUG: deposit amount is less than deposit fee");
 
     let deposit_event = DepositEvent {
-        signature,
-        account,
+        deposit_id: DepositId { signature, account },
         deposit_amount,
         amount_to_mint,
     };

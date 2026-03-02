@@ -51,7 +51,7 @@ pub enum EventType {
         /// The account to which the minter should mint ckSOL.
         account: Account,
         /// The deposit amount in lamports.
-        amount: Lamport,
+        deposit_amount: Lamport,
         /// The amount of ckSOL tokens to mint for this deposit.
         /// This amount is generally lower than `deposit_amount` due
         /// to the deposit fee.
