@@ -84,7 +84,7 @@ pub struct WithdrawSolArgs {
     /// The subaccount to burn ckSOL from.
     pub from_subaccount: Option<Subaccount>,
 
-    /// Amount to retrieve in Lamports.
+    /// Amount to withdraw in Lamports.
     pub amount: u64,
 
     /// Address where to send Solana tokens.
