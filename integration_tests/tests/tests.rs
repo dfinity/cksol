@@ -155,7 +155,7 @@ mod retrieve_sol_tests {
 
     use candid::Nat;
     use cksol_int_tests::{fixtures::get_memo, ledger_init_args::LEDGER_TRANSFER_FEE};
-    use cksol_types::{BurnMemo, Memo};
+    use cksol_types::{BurnMemo, Memo, RetrieveSolOk};
     use cksol_types_internal::UpgradeArgs;
     use icrc_ledger_types::icrc1::account::Account;
     use solana_address::Address;
@@ -396,6 +396,70 @@ mod retrieve_sol_tests {
         assert_eq!(
             balance,
             initial_balance - LEDGER_TRANSFER_FEE - WITHDRAWAL_AMOUNT
+        );
+
+        setup.drop().await;
+    }
+
+    #[tokio::test]
+    async fn should_fail_is_already_processing() {
+        const WITHDRAWAL_AMOUNT: u64 = 100_000_000;
+        const WITHDRAWAL_ADDRESS: &str = "E4MpwNnMWs2XtW5gVrxZvyS7fMq31QD5HvbxmwP45Tz3";
+
+        let initial_balance = 10 * WITHDRAWAL_AMOUNT;
+
+        let setup = SetupBuilder::new()
+            .with_initial_balances(vec![(DEFAULT_CALLER_ACCOUNT, Nat::from(initial_balance))])
+            .build()
+            .await;
+
+        setup
+            .ledger()
+            .approve(
+                None,
+                u64::MAX,
+                Account {
+                    owner: setup.minter_canister_id(),
+                    subaccount: None,
+                },
+            )
+            .await;
+
+        let args = RetrieveSolArgs {
+            from_subaccount: None,
+            amount: WITHDRAWAL_AMOUNT,
+            address: WITHDRAWAL_ADDRESS.to_string(),
+        };
+
+        let minter1 = setup.minter();
+        let minter2 = setup.minter();
+
+        let (result1, result2) = join!(
+            minter1.retrieve_sol(args.clone()),
+            minter2.retrieve_sol(args.clone()),
+        );
+
+        let (result1, result2) = match (&result1, &result2) {
+            (Ok(_), Err(_)) => (result1, result2),
+            (Err(_), Ok(_)) => (result2, result1),
+            _ => panic!("Expected one success and one error, but got: {result1:?} and {result2:?}"),
+        };
+
+        // One should succeed, one should fail with AlreadyProcessing (order is non-deterministic)
+        let results = [&result1, &result2];
+        assert!(
+            results
+                .iter()
+                .any(|r| matches!(r, Ok(RetrieveSolOk { block_index: _ }))),
+            "Expected one Minted result, got: {:?}",
+            results
+        );
+        assert!(
+            results
+                .iter()
+                .any(|r| matches!(r, Err(RetrieveSolError::AlreadyProcessing))),
+            "Expected one AlreadyProcessing result, got: {:?}",
+            results
         );
 
         setup.drop().await;

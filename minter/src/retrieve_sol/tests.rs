@@ -1,9 +1,12 @@
-use crate::{retrieve_sol::retrieve_sol, runtime::TestCanisterRuntime, test_fixtures::init_state};
+use crate::{
+    guard::retrieve_sol_guard, retrieve_sol::retrieve_sol, runtime::TestCanisterRuntime,
+    test_fixtures::init_state,
+};
 use assert_matches::assert_matches;
 use candid::{Nat, Principal};
 use cksol_types::{RetrieveSolError, RetrieveSolOk};
 use ic_canister_runtime::IcError;
-use icrc_ledger_types::icrc2::transfer_from::TransferFromError;
+use icrc_ledger_types::{icrc1::account::Account, icrc2::transfer_from::TransferFromError};
 
 const VALID_ADDRESS: &str = "E4MpwNnMWs2XtW5gVrxZvyS7fMq31QD5HvbxmwP45Tz3";
 
@@ -215,4 +218,31 @@ async fn should_panic_if_caller_is_anonymous() {
         VALID_ADDRESS.to_string(),
     )
     .await;
+}
+
+#[tokio::test]
+async fn should_return_error_if_already_processing() {
+    init_state();
+
+    let caller = test_caller();
+    let from = Account {
+        owner: caller,
+        subaccount: None,
+    };
+    let _guard = retrieve_sol_guard(from).unwrap();
+
+    let runtime = TestCanisterRuntime::new();
+    let minter_account = Principal::anonymous().into();
+
+    let result = retrieve_sol(
+        runtime,
+        minter_account,
+        caller,
+        None,
+        1,
+        VALID_ADDRESS.to_string(),
+    )
+    .await;
+
+    assert_eq!(result, Err(RetrieveSolError::AlreadyProcessing));
 }
