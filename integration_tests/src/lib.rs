@@ -374,9 +374,14 @@ impl Ledger<'_> {
             .unwrap()
     }
 
-    pub async fn approve(&self, amount: u64, spender: Account) -> u64 {
+    pub async fn approve(
+        &self,
+        from_subaccount: Option<[u8; 32]>,
+        amount: u64,
+        spender: Account,
+    ) -> u64 {
         let args = ApproveArgs {
-            from_subaccount: None,
+            from_subaccount,
             spender,
             amount: Nat::from(amount),
             expected_allowance: None,

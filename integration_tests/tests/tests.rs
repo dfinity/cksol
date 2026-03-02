@@ -253,17 +253,28 @@ mod retrieve_sol_tests {
     }
 
     #[tokio::test]
-    async fn should_fail_if_insufficient_funds() {
+    async fn should_fail_if_insufficient_funds_or_allowance() {
         const WITHDRAWAL_AMOUNT: u64 = 100_000_000;
 
+        let subaccount = Some([1u8; 32]);
+        let caller_account_sub = Account {
+            owner: Setup::DEFAULT_CALLER,
+            subaccount,
+        };
+
         let setup = SetupBuilder::new()
-            .with_initial_balances(vec![(DEFAULT_CALLER_ACCOUNT, Nat::from(WITHDRAWAL_AMOUNT))])
+            .with_initial_balances(vec![
+                (DEFAULT_CALLER_ACCOUNT, Nat::from(WITHDRAWAL_AMOUNT)),
+                (caller_account_sub, Nat::from(10 * WITHDRAWAL_AMOUNT)),
+            ])
             .build()
             .await;
 
+        // Test insufficent funds
         setup
             .ledger()
             .approve(
+                None,
                 u64::MAX,
                 Account {
                     owner: setup.minter_canister_id(),
@@ -285,23 +296,11 @@ mod retrieve_sol_tests {
         assert_eq!(balance, WITHDRAWAL_AMOUNT - LEDGER_TRANSFER_FEE);
         assert_eq!(result, Err(RetrieveSolError::InsufficientFunds { balance }));
 
-        setup.drop().await;
-    }
-
-    #[tokio::test]
-    async fn should_fail_if_insufficient_allowance() {
-        const WITHDRAWAL_AMOUNT: u64 = 100_000_000;
-        let initial_balance = 10 * WITHDRAWAL_AMOUNT;
-
-        let setup = SetupBuilder::new()
-            .with_initial_balances(vec![(DEFAULT_CALLER_ACCOUNT, Nat::from(initial_balance))])
-            .build()
-            .await;
-
+        // Test insufficient allowance
         let result = setup
             .minter()
             .retrieve_sol(RetrieveSolArgs {
-                from_subaccount: None,
+                from_subaccount: subaccount,
                 amount: WITHDRAWAL_AMOUNT,
                 address: "E4MpwNnMWs2XtW5gVrxZvyS7fMq31QD5HvbxmwP45Tz3".to_string(),
             })
@@ -317,6 +316,7 @@ mod retrieve_sol_tests {
         setup
             .ledger()
             .approve(
+                subaccount,
                 approve_amount,
                 Account {
                     owner: setup.minter_canister_id(),
@@ -328,7 +328,7 @@ mod retrieve_sol_tests {
         let result = setup
             .minter()
             .retrieve_sol(RetrieveSolArgs {
-                from_subaccount: None,
+                from_subaccount: subaccount,
                 amount: WITHDRAWAL_AMOUNT,
                 address: "E4MpwNnMWs2XtW5gVrxZvyS7fMq31QD5HvbxmwP45Tz3".to_string(),
             })
@@ -341,8 +341,8 @@ mod retrieve_sol_tests {
             })
         );
 
-        let balance = setup.ledger().balance_of(DEFAULT_CALLER_ACCOUNT).await;
-        assert_eq!(balance, initial_balance - LEDGER_TRANSFER_FEE);
+        let balance = setup.ledger().balance_of(caller_account_sub).await;
+        assert_eq!(balance, 10 * WITHDRAWAL_AMOUNT - LEDGER_TRANSFER_FEE);
 
         setup.drop().await;
     }
@@ -362,6 +362,7 @@ mod retrieve_sol_tests {
         setup
             .ledger()
             .approve(
+                None,
                 WITHDRAWAL_AMOUNT,
                 Account {
                     owner: setup.minter_canister_id(),
