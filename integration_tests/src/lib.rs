@@ -12,7 +12,6 @@ use ic_http_types::{HttpRequest, HttpResponse};
 use ic_management_canister_types::{CanisterId, CanisterSettings};
 use ic_pocket_canister_runtime::{ExecuteHttpOutcallMocks, PocketIcRuntime};
 use icrc_ledger_types::icrc1::account::Account;
-use icrc_ledger_types::icrc2::allowance::{Allowance, AllowanceArgs};
 use icrc_ledger_types::icrc2::approve::{ApproveArgs, ApproveError};
 use icrc_ledger_types::icrc3::blocks::{GetBlocksRequest, GetBlocksResult, ICRC3GenericBlock};
 use num_traits::cast::ToPrimitive;
@@ -400,27 +399,10 @@ impl Ledger<'_> {
             start: Nat::from(block_index),
             length: Nat::from(1u64),
         }];
-        let result = self
-            .0
-            .query_call::<_, GetBlocksResult>("icrc3_get_blocks", (args,))
-            .await;
+        let result: GetBlocksResult = self.0.query_call("icrc3_get_blocks", (args,)).await;
         assert_eq!(result.blocks.len(), 1);
         assert_eq!(result.blocks[0].id, Nat::from(block_index));
         result.blocks[0].block.clone()
-    }
-
-    pub async fn allowance(&self, from: Account, spender: Account) -> u64 {
-        let args = AllowanceArgs {
-            account: from,
-            spender,
-        };
-        self.0
-            .update_call::<_, Allowance>("icrc2_allowance", (args,))
-            .await
-            .allowance
-            .0
-            .to_u64()
-            .unwrap()
     }
 
     pub async fn stop(&self) {
