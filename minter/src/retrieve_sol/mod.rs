@@ -68,7 +68,19 @@ pub async fn retrieve_sol<R: CanisterRuntime>(
                         error_message: message,
                         error_code: error_code.0.to_u64().expect("error code should fit in u64"),
                     },
-                    other_error => panic!("Unexpected burn error: {other_error}"),
+                    TransferFromError::BadFee { expected_fee } => {
+                        panic!("Unexpected BadFee error, expected_fee: {expected_fee}")
+                    }
+                    TransferFromError::BadBurn { min_burn_amount } => {
+                        panic!("Unexpected BadBurn error, min_burn_amount: {min_burn_amount}")
+                    }
+                    TransferFromError::TooOld => panic!("Unexpected TooOld error"),
+                    TransferFromError::CreatedInFuture { ledger_time } => {
+                        panic!("Unexpected CreatedInFuture error, ledger_time: {ledger_time}")
+                    }
+                    TransferFromError::Duplicate { duplicate_of } => {
+                        panic!("Unexpected Duplicate error, duplicate_of: {duplicate_of}")
+                    }
                 }
             }
         })?;
