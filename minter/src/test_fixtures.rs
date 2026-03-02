@@ -299,23 +299,11 @@ pub mod deposit {
                         "Program 11111111111111111111111111111111 invoke [1]".to_string(),
                         "Program 11111111111111111111111111111111 success".to_string(),
                         "Program 11111111111111111111111111111111 invoke [1]".to_string(),
-                        "Program 11111111111111111111111111111111 success".to_string()
+                        "Program 11111111111111111111111111111111 success".to_string(),
                     ]),
-                    post_balances: vec![
-                        4295796440,
-                        200000000,
-                        300000000,
-                        600000000,
-                        1
-                    ],
+                    post_balances: vec![4295796440, 200000000, 300000000, 600000000, 1],
                     post_token_balances: OptionSerializer::Some(vec![]),
-                    pre_balances: vec![
-                        4895801440,
-                        0,
-                        0,
-                        500000000,
-                        1
-                    ],
+                    pre_balances: vec![4895801440, 0, 0, 500000000, 1],
                     pre_token_balances: OptionSerializer::Some(vec![]),
                     rewards: OptionSerializer::None,
                     status: Ok(()),
