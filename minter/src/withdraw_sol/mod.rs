@@ -29,10 +29,10 @@ pub async fn withdraw_sol<R: CanisterRuntime>(
         owner: caller,
         subaccount: from_subaccount,
     };
+    let _guard = withdraw_sol_guard(from)?;
+
     let solana_address = Address::from_str(&address)
         .map_err(|e| WithdrawSolError::MalformedAddress(e.to_string()))?;
-
-    let _guard = withdraw_sol_guard(from)?;
 
     let block_index = burn(&runtime, minter_account, from, amount, solana_address)
         .await
