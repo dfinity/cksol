@@ -5,8 +5,12 @@ use solana_address::Address;
 
 use crate::{ledger::burn, runtime::CanisterRuntime};
 
+#[cfg(test)]
+mod tests;
+
 pub async fn retrieve_sol<R: CanisterRuntime>(
     runtime: R,
+    minter_account: Account,
     from: Account,
     amount: u64,
     to: Address,
@@ -15,7 +19,7 @@ pub async fn retrieve_sol<R: CanisterRuntime>(
     // multiple withdrawals to the same address should be fine?
     // If we don't deduplicate at all, we probably also don't need
     // the RetrieveSolError::AlreadyProcessing error.
-    let block_index = burn(&runtime, from, amount, to)
+    let block_index = burn(&runtime, minter_account, from, amount, to)
         .await
         .map_err(|e| match e {
             crate::ledger::BurnError::IcError(ic_error) => {

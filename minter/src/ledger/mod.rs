@@ -47,12 +47,12 @@ pub async fn mint<R: CanisterRuntime>(
 
 pub async fn burn<R: CanisterRuntime>(
     runtime: &R,
+    minter_account: Account,
     from: Account,
     burn_amount: Lamport,
     to_address: Address,
 ) -> Result<u64, BurnError> {
     let burn_memo = BurnMemo::convert(to_address);
-    let minter_account: Account = ic_cdk::api::canister_self().into();
 
     let block_index =
         read_state(|state| state.ledger_client(runtime.inter_canister_call_runtime()))

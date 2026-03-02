@@ -67,9 +67,11 @@ async fn retrieve_sol(args: RetrieveSolArgs) -> Result<RetrieveSolOk, RetrieveSo
         return Err(RetrieveSolError::AmountTooLow(minimum_withdrawal_amount));
     }
 
+    let minter_account: Account = ic_cdk::api::canister_self().into();
+
     cksol_minter::retrieve_sol::retrieve_sol(
         IcCanisterRuntime::new(),
-        // add minter account as param,
+        minter_account,
         from,
         args.amount,
         solana_address.into(),
