@@ -35,7 +35,7 @@ mod state_from_init_args {
                 deposit_fee: DEPOSIT_FEE,
                 minimum_withdrawal_amount: MINIMUM_WITHDRAWAL_AMOUNT,
                 pending_update_balance_requests: BTreeSet::new(),
-                pending_retrieve_sol_requests: BTreeSet::new(),
+                pending_withdraw_sol_requests: BTreeSet::new(),
             }
         );
     }

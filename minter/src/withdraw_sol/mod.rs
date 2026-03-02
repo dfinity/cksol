@@ -1,25 +1,25 @@
 use std::str::FromStr;
 
 use candid::Principal;
-use cksol_types::{RetrieveSolError, RetrieveSolOk};
+use cksol_types::{WithdrawSolError, WithdrawSolOk};
 use icrc_ledger_types::icrc1::account::{Account, Subaccount};
 use icrc_ledger_types::icrc2::transfer_from::TransferFromError;
 use num_traits::ToPrimitive;
 use solana_address::Address;
 
-use crate::{guard::retrieve_sol_guard, ledger::burn, runtime::CanisterRuntime};
+use crate::{guard::withdraw_sol_guard, ledger::burn, runtime::CanisterRuntime};
 
 #[cfg(test)]
 mod tests;
 
-pub async fn retrieve_sol<R: CanisterRuntime>(
+pub async fn withdraw_sol<R: CanisterRuntime>(
     runtime: R,
     minter_account: Account,
     caller: Principal,
     from_subaccount: Option<Subaccount>,
     amount: u64,
     address: String,
-) -> Result<RetrieveSolOk, RetrieveSolError> {
+) -> Result<WithdrawSolOk, WithdrawSolError> {
     assert_ne!(
         caller,
         Principal::anonymous(),
@@ -30,39 +30,39 @@ pub async fn retrieve_sol<R: CanisterRuntime>(
         subaccount: from_subaccount,
     };
     let solana_address = Address::from_str(&address)
-        .map_err(|e| RetrieveSolError::MalformedAddress(e.to_string()))?;
+        .map_err(|e| WithdrawSolError::MalformedAddress(e.to_string()))?;
 
-    let _guard = retrieve_sol_guard(from)?;
+    let _guard = withdraw_sol_guard(from)?;
 
     let block_index = burn(&runtime, minter_account, from, amount, solana_address)
         .await
         .map_err(|e| match e {
             crate::ledger::BurnError::IcError(ic_error) => {
-                RetrieveSolError::TemporarilyUnavailable(format!(
+                WithdrawSolError::TemporarilyUnavailable(format!(
                     "Failed to burn tokens: {ic_error}"
                 ))
             }
             crate::ledger::BurnError::TransferFromError(transfer_from_error) => {
                 match transfer_from_error {
                     TransferFromError::InsufficientFunds { balance } => {
-                        RetrieveSolError::InsufficientFunds {
+                        WithdrawSolError::InsufficientFunds {
                             balance: balance.0.to_u64().expect("balance should fit in u64"),
                         }
                     }
                     TransferFromError::InsufficientAllowance { allowance } => {
-                        RetrieveSolError::InsufficientAllowance {
+                        WithdrawSolError::InsufficientAllowance {
                             allowance: allowance.0.to_u64().expect("allowance should fit in u64"),
                         }
                     }
                     TransferFromError::TemporarilyUnavailable => {
-                        RetrieveSolError::TemporarilyUnavailable(
+                        WithdrawSolError::TemporarilyUnavailable(
                             "Ledger is temporarily unavailable".to_string(),
                         )
                     }
                     TransferFromError::GenericError {
                         error_code,
                         message,
-                    } => RetrieveSolError::GenericError {
+                    } => WithdrawSolError::GenericError {
                         error_message: message,
                         error_code: error_code.0.to_u64().expect("error code should fit in u64"),
                     },
@@ -85,5 +85,5 @@ pub async fn retrieve_sol<R: CanisterRuntime>(
 
     // TODO DEFI-2671 record event for processed withdrawal burn
 
-    Ok(RetrieveSolOk { block_index })
+    Ok(WithdrawSolOk { block_index })
 }

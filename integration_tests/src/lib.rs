@@ -2,8 +2,8 @@ use crate::{events::MinterEventAssert, ledger_init_args::ledger_init_args};
 use candid::{CandidType, Decode, Encode, Nat, Principal, utils::ArgumentEncoder};
 use canlog::{Log, LogEntry};
 use cksol_types::{
-    Address, DepositStatus, GetDepositAddressArgs, MinterInfo, RetrieveSolArgs, RetrieveSolError,
-    RetrieveSolOk, RetrieveSolStatus, UpdateBalanceArgs, UpdateBalanceError,
+    Address, DepositStatus, GetDepositAddressArgs, MinterInfo, WithdrawSolArgs, WithdrawSolError,
+    WithdrawSolOk, WithdrawSolStatus, UpdateBalanceArgs, UpdateBalanceError,
 };
 use cksol_types_internal::event::{Event, GetEventsResult};
 use cksol_types_internal::{MinterArg, log::Priority};
@@ -281,16 +281,16 @@ impl CkSolMinter<'_> {
         self.0.try_update_call("update_balance", (args,)).await
     }
 
-    pub async fn retrieve_sol(
+    pub async fn withdraw_sol(
         &self,
-        args: RetrieveSolArgs,
-    ) -> Result<RetrieveSolOk, RetrieveSolError> {
-        self.0.update_call("retrieve_sol", (args,)).await
+        args: WithdrawSolArgs,
+    ) -> Result<WithdrawSolOk, WithdrawSolError> {
+        self.0.update_call("withdraw_sol", (args,)).await
     }
 
-    pub async fn retrieve_sol_status(&self, block_index: u64) -> RetrieveSolStatus {
+    pub async fn withdraw_sol_status(&self, block_index: u64) -> WithdrawSolStatus {
         self.0
-            .update_call("retrieve_sol_status", (block_index,))
+            .update_call("withdraw_sol_status", (block_index,))
             .await
     }
 

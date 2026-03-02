@@ -2,7 +2,7 @@ pub mod address;
 mod guard;
 mod ledger;
 pub mod lifecycle;
-pub mod retrieve_sol;
+pub mod withdraw_sol;
 pub mod runtime;
 pub mod state;
 pub mod storage;

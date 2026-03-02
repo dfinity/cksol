@@ -1,10 +1,10 @@
 use crate::{
-    guard::retrieve_sol_guard, retrieve_sol::retrieve_sol, runtime::TestCanisterRuntime,
+    guard::withdraw_sol_guard, withdraw_sol::withdraw_sol, runtime::TestCanisterRuntime,
     test_fixtures::init_state,
 };
 use assert_matches::assert_matches;
 use candid::{Nat, Principal};
-use cksol_types::{RetrieveSolError, RetrieveSolOk};
+use cksol_types::{WithdrawSolError, WithdrawSolOk};
 use ic_canister_runtime::IcError;
 use icrc_ledger_types::{icrc1::account::Account, icrc2::transfer_from::TransferFromError};
 
@@ -22,7 +22,7 @@ async fn should_return_error_if_calling_ledger_fails() {
 
     let minter_account = Principal::anonymous().into();
 
-    let result = retrieve_sol(
+    let result = withdraw_sol(
         runtime,
         minter_account,
         test_caller(),
@@ -34,7 +34,7 @@ async fn should_return_error_if_calling_ledger_fails() {
 
     assert_matches!(
         result,
-        Err(RetrieveSolError::TemporarilyUnavailable(e)) => assert!(e.contains("Failed to burn tokens"))
+        Err(WithdrawSolError::TemporarilyUnavailable(e)) => assert!(e.contains("Failed to burn tokens"))
     );
 }
 
@@ -48,7 +48,7 @@ async fn should_return_error_if_ledger_unavailable() {
 
     let minter_account = Principal::anonymous().into();
 
-    let result = retrieve_sol(
+    let result = withdraw_sol(
         runtime,
         minter_account,
         test_caller(),
@@ -60,7 +60,7 @@ async fn should_return_error_if_ledger_unavailable() {
 
     assert_eq!(
         result,
-        Err(RetrieveSolError::TemporarilyUnavailable(
+        Err(WithdrawSolError::TemporarilyUnavailable(
             "Ledger is temporarily unavailable".to_string(),
         ))
     );
@@ -78,7 +78,7 @@ async fn should_return_error_if_insufficient_allowance() {
 
     let minter_account = Principal::anonymous().into();
 
-    let result = retrieve_sol(
+    let result = withdraw_sol(
         runtime,
         minter_account,
         test_caller(),
@@ -90,7 +90,7 @@ async fn should_return_error_if_insufficient_allowance() {
 
     assert_eq!(
         result,
-        Err(RetrieveSolError::InsufficientAllowance { allowance: 123u64 })
+        Err(WithdrawSolError::InsufficientAllowance { allowance: 123u64 })
     );
 }
 
@@ -106,7 +106,7 @@ async fn should_return_error_if_insufficient_funds() {
 
     let minter_account = Principal::anonymous().into();
 
-    let result = retrieve_sol(
+    let result = withdraw_sol(
         runtime,
         minter_account,
         test_caller(),
@@ -118,7 +118,7 @@ async fn should_return_error_if_insufficient_funds() {
 
     assert_eq!(
         result,
-        Err(RetrieveSolError::InsufficientFunds { balance: 123u64 })
+        Err(WithdrawSolError::InsufficientFunds { balance: 123u64 })
     );
 }
 
@@ -135,7 +135,7 @@ async fn should_return_generic_error() {
 
     let minter_account = Principal::anonymous().into();
 
-    let result = retrieve_sol(
+    let result = withdraw_sol(
         runtime,
         minter_account,
         test_caller(),
@@ -147,7 +147,7 @@ async fn should_return_generic_error() {
 
     assert_eq!(
         result,
-        Err(RetrieveSolError::GenericError {
+        Err(WithdrawSolError::GenericError {
             error_message: "msg".to_string(),
             error_code: 123u64
         })
@@ -163,7 +163,7 @@ async fn should_return_ok_if_burn_succeeds() {
 
     let minter_account = Principal::anonymous().into();
 
-    let result = retrieve_sol(
+    let result = withdraw_sol(
         runtime,
         minter_account,
         test_caller(),
@@ -175,7 +175,7 @@ async fn should_return_ok_if_burn_succeeds() {
 
     assert_eq!(
         result,
-        Ok(RetrieveSolOk {
+        Ok(WithdrawSolOk {
             block_index: 123u64
         })
     );
@@ -188,7 +188,7 @@ async fn should_return_error_if_address_malformed() {
     let runtime = TestCanisterRuntime::new();
     let minter_account = Principal::anonymous().into();
 
-    let result = retrieve_sol(
+    let result = withdraw_sol(
         runtime,
         minter_account,
         test_caller(),
@@ -198,7 +198,7 @@ async fn should_return_error_if_address_malformed() {
     )
     .await;
 
-    assert_matches!(result, Err(RetrieveSolError::MalformedAddress(_)));
+    assert_matches!(result, Err(WithdrawSolError::MalformedAddress(_)));
 }
 
 #[tokio::test]
@@ -209,7 +209,7 @@ async fn should_panic_if_caller_is_anonymous() {
     let runtime = TestCanisterRuntime::new();
     let minter_account = Principal::anonymous().into();
 
-    let _ = retrieve_sol(
+    let _ = withdraw_sol(
         runtime,
         minter_account,
         Principal::anonymous(),
@@ -229,12 +229,12 @@ async fn should_return_error_if_already_processing() {
         owner: caller,
         subaccount: None,
     };
-    let _guard = retrieve_sol_guard(from).unwrap();
+    let _guard = withdraw_sol_guard(from).unwrap();
 
     let runtime = TestCanisterRuntime::new();
     let minter_account = Principal::anonymous().into();
 
-    let result = retrieve_sol(
+    let result = withdraw_sol(
         runtime,
         minter_account,
         caller,
@@ -244,5 +244,5 @@ async fn should_return_error_if_already_processing() {
     )
     .await;
 
-    assert_eq!(result, Err(RetrieveSolError::AlreadyProcessing));
+    assert_eq!(result, Err(WithdrawSolError::AlreadyProcessing));
 }

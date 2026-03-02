@@ -2,8 +2,8 @@ use candid::Principal;
 use canlog::{Log, Sort};
 use cksol_minter::{runtime::IcCanisterRuntime, state::read_state};
 use cksol_types::{
-    Address, DepositStatus, GetDepositAddressArgs, MinterInfo, RetrieveSolArgs, RetrieveSolError,
-    RetrieveSolOk, RetrieveSolStatus, UpdateBalanceArgs, UpdateBalanceError,
+    Address, DepositStatus, GetDepositAddressArgs, MinterInfo, WithdrawSolArgs, WithdrawSolError,
+    WithdrawSolOk, WithdrawSolStatus, UpdateBalanceArgs, UpdateBalanceError,
 };
 use cksol_types_internal::{MinterArg, log::Priority};
 use ic_http_types::{HttpRequest, HttpResponse, HttpResponseBuilder};
@@ -57,15 +57,15 @@ async fn update_balance(args: UpdateBalanceArgs) -> Result<DepositStatus, Update
 }
 
 #[ic_cdk::update]
-async fn retrieve_sol(args: RetrieveSolArgs) -> Result<RetrieveSolOk, RetrieveSolError> {
+async fn withdraw_sol(args: WithdrawSolArgs) -> Result<WithdrawSolOk, WithdrawSolError> {
     let minimum_withdrawal_amount = read_state(|s| s.minimum_withdrawal_amount());
     if args.amount < minimum_withdrawal_amount {
-        return Err(RetrieveSolError::AmountTooLow(minimum_withdrawal_amount));
+        return Err(WithdrawSolError::AmountTooLow(minimum_withdrawal_amount));
     }
 
     let minter_account: Account = ic_cdk::api::canister_self().into();
 
-    cksol_minter::retrieve_sol::retrieve_sol(
+    cksol_minter::withdraw_sol::withdraw_sol(
         IcCanisterRuntime::new(),
         minter_account,
         ic_cdk::api::msg_caller(),
@@ -77,8 +77,8 @@ async fn retrieve_sol(args: RetrieveSolArgs) -> Result<RetrieveSolOk, RetrieveSo
 }
 
 #[ic_cdk::update]
-async fn retrieve_sol_status(_block_index: u64) -> RetrieveSolStatus {
-    RetrieveSolStatus::NotFound
+async fn withdraw_sol_status(_block_index: u64) -> WithdrawSolStatus {
+    WithdrawSolStatus::NotFound
 }
 
 #[ic_cdk::query]
