@@ -30,11 +30,21 @@ pub enum EventType {
     #[n(1)]
     Upgrade(#[n(0)] UpgradeArgs),
     /// The minter discovered a Solana transaction that is a valid ckSOL
-    /// deposit for the given account.
+    /// deposit for the given account. ckSOL tokens will be minted for
+    /// this deposit.
     #[n(2)]
     AcceptedDeposit(#[n(0)] DepositEvent),
-    /// The minter minted ckSOL in response to a deposit.
+    /// The minter discovered a Solana transaction that is a valid ckSOL
+    /// deposit, but it is unknown whether ckSOL tokens were minted for
+    /// it or not, most likely because there was an unexpected panic in
+    /// the callback.
+    ///
+    /// The deposit is quarantined to avoid any double minting and
+    /// will not be further processed without manual intervention.
     #[n(3)]
+    QuarantinedDeposit(#[n(0)] DepositEvent),
+    /// The minter minted ckSOL in response to a deposit.
+    #[n(4)]
     Minted(#[n(0)] MintedEvent),
 }
 

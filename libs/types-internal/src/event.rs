@@ -24,14 +24,38 @@ pub enum EventType {
     /// The minter upgraded with the specified arguments.
     Upgrade(UpgradeArgs),
     /// The minter discovered a Solana transaction that is a valid ckSOL
-    /// deposit for the given account.
+    /// deposit for the given account. ckSOL tokens will be minted for
+    /// this deposit.
     AcceptedDeposit {
         /// The signature of the Solana deposit transaction.
         signature: Signature,
         /// The account to which the minter should mint ckSOL.
         account: Account,
         /// The deposit amount in lamports.
+        deposit_amount: Lamport,
+        /// The amount of ckSOL tokens to mint for this deposit.
+        /// This amount is generally lower than `deposit_amount` due
+        /// to the deposit fee.
+        amount_to_mint: Lamport,
+    },
+    /// The minter discovered a Solana transaction that is a valid ckSOL
+    /// deposit, but it is unknown whether ckSOL tokens were minted for
+    /// it or not, most likely because there was an unexpected panic in
+    /// the callback.
+    ///
+    /// The deposit is quarantined to avoid any double minting and
+    /// will not be further processed without manual intervention.
+    QuarantinedDeposit {
+        /// The signature of the Solana deposit transaction.
+        signature: Signature,
+        /// The account to which the minter should mint ckSOL.
+        account: Account,
+        /// The deposit amount in lamports.
         amount: Lamport,
+        /// The amount of ckSOL tokens to mint for this deposit.
+        /// This amount is generally lower than `deposit_amount` due
+        /// to the deposit fee.
+        amount_to_mint: Lamport,
     },
     /// The minter minted ckSOL in response to a deposit.
     Minted {
