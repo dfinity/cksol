@@ -22,7 +22,12 @@ pub async fn mint<R: CanisterRuntime>(
     let signature = deposit_event.signature;
     let mint_memo = MintMemo::convert(signature);
 
-    let minted_amount = deposit_event.amount - read_state(|state| state.deposit_fee());
+    let deposit_fee = read_state(|state| state.deposit_fee());
+    assert!(
+        deposit_event.amount > deposit_fee,
+        "Deposit amount is less than fee!"
+    );
+    let minted_amount = deposit_event.amount - deposit_fee;
 
     let block_index =
         read_state(|state| state.ledger_client(runtime.inter_canister_call_runtime()))
