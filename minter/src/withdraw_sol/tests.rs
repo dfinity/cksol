@@ -1,6 +1,8 @@
 use crate::{
-    guard::withdraw_sol_guard, withdraw_sol::withdraw_sol, runtime::TestCanisterRuntime,
-    test_fixtures::init_state,
+    guard::withdraw_sol_guard,
+    runtime::TestCanisterRuntime,
+    test_fixtures::{MINTER_ACCOUNT, init_state},
+    withdraw_sol::withdraw_sol,
 };
 use assert_matches::assert_matches;
 use candid::{Nat, Principal};
@@ -20,11 +22,9 @@ async fn should_return_error_if_calling_ledger_fails() {
 
     let runtime = TestCanisterRuntime::new().add_stub_error(IcError::CallPerformFailed);
 
-    let minter_account = Principal::anonymous().into();
-
     let result = withdraw_sol(
         runtime,
-        minter_account,
+        MINTER_ACCOUNT,
         test_caller(),
         None,
         1,
@@ -46,11 +46,9 @@ async fn should_return_error_if_ledger_unavailable() {
         TransferFromError::TemporarilyUnavailable,
     ));
 
-    let minter_account = Principal::anonymous().into();
-
     let result = withdraw_sol(
         runtime,
-        minter_account,
+        MINTER_ACCOUNT,
         test_caller(),
         None,
         1,
@@ -76,11 +74,9 @@ async fn should_return_error_if_insufficient_allowance() {
         },
     ));
 
-    let minter_account = Principal::anonymous().into();
-
     let result = withdraw_sol(
         runtime,
-        minter_account,
+        MINTER_ACCOUNT,
         test_caller(),
         None,
         1,
@@ -104,11 +100,9 @@ async fn should_return_error_if_insufficient_funds() {
         },
     ));
 
-    let minter_account = Principal::anonymous().into();
-
     let result = withdraw_sol(
         runtime,
-        minter_account,
+        MINTER_ACCOUNT,
         test_caller(),
         None,
         1,
@@ -133,11 +127,9 @@ async fn should_return_generic_error() {
         },
     ));
 
-    let minter_account = Principal::anonymous().into();
-
     let result = withdraw_sol(
         runtime,
-        minter_account,
+        MINTER_ACCOUNT,
         test_caller(),
         None,
         1,
@@ -161,11 +153,9 @@ async fn should_return_ok_if_burn_succeeds() {
     let runtime = TestCanisterRuntime::new()
         .add_stub_response(Ok::<Nat, TransferFromError>(Nat::from(123u64)));
 
-    let minter_account = Principal::anonymous().into();
-
     let result = withdraw_sol(
         runtime,
-        minter_account,
+        MINTER_ACCOUNT,
         test_caller(),
         None,
         1,
@@ -186,11 +176,10 @@ async fn should_return_error_if_address_malformed() {
     init_state();
 
     let runtime = TestCanisterRuntime::new();
-    let minter_account = Principal::anonymous().into();
 
     let result = withdraw_sol(
         runtime,
-        minter_account,
+        MINTER_ACCOUNT,
         test_caller(),
         None,
         1,
@@ -207,11 +196,10 @@ async fn should_panic_if_caller_is_anonymous() {
     init_state();
 
     let runtime = TestCanisterRuntime::new();
-    let minter_account = Principal::anonymous().into();
 
     let _ = withdraw_sol(
         runtime,
-        minter_account,
+        MINTER_ACCOUNT,
         Principal::anonymous(),
         None,
         1,
@@ -232,11 +220,10 @@ async fn should_return_error_if_already_processing() {
     let _guard = withdraw_sol_guard(from).unwrap();
 
     let runtime = TestCanisterRuntime::new();
-    let minter_account = Principal::anonymous().into();
 
     let result = withdraw_sol(
         runtime,
-        minter_account,
+        MINTER_ACCOUNT,
         caller,
         None,
         1,
