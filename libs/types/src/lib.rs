@@ -5,7 +5,7 @@
 
 use candid::{CandidType, Nat, Principal};
 use icrc_ledger_types::icrc1::account::Subaccount;
-pub use memo::{MAX_SERIALIZED_MEMO_BYTES, Memo, MintMemo};
+pub use memo::{BurnMemo, MAX_SERIALIZED_MEMO_BYTES, Memo, MintMemo};
 use serde::{Deserialize, Serialize};
 pub use sol_rpc_types::{Lamport, Pubkey as Address, Signature};
 use thiserror::Error;
@@ -78,29 +78,29 @@ pub enum UpdateBalanceError {
     ValueTooSmall,
 }
 
-/// Arguments for a request to the `retrieve_sol` ckSOL minter endpoint.
+/// Arguments for a request to the `withdraw_sol` ckSOL minter endpoint.
 #[derive(Clone, Eq, PartialEq, Debug, Default, CandidType, Deserialize, Serialize)]
-pub struct RetrieveSolArgs {
+pub struct WithdrawSolArgs {
     /// The subaccount to burn ckSOL from.
     pub from_subaccount: Option<Subaccount>,
 
-    /// Amount to retrieve in Lamports.
+    /// Amount to withdraw in Lamports.
     pub amount: u64,
 
     /// Address where to send Solana tokens.
     pub address: String,
 }
 
-/// The successful result of calling the `retrieve_sol` endpoint.
+/// The successful result of calling the `withdraw_sol` endpoint.
 #[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize)]
-pub struct RetrieveSolOk {
+pub struct WithdrawSolOk {
     /// The index of the burn block on the ckSOL ledger.
     pub block_index: u64,
 }
 
-/// The error result of calling the `retrieve_sol` endpoint.
+/// The error result of calling the `withdraw_sol` endpoint.
 #[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize)]
-pub enum RetrieveSolError {
+pub enum WithdrawSolError {
     /// There is another request for this principal.
     AlreadyProcessing,
 
@@ -114,6 +114,12 @@ pub enum RetrieveSolError {
     InsufficientFunds {
         /// The current balance of the withdrawal account.
         balance: u64,
+    },
+
+    /// The minter is not approved to transfer the requested amount.
+    InsufficientAllowance {
+        /// The current allowance for the minter.
+        allowance: u64,
     },
 
     /// There are too many concurrent requests, retry later.
@@ -149,7 +155,7 @@ pub enum TxFinalizedStatus {
 
 /// Retrieve the status of a withdrawal request.
 #[derive(Clone, Eq, PartialEq, Hash, Debug, CandidType, Deserialize)]
-pub enum RetrieveSolStatus {
+pub enum WithdrawSolStatus {
     /// Withdrawal request is not found.
     NotFound,
 

@@ -113,7 +113,7 @@ type UpgradeArgs = record {
     minimum_deposit_amount : opt Lamport;
 };
 
-type RetrieveSolArgs = record {
+type WithdrawSolArgs = record {
     // The subaccount to burn ckSOL from.
     from_subaccount : opt blob;
     // The amount of ckSOL in Lamports that the client wants to withdraw.
@@ -122,13 +122,13 @@ type RetrieveSolArgs = record {
     address : Address;
 };
 
-type RetrieveSolOk = record {
+type WithdrawSolOk = record {
     // Returns the burn transaction index corresponding to the withdrawal.
     // You can use this index to query the withdrawal status.
     block_index : nat64
 };
 
-type RetrieveSolError = variant {
+type WithdrawSolError = variant {
     // The minter is already processing another retrieval request for the same
     // principal.
     AlreadyProcessing;
@@ -139,6 +139,8 @@ type RetrieveSolError = variant {
     MalformedAddress : Address;
     // The ckSOL balance of the withdrawal account is too low.
     InsufficientFunds : record { balance : nat64 };
+    // The minter is not approved to transfer the requested amount.
+    InsufficientAllowance : record { allowance : nat64 };
     // The minter is overloaded, retry the request.
     // The payload contains a human-readable message explaining what caused the unavailability.
     TemporarilyUnavailable : text;
@@ -158,7 +160,7 @@ type TxFinalizedStatus = variant {
 };
 
 // Retrieve the status of a withdrawal request.
-type RetrieveSolStatus = variant {
+type WithdrawSolStatus = variant {
     // Withdrawal request is not found.
     NotFound;
 
@@ -212,10 +214,10 @@ service : (MinterArg) -> {
     update_balance: (UpdateBalanceArgs) -> (UpdateBalanceResult);
 
     // Submits a request to convert ckSOL to Solana.
-    retrieve_sol : (RetrieveSolArgs) -> (variant { Ok : RetrieveSolOk; Err : RetrieveSolError });
+    withdraw_sol : (WithdrawSolArgs) -> (variant { Ok : WithdrawSolOk; Err : WithdrawSolError });
 
     // Retrieve the status of a Solana withdrawal request.
-    retrieve_sol_status : (nat64) -> (RetrieveSolStatus);
+    withdraw_sol_status : (nat64) -> (WithdrawSolStatus);
 
     // *WARNING*: This is a debug endpoint, backwards-compatibility is not guaranteed.
     // Returns events from the event log starting at the given index.

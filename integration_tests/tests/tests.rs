@@ -10,8 +10,8 @@ use cksol_int_tests::{
     },
 };
 use cksol_types::{
-    DepositStatus, GetDepositAddressArgs, MinterInfo, RetrieveSolArgs, RetrieveSolError,
-    RetrieveSolStatus, UpdateBalanceArgs, UpdateBalanceError,
+    DepositStatus, GetDepositAddressArgs, MinterInfo, UpdateBalanceArgs, UpdateBalanceError,
+    WithdrawSolArgs, WithdrawSolError, WithdrawSolStatus,
 };
 use cksol_types_internal::{UpgradeArgs, event::EventType, log::Priority};
 use ic_pocket_canister_runtime::{JsonRpcResponse, MockHttpOutcalls, MockHttpOutcallsBuilder};
@@ -176,8 +176,15 @@ mod lifecycle {
     }
 }
 
-mod retrieve_sol_tests {
+mod withdraw_sol_tests {
+    use std::str::FromStr;
+
+    use candid::Nat;
+    use cksol_int_tests::{fixtures::get_memo, ledger_init_args::LEDGER_TRANSFER_FEE};
+    use cksol_types::{BurnMemo, Memo, WithdrawSolOk};
     use cksol_types_internal::UpgradeArgs;
+    use icrc_ledger_types::icrc1::account::Account;
+    use solana_address::Address;
 
     use super::*;
 
@@ -185,25 +192,28 @@ mod retrieve_sol_tests {
     async fn should_validate_solana_address() {
         let setup = SetupBuilder::new().build().await;
 
-        let args = RetrieveSolArgs {
+        let args = WithdrawSolArgs {
             from_subaccount: None,
             amount: u64::MAX,
             address: "InvalidAddress".to_string(),
         };
 
-        let result = setup.minter().retrieve_sol(args).await;
+        let result = setup.minter().withdraw_sol(args).await;
         let err = result.unwrap_err();
-        assert_matches!(err, RetrieveSolError::MalformedAddress(_));
+        assert_matches!(err, WithdrawSolError::MalformedAddress(_));
 
-        let args = RetrieveSolArgs {
+        let args = WithdrawSolArgs {
             from_subaccount: None,
             amount: u64::MAX,
             address: "E4MpwNnMWs2XtW5gVrxZvyS7fMq31QD5HvbxmwP45Tz3".to_string(),
         };
 
-        let result = setup.minter().retrieve_sol(args).await;
+        let result = setup.minter().withdraw_sol(args).await;
         let err = result.unwrap_err();
-        assert_eq!(err, RetrieveSolError::InsufficientFunds { balance: 0 });
+        assert_eq!(
+            err,
+            WithdrawSolError::InsufficientAllowance { allowance: 0 }
+        );
 
         setup.drop().await;
     }
@@ -212,15 +222,18 @@ mod retrieve_sol_tests {
     async fn should_check_minimum_withdrawal_amount() {
         let setup = SetupBuilder::new().build().await;
 
-        let args = RetrieveSolArgs {
+        let args = WithdrawSolArgs {
             from_subaccount: None,
             amount: Setup::DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT,
             address: "E4MpwNnMWs2XtW5gVrxZvyS7fMq31QD5HvbxmwP45Tz3".to_string(),
         };
 
-        let result = setup.minter().retrieve_sol(args.clone()).await;
+        let result = setup.minter().withdraw_sol(args.clone()).await;
         let err = result.unwrap_err();
-        assert_eq!(err, RetrieveSolError::InsufficientFunds { balance: 0 });
+        assert_eq!(
+            err,
+            WithdrawSolError::InsufficientAllowance { allowance: 0 }
+        );
 
         let new_minimum_withdrawal_amount = Setup::DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT + 1;
         setup
@@ -232,22 +245,25 @@ mod retrieve_sol_tests {
             .await
             .expect("upgrade failed");
 
-        let result = setup.minter().retrieve_sol(args).await;
+        let result = setup.minter().withdraw_sol(args).await;
         let err = result.unwrap_err();
         assert_eq!(
             err,
-            RetrieveSolError::AmountTooLow(new_minimum_withdrawal_amount)
+            WithdrawSolError::AmountTooLow(new_minimum_withdrawal_amount)
         );
 
-        let args = RetrieveSolArgs {
+        let args = WithdrawSolArgs {
             from_subaccount: None,
             amount: new_minimum_withdrawal_amount,
             address: "E4MpwNnMWs2XtW5gVrxZvyS7fMq31QD5HvbxmwP45Tz3".to_string(),
         };
 
-        let result = setup.minter().retrieve_sol(args).await;
+        let result = setup.minter().withdraw_sol(args).await;
         let err = result.unwrap_err();
-        assert_eq!(err, RetrieveSolError::InsufficientFunds { balance: 0 });
+        assert_eq!(
+            err,
+            WithdrawSolError::InsufficientAllowance { allowance: 0 }
+        );
 
         setup.drop().await;
     }
@@ -256,8 +272,227 @@ mod retrieve_sol_tests {
     async fn should_return_not_found_status() {
         let setup = SetupBuilder::new().build().await;
 
-        let status = setup.minter().retrieve_sol_status(u64::MAX).await;
-        assert_eq!(status, RetrieveSolStatus::NotFound);
+        let status = setup.minter().withdraw_sol_status(u64::MAX).await;
+        assert_eq!(status, WithdrawSolStatus::NotFound);
+
+        setup.drop().await;
+    }
+
+    #[tokio::test]
+    async fn should_fail_if_insufficient_funds_or_allowance() {
+        const WITHDRAWAL_AMOUNT: u64 = 100_000_000;
+
+        let subaccount = Some([1u8; 32]);
+        let caller_account_sub = Account {
+            owner: Setup::DEFAULT_CALLER,
+            subaccount,
+        };
+
+        let setup = SetupBuilder::new()
+            .with_initial_ledger_balances(vec![
+                (DEFAULT_CALLER_ACCOUNT, Nat::from(WITHDRAWAL_AMOUNT)),
+                (caller_account_sub, Nat::from(10 * WITHDRAWAL_AMOUNT)),
+            ])
+            .build()
+            .await;
+
+        // Test insufficent funds
+        setup
+            .ledger()
+            .approve(
+                None,
+                u64::MAX,
+                Account {
+                    owner: setup.minter_canister_id(),
+                    subaccount: None,
+                },
+            )
+            .await;
+
+        let result = setup
+            .minter()
+            .withdraw_sol(WithdrawSolArgs {
+                from_subaccount: None,
+                amount: WITHDRAWAL_AMOUNT,
+                address: "E4MpwNnMWs2XtW5gVrxZvyS7fMq31QD5HvbxmwP45Tz3".to_string(),
+            })
+            .await;
+
+        let balance = setup.ledger().balance_of(DEFAULT_CALLER_ACCOUNT).await;
+        assert_eq!(balance, WITHDRAWAL_AMOUNT - LEDGER_TRANSFER_FEE);
+        assert_eq!(result, Err(WithdrawSolError::InsufficientFunds { balance }));
+
+        // Test insufficient allowance
+        let result = setup
+            .minter()
+            .withdraw_sol(WithdrawSolArgs {
+                from_subaccount: subaccount,
+                amount: WITHDRAWAL_AMOUNT,
+                address: "E4MpwNnMWs2XtW5gVrxZvyS7fMq31QD5HvbxmwP45Tz3".to_string(),
+            })
+            .await;
+
+        assert_eq!(
+            result,
+            Err(WithdrawSolError::InsufficientAllowance { allowance: 0 })
+        );
+
+        let approve_amount = WITHDRAWAL_AMOUNT - 1;
+
+        setup
+            .ledger()
+            .approve(
+                subaccount,
+                approve_amount,
+                Account {
+                    owner: setup.minter_canister_id(),
+                    subaccount: None,
+                },
+            )
+            .await;
+
+        let result = setup
+            .minter()
+            .withdraw_sol(WithdrawSolArgs {
+                from_subaccount: subaccount,
+                amount: WITHDRAWAL_AMOUNT,
+                address: "E4MpwNnMWs2XtW5gVrxZvyS7fMq31QD5HvbxmwP45Tz3".to_string(),
+            })
+            .await;
+
+        assert_eq!(
+            result,
+            Err(WithdrawSolError::InsufficientAllowance {
+                allowance: approve_amount
+            })
+        );
+
+        let balance = setup.ledger().balance_of(caller_account_sub).await;
+        assert_eq!(balance, 10 * WITHDRAWAL_AMOUNT - LEDGER_TRANSFER_FEE);
+
+        setup.drop().await;
+    }
+
+    #[tokio::test]
+    async fn should_burn_sol_successfully() {
+        const WITHDRAWAL_AMOUNT: u64 = 100_000_000;
+        const WITHDRAWAL_ADDRESS: &str = "E4MpwNnMWs2XtW5gVrxZvyS7fMq31QD5HvbxmwP45Tz3";
+
+        let initial_balance = 10 * WITHDRAWAL_AMOUNT;
+
+        let setup = SetupBuilder::new()
+            .with_initial_ledger_balances(vec![(
+                DEFAULT_CALLER_ACCOUNT,
+                Nat::from(initial_balance),
+            )])
+            .build()
+            .await;
+
+        setup
+            .ledger()
+            .approve(
+                None,
+                WITHDRAWAL_AMOUNT,
+                Account {
+                    owner: setup.minter_canister_id(),
+                    subaccount: None,
+                },
+            )
+            .await;
+
+        let result = setup
+            .minter()
+            .withdraw_sol(WithdrawSolArgs {
+                from_subaccount: None,
+                amount: WITHDRAWAL_AMOUNT,
+                address: WITHDRAWAL_ADDRESS.to_string(),
+            })
+            .await;
+
+        let block_index = result.expect("burn should succeed").block_index;
+
+        let block = setup.ledger().get_block(block_index).await;
+        let memo_blob = get_memo(block);
+        let memo = minicbor::decode::<Memo>(&memo_blob).expect("failed to decode memo");
+        let expected_memo = BurnMemo::Convert {
+            to_address: Address::from_str(WITHDRAWAL_ADDRESS)
+                .expect("failed to decode address")
+                .to_bytes(),
+        };
+        assert_eq!(memo, Memo::from(expected_memo));
+
+        let balance = setup.ledger().balance_of(DEFAULT_CALLER_ACCOUNT).await;
+        assert_eq!(
+            balance,
+            initial_balance - LEDGER_TRANSFER_FEE - WITHDRAWAL_AMOUNT
+        );
+
+        setup.drop().await;
+    }
+
+    #[tokio::test]
+    async fn should_fail_is_already_processing() {
+        const WITHDRAWAL_AMOUNT: u64 = 100_000_000;
+        const WITHDRAWAL_ADDRESS: &str = "E4MpwNnMWs2XtW5gVrxZvyS7fMq31QD5HvbxmwP45Tz3";
+
+        let initial_balance = 10 * WITHDRAWAL_AMOUNT;
+
+        let setup = SetupBuilder::new()
+            .with_initial_ledger_balances(vec![(
+                DEFAULT_CALLER_ACCOUNT,
+                Nat::from(initial_balance),
+            )])
+            .build()
+            .await;
+
+        setup
+            .ledger()
+            .approve(
+                None,
+                u64::MAX,
+                Account {
+                    owner: setup.minter_canister_id(),
+                    subaccount: None,
+                },
+            )
+            .await;
+
+        let args = WithdrawSolArgs {
+            from_subaccount: None,
+            amount: WITHDRAWAL_AMOUNT,
+            address: WITHDRAWAL_ADDRESS.to_string(),
+        };
+
+        let minter1 = setup.minter();
+        let minter2 = setup.minter();
+
+        let (result1, result2) = join!(
+            minter1.withdraw_sol(args.clone()),
+            minter2.withdraw_sol(args.clone()),
+        );
+
+        let (result1, result2) = match (&result1, &result2) {
+            (Ok(_), Err(_)) => (result1, result2),
+            (Err(_), Ok(_)) => (result2, result1),
+            _ => panic!("Expected one success and one error, but got: {result1:?} and {result2:?}"),
+        };
+
+        // One should succeed, one should fail with AlreadyProcessing (order is non-deterministic)
+        let results = [&result1, &result2];
+        assert!(
+            results
+                .iter()
+                .any(|r| matches!(r, Ok(WithdrawSolOk { block_index: _ }))),
+            "Expected one Minted result, got: {:?}",
+            results
+        );
+        assert!(
+            results
+                .iter()
+                .any(|r| matches!(r, Err(WithdrawSolError::AlreadyProcessing))),
+            "Expected one AlreadyProcessing result, got: {:?}",
+            results
+        );
 
         setup.drop().await;
     }

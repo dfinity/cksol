@@ -67,6 +67,7 @@ pub struct State {
     minimum_withdrawal_amount: u64,
     minimum_deposit_amount: u64,
     pending_update_balance_requests: BTreeSet<Account>,
+    pending_withdraw_sol_requests: BTreeSet<Account>,
 }
 
 impl State {
@@ -131,6 +132,10 @@ impl State {
 
     pub fn pending_update_balance_requests_mut(&mut self) -> &mut BTreeSet<Account> {
         &mut self.pending_update_balance_requests
+    }
+
+    pub fn pending_withdraw_sol_requests_mut(&mut self) -> &mut BTreeSet<Account> {
+        &mut self.pending_withdraw_sol_requests
     }
 
     fn validate(&self) -> Result<(), InvalidStateError> {
@@ -212,6 +217,7 @@ impl TryFrom<InitArgs> for State {
             minimum_withdrawal_amount,
             minimum_deposit_amount,
             pending_update_balance_requests: BTreeSet::new(),
+            pending_withdraw_sol_requests: BTreeSet::new(),
         };
         state.validate()?;
         Ok(state)

@@ -1,5 +1,5 @@
 use crate::state::{State, mutate_state};
-use cksol_types::UpdateBalanceError;
+use cksol_types::{UpdateBalanceError, WithdrawSolError};
 use icrc_ledger_types::icrc1::account::Account;
 use std::{collections::BTreeSet, marker::PhantomData};
 
@@ -15,6 +15,17 @@ pub enum GuardError {
 }
 
 impl From<GuardError> for UpdateBalanceError {
+    fn from(e: GuardError) -> Self {
+        match e {
+            GuardError::AlreadyProcessing => Self::AlreadyProcessing,
+            GuardError::TooManyConcurrentRequests => {
+                Self::TemporarilyUnavailable("too many concurrent requests".to_string())
+            }
+        }
+    }
+}
+
+impl From<GuardError> for WithdrawSolError {
     fn from(e: GuardError) -> Self {
         match e {
             GuardError::AlreadyProcessing => Self::AlreadyProcessing,
@@ -73,8 +84,22 @@ impl<R: PendingRequests> Drop for Guard<R> {
     }
 }
 
+pub struct PendingWithdrawSolRequests;
+
+impl PendingRequests for PendingWithdrawSolRequests {
+    fn pending_requests(state: &mut State) -> &mut BTreeSet<Account> {
+        state.pending_withdraw_sol_requests_mut()
+    }
+}
+
 pub fn update_balance_guard(
     account: Account,
 ) -> Result<Guard<PendingUpdateBalanceRequests>, GuardError> {
+    Guard::new(account)
+}
+
+pub fn withdraw_sol_guard(
+    account: Account,
+) -> Result<Guard<PendingWithdrawSolRequests>, GuardError> {
     Guard::new(account)
 }

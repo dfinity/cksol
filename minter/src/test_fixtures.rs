@@ -14,6 +14,10 @@ use std::str::FromStr;
 
 pub const DEPOSIT_FEE: Lamport = 10_000_000; // 0.01 SOL
 pub const MINIMUM_WITHDRAWAL_AMOUNT: Lamport = 10_000_000; // 0.01 SOL
+pub const MINTER_ACCOUNT: Account = Account {
+    owner: Principal::from_slice(&[1u8; 10]),
+    subaccount: None,
+};
 pub const MINIMUM_DEPOSIT_AMOUNT: Lamport = 10_000_000; // 0.01 SOL
 
 pub fn sol_rpc_canister_id() -> Principal {
