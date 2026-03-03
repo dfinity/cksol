@@ -13,7 +13,7 @@ use crate::{
     runtime::CanisterRuntime,
     state::{audit::process_event, event::EventType, mutate_state, read_state},
 };
-use cksol_types_internal::BurnEvent;
+use cksol_types_internal::{BurnEvent, WithdrawalId};
 
 #[cfg(test)]
 mod tests;
@@ -97,7 +97,11 @@ pub async fn withdraw_sol<R: CanisterRuntime>(
                 burn_block_index: block_index,
                 withdrawal_amount: amount,
                 withdrawal_fee,
-                solana_address: solana_address.to_bytes(),
+                withdrawal_id: WithdrawalId {
+                    owner: caller,
+                    subaccount: from_subaccount,
+                    solana_address: solana_address.to_bytes(),
+                },
             }),
             &runtime,
         )

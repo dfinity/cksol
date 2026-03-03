@@ -74,6 +74,21 @@ pub struct UpgradeArgs {
     pub withdrawal_fee: Option<Lamport>,
 }
 
+/// Identifies a withdrawal request by the source ledger account and the destination Solana address.
+#[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize)]
+#[cfg_attr(feature = "event", derive(minicbor::Encode, minicbor::Decode))]
+pub struct WithdrawalId {
+    /// The principal that initiated the withdrawal.
+    #[cfg_attr(feature = "event", n(0), cbor(with = "icrc_cbor::principal"))]
+    pub owner: Principal,
+    /// The subaccount from which ckSOL was burned.
+    #[cfg_attr(feature = "event", n(1), cbor(with = "minicbor::bytes"))]
+    pub subaccount: Option<[u8; 32]>,
+    /// The destination Solana address.
+    #[cfg_attr(feature = "event", n(2), cbor(with = "minicbor::bytes"))]
+    pub solana_address: [u8; 32],
+}
+
 /// Payload of the `WithdrawalBurned` event.
 #[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize)]
 #[cfg_attr(feature = "event", derive(minicbor::Encode, minicbor::Decode))]
@@ -87,9 +102,9 @@ pub struct BurnEvent {
     /// The fee retained by the minter (in lamports).
     #[cfg_attr(feature = "event", n(2))]
     pub withdrawal_fee: Lamport,
-    /// The destination Solana address.
-    #[cfg_attr(feature = "event", n(3), cbor(with = "minicbor::bytes"))]
-    pub solana_address: [u8; 32],
+    /// The withdrawal request identifier.
+    #[cfg_attr(feature = "event", n(3))]
+    pub withdrawal_id: WithdrawalId,
 }
 
 /// The ID of one of the ICP root keys.

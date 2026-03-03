@@ -60,7 +60,7 @@ pub fn init_schnorr_master_key() {
 
 pub mod arb {
     use crate::state::event::{Event, EventType};
-    use cksol_types_internal::{BurnEvent, Ed25519KeyName, InitArgs, UpgradeArgs};
+    use cksol_types_internal::{BurnEvent, Ed25519KeyName, InitArgs, UpgradeArgs, WithdrawalId};
     use proptest::prelude::{Just, Strategy, any, prop, prop_oneof};
 
     pub fn arb_principal() -> impl Strategy<Value = candid::Principal> {
@@ -134,13 +134,26 @@ pub mod arb {
             )
     }
 
+    pub fn arb_withdrawal_id() -> impl Strategy<Value = WithdrawalId> {
+        (
+            arb_principal(),
+            prop::option::of(any::<[u8; 32]>()),
+            any::<[u8; 32]>(),
+        )
+            .prop_map(|(owner, subaccount, solana_address)| WithdrawalId {
+                owner,
+                subaccount,
+                solana_address,
+            })
+    }
+
     pub fn arb_burn_event() -> impl Strategy<Value = BurnEvent> {
-        (any::<u64>(), any::<u64>(), any::<u64>(), any::<[u8; 32]>()).prop_map(
-            |(burn_block_index, withdrawal_amount, withdrawal_fee, solana_address)| BurnEvent {
+        (any::<u64>(), any::<u64>(), any::<u64>(), arb_withdrawal_id()).prop_map(
+            |(burn_block_index, withdrawal_amount, withdrawal_fee, withdrawal_id)| BurnEvent {
                 burn_block_index,
                 withdrawal_amount,
                 withdrawal_fee,
-                solana_address,
+                withdrawal_id,
             },
         )
     }
