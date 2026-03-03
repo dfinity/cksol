@@ -38,7 +38,7 @@ pub struct SetupBuilder {
     caller: Option<Principal>,
     make_live: Option<PocketIcMode>,
     sol_rpc_install_args: Option<sol_rpc_types::InstallArgs>,
-    initial_balances: Option<Vec<(Account, Nat)>>,
+    initial_ledger_balances: Option<Vec<(Account, Nat)>>,
 }
 
 impl SetupBuilder {
@@ -51,8 +51,11 @@ impl SetupBuilder {
         self
     }
 
-    pub fn with_initial_balances(mut self, initial_balances: Vec<(Account, Nat)>) -> Self {
-        self.initial_balances = Some(initial_balances);
+    pub fn with_initial_ledger_balances(
+        mut self,
+        initial_ledger_balances: Vec<(Account, Nat)>,
+    ) -> Self {
+        self.initial_ledger_balances = Some(initial_ledger_balances);
         self
     }
 
@@ -71,7 +74,7 @@ impl SetupBuilder {
             self.caller,
             self.make_live.unwrap_or_default(),
             self.sol_rpc_install_args.unwrap_or_default(),
-            self.initial_balances,
+            self.initial_ledger_balances,
         )
         .await
     }
@@ -95,7 +98,7 @@ impl Setup {
         caller: Option<Principal>,
         make_live: PocketIcMode,
         sol_rpc_install_args: sol_rpc_types::InstallArgs,
-        initial_balances: Option<Vec<(Account, Nat)>>,
+        initial_ledger_balances: Option<Vec<(Account, Nat)>>,
     ) -> Self {
         let env = PocketIcBuilder::new()
             .with_nns_subnet() //make_live requires NNS subnet.
@@ -151,7 +154,7 @@ impl Setup {
             ledger_wasm().await,
             Encode!(&ledger_init_args(
                 minter_canister_id,
-                initial_balances.unwrap_or(vec![])
+                initial_ledger_balances.unwrap_or(vec![])
             ))
             .unwrap(),
             Some(Self::DEFAULT_CONTROLLER),

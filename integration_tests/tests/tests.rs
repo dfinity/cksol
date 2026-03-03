@@ -289,7 +289,7 @@ mod withdraw_sol_tests {
         };
 
         let setup = SetupBuilder::new()
-            .with_initial_balances(vec![
+            .with_initial_ledger_balances(vec![
                 (DEFAULT_CALLER_ACCOUNT, Nat::from(WITHDRAWAL_AMOUNT)),
                 (caller_account_sub, Nat::from(10 * WITHDRAWAL_AMOUNT)),
             ])
@@ -381,7 +381,10 @@ mod withdraw_sol_tests {
         let initial_balance = 10 * WITHDRAWAL_AMOUNT;
 
         let setup = SetupBuilder::new()
-            .with_initial_balances(vec![(DEFAULT_CALLER_ACCOUNT, Nat::from(initial_balance))])
+            .with_initial_ledger_balances(vec![(
+                DEFAULT_CALLER_ACCOUNT,
+                Nat::from(initial_balance),
+            )])
             .build()
             .await;
 
@@ -435,7 +438,10 @@ mod withdraw_sol_tests {
         let initial_balance = 10 * WITHDRAWAL_AMOUNT;
 
         let setup = SetupBuilder::new()
-            .with_initial_balances(vec![(DEFAULT_CALLER_ACCOUNT, Nat::from(initial_balance))])
+            .with_initial_ledger_balances(vec![(
+                DEFAULT_CALLER_ACCOUNT,
+                Nat::from(initial_balance),
+            )])
             .build()
             .await;
 
