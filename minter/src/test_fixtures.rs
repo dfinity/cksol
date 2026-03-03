@@ -18,6 +18,7 @@ pub const MINTER_ACCOUNT: Account = Account {
     owner: Principal::from_slice(&[1u8; 10]),
     subaccount: None,
 };
+pub const MINIMUM_DEPOSIT_AMOUNT: Lamport = 10_000_000; // 0.01 SOL
 
 pub fn sol_rpc_canister_id() -> Principal {
     Principal::from_slice(&[1_u8; 20])
@@ -34,6 +35,7 @@ pub fn valid_init_args() -> InitArgs {
         deposit_fee: DEPOSIT_FEE,
         master_key_name: Ed25519KeyName::default(),
         minimum_withdrawal_amount: MINIMUM_WITHDRAWAL_AMOUNT,
+        minimum_deposit_amount: MINIMUM_DEPOSIT_AMOUNT,
     }
 }
 
@@ -79,6 +81,7 @@ pub mod arb {
             any::<u64>(),
             arb_ed25519_key_name(),
             any::<u64>(),
+            any::<u64>(),
         )
             .prop_map(
                 |(
@@ -87,6 +90,7 @@ pub mod arb {
                     deposit_fee,
                     master_key_name,
                     minimum_withdrawal_amount,
+                    minimum_deposit_amount,
                 )| {
                     InitArgs {
                         sol_rpc_canister_id,
@@ -94,6 +98,7 @@ pub mod arb {
                         deposit_fee,
                         master_key_name,
                         minimum_withdrawal_amount,
+                        minimum_deposit_amount,
                     }
                 },
             )
@@ -104,12 +109,19 @@ pub mod arb {
             prop::option::of(arb_principal()),
             prop::option::of(any::<u64>()),
             prop::option::of(any::<u64>()),
+            prop::option::of(any::<u64>()),
         )
             .prop_map(
-                |(sol_rpc_canister_id, deposit_fee, minimum_withdrawal_amount)| UpgradeArgs {
+                |(
                     sol_rpc_canister_id,
                     deposit_fee,
                     minimum_withdrawal_amount,
+                    minimum_deposit_amount,
+                )| UpgradeArgs {
+                    sol_rpc_canister_id,
+                    deposit_fee,
+                    minimum_withdrawal_amount,
+                    minimum_deposit_amount,
                 },
             )
     }
