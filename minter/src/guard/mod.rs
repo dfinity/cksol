@@ -1,5 +1,5 @@
 use crate::state::{State, mutate_state};
-use cksol_types::{WithdrawSolError, UpdateBalanceError};
+use cksol_types::{UpdateBalanceError, WithdrawSolError};
 use icrc_ledger_types::icrc1::account::Account;
 use std::{collections::BTreeSet, marker::PhantomData};
 

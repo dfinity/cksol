@@ -2,8 +2,8 @@ use crate::{events::MinterEventAssert, ledger_init_args::ledger_init_args};
 use candid::{CandidType, Decode, Encode, Nat, Principal, utils::ArgumentEncoder};
 use canlog::{Log, LogEntry};
 use cksol_types::{
-    Address, DepositStatus, GetDepositAddressArgs, MinterInfo, WithdrawSolArgs, WithdrawSolError,
-    WithdrawSolOk, WithdrawSolStatus, UpdateBalanceArgs, UpdateBalanceError,
+    Address, DepositStatus, GetDepositAddressArgs, MinterInfo, UpdateBalanceArgs,
+    UpdateBalanceError, WithdrawSolArgs, WithdrawSolError, WithdrawSolOk, WithdrawSolStatus,
 };
 use cksol_types_internal::event::{Event, GetEventsResult};
 use cksol_types_internal::{MinterArg, log::Priority};
