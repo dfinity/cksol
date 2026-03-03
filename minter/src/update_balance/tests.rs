@@ -98,10 +98,13 @@ async fn should_fail_if_deposit_amount_is_below_minimum() {
 
     let result = update_balance(runtime, DEPOSITOR_ACCOUNT, deposit_transaction_signature()).await;
 
-    assert_eq!(result, Err(UpdateBalanceError::ValueTooSmall {
-        deposit_amount: DEPOSIT_AMOUNT,
-        minimum_deposit_amount: MINIMUM_DEPOSIT_AMOUNT,
-    }));
+    assert_eq!(
+        result,
+        Err(UpdateBalanceError::ValueTooSmall {
+            deposit_amount: DEPOSIT_AMOUNT,
+            minimum_deposit_amount: MINIMUM_DEPOSIT_AMOUNT,
+        })
+    );
     EventsAssert::assert_no_events_recorded();
 }
 

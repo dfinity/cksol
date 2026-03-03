@@ -27,9 +27,7 @@ fn apply_state_transition(state: &mut State, payload: &EventType) {
         EventType::AcceptedDeposit(event) => {
             state.process_accepted_deposit(event);
         }
-        EventType::QuarantinedDeposit(event) => {
-            state.process_quarantined_deposit(event)
-        }
+        EventType::QuarantinedDeposit(event) => state.process_quarantined_deposit(event),
         EventType::Minted(event) => {
             state.process_mint(event);
         }

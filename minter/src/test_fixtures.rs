@@ -1,11 +1,11 @@
 use crate::{
+    numeric::LedgerMintIndex,
     state::{
         SchnorrPublicKey, State,
-        event::{DepositEvent, Event, EventType, DepositId, MintedEvent},
+        event::{DepositEvent, DepositId, Event, EventType, MintedEvent},
         init_once_state, mutate_state,
     },
     storage::with_event_iter,
-    numeric::LedgerMintIndex,
 };
 use candid::Principal;
 use cksol_types::DepositStatus;
