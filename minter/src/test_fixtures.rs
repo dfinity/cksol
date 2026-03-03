@@ -134,15 +134,16 @@ pub mod arb {
             )
     }
 
+    pub fn arb_account() -> impl Strategy<Value = icrc_ledger_types::icrc1::account::Account> {
+        (arb_principal(), prop::option::of(any::<[u8; 32]>())).prop_map(|(owner, subaccount)| {
+            icrc_ledger_types::icrc1::account::Account { owner, subaccount }
+        })
+    }
+
     pub fn arb_withdrawal_id() -> impl Strategy<Value = WithdrawalId> {
-        (
-            arb_principal(),
-            prop::option::of(any::<[u8; 32]>()),
-            any::<[u8; 32]>(),
-        )
-            .prop_map(|(owner, subaccount, solana_address)| WithdrawalId {
-                owner,
-                subaccount,
+        (arb_account(), any::<[u8; 32]>())
+            .prop_map(|(account, solana_address)| WithdrawalId {
+                account,
                 solana_address,
             })
     }

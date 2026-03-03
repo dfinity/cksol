@@ -98,8 +98,7 @@ pub async fn withdraw_sol<R: CanisterRuntime>(
                 withdrawal_amount: amount,
                 withdrawal_fee,
                 withdrawal_id: WithdrawalId {
-                    owner: caller,
-                    subaccount: from_subaccount,
+                    account: from,
                     solana_address: solana_address.to_bytes(),
                 },
             }),

@@ -183,8 +183,7 @@ type WithdrawSolStatus = variant {
 
 // Identifies a withdrawal request.
 type WithdrawalId = record {
-    owner : principal;
-    subaccount : opt blob;
+    account : record { owner : principal; subaccount : opt blob };
     solana_address : blob;
 };
 

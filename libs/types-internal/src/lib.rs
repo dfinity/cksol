@@ -10,6 +10,7 @@ pub mod event;
 pub mod log;
 
 use candid::{CandidType, Principal};
+use icrc_ledger_types::icrc1::account::Account;
 use serde::{Deserialize, Serialize};
 use sol_rpc_types::Lamport;
 use std::fmt;
@@ -78,14 +79,11 @@ pub struct UpgradeArgs {
 #[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize)]
 #[cfg_attr(feature = "event", derive(minicbor::Encode, minicbor::Decode))]
 pub struct WithdrawalId {
-    /// The principal that initiated the withdrawal.
-    #[cfg_attr(feature = "event", n(0), cbor(with = "icrc_cbor::principal"))]
-    pub owner: Principal,
-    /// The subaccount from which ckSOL was burned.
-    #[cfg_attr(feature = "event", n(1), cbor(with = "minicbor::bytes"))]
-    pub subaccount: Option<[u8; 32]>,
+    /// The ledger account from which ckSOL was burned.
+    #[cfg_attr(feature = "event", n(0))]
+    pub account: Account,
     /// The destination Solana address.
-    #[cfg_attr(feature = "event", n(2), cbor(with = "minicbor::bytes"))]
+    #[cfg_attr(feature = "event", n(1), cbor(with = "minicbor::bytes"))]
     pub solana_address: [u8; 32],
 }
 

@@ -814,6 +814,7 @@ dependencies = [
  "candid",
  "canlog",
  "icrc-cbor",
+ "icrc-ledger-types",
  "minicbor",
  "serde",
  "sol_rpc_types",
