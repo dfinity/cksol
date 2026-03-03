@@ -30,8 +30,8 @@ pub enum EventType {
     #[n(1)]
     Upgrade(#[n(0)] UpgradeArgs),
     /// The minter discovered a Solana transaction that is a valid ckSOL
-    /// deposit for the given account. ckSOL tokens will be minted for
-    /// this deposit.
+    /// deposit for the given account. ckSOL tokens have not yet been
+    /// minted for this deposit.
     #[n(2)]
     AcceptedDeposit(#[n(0)] DepositEvent),
     /// The minter discovered a Solana transaction that is a valid ckSOL

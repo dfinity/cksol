@@ -25,13 +25,13 @@ fn apply_state_transition(state: &mut State, payload: &EventType) {
                 .expect("applying upgrade event should succeed");
         }
         EventType::AcceptedDeposit(event) => {
-            state.record_event_to_mint(event);
+            state.process_accepted_deposit(event);
         }
-        EventType::QuarantinedDeposit(_event) => {
-            // TODO DEFI-2643
+        EventType::QuarantinedDeposit(event) => {
+            state.process_quarantined_deposit(event)
         }
         EventType::Minted(event) => {
-            state.record_successful_mint(event);
+            state.process_mint(event);
         }
     }
 }

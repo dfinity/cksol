@@ -1,10 +1,11 @@
 use crate::{
     state::{
         SchnorrPublicKey, State,
-        event::{DepositEvent, Event, EventType},
+        event::{DepositEvent, Event, EventType, DepositId, MintedEvent},
         init_once_state, mutate_state,
     },
     storage::with_event_iter,
+    numeric::LedgerMintIndex,
 };
 use candid::Principal;
 use cksol_types::DepositStatus;
@@ -146,8 +147,6 @@ pub mod arb {
 
 pub mod deposit {
     use super::*;
-    use crate::numeric::LedgerMintIndex;
-    use crate::state::event::{DepositId, MintedEvent};
 
     pub const DEPOSIT_AMOUNT: Lamport = 500_000_000;
     pub const DEPOSIT_ADDRESS: Address = address!("BVH7GZXRdqyZLSLBS4cm1Yom8Yvekw6ytgSFz9y9on4e");

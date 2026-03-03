@@ -15,8 +15,16 @@ mod memo;
 /// The outcome of processing a Solana deposit transaction.
 #[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize, Serialize)]
 pub enum DepositStatus {
-    /// The transaction is a valid deposit, but the minter failed to mint ckSOL on the ledger.
+    /// The transaction is a valid deposit, but the corresponding ckSOL tokens
+    /// have not yet been minted.
     Processing(Signature),
+    /// The transaction is a valid deposit, but it is unknown whether the
+    /// corresponding ckSOL tokens have been minted, most likely because there
+    /// was an unexpected panic while trying to mint.
+    ///
+    /// The deposit is quarantined to avoid any double minting and will not
+    /// be further processed without manual intervention.
+    Quarantined(Signature),
     /// The minter accepted the deposit and minted ckSOL tokens on the ledger.
     Minted {
         /// The mint transaction index on the ledger.

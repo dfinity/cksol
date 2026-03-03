@@ -3,9 +3,9 @@ mod tests;
 
 use crate::{
     ledger::client::LedgerClient,
+    numeric::LedgerMintIndex,
     state::event::{DepositEvent, DepositId, MintedEvent},
 };
-use assert_matches::assert_matches;
 use candid::Principal;
 use cksol_types::DepositStatus;
 use cksol_types_internal::{Ed25519KeyName, InitArgs, UpgradeArgs};
@@ -74,8 +74,9 @@ pub struct State {
     minimum_withdrawal_amount: Lamport,
     minimum_deposit_amount: u64,
     pending_update_balance_requests: BTreeSet<Account>,
-    events_to_mint: BTreeMap<DepositId, DepositEvent>,
-    minted_events: BTreeMap<DepositId, MintedEvent>,
+    accepted_deposits: BTreeMap<DepositId, Lamport>,
+    quarantined_deposit: BTreeSet<DepositId>,
+    minted_deposits: BTreeMap<DepositId, MintedDeposit>,
 }
 
 impl State {
@@ -120,33 +121,25 @@ impl State {
         self.minimum_deposit_amount
     }
 
-    pub fn events_to_mint(&self) -> &BTreeMap<DepositId, DepositEvent> {
-        &self.events_to_mint
-    }
-
-    pub fn minted_events(&self) -> &BTreeMap<DepositId, MintedEvent> {
-        &self.minted_events
-    }
-
-    pub fn deposit_status(&self, deposit: &DepositId) -> Option<DepositStatus> {
-        let maybe_deposit_event = self.events_to_mint().get(deposit);
-        let maybe_mint_event = self.minted_events().get(deposit);
-
-        match (maybe_deposit_event, maybe_mint_event) {
-            (None, None) => None,
-            (Some(deposit_event), None) => Some(DepositStatus::Processing(
-                deposit_event.deposit_id.signature.into(),
-            )),
-            (None, Some(minted_event)) => Some(DepositStatus::Minted {
-                block_index: *minted_event.mint_block_index.get(),
-                minted_amount: minted_event.minted_amount,
-                signature: minted_event.deposit_event.deposit_id.signature.into(),
-            }),
-            (Some(_), Some(_)) => panic!(
-                "Found both event to mint and minted event for deposit with account {:?} and signature {:?}",
-                deposit.account, deposit.signature
-            ),
+    pub fn deposit_status(&self, deposit_id: &DepositId) -> Option<DepositStatus> {
+        if self.quarantined_deposit.contains(deposit_id) {
+            return Some(DepositStatus::Quarantined(deposit_id.signature.into()));
         }
+        if self.accepted_deposits.contains_key(deposit_id) {
+            return Some(DepositStatus::Processing(deposit_id.signature.into()));
+        }
+        if let Some(MintedDeposit {
+            block_index,
+            minted_amount,
+        }) = self.minted_deposits.get(deposit_id)
+        {
+            return Some(DepositStatus::Minted {
+                block_index: *block_index.get(),
+                minted_amount: *minted_amount,
+                signature: deposit_id.signature.into(),
+            });
+        }
+        None
     }
 
     pub fn sol_rpc_client<R: Runtime>(&self, runtime: R) -> SolRpcClient<R> {
@@ -218,28 +211,61 @@ impl State {
         self.validate()
     }
 
-    fn record_event_to_mint(&mut self, event: &DepositEvent) {
+    fn process_accepted_deposit(&mut self, event: &DepositEvent) {
+        let deposit_id = event.deposit_id;
         assert!(
-            !self.events_to_mint.contains_key(&event.deposit_id),
-            "There must not be two different events to mint for the same account and signature"
+            !self.quarantined_deposit.contains(&deposit_id),
+            "Attempted to accept already quarantined deposit: {deposit_id:?}"
         );
-        assert!(!self.minted_events.contains_key(&event.deposit_id));
-        self.events_to_mint.insert(event.deposit_id, event.clone());
+        assert!(
+            !self.minted_deposits.contains_key(&deposit_id),
+            "Attempted to accept an already minted deposit: {deposit_id:?}"
+        );
+        assert!(
+            self.accepted_deposits
+                .insert(deposit_id, event.amount_to_mint)
+                .is_none(),
+            "Attempted to accept an already accepted deposit: {deposit_id:?}"
+        );
     }
 
-    fn record_successful_mint(&mut self, event: &MintedEvent) {
-        assert_matches!(
-            self.events_to_mint.remove(&event.deposit_event.deposit_id),
-            Some(_),
-            "Attempted to mint ckSOL for an unknown event {:?}",
-            event.deposit_event
+    fn process_quarantined_deposit(&mut self, event: &DepositEvent) {
+        let deposit_id = event.deposit_id;
+        assert!(
+            !self.accepted_deposits.contains_key(&deposit_id),
+            "Attempted to quarantine an already accepted deposit: {deposit_id:?}"
         );
-        assert_eq!(
-            self.minted_events
-                .insert(event.deposit_event.deposit_id, event.clone()),
-            None,
-            "Attempted to mint ckSOL twice for the same event {:?}",
-            event.deposit_event
+        assert!(
+            !self.minted_deposits.contains_key(&deposit_id),
+            "Attempted to quarantine an already minted deposit: {deposit_id:?}"
+        );
+        assert!(
+            !self.quarantined_deposit.insert(deposit_id),
+            "Attempted to quarantine already quarantined deposit: {deposit_id:?}"
+        );
+    }
+
+    fn process_mint(&mut self, event: &MintedEvent) {
+        let deposit_id = event.deposit_event.deposit_id;
+        assert!(
+            !self.quarantined_deposit.contains(&deposit_id),
+            "Attempted to mint ckSOL for a quarantined deposit: {deposit_id:?}",
+        );
+        assert!(
+            self.accepted_deposits.remove(&deposit_id).is_some(),
+            "Attempted to mint ckSOL for an unknown deposit: {deposit_id:?}",
+        );
+        assert!(
+            self.minted_deposits
+                .insert(
+                    deposit_id,
+                    MintedDeposit {
+                        block_index: event.mint_block_index,
+                        minted_amount: event.minted_amount,
+                    }
+                )
+                .is_none(),
+            "Attempted to mint ckSOL twice for the same deposit: {deposit_id:?}",
         );
     }
 }
@@ -275,8 +301,9 @@ impl TryFrom<InitArgs> for State {
             minimum_withdrawal_amount,
             minimum_deposit_amount,
             pending_update_balance_requests: BTreeSet::new(),
-            events_to_mint: BTreeMap::new(),
-            minted_events: BTreeMap::new(),
+            accepted_deposits: BTreeMap::new(),
+            quarantined_deposit: BTreeSet::new(),
+            minted_deposits: BTreeMap::new(),
         };
         state.validate()?;
         Ok(state)
@@ -287,4 +314,10 @@ impl TryFrom<InitArgs> for State {
 pub struct SchnorrPublicKey {
     pub public_key: PublicKey,
     pub chain_code: [u8; 32],
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MintedDeposit {
+    block_index: LedgerMintIndex,
+    minted_amount: Lamport,
 }
