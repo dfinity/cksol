@@ -2,8 +2,8 @@ use crate::{events::MinterEventAssert, ledger_init_args::ledger_init_args};
 use candid::{CandidType, Decode, Encode, Nat, Principal, utils::ArgumentEncoder};
 use canlog::{Log, LogEntry};
 use cksol_types::{
-    Address, DepositStatus, GetDepositAddressArgs, MinterInfo, RetrieveSolArgs, RetrieveSolError,
-    RetrieveSolOk, RetrieveSolStatus, UpdateBalanceArgs, UpdateBalanceError,
+    Address, DepositStatus, GetDepositAddressArgs, MinterInfo, UpdateBalanceArgs,
+    UpdateBalanceError, WithdrawSolArgs, WithdrawSolError, WithdrawSolOk, WithdrawSolStatus,
 };
 use cksol_types_internal::event::{Event, GetEventsResult};
 use cksol_types_internal::{MinterArg, log::Priority};
@@ -12,11 +12,14 @@ use ic_http_types::{HttpRequest, HttpResponse};
 use ic_management_canister_types::{CanisterId, CanisterSettings};
 use ic_pocket_canister_runtime::{ExecuteHttpOutcallMocks, PocketIcRuntime};
 use icrc_ledger_types::icrc1::account::Account;
+use icrc_ledger_types::icrc2::approve::{ApproveArgs, ApproveError};
+use icrc_ledger_types::icrc3::blocks::{GetBlocksRequest, GetBlocksResult, ICRC3GenericBlock};
 use num_traits::cast::ToPrimitive;
 use pocket_ic::{PocketIcBuilder, RejectResponse, nonblocking::PocketIc};
 use serde::de::DeserializeOwned;
 use sol_rpc_client::SolRpcClient;
 use sol_rpc_types::{Lamport, RpcAccess};
+use std::vec;
 use std::{env::var, fs, path::PathBuf};
 
 pub mod events;
@@ -35,6 +38,7 @@ pub struct SetupBuilder {
     caller: Option<Principal>,
     make_live: Option<PocketIcMode>,
     sol_rpc_install_args: Option<sol_rpc_types::InstallArgs>,
+    initial_ledger_balances: Option<Vec<(Account, Nat)>>,
 }
 
 impl SetupBuilder {
@@ -44,6 +48,14 @@ impl SetupBuilder {
 
     pub fn with_caller(mut self, caller: Principal) -> Self {
         self.caller = Some(caller);
+        self
+    }
+
+    pub fn with_initial_ledger_balances(
+        mut self,
+        initial_ledger_balances: Vec<(Account, Nat)>,
+    ) -> Self {
+        self.initial_ledger_balances = Some(initial_ledger_balances);
         self
     }
 
@@ -62,6 +74,7 @@ impl SetupBuilder {
             self.caller,
             self.make_live.unwrap_or_default(),
             self.sol_rpc_install_args.unwrap_or_default(),
+            self.initial_ledger_balances,
         )
         .await
     }
@@ -85,6 +98,7 @@ impl Setup {
         caller: Option<Principal>,
         make_live: PocketIcMode,
         sol_rpc_install_args: sol_rpc_types::InstallArgs,
+        initial_ledger_balances: Option<Vec<(Account, Nat)>>,
     ) -> Self {
         let env = PocketIcBuilder::new()
             .with_nns_subnet() //make_live requires NNS subnet.
@@ -138,7 +152,11 @@ impl Setup {
         env.install_canister(
             ledger_canister_id,
             ledger_wasm().await,
-            Encode!(&ledger_init_args(minter_canister_id)).unwrap(),
+            Encode!(&ledger_init_args(
+                minter_canister_id,
+                initial_ledger_balances.unwrap_or(vec![])
+            ))
+            .unwrap(),
             Some(Self::DEFAULT_CONTROLLER),
         )
         .await;
@@ -197,6 +215,10 @@ impl Setup {
             runtime: self.runtime(),
             id: self.minter_canister_id,
         })
+    }
+
+    pub fn minter_canister_id(&self) -> Principal {
+        self.minter_canister_id
     }
 
     pub fn ledger(&self) -> Ledger<'_> {
@@ -263,16 +285,16 @@ impl CkSolMinter<'_> {
         self.0.try_update_call("update_balance", (args,)).await
     }
 
-    pub async fn retrieve_sol(
+    pub async fn withdraw_sol(
         &self,
-        args: RetrieveSolArgs,
-    ) -> Result<RetrieveSolOk, RetrieveSolError> {
-        self.0.update_call("retrieve_sol", (args,)).await
+        args: WithdrawSolArgs,
+    ) -> Result<WithdrawSolOk, WithdrawSolError> {
+        self.0.update_call("withdraw_sol", (args,)).await
     }
 
-    pub async fn retrieve_sol_status(&self, block_index: u64) -> RetrieveSolStatus {
+    pub async fn withdraw_sol_status(&self, block_index: u64) -> WithdrawSolStatus {
         self.0
-            .update_call("retrieve_sol_status", (block_index,))
+            .update_call("withdraw_sol_status", (block_index,))
             .await
     }
 
@@ -354,6 +376,42 @@ impl Ledger<'_> {
             .0
             .to_u64()
             .unwrap()
+    }
+
+    pub async fn approve(
+        &self,
+        from_subaccount: Option<[u8; 32]>,
+        amount: u64,
+        spender: Account,
+    ) -> u64 {
+        let args = ApproveArgs {
+            from_subaccount,
+            spender,
+            amount: Nat::from(amount),
+            expected_allowance: None,
+            expires_at: None,
+            fee: None,
+            memo: None,
+            created_at_time: None,
+        };
+        self.0
+            .update_call::<_, Result<Nat, ApproveError>>("icrc2_approve", (args,))
+            .await
+            .expect("approve call failed")
+            .0
+            .to_u64()
+            .unwrap()
+    }
+
+    pub async fn get_block(&self, block_index: u64) -> ICRC3GenericBlock {
+        let args = vec![GetBlocksRequest {
+            start: Nat::from(block_index),
+            length: Nat::from(1u64),
+        }];
+        let result: GetBlocksResult = self.0.query_call("icrc3_get_blocks", (args,)).await;
+        assert_eq!(result.blocks.len(), 1);
+        assert_eq!(result.blocks[0].id, Nat::from(block_index));
+        result.blocks[0].block.clone()
     }
 
     pub async fn stop(&self) {

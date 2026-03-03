@@ -1,4 +1,7 @@
-use crate::memo::{MAX_SERIALIZED_MEMO_BYTES, Memo as CkSolMinterMemo, MintMemo};
+use crate::{
+    BurnMemo,
+    memo::{MAX_SERIALIZED_MEMO_BYTES, Memo as CkSolMinterMemo, MintMemo},
+};
 use icrc_ledger_types::icrc1::transfer::Memo as Icrc1Memo;
 use proptest::prelude::*;
 
@@ -12,7 +15,10 @@ proptest! {
 }
 
 fn arb_memo() -> impl Strategy<Value = CkSolMinterMemo> {
-    arb_mint_memo().prop_map(CkSolMinterMemo::Mint)
+    prop_oneof![
+        arb_mint_memo().prop_map(CkSolMinterMemo::Mint),
+        arb_burn_memo().prop_map(CkSolMinterMemo::Burn)
+    ]
 }
 
 fn arb_mint_memo() -> impl Strategy<Value = MintMemo> {
@@ -23,4 +29,8 @@ fn arb_mint_memo() -> impl Strategy<Value = MintMemo> {
 
 fn arb_signature() -> impl Strategy<Value = solana_signature::Signature> {
     prop::array::uniform::<_, 64>(any::<u8>()).prop_map(solana_signature::Signature::from)
+}
+
+fn arb_burn_memo() -> impl Strategy<Value = BurnMemo> {
+    any::<[u8; 32]>().prop_map(|to_address| BurnMemo::Convert { to_address })
 }

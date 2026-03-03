@@ -17,6 +17,7 @@ icrc-ledger-types = { workspace = true }
 minicbor = { workspace = true, features = ["derive"] }
 serde = { workspace = true }
 sol_rpc_types = { workspace = true }
+solana-address = { workspace = true }
 solana-signature = { workspace = true }
 thiserror = { workspace = true }
 

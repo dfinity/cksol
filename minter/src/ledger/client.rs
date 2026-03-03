@@ -1,7 +1,10 @@
 use crate::numeric::LedgerMintIndex;
 use candid::Principal;
 use ic_canister_runtime::{IcError, Runtime};
-use icrc_ledger_types::icrc1::transfer::{BlockIndex, TransferArg, TransferError};
+use icrc_ledger_types::{
+    icrc1::transfer::{BlockIndex, TransferArg, TransferError},
+    icrc2::transfer_from::{TransferFromArgs, TransferFromError},
+};
 use num_traits::ToPrimitive;
 
 pub struct LedgerClient<R> {
@@ -40,5 +43,16 @@ impl<R: Runtime> LedgerClient<R> {
                         .into()
                 })
             })
+    }
+}
+
+impl<R: Runtime> LedgerClient<R> {
+    pub async fn transfer_from(
+        &self,
+        args: TransferFromArgs,
+    ) -> Result<Result<BlockIndex, TransferFromError>, IcError> {
+        self.runtime
+            .update_call(self.ledger_canister_id, "icrc2_transfer_from", (args,), 0)
+            .await
     }
 }

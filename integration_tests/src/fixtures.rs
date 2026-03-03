@@ -4,7 +4,10 @@ use cksol_types::{GetDepositAddressArgs, Signature, UpdateBalanceArgs};
 use ic_pocket_canister_runtime::{
     ExecuteHttpOutcallMocks, JsonRpcRequestMatcher, JsonRpcResponse, MockHttpOutcalls,
 };
-use icrc_ledger_types::icrc1::account::Account;
+use icrc_ledger_types::{
+    icrc::generic_value::{ICRC3Value, Value},
+    icrc1::account::Account,
+};
 use pocket_ic::nonblocking::PocketIc;
 use serde_json::json;
 use sol_rpc_types::Lamport;
@@ -139,4 +142,14 @@ impl ExecuteHttpOutcallMocks for SharedMockHttpOutcalls {
             .execute_http_outcall_mocks(runtime)
             .await
     }
+}
+
+pub fn get_memo(block: ICRC3Value) -> Vec<u8> {
+    let block: Value = block.into();
+    let block_map = block.as_map().expect("should be a map");
+    let tx = block_map.get("tx").expect("should have a tx");
+    let tx_map = tx.clone().as_map().expect("should be a map");
+    let memo = tx_map.get("memo").expect("should have a memo");
+    let memo_blob = memo.clone().as_blob().expect("memo should be a blob");
+    memo_blob.into_vec()
 }

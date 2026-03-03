@@ -27,6 +27,7 @@ ic-ed25519 = { workspace = true }
 ic-http-types = { workspace = true }
 ic-stable-structures = { workspace = true }
 icrc-cbor = { workspace = true }
+icrc-ledger-client-cdk = { workspace = true }
 icrc-ledger-types = { workspace = true }
 minicbor = { workspace = true, features = ["derive"] }
 num-traits = { workspace = true }
