@@ -2,8 +2,8 @@ use candid::Principal;
 use canlog::{Log, Sort};
 use cksol_minter::{runtime::IcCanisterRuntime, state::read_state};
 use cksol_types::{
-    Address, DepositStatus, GetDepositAddressArgs, MinterInfo, WithdrawSolArgs, WithdrawSolError,
-    WithdrawSolOk, WithdrawSolStatus, UpdateBalanceArgs, UpdateBalanceError,
+    Address, DepositStatus, GetDepositAddressArgs, MinterInfo, UpdateBalanceArgs,
+    UpdateBalanceError, WithdrawSolArgs, WithdrawSolError, WithdrawSolOk, WithdrawSolStatus,
 };
 use cksol_types_internal::{MinterArg, log::Priority};
 use ic_http_types::{HttpRequest, HttpResponse, HttpResponseBuilder};
