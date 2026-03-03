@@ -13,6 +13,10 @@ use solana_signature::Signature;
 const SOLANA_VALIDATOR_URL: &str = "http://localhost:8899";
 const PRINCIPAL: Principal = Principal::from_slice(&[0x9d, 0xf7, 0x99]);
 
+// TODO DEFI-2643: Add tests with more exotic transactions, e.g.:
+//  - a transaction with multiple transfer instructions to same target address: single mint with the summed up amount
+//  - a transaction with multiple instructions, not all to the same target address: only relevant amounts are considered.
+
 #[tokio::test(flavor = "multi_thread")]
 async fn should_update_balance() {
     const DEPOSIT_AMOUNT: Lamport = 2 * LAMPORTS_PER_SOL;
@@ -60,7 +64,6 @@ async fn should_update_balance() {
             signature: deposit_signature.into(),
         })
         .await;
-
     assert_matches!(result, Ok(DepositStatus::Minted {
         minted_amount,
         signature,
