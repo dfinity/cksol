@@ -3,7 +3,7 @@ use crate::{
     state::read_state,
     state::{
         audit::process_event,
-        event::{Deposit, EventType, MintedEvent},
+        event::{DepositId, EventType},
         mutate_state,
     },
 };
@@ -12,33 +12,34 @@ use derive_more::From;
 use ic_canister_runtime::IcError;
 use icrc_ledger_types::icrc1::transfer::{NumTokens, TransferArg, TransferError};
 use scopeguard::ScopeGuard;
+use sol_rpc_types::Lamport;
 use thiserror::Error;
 
 pub mod client;
 
 pub async fn mint<R: CanisterRuntime>(
     runtime: &R,
-    deposit: Deposit,
+    deposit_id: DepositId,
+    amount_to_mint: Lamport,
 ) -> Result<DepositStatus, MintError> {
-    let signature = deposit.deposit_id.signature;
+    let signature = deposit_id.signature;
     let mint_memo = MintMemo::convert(signature);
-    let minted_amount = deposit.amount_to_mint;
 
     // Ensure that even if we were to panic in the callback, after having contacted the ledger
     // to mint the tokens, this deposit will not be processed again.
-    let prevent_double_minting_guard = scopeguard::guard(deposit.clone(), |deposit| {
-        mutate_state(|s| process_event(s, EventType::QuarantinedDeposit(deposit), runtime));
+    let prevent_double_minting_guard = scopeguard::guard(deposit_id, |deposit_id| {
+        mutate_state(|s| process_event(s, EventType::QuarantinedDeposit(deposit_id), runtime));
     });
 
     let client = read_state(|state| state.ledger_client(runtime.inter_canister_call_runtime()));
     let block_index = match client
         .transfer(TransferArg {
             from_subaccount: None,
-            to: deposit.deposit_id.account,
+            to: deposit_id.account,
             fee: None,
             created_at_time: Some(runtime.time()),
             memo: Some(Memo::from(mint_memo).into()),
-            amount: NumTokens::from(minted_amount),
+            amount: NumTokens::from(amount_to_mint),
         })
         .await
         .map_err(MintError::from)
@@ -55,11 +56,10 @@ pub async fn mint<R: CanisterRuntime>(
     mutate_state(|s| {
         process_event(
             s,
-            EventType::Minted(MintedEvent {
-                deposit,
-                minted_amount,
+            EventType::Minted {
+                deposit_id,
                 mint_block_index: block_index,
-            }),
+            },
             runtime,
         )
     });
@@ -69,7 +69,7 @@ pub async fn mint<R: CanisterRuntime>(
 
     Ok(DepositStatus::Minted {
         block_index: *block_index.get(),
-        minted_amount,
+        minted_amount: amount_to_mint,
         signature: signature.into(),
     })
 }

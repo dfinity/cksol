@@ -1,11 +1,4 @@
-#[cfg(test)]
-mod tests;
-
-use crate::{
-    ledger::client::LedgerClient,
-    numeric::LedgerMintIndex,
-    state::event::{Deposit, DepositId, MintedEvent},
-};
+use crate::{ledger::client::LedgerClient, numeric::LedgerMintIndex, state::event::DepositId};
 use candid::Principal;
 use cksol_types::DepositStatus;
 use cksol_types_internal::{Ed25519KeyName, InitArgs, UpgradeArgs};
@@ -18,6 +11,9 @@ use std::{
     cell::RefCell,
     collections::{BTreeMap, BTreeSet},
 };
+
+#[cfg(test)]
+mod tests;
 
 pub mod audit;
 pub mod event;
@@ -75,7 +71,7 @@ pub struct State {
     minimum_deposit_amount: u64,
     pending_update_balance_requests: BTreeSet<Account>,
     accepted_deposits: BTreeMap<DepositId, Lamport>,
-    quarantined_deposit: BTreeSet<DepositId>,
+    quarantined_deposits: BTreeMap<DepositId, Lamport>,
     minted_deposits: BTreeMap<DepositId, MintedDeposit>,
 }
 
@@ -122,7 +118,7 @@ impl State {
     }
 
     pub fn deposit_status(&self, deposit_id: &DepositId) -> Option<DepositStatus> {
-        if self.quarantined_deposit.contains(deposit_id) {
+        if self.quarantined_deposits.contains_key(deposit_id) {
             return Some(DepositStatus::Quarantined(deposit_id.signature.into()));
         }
         if self.accepted_deposits.contains_key(deposit_id) {
@@ -211,57 +207,60 @@ impl State {
         self.validate()
     }
 
-    fn process_accepted_deposit(&mut self, event: &Deposit) {
-        let deposit_id = event.deposit_id;
+    fn process_accepted_deposit(&mut self, deposit_id: &DepositId, amount_to_mint: &Lamport) {
         assert!(
-            !self.quarantined_deposit.contains(&deposit_id),
+            !self.quarantined_deposits.contains_key(deposit_id),
             "Attempted to accept already quarantined deposit: {deposit_id:?}"
         );
         assert!(
-            !self.minted_deposits.contains_key(&deposit_id),
+            !self.minted_deposits.contains_key(deposit_id),
             "Attempted to accept an already minted deposit: {deposit_id:?}"
         );
         assert!(
             self.accepted_deposits
-                .insert(deposit_id, event.amount_to_mint)
+                .insert(*deposit_id, *amount_to_mint)
                 .is_none(),
             "Attempted to accept an already accepted deposit: {deposit_id:?}"
         );
     }
 
-    fn process_quarantined_deposit(&mut self, event: &Deposit) {
-        let deposit_id = event.deposit_id;
+    fn process_quarantined_deposit(&mut self, deposit_id: &DepositId) {
         assert!(
-            !self.minted_deposits.contains_key(&deposit_id),
+            !self.minted_deposits.contains_key(deposit_id),
             "Attempted to quarantine an already minted deposit: {deposit_id:?}"
         );
+        let amount_to_mint = self
+            .accepted_deposits
+            .remove(deposit_id)
+            .unwrap_or_else(|| {
+                panic!("Attempted to quarantine an unknown deposit: {deposit_id:?}")
+            });
         assert!(
-            self.accepted_deposits.remove(&deposit_id).is_some(),
-            "Attempted to quarantine an unknown deposit: {deposit_id:?}"
-        );
-        assert!(
-            self.quarantined_deposit.insert(deposit_id),
+            self.quarantined_deposits
+                .insert(*deposit_id, amount_to_mint)
+                .is_none(),
             "Attempted to quarantine already quarantined deposit: {deposit_id:?}"
         );
     }
 
-    fn process_mint(&mut self, event: &MintedEvent) {
-        let deposit_id = event.deposit.deposit_id;
+    fn process_mint(&mut self, deposit_id: &DepositId, mint_block_index: &LedgerMintIndex) {
         assert!(
-            !self.quarantined_deposit.contains(&deposit_id),
+            !self.quarantined_deposits.contains_key(deposit_id),
             "Attempted to mint ckSOL for a quarantined deposit: {deposit_id:?}",
         );
-        assert!(
-            self.accepted_deposits.remove(&deposit_id).is_some(),
-            "Attempted to mint ckSOL for an unknown deposit: {deposit_id:?}",
-        );
+        let amount_to_mint = self
+            .accepted_deposits
+            .remove(deposit_id)
+            .unwrap_or_else(|| {
+                panic!("Attempted to mint ckSOL for an unknown deposit: {deposit_id:?}")
+            });
         assert!(
             self.minted_deposits
                 .insert(
-                    deposit_id,
+                    *deposit_id,
                     MintedDeposit {
-                        block_index: event.mint_block_index,
-                        minted_amount: event.minted_amount,
+                        block_index: *mint_block_index,
+                        minted_amount: amount_to_mint,
                     }
                 )
                 .is_none(),
@@ -302,7 +301,7 @@ impl TryFrom<InitArgs> for State {
             minimum_deposit_amount,
             pending_update_balance_requests: BTreeSet::new(),
             accepted_deposits: BTreeMap::new(),
-            quarantined_deposit: BTreeSet::new(),
+            quarantined_deposits: BTreeMap::new(),
             minted_deposits: BTreeMap::new(),
         };
         state.validate()?;

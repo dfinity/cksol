@@ -41,7 +41,7 @@ mod state_from_init_args {
                 minimum_deposit_amount: MINIMUM_DEPOSIT_AMOUNT,
                 pending_update_balance_requests: BTreeSet::new(),
                 accepted_deposits: BTreeMap::new(),
-                quarantined_deposit: BTreeSet::new(),
+                quarantined_deposits: BTreeMap::new(),
                 minted_deposits: BTreeMap::new(),
             }
         );

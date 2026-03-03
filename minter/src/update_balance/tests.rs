@@ -1,15 +1,16 @@
 use crate::{
     runtime::TestCanisterRuntime,
-    state::event::{Deposit, DepositId, EventType, MintedEvent},
+    state::event::{DepositId, EventType},
     test_fixtures::{
         BLOCK_INDEX, DEPOSIT_FEE, EventsAssert,
         deposit::{
-            DEPOSIT_AMOUNT, DEPOSITOR_ACCOUNT, DEPOSITOR_PRINCIPAL, deposit, deposit_status_minted,
-            deposit_status_processing, deposit_status_quarantined, deposit_transaction,
-            deposit_transaction_signature, deposit_transaction_to_multiple_accounts,
+            DEPOSIT_AMOUNT, DEPOSITOR_ACCOUNT, DEPOSITOR_PRINCIPAL, accepted_deposit_event,
+            deposit_status_minted, deposit_status_processing, deposit_status_quarantined,
+            deposit_transaction, deposit_transaction_signature,
+            deposit_transaction_to_multiple_accounts,
             deposit_transaction_to_multiple_accounts_signature,
             deposit_transaction_to_wrong_address, deposit_transaction_to_wrong_address_signature,
-            minted_event,
+            minted_event, quarantined_deposit_event,
         },
         init_schnorr_master_key, init_state, init_state_with_args, valid_init_args,
     },
@@ -127,7 +128,7 @@ async fn should_return_processing_if_mint_fails() {
     assert_eq!(result, Ok(deposit_status_processing()));
 
     EventsAssert::from_recorded()
-        .expect_event_eq(EventType::AcceptedDeposit(deposit()))
+        .expect_event_eq(accepted_deposit_event())
         .assert_no_more_events();
 }
 
@@ -154,7 +155,7 @@ async fn should_return_processing_again_on_second_call() {
     assert_eq!(result, Ok(deposit_status_processing()));
 
     EventsAssert::from_recorded()
-        .expect_event_eq(EventType::AcceptedDeposit(deposit()))
+        .expect_event_eq(accepted_deposit_event())
         .assert_no_more_events();
 }
 
@@ -177,8 +178,8 @@ async fn should_succeed_with_valid_deposit_transaction() {
     assert_eq!(result, Ok(deposit_status_minted()));
 
     EventsAssert::from_recorded()
-        .expect_event_eq(EventType::AcceptedDeposit(deposit()))
-        .expect_event_eq(EventType::Minted(minted_event(BLOCK_INDEX)))
+        .expect_event_eq(accepted_deposit_event())
+        .expect_event_eq(minted_event(BLOCK_INDEX))
         .assert_no_more_events();
 }
 
@@ -204,8 +205,8 @@ async fn should_not_double_mint() {
 
     // Only one mint event recorded
     EventsAssert::from_recorded()
-        .expect_event_eq(EventType::AcceptedDeposit(deposit()))
-        .expect_event_eq(EventType::Minted(minted_event(BLOCK_INDEX)))
+        .expect_event_eq(accepted_deposit_event())
+        .expect_event_eq(minted_event(BLOCK_INDEX))
         .assert_no_more_events();
 }
 
@@ -240,8 +241,8 @@ async fn should_quarantine_deposit() {
 
     // Only one mint event recorded
     EventsAssert::from_recorded()
-        .expect_event_eq(EventType::AcceptedDeposit(deposit()))
-        .expect_event_eq(EventType::QuarantinedDeposit(deposit()))
+        .expect_event_eq(accepted_deposit_event())
+        .expect_event_eq(quarantined_deposit_event())
         .assert_no_more_events();
 }
 
@@ -300,22 +301,19 @@ async fn should_allow_deposits_to_multiple_accounts_with_single_transaction() {
 
     let mut events_assert = EventsAssert::from_recorded();
     for i in 0..3 {
-        let deposit = Deposit {
-            deposit_id: DepositId {
-                signature: deposit_transaction_to_multiple_accounts_signature(),
-                account: ACCOUNTS[i],
-            },
-            deposit_amount: DEPOSIT_AMOUNTS[i],
-            amount_to_mint: DEPOSIT_AMOUNTS[i] - DEPOSIT_FEE,
-        };
-        let minted_event = MintedEvent {
-            deposit: deposit.clone(),
-            minted_amount: DEPOSIT_AMOUNTS[i] - DEPOSIT_FEE,
-            mint_block_index: BLOCK_INDEXES[i].into(),
+        let deposit_id = DepositId {
+            signature: deposit_transaction_to_multiple_accounts_signature(),
+            account: ACCOUNTS[i],
         };
         events_assert = events_assert
-            .expect_event_eq(EventType::AcceptedDeposit(deposit))
-            .expect_event_eq(EventType::Minted(minted_event))
+            .expect_event_eq(EventType::AcceptedDeposit {
+                deposit_id,
+                amount_to_mint: DEPOSIT_AMOUNTS[i] - DEPOSIT_FEE,
+            })
+            .expect_event_eq(EventType::Minted {
+                deposit_id,
+                mint_block_index: BLOCK_INDEXES[i].into(),
+            })
     }
     events_assert.assert_no_more_events();
 }

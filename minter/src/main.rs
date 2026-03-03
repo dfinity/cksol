@@ -94,22 +94,19 @@ fn get_events(
         match event_type {
             EventType::Init(args) => event::EventType::Init(args),
             EventType::Upgrade(args) => event::EventType::Upgrade(args),
-            EventType::AcceptedDeposit(deposit) => event::EventType::AcceptedDeposit {
-                signature: deposit.deposit_id.signature.into(),
-                account: deposit.deposit_id.account,
-                deposit_amount: deposit.deposit_amount,
-                amount_to_mint: deposit.amount_to_mint,
+            EventType::AcceptedDeposit{ deposit_id, amount_to_mint } => event::EventType::AcceptedDeposit {
+                signature: deposit_id.signature.into(),
+                account: deposit_id.account,
+                amount_to_mint,
             },
-            EventType::Minted(minted_event) => event::EventType::Minted {
-                signature: minted_event.deposit.deposit_id.signature.into(),
-                account: minted_event.deposit.deposit_id.account,
-                mint_block_index: *minted_event.mint_block_index.get(),
+            EventType::Minted{ deposit_id, mint_block_index } => event::EventType::Minted {
+                signature: deposit_id.signature.into(),
+                account: deposit_id.account,
+                mint_block_index: *mint_block_index.get(),
             },
-            EventType::QuarantinedDeposit(deposit) => event::EventType::QuarantinedDeposit {
-                signature: deposit.deposit_id.signature.into(),
-                account: deposit.deposit_id.account,
-                deposit_amount: deposit.deposit_amount,
-                amount_to_mint: deposit.amount_to_mint,
+            EventType::QuarantinedDeposit(deposit_id) => event::EventType::QuarantinedDeposit {
+                signature: deposit_id.signature.into(),
+                account: deposit_id.account,
             },
         }
     }

@@ -33,7 +33,12 @@ pub enum EventType {
     /// deposit for the given account. ckSOL tokens have not yet been
     /// minted for this deposit.
     #[n(2)]
-    AcceptedDeposit(#[n(0)] Deposit),
+    AcceptedDeposit {
+        #[n(0)]
+        deposit_id: DepositId,
+        #[n(1)]
+        amount_to_mint: Lamport,
+    },
     /// The minter discovered a Solana transaction that is a valid ckSOL
     /// deposit, but it is unknown whether ckSOL tokens were minted for
     /// it or not, most likely because there was an unexpected panic in
@@ -42,10 +47,14 @@ pub enum EventType {
     /// The deposit is quarantined to avoid any double minting and
     /// will not be further processed without manual intervention.
     #[n(3)]
-    QuarantinedDeposit(#[n(0)] Deposit),
-    /// The minter minted ckSOL in response to a deposit.
+    QuarantinedDeposit(#[n(0)] DepositId),
     #[n(4)]
-    Minted(#[n(0)] MintedEvent),
+    Minted {
+        #[n(0)]
+        deposit_id: DepositId,
+        #[cbor(n(1), with = "cbor::id")]
+        mint_block_index: LedgerMintIndex,
+    },
 }
 
 #[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd, Debug, Decode, Encode)]
@@ -54,26 +63,6 @@ pub struct DepositId {
     pub signature: Signature,
     #[n(1)]
     pub account: Account,
-}
-
-#[derive(Clone, Eq, Ord, PartialEq, PartialOrd, Debug, Decode, Encode)]
-pub struct Deposit {
-    #[n(0)]
-    pub deposit_id: DepositId,
-    #[n(1)]
-    pub deposit_amount: Lamport,
-    #[n(2)]
-    pub amount_to_mint: Lamport,
-}
-
-#[derive(Clone, Eq, Ord, PartialEq, PartialOrd, Debug, Decode, Encode)]
-pub struct MintedEvent {
-    #[n(0)]
-    pub deposit: Deposit,
-    #[n(1)]
-    pub minted_amount: Lamport,
-    #[cbor(n(2), with = "cbor::id")]
-    pub mint_block_index: LedgerMintIndex,
 }
 
 impl Storable for Event {
