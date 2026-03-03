@@ -15,8 +15,16 @@ mod memo;
 /// The outcome of processing a Solana deposit transaction.
 #[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize, Serialize)]
 pub enum DepositStatus {
-    /// The transaction is a valid deposit, but the minter failed to mint ckSOL on the ledger.
+    /// The transaction is a valid deposit, but the corresponding ckSOL tokens
+    /// have not yet been minted.
     Processing(Signature),
+    /// The transaction is a valid deposit, but it is unknown whether the
+    /// corresponding ckSOL tokens have been minted, most likely because there
+    /// was an unexpected panic while trying to mint.
+    ///
+    /// The deposit is quarantined to avoid any double minting and will not
+    /// be further processed without manual intervention.
+    Quarantined(Signature),
     /// The minter accepted the deposit and minted ckSOL tokens on the ledger.
     Minted {
         /// The mint transaction index on the ledger.
@@ -74,8 +82,15 @@ pub enum UpdateBalanceError {
     #[error("The transaction is not a valid deposit: {0}")]
     InvalidDepositTransaction(String),
     /// The deposit amount does not cover the deposit fee.
-    #[error("The deposit amount does not cover the deposit fee")]
-    ValueTooSmall,
+    #[error(
+        "Insufficient deposit amount: expected at least {minimum_deposit_amount} lamports, but got {deposit_amount} lamports"
+    )]
+    ValueTooSmall {
+        /// The minimum deposit amount for the deposit to be accepted.
+        minimum_deposit_amount: Lamport,
+        /// The amount that was deposited.
+        deposit_amount: Lamport,
+    },
 }
 
 /// Arguments for a request to the `withdraw_sol` ckSOL minter endpoint.

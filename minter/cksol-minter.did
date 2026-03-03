@@ -6,6 +6,12 @@
 // [account]: https://solana.com/docs/core/accounts
 type Address = text;
 
+// Represents an account on the ckSOL ledger.
+type Account = record {
+    owner: principal;
+    subaccount: opt blob;
+};
+
 // The ID of one of the ICP root keys.
 type Ed25519KeyName = variant {
     MainnetTestKey1;
@@ -60,7 +66,12 @@ type UpdateBalanceError = variant {
     // deposit to the owner's deposit address.
     InvalidDepositTransaction : text;
     // The deposit amount does not cover the deposit fee.
-    ValueTooSmall;
+    ValueTooSmall : record {
+        // The minimum deposit amount for the deposit to be accepted.
+        minimum_deposit_amount: Lamport;
+        // The amount that was deposited.
+        deposit_amount: Lamport;
+    };
 };
 
 // The outcome of processing a Solana deposit transaction.
@@ -68,6 +79,13 @@ type DepositStatus = variant {
     // The transaction is a valid deposit, but the minter failed to mint ckSOL on the ledger.
     // The caller should retry the `update_balance` call.
     Processing : Signature;
+    // The transaction is a valid deposit, but it is unknown whether the
+    // corresponding ckSOL tokens have been minted, most likely because there
+    // was an unexpected panic while trying to mint.
+    //
+    // The deposit is quarantined to avoid any double minting and will not
+    // be further processed without manual intervention.
+    Quarantined : Signature;
     // The minter accepted the deposit and minted ckSOL tokens on the ledger.
     Minted : record {
         // The MINT transaction index on the ledger.
@@ -180,8 +198,46 @@ type WithdrawSolStatus = variant {
 
 // A minter event payload.
 type EventType = variant {
+    // The minter initialization event.
+    // Must be the first event in the log.
     Init : InitArgs;
+    // The minter upgraded with the specified arguments.
     Upgrade : UpgradeArgs;
+    // The minter discovered a Solana transaction that is a valid ckSOL
+    // deposit for the given account. ckSOL tokens have not yet been
+    // minted for this deposit.
+    AcceptedDeposit : record {
+        // The signature of the Solana deposit transaction.
+        signature: Signature;
+        // The account to which the minter should mint ckSOL.
+        account: Account;
+        // The amount of ckSOL tokens to mint for this deposit.
+        // This amount is generally lower than `deposit_amount` due
+        // to the deposit fee.
+        amount_to_mint: Lamport;
+    };
+    // The minter discovered a Solana transaction that is a valid ckSOL
+    // deposit, but it is unknown whether ckSOL tokens were minted for
+    // it or not, most likely because there was an unexpected panic in
+    // the callback.
+    //
+    // The deposit is quarantined to avoid any double minting and
+    // will not be further processed without manual intervention.
+    QuarantinedDeposit : record {
+        // The signature of the Solana deposit transaction.
+        signature: Signature;
+        // The account to which the minter should mint ckSOL.
+        account: Account;
+    };
+    // The minter minted ckSOL in response to a deposit.
+    Minted : record {
+        // The signature of the Solana deposit transaction.
+        signature: Signature;
+        // The account to which the minter minted ckSOL.
+        account: Account;
+        // The transaction index on the ckSOL ledger.
+        mint_block_index: nat64;
+    };
 };
 
 // A minter event.
