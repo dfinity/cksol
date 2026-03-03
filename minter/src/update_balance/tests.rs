@@ -1,12 +1,11 @@
-use crate::state::event::DepositId;
 use crate::{
     runtime::TestCanisterRuntime,
-    state::event::{DepositEvent, EventType, MintedEvent},
+    state::event::{Deposit, DepositId, EventType, MintedEvent},
     test_fixtures::{
         BLOCK_INDEX, DEPOSIT_FEE, EventsAssert,
         deposit::{
-            DEPOSIT_AMOUNT, DEPOSITOR_ACCOUNT, DEPOSITOR_PRINCIPAL, accepted_deposit_event,
-            deposit_status_minted, deposit_status_processing, deposit_transaction,
+            DEPOSIT_AMOUNT, DEPOSITOR_ACCOUNT, DEPOSITOR_PRINCIPAL, deposit, deposit_status_minted,
+            deposit_status_processing, deposit_status_quarantined, deposit_transaction,
             deposit_transaction_signature, deposit_transaction_to_multiple_accounts,
             deposit_transaction_to_multiple_accounts_signature,
             deposit_transaction_to_wrong_address, deposit_transaction_to_wrong_address_signature,
@@ -26,6 +25,7 @@ use icrc_ledger_types::icrc1::{
     transfer::{BlockIndex, TransferError},
 };
 use sol_rpc_types::{EncodedConfirmedTransactionWithStatusMeta, Lamport, MultiRpcResult};
+use std::panic;
 
 type GetTransactionResult = MultiRpcResult<Option<EncodedConfirmedTransactionWithStatusMeta>>;
 
@@ -127,7 +127,7 @@ async fn should_return_processing_if_mint_fails() {
     assert_eq!(result, Ok(deposit_status_processing()));
 
     EventsAssert::from_recorded()
-        .expect_event_eq(EventType::AcceptedDeposit(accepted_deposit_event()))
+        .expect_event_eq(EventType::AcceptedDeposit(deposit()))
         .assert_no_more_events();
 }
 
@@ -154,7 +154,7 @@ async fn should_return_processing_again_on_second_call() {
     assert_eq!(result, Ok(deposit_status_processing()));
 
     EventsAssert::from_recorded()
-        .expect_event_eq(EventType::AcceptedDeposit(accepted_deposit_event()))
+        .expect_event_eq(EventType::AcceptedDeposit(deposit()))
         .assert_no_more_events();
 }
 
@@ -177,7 +177,7 @@ async fn should_succeed_with_valid_deposit_transaction() {
     assert_eq!(result, Ok(deposit_status_minted()));
 
     EventsAssert::from_recorded()
-        .expect_event_eq(EventType::AcceptedDeposit(accepted_deposit_event()))
+        .expect_event_eq(EventType::AcceptedDeposit(deposit()))
         .expect_event_eq(EventType::Minted(minted_event(BLOCK_INDEX)))
         .assert_no_more_events();
 }
@@ -204,8 +204,44 @@ async fn should_not_double_mint() {
 
     // Only one mint event recorded
     EventsAssert::from_recorded()
-        .expect_event_eq(EventType::AcceptedDeposit(accepted_deposit_event()))
+        .expect_event_eq(EventType::AcceptedDeposit(deposit()))
         .expect_event_eq(EventType::Minted(minted_event(BLOCK_INDEX)))
+        .assert_no_more_events();
+}
+
+#[tokio::test]
+async fn should_quarantine_deposit() {
+    init_state();
+    init_schnorr_master_key();
+
+    // Don't mock the ledger response so the runtime panics when calling it to mint
+    let get_transaction_response =
+        GetTransactionResult::Consistent(Ok(Some(deposit_transaction().try_into().unwrap())));
+    let runtime = || {
+        TestCanisterRuntime::new()
+            .with_increasing_time()
+            .add_stub_response(get_transaction_response)
+    };
+    let result = tokio::spawn(async move {
+        update_balance(
+            runtime(),
+            DEPOSITOR_ACCOUNT,
+            deposit_transaction_signature(),
+        )
+        .await
+    })
+    .await;
+    assert!(result.is_err_and(|e| e.is_panic()));
+
+    // On the second call, the deposit should have been quarantined
+    let runtime = TestCanisterRuntime::new();
+    let result = update_balance(runtime, DEPOSITOR_ACCOUNT, deposit_transaction_signature()).await;
+    assert_eq!(result, Ok(deposit_status_quarantined()));
+
+    // Only one mint event recorded
+    EventsAssert::from_recorded()
+        .expect_event_eq(EventType::AcceptedDeposit(deposit()))
+        .expect_event_eq(EventType::QuarantinedDeposit(deposit()))
         .assert_no_more_events();
 }
 
@@ -264,7 +300,7 @@ async fn should_allow_deposits_to_multiple_accounts_with_single_transaction() {
 
     let mut events_assert = EventsAssert::from_recorded();
     for i in 0..3 {
-        let accepted_deposit_event = DepositEvent {
+        let deposit = Deposit {
             deposit_id: DepositId {
                 signature: deposit_transaction_to_multiple_accounts_signature(),
                 account: ACCOUNTS[i],
@@ -273,12 +309,12 @@ async fn should_allow_deposits_to_multiple_accounts_with_single_transaction() {
             amount_to_mint: DEPOSIT_AMOUNTS[i] - DEPOSIT_FEE,
         };
         let minted_event = MintedEvent {
-            deposit_event: accepted_deposit_event.clone(),
+            deposit: deposit.clone(),
             minted_amount: DEPOSIT_AMOUNTS[i] - DEPOSIT_FEE,
             mint_block_index: BLOCK_INDEXES[i].into(),
         };
         events_assert = events_assert
-            .expect_event_eq(EventType::AcceptedDeposit(accepted_deposit_event))
+            .expect_event_eq(EventType::AcceptedDeposit(deposit))
             .expect_event_eq(EventType::Minted(minted_event))
     }
     events_assert.assert_no_more_events();

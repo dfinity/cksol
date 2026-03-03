@@ -31,6 +31,7 @@ icrc-ledger-types = { workspace = true }
 minicbor = { workspace = true, features = ["derive"] }
 num-traits = { workspace = true }
 phantom_newtype = { workspace = true }
+scopeguard = { workspace = true }
 serde = { workspace = true }
 sol_rpc_client = { workspace = true }
 sol_rpc_types = { workspace = true }

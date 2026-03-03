@@ -780,6 +780,7 @@ dependencies = [
  "num-traits",
  "phantom_newtype",
  "proptest",
+ "scopeguard",
  "serde",
  "sol_rpc_client",
  "sol_rpc_types",

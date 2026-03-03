@@ -2,7 +2,7 @@ use crate::{
     numeric::LedgerMintIndex,
     state::{
         SchnorrPublicKey, State,
-        event::{DepositEvent, DepositId, Event, EventType, MintedEvent},
+        event::{Deposit, DepositId, Event, EventType, MintedEvent},
         init_once_state, mutate_state,
     },
     storage::with_event_iter,
@@ -160,6 +160,10 @@ pub mod deposit {
         DepositStatus::Processing(deposit_transaction_signature().into())
     }
 
+    pub fn deposit_status_quarantined() -> DepositStatus {
+        DepositStatus::Quarantined(deposit_transaction_signature().into())
+    }
+
     pub fn deposit_status_minted() -> DepositStatus {
         DepositStatus::Minted {
             block_index: BLOCK_INDEX,
@@ -170,14 +174,14 @@ pub mod deposit {
 
     pub fn minted_event(mint_block_index: impl Into<LedgerMintIndex>) -> MintedEvent {
         MintedEvent {
-            deposit_event: accepted_deposit_event(),
+            deposit: deposit(),
             minted_amount: DEPOSIT_AMOUNT - DEPOSIT_FEE,
             mint_block_index: mint_block_index.into(),
         }
     }
 
-    pub fn accepted_deposit_event() -> DepositEvent {
-        DepositEvent {
+    pub fn deposit() -> Deposit {
+        Deposit {
             deposit_id: DepositId {
                 signature: deposit_transaction_signature(),
                 account: DEPOSITOR_ACCOUNT,

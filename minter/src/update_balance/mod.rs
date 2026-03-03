@@ -5,7 +5,7 @@ use crate::{
     runtime::CanisterRuntime,
     state::{
         audit::process_event,
-        event::{DepositEvent, DepositId, EventType},
+        event::{Deposit, DepositId, EventType},
         mutate_state, read_state,
     },
     transaction::{get_deposit_amount_to_address, try_get_transaction},
@@ -65,17 +65,13 @@ pub async fn update_balance<R: CanisterRuntime>(
         .checked_sub(read_state(|state| state.deposit_fee()))
         .expect("BUG: deposit amount is less than deposit fee");
 
-    let deposit_event = DepositEvent {
+    let deposit = Deposit {
         deposit_id: DepositId { signature, account },
         deposit_amount,
         amount_to_mint,
     };
     mutate_state(|state| {
-        process_event(
-            state,
-            EventType::AcceptedDeposit(deposit_event.clone()),
-            &runtime,
-        )
+        process_event(state, EventType::AcceptedDeposit(deposit.clone()), &runtime)
     });
 
     // TODO DEFI-2643: If minting fails, we should try again later automatically (i.e. set up a
@@ -85,7 +81,7 @@ pub async fn update_balance<R: CanisterRuntime>(
     //  event, i.e. watch out for race conditions!
     // TODO DEFI-2643: Handle the case where the mint calls panic with a scopeguard, similar to the
     //  ckBTC minter.
-    match mint(&runtime, deposit_event).await {
+    match mint(&runtime, deposit).await {
         Ok(deposit_status) => Ok(deposit_status),
         Err(e) => {
             log!(

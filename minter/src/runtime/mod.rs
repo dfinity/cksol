@@ -1,8 +1,10 @@
 use candid::CandidType;
 use ic_canister_runtime::{IcError, IcRuntime, Runtime, StubRuntime};
-use std::cell::RefCell;
-use std::fmt::Debug;
-use std::iter;
+use std::{
+    fmt::Debug,
+    iter,
+    sync::{Arc, Mutex},
+};
 
 pub trait CanisterRuntime {
     fn inter_canister_call_runtime(&self) -> impl Runtime;
@@ -35,16 +37,16 @@ impl CanisterRuntime for IcCanisterRuntime {
 
 pub struct TestCanisterRuntime {
     inter_canister_call_runtime: StubRuntime,
-    times: RefCell<Box<dyn Iterator<Item = u64>>>,
-    instruction_counts: RefCell<Box<dyn Iterator<Item = u64>>>,
+    times: Arc<Mutex<dyn Iterator<Item = u64> + Send + Sync>>,
+    instruction_counts: Arc<Mutex<dyn Iterator<Item = u64> + Send + Sync>>,
 }
 
 impl Default for TestCanisterRuntime {
     fn default() -> Self {
         Self {
             inter_canister_call_runtime: Default::default(),
-            times: RefCell::new(Box::new(iter::empty())),
-            instruction_counts: RefCell::new(Box::new(iter::empty())),
+            times: Arc::new(Mutex::new(iter::empty())),
+            instruction_counts: Arc::new(Mutex::new(iter::empty())),
         }
     }
 }
@@ -66,12 +68,16 @@ impl TestCanisterRuntime {
     }
 
     pub fn with_increasing_time(mut self) -> Self {
-        self.times = RefCell::new(Box::new(0..));
+        self.times = Arc::new(Mutex::new(0..));
         self
     }
 
-    pub fn with_stub_times(mut self, times: impl IntoIterator<Item = u64> + 'static) -> Self {
-        self.times = RefCell::new(Box::new(times.into_iter()));
+    pub fn with_stub_times<I>(mut self, times: I) -> Self
+    where
+        I: IntoIterator<Item = u64> + 'static,
+        <I as IntoIterator>::IntoIter: Send + Sync,
+    {
+        self.times = Arc::new(Mutex::new(times.into_iter()));
         self
     }
 }
@@ -83,12 +89,17 @@ impl CanisterRuntime for TestCanisterRuntime {
     }
 
     fn time(&self) -> u64 {
-        self.times.borrow_mut().next().expect("No more stub times!")
+        self.times
+            .try_lock()
+            .unwrap()
+            .next()
+            .expect("No more stub times!")
     }
 
     fn instruction_counter(&self) -> u64 {
         self.instruction_counts
-            .borrow_mut()
+            .try_lock()
+            .unwrap()
             .next()
             .expect("No more stub instruction counts!")
     }

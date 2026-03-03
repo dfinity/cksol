@@ -4,7 +4,7 @@ mod tests;
 use crate::{
     ledger::client::LedgerClient,
     numeric::LedgerMintIndex,
-    state::event::{DepositEvent, DepositId, MintedEvent},
+    state::event::{Deposit, DepositId, MintedEvent},
 };
 use candid::Principal;
 use cksol_types::DepositStatus;
@@ -211,7 +211,7 @@ impl State {
         self.validate()
     }
 
-    fn process_accepted_deposit(&mut self, event: &DepositEvent) {
+    fn process_accepted_deposit(&mut self, event: &Deposit) {
         let deposit_id = event.deposit_id;
         assert!(
             !self.quarantined_deposit.contains(&deposit_id),
@@ -229,24 +229,24 @@ impl State {
         );
     }
 
-    fn process_quarantined_deposit(&mut self, event: &DepositEvent) {
+    fn process_quarantined_deposit(&mut self, event: &Deposit) {
         let deposit_id = event.deposit_id;
-        assert!(
-            !self.accepted_deposits.contains_key(&deposit_id),
-            "Attempted to quarantine an already accepted deposit: {deposit_id:?}"
-        );
         assert!(
             !self.minted_deposits.contains_key(&deposit_id),
             "Attempted to quarantine an already minted deposit: {deposit_id:?}"
         );
         assert!(
-            !self.quarantined_deposit.insert(deposit_id),
+            self.accepted_deposits.remove(&deposit_id).is_some(),
+            "Attempted to quarantine an unknown deposit: {deposit_id:?}"
+        );
+        assert!(
+            self.quarantined_deposit.insert(deposit_id),
             "Attempted to quarantine already quarantined deposit: {deposit_id:?}"
         );
     }
 
     fn process_mint(&mut self, event: &MintedEvent) {
-        let deposit_id = event.deposit_event.deposit_id;
+        let deposit_id = event.deposit.deposit_id;
         assert!(
             !self.quarantined_deposit.contains(&deposit_id),
             "Attempted to mint ckSOL for a quarantined deposit: {deposit_id:?}",
