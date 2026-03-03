@@ -24,6 +24,7 @@ fn apply_state_transition(state: &mut State, payload: &EventType) {
                 .upgrade(upgrade_arg.clone())
                 .expect("applying upgrade event should succeed");
         }
+        EventType::WithdrawalBurned(_) => {}
     }
 }
 

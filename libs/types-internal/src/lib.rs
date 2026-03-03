@@ -74,6 +74,21 @@ pub struct UpgradeArgs {
     pub withdrawal_fee: Option<Lamport>,
 }
 
+/// Payload of the `WithdrawalBurned` event.
+#[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize)]
+#[cfg_attr(feature = "event", derive(minicbor::Encode, minicbor::Decode))]
+pub struct BurnEvent {
+    /// The burn transaction index on the ckSOL ledger.
+    #[cfg_attr(feature = "event", n(0))]
+    pub burn_block_index: u64,
+    /// The total amount burned from the user (in lamports).
+    #[cfg_attr(feature = "event", n(1))]
+    pub withdrawal_amount: Lamport,
+    /// The fee retained by the minter (in lamports).
+    #[cfg_attr(feature = "event", n(2))]
+    pub withdrawal_fee: Lamport,
+}
+
 /// The ID of one of the ICP root keys.
 /// See the [tEdDSA documentation](https://internetcomputer.org/docs/building-apps/network-features/signatures/t-schnorr#signing-messages-and-transactions)
 /// for more details.

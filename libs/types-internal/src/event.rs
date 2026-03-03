@@ -1,6 +1,6 @@
 //! Candid-compatible event types for the ckSOL minter.
 
-use crate::{InitArgs, UpgradeArgs};
+use crate::{BurnEvent, InitArgs, UpgradeArgs};
 use candid::CandidType;
 use serde::Deserialize;
 
@@ -21,6 +21,8 @@ pub enum EventType {
     Init(InitArgs),
     /// The minter upgraded with the specified arguments.
     Upgrade(UpgradeArgs),
+    /// The minter burned ckSOL for a withdrawal request.
+    WithdrawalBurned(BurnEvent),
 }
 
 /// Arguments for the `get_events` endpoint.

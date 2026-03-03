@@ -181,10 +181,18 @@ type WithdrawSolStatus = variant {
     TxFinalized : TxFinalizedStatus;
 };
 
+// Payload of the WithdrawalBurned event.
+type BurnEvent = record {
+    burn_block_index : nat64;
+    withdrawal_amount : Lamport;
+    withdrawal_fee : Lamport;
+};
+
 // A minter event payload.
 type EventType = variant {
     Init : InitArgs;
     Upgrade : UpgradeArgs;
+    WithdrawalBurned : BurnEvent;
 };
 
 // A minter event.

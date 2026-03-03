@@ -1,4 +1,4 @@
-use cksol_types_internal::{InitArgs, UpgradeArgs};
+use cksol_types_internal::{BurnEvent, InitArgs, UpgradeArgs};
 use ic_stable_structures::Storable;
 use ic_stable_structures::storable::Bound;
 use minicbor::{Decode, Encode};
@@ -23,6 +23,9 @@ pub enum EventType {
     /// The minter upgraded with the specified arguments.
     #[n(1)]
     Upgrade(#[n(0)] UpgradeArgs),
+    /// The minter burned ckSOL for a withdrawal request.
+    #[n(2)]
+    WithdrawalBurned(#[n(0)] BurnEvent),
 }
 
 impl Storable for Event {
