@@ -97,6 +97,7 @@ pub async fn withdraw_sol<R: CanisterRuntime>(
                 burn_block_index: block_index,
                 withdrawal_amount: amount,
                 withdrawal_fee,
+                solana_address: solana_address.to_bytes(),
             }),
             &runtime,
         )

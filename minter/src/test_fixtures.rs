@@ -135,11 +135,12 @@ pub mod arb {
     }
 
     pub fn arb_burn_event() -> impl Strategy<Value = BurnEvent> {
-        (any::<u64>(), any::<u64>(), any::<u64>()).prop_map(
-            |(burn_block_index, withdrawal_amount, withdrawal_fee)| BurnEvent {
+        (any::<u64>(), any::<u64>(), any::<u64>(), any::<[u8; 32]>()).prop_map(
+            |(burn_block_index, withdrawal_amount, withdrawal_fee, solana_address)| BurnEvent {
                 burn_block_index,
                 withdrawal_amount,
                 withdrawal_fee,
+                solana_address,
             },
         )
     }

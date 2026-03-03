@@ -87,6 +87,9 @@ pub struct BurnEvent {
     /// The fee retained by the minter (in lamports).
     #[cfg_attr(feature = "event", n(2))]
     pub withdrawal_fee: Lamport,
+    /// The destination Solana address.
+    #[cfg_attr(feature = "event", n(3), cbor(with = "minicbor::bytes"))]
+    pub solana_address: [u8; 32],
 }
 
 /// The ID of one of the ICP root keys.
