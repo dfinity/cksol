@@ -64,6 +64,7 @@ pub struct State {
     ledger_canister_id: Principal,
     sol_rpc_canister_id: Principal,
     deposit_fee: u64,
+    withdrawal_fee: u64,
     minimum_withdrawal_amount: u64,
     minimum_deposit_amount: u64,
     pending_update_balance_requests: BTreeSet<Account>,
@@ -102,6 +103,10 @@ impl State {
 
     pub fn deposit_fee(&self) -> u64 {
         self.deposit_fee
+    }
+
+    pub fn withdrawal_fee(&self) -> u64 {
+        self.withdrawal_fee
     }
 
     pub fn minimum_withdrawal_amount(&self) -> u64 {
@@ -158,6 +163,12 @@ impl State {
                 deposit_fee: self.deposit_fee,
             });
         }
+        if self.minimum_withdrawal_amount < self.withdrawal_fee {
+            return Err(InvalidStateError::InvalidMinimumWithdrawalAmount {
+                minimum_withdrawal_amount: self.minimum_withdrawal_amount,
+                withdrawal_fee: self.withdrawal_fee,
+            });
+        }
         Ok(())
     }
 
@@ -168,6 +179,7 @@ impl State {
             deposit_fee,
             minimum_withdrawal_amount,
             minimum_deposit_amount,
+            withdrawal_fee,
         }: UpgradeArgs,
     ) -> Result<(), InvalidStateError> {
         if let Some(sol_rpc_canister_id) = sol_rpc_canister_id {
@@ -175,6 +187,9 @@ impl State {
         }
         if let Some(deposit_fee) = deposit_fee {
             self.deposit_fee = deposit_fee;
+        }
+        if let Some(withdrawal_fee) = withdrawal_fee {
+            self.withdrawal_fee = withdrawal_fee;
         }
         if let Some(minimum_withdrawal_amount) = minimum_withdrawal_amount {
             self.minimum_withdrawal_amount = minimum_withdrawal_amount;
@@ -193,6 +208,10 @@ pub enum InvalidStateError {
         minimum_deposit_amount: u64,
         deposit_fee: u64,
     },
+    InvalidMinimumWithdrawalAmount {
+        minimum_withdrawal_amount: u64,
+        withdrawal_fee: u64,
+    },
 }
 
 impl TryFrom<InitArgs> for State {
@@ -206,6 +225,7 @@ impl TryFrom<InitArgs> for State {
             master_key_name,
             minimum_withdrawal_amount,
             minimum_deposit_amount,
+            withdrawal_fee,
         }: InitArgs,
     ) -> Result<Self, Self::Error> {
         let state = Self {
@@ -214,6 +234,7 @@ impl TryFrom<InitArgs> for State {
             ledger_canister_id,
             sol_rpc_canister_id,
             deposit_fee,
+            withdrawal_fee,
             minimum_withdrawal_amount,
             minimum_deposit_amount,
             pending_update_balance_requests: BTreeSet::new(),

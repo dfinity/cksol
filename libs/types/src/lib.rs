@@ -182,4 +182,6 @@ pub struct MinterInfo {
     pub minimum_withdrawal_amount: Lamport,
     /// Minimum deposit amount in lamports.
     pub minimum_deposit_amount: Lamport,
+    /// Fee deducted from each withdrawal (ckSOL -> SOL).
+    pub withdrawal_fee: Lamport,
 }

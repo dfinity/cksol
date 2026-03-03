@@ -48,6 +48,9 @@ pub struct InitArgs {
     /// Minimum deposit amount in lamports.
     #[cfg_attr(feature = "event", n(5))]
     pub minimum_deposit_amount: Lamport,
+    /// The withdrawal fee in lamports.
+    #[cfg_attr(feature = "event", n(6))]
+    pub withdrawal_fee: Lamport,
 }
 
 /// The upgrade args for the ckSOL minter canister.
@@ -66,6 +69,9 @@ pub struct UpgradeArgs {
     /// The new minimum deposit amount in lamports.
     #[cfg_attr(feature = "event", n(3))]
     pub minimum_deposit_amount: Option<Lamport>,
+    /// The new withdrawal fee in lamports.
+    #[cfg_attr(feature = "event", n(4))]
+    pub withdrawal_fee: Option<Lamport>,
 }
 
 /// The ID of one of the ICP root keys.
