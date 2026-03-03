@@ -10,8 +10,8 @@ use cksol_int_tests::{
     },
 };
 use cksol_types::{
-    DepositStatus, GetDepositAddressArgs, MinterInfo, WithdrawSolArgs, WithdrawSolError,
-    WithdrawSolStatus, UpdateBalanceArgs, UpdateBalanceError,
+    DepositStatus, GetDepositAddressArgs, MinterInfo, UpdateBalanceArgs, UpdateBalanceError,
+    WithdrawSolArgs, WithdrawSolError, WithdrawSolStatus,
 };
 use cksol_types_internal::{UpgradeArgs, event::EventType, log::Priority};
 use ic_pocket_canister_runtime::{JsonRpcResponse, MockHttpOutcalls, MockHttpOutcallsBuilder};
