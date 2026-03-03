@@ -82,8 +82,15 @@ pub enum UpdateBalanceError {
     #[error("The transaction is not a valid deposit: {0}")]
     InvalidDepositTransaction(String),
     /// The deposit amount does not cover the deposit fee.
-    #[error("The deposit amount does not cover the deposit fee")]
-    ValueTooSmall,
+    #[error(
+        "Insufficient deposit amount: expected at least {minimum_deposit_amount} lamports, but got {deposit_amount} lamports"
+    )]
+    ValueTooSmall {
+        /// The minimum deposit amount for the deposit to be accepted.
+        minimum_deposit_amount: Lamport,
+        /// The amount that was deposited.
+        deposit_amount: Lamport,
+    },
 }
 
 /// Arguments for a request to the `retrieve_sol` ckSOL minter endpoint.

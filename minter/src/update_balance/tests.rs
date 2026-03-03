@@ -85,8 +85,9 @@ async fn should_return_error_if_transaction_not_valid_deposit() {
 
 #[tokio::test]
 async fn should_fail_if_deposit_amount_is_below_minimum() {
+    const MINIMUM_DEPOSIT_AMOUNT: Lamport = 2 * DEPOSIT_AMOUNT;
     init_state_with_args(InitArgs {
-        minimum_deposit_amount: 2 * DEPOSIT_AMOUNT,
+        minimum_deposit_amount: MINIMUM_DEPOSIT_AMOUNT,
         ..valid_init_args()
     });
     init_schnorr_master_key();
@@ -97,7 +98,10 @@ async fn should_fail_if_deposit_amount_is_below_minimum() {
 
     let result = update_balance(runtime, DEPOSITOR_ACCOUNT, deposit_transaction_signature()).await;
 
-    assert_eq!(result, Err(UpdateBalanceError::ValueTooSmall));
+    assert_eq!(result, Err(UpdateBalanceError::ValueTooSmall {
+        deposit_amount: DEPOSIT_AMOUNT,
+        minimum_deposit_amount: MINIMUM_DEPOSIT_AMOUNT,
+    }));
     EventsAssert::assert_no_events_recorded();
 }
 
