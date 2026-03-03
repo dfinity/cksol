@@ -101,6 +101,26 @@ fn get_events(
         match event_type {
             EventType::Init(args) => event::EventType::Init(args),
             EventType::Upgrade(args) => event::EventType::Upgrade(args),
+            EventType::AcceptedDeposit {
+                deposit_id,
+                amount_to_mint,
+            } => event::EventType::AcceptedDeposit {
+                signature: deposit_id.signature.into(),
+                account: deposit_id.account,
+                amount_to_mint,
+            },
+            EventType::Minted {
+                deposit_id,
+                mint_block_index,
+            } => event::EventType::Minted {
+                signature: deposit_id.signature.into(),
+                account: deposit_id.account,
+                mint_block_index: *mint_block_index.get(),
+            },
+            EventType::QuarantinedDeposit(deposit_id) => event::EventType::QuarantinedDeposit {
+                signature: deposit_id.signature.into(),
+                account: deposit_id.account,
+            },
         }
     }
 

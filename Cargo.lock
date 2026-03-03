@@ -780,7 +780,9 @@ dependencies = [
  "icrc-ledger-types",
  "minicbor",
  "num-traits",
+ "phantom_newtype",
  "proptest",
+ "scopeguard",
  "serde",
  "sol_rpc_client",
  "sol_rpc_types",
@@ -814,6 +816,7 @@ dependencies = [
  "candid",
  "canlog",
  "icrc-cbor",
+ "icrc-ledger-types",
  "minicbor",
  "serde",
  "sol_rpc_types",
@@ -3145,6 +3148,12 @@ dependencies = [
  "fixedbitset",
  "indexmap",
 ]
+
+[[package]]
+name = "phantom_newtype"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a4e36614e15df8570f9eefecc326fe379c2551366cb20a43105639596e474506"
 
 [[package]]
 name = "phf_shared"

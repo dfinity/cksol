@@ -1,5 +1,14 @@
-use crate::state::{SchnorrPublicKey, State, init_once_state, mutate_state};
+use crate::{
+    numeric::LedgerMintIndex,
+    state::{
+        SchnorrPublicKey, State,
+        event::{DepositId, Event, EventType},
+        init_once_state, mutate_state,
+    },
+    storage::with_event_iter,
+};
 use candid::Principal;
+use cksol_types::DepositStatus;
 use cksol_types_internal::{Ed25519KeyName, InitArgs};
 use ic_ed25519::{PocketIcMasterPublicKeyId, PublicKey};
 use icrc_ledger_types::icrc1::account::Account;
@@ -10,8 +19,9 @@ use solana_transaction_status_client_types::{
     EncodedTransactionWithStatusMeta, TransactionBinaryEncoding, UiLoadedAddresses,
     UiTransactionStatusMeta, option_serializer::OptionSerializer,
 };
-use std::str::FromStr;
+use std::{collections::VecDeque, str::FromStr};
 
+pub const BLOCK_INDEX: u64 = 98763_u64;
 pub const DEPOSIT_FEE: Lamport = 10_000_000; // 0.01 SOL
 pub const WITHDRAWAL_FEE: Lamport = 5_000_000; // 0.005 SOL
 pub const MINIMUM_WITHDRAWAL_AMOUNT: Lamport = 10_000_000; // 0.01 SOL
@@ -158,6 +168,47 @@ pub mod deposit {
         subaccount: None,
     };
 
+    pub fn deposit_status_processing() -> DepositStatus {
+        DepositStatus::Processing(deposit_transaction_signature().into())
+    }
+
+    pub fn deposit_status_quarantined() -> DepositStatus {
+        DepositStatus::Quarantined(deposit_transaction_signature().into())
+    }
+
+    pub fn deposit_status_minted() -> DepositStatus {
+        DepositStatus::Minted {
+            block_index: BLOCK_INDEX,
+            minted_amount: DEPOSIT_AMOUNT - DEPOSIT_FEE,
+            signature: deposit_transaction_signature().into(),
+        }
+    }
+
+    pub fn accepted_deposit_event() -> EventType {
+        EventType::AcceptedDeposit {
+            deposit_id: deposit_id(),
+            amount_to_mint: DEPOSIT_AMOUNT - DEPOSIT_FEE,
+        }
+    }
+
+    pub fn quarantined_deposit_event() -> EventType {
+        EventType::QuarantinedDeposit(deposit_id())
+    }
+
+    pub fn minted_event(mint_block_index: impl Into<LedgerMintIndex>) -> EventType {
+        EventType::Minted {
+            deposit_id: deposit_id(),
+            mint_block_index: mint_block_index.into(),
+        }
+    }
+
+    pub fn deposit_id() -> DepositId {
+        DepositId {
+            signature: deposit_transaction_signature(),
+            account: DEPOSITOR_ACCOUNT,
+        }
+    }
+
     // https://explorer.solana.com/tx/49aFRmEtgnVN3UetkKHJbz3ZMcDY6pgS9oDoN4Y4NQYfHSx4nsDsx3PSKubxfmY69URcosJj3CWu4aypeddduZYX?cluster=devnet
     pub fn deposit_transaction_signature() -> solana_signature::Signature {
         const SIGNATURE: &str = "49aFRmEtgnVN3UetkKHJbz3ZMcDY6pgS9oDoN4Y4NQYfHSx4nsDsx3PSKubxfmY69URcosJj3CWu4aypeddduZYX";
@@ -246,5 +297,88 @@ pub mod deposit {
             },
             block_time: Some(1771421240),
         }
+    }
+
+    // https://explorer.solana.com/tx/56LyqGhjJV4epkZbn9Q1bW1Qf6L5jP1oF7rRkSt9zWtDPpxdyBVxc73NfQxADBhdXjshGQi8WQJokGWjT9Z8z97v?cluster=devnet
+    pub fn deposit_transaction_to_multiple_accounts_signature() -> solana_signature::Signature {
+        const SIGNATURE: &str = "56LyqGhjJV4epkZbn9Q1bW1Qf6L5jP1oF7rRkSt9zWtDPpxdyBVxc73NfQxADBhdXjshGQi8WQJokGWjT9Z8z97v";
+        solana_signature::Signature::from_str(SIGNATURE).unwrap()
+    }
+
+    // Single transaction that transfers funds to multiple accounts:
+    //  - 0.1 SOL to BVH7GZXRdqyZLSLBS4cm1Yom8Yvekw6ytgSFz9y9on4e
+    //  - 0.2 SOL to 36nNQ1JxjZ9tSN8WWqGPjV9H3FexvsMC5gEnkmUhigpY
+    //  - 0.3 SOL to 75H1btFeRrFySZuKyZGPpvYcy3uDkcMoj5EL2mpsFUvr
+    // https://explorer.solana.com/tx/56LyqGhjJV4epkZbn9Q1bW1Qf6L5jP1oF7rRkSt9zWtDPpxdyBVxc73NfQxADBhdXjshGQi8WQJokGWjT9Z8z97v?cluster=devnet
+    pub fn deposit_transaction_to_multiple_accounts() -> EncodedConfirmedTransactionWithStatusMeta {
+        const ENCODED_DEPOSIT_TRANSACTION: &str = "AcytR2Rq+c0hM6m/Fka99Q4d7R4Nin2Ic4z/c1DLSmPLkhiLffSIvYlQLLKH/zvcy3JgP/umG5TN9TLv9oSUYAkBAAEFIg5JU11WGypQAKfOpxcE0+UIiKney1G6hf+6GRXcmscfMpOhqUYjXIxXvJp/bhOwZFCsImXzz5iVqw/g+bBPiVo+jDsfe97gI2/mJd+TXE7nJj+D6zIOZsV4YmKTgeUvm9NYan1lUBJ+p+uJV+FG8uZ+ZU5ZkqbFoBB9YL+y21cAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAN9p0fDGOCOG2Vh6Cbo7MPuOUKoG2zX1iTCguRzb3oKRAwQCAAMMAgAAAADh9QUAAAAABAIAAQwCAAAAAMLrCwAAAAAEAgACDAIAAAAAo+ERAAAAAA==";
+        EncodedConfirmedTransactionWithStatusMeta {
+            slot: 445682829,
+            transaction: EncodedTransactionWithStatusMeta {
+                transaction: EncodedTransaction::Binary(
+                    ENCODED_DEPOSIT_TRANSACTION.to_string(),
+                    TransactionBinaryEncoding::Base64,
+                ),
+                meta: Some(UiTransactionStatusMeta {
+                    compute_units_consumed: OptionSerializer::Some(450),
+                    cost_units: OptionSerializer::Some(2387),
+                    err: None,
+                    fee: 5000,
+                    inner_instructions: OptionSerializer::Some(vec![]),
+                    loaded_addresses: OptionSerializer::Some(UiLoadedAddresses {
+                        writable: vec![],
+                        readonly: vec![],
+                    }),
+                    log_messages: OptionSerializer::Some(vec![
+                        "Program 11111111111111111111111111111111 invoke [1]".to_string(),
+                        "Program 11111111111111111111111111111111 success".to_string(),
+                        "Program 11111111111111111111111111111111 invoke [1]".to_string(),
+                        "Program 11111111111111111111111111111111 success".to_string(),
+                        "Program 11111111111111111111111111111111 invoke [1]".to_string(),
+                        "Program 11111111111111111111111111111111 success".to_string(),
+                    ]),
+                    post_balances: vec![4295796440, 200000000, 300000000, 600000000, 1],
+                    post_token_balances: OptionSerializer::Some(vec![]),
+                    pre_balances: vec![4895801440, 0, 0, 500000000, 1],
+                    pre_token_balances: OptionSerializer::Some(vec![]),
+                    rewards: OptionSerializer::None,
+                    status: Ok(()),
+                    return_data: OptionSerializer::Skip,
+                }),
+                version: None,
+            },
+            block_time: Some(1772447561),
+        }
+    }
+}
+
+pub struct EventsAssert(VecDeque<Event>);
+
+impl EventsAssert {
+    pub fn from_recorded() -> Self {
+        Self(with_event_iter(|events| events.collect()))
+    }
+
+    pub fn assert_no_events_recorded() {
+        Self::from_recorded().assert_no_more_events();
+    }
+
+    pub fn expect_event<F>(mut self, check: F) -> Self
+    where
+        F: Fn(EventType),
+    {
+        let event = self.0.pop_front().expect("No more events!");
+        check(event.payload);
+        self
+    }
+
+    pub fn expect_event_eq(mut self, expected: EventType) -> Self {
+        let event = self.0.pop_front().expect("No more events!");
+        assert_eq!(event.payload, expected);
+        self
+    }
+
+    pub fn assert_no_more_events(&self) {
+        assert!(self.0.is_empty());
     }
 }

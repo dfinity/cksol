@@ -24,6 +24,19 @@ fn apply_state_transition(state: &mut State, payload: &EventType) {
                 .upgrade(upgrade_arg.clone())
                 .expect("applying upgrade event should succeed");
         }
+        EventType::AcceptedDeposit {
+            deposit_id,
+            amount_to_mint,
+        } => {
+            state.process_accepted_deposit(deposit_id, amount_to_mint);
+        }
+        EventType::QuarantinedDeposit(deposit_id) => state.process_quarantined_deposit(deposit_id),
+        EventType::Minted {
+            deposit_id,
+            mint_block_index,
+        } => {
+            state.process_mint(deposit_id, mint_block_index);
+        }
     }
 }
 
