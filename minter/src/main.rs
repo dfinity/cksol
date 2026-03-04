@@ -77,8 +77,8 @@ async fn withdraw_sol(args: WithdrawSolArgs) -> Result<WithdrawSolOk, WithdrawSo
 }
 
 #[ic_cdk::update]
-async fn withdraw_sol_status(_block_index: u64) -> WithdrawSolStatus {
-    WithdrawSolStatus::NotFound
+async fn withdraw_sol_status(block_index: u64) -> WithdrawSolStatus {
+    read_state(|s| s.withdrawal_status(block_index))
 }
 
 #[ic_cdk::query]
