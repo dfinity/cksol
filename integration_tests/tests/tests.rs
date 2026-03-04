@@ -415,6 +415,12 @@ mod withdraw_sol_tests {
 
         let block_index = result.expect("burn should succeed").block_index;
 
+        let status = setup.minter().withdraw_sol_status(block_index).await;
+        assert_eq!(status, WithdrawSolStatus::Pending);
+        // 0 is the initial mint block, should be NotFound
+        let status = setup.minter().withdraw_sol_status(0).await;
+        assert_eq!(status, WithdrawSolStatus::NotFound);
+
         let block = setup.ledger().get_block(block_index).await;
         let memo_blob = get_memo(block);
         let memo = minicbor::decode::<Memo>(&memo_blob).expect("failed to decode memo");
