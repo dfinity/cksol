@@ -23,8 +23,6 @@ pub enum EventType {
     Init(InitArgs),
     /// The minter upgraded with the specified arguments.
     Upgrade(UpgradeArgs),
-    /// The minter burned ckSOL for a withdrawal request.
-    WithdrawalBurned(BurnEvent),
     /// The minter discovered a Solana transaction that is a valid ckSOL
     /// deposit for the given account. ckSOL tokens have not yet been
     /// minted for this deposit.
@@ -60,6 +58,8 @@ pub enum EventType {
         /// The transaction index on the ckSOL ledger.
         mint_block_index: u64,
     },
+    /// The minter burned ckSOL for a withdrawal request.
+    WithdrawalBurned(BurnEvent),
 }
 
 /// Arguments for the `get_events` endpoint.
