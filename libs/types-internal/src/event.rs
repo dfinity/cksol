@@ -1,6 +1,6 @@
 //! Candid-compatible event types for the ckSOL minter.
 
-use crate::{WithdrawSolRequest, InitArgs, UpgradeArgs};
+use crate::{InitArgs, UpgradeArgs, WithdrawSolRequest};
 use candid::CandidType;
 use icrc_ledger_types::icrc1::account::Account;
 use serde::Deserialize;
