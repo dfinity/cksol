@@ -199,18 +199,13 @@ type WithdrawSolStatus = variant {
     TxFinalized : TxFinalizedStatus;
 };
 
-// Identifies a withdrawal request.
-type WithdrawalId = record {
-    account : record { owner : principal; subaccount : opt blob };
-    solana_address : blob;
-};
-
 // Payload of the AcceptedWithdrawSolRequest event.
 type WithdrawSolRequest = record {
+    account : Account;
+    solana_address : blob;
     burn_block_index : nat64;
     withdrawal_amount : Lamport;
     withdrawal_fee : Lamport;
-    withdrawal_id : WithdrawalId;
 };
 
 // A minter event payload.

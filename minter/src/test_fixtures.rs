@@ -70,7 +70,7 @@ pub fn init_schnorr_master_key() {
 
 pub mod arb {
     use crate::state::event::{Event, EventType};
-    use cksol_types_internal::{WithdrawSolRequest, Ed25519KeyName, InitArgs, UpgradeArgs, WithdrawalId};
+    use cksol_types_internal::{WithdrawSolRequest, Ed25519KeyName, InitArgs, UpgradeArgs};
     use proptest::prelude::{Just, Strategy, any, prop, prop_oneof};
 
     pub fn arb_principal() -> impl Strategy<Value = candid::Principal> {
@@ -150,26 +150,21 @@ pub mod arb {
         })
     }
 
-    pub fn arb_withdrawal_id() -> impl Strategy<Value = WithdrawalId> {
-        (arb_account(), any::<[u8; 32]>()).prop_map(|(account, solana_address)| WithdrawalId {
-            account,
-            solana_address,
-        })
-    }
-
     pub fn arb_burn_event() -> impl Strategy<Value = WithdrawSolRequest> {
         (
+            arb_account(),
+            any::<[u8; 32]>(),
             any::<u64>(),
             any::<u64>(),
             any::<u64>(),
-            arb_withdrawal_id(),
         )
             .prop_map(
-                |(burn_block_index, withdrawal_amount, withdrawal_fee, withdrawal_id)| WithdrawSolRequest {
+                |(account, solana_address, burn_block_index, withdrawal_amount, withdrawal_fee)| WithdrawSolRequest {
+                    account,
+                    solana_address,
                     burn_block_index,
                     withdrawal_amount,
                     withdrawal_fee,
-                    withdrawal_id,
                 },
             )
     }

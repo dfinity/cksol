@@ -75,33 +75,24 @@ pub struct UpgradeArgs {
     pub withdrawal_fee: Option<Lamport>,
 }
 
-/// Identifies a withdrawal request by the source ledger account and the destination Solana address.
+/// Payload of the `AcceptedWithdrawSolRequest` event.
 #[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize)]
 #[cfg_attr(feature = "event", derive(minicbor::Encode, minicbor::Decode))]
-pub struct WithdrawalId {
+pub struct WithdrawSolRequest {
     /// The ledger account from which ckSOL was burned.
     #[cfg_attr(feature = "event", n(0))]
     pub account: Account,
     /// The destination Solana address.
     #[cfg_attr(feature = "event", n(1), cbor(with = "minicbor::bytes"))]
     pub solana_address: [u8; 32],
-}
-
-/// Payload of the `AcceptedWithdrawSolRequest` event.
-#[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize)]
-#[cfg_attr(feature = "event", derive(minicbor::Encode, minicbor::Decode))]
-pub struct WithdrawSolRequest {
-    /// The withdrawal request identifier.
-    #[cfg_attr(feature = "event", n(0))]
-    pub withdrawal_id: WithdrawalId,
     /// The burn transaction index on the ckSOL ledger.
-    #[cfg_attr(feature = "event", n(1))]
+    #[cfg_attr(feature = "event", n(2))]
     pub burn_block_index: u64,
     /// The total amount burned from the user (in lamports).
-    #[cfg_attr(feature = "event", n(2))]
+    #[cfg_attr(feature = "event", n(3))]
     pub withdrawal_amount: Lamport,
     /// The fee retained by the minter (in lamports).
-    #[cfg_attr(feature = "event", n(3))]
+    #[cfg_attr(feature = "event", n(4))]
     pub withdrawal_fee: Lamport,
 }
 
