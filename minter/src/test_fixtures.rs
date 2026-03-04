@@ -69,13 +69,40 @@ pub fn init_schnorr_master_key() {
 }
 
 pub mod arb {
-    use crate::state::event::{Event, EventType};
-    use cksol_types_internal::{WithdrawSolRequest, Ed25519KeyName, InitArgs, UpgradeArgs};
+    use crate::{
+        numeric::LedgerMintIndex,
+        state::event::{DepositId, Event, EventType},
+    };
+    use cksol_types_internal::{Ed25519KeyName, InitArgs, UpgradeArgs, WithdrawSolRequest};
+    use icrc_ledger_types::icrc1::account::Account;
     use proptest::prelude::{Just, Strategy, any, prop, prop_oneof};
+    use solana_signature::Signature;
 
     pub fn arb_principal() -> impl Strategy<Value = candid::Principal> {
         prop::collection::vec(any::<u8>(), 0..=29)
             .prop_map(|bytes| candid::Principal::from_slice(&bytes))
+    }
+
+    pub fn arb_subaccount() -> impl Strategy<Value = Option<[u8; 32]>> {
+        prop::option::of(any::<[u8; 32]>())
+    }
+
+    pub fn arb_account() -> impl Strategy<Value = Account> {
+        (arb_principal(), arb_subaccount())
+            .prop_map(|(owner, subaccount)| Account { owner, subaccount })
+    }
+
+    pub fn arb_signature() -> impl Strategy<Value = Signature> {
+        any::<[u8; 64]>().prop_map(Signature::from)
+    }
+
+    pub fn arb_deposit_id() -> impl Strategy<Value = DepositId> {
+        (arb_signature(), arb_account())
+            .prop_map(|(signature, account)| DepositId { signature, account })
+    }
+
+    pub fn arb_ledger_mint_index() -> impl Strategy<Value = LedgerMintIndex> {
+        any::<u64>().prop_map(LedgerMintIndex::from)
     }
 
     pub fn arb_ed25519_key_name() -> impl Strategy<Value = Ed25519KeyName> {
@@ -144,12 +171,6 @@ pub mod arb {
             )
     }
 
-    pub fn arb_account() -> impl Strategy<Value = icrc_ledger_types::icrc1::account::Account> {
-        (arb_principal(), prop::option::of(any::<[u8; 32]>())).prop_map(|(owner, subaccount)| {
-            icrc_ledger_types::icrc1::account::Account { owner, subaccount }
-        })
-    }
-
     pub fn arb_burn_event() -> impl Strategy<Value = WithdrawSolRequest> {
         (
             arb_account(),
@@ -159,12 +180,14 @@ pub mod arb {
             any::<u64>(),
         )
             .prop_map(
-                |(account, solana_address, burn_block_index, withdrawal_amount, withdrawal_fee)| WithdrawSolRequest {
-                    account,
-                    solana_address,
-                    burn_block_index,
-                    withdrawal_amount,
-                    withdrawal_fee,
+                |(account, solana_address, burn_block_index, withdrawal_amount, withdrawal_fee)| {
+                    WithdrawSolRequest {
+                        account,
+                        solana_address,
+                        burn_block_index,
+                        withdrawal_amount,
+                        withdrawal_fee,
+                    }
                 },
             )
     }
@@ -174,6 +197,19 @@ pub mod arb {
             arb_init_args().prop_map(EventType::Init),
             arb_upgrade_args().prop_map(EventType::Upgrade),
             arb_burn_event().prop_map(EventType::AccepterWithdrawSolRequest),
+            (arb_deposit_id(), any::<u64>()).prop_map(|(deposit_id, amount_to_mint)| {
+                EventType::AcceptedDeposit {
+                    deposit_id,
+                    amount_to_mint,
+                }
+            }),
+            arb_deposit_id().prop_map(EventType::QuarantinedDeposit),
+            (arb_deposit_id(), arb_ledger_mint_index()).prop_map(
+                |(deposit_id, mint_block_index)| EventType::Minted {
+                    deposit_id,
+                    mint_block_index,
+                }
+            ),
         ]
     }
 
