@@ -151,22 +151,27 @@ pub mod arb {
     }
 
     pub fn arb_withdrawal_id() -> impl Strategy<Value = WithdrawalId> {
-        (arb_account(), any::<[u8; 32]>())
-            .prop_map(|(account, solana_address)| WithdrawalId {
-                account,
-                solana_address,
-            })
+        (arb_account(), any::<[u8; 32]>()).prop_map(|(account, solana_address)| WithdrawalId {
+            account,
+            solana_address,
+        })
     }
 
     pub fn arb_burn_event() -> impl Strategy<Value = BurnEvent> {
-        (any::<u64>(), any::<u64>(), any::<u64>(), arb_withdrawal_id()).prop_map(
-            |(burn_block_index, withdrawal_amount, withdrawal_fee, withdrawal_id)| BurnEvent {
-                burn_block_index,
-                withdrawal_amount,
-                withdrawal_fee,
-                withdrawal_id,
-            },
+        (
+            any::<u64>(),
+            any::<u64>(),
+            any::<u64>(),
+            arb_withdrawal_id(),
         )
+            .prop_map(
+                |(burn_block_index, withdrawal_amount, withdrawal_fee, withdrawal_id)| BurnEvent {
+                    burn_block_index,
+                    withdrawal_amount,
+                    withdrawal_fee,
+                    withdrawal_id,
+                },
+            )
     }
 
     pub fn arb_event_type() -> impl Strategy<Value = EventType> {
