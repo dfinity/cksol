@@ -87,10 +87,10 @@ pub struct WithdrawalId {
     pub solana_address: [u8; 32],
 }
 
-/// Payload of the `WithdrawalBurned` event.
+/// Payload of the `AcceptedWithdrawSolRequest` event.
 #[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize)]
 #[cfg_attr(feature = "event", derive(minicbor::Encode, minicbor::Decode))]
-pub struct BurnEvent {
+pub struct WithdrawSolRequest {
     /// The withdrawal request identifier.
     #[cfg_attr(feature = "event", n(0))]
     pub withdrawal_id: WithdrawalId,

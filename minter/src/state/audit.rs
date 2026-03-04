@@ -24,7 +24,7 @@ fn apply_state_transition(state: &mut State, payload: &EventType) {
                 .upgrade(upgrade_arg.clone())
                 .expect("applying upgrade event should succeed");
         }
-        EventType::WithdrawalBurned(_) => {}
+        EventType::AccepterWithdrawSolRequest(_) => {}
         EventType::AcceptedDeposit {
             deposit_id,
             amount_to_mint,

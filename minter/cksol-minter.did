@@ -205,8 +205,8 @@ type WithdrawalId = record {
     solana_address : blob;
 };
 
-// Payload of the WithdrawalBurned event.
-type BurnEvent = record {
+// Payload of the AcceptedWithdrawSolRequest event.
+type WithdrawSolRequest = record {
     burn_block_index : nat64;
     withdrawal_amount : Lamport;
     withdrawal_fee : Lamport;
@@ -220,7 +220,7 @@ type EventType = variant {
     Init : InitArgs;
     // The minter upgraded with the specified arguments.
     Upgrade : UpgradeArgs;
-    WithdrawalBurned : BurnEvent;
+    AcceptedWithdrawSolRequest : WithdrawSolRequest;
     // The minter discovered a Solana transaction that is a valid ckSOL
     // deposit for the given account. ckSOL tokens have not yet been
     // minted for this deposit.

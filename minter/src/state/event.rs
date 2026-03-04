@@ -1,5 +1,5 @@
 use crate::numeric::LedgerMintIndex;
-use cksol_types_internal::{BurnEvent, InitArgs, UpgradeArgs};
+use cksol_types_internal::{InitArgs, UpgradeArgs, WithdrawSolRequest};
 use ic_stable_structures::Storable;
 use ic_stable_structures::storable::Bound;
 use icrc_ledger_types::icrc1::account::Account;
@@ -57,7 +57,7 @@ pub enum EventType {
     },
     /// The minter burned ckSOL for a withdrawal request.
     #[n(5)]
-    WithdrawalBurned(#[n(0)] BurnEvent),
+    AccepterWithdrawSolRequest(#[n(0)] WithdrawSolRequest),
 }
 
 #[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd, Debug, Decode, Encode)]

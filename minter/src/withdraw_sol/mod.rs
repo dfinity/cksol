@@ -13,7 +13,7 @@ use crate::{
     runtime::CanisterRuntime,
     state::{audit::process_event, event::EventType, mutate_state, read_state},
 };
-use cksol_types_internal::{BurnEvent, WithdrawalId};
+use cksol_types_internal::{WithdrawSolRequest, WithdrawalId};
 
 #[cfg(test)]
 mod tests;
@@ -93,7 +93,7 @@ pub async fn withdraw_sol<R: CanisterRuntime>(
     mutate_state(|s| {
         process_event(
             s,
-            EventType::WithdrawalBurned(BurnEvent {
+            EventType::AccepterWithdrawSolRequest(WithdrawSolRequest {
                 burn_block_index: block_index,
                 withdrawal_amount: amount,
                 withdrawal_fee,

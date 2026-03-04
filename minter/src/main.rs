@@ -101,8 +101,8 @@ fn get_events(
         match event_type {
             EventType::Init(args) => event::EventType::Init(args),
             EventType::Upgrade(args) => event::EventType::Upgrade(args),
-            EventType::WithdrawalBurned(burn_event) => {
-                event::EventType::WithdrawalBurned(burn_event)
+            EventType::AccepterWithdrawSolRequest(burn_event) => {
+                event::EventType::AcceptedWithdrawSolRequest(burn_event)
             }
             EventType::AcceptedDeposit {
                 deposit_id,

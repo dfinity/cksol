@@ -1,6 +1,6 @@
 //! Candid-compatible event types for the ckSOL minter.
 
-use crate::{BurnEvent, InitArgs, UpgradeArgs};
+use crate::{WithdrawSolRequest, InitArgs, UpgradeArgs};
 use candid::CandidType;
 use icrc_ledger_types::icrc1::account::Account;
 use serde::Deserialize;
@@ -59,7 +59,7 @@ pub enum EventType {
         mint_block_index: u64,
     },
     /// The minter burned ckSOL for a withdrawal request.
-    WithdrawalBurned(BurnEvent),
+    AcceptedWithdrawSolRequest(WithdrawSolRequest),
 }
 
 /// Arguments for the `get_events` endpoint.
