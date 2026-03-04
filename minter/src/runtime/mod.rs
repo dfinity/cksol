@@ -1,6 +1,10 @@
 use candid::CandidType;
 use ic_canister_runtime::{IcError, IcRuntime, Runtime, StubRuntime};
-use std::cell::RefCell;
+use std::{
+    fmt::Debug,
+    iter,
+    sync::{Arc, Mutex},
+};
 
 pub trait CanisterRuntime {
     fn inter_canister_call_runtime(&self) -> impl Runtime;
@@ -31,11 +35,20 @@ impl CanisterRuntime for IcCanisterRuntime {
     }
 }
 
-#[derive(Default, Debug)]
 pub struct TestCanisterRuntime {
     inter_canister_call_runtime: StubRuntime,
-    times: RefCell<Vec<u64>>,
-    instruction_counts: RefCell<Vec<u64>>,
+    times: Arc<Mutex<dyn Iterator<Item = u64> + Send + Sync>>,
+    instruction_counts: Arc<Mutex<dyn Iterator<Item = u64> + Send + Sync>>,
+}
+
+impl Default for TestCanisterRuntime {
+    fn default() -> Self {
+        Self {
+            inter_canister_call_runtime: Default::default(),
+            times: Arc::new(Mutex::new(iter::empty())),
+            instruction_counts: Arc::new(Mutex::new(iter::empty())),
+        }
+    }
 }
 
 impl TestCanisterRuntime {
@@ -54,8 +67,17 @@ impl TestCanisterRuntime {
         self
     }
 
-    pub fn add_stub_time(self, time: u64) -> Self {
-        self.times.borrow_mut().push(time);
+    pub fn with_increasing_time(mut self) -> Self {
+        self.times = Arc::new(Mutex::new(0..));
+        self
+    }
+
+    pub fn with_stub_times<I>(mut self, times: I) -> Self
+    where
+        I: IntoIterator<Item = u64> + 'static,
+        <I as IntoIterator>::IntoIter: Send + Sync,
+    {
+        self.times = Arc::new(Mutex::new(times.into_iter()));
         self
     }
 }
@@ -67,13 +89,18 @@ impl CanisterRuntime for TestCanisterRuntime {
     }
 
     fn time(&self) -> u64 {
-        self.times.borrow_mut().pop().expect("No more stub times!")
+        self.times
+            .try_lock()
+            .unwrap()
+            .next()
+            .expect("No more stub times!")
     }
 
     fn instruction_counter(&self) -> u64 {
         self.instruction_counts
-            .borrow_mut()
-            .pop()
+            .try_lock()
+            .unwrap()
+            .next()
             .expect("No more stub instruction counts!")
     }
 }

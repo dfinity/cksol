@@ -13,9 +13,14 @@ use solana_signature::Signature;
 const SOLANA_VALIDATOR_URL: &str = "http://localhost:8899";
 const PRINCIPAL: Principal = Principal::from_slice(&[0x9d, 0xf7, 0x99]);
 
+// TODO DEFI-2643: Add tests with more exotic transactions, e.g.:
+//  - a transaction with multiple transfer instructions to same target address: single mint with the summed up amount
+//  - a transaction with multiple instructions, not all to the same target address: only relevant amounts are considered.
+
 #[tokio::test(flavor = "multi_thread")]
-async fn should_update_balance_with_single_deposit() {
+async fn should_update_balance() {
     const DEPOSIT_AMOUNT: Lamport = 2 * LAMPORTS_PER_SOL;
+    const EXPECTED_MINT_AMOUNT: Lamport = DEPOSIT_AMOUNT - Setup::DEFAULT_DEPOSIT_FEE;
 
     let setup = SetupBuilder::new()
         .with_pocket_ic_live_mode()
@@ -59,13 +64,11 @@ async fn should_update_balance_with_single_deposit() {
             signature: deposit_signature.into(),
         })
         .await;
-
-    let expected_minted_amount = DEPOSIT_AMOUNT - Setup::DEFAULT_DEPOSIT_FEE;
     assert_matches!(result, Ok(DepositStatus::Minted {
-            minted_amount,
-            signature,
-            block_index: _,
-        }) if minted_amount == expected_minted_amount && signature == deposit_signature.into());
+        minted_amount,
+        signature,
+        block_index: _,
+    }) if minted_amount == EXPECTED_MINT_AMOUNT && signature == deposit_signature.into());
 
     let balance_after = setup
         .ledger()
@@ -74,7 +77,7 @@ async fn should_update_balance_with_single_deposit() {
             subaccount: None,
         })
         .await;
-    assert_eq!(balance_after, expected_minted_amount);
+    assert_eq!(balance_after, EXPECTED_MINT_AMOUNT);
 
     setup.drop().await;
 }

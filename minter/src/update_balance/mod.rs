@@ -3,7 +3,11 @@ use crate::{
     guard::update_balance_guard,
     ledger::mint,
     runtime::CanisterRuntime,
-    state::read_state,
+    state::{
+        audit::process_event,
+        event::{DepositId, EventType},
+        mutate_state, read_state,
+    },
     transaction::{get_deposit_amount_to_address, try_get_transaction},
 };
 use canlog::log;
@@ -19,8 +23,12 @@ pub async fn update_balance<R: CanisterRuntime>(
     account: Account,
     signature: solana_signature::Signature,
 ) -> Result<DepositStatus, UpdateBalanceError> {
-    // TODO DEFI-2643: Check state to see if transaction is known
     let _guard = update_balance_guard(account)?;
+
+    let deposit_id = DepositId { account, signature };
+    if let Some(deposit_status) = read_state(|state| state.deposit_status(&deposit_id)) {
+        return Ok(deposit_status);
+    }
 
     let maybe_transaction = try_get_transaction(&runtime, signature)
         .await
@@ -46,15 +54,36 @@ pub async fn update_balance<R: CanisterRuntime>(
             );
             UpdateBalanceError::InvalidDepositTransaction(e.to_string())
         })?;
-
-    if deposit_amount < read_state(|state| state.minimum_deposit_amount()) {
-        return Err(UpdateBalanceError::ValueTooSmall);
+    let minimum_deposit_amount = read_state(|state| state.minimum_deposit_amount());
+    if deposit_amount < minimum_deposit_amount {
+        return Err(UpdateBalanceError::ValueTooSmall {
+            minimum_deposit_amount,
+            deposit_amount,
+        });
     }
-    let amount_to_mint = deposit_amount - read_state(|state| state.deposit_fee());
+    let amount_to_mint = deposit_amount
+        .checked_sub(read_state(|state| state.deposit_fee()))
+        .expect("BUG: deposit amount is less than deposit fee");
 
-    // TODO DEFI-2643: Record event for processed deposit
+    mutate_state(|state| {
+        process_event(
+            state,
+            EventType::AcceptedDeposit {
+                deposit_id,
+                amount_to_mint,
+            },
+            &runtime,
+        )
+    });
 
-    match mint(&runtime, account, amount_to_mint, signature.into()).await {
+    // TODO DEFI-2643: If minting fails, we should try again later automatically (i.e. set up a
+    //  timer that checks events to mint.
+    // TODO DEFI-2643: Handle the case where the timer execution triggers while we are awaiting the
+    //  response from the ledger and we concurrently try to mint for the same `AcceptedDeposit`
+    //  event, i.e. watch out for race conditions!
+    // TODO DEFI-2643: Handle the case where the mint calls panic with a scopeguard, similar to the
+    //  ckBTC minter.
+    match mint(&runtime, deposit_id, amount_to_mint).await {
         Ok(deposit_status) => Ok(deposit_status),
         Err(e) => {
             log!(
