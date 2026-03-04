@@ -89,6 +89,7 @@ pub struct Setup {
 
 impl Setup {
     pub const DEFAULT_DEPOSIT_FEE: Lamport = 10_000_000; // 0.01 SOL
+    pub const DEFAULT_WITHDRAWAL_FEE: Lamport = 5_000_000; // 0.005 SOL
     pub const DEFAULT_CONTROLLER: Principal = Principal::from_slice(&[0x9d, 0xf7, 0x01]);
     pub const DEFAULT_CALLER: Principal = Principal::from_slice(&[0x9d, 0xf7, 0x02]);
     pub const DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT: Lamport = 10_000_000; // 0.01 SOL
@@ -516,6 +517,7 @@ fn cksol_minter_init_args(
         master_key_name: Ed25519KeyName::MainnetProdKey1,
         minimum_withdrawal_amount: Setup::DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT,
         minimum_deposit_amount: Setup::DEFAULT_MINIMUM_DEPOSIT_AMOUNT,
+        withdrawal_fee: Setup::DEFAULT_WITHDRAWAL_FEE,
     })
 }
 

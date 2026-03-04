@@ -126,16 +126,19 @@ mod lifecycle {
                 deposit_fee: Setup::DEFAULT_DEPOSIT_FEE,
                 minimum_withdrawal_amount: Setup::DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT,
                 minimum_deposit_amount: Setup::DEFAULT_MINIMUM_DEPOSIT_AMOUNT,
+                withdrawal_fee: Setup::DEFAULT_WITHDRAWAL_FEE,
             }
         );
 
         let new_deposit_fee = 10;
         let new_minimum_withdrawal_amount = 20;
+        let new_withdrawal_fee = 15;
         setup
             .minter()
             .upgrade(UpgradeArgs {
                 deposit_fee: Some(new_deposit_fee),
                 minimum_withdrawal_amount: Some(new_minimum_withdrawal_amount),
+                withdrawal_fee: Some(new_withdrawal_fee),
                 ..Default::default()
             })
             .await
@@ -148,6 +151,7 @@ mod lifecycle {
                 deposit_fee: new_deposit_fee,
                 minimum_withdrawal_amount: new_minimum_withdrawal_amount,
                 minimum_deposit_amount: Setup::DEFAULT_MINIMUM_DEPOSIT_AMOUNT,
+                withdrawal_fee: new_withdrawal_fee,
             }
         );
 

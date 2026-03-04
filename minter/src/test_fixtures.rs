@@ -23,6 +23,7 @@ use std::{collections::VecDeque, str::FromStr};
 
 pub const BLOCK_INDEX: u64 = 98763_u64;
 pub const DEPOSIT_FEE: Lamport = 10_000_000; // 0.01 SOL
+pub const WITHDRAWAL_FEE: Lamport = 5_000_000; // 0.005 SOL
 pub const MINIMUM_WITHDRAWAL_AMOUNT: Lamport = 10_000_000; // 0.01 SOL
 pub const MINTER_ACCOUNT: Account = Account {
     owner: Principal::from_slice(&[1u8; 10]),
@@ -46,6 +47,7 @@ pub fn valid_init_args() -> InitArgs {
         master_key_name: Ed25519KeyName::default(),
         minimum_withdrawal_amount: MINIMUM_WITHDRAWAL_AMOUNT,
         minimum_deposit_amount: MINIMUM_DEPOSIT_AMOUNT,
+        withdrawal_fee: WITHDRAWAL_FEE,
     }
 }
 
@@ -92,6 +94,7 @@ pub mod arb {
             arb_ed25519_key_name(),
             any::<u64>(),
             any::<u64>(),
+            any::<u64>(),
         )
             .prop_map(
                 |(
@@ -101,6 +104,7 @@ pub mod arb {
                     master_key_name,
                     minimum_withdrawal_amount,
                     minimum_deposit_amount,
+                    withdrawal_fee,
                 )| {
                     InitArgs {
                         sol_rpc_canister_id,
@@ -109,6 +113,7 @@ pub mod arb {
                         master_key_name,
                         minimum_withdrawal_amount,
                         minimum_deposit_amount,
+                        withdrawal_fee,
                     }
                 },
             )
@@ -120,6 +125,7 @@ pub mod arb {
             prop::option::of(any::<u64>()),
             prop::option::of(any::<u64>()),
             prop::option::of(any::<u64>()),
+            prop::option::of(any::<u64>()),
         )
             .prop_map(
                 |(
@@ -127,11 +133,13 @@ pub mod arb {
                     deposit_fee,
                     minimum_withdrawal_amount,
                     minimum_deposit_amount,
+                    withdrawal_fee,
                 )| UpgradeArgs {
                     sol_rpc_canister_id,
                     deposit_fee,
                     minimum_withdrawal_amount,
                     minimum_deposit_amount,
+                    withdrawal_fee,
                 },
             )
     }

@@ -3,8 +3,8 @@ use crate::{
     runtime::TestCanisterRuntime,
     state::audit::process_event,
     test_fixtures::{
-        DEPOSIT_FEE, MINIMUM_DEPOSIT_AMOUNT, MINIMUM_WITHDRAWAL_AMOUNT, arb::arb_event,
-        ledger_canister_id, sol_rpc_canister_id, valid_init_args,
+        DEPOSIT_FEE, MINIMUM_DEPOSIT_AMOUNT, MINIMUM_WITHDRAWAL_AMOUNT, WITHDRAWAL_FEE,
+        arb::arb_event, ledger_canister_id, sol_rpc_canister_id, valid_init_args,
     },
 };
 use assert_matches::assert_matches;
@@ -37,6 +37,7 @@ mod state_from_init_args {
                 ledger_canister_id: ledger_canister_id(),
                 sol_rpc_canister_id: sol_rpc_canister_id(),
                 deposit_fee: DEPOSIT_FEE,
+                withdrawal_fee: WITHDRAWAL_FEE,
                 minimum_withdrawal_amount: MINIMUM_WITHDRAWAL_AMOUNT,
                 minimum_deposit_amount: MINIMUM_DEPOSIT_AMOUNT,
                 pending_update_balance_requests: BTreeSet::new(),
@@ -88,6 +89,23 @@ mod state_from_init_args {
         assert_matches!(
             State::try_from(args),
             Err(InvalidStateError::InvalidCanisterId(_))
+        );
+    }
+
+    #[test]
+    fn should_fail_when_minimum_withdrawal_amount_too_low() {
+        let insufficient_minimum_withdrawal_amount = WITHDRAWAL_FEE / 2;
+        let args = InitArgs {
+            minimum_withdrawal_amount: insufficient_minimum_withdrawal_amount,
+            ..valid_init_args()
+        };
+
+        assert_matches!(
+            State::try_from(args),
+            Err(InvalidStateError::InvalidMinimumWithdrawalAmount {
+                minimum_withdrawal_amount,
+                withdrawal_fee
+            }) if minimum_withdrawal_amount == insufficient_minimum_withdrawal_amount && withdrawal_fee == WITHDRAWAL_FEE
         );
     }
 
@@ -238,6 +256,69 @@ mod state_upgrade {
             .unwrap();
 
         assert_eq!(state.minimum_deposit_amount(), DEPOSIT_FEE);
+    }
+
+    #[test]
+    fn should_update_withdrawal_fee() {
+        let mut state = initial_state();
+        let new_withdrawal_fee = WITHDRAWAL_FEE / 2;
+
+        state
+            .upgrade(UpgradeArgs {
+                withdrawal_fee: Some(new_withdrawal_fee),
+                ..Default::default()
+            })
+            .unwrap();
+
+        assert_eq!(state.withdrawal_fee(), new_withdrawal_fee);
+    }
+
+    #[test]
+    fn should_fail_when_new_withdrawal_fee_exceeds_minimum_withdrawal_amount() {
+        let mut state = initial_state();
+        let new_withdrawal_fee = MINIMUM_WITHDRAWAL_AMOUNT + 1;
+
+        assert_matches!(
+            state.upgrade(UpgradeArgs {
+                withdrawal_fee: Some(new_withdrawal_fee),
+                ..Default::default()
+            }),
+            Err(InvalidStateError::InvalidMinimumWithdrawalAmount {
+                minimum_withdrawal_amount,
+                withdrawal_fee
+            }) if minimum_withdrawal_amount == MINIMUM_WITHDRAWAL_AMOUNT && withdrawal_fee == new_withdrawal_fee
+        );
+    }
+
+    #[test]
+    fn should_fail_when_new_minimum_withdrawal_amount_below_withdrawal_fee() {
+        let mut state = initial_state();
+        let new_minimum_withdrawal_amount = WITHDRAWAL_FEE - 1;
+
+        assert_matches!(
+            state.upgrade(UpgradeArgs {
+                minimum_withdrawal_amount: Some(new_minimum_withdrawal_amount),
+                ..Default::default()
+            }),
+            Err(InvalidStateError::InvalidMinimumWithdrawalAmount {
+                minimum_withdrawal_amount,
+                withdrawal_fee
+            }) if minimum_withdrawal_amount == new_minimum_withdrawal_amount && withdrawal_fee == WITHDRAWAL_FEE
+        );
+    }
+
+    #[test]
+    fn should_succeed_when_minimum_withdrawal_amount_equals_withdrawal_fee() {
+        let mut state = initial_state();
+
+        state
+            .upgrade(UpgradeArgs {
+                minimum_withdrawal_amount: Some(WITHDRAWAL_FEE),
+                ..Default::default()
+            })
+            .unwrap();
+
+        assert_eq!(state.minimum_withdrawal_amount(), WITHDRAWAL_FEE);
     }
 
     // This test ensures the canister state is rolled back after a failed upgrade
