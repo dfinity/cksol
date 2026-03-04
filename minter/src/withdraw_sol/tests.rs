@@ -152,7 +152,7 @@ async fn should_return_ok_if_burn_succeeds() {
 
     let runtime = TestCanisterRuntime::new()
         .add_stub_response(Ok::<Nat, TransferFromError>(Nat::from(123u64)))
-        .with_stub_times([0]);
+        .with_stub_times([0, 0]);
 
     let result = withdraw_sol(
         runtime,

@@ -94,6 +94,9 @@ pub struct WithdrawSolRequest {
     /// The fee retained by the minter (in lamports).
     #[cfg_attr(feature = "event", n(4))]
     pub withdrawal_fee: Lamport,
+    /// The time when the request was recorded, in nanoseconds since the epoch.
+    #[cfg_attr(feature = "event", n(5))]
+    pub created_at: u64,
 }
 
 /// The ID of one of the ICP root keys.

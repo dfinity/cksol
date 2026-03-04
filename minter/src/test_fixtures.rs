@@ -178,15 +178,24 @@ pub mod arb {
             any::<u64>(),
             any::<u64>(),
             any::<u64>(),
+            any::<u64>(),
         )
             .prop_map(
-                |(account, solana_address, burn_block_index, withdrawal_amount, withdrawal_fee)| {
+                |(
+                    account,
+                    solana_address,
+                    burn_block_index,
+                    withdrawal_amount,
+                    withdrawal_fee,
+                    created_at,
+                )| {
                     WithdrawSolRequest {
                         account,
                         solana_address,
                         burn_block_index,
                         withdrawal_amount,
                         withdrawal_fee,
+                        created_at,
                     }
                 },
             )

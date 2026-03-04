@@ -206,6 +206,7 @@ type WithdrawSolRequest = record {
     burn_block_index : nat64;
     withdrawal_amount : Lamport;
     withdrawal_fee : Lamport;
+    created_at : nat64;
 };
 
 // A minter event payload.
