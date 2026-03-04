@@ -20,3 +20,6 @@ icrc-ledger-types = { workspace = true, optional = true }
 minicbor = { workspace = true, features = ["derive"], optional = true }
 serde = { workspace = true }
 sol_rpc_types = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }

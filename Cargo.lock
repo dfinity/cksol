@@ -818,6 +818,7 @@ dependencies = [
  "icrc-cbor",
  "icrc-ledger-types",
  "minicbor",
+ "proptest",
  "serde",
  "sol_rpc_types",
 ]

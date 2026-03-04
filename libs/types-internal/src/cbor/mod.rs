@@ -4,6 +4,9 @@ use minicbor::{
     encode::{Encoder, Write},
 };
 
+#[cfg(test)]
+mod tests;
+
 pub mod u128 {
     use super::*;
 
