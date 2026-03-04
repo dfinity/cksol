@@ -10,28 +10,28 @@ const MAX_CONCURRENT: usize = 100;
 
 pub fn update_balance_guard(
     account: Account,
-) -> Result<Guard<PendingUpdateBalanceRequests>, GuardError> {
+) -> Result<Guard<Account, PendingUpdateBalanceRequests>, GuardError> {
     Guard::new(account)
 }
 
 pub struct PendingUpdateBalanceRequests;
 
-impl PendingRequests for PendingUpdateBalanceRequests {
-    fn pending_requests(state: &mut State) -> &mut BTreeSet<Account> {
+impl GetLocked<Account> for PendingUpdateBalanceRequests {
+    fn get_locked(state: &mut State) -> &mut BTreeSet<Account> {
         state.pending_update_balance_requests_mut()
     }
 }
 
 pub fn withdraw_sol_guard(
     account: Account,
-) -> Result<Guard<PendingWithdrawSolRequests>, GuardError> {
+) -> Result<Guard<Account, PendingWithdrawSolRequests>, GuardError> {
     Guard::new(account)
 }
 
 pub struct PendingWithdrawSolRequests;
 
-impl PendingRequests for PendingWithdrawSolRequests {
-    fn pending_requests(state: &mut State) -> &mut BTreeSet<Account> {
+impl GetLocked<Account> for PendingWithdrawSolRequests {
+    fn get_locked(state: &mut State) -> &mut BTreeSet<Account> {
         state.pending_withdraw_sol_requests_mut()
     }
 }
@@ -39,41 +39,41 @@ impl PendingRequests for PendingWithdrawSolRequests {
 /// Guards a block from executing twice when called by the same user and from being
 /// executed [`MAX_CONCURRENT`] or more times in parallel.
 #[must_use]
-pub struct Guard<R: PendingRequests> {
-    account: Account,
-    _marker: PhantomData<R>,
+pub struct Guard<T: Ord, G: GetLocked<T>> {
+    value: T,
+    _marker: PhantomData<G>,
 }
 
-impl<R: PendingRequests> Guard<R> {
+impl<T: Ord + Clone, G: GetLocked<T>> Guard<T, G> {
     /// Attempts to create a new guard for the current block. Fails if there is
     /// already a pending request for the specified [`Account`] or if there
     /// are at least [`MAX_CONCURRENT`] pending requests.
-    pub fn new(account: Account) -> Result<Self, GuardError> {
+    pub fn new(value: T) -> Result<Self, GuardError> {
         mutate_state(|s| {
-            let accounts = R::pending_requests(s);
-            if accounts.contains(&account) {
+            let already_locked = G::get_locked(s);
+            if already_locked.contains(&value) {
                 return Err(GuardError::AlreadyProcessing);
             }
-            if accounts.len() >= MAX_CONCURRENT {
+            if already_locked.len() >= MAX_CONCURRENT {
                 return Err(GuardError::TooManyConcurrentRequests);
             }
-            accounts.insert(account);
+            already_locked.insert(value.clone());
             Ok(Self {
-                account,
+                value,
                 _marker: PhantomData,
             })
         })
     }
 }
 
-impl<R: PendingRequests> Drop for Guard<R> {
+impl<T: Ord, G: GetLocked<T>> Drop for Guard<T, G> {
     fn drop(&mut self) {
-        mutate_state(|s| R::pending_requests(s).remove(&self.account));
+        mutate_state(|s| G::get_locked(s).remove(&self.value));
     }
 }
 
-pub trait PendingRequests {
-    fn pending_requests(state: &mut State) -> &mut BTreeSet<Account>;
+pub trait GetLocked<T: Ord> {
+    fn get_locked(state: &mut State) -> &mut BTreeSet<T>;
 }
 
 #[derive(Eq, PartialEq, Debug)]
