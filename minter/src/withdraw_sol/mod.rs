@@ -11,9 +11,12 @@ use crate::{
     guard::withdraw_sol_guard,
     ledger::burn,
     runtime::CanisterRuntime,
-    state::{audit::process_event, event::EventType, mutate_state, read_state},
+    state::{
+        audit::process_event,
+        event::{EventType, WithdrawSolRequest},
+        mutate_state, read_state,
+    },
 };
-use cksol_types_internal::WithdrawSolRequest;
 
 #[cfg(test)]
 mod tests;

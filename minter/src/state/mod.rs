@@ -1,7 +1,11 @@
-use crate::{ledger::client::LedgerClient, numeric::LedgerMintIndex, state::event::DepositId};
+use crate::{
+    ledger::client::LedgerClient,
+    numeric::LedgerMintIndex,
+    state::event::{DepositId, WithdrawSolRequest},
+};
 use candid::Principal;
 use cksol_types::{DepositStatus, WithdrawSolStatus};
-use cksol_types_internal::{Ed25519KeyName, InitArgs, UpgradeArgs, WithdrawSolRequest};
+use cksol_types_internal::{Ed25519KeyName, InitArgs, UpgradeArgs};
 use ic_canister_runtime::Runtime;
 use ic_ed25519::PublicKey;
 use icrc_ledger_types::icrc1::account::Account;

@@ -73,7 +73,8 @@ pub mod arb {
         numeric::LedgerMintIndex,
         state::event::{DepositId, Event, EventType},
     };
-    use cksol_types_internal::{Ed25519KeyName, InitArgs, UpgradeArgs, WithdrawSolRequest};
+    use crate::state::event::WithdrawSolRequest;
+    use cksol_types_internal::{Ed25519KeyName, InitArgs, UpgradeArgs};
     use icrc_ledger_types::icrc1::account::Account;
     use proptest::prelude::{Just, Strategy, any, prop, prop_oneof};
     use solana_signature::Signature;

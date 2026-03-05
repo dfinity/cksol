@@ -10,7 +10,6 @@ pub mod event;
 pub mod log;
 
 use candid::{CandidType, Principal};
-use icrc_ledger_types::icrc1::account::Account;
 use serde::{Deserialize, Serialize};
 use sol_rpc_types::Lamport;
 use std::fmt;
@@ -73,30 +72,6 @@ pub struct UpgradeArgs {
     /// The new withdrawal fee in lamports.
     #[cfg_attr(feature = "event", n(4))]
     pub withdrawal_fee: Option<Lamport>,
-}
-
-/// Payload of the `AcceptedWithdrawSolRequest` event.
-#[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize)]
-#[cfg_attr(feature = "event", derive(minicbor::Encode, minicbor::Decode))]
-pub struct WithdrawSolRequest {
-    /// The ledger account from which ckSOL was burned.
-    #[cfg_attr(feature = "event", n(0))]
-    pub account: Account,
-    /// The destination Solana address.
-    #[cfg_attr(feature = "event", n(1), cbor(with = "minicbor::bytes"))]
-    pub solana_address: [u8; 32],
-    /// The burn transaction index on the ckSOL ledger.
-    #[cfg_attr(feature = "event", n(2))]
-    pub burn_block_index: u64,
-    /// The total amount burned from the user (in lamports).
-    #[cfg_attr(feature = "event", n(3))]
-    pub withdrawal_amount: Lamport,
-    /// The fee retained by the minter (in lamports).
-    #[cfg_attr(feature = "event", n(4))]
-    pub withdrawal_fee: Lamport,
-    /// The time when the request was recorded, in nanoseconds since the epoch.
-    #[cfg_attr(feature = "event", n(5))]
-    pub created_at: u64,
 }
 
 /// The ID of one of the ICP root keys.

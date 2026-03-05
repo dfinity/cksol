@@ -1,6 +1,6 @@
 //! Candid-compatible event types for the ckSOL minter.
 
-use crate::{InitArgs, UpgradeArgs, WithdrawSolRequest};
+use crate::{InitArgs, UpgradeArgs};
 use candid::CandidType;
 use icrc_ledger_types::icrc1::account::Account;
 use serde::Deserialize;
@@ -59,7 +59,20 @@ pub enum EventType {
         mint_block_index: u64,
     },
     /// The minter burned ckSOL for a withdrawal request.
-    AcceptedWithdrawSolRequest(WithdrawSolRequest),
+    AcceptedWithdrawSolRequest {
+        /// The ledger account from which ckSOL was burned.
+        account: Account,
+        /// The destination Solana address.
+        solana_address: [u8; 32],
+        /// The burn transaction index on the ckSOL ledger.
+        burn_block_index: u64,
+        /// The total amount burned from the user (in lamports).
+        withdrawal_amount: Lamport,
+        /// The fee retained by the minter (in lamports).
+        withdrawal_fee: Lamport,
+        /// The time when the request was recorded, in nanoseconds since the epoch.
+        created_at: u64,
+    },
 }
 
 /// Arguments for the `get_events` endpoint.
