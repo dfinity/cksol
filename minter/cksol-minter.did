@@ -200,12 +200,18 @@ type WithdrawSolStatus = variant {
 };
 
 // Request to convert ckSOL to Solana.
-type WithdrawSolRequest = record {
+type AcceptedWithdrawSolRequest = record {
+    // The ckSOL ledger account.
     account : Account;
+    // The solana address to receive the funds.
     solana_address : blob;
+    // The index of the ledger block that burned the ckSOL tokens.
     burn_block_index : nat64;
+    // The requested withdrawal amount.
     withdrawal_amount : Lamport;
+    // The fee that will be applied during the withdrawal.
     withdrawal_fee : Lamport;
+    // The time the request was received.
     created_at : nat64;
 };
 
@@ -219,7 +225,7 @@ type EventType = variant {
     // The minter accepted the withdrawal request and
     // burned the requested amount of ckSOL.
     // The Solana transaction was not generated yet.
-    AcceptedWithdrawSolRequest : WithdrawSolRequest;
+    AcceptedWithdrawSolRequest : AcceptedWithdrawSolRequest;
     // The minter discovered a Solana transaction that is a valid ckSOL
     // deposit for the given account. ckSOL tokens have not yet been
     // minted for this deposit.
