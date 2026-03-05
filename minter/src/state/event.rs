@@ -1,4 +1,4 @@
-use crate::numeric::LedgerMintIndex;
+use crate::numeric::{LedgerBurnIndex, LedgerMintIndex};
 use cksol_types_internal::{InitArgs, UpgradeArgs};
 use ic_stable_structures::Storable;
 use ic_stable_structures::storable::Bound;
@@ -70,8 +70,8 @@ pub struct WithdrawSolRequest {
     #[cbor(n(1), with = "minicbor::bytes")]
     pub solana_address: [u8; 32],
     /// The burn transaction index on the ckSOL ledger.
-    #[n(2)]
-    pub burn_block_index: u64,
+    #[cbor(n(2), with = "cbor::id")]
+    pub burn_block_index: LedgerBurnIndex,
     /// The total amount burned from the user (in lamports).
     #[n(3)]
     pub withdrawal_amount: Lamport,

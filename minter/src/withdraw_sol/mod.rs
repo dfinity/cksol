@@ -99,7 +99,7 @@ pub async fn withdraw_sol<R: CanisterRuntime>(
             EventType::AccepterWithdrawSolRequest(WithdrawSolRequest {
                 account: from,
                 solana_address: solana_address.to_bytes(),
-                burn_block_index: block_index,
+                burn_block_index: block_index.into(),
                 withdrawal_amount: amount,
                 withdrawal_fee,
                 created_at: runtime.time(),

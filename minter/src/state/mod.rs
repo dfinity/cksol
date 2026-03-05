@@ -1,6 +1,6 @@
 use crate::{
     ledger::client::LedgerClient,
-    numeric::LedgerMintIndex,
+    numeric::{LedgerBurnIndex, LedgerMintIndex},
     state::event::{DepositId, WithdrawSolRequest},
 };
 use candid::Principal;
@@ -79,7 +79,7 @@ pub struct State {
     accepted_deposits: BTreeMap<DepositId, Lamport>,
     quarantined_deposits: BTreeMap<DepositId, Lamport>,
     minted_deposits: BTreeMap<DepositId, MintedDeposit>,
-    pending_withdrawal_requests: BTreeMap<u64, WithdrawSolRequest>,
+    pending_withdrawal_requests: BTreeMap<LedgerBurnIndex, WithdrawSolRequest>,
 }
 
 impl State {
@@ -269,7 +269,10 @@ impl State {
     }
 
     pub fn withdrawal_status(&self, block_index: u64) -> WithdrawSolStatus {
-        if self.pending_withdrawal_requests.contains_key(&block_index) {
+        if self
+            .pending_withdrawal_requests
+            .contains_key(&LedgerBurnIndex::from(block_index))
+        {
             return WithdrawSolStatus::Pending;
         }
         WithdrawSolStatus::NotFound

@@ -70,10 +70,9 @@ pub fn init_schnorr_master_key() {
 
 pub mod arb {
     use crate::{
-        numeric::LedgerMintIndex,
-        state::event::{DepositId, Event, EventType},
+        numeric::{LedgerBurnIndex, LedgerMintIndex},
+        state::event::{DepositId, Event, EventType, WithdrawSolRequest},
     };
-    use crate::state::event::WithdrawSolRequest;
     use cksol_types_internal::{Ed25519KeyName, InitArgs, UpgradeArgs};
     use icrc_ledger_types::icrc1::account::Account;
     use proptest::prelude::{Just, Strategy, any, prop, prop_oneof};
@@ -172,11 +171,15 @@ pub mod arb {
             )
     }
 
+    pub fn arb_ledger_burn_index() -> impl Strategy<Value = LedgerBurnIndex> {
+        any::<u64>().prop_map(LedgerBurnIndex::from)
+    }
+
     pub fn arb_withdraw_sol_request() -> impl Strategy<Value = WithdrawSolRequest> {
         (
             arb_account(),
             any::<[u8; 32]>(),
-            any::<u64>(),
+            arb_ledger_burn_index(),
             any::<u64>(),
             any::<u64>(),
             any::<u64>(),

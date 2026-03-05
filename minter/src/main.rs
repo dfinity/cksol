@@ -105,7 +105,7 @@ fn get_events(
                 event::EventType::AcceptedWithdrawSolRequest {
                     account: request.account,
                     solana_address: request.solana_address,
-                    burn_block_index: request.burn_block_index,
+                    burn_block_index: *request.burn_block_index.get(),
                     withdrawal_amount: request.withdrawal_amount,
                     withdrawal_fee: request.withdrawal_fee,
                     created_at: request.created_at,
