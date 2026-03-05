@@ -199,7 +199,7 @@ type WithdrawSolStatus = variant {
     TxFinalized : TxFinalizedStatus;
 };
 
-// Payload of the AcceptedWithdrawSolRequest event.
+// Request to convert ckSOL to Solana.
 type WithdrawSolRequest = record {
     account : Account;
     solana_address : blob;
@@ -216,6 +216,9 @@ type EventType = variant {
     Init : InitArgs;
     // The minter upgraded with the specified arguments.
     Upgrade : UpgradeArgs;
+    // The minter accepted the withdrawal request and
+    // burned the requested amount of ckSOL.
+    // The Solana transaction was not generated yet.
     AcceptedWithdrawSolRequest : WithdrawSolRequest;
     // The minter discovered a Solana transaction that is a valid ckSOL
     // deposit for the given account. ckSOL tokens have not yet been
