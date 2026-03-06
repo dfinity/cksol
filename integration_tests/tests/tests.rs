@@ -122,7 +122,6 @@ mod lifecycle {
         const NEW_MINIMUM_DEPOSIT_AMOUNT: Lamport = 25;
         const NEW_WITHDRAWAL_FEE: Lamport = 15;
         const NEW_UPDATE_BALANCE_REQUIRED_CYCLES: u128 = 500_000_000_000;
-        const NEW_CYCLES_PER_RPC_CALL: u128 = 600_000_000_000;
 
         let setup = SetupBuilder::new().build().await;
 
@@ -135,8 +134,6 @@ mod lifecycle {
                 minimum_deposit_amount: Setup::DEFAULT_MINIMUM_DEPOSIT_AMOUNT,
                 withdrawal_fee: Setup::DEFAULT_WITHDRAWAL_FEE,
                 update_balance_required_cycles: Setup::DEFAULT_UPDATE_BALANCE_REQUIRED_CYCLES
-                    as u128,
-                cycles_to_attach_per_rpc_call: Setup::DEFAULT_CYCLES_PER_RPC_CALL as u128,
             }
         );
 
@@ -160,7 +157,6 @@ mod lifecycle {
                 minimum_deposit_amount: Some(NEW_MINIMUM_DEPOSIT_AMOUNT),
                 withdrawal_fee: Some(NEW_WITHDRAWAL_FEE),
                 update_balance_required_cycles: Some(NEW_UPDATE_BALANCE_REQUIRED_CYCLES as u64),
-                cycles_to_attach_per_rpc_call: Some(NEW_CYCLES_PER_RPC_CALL as u64),
             })
             .await
             .expect("upgrade failed");
@@ -174,7 +170,6 @@ mod lifecycle {
                 minimum_deposit_amount: NEW_MINIMUM_DEPOSIT_AMOUNT,
                 withdrawal_fee: NEW_WITHDRAWAL_FEE,
                 update_balance_required_cycles: NEW_UPDATE_BALANCE_REQUIRED_CYCLES,
-                cycles_to_attach_per_rpc_call: NEW_CYCLES_PER_RPC_CALL,
             }
         );
 

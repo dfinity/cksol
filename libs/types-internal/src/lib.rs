@@ -54,9 +54,6 @@ pub struct InitArgs {
     /// Minimum cycles the caller must attach when calling `update_balance`.
     #[cfg_attr(feature = "event", n(7))]
     pub update_balance_required_cycles: u64,
-    /// Cycles attached to each inter-canister call to the SOL RPC canister.
-    #[cfg_attr(feature = "event", n(8))]
-    pub cycles_to_attach_per_rpc_call: u64,
 }
 
 /// The upgrade args for the ckSOL minter canister.
@@ -81,9 +78,6 @@ pub struct UpgradeArgs {
     /// New minimum cycles the caller must attach when calling `update_balance`.
     #[cfg_attr(feature = "event", n(5))]
     pub update_balance_required_cycles: Option<u64>,
-    /// New cycles attached to each inter-canister call to the SOL RPC canister.
-    #[cfg_attr(feature = "event", n(6))]
-    pub cycles_to_attach_per_rpc_call: Option<u64>,
 }
 
 /// The ID of one of the ICP root keys.

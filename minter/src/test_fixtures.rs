@@ -31,8 +31,7 @@ pub const MINTER_ACCOUNT: Account = Account {
     subaccount: None,
 };
 pub const MINIMUM_DEPOSIT_AMOUNT: Lamport = 10_000_000; // 0.01 SOL
-pub const UPDATE_BALANCE_REQUIRED_CYCLES: u64 = 1_000_000_000_000;
-pub const CYCLES_PER_RPC_CALL: u64 = 1_000_000_000_000;
+pub const UPDATE_BALANCE_REQUIRED_CYCLES: u128 = 1_000_000_000_000;
 
 pub fn sol_rpc_canister_id() -> Principal {
     Principal::from_slice(&[1_u8; 20])
@@ -51,8 +50,7 @@ pub fn valid_init_args() -> InitArgs {
         minimum_withdrawal_amount: MINIMUM_WITHDRAWAL_AMOUNT,
         minimum_deposit_amount: MINIMUM_DEPOSIT_AMOUNT,
         withdrawal_fee: WITHDRAWAL_FEE,
-        update_balance_required_cycles: UPDATE_BALANCE_REQUIRED_CYCLES,
-        cycles_to_attach_per_rpc_call: CYCLES_PER_RPC_CALL,
+        update_balance_required_cycles: UPDATE_BALANCE_REQUIRED_CYCLES as u64,
     }
 }
 
@@ -120,7 +118,6 @@ pub mod arb {
             any::<u64>(),
             any::<u64>(),
             any::<u64>(),
-            any::<u64>(),
         )
             .prop_map(
                 |(
@@ -132,7 +129,6 @@ pub mod arb {
                     minimum_deposit_amount,
                     withdrawal_fee,
                     update_balance_required_cycles,
-                    cycles_to_attach_per_rpc_call,
                 )| {
                     InitArgs {
                         sol_rpc_canister_id,
@@ -143,7 +139,6 @@ pub mod arb {
                         minimum_deposit_amount,
                         withdrawal_fee,
                         update_balance_required_cycles,
-                        cycles_to_attach_per_rpc_call,
                     }
                 },
             )
@@ -157,7 +152,6 @@ pub mod arb {
             prop::option::of(any::<u64>()),
             prop::option::of(any::<u64>()),
             prop::option::of(any::<u64>()),
-            prop::option::of(any::<u64>()),
         )
             .prop_map(
                 |(
@@ -167,7 +161,6 @@ pub mod arb {
                     minimum_deposit_amount,
                     withdrawal_fee,
                     update_balance_required_cycles,
-                    cycles_to_attach_per_rpc_call,
                 )| UpgradeArgs {
                     sol_rpc_canister_id,
                     deposit_fee,
@@ -175,7 +168,6 @@ pub mod arb {
                     minimum_deposit_amount,
                     withdrawal_fee,
                     update_balance_required_cycles,
-                    cycles_to_attach_per_rpc_call,
                 },
             )
     }

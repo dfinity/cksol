@@ -201,6 +201,4 @@ pub struct MinterInfo {
     pub withdrawal_fee: Lamport,
     /// Minimum cycles the caller must attach when calling `update_balance`.
     pub update_balance_required_cycles: u128,
-    /// Cycles attached to each inter-canister call to the SOL RPC canister.
-    pub cycles_to_attach_per_rpc_call: u128,
 }
