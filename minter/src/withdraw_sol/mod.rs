@@ -107,5 +107,7 @@ pub async fn withdraw_sol<R: CanisterRuntime>(
         )
     });
 
+    // TODO DEFI-2671: trigger the timer to process pending withdrawals.
+
     Ok(WithdrawSolOk { block_index })
 }
