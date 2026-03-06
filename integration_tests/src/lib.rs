@@ -92,7 +92,7 @@ impl Setup {
     pub const DEFAULT_WITHDRAWAL_FEE: Lamport = 5_000_000; // 0.005 SOL
     pub const DEFAULT_CONTROLLER: Principal = Principal::from_slice(&[0x9d, 0xf7, 0x01]);
     pub const DEFAULT_CALLER: Principal = Principal::from_slice(&[0x9d, 0xf7, 0x02]);
-    pub const DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT: Lamport = 10_000_000; // 0.01 SOL
+    pub const DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT: Lamport = 1_000_000; // 0.001 SOL
     pub const DEFAULT_MINIMUM_DEPOSIT_AMOUNT: Lamport = 10_000_000; // 0.01 SOL
     pub const DEFAULT_UPDATE_BALANCE_REQUIRED_CYCLES: u128 = 1_000_000_000_000;
     pub const DEFAULT_UPDATE_BALANCE_COLLATERAL_CYCLES_PER_NODE: u128 = 10_000_000;
