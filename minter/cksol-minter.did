@@ -211,8 +211,6 @@ type AcceptedWithdrawSolRequest = record {
     withdrawal_amount : Lamport;
     // The fee that will be applied during the withdrawal.
     withdrawal_fee : Lamport;
-    // The time the request was received.
-    created_at : nat64;
 };
 
 // A minter event payload.

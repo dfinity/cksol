@@ -78,9 +78,6 @@ pub struct WithdrawSolRequest {
     /// The fee retained by the minter (in lamports).
     #[n(4)]
     pub withdrawal_fee: Lamport,
-    /// The time when the request was recorded, in nanoseconds since the epoch.
-    #[n(5)]
-    pub created_at: u64,
 }
 
 #[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd, Debug, Decode, Encode)]

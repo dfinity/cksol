@@ -70,8 +70,6 @@ pub enum EventType {
         withdrawal_amount: Lamport,
         /// The fee retained by the minter (in lamports).
         withdrawal_fee: Lamport,
-        /// The time when the request was recorded, in nanoseconds since the epoch.
-        created_at: u64,
     },
 }
 

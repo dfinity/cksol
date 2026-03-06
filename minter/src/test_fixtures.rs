@@ -182,7 +182,6 @@ pub mod arb {
             arb_ledger_burn_index(),
             any::<u64>(),
             any::<u64>(),
-            any::<u64>(),
         )
             .prop_map(
                 |(
@@ -191,7 +190,6 @@ pub mod arb {
                     burn_block_index,
                     withdrawal_amount,
                     withdrawal_fee,
-                    created_at,
                 )| {
                     WithdrawSolRequest {
                         account,
@@ -199,7 +197,6 @@ pub mod arb {
                         burn_block_index,
                         withdrawal_amount,
                         withdrawal_fee,
-                        created_at,
                     }
                 },
             )
