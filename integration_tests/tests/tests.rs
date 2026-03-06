@@ -441,7 +441,7 @@ mod withdraw_sol_tests {
     }
 
     #[tokio::test]
-    async fn should_fail_is_already_processing() {
+    async fn should_fail_if_already_processing() {
         const WITHDRAWAL_AMOUNT: u64 = 100_000_000;
         const WITHDRAWAL_ADDRESS: &str = "E4MpwNnMWs2XtW5gVrxZvyS7fMq31QD5HvbxmwP45Tz3";
 
