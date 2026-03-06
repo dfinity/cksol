@@ -273,16 +273,6 @@ mod withdraw_sol_tests {
     }
 
     #[tokio::test]
-    async fn should_return_not_found_status() {
-        let setup = SetupBuilder::new().build().await;
-
-        let status = setup.minter().withdraw_sol_status(u64::MAX).await;
-        assert_eq!(status, WithdrawSolStatus::NotFound);
-
-        setup.drop().await;
-    }
-
-    #[tokio::test]
     async fn should_fail_if_insufficient_funds_or_allowance() {
         const WITHDRAWAL_AMOUNT: u64 = 100_000_000;
 
@@ -415,12 +405,6 @@ mod withdraw_sol_tests {
 
         let block_index = result.expect("burn should succeed").block_index;
 
-        let status = setup.minter().withdraw_sol_status(block_index).await;
-        assert_eq!(status, WithdrawSolStatus::Pending);
-        // 0 is the initial mint block, should be NotFound
-        let status = setup.minter().withdraw_sol_status(0).await;
-        assert_eq!(status, WithdrawSolStatus::NotFound);
-
         let block = setup.ledger().get_block(block_index).await;
         let memo_blob = get_memo(block);
         let memo = minicbor::decode::<Memo>(&memo_blob).expect("failed to decode memo");
@@ -436,6 +420,55 @@ mod withdraw_sol_tests {
             balance,
             initial_balance - LEDGER_TRANSFER_FEE - WITHDRAWAL_AMOUNT
         );
+
+        setup.drop().await;
+    }
+
+    #[tokio::test]
+    async fn should_return_withdrawal_status() {
+        const WITHDRAWAL_AMOUNT: u64 = 100_000_000;
+        const WITHDRAWAL_ADDRESS: &str = "E4MpwNnMWs2XtW5gVrxZvyS7fMq31QD5HvbxmwP45Tz3";
+
+        let initial_balance = 10 * WITHDRAWAL_AMOUNT;
+
+        let setup = SetupBuilder::new()
+            .with_initial_ledger_balances(vec![(
+                DEFAULT_CALLER_ACCOUNT,
+                Nat::from(initial_balance),
+            )])
+            .build()
+            .await;
+
+        setup
+            .ledger()
+            .approve(
+                None,
+                WITHDRAWAL_AMOUNT,
+                Account {
+                    owner: setup.minter_canister_id(),
+                    subaccount: None,
+                },
+            )
+            .await;
+
+        let result = setup
+            .minter()
+            .withdraw_sol(WithdrawSolArgs {
+                from_subaccount: None,
+                amount: WITHDRAWAL_AMOUNT,
+                address: WITHDRAWAL_ADDRESS.to_string(),
+            })
+            .await;
+
+        let block_index = result.expect("burn should succeed").block_index;
+
+        let status = setup.minter().withdraw_sol_status(block_index).await;
+        assert_eq!(status, WithdrawSolStatus::Pending);
+        // 0 is the initial mint block, should be NotFound
+        let status = setup.minter().withdraw_sol_status(0).await;
+        assert_eq!(status, WithdrawSolStatus::NotFound);
+        let status = setup.minter().withdraw_sol_status(u64::MAX).await;
+        assert_eq!(status, WithdrawSolStatus::NotFound);
 
         setup.drop().await;
     }
