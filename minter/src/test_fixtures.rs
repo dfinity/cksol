@@ -1,9 +1,9 @@
 use crate::{
     numeric::LedgerMintIndex,
     state::{
-        event::{DepositId, Event, EventType}, init_once_state,
-        mutate_state,
         SchnorrPublicKey, State,
+        event::{DepositId, Event, EventType},
+        init_once_state, mutate_state,
     },
     storage::with_event_iter,
 };
@@ -12,13 +12,13 @@ use cksol_types::{DepositStatus, Lamport};
 use cksol_types_internal::{Ed25519KeyName, InitArgs, UpgradeArgs};
 use ic_ed25519::{PocketIcMasterPublicKeyId, PublicKey};
 use icrc_ledger_types::icrc1::account::Account;
-use proptest::prelude::{any, prop, prop_oneof, Just, Strategy};
-use solana_address::{address, Address};
+use proptest::prelude::{Just, Strategy, any, prop, prop_oneof};
+use solana_address::{Address, address};
 use solana_signature::Signature;
 use solana_transaction_status_client_types::{
-    option_serializer::OptionSerializer, EncodedConfirmedTransactionWithStatusMeta,
-    EncodedTransaction, EncodedTransactionWithStatusMeta, TransactionBinaryEncoding,
-    UiLoadedAddresses, UiTransactionStatusMeta,
+    EncodedConfirmedTransactionWithStatusMeta, EncodedTransaction,
+    EncodedTransactionWithStatusMeta, TransactionBinaryEncoding, UiLoadedAddresses,
+    UiTransactionStatusMeta, option_serializer::OptionSerializer,
 };
 use std::{collections::VecDeque, str::FromStr};
 
@@ -76,34 +76,33 @@ pub fn init_schnorr_master_key() {
 pub mod arb {
     use super::*;
 
-    pub fn arb_principal() -> impl Strategy<Value=Principal> {
-        prop::collection::vec(any::<u8>(), 0..=29)
-            .prop_map(|bytes| Principal::from_slice(&bytes))
+    pub fn arb_principal() -> impl Strategy<Value = Principal> {
+        prop::collection::vec(any::<u8>(), 0..=29).prop_map(|bytes| Principal::from_slice(&bytes))
     }
 
-    pub fn arb_subaccount() -> impl Strategy<Value=Option<[u8; 32]>> {
+    pub fn arb_subaccount() -> impl Strategy<Value = Option<[u8; 32]>> {
         prop::option::of(any::<[u8; 32]>())
     }
 
-    pub fn arb_account() -> impl Strategy<Value=Account> {
+    pub fn arb_account() -> impl Strategy<Value = Account> {
         (arb_principal(), arb_subaccount())
             .prop_map(|(owner, subaccount)| Account { owner, subaccount })
     }
 
-    pub fn arb_signature() -> impl Strategy<Value=Signature> {
+    pub fn arb_signature() -> impl Strategy<Value = Signature> {
         any::<[u8; 64]>().prop_map(Signature::from)
     }
 
-    pub fn arb_deposit_id() -> impl Strategy<Value=DepositId> {
+    pub fn arb_deposit_id() -> impl Strategy<Value = DepositId> {
         (arb_signature(), arb_account())
             .prop_map(|(signature, account)| DepositId { signature, account })
     }
 
-    pub fn arb_ledger_mint_index() -> impl Strategy<Value=LedgerMintIndex> {
+    pub fn arb_ledger_mint_index() -> impl Strategy<Value = LedgerMintIndex> {
         any::<u64>().prop_map(LedgerMintIndex::from)
     }
 
-    pub fn arb_ed25519_key_name() -> impl Strategy<Value=Ed25519KeyName> {
+    pub fn arb_ed25519_key_name() -> impl Strategy<Value = Ed25519KeyName> {
         prop_oneof![
             Just(Ed25519KeyName::LocalDevelopment),
             Just(Ed25519KeyName::MainnetTestKey1),
@@ -111,7 +110,7 @@ pub mod arb {
         ]
     }
 
-    pub fn arb_init_args() -> impl Strategy<Value=InitArgs> {
+    pub fn arb_init_args() -> impl Strategy<Value = InitArgs> {
         (
             arb_principal(),
             arb_principal(),
@@ -125,16 +124,16 @@ pub mod arb {
         )
             .prop_map(
                 |(
-                     sol_rpc_canister_id,
-                     ledger_canister_id,
-                     deposit_fee,
-                     master_key_name,
-                     minimum_withdrawal_amount,
-                     minimum_deposit_amount,
-                     withdrawal_fee,
-                     update_balance_required_cycles,
-                     cycles_per_rpc_call,
-                 )| {
+                    sol_rpc_canister_id,
+                    ledger_canister_id,
+                    deposit_fee,
+                    master_key_name,
+                    minimum_withdrawal_amount,
+                    minimum_deposit_amount,
+                    withdrawal_fee,
+                    update_balance_required_cycles,
+                    cycles_per_rpc_call,
+                )| {
                     InitArgs {
                         sol_rpc_canister_id,
                         ledger_canister_id,
@@ -150,7 +149,7 @@ pub mod arb {
             )
     }
 
-    pub fn arb_upgrade_args() -> impl Strategy<Value=UpgradeArgs> {
+    pub fn arb_upgrade_args() -> impl Strategy<Value = UpgradeArgs> {
         (
             prop::option::of(arb_principal()),
             prop::option::of(any::<u64>()),
@@ -162,14 +161,14 @@ pub mod arb {
         )
             .prop_map(
                 |(
-                     sol_rpc_canister_id,
-                     deposit_fee,
-                     minimum_withdrawal_amount,
-                     minimum_deposit_amount,
-                     withdrawal_fee,
-                     update_balance_required_cycles,
-                     cycles_per_rpc_call,
-                 )| UpgradeArgs {
+                    sol_rpc_canister_id,
+                    deposit_fee,
+                    minimum_withdrawal_amount,
+                    minimum_deposit_amount,
+                    withdrawal_fee,
+                    update_balance_required_cycles,
+                    cycles_per_rpc_call,
+                )| UpgradeArgs {
                     sol_rpc_canister_id,
                     deposit_fee,
                     minimum_withdrawal_amount,
@@ -181,7 +180,7 @@ pub mod arb {
             )
     }
 
-    pub fn arb_event_type() -> impl Strategy<Value=EventType> {
+    pub fn arb_event_type() -> impl Strategy<Value = EventType> {
         prop_oneof![
             arb_init_args().prop_map(EventType::Init),
             arb_upgrade_args().prop_map(EventType::Upgrade),
@@ -201,7 +200,7 @@ pub mod arb {
         ]
     }
 
-    pub fn arb_event() -> impl Strategy<Value=Event> {
+    pub fn arb_event() -> impl Strategy<Value = Event> {
         (any::<u64>(), arb_event_type())
             .prop_map(|(timestamp, payload)| Event { timestamp, payload })
     }

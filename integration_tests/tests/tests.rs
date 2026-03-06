@@ -134,7 +134,8 @@ mod lifecycle {
                 minimum_withdrawal_amount: Setup::DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT,
                 minimum_deposit_amount: Setup::DEFAULT_MINIMUM_DEPOSIT_AMOUNT,
                 withdrawal_fee: Setup::DEFAULT_WITHDRAWAL_FEE,
-                update_balance_required_cycles: Setup::DEFAULT_UPDATE_BALANCE_REQUIRED_CYCLES as u128,
+                update_balance_required_cycles: Setup::DEFAULT_UPDATE_BALANCE_REQUIRED_CYCLES
+                    as u128,
                 cycles_per_rpc_call: Setup::DEFAULT_CYCLES_PER_RPC_CALL as u128,
             }
         );
