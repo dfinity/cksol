@@ -5,8 +5,6 @@
 #![forbid(unsafe_code)]
 
 #[cfg(feature = "event")]
-mod cbor;
-#[cfg(feature = "event")]
 pub mod event;
 #[cfg(feature = "log")]
 pub mod log;
