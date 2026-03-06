@@ -87,10 +87,10 @@ mod lifecycle {
 
         let minter_info_before = minter.get_minter_info().await;
 
-        // Setting a deposit fee higher than the minimum withdrawal amount should fail!
+        // Setting a deposit fee higher than the minimum deposit amount should fail!
         let result = minter
             .upgrade(UpgradeArgs {
-                minimum_withdrawal_amount: Some(5_000_000),
+                minimum_deposit_amount: Some(5_000_000),
                 deposit_fee: Some(20_000_000),
                 ..UpgradeArgs::default()
             })
@@ -117,6 +117,15 @@ mod lifecycle {
 
     #[tokio::test]
     async fn should_get_minter_info_and_upgrade() {
+        const NEW_DEPOSIT_FEE: Lamport = 10;
+        const NEW_MINIMUM_WITHDRAWAL_AMOUNT: Lamport = 20;
+        const NEW_MINIMUM_DEPOSIT_AMOUNT: Lamport = 25;
+        const NEW_WITHDRAWAL_FEE: Lamport = 15;
+        const NEW_UPDATE_BALANCE_REQUIRED_CYCLES: u128 = 500_000_000_000;
+        const NEW_UPDATE_BALANCE_COLLATERAL_CYCLES_PER_NODE: u128 = 5_000_000;
+        const NEW_CYCLES_PER_RPC_CALL: u128 = 600_000_000_000;
+        const NEW_NUM_SUBNET_NODES: u32 = 28;
+
         let setup = SetupBuilder::new().build().await;
 
         let minter_info = setup.minter().get_minter_info().await;
@@ -135,16 +144,20 @@ mod lifecycle {
             }
         );
 
-        let new_deposit_fee = 10;
-        let new_minimum_withdrawal_amount = 20;
-        let new_withdrawal_fee = 15;
         setup
             .minter()
             .upgrade(UpgradeArgs {
-                deposit_fee: Some(new_deposit_fee),
-                minimum_withdrawal_amount: Some(new_minimum_withdrawal_amount),
-                withdrawal_fee: Some(new_withdrawal_fee),
-                ..Default::default()
+                sol_rpc_canister_id: None,
+                deposit_fee: Some(NEW_DEPOSIT_FEE),
+                minimum_withdrawal_amount: Some(NEW_MINIMUM_WITHDRAWAL_AMOUNT),
+                minimum_deposit_amount: Some(NEW_MINIMUM_DEPOSIT_AMOUNT),
+                withdrawal_fee: Some(NEW_WITHDRAWAL_FEE),
+                update_balance_required_cycles: Some(NEW_UPDATE_BALANCE_REQUIRED_CYCLES),
+                update_balance_collateral_cycles_per_node: Some(
+                    NEW_UPDATE_BALANCE_COLLATERAL_CYCLES_PER_NODE,
+                ),
+                cycles_per_rpc_call: Some(NEW_CYCLES_PER_RPC_CALL),
+                num_subnet_nodes: Some(NEW_NUM_SUBNET_NODES),
             })
             .await
             .expect("upgrade failed");
@@ -153,15 +166,15 @@ mod lifecycle {
         assert_eq!(
             minter_info,
             MinterInfo {
-                deposit_fee: new_deposit_fee,
-                minimum_withdrawal_amount: new_minimum_withdrawal_amount,
-                minimum_deposit_amount: Setup::DEFAULT_MINIMUM_DEPOSIT_AMOUNT,
-                withdrawal_fee: new_withdrawal_fee,
-                update_balance_required_cycles: Setup::DEFAULT_UPDATE_BALANCE_REQUIRED_CYCLES,
+                deposit_fee: NEW_DEPOSIT_FEE,
+                minimum_withdrawal_amount: NEW_MINIMUM_WITHDRAWAL_AMOUNT,
+                minimum_deposit_amount: NEW_MINIMUM_DEPOSIT_AMOUNT,
+                withdrawal_fee: NEW_WITHDRAWAL_FEE,
+                update_balance_required_cycles: NEW_UPDATE_BALANCE_REQUIRED_CYCLES,
                 update_balance_collateral_cycles_per_node:
-                    Setup::DEFAULT_UPDATE_BALANCE_COLLATERAL_CYCLES_PER_NODE,
-                cycles_per_rpc_call: Setup::DEFAULT_CYCLES_PER_RPC_CALL,
-                num_subnet_nodes: Setup::DEFAULT_NUM_SUBNET_NODES,
+                    NEW_UPDATE_BALANCE_COLLATERAL_CYCLES_PER_NODE,
+                cycles_per_rpc_call: NEW_CYCLES_PER_RPC_CALL,
+                num_subnet_nodes: NEW_NUM_SUBNET_NODES,
             }
         );
 
