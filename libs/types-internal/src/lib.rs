@@ -54,17 +54,11 @@ pub struct InitArgs {
     #[cfg_attr(feature = "event", n(6))]
     pub withdrawal_fee: Lamport,
     /// Minimum cycles the caller must attach when calling `update_balance`.
-    #[cfg_attr(feature = "event", n(7), cbor(with = "crate::cbor::u128"))]
-    pub update_balance_required_cycles: u128,
-    /// Collateral cycles per subnet node for the `update_balance` call.
-    #[cfg_attr(feature = "event", n(8), cbor(with = "crate::cbor::u128"))]
-    pub update_balance_collateral_cycles_per_node: u128,
+    #[cfg_attr(feature = "event", n(7))]
+    pub update_balance_required_cycles: u64,
     /// Cycles attached to each inter-canister call to the SOL RPC canister.
-    #[cfg_attr(feature = "event", n(9), cbor(with = "crate::cbor::u128"))]
-    pub cycles_per_rpc_call: u128,
-    /// Number of subnet nodes, used to calculate total collateral for `update_balance`.
-    #[cfg_attr(feature = "event", n(10))]
-    pub num_subnet_nodes: u32,
+    #[cfg_attr(feature = "event", n(8))]
+    pub cycles_per_rpc_call: u64,
 }
 
 /// The upgrade args for the ckSOL minter canister.
@@ -87,17 +81,11 @@ pub struct UpgradeArgs {
     #[cfg_attr(feature = "event", n(4))]
     pub withdrawal_fee: Option<Lamport>,
     /// New minimum cycles the caller must attach when calling `update_balance`.
-    #[cfg_attr(feature = "event", n(5), cbor(with = "crate::cbor::u128::option"))]
-    pub update_balance_required_cycles: Option<u128>,
-    /// New collateral cycles per subnet node for the `update_balance` call.
-    #[cfg_attr(feature = "event", n(6), cbor(with = "crate::cbor::u128::option"))]
-    pub update_balance_collateral_cycles_per_node: Option<u128>,
+    #[cfg_attr(feature = "event", n(5))]
+    pub update_balance_required_cycles: Option<u64>,
     /// New cycles attached to each inter-canister call to the SOL RPC canister.
-    #[cfg_attr(feature = "event", n(7), cbor(with = "crate::cbor::u128::option"))]
-    pub cycles_per_rpc_call: Option<u128>,
-    /// New number of subnet nodes, used to calculate total collateral for `update_balance`.
-    #[cfg_attr(feature = "event", n(8))]
-    pub num_subnet_nodes: Option<u32>,
+    #[cfg_attr(feature = "event", n(6))]
+    pub cycles_per_rpc_call: Option<u64>,
 }
 
 /// The ID of one of the ICP root keys.

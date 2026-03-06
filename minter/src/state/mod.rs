@@ -71,9 +71,7 @@ pub struct State {
     minimum_withdrawal_amount: Lamport,
     minimum_deposit_amount: Lamport,
     update_balance_required_cycles: u128,
-    update_balance_collateral_cycles_per_node: u128,
     cycles_per_rpc_call: u128,
-    num_subnet_nodes: u32,
     pending_update_balance_requests: BTreeSet<Account>,
     pending_withdraw_sol_requests: BTreeSet<Account>,
     accepted_deposits: BTreeMap<DepositId, Lamport>,
@@ -131,20 +129,8 @@ impl State {
         self.update_balance_required_cycles
     }
 
-    pub fn update_balance_collateral(&self) -> u128 {
-        self.update_balance_collateral_cycles_per_node * (self.num_subnet_nodes as u128)
-    }
-
-    pub fn update_balance_collateral_cycles_per_node(&self) -> u128 {
-        self.update_balance_collateral_cycles_per_node
-    }
-
     pub fn cycles_per_rpc_call(&self) -> u128 {
         self.cycles_per_rpc_call
-    }
-
-    pub fn num_subnet_nodes(&self) -> u32 {
-        self.num_subnet_nodes
     }
 
     pub fn cycles_to_attach_for_rpc_call(&self) -> u128 {
@@ -236,8 +222,6 @@ impl State {
             minimum_deposit_amount,
             withdrawal_fee,
             update_balance_required_cycles,
-            update_balance_collateral_cycles_per_node,
-            num_subnet_nodes,
             cycles_per_rpc_call,
         }: UpgradeArgs,
     ) -> Result<(), InvalidStateError> {
@@ -257,19 +241,10 @@ impl State {
             self.minimum_deposit_amount = minimum_deposit_amount;
         }
         if let Some(update_balance_required_cycles) = update_balance_required_cycles {
-            self.update_balance_required_cycles = update_balance_required_cycles;
-        }
-        if let Some(update_balance_collateral_cycles_per_node) =
-            update_balance_collateral_cycles_per_node
-        {
-            self.update_balance_collateral_cycles_per_node =
-                update_balance_collateral_cycles_per_node;
-        }
-        if let Some(num_subnet_nodes) = num_subnet_nodes {
-            self.num_subnet_nodes = num_subnet_nodes;
+            self.update_balance_required_cycles = update_balance_required_cycles as u128;
         }
         if let Some(cycles_per_rpc_call) = cycles_per_rpc_call {
-            self.cycles_per_rpc_call = cycles_per_rpc_call;
+            self.cycles_per_rpc_call = cycles_per_rpc_call as u128;
         }
         self.validate()
     }
@@ -362,8 +337,6 @@ impl TryFrom<InitArgs> for State {
             minimum_deposit_amount,
             withdrawal_fee,
             update_balance_required_cycles,
-            update_balance_collateral_cycles_per_node,
-            num_subnet_nodes,
             cycles_per_rpc_call,
         }: InitArgs,
     ) -> Result<Self, Self::Error> {
@@ -376,10 +349,8 @@ impl TryFrom<InitArgs> for State {
             withdrawal_fee,
             minimum_withdrawal_amount,
             minimum_deposit_amount,
-            update_balance_required_cycles,
-            update_balance_collateral_cycles_per_node,
-            cycles_per_rpc_call,
-            num_subnet_nodes,
+            update_balance_required_cycles: update_balance_required_cycles as u128,
+            cycles_per_rpc_call: cycles_per_rpc_call as u128,
             pending_update_balance_requests: BTreeSet::new(),
             pending_withdraw_sol_requests: BTreeSet::new(),
             accepted_deposits: BTreeMap::new(),

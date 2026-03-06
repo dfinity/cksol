@@ -4,7 +4,6 @@ use crate::{
     state::audit::process_event,
     test_fixtures::{
         CYCLES_PER_RPC_CALL, DEPOSIT_FEE, MINIMUM_DEPOSIT_AMOUNT, MINIMUM_WITHDRAWAL_AMOUNT,
-        NUM_SUBNET_NODES, UPDATE_BALANCE_COLLATERAL_CYCLES_PER_NODE,
         UPDATE_BALANCE_REQUIRED_CYCLES, WITHDRAWAL_FEE, arb::arb_event, ledger_canister_id,
         sol_rpc_canister_id, valid_init_args,
     },
@@ -42,11 +41,8 @@ mod state_from_init_args {
                 withdrawal_fee: WITHDRAWAL_FEE,
                 minimum_withdrawal_amount: MINIMUM_WITHDRAWAL_AMOUNT,
                 minimum_deposit_amount: MINIMUM_DEPOSIT_AMOUNT,
-                update_balance_required_cycles: UPDATE_BALANCE_REQUIRED_CYCLES,
-                update_balance_collateral_cycles_per_node:
-                    UPDATE_BALANCE_COLLATERAL_CYCLES_PER_NODE,
-                num_subnet_nodes: NUM_SUBNET_NODES,
-                cycles_per_rpc_call: CYCLES_PER_RPC_CALL,
+                update_balance_required_cycles: UPDATE_BALANCE_REQUIRED_CYCLES as u128,
+                cycles_per_rpc_call: CYCLES_PER_RPC_CALL as u128,
                 pending_update_balance_requests: BTreeSet::new(),
                 pending_withdraw_sol_requests: BTreeSet::new(),
                 accepted_deposits: BTreeMap::new(),

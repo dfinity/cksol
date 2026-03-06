@@ -122,9 +122,7 @@ mod lifecycle {
         const NEW_MINIMUM_DEPOSIT_AMOUNT: Lamport = 25;
         const NEW_WITHDRAWAL_FEE: Lamport = 15;
         const NEW_UPDATE_BALANCE_REQUIRED_CYCLES: u128 = 500_000_000_000;
-        const NEW_UPDATE_BALANCE_COLLATERAL_CYCLES_PER_NODE: u128 = 5_000_000;
         const NEW_CYCLES_PER_RPC_CALL: u128 = 600_000_000_000;
-        const NEW_NUM_SUBNET_NODES: u32 = 28;
 
         let setup = SetupBuilder::new().build().await;
 
@@ -136,11 +134,8 @@ mod lifecycle {
                 minimum_withdrawal_amount: Setup::DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT,
                 minimum_deposit_amount: Setup::DEFAULT_MINIMUM_DEPOSIT_AMOUNT,
                 withdrawal_fee: Setup::DEFAULT_WITHDRAWAL_FEE,
-                update_balance_required_cycles: Setup::DEFAULT_UPDATE_BALANCE_REQUIRED_CYCLES,
-                update_balance_collateral_cycles_per_node:
-                    Setup::DEFAULT_UPDATE_BALANCE_COLLATERAL_CYCLES_PER_NODE,
-                cycles_per_rpc_call: Setup::DEFAULT_CYCLES_PER_RPC_CALL,
-                num_subnet_nodes: Setup::DEFAULT_NUM_SUBNET_NODES,
+                update_balance_required_cycles: Setup::DEFAULT_UPDATE_BALANCE_REQUIRED_CYCLES as u128,
+                cycles_per_rpc_call: Setup::DEFAULT_CYCLES_PER_RPC_CALL as u128,
             }
         );
 
@@ -163,12 +158,8 @@ mod lifecycle {
                 minimum_withdrawal_amount: Some(NEW_MINIMUM_WITHDRAWAL_AMOUNT),
                 minimum_deposit_amount: Some(NEW_MINIMUM_DEPOSIT_AMOUNT),
                 withdrawal_fee: Some(NEW_WITHDRAWAL_FEE),
-                update_balance_required_cycles: Some(NEW_UPDATE_BALANCE_REQUIRED_CYCLES),
-                update_balance_collateral_cycles_per_node: Some(
-                    NEW_UPDATE_BALANCE_COLLATERAL_CYCLES_PER_NODE,
-                ),
-                cycles_per_rpc_call: Some(NEW_CYCLES_PER_RPC_CALL),
-                num_subnet_nodes: Some(NEW_NUM_SUBNET_NODES),
+                update_balance_required_cycles: Some(NEW_UPDATE_BALANCE_REQUIRED_CYCLES as u64),
+                cycles_per_rpc_call: Some(NEW_CYCLES_PER_RPC_CALL as u64),
             })
             .await
             .expect("upgrade failed");
@@ -182,10 +173,7 @@ mod lifecycle {
                 minimum_deposit_amount: NEW_MINIMUM_DEPOSIT_AMOUNT,
                 withdrawal_fee: NEW_WITHDRAWAL_FEE,
                 update_balance_required_cycles: NEW_UPDATE_BALANCE_REQUIRED_CYCLES,
-                update_balance_collateral_cycles_per_node:
-                    NEW_UPDATE_BALANCE_COLLATERAL_CYCLES_PER_NODE,
                 cycles_per_rpc_call: NEW_CYCLES_PER_RPC_CALL,
-                num_subnet_nodes: NEW_NUM_SUBNET_NODES,
             }
         );
 

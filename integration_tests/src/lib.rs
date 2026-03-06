@@ -5,22 +5,26 @@ use cksol_types::{
     Address, DepositStatus, GetDepositAddressArgs, MinterInfo, UpdateBalanceArgs,
     UpdateBalanceError, WithdrawSolArgs, WithdrawSolError, WithdrawSolOk, WithdrawSolStatus,
 };
-use cksol_types_internal::event::{Event, GetEventsResult};
-use cksol_types_internal::{MinterArg, log::Priority};
+use cksol_types_internal::{
+    MinterArg,
+    event::{Event, GetEventsResult},
+    log::Priority,
+};
 use ic_canister_runtime::Runtime;
 use ic_http_types::{HttpRequest, HttpResponse};
 use ic_management_canister_types::{CanisterId, CanisterSettings};
 use ic_pocket_canister_runtime::{ExecuteHttpOutcallMocks, PocketIcRuntime};
-use icrc_ledger_types::icrc1::account::Account;
-use icrc_ledger_types::icrc2::approve::{ApproveArgs, ApproveError};
-use icrc_ledger_types::icrc3::blocks::{GetBlocksRequest, GetBlocksResult, ICRC3GenericBlock};
+use icrc_ledger_types::{
+    icrc1::account::Account,
+    icrc2::approve::{ApproveArgs, ApproveError},
+    icrc3::blocks::{GetBlocksRequest, GetBlocksResult, ICRC3GenericBlock},
+};
 use num_traits::cast::ToPrimitive;
 use pocket_ic::{PocketIcBuilder, RejectResponse, nonblocking::PocketIc};
 use serde::de::DeserializeOwned;
 use sol_rpc_client::SolRpcClient;
 use sol_rpc_types::{Lamport, RpcAccess};
-use std::vec;
-use std::{env::var, fs, path::PathBuf};
+use std::{env::var, fs, path::PathBuf, vec};
 
 pub mod events;
 pub mod fixtures;
@@ -94,13 +98,8 @@ impl Setup {
     pub const DEFAULT_CALLER: Principal = Principal::from_slice(&[0x9d, 0xf7, 0x02]);
     pub const DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT: Lamport = 1_000_000; // 0.001 SOL
     pub const DEFAULT_MINIMUM_DEPOSIT_AMOUNT: Lamport = 10_000_000; // 0.01 SOL
-    pub const DEFAULT_UPDATE_BALANCE_REQUIRED_CYCLES: u128 = 1_000_000_000_000;
-    pub const DEFAULT_UPDATE_BALANCE_COLLATERAL_CYCLES_PER_NODE: u128 = 10_000_000;
-    pub const DEFAULT_CYCLES_PER_RPC_CALL: u128 = 1_000_000_000_000;
-    pub const DEFAULT_NUM_SUBNET_NODES: u32 = 34;
-    pub const DEFAULT_UPDATE_BALANCE_COLLATERAL_CYCLES: u128 = (Self::DEFAULT_NUM_SUBNET_NODES
-        as u128)
-        * Self::DEFAULT_UPDATE_BALANCE_COLLATERAL_CYCLES_PER_NODE;
+    pub const DEFAULT_UPDATE_BALANCE_REQUIRED_CYCLES: u64 = 1_000_000_000_000;
+    pub const DEFAULT_CYCLES_PER_RPC_CALL: u64 = 1_000_000_000_000;
 
     pub async fn new(
         caller: Option<Principal>,
@@ -526,9 +525,6 @@ fn cksol_minter_init_args(
         minimum_deposit_amount: Setup::DEFAULT_MINIMUM_DEPOSIT_AMOUNT,
         withdrawal_fee: Setup::DEFAULT_WITHDRAWAL_FEE,
         update_balance_required_cycles: Setup::DEFAULT_UPDATE_BALANCE_REQUIRED_CYCLES,
-        update_balance_collateral_cycles_per_node:
-            Setup::DEFAULT_UPDATE_BALANCE_COLLATERAL_CYCLES_PER_NODE,
-        num_subnet_nodes: Setup::DEFAULT_NUM_SUBNET_NODES,
         cycles_per_rpc_call: Setup::DEFAULT_CYCLES_PER_RPC_CALL,
     })
 }
