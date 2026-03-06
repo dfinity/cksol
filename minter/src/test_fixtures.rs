@@ -85,6 +85,28 @@ pub mod arb {
             .prop_map(|bytes| candid::Principal::from_slice(&bytes))
     }
 
+    pub fn arb_subaccount() -> impl Strategy<Value = Option<[u8; 32]>> {
+        prop::option::of(any::<[u8; 32]>())
+    }
+
+    pub fn arb_account() -> impl Strategy<Value = Account> {
+        (arb_principal(), arb_subaccount())
+            .prop_map(|(owner, subaccount)| Account { owner, subaccount })
+    }
+
+    pub fn arb_signature() -> impl Strategy<Value = Signature> {
+        any::<[u8; 64]>().prop_map(Signature::from)
+    }
+
+    pub fn arb_deposit_id() -> impl Strategy<Value = DepositId> {
+        (arb_signature(), arb_account())
+            .prop_map(|(signature, account)| DepositId { signature, account })
+    }
+
+    pub fn arb_ledger_mint_index() -> impl Strategy<Value = LedgerMintIndex> {
+        any::<u64>().prop_map(LedgerMintIndex::from)
+    }
+
     pub fn arb_ed25519_key_name() -> impl Strategy<Value = Ed25519KeyName> {
         prop_oneof![
             Just(Ed25519KeyName::LocalDevelopment),
@@ -179,6 +201,19 @@ pub mod arb {
         prop_oneof![
             arb_init_args().prop_map(EventType::Init),
             arb_upgrade_args().prop_map(EventType::Upgrade),
+            (arb_deposit_id(), any::<u64>()).prop_map(|(deposit_id, amount_to_mint)| {
+                EventType::AcceptedDeposit {
+                    deposit_id,
+                    amount_to_mint,
+                }
+            }),
+            arb_deposit_id().prop_map(EventType::QuarantinedDeposit),
+            (arb_deposit_id(), arb_ledger_mint_index()).prop_map(
+                |(deposit_id, mint_block_index)| EventType::Minted {
+                    deposit_id,
+                    mint_block_index,
+                }
+            ),
         ]
     }
 
