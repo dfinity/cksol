@@ -1,13 +1,15 @@
 use crate::{
+    guard::{TimerGuard, TimerGuardError},
     runtime::CanisterRuntime,
     state::read_state,
     state::{
+        TaskType,
         audit::process_event,
         event::{DepositId, EventType},
         mutate_state,
     },
 };
-use cksol_types::{BurnMemo, DepositStatus, Memo, MintMemo};
+use cksol_types::{BurnMemo, DepositStatus, Lamport, Memo, MintMemo};
 use derive_more::From;
 use ic_canister_runtime::IcError;
 use icrc_ledger_types::{
@@ -19,13 +21,61 @@ use icrc_ledger_types::{
 };
 use num_traits::cast::ToPrimitive;
 use scopeguard::ScopeGuard;
-use sol_rpc_types::Lamport;
 use solana_address::Address;
+use std::time::Duration;
 use thiserror::Error;
 
 pub mod client;
 
-pub async fn mint<R: CanisterRuntime>(
+// TODO DEFI-2643: Make this a configurable parameter
+const MINT_RETRY_DELAY: Duration = Duration::from_mins(1);
+
+pub fn schedule_mint_for_accepted_deposits<R: CanisterRuntime + Clone + 'static>(runtime: R) {
+    runtime
+        .clone()
+        .set_timer(MINT_RETRY_DELAY, mint_for_accepted_deposits(runtime));
+}
+
+pub async fn mint_for_accepted_deposits<R: CanisterRuntime + Clone + 'static>(runtime: R) {
+    // In case we do not manage to mint all pending deposits, make sure to re-schedule
+    // this task to execute.
+    let schedule_timer_guard = scopeguard::guard(runtime.clone(), |runtime| {
+        schedule_mint_for_accepted_deposits(runtime);
+    });
+
+    let _guard = match TimerGuard::new(TaskType::Mint) {
+        Ok(guard) => guard,
+        Err(_) => return,
+    };
+
+    let mut pending_accepted_deposits = false;
+    for (deposit_id, amount_to_mint) in read_state(|state| state.accepted_deposits()) {
+        match mint(&runtime, deposit_id, amount_to_mint).await {
+            Ok(DepositStatus::Processing(_)) | Err(_) => {
+                pending_accepted_deposits = true;
+            }
+            Ok(DepositStatus::Minted { .. }) | Ok(DepositStatus::Quarantined(_)) => {}
+        }
+    }
+
+    if !pending_accepted_deposits {
+        // No more pending deposits to mint, defuse guard
+        ScopeGuard::into_inner(schedule_timer_guard);
+    }
+}
+
+pub async fn mint_for_deposit<R: CanisterRuntime>(
+    runtime: &R,
+    deposit_id: DepositId,
+    amount_to_mint: Lamport,
+) -> Result<DepositStatus, MintError> {
+    let _guard = TimerGuard::new(TaskType::Mint)?;
+    mint(runtime, deposit_id, amount_to_mint).await
+}
+
+/// This method should only be called after having acquired a [`TimerGuard`]
+///  for [`TaskType::Mint`].
+async fn mint<R: CanisterRuntime>(
     runtime: &R,
     deposit_id: DepositId,
     amount_to_mint: Lamport,
@@ -115,6 +165,8 @@ pub async fn burn<R: CanisterRuntime>(
 #[derive(Debug, PartialEq, Error, From)]
 #[from(IcError)]
 pub enum MintError {
+    #[error("Mint already in progress")]
+    AlreadyProcessing(TimerGuardError),
     #[error("Error while calling ledger canister: {0}")]
     IcError(IcError),
     // TODO DEFI-2643: Should we panic on any of those errors?

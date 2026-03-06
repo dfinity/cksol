@@ -569,7 +569,8 @@ mod update_balance_tests {
     }
 
     #[tokio::test]
-    async fn should_return_processing_if_minting_fails() {
+    async fn should_return_processing_and_schedule_mint_if_minting_fails() {
+        const EXPECTED_MINT_AMOUNT: Lamport = DEPOSIT_AMOUNT - Setup::DEFAULT_DEPOSIT_FEE;
         let setup = SetupBuilder::new().build().await;
 
         setup.ledger().stop().await;
@@ -593,7 +594,34 @@ mod update_balance_tests {
             .minter()
             .update_balance(default_update_balance_args())
             .await;
-        assert_eq!(result, Ok(DepositStatus::Processing(deposit_signature)));
+        assert_eq!(
+            result,
+            Ok(DepositStatus::Processing(deposit_signature.clone()))
+        );
+
+        // Restart minter: balance should be zero
+        setup.ledger().start().await;
+        let balance_before = setup.ledger().balance_of(DEFAULT_CALLER_ACCOUNT).await;
+        assert_eq!(balance_before, 0);
+
+        // Advance time for the scheduled minting task to be triggered,
+        // then tick to execute the task
+        setup.advance_time(Setup::MINT_RETRY_DELAY).await;
+        setup.tick().await;
+
+        // The deposit should now have been minted, without making any additional JSON-RPC calls
+        let result = setup
+            .minter()
+            .update_balance(default_update_balance_args())
+            .await;
+        assert_matches!(&result, Ok(DepositStatus::Minted {
+            minted_amount,
+            signature,
+            block_index: _,
+        }) if minted_amount == &EXPECTED_MINT_AMOUNT && signature == &deposit_signature);
+
+        let balance_after = setup.ledger().balance_of(DEFAULT_CALLER_ACCOUNT).await;
+        assert_eq!(balance_after, EXPECTED_MINT_AMOUNT);
 
         setup.drop().await;
     }

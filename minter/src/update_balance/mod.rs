@@ -1,7 +1,8 @@
+use crate::ledger::schedule_mint_for_accepted_deposits;
 use crate::{
     address::get_deposit_address,
     guard::update_balance_guard,
-    ledger::mint,
+    ledger::mint_for_deposit,
     runtime::CanisterRuntime,
     state::{
         audit::process_event,
@@ -14,11 +15,12 @@ use canlog::log;
 use cksol_types::{DepositStatus, UpdateBalanceError};
 use cksol_types_internal::log::Priority;
 use icrc_ledger_types::icrc1::account::Account;
+use scopeguard::ScopeGuard;
 
 #[cfg(test)]
 mod tests;
 
-pub async fn update_balance<R: CanisterRuntime>(
+pub async fn update_balance<R: CanisterRuntime + Clone + 'static>(
     runtime: R,
     account: Account,
     signature: solana_signature::Signature,
@@ -76,15 +78,18 @@ pub async fn update_balance<R: CanisterRuntime>(
         )
     });
 
-    // TODO DEFI-2643: If minting fails, we should try again later automatically (i.e. set up a
-    //  timer that checks events to mint.
-    // TODO DEFI-2643: Handle the case where the timer execution triggers while we are awaiting the
-    //  response from the ledger and we concurrently try to mint for the same `AcceptedDeposit`
-    //  event, i.e. watch out for race conditions!
-    // TODO DEFI-2643: Handle the case where the mint calls panic with a scopeguard, similar to the
-    //  ckBTC minter.
-    match mint(&runtime, deposit_id, amount_to_mint).await {
-        Ok(deposit_status) => Ok(deposit_status),
+    // In case minting fails, we schedule a task to re-try later to ensure pending
+    // deposits eventually get minted.
+    let schedule_mint_guard = scopeguard::guard(runtime.clone(), |runtime| {
+        schedule_mint_for_accepted_deposits(runtime.clone());
+    });
+
+    match mint_for_deposit(&runtime, deposit_id, amount_to_mint).await {
+        Ok(deposit_status) => {
+            // Minting succeeded, defuse guard
+            ScopeGuard::into_inner(schedule_mint_guard);
+            Ok(deposit_status)
+        }
         Err(e) => {
             log!(
                 Priority::Info,

@@ -75,6 +75,7 @@ pub struct State {
     accepted_deposits: BTreeMap<DepositId, Lamport>,
     quarantined_deposits: BTreeMap<DepositId, Lamport>,
     minted_deposits: BTreeMap<DepositId, MintedDeposit>,
+    active_tasks: BTreeSet<TaskType>,
 }
 
 impl State {
@@ -123,6 +124,10 @@ impl State {
         self.minimum_deposit_amount
     }
 
+    pub fn accepted_deposits(&self) -> BTreeMap<DepositId, Lamport> {
+        self.accepted_deposits.clone()
+    }
+
     pub fn deposit_status(&self, deposit_id: &DepositId) -> Option<DepositStatus> {
         if self.quarantined_deposits.contains_key(deposit_id) {
             return Some(DepositStatus::Quarantined(deposit_id.signature.into()));
@@ -168,6 +173,10 @@ impl State {
 
     pub fn pending_withdraw_sol_requests_mut(&mut self) -> &mut BTreeSet<Account> {
         &mut self.pending_withdraw_sol_requests
+    }
+
+    pub fn active_tasks_mut(&mut self) -> &mut BTreeSet<TaskType> {
+        &mut self.active_tasks
     }
 
     fn validate(&self) -> Result<(), InvalidStateError> {
@@ -330,6 +339,7 @@ impl TryFrom<InitArgs> for State {
             accepted_deposits: BTreeMap::new(),
             quarantined_deposits: BTreeMap::new(),
             minted_deposits: BTreeMap::new(),
+            active_tasks: BTreeSet::new(),
         };
         state.validate()?;
         Ok(state)
@@ -346,4 +356,9 @@ pub struct SchnorrPublicKey {
 pub struct MintedDeposit {
     block_index: LedgerMintIndex,
     minted_amount: Lamport,
+}
+
+#[derive(Copy, Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub enum TaskType {
+    Mint,
 }

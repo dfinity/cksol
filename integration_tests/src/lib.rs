@@ -19,6 +19,7 @@ use pocket_ic::{PocketIcBuilder, RejectResponse, nonblocking::PocketIc};
 use serde::de::DeserializeOwned;
 use sol_rpc_client::SolRpcClient;
 use sol_rpc_types::{Lamport, RpcAccess};
+use std::time::Duration;
 use std::vec;
 use std::{env::var, fs, path::PathBuf};
 
@@ -94,6 +95,7 @@ impl Setup {
     pub const DEFAULT_CALLER: Principal = Principal::from_slice(&[0x9d, 0xf7, 0x02]);
     pub const DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT: Lamport = 10_000_000; // 0.01 SOL
     pub const DEFAULT_MINIMUM_DEPOSIT_AMOUNT: Lamport = 10_000_000; // 0.01 SOL
+    pub const MINT_RETRY_DELAY: Duration = Duration::from_mins(1);
 
     pub async fn new(
         caller: Option<Principal>,
@@ -202,6 +204,10 @@ impl Setup {
         )
         .await
         .expect("BUG: Failed to call updateApiKeys");
+    }
+
+    pub async fn advance_time(&self, duration: Duration) {
+        self.env.as_ref().unwrap().advance_time(duration).await
     }
 
     pub fn runtime(&self) -> PocketIcRuntime<'_> {
@@ -415,6 +421,10 @@ impl Ledger<'_> {
         result.blocks[0].block.clone()
     }
 
+    pub async fn start(&self) {
+        self.0.start().await;
+    }
+
     pub async fn stop(&self) {
         self.0.stop().await;
     }
@@ -481,6 +491,14 @@ impl Canister<'_> {
                 Some(Setup::DEFAULT_CONTROLLER),
             )
             .await
+    }
+
+    pub async fn start(&self) {
+        self.runtime
+            .as_ref()
+            .start_canister(self.id, Some(Setup::DEFAULT_CONTROLLER))
+            .await
+            .expect("Failed to stop canister");
     }
 
     pub async fn stop(&self) {

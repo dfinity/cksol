@@ -1,5 +1,6 @@
 use candid::CandidType;
 use ic_canister_runtime::{IcError, IcRuntime, Runtime, StubRuntime};
+use std::time::Duration;
 use std::{
     fmt::Debug,
     iter,
@@ -10,9 +11,14 @@ pub trait CanisterRuntime {
     fn inter_canister_call_runtime(&self) -> impl Runtime;
     fn time(&self) -> u64;
     fn instruction_counter(&self) -> u64;
+    fn set_timer(
+        &self,
+        delay: Duration,
+        future: impl Future<Output = ()> + 'static,
+    ) -> ic_cdk_timers::TimerId;
 }
 
-#[derive(Default, Debug)]
+#[derive(Clone, Default, Debug)]
 pub struct IcCanisterRuntime(IcRuntime);
 
 impl IcCanisterRuntime {
@@ -33,8 +39,17 @@ impl CanisterRuntime for IcCanisterRuntime {
     fn instruction_counter(&self) -> u64 {
         ic_cdk::api::instruction_counter()
     }
+
+    fn set_timer(
+        &self,
+        delay: Duration,
+        future: impl Future<Output = ()> + 'static,
+    ) -> ic_cdk_timers::TimerId {
+        ic_cdk_timers::set_timer(delay, future)
+    }
 }
 
+#[derive(Clone)]
 pub struct TestCanisterRuntime {
     inter_canister_call_runtime: StubRuntime,
     times: Arc<Mutex<dyn Iterator<Item = u64> + Send + Sync>>,
@@ -102,5 +117,13 @@ impl CanisterRuntime for TestCanisterRuntime {
             .unwrap()
             .next()
             .expect("No more stub instruction counts!")
+    }
+
+    fn set_timer(
+        &self,
+        _delay: Duration,
+        _future: impl Future<Output = ()> + 'static,
+    ) -> ic_cdk_timers::TimerId {
+        Default::default()
     }
 }
