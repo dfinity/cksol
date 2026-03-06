@@ -1,7 +1,9 @@
 use crate::{
+    guard::{TaskGuard, TaskGuardError},
     runtime::CanisterRuntime,
     state::read_state,
     state::{
+        TaskType,
         audit::process_event,
         event::{DepositId, EventType},
         mutate_state,
@@ -30,6 +32,8 @@ pub async fn mint<R: CanisterRuntime>(
     deposit_id: DepositId,
     amount_to_mint: Lamport,
 ) -> Result<DepositStatus, MintError> {
+    let _guard = TaskGuard::new(TaskType::Mint)?;
+
     let signature = deposit_id.signature;
     let mint_memo = MintMemo::convert(signature);
 
@@ -115,6 +119,8 @@ pub async fn burn<R: CanisterRuntime>(
 #[derive(Debug, PartialEq, Error, From)]
 #[from(IcError)]
 pub enum MintError {
+    #[error("Mint already in progress")]
+    AlreadyProcessing(TaskGuardError),
     #[error("Error while calling ledger canister: {0}")]
     IcError(IcError),
     // TODO DEFI-2643: Should we panic on any of those errors?

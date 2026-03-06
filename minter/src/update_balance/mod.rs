@@ -76,13 +76,6 @@ pub async fn update_balance<R: CanisterRuntime>(
         )
     });
 
-    // TODO DEFI-2643: If minting fails, we should try again later automatically (i.e. set up a
-    //  timer that checks events to mint.
-    // TODO DEFI-2643: Handle the case where the timer execution triggers while we are awaiting the
-    //  response from the ledger and we concurrently try to mint for the same `AcceptedDeposit`
-    //  event, i.e. watch out for race conditions!
-    // TODO DEFI-2643: Handle the case where the mint calls panic with a scopeguard, similar to the
-    //  ckBTC minter.
     match mint(&runtime, deposit_id, amount_to_mint).await {
         Ok(deposit_status) => Ok(deposit_status),
         Err(e) => {

@@ -74,6 +74,7 @@ pub struct State {
     withdrawal_fee: Lamport,
     minimum_withdrawal_amount: Lamport,
     minimum_deposit_amount: Lamport,
+    active_tasks: BTreeSet<TaskType>,
     pending_update_balance_requests: BTreeSet<Account>,
     pending_withdraw_sol_requests: BTreeSet<Account>,
     accepted_deposits: BTreeMap<DepositId, Lamport>,
@@ -173,6 +174,10 @@ impl State {
 
     pub fn pending_withdraw_sol_requests_mut(&mut self) -> &mut BTreeSet<Account> {
         &mut self.pending_withdraw_sol_requests
+    }
+
+    pub fn active_tasks_mut(&mut self) -> &mut BTreeSet<TaskType> {
+        &mut self.active_tasks
     }
 
     fn validate(&self) -> Result<(), InvalidStateError> {
@@ -350,6 +355,7 @@ impl TryFrom<InitArgs> for State {
             withdrawal_fee,
             minimum_withdrawal_amount,
             minimum_deposit_amount,
+            active_tasks: BTreeSet::new(),
             pending_update_balance_requests: BTreeSet::new(),
             pending_withdraw_sol_requests: BTreeSet::new(),
             accepted_deposits: BTreeMap::new(),
@@ -372,4 +378,9 @@ pub struct SchnorrPublicKey {
 pub struct MintedDeposit {
     block_index: LedgerMintIndex,
     minted_amount: Lamport,
+}
+
+#[derive(Copy, Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub enum TaskType {
+    Mint,
 }

@@ -1,4 +1,4 @@
-use crate::state::{State, mutate_state};
+use crate::state::{State, TaskType, mutate_state};
 use cksol_types::{UpdateBalanceError, WithdrawSolError};
 use icrc_ledger_types::icrc1::account::Account;
 use std::{collections::BTreeSet, marker::PhantomData};
@@ -102,4 +102,33 @@ pub fn withdraw_sol_guard(
     account: Account,
 ) -> Result<Guard<PendingWithdrawSolRequests>, GuardError> {
     Guard::new(account)
+}
+
+#[derive(Eq, PartialEq, Debug)]
+pub enum TaskGuardError {
+    AlreadyProcessing,
+}
+
+#[derive(Eq, PartialEq, Debug)]
+pub struct TaskGuard {
+    task: TaskType,
+}
+
+impl TaskGuard {
+    pub fn new(task: TaskType) -> Result<Self, TaskGuardError> {
+        mutate_state(|s| {
+            if !s.active_tasks_mut().insert(task) {
+                return Err(TaskGuardError::AlreadyProcessing);
+            }
+            Ok(Self { task })
+        })
+    }
+}
+
+impl Drop for TaskGuard {
+    fn drop(&mut self) {
+        mutate_state(|s| {
+            s.active_tasks_mut().remove(&self.task);
+        });
+    }
 }

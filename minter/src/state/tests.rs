@@ -40,6 +40,7 @@ mod state_from_init_args {
                 withdrawal_fee: WITHDRAWAL_FEE,
                 minimum_withdrawal_amount: MINIMUM_WITHDRAWAL_AMOUNT,
                 minimum_deposit_amount: MINIMUM_DEPOSIT_AMOUNT,
+                active_tasks: BTreeSet::new(),
                 pending_update_balance_requests: BTreeSet::new(),
                 pending_withdraw_sol_requests: BTreeSet::new(),
                 accepted_deposits: BTreeMap::new(),
