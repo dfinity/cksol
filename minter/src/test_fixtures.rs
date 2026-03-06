@@ -8,13 +8,13 @@ use crate::{
     storage::with_event_iter,
 };
 use candid::Principal;
-use cksol_types::DepositStatus;
+use cksol_types::{DepositStatus, Lamport};
 use cksol_types_internal::{Ed25519KeyName, InitArgs, UpgradeArgs};
 use ic_ed25519::{PocketIcMasterPublicKeyId, PublicKey};
 use icrc_ledger_types::icrc1::account::Account;
 use proptest::prelude::{Just, Strategy, any, prop, prop_oneof};
-use sol_rpc_types::Lamport;
 use solana_address::{Address, address};
+use solana_signature::Signature;
 use solana_transaction_status_client_types::{
     EncodedConfirmedTransactionWithStatusMeta, EncodedTransaction,
     EncodedTransactionWithStatusMeta, TransactionBinaryEncoding, UiLoadedAddresses,
