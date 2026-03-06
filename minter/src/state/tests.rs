@@ -42,7 +42,7 @@ mod state_from_init_args {
                 minimum_withdrawal_amount: MINIMUM_WITHDRAWAL_AMOUNT,
                 minimum_deposit_amount: MINIMUM_DEPOSIT_AMOUNT,
                 update_balance_required_cycles: UPDATE_BALANCE_REQUIRED_CYCLES as u128,
-                cycles_per_rpc_call: CYCLES_PER_RPC_CALL as u128,
+                cycles_to_attach_per_rpc_call: CYCLES_PER_RPC_CALL as u128,
                 pending_update_balance_requests: BTreeSet::new(),
                 pending_withdraw_sol_requests: BTreeSet::new(),
                 accepted_deposits: BTreeMap::new(),
@@ -322,6 +322,95 @@ mod state_upgrade {
             .unwrap();
 
         assert_eq!(state.minimum_withdrawal_amount(), WITHDRAWAL_FEE);
+    }
+
+    #[test]
+    fn should_update_update_balance_required_cycles() {
+        let mut state = initial_state();
+        let new_update_balance_required_cycles = UPDATE_BALANCE_REQUIRED_CYCLES * 2;
+
+        state
+            .upgrade(UpgradeArgs {
+                update_balance_required_cycles: Some(new_update_balance_required_cycles),
+                ..Default::default()
+            })
+            .unwrap();
+
+        assert_eq!(
+            state.update_balance_required_cycles(),
+            new_update_balance_required_cycles as u128
+        );
+    }
+
+    #[test]
+    fn should_update_cycles_to_attach_per_rpc_call() {
+        let mut state = initial_state();
+        let new_cycles_to_attach_per_rpc_call = CYCLES_PER_RPC_CALL / 2;
+
+        state
+            .upgrade(UpgradeArgs {
+                cycles_to_attach_per_rpc_call: Some(new_cycles_to_attach_per_rpc_call),
+                ..Default::default()
+            })
+            .unwrap();
+
+        assert_eq!(
+            state.cycles_to_attach_per_rpc_call(),
+            new_cycles_to_attach_per_rpc_call as u128
+        );
+    }
+
+    #[test]
+    fn should_fail_when_new_cycles_to_attach_per_rpc_call_exceeds_update_balance_required_cycles() {
+        let mut state = initial_state();
+        let new_cycles_to_attach_per_rpc_call = UPDATE_BALANCE_REQUIRED_CYCLES + 1;
+
+        assert_matches!(
+            state.upgrade(UpgradeArgs {
+                cycles_to_attach_per_rpc_call: Some(new_cycles_to_attach_per_rpc_call),
+                ..Default::default()
+            }),
+            Err(InvalidStateError::InvalidUpdateBalanceRequiredCycles {
+                update_balance_required_cycles,
+                cycles_to_attach_per_rpc_call
+            }) if update_balance_required_cycles == UPDATE_BALANCE_REQUIRED_CYCLES as u128
+               && cycles_to_attach_per_rpc_call == new_cycles_to_attach_per_rpc_call as u128
+        );
+    }
+
+    #[test]
+    fn should_fail_when_new_update_balance_required_cycles_below_cycles_to_attach_per_rpc_call() {
+        let mut state = initial_state();
+        let new_update_balance_required_cycles = CYCLES_PER_RPC_CALL - 1;
+
+        assert_matches!(
+            state.upgrade(UpgradeArgs {
+                update_balance_required_cycles: Some(new_update_balance_required_cycles),
+                ..Default::default()
+            }),
+            Err(InvalidStateError::InvalidUpdateBalanceRequiredCycles {
+                update_balance_required_cycles,
+                cycles_to_attach_per_rpc_call
+            }) if update_balance_required_cycles == new_update_balance_required_cycles as u128
+               && cycles_to_attach_per_rpc_call == CYCLES_PER_RPC_CALL as u128
+        );
+    }
+
+    #[test]
+    fn should_succeed_when_update_balance_required_cycles_equals_cycles_to_attach_per_rpc_call() {
+        let mut state = initial_state();
+
+        state
+            .upgrade(UpgradeArgs {
+                update_balance_required_cycles: Some(CYCLES_PER_RPC_CALL),
+                ..Default::default()
+            })
+            .unwrap();
+
+        assert_eq!(
+            state.update_balance_required_cycles(),
+            CYCLES_PER_RPC_CALL as u128
+        );
     }
 
     // This test ensures the canister state is rolled back after a failed upgrade

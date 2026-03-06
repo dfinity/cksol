@@ -111,7 +111,7 @@ type InitArgs = record {
     withdrawal_fee : Lamport;
     update_balance_required_cycles : nat;
     update_balance_collateral_cycles_per_node : nat;
-    cycles_per_rpc_call : nat;
+    cycles_to_attach_per_rpc_call : nat;
     num_subnet_nodes : nat32;
 };
 
@@ -123,7 +123,7 @@ type MinterInfo = record {
     withdrawal_fee : Lamport;
     update_balance_required_cycles : nat;
     update_balance_collateral_cycles_per_node : nat;
-    cycles_per_rpc_call : nat;
+    cycles_to_attach_per_rpc_call : nat;
     num_subnet_nodes : nat32;
 };
 
@@ -142,7 +142,7 @@ type UpgradeArgs = record {
     withdrawal_fee : opt Lamport;
     update_balance_required_cycles : opt nat;
     update_balance_collateral_cycles_per_node : opt nat;
-    cycles_per_rpc_call : opt nat;
+    cycles_to_attach_per_rpc_call : opt nat;
     num_subnet_nodes : opt nat32;
 };
 

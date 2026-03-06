@@ -52,7 +52,7 @@ pub fn valid_init_args() -> InitArgs {
         minimum_deposit_amount: MINIMUM_DEPOSIT_AMOUNT,
         withdrawal_fee: WITHDRAWAL_FEE,
         update_balance_required_cycles: UPDATE_BALANCE_REQUIRED_CYCLES,
-        cycles_per_rpc_call: CYCLES_PER_RPC_CALL,
+        cycles_to_attach_per_rpc_call: CYCLES_PER_RPC_CALL,
     }
 }
 
@@ -132,7 +132,7 @@ pub mod arb {
                     minimum_deposit_amount,
                     withdrawal_fee,
                     update_balance_required_cycles,
-                    cycles_per_rpc_call,
+                    cycles_to_attach_per_rpc_call,
                 )| {
                     InitArgs {
                         sol_rpc_canister_id,
@@ -143,7 +143,7 @@ pub mod arb {
                         minimum_deposit_amount,
                         withdrawal_fee,
                         update_balance_required_cycles,
-                        cycles_per_rpc_call,
+                        cycles_to_attach_per_rpc_call,
                     }
                 },
             )
@@ -167,7 +167,7 @@ pub mod arb {
                     minimum_deposit_amount,
                     withdrawal_fee,
                     update_balance_required_cycles,
-                    cycles_per_rpc_call,
+                    cycles_to_attach_per_rpc_call,
                 )| UpgradeArgs {
                     sol_rpc_canister_id,
                     deposit_fee,
@@ -175,7 +175,7 @@ pub mod arb {
                     minimum_deposit_amount,
                     withdrawal_fee,
                     update_balance_required_cycles,
-                    cycles_per_rpc_call,
+                    cycles_to_attach_per_rpc_call,
                 },
             )
     }

@@ -19,7 +19,7 @@ pub async fn try_get_transaction<R: CanisterRuntime>(
         .get_transaction(signature)
         .with_encoding(GetTransactionEncoding::Base64)
         .with_commitment(CommitmentLevel::Finalized)
-        .with_cycles(read_state(|state| state.cycles_per_rpc_call()))
+        .with_cycles(read_state(|state| state.cycles_to_attach_per_rpc_call()))
         .try_send()
         .await;
     // TODO DEFI-2643: Accept (cost of call to SOL RPC canister) cycles from caller

@@ -525,7 +525,7 @@ fn cksol_minter_init_args(
         minimum_deposit_amount: Setup::DEFAULT_MINIMUM_DEPOSIT_AMOUNT,
         withdrawal_fee: Setup::DEFAULT_WITHDRAWAL_FEE,
         update_balance_required_cycles: Setup::DEFAULT_UPDATE_BALANCE_REQUIRED_CYCLES,
-        cycles_per_rpc_call: Setup::DEFAULT_CYCLES_PER_RPC_CALL,
+        cycles_to_attach_per_rpc_call: Setup::DEFAULT_CYCLES_PER_RPC_CALL,
     })
 }
 

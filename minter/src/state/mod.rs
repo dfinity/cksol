@@ -71,7 +71,7 @@ pub struct State {
     minimum_withdrawal_amount: Lamport,
     minimum_deposit_amount: Lamport,
     update_balance_required_cycles: u128,
-    cycles_per_rpc_call: u128,
+    cycles_to_attach_per_rpc_call: u128,
     pending_update_balance_requests: BTreeSet<Account>,
     pending_withdraw_sol_requests: BTreeSet<Account>,
     accepted_deposits: BTreeMap<DepositId, Lamport>,
@@ -129,12 +129,12 @@ impl State {
         self.update_balance_required_cycles
     }
 
-    pub fn cycles_per_rpc_call(&self) -> u128 {
-        self.cycles_per_rpc_call
+    pub fn cycles_to_attach_per_rpc_call(&self) -> u128 {
+        self.cycles_to_attach_per_rpc_call
     }
 
     pub fn cycles_to_attach_for_rpc_call(&self) -> u128 {
-        self.cycles_per_rpc_call
+        self.cycles_to_attach_per_rpc_call
     }
 
     pub fn deposit_status(&self, deposit_id: &DepositId) -> Option<DepositStatus> {
@@ -210,6 +210,12 @@ impl State {
                 withdrawal_fee: self.withdrawal_fee,
             });
         }
+        if self.update_balance_required_cycles < self.cycles_to_attach_per_rpc_call {
+            return Err(InvalidStateError::InvalidUpdateBalanceRequiredCycles {
+                update_balance_required_cycles: self.update_balance_required_cycles,
+                cycles_to_attach_per_rpc_call: self.cycles_to_attach_per_rpc_call,
+            });
+        }
         Ok(())
     }
 
@@ -222,7 +228,7 @@ impl State {
             minimum_deposit_amount,
             withdrawal_fee,
             update_balance_required_cycles,
-            cycles_per_rpc_call,
+            cycles_to_attach_per_rpc_call,
         }: UpgradeArgs,
     ) -> Result<(), InvalidStateError> {
         if let Some(sol_rpc_canister_id) = sol_rpc_canister_id {
@@ -243,8 +249,8 @@ impl State {
         if let Some(update_balance_required_cycles) = update_balance_required_cycles {
             self.update_balance_required_cycles = update_balance_required_cycles as u128;
         }
-        if let Some(cycles_per_rpc_call) = cycles_per_rpc_call {
-            self.cycles_per_rpc_call = cycles_per_rpc_call as u128;
+        if let Some(cycles_to_attach_per_rpc_call) = cycles_to_attach_per_rpc_call {
+            self.cycles_to_attach_per_rpc_call = cycles_to_attach_per_rpc_call as u128;
         }
         self.validate()
     }
@@ -322,6 +328,10 @@ pub enum InvalidStateError {
         minimum_withdrawal_amount: u64,
         withdrawal_fee: u64,
     },
+    InvalidUpdateBalanceRequiredCycles {
+        update_balance_required_cycles: u128,
+        cycles_to_attach_per_rpc_call: u128,
+    },
 }
 
 impl TryFrom<InitArgs> for State {
@@ -337,7 +347,7 @@ impl TryFrom<InitArgs> for State {
             minimum_deposit_amount,
             withdrawal_fee,
             update_balance_required_cycles,
-            cycles_per_rpc_call,
+            cycles_to_attach_per_rpc_call,
         }: InitArgs,
     ) -> Result<Self, Self::Error> {
         let state = Self {
@@ -350,7 +360,7 @@ impl TryFrom<InitArgs> for State {
             minimum_withdrawal_amount,
             minimum_deposit_amount,
             update_balance_required_cycles: update_balance_required_cycles as u128,
-            cycles_per_rpc_call: cycles_per_rpc_call as u128,
+            cycles_to_attach_per_rpc_call: cycles_to_attach_per_rpc_call as u128,
             pending_update_balance_requests: BTreeSet::new(),
             pending_withdraw_sol_requests: BTreeSet::new(),
             accepted_deposits: BTreeMap::new(),
