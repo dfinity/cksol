@@ -1,8 +1,8 @@
 use crate::{
-    numeric::LedgerMintIndex,
+    numeric::{LedgerBurnIndex, LedgerMintIndex},
     state::{
         SchnorrPublicKey, State,
-        event::{DepositId, Event, EventType},
+        event::{DepositId, Event, EventType, WithdrawSolRequest},
         init_once_state, mutate_state,
     },
     storage::with_event_iter,
@@ -172,10 +172,36 @@ pub mod arb {
             )
     }
 
+    pub fn arb_ledger_burn_index() -> impl Strategy<Value = LedgerBurnIndex> {
+        any::<u64>().prop_map(LedgerBurnIndex::from)
+    }
+
+    pub fn arb_withdraw_sol_request() -> impl Strategy<Value = WithdrawSolRequest> {
+        (
+            arb_account(),
+            any::<[u8; 32]>(),
+            arb_ledger_burn_index(),
+            any::<u64>(),
+            any::<u64>(),
+        )
+            .prop_map(
+                |(account, solana_address, burn_block_index, withdrawal_amount, withdrawal_fee)| {
+                    WithdrawSolRequest {
+                        account,
+                        solana_address,
+                        burn_block_index,
+                        withdrawal_amount,
+                        withdrawal_fee,
+                    }
+                },
+            )
+    }
+
     pub fn arb_event_type() -> impl Strategy<Value = EventType> {
         prop_oneof![
             arb_init_args().prop_map(EventType::Init),
             arb_upgrade_args().prop_map(EventType::Upgrade),
+            arb_withdraw_sol_request().prop_map(EventType::AccepterWithdrawSolRequest),
             (arb_deposit_id(), any::<u64>()).prop_map(|(deposit_id, amount_to_mint)| {
                 EventType::AcceptedDeposit {
                     deposit_id,

@@ -202,6 +202,20 @@ type WithdrawSolStatus = variant {
     TxFinalized : TxFinalizedStatus;
 };
 
+// Request to convert ckSOL to Solana.
+type AcceptedWithdrawSolRequest = record {
+    // The ckSOL ledger account.
+    account : Account;
+    // The solana address to receive the funds.
+    solana_address : blob;
+    // The index of the ledger block that burned the ckSOL tokens.
+    burn_block_index : nat64;
+    // The requested withdrawal amount.
+    withdrawal_amount : Lamport;
+    // The fee that will be applied during the withdrawal.
+    withdrawal_fee : Lamport;
+};
+
 // A minter event payload.
 type EventType = variant {
     // The minter initialization event.
@@ -209,6 +223,10 @@ type EventType = variant {
     Init : InitArgs;
     // The minter upgraded with the specified arguments.
     Upgrade : UpgradeArgs;
+    // The minter accepted the withdrawal request and
+    // burned the requested amount of ckSOL.
+    // The Solana transaction was not generated yet.
+    AcceptedWithdrawSolRequest : AcceptedWithdrawSolRequest;
     // The minter discovered a Solana transaction that is a valid ckSOL
     // deposit for the given account. ckSOL tokens have not yet been
     // minted for this deposit.
