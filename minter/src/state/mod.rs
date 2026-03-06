@@ -279,10 +279,10 @@ impl State {
     }
 
     fn process_accepted_withdrawal(&mut self, request: &WithdrawSolRequest) {
-        assert!(
+        assert_eq!(
             self.pending_withdrawal_requests
-                .insert(request.burn_block_index, request.clone())
-                .is_none(),
+                .insert(request.burn_block_index, request.clone()),
+            None,
             "Attempted to accept an already accepted withdrawal request: {:?}",
             request.burn_block_index
         );
