@@ -76,9 +76,14 @@ type UpdateBalanceError = variant {
 
 // The outcome of processing a Solana deposit transaction.
 type DepositStatus = variant {
-    // The transaction is a valid deposit, but the minter failed to mint ckSOL on the ledger.
-    // The caller should retry the `update_balance` call.
-    Processing : Signature;
+    // The transaction is a valid deposit, but the corresponding ckSOL tokens
+    // have not yet been minted.
+    Processing : record {
+        // The amount to mint (deposit amount minus fees).
+        amount_to_mint: Lamport;
+        // The Solana transaction that caused the balance update.
+        signature: Signature;
+    };
     // The transaction is a valid deposit, but it is unknown whether the
     // corresponding ckSOL tokens have been minted, most likely because there
     // was an unexpected panic while trying to mint.
@@ -88,11 +93,11 @@ type DepositStatus = variant {
     Quarantined : Signature;
     // The minter accepted the deposit and minted ckSOL tokens on the ledger.
     Minted : record {
-        // The MINT transaction index on the ledger.
+        // The mint transaction index on the ledger.
         block_index: nat64;
         // The minted amount (deposit amount minus fees).
         minted_amount: Lamport;
-        // The UTXO that caused the balance update.
+        // The Solana transaction that caused the balance update.
         signature: Signature;
     };
 };

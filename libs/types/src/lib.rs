@@ -17,7 +17,12 @@ mod memo;
 pub enum DepositStatus {
     /// The transaction is a valid deposit, but the corresponding ckSOL tokens
     /// have not yet been minted.
-    Processing(Signature),
+    Processing {
+        /// The amount to mint (deposit amount minus fees).
+        amount_to_mint: Lamport,
+        /// The Solana transaction that caused the balance update.
+        signature: Signature,
+    },
     /// The transaction is a valid deposit, but it is unknown whether the
     /// corresponding ckSOL tokens have been minted, most likely because there
     /// was an unexpected panic while trying to mint.
