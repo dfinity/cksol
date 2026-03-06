@@ -7,7 +7,16 @@ use icrc_ledger_types::icrc2::transfer_from::TransferFromError;
 use num_traits::ToPrimitive;
 use solana_address::Address;
 
-use crate::{guard::withdraw_sol_guard, ledger::burn, runtime::CanisterRuntime};
+use crate::{
+    guard::withdraw_sol_guard,
+    ledger::burn,
+    runtime::CanisterRuntime,
+    state::{
+        audit::process_event,
+        event::{EventType, WithdrawSolRequest},
+        mutate_state, read_state,
+    },
+};
 
 #[cfg(test)]
 mod tests;
@@ -83,7 +92,22 @@ pub async fn withdraw_sol<R: CanisterRuntime>(
             }
         })?;
 
-    // TODO DEFI-2671 record event for processed withdrawal burn
+    let withdrawal_fee = read_state(|s| s.withdrawal_fee());
+    mutate_state(|s| {
+        process_event(
+            s,
+            EventType::AccepterWithdrawSolRequest(WithdrawSolRequest {
+                account: from,
+                solana_address: solana_address.to_bytes(),
+                burn_block_index: block_index.into(),
+                withdrawal_amount: amount,
+                withdrawal_fee,
+            }),
+            &runtime,
+        )
+    });
+
+    // TODO DEFI-2671: trigger the timer to process pending withdrawals.
 
     Ok(WithdrawSolOk { block_index })
 }

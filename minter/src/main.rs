@@ -77,8 +77,8 @@ async fn withdraw_sol(args: WithdrawSolArgs) -> Result<WithdrawSolOk, WithdrawSo
 }
 
 #[ic_cdk::update]
-async fn withdraw_sol_status(_block_index: u64) -> WithdrawSolStatus {
-    WithdrawSolStatus::NotFound
+async fn withdraw_sol_status(block_index: u64) -> WithdrawSolStatus {
+    read_state(|s| s.withdrawal_status(block_index))
 }
 
 #[ic_cdk::query]
@@ -101,6 +101,15 @@ fn get_events(
         match event_type {
             EventType::Init(args) => event::EventType::Init(args),
             EventType::Upgrade(args) => event::EventType::Upgrade(args),
+            EventType::AccepterWithdrawSolRequest(request) => {
+                event::EventType::AcceptedWithdrawSolRequest {
+                    account: request.account,
+                    solana_address: request.solana_address,
+                    burn_block_index: *request.burn_block_index.get(),
+                    withdrawal_amount: request.withdrawal_amount,
+                    withdrawal_fee: request.withdrawal_fee,
+                }
+            }
             EventType::AcceptedDeposit {
                 deposit_id,
                 amount_to_mint,

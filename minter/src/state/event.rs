@@ -1,4 +1,4 @@
-use crate::numeric::LedgerMintIndex;
+use crate::numeric::{LedgerBurnIndex, LedgerMintIndex};
 use cksol_types_internal::{InitArgs, UpgradeArgs};
 use ic_stable_structures::Storable;
 use ic_stable_structures::storable::Bound;
@@ -55,6 +55,29 @@ pub enum EventType {
         #[cbor(n(1), with = "cbor::id")]
         mint_block_index: LedgerMintIndex,
     },
+    /// The minter burned ckSOL for a withdrawal request.
+    #[n(5)]
+    AccepterWithdrawSolRequest(#[n(0)] WithdrawSolRequest),
+}
+
+/// Payload of the `AcceptedWithdrawSolRequest` event.
+#[derive(Clone, Eq, PartialEq, Debug, Decode, Encode)]
+pub struct WithdrawSolRequest {
+    /// The ledger account from which ckSOL was burned.
+    #[n(0)]
+    pub account: Account,
+    /// The destination Solana address.
+    #[cbor(n(1), with = "minicbor::bytes")]
+    pub solana_address: [u8; 32],
+    /// The burn transaction index on the ckSOL ledger.
+    #[cbor(n(2), with = "cbor::id")]
+    pub burn_block_index: LedgerBurnIndex,
+    /// The total amount burned from the user (in lamports).
+    #[n(3)]
+    pub withdrawal_amount: Lamport,
+    /// The fee retained by the minter (in lamports).
+    #[n(4)]
+    pub withdrawal_fee: Lamport,
 }
 
 #[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd, Debug, Decode, Encode)]
