@@ -128,9 +128,9 @@ mod lifecycle {
 
         let setup = SetupBuilder::new().build().await;
 
-        let minter_info = setup.minter().get_minter_info().await;
+        let initial_minter_info = setup.minter().get_minter_info().await;
         assert_eq!(
-            minter_info,
+            initial_minter_info,
             MinterInfo {
                 deposit_fee: Setup::DEFAULT_DEPOSIT_FEE,
                 minimum_withdrawal_amount: Setup::DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT,
@@ -144,6 +144,17 @@ mod lifecycle {
             }
         );
 
+        // Upgrade with default args should not change any values
+        setup
+            .minter()
+            .upgrade(UpgradeArgs::default())
+            .await
+            .expect("upgrade failed");
+
+        let minter_info = setup.minter().get_minter_info().await;
+        assert_eq!(minter_info, initial_minter_info);
+
+        // Update with non-default upgrade args should update to the specified values
         setup
             .minter()
             .upgrade(UpgradeArgs {
