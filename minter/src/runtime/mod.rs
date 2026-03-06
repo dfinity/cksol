@@ -1,10 +1,10 @@
 use candid::CandidType;
 use ic_canister_runtime::{IcError, IcRuntime, Runtime, StubRuntime};
 use std::{
+    collections::VecDeque,
     fmt::Debug,
     iter,
     sync::{Arc, Mutex},
-    collections::VecDeque,
 };
 
 pub trait CanisterRuntime {

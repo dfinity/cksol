@@ -1,6 +1,7 @@
 use crate::{
     runtime::TestCanisterRuntime,
     test_fixtures::{
+        UPDATE_BALANCE_REQUIRED_CYCLES,
         deposit::{
             DEPOSIT_ADDRESS, DEPOSIT_AMOUNT, deposit_transaction, deposit_transaction_signature,
             deposit_transaction_to_wrong_address,
@@ -20,7 +21,6 @@ use solana_transaction_status_client_types::{EncodedTransaction, TransactionBina
 // TODO DEFI-2643: Test behavior with cycles
 mod get_transaction_tests {
     use super::*;
-    use crate::test_fixtures::UPDATE_BALANCE_REQUIRED_CYCLES;
 
     type MultiRpcResult = sol_rpc_types::MultiRpcResult<
         Option<sol_rpc_types::EncodedConfirmedTransactionWithStatusMeta>,
