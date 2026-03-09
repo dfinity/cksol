@@ -51,6 +51,9 @@ pub struct InitArgs {
     /// The withdrawal fee in lamports.
     #[cfg_attr(feature = "event", n(6))]
     pub withdrawal_fee: Lamport,
+    /// Minimum cycles the caller must attach when calling `update_balance`.
+    #[cfg_attr(feature = "event", n(7))]
+    pub update_balance_required_cycles: u64,
 }
 
 /// The upgrade args for the ckSOL minter canister.
@@ -72,6 +75,9 @@ pub struct UpgradeArgs {
     /// The new withdrawal fee in lamports.
     #[cfg_attr(feature = "event", n(4))]
     pub withdrawal_fee: Option<Lamport>,
+    /// New minimum cycles the caller must attach when calling `update_balance`.
+    #[cfg_attr(feature = "event", n(5))]
+    pub update_balance_required_cycles: Option<u64>,
 }
 
 /// The ID of one of the ICP root keys.

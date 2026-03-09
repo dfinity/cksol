@@ -2,7 +2,7 @@ use crate::{
     runtime::TestCanisterRuntime,
     state::event::{DepositId, EventType},
     test_fixtures::{
-        BLOCK_INDEX, DEPOSIT_FEE, EventsAssert,
+        BLOCK_INDEX, DEPOSIT_FEE, EventsAssert, UPDATE_BALANCE_REQUIRED_CYCLES,
         deposit::{
             DEPOSIT_AMOUNT, DEPOSITOR_ACCOUNT, DEPOSITOR_PRINCIPAL, accepted_deposit_event,
             deposit_status_minted, deposit_status_processing, deposit_status_quarantined,
@@ -35,7 +35,9 @@ async fn should_return_error_if_get_transaction_fails() {
     init_state();
     init_schnorr_master_key();
 
-    let runtime = TestCanisterRuntime::new().add_stub_error(IcError::CallPerformFailed);
+    let runtime = TestCanisterRuntime::new()
+        .add_msg_cycles_available(UPDATE_BALANCE_REQUIRED_CYCLES)
+        .add_stub_error(IcError::CallPerformFailed);
 
     let result = update_balance(runtime, DEPOSITOR_ACCOUNT, deposit_transaction_signature()).await;
 
@@ -51,8 +53,9 @@ async fn should_return_error_if_transaction_not_found() {
     init_state();
     init_schnorr_master_key();
 
-    let runtime =
-        TestCanisterRuntime::new().add_stub_response(GetTransactionResult::Consistent(Ok(None)));
+    let runtime = TestCanisterRuntime::new()
+        .add_msg_cycles_available(UPDATE_BALANCE_REQUIRED_CYCLES)
+        .add_stub_response(GetTransactionResult::Consistent(Ok(None)));
 
     let result = update_balance(runtime, DEPOSITOR_ACCOUNT, deposit_transaction_signature()).await;
 
@@ -68,7 +71,9 @@ async fn should_return_error_if_transaction_not_valid_deposit() {
     let get_transaction_response = GetTransactionResult::Consistent(Ok(Some(
         deposit_transaction_to_wrong_address().try_into().unwrap(),
     )));
-    let runtime = TestCanisterRuntime::new().add_stub_response(get_transaction_response);
+    let runtime = TestCanisterRuntime::new()
+        .add_msg_cycles_available(UPDATE_BALANCE_REQUIRED_CYCLES)
+        .add_stub_response(get_transaction_response);
 
     let result = update_balance(
         runtime,
@@ -95,7 +100,9 @@ async fn should_fail_if_deposit_amount_is_below_minimum() {
 
     let get_transaction_response =
         GetTransactionResult::Consistent(Ok(Some(deposit_transaction().try_into().unwrap())));
-    let runtime = TestCanisterRuntime::new().add_stub_response(get_transaction_response);
+    let runtime = TestCanisterRuntime::new()
+        .add_msg_cycles_available(UPDATE_BALANCE_REQUIRED_CYCLES)
+        .add_stub_response(get_transaction_response);
 
     let result = update_balance(runtime, DEPOSITOR_ACCOUNT, deposit_transaction_signature()).await;
 
@@ -118,6 +125,7 @@ async fn should_return_processing_if_mint_fails() {
         GetTransactionResult::Consistent(Ok(Some(deposit_transaction().try_into().unwrap())));
     let runtime = TestCanisterRuntime::new()
         .with_increasing_time()
+        .add_msg_cycles_available(UPDATE_BALANCE_REQUIRED_CYCLES)
         .add_stub_response(get_transaction_response)
         .add_stub_response(Err::<BlockIndex, TransferError>(
             TransferError::TemporarilyUnavailable,
@@ -142,6 +150,7 @@ async fn should_return_processing_again_on_second_call() {
         GetTransactionResult::Consistent(Ok(Some(deposit_transaction().try_into().unwrap())));
     let runtime = TestCanisterRuntime::new()
         .with_increasing_time()
+        .add_msg_cycles_available(UPDATE_BALANCE_REQUIRED_CYCLES)
         .add_stub_response(get_transaction_response)
         .add_stub_response(Err::<BlockIndex, TransferError>(
             TransferError::TemporarilyUnavailable,
@@ -170,6 +179,7 @@ async fn should_succeed_with_valid_deposit_transaction() {
         GetTransactionResult::Consistent(Ok(Some(deposit_transaction().try_into().unwrap())));
     let runtime = TestCanisterRuntime::new()
         .with_increasing_time()
+        .add_msg_cycles_available(UPDATE_BALANCE_REQUIRED_CYCLES)
         .add_stub_response(get_transaction_response)
         .add_stub_response(Ok::<BlockIndex, TransferError>(BLOCK_INDEX.into()));
 
@@ -193,6 +203,7 @@ async fn should_not_double_mint() {
         GetTransactionResult::Consistent(Ok(Some(deposit_transaction().try_into().unwrap())));
     let runtime = TestCanisterRuntime::new()
         .with_increasing_time()
+        .add_msg_cycles_available(UPDATE_BALANCE_REQUIRED_CYCLES)
         .add_stub_response(get_transaction_response)
         .add_stub_response(Ok::<BlockIndex, TransferError>(BLOCK_INDEX.into()));
     let result = update_balance(runtime, DEPOSITOR_ACCOUNT, deposit_transaction_signature()).await;
@@ -221,6 +232,7 @@ async fn should_quarantine_deposit() {
     let runtime = || {
         TestCanisterRuntime::new()
             .with_increasing_time()
+            .add_msg_cycles_available(UPDATE_BALANCE_REQUIRED_CYCLES)
             .add_stub_response(get_transaction_response)
     };
     let result = tokio::spawn(async move {
@@ -281,6 +293,7 @@ async fn should_allow_deposits_to_multiple_accounts_with_single_transaction() {
     for i in 0..3 {
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
+            .add_msg_cycles_available(UPDATE_BALANCE_REQUIRED_CYCLES)
             .add_stub_response(get_transaction_response.clone())
             .add_stub_response(Ok::<BlockIndex, TransferError>(BLOCK_INDEXES[i].into()));
         let result = update_balance(

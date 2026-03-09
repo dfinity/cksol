@@ -109,6 +109,7 @@ type InitArgs = record {
     minimum_withdrawal_amount : Lamport;
     minimum_deposit_amount : Lamport;
     withdrawal_fee : Lamport;
+    update_balance_required_cycles : nat64;
 };
 
 // Information about the ckSOL minter canister.
@@ -117,6 +118,7 @@ type MinterInfo = record {
     minimum_withdrawal_amount : Lamport;
     minimum_deposit_amount : Lamport;
     withdrawal_fee : Lamport;
+    update_balance_required_cycles : nat;
 };
 
 // The ckSOL minter service arguments.
@@ -132,6 +134,7 @@ type UpgradeArgs = record {
     minimum_withdrawal_amount : opt Lamport;
     minimum_deposit_amount : opt Lamport;
     withdrawal_fee : opt Lamport;
+    update_balance_required_cycles : opt nat64;
 };
 
 type WithdrawSolArgs = record {

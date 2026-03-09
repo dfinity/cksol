@@ -74,6 +74,7 @@ pub struct State {
     withdrawal_fee: Lamport,
     minimum_withdrawal_amount: Lamport,
     minimum_deposit_amount: Lamport,
+    update_balance_required_cycles: u128,
     pending_update_balance_requests: BTreeSet<Account>,
     pending_withdraw_sol_requests: BTreeSet<Account>,
     accepted_deposits: BTreeMap<DepositId, Lamport>,
@@ -126,6 +127,10 @@ impl State {
 
     pub fn minimum_deposit_amount(&self) -> u64 {
         self.minimum_deposit_amount
+    }
+
+    pub fn update_balance_required_cycles(&self) -> u128 {
+        self.update_balance_required_cycles
     }
 
     pub fn deposit_status(&self, deposit_id: &DepositId) -> Option<DepositStatus> {
@@ -212,6 +217,7 @@ impl State {
             minimum_withdrawal_amount,
             minimum_deposit_amount,
             withdrawal_fee,
+            update_balance_required_cycles,
         }: UpgradeArgs,
     ) -> Result<(), InvalidStateError> {
         if let Some(sol_rpc_canister_id) = sol_rpc_canister_id {
@@ -228,6 +234,9 @@ impl State {
         }
         if let Some(minimum_deposit_amount) = minimum_deposit_amount {
             self.minimum_deposit_amount = minimum_deposit_amount;
+        }
+        if let Some(update_balance_required_cycles) = update_balance_required_cycles {
+            self.update_balance_required_cycles = update_balance_required_cycles as u128;
         }
         self.validate()
     }
@@ -339,6 +348,7 @@ impl TryFrom<InitArgs> for State {
             minimum_withdrawal_amount,
             minimum_deposit_amount,
             withdrawal_fee,
+            update_balance_required_cycles,
         }: InitArgs,
     ) -> Result<Self, Self::Error> {
         let state = Self {
@@ -350,6 +360,7 @@ impl TryFrom<InitArgs> for State {
             withdrawal_fee,
             minimum_withdrawal_amount,
             minimum_deposit_amount,
+            update_balance_required_cycles: update_balance_required_cycles as u128,
             pending_update_balance_requests: BTreeSet::new(),
             pending_withdraw_sol_requests: BTreeSet::new(),
             accepted_deposits: BTreeMap::new(),

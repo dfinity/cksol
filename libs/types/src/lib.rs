@@ -199,4 +199,6 @@ pub struct MinterInfo {
     pub minimum_deposit_amount: Lamport,
     /// Fee deducted from each withdrawal (ckSOL -> SOL).
     pub withdrawal_fee: Lamport,
+    /// Minimum cycles the caller must attach when calling `update_balance`.
+    pub update_balance_required_cycles: u128,
 }

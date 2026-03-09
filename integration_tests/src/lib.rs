@@ -5,22 +5,26 @@ use cksol_types::{
     Address, DepositStatus, GetDepositAddressArgs, MinterInfo, UpdateBalanceArgs,
     UpdateBalanceError, WithdrawSolArgs, WithdrawSolError, WithdrawSolOk, WithdrawSolStatus,
 };
-use cksol_types_internal::event::{Event, GetEventsResult};
-use cksol_types_internal::{MinterArg, log::Priority};
+use cksol_types_internal::{
+    MinterArg,
+    event::{Event, GetEventsResult},
+    log::Priority,
+};
 use ic_canister_runtime::Runtime;
 use ic_http_types::{HttpRequest, HttpResponse};
 use ic_management_canister_types::{CanisterId, CanisterSettings};
 use ic_pocket_canister_runtime::{ExecuteHttpOutcallMocks, PocketIcRuntime};
-use icrc_ledger_types::icrc1::account::Account;
-use icrc_ledger_types::icrc2::approve::{ApproveArgs, ApproveError};
-use icrc_ledger_types::icrc3::blocks::{GetBlocksRequest, GetBlocksResult, ICRC3GenericBlock};
+use icrc_ledger_types::{
+    icrc1::account::Account,
+    icrc2::approve::{ApproveArgs, ApproveError},
+    icrc3::blocks::{GetBlocksRequest, GetBlocksResult, ICRC3GenericBlock},
+};
 use num_traits::cast::ToPrimitive;
 use pocket_ic::{PocketIcBuilder, RejectResponse, nonblocking::PocketIc};
 use serde::de::DeserializeOwned;
 use sol_rpc_client::SolRpcClient;
-use sol_rpc_types::{Lamport, RpcAccess};
-use std::vec;
-use std::{env::var, fs, path::PathBuf};
+use sol_rpc_types::{Lamport, Mode, RpcAccess};
+use std::{default::Default, env::var, fs, path::PathBuf, vec};
 
 pub mod events;
 pub mod fixtures;
@@ -73,7 +77,12 @@ impl SetupBuilder {
         Setup::new(
             self.caller,
             self.make_live.unwrap_or_default(),
-            self.sol_rpc_install_args.unwrap_or_default(),
+            self.sol_rpc_install_args
+                .unwrap_or(sol_rpc_types::InstallArgs {
+                    // TODO DEFI-2643: Use `Normal` mode once proxy canister is setup
+                    mode: Some(Mode::Demo),
+                    ..sol_rpc_types::InstallArgs::default()
+                }),
             self.initial_ledger_balances,
         )
         .await
@@ -89,11 +98,12 @@ pub struct Setup {
 
 impl Setup {
     pub const DEFAULT_DEPOSIT_FEE: Lamport = 10_000_000; // 0.01 SOL
-    pub const DEFAULT_WITHDRAWAL_FEE: Lamport = 5_000_000; // 0.005 SOL
+    pub const DEFAULT_WITHDRAWAL_FEE: Lamport = 1_000_000; // 0.001 SOL
     pub const DEFAULT_CONTROLLER: Principal = Principal::from_slice(&[0x9d, 0xf7, 0x01]);
     pub const DEFAULT_CALLER: Principal = Principal::from_slice(&[0x9d, 0xf7, 0x02]);
-    pub const DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT: Lamport = 10_000_000; // 0.01 SOL
+    pub const DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT: Lamport = 1_000_000; // 0.001 SOL
     pub const DEFAULT_MINIMUM_DEPOSIT_AMOUNT: Lamport = 10_000_000; // 0.01 SOL
+    pub const DEFAULT_UPDATE_BALANCE_REQUIRED_CYCLES: u128 = 1_000_000_000_000;
 
     pub async fn new(
         caller: Option<Principal>,
@@ -518,6 +528,7 @@ fn cksol_minter_init_args(
         minimum_withdrawal_amount: Setup::DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT,
         minimum_deposit_amount: Setup::DEFAULT_MINIMUM_DEPOSIT_AMOUNT,
         withdrawal_fee: Setup::DEFAULT_WITHDRAWAL_FEE,
+        update_balance_required_cycles: Setup::DEFAULT_UPDATE_BALANCE_REQUIRED_CYCLES as u64,
     })
 }
 

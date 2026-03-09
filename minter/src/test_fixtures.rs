@@ -8,11 +8,10 @@ use crate::{
     storage::with_event_iter,
 };
 use candid::Principal;
-use cksol_types::DepositStatus;
+use cksol_types::{DepositStatus, Lamport};
 use cksol_types_internal::{Ed25519KeyName, InitArgs};
 use ic_ed25519::{PocketIcMasterPublicKeyId, PublicKey};
 use icrc_ledger_types::icrc1::account::Account;
-use sol_rpc_types::Lamport;
 use solana_address::{Address, address};
 use solana_transaction_status_client_types::{
     EncodedConfirmedTransactionWithStatusMeta, EncodedTransaction,
@@ -30,6 +29,7 @@ pub const MINTER_ACCOUNT: Account = Account {
     subaccount: None,
 };
 pub const MINIMUM_DEPOSIT_AMOUNT: Lamport = 10_000_000; // 0.01 SOL
+pub const UPDATE_BALANCE_REQUIRED_CYCLES: u128 = 1_000_000_000_000;
 
 pub fn sol_rpc_canister_id() -> Principal {
     Principal::from_slice(&[1_u8; 20])
@@ -48,6 +48,7 @@ pub fn valid_init_args() -> InitArgs {
         minimum_withdrawal_amount: MINIMUM_WITHDRAWAL_AMOUNT,
         minimum_deposit_amount: MINIMUM_DEPOSIT_AMOUNT,
         withdrawal_fee: WITHDRAWAL_FEE,
+        update_balance_required_cycles: UPDATE_BALANCE_REQUIRED_CYCLES as u64,
     }
 }
 
@@ -73,14 +74,14 @@ pub mod arb {
         numeric::{LedgerBurnIndex, LedgerMintIndex},
         state::event::{DepositId, Event, EventType, WithdrawSolRequest},
     };
+    use candid::Principal;
     use cksol_types_internal::{Ed25519KeyName, InitArgs, UpgradeArgs};
     use icrc_ledger_types::icrc1::account::Account;
     use proptest::prelude::{Just, Strategy, any, prop, prop_oneof};
     use solana_signature::Signature;
 
-    pub fn arb_principal() -> impl Strategy<Value = candid::Principal> {
-        prop::collection::vec(any::<u8>(), 0..=29)
-            .prop_map(|bytes| candid::Principal::from_slice(&bytes))
+    pub fn arb_principal() -> impl Strategy<Value = Principal> {
+        prop::collection::vec(any::<u8>(), 0..=29).prop_map(|bytes| Principal::from_slice(&bytes))
     }
 
     pub fn arb_subaccount() -> impl Strategy<Value = Option<[u8; 32]>> {
@@ -122,6 +123,7 @@ pub mod arb {
             any::<u64>(),
             any::<u64>(),
             any::<u64>(),
+            any::<u64>(),
         )
             .prop_map(
                 |(
@@ -132,6 +134,7 @@ pub mod arb {
                     minimum_withdrawal_amount,
                     minimum_deposit_amount,
                     withdrawal_fee,
+                    update_balance_required_cycles,
                 )| {
                     InitArgs {
                         sol_rpc_canister_id,
@@ -141,6 +144,7 @@ pub mod arb {
                         minimum_withdrawal_amount,
                         minimum_deposit_amount,
                         withdrawal_fee,
+                        update_balance_required_cycles,
                     }
                 },
             )
@@ -153,6 +157,7 @@ pub mod arb {
             prop::option::of(any::<u64>()),
             prop::option::of(any::<u64>()),
             prop::option::of(any::<u64>()),
+            prop::option::of(any::<u64>()),
         )
             .prop_map(
                 |(
@@ -161,12 +166,14 @@ pub mod arb {
                     minimum_withdrawal_amount,
                     minimum_deposit_amount,
                     withdrawal_fee,
+                    update_balance_required_cycles,
                 )| UpgradeArgs {
                     sol_rpc_canister_id,
                     deposit_fee,
                     minimum_withdrawal_amount,
                     minimum_deposit_amount,
                     withdrawal_fee,
+                    update_balance_required_cycles,
                 },
             )
     }
