@@ -41,6 +41,7 @@ impl CanisterRuntime for IcCanisterRuntime {
     }
 }
 
+// TODO DEFI-2643: Move to test code.
 pub struct TestCanisterRuntime {
     inter_canister_call_runtime: StubRuntime,
     times: Arc<Mutex<dyn Iterator<Item = u64> + Send + Sync>>,
