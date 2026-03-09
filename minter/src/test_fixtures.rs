@@ -77,6 +77,7 @@ pub mod arb {
     use candid::Principal;
     use cksol_types_internal::{Ed25519KeyName, InitArgs, UpgradeArgs};
     use icrc_ledger_types::icrc1::account::Account;
+    use proptest::collection::vec;
     use proptest::prelude::{Just, Strategy, any, prop, prop_oneof};
     use solana_signature::Signature;
 
@@ -224,7 +225,7 @@ pub mod arb {
                     mint_block_index,
                 }
             ),
-            arb_deposit_id().prop_map(EventType::PooledDepositFunds),
+            vec(arb_deposit_id(), 0..10).prop_map(EventType::PooledDepositFunds),
         ]
     }
 

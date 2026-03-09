@@ -339,16 +339,18 @@ impl State {
         );
     }
 
-    pub fn process_pooled_funds(&mut self, deposit_id: &DepositId) {
-        let deposit_amount = self.deposits_to_pool.remove(deposit_id).unwrap_or_else(|| {
-            panic!("Attempted to pool funds for an unknown ckSOL deposit: {deposit_id:?}")
-        });
-        assert!(
-            self.pooled_deposits
-                .insert(*deposit_id, deposit_amount)
-                .is_none(),
-            "Attempted to pool funds twice twice for the same ckSOL deposit: {deposit_id:?}",
-        );
+    pub fn process_pooled_funds(&mut self, deposit_ids: &Vec<DepositId>) {
+        for deposit_id in deposit_ids {
+            let deposit_amount = self.deposits_to_pool.remove(deposit_id).unwrap_or_else(|| {
+                panic!("Attempted to pool funds for an unknown ckSOL deposit: {deposit_id:?}")
+            });
+            assert!(
+                self.pooled_deposits
+                    .insert(*deposit_id, deposit_amount)
+                    .is_none(),
+                "Attempted to pool funds twice twice for the same ckSOL deposit: {deposit_id:?}",
+            );
+        }
     }
 }
 

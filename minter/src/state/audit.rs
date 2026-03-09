@@ -41,7 +41,7 @@ fn apply_state_transition(state: &mut State, payload: &EventType) {
         } => {
             state.process_mint(deposit_id, mint_block_index);
         }
-        EventType::PooledDepositFunds(deposit_id) => state.process_pooled_funds(deposit_id),
+        EventType::PooledDepositFunds(deposit_ids) => state.process_pooled_funds(deposit_ids),
     }
 }
 

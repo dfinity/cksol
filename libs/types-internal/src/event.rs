@@ -27,10 +27,8 @@ pub enum EventType {
     /// deposit for the given account. ckSOL tokens have not yet been
     /// minted for this deposit.
     AcceptedDeposit {
-        /// The signature of the Solana deposit transaction.
-        signature: Signature,
-        /// The account to which the minter should mint ckSOL.
-        account: Account,
+        /// The accepted deposit.
+        deposit_id: DepositId,
         /// The amount that was deposited.
         deposit_amount: Lamport,
         /// The amount of ckSOL tokens to mint for this deposit.
@@ -46,17 +44,13 @@ pub enum EventType {
     /// The deposit is quarantined to avoid any double minting and
     /// will not be further processed without manual intervention.
     QuarantinedDeposit {
-        /// The signature of the Solana deposit transaction.
-        signature: Signature,
-        /// The account to which the minter should mint ckSOL.
-        account: Account,
+        /// The quarantined deposit.
+        deposit_id: DepositId,
     },
     /// The minter minted ckSOL in response to a deposit.
     Minted {
-        /// The signature of the Solana deposit transaction.
-        signature: Signature,
-        /// The account to which the minter minted ckSOL.
-        account: Account,
+        /// The minted deposit.
+        deposit_id: DepositId,
         /// The transaction index on the ckSOL ledger.
         mint_block_index: u64,
     },
@@ -73,13 +67,20 @@ pub enum EventType {
         /// The fee retained by the minter (in lamports).
         withdrawal_fee: Lamport,
     },
-    /// The minter pooled funds from a ckSOL deposit.
+    /// The minter pooled funds from ckSOL deposits.
     PooledDepositFunds {
-        /// The signature of the Solana deposit transaction.
-        signature: Signature,
-        /// The account to which the minter should mint ckSOL.
-        account: Account,
+        /// The deposits whose funds were pooled by the minter.
+        deposit_ids: Vec<DepositId>,
     },
+}
+
+/// Represents a Solana transaction depositing funds to a ckSOL account.
+#[derive(Clone, Debug, CandidType, Deserialize)]
+pub struct DepositId {
+    /// The signature of the Solana deposit transaction.
+    pub signature: Signature,
+    /// The account to which the minter should mint ckSOL.
+    pub account: Account,
 }
 
 /// Arguments for the `get_events` endpoint.

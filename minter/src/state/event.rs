@@ -60,9 +60,9 @@ pub enum EventType {
     /// The minter burned ckSOL for a withdrawal request.
     #[n(5)]
     AccepterWithdrawSolRequest(#[n(0)] WithdrawSolRequest),
-    /// The minter pooled funds from a ckSOL deposit.
+    /// The minter pooled funds from ckSOL deposits.
     #[n(6)]
-    PooledDepositFunds(#[n(0)] DepositId),
+    PooledDepositFunds(#[n(0)] Vec<DepositId>),
 }
 
 /// Payload of the `AcceptedWithdrawSolRequest` event.
@@ -91,6 +91,15 @@ pub struct DepositId {
     pub signature: Signature,
     #[n(1)]
     pub account: Account,
+}
+
+impl From<DepositId> for cksol_types_internal::event::DepositId {
+    fn from(DepositId { signature, account }: DepositId) -> Self {
+        Self {
+            signature: signature.into(),
+            account,
+        }
+    }
 }
 
 impl Storable for Event {
