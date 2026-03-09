@@ -81,6 +81,8 @@ pub struct State {
     quarantined_deposits: BTreeMap<DepositId, Lamport>,
     minted_deposits: BTreeMap<DepositId, MintedDeposit>,
     pending_withdrawal_requests: BTreeMap<LedgerBurnIndex, WithdrawSolRequest>,
+    deposits_to_pool: BTreeMap<DepositId, Lamport>,
+    pooled_deposits: BTreeMap<DepositId, Lamport>,
 }
 
 impl State {
@@ -241,7 +243,12 @@ impl State {
         self.validate()
     }
 
-    fn process_accepted_deposit(&mut self, deposit_id: &DepositId, amount_to_mint: &Lamport) {
+    fn process_accepted_deposit(
+        &mut self,
+        deposit_id: &DepositId,
+        deposit_amount: &Lamport,
+        amount_to_mint: &Lamport,
+    ) {
         assert!(
             !self.quarantined_deposits.contains_key(deposit_id),
             "Attempted to accept already quarantined deposit: {deposit_id:?}"
@@ -255,6 +262,16 @@ impl State {
                 .insert(*deposit_id, *amount_to_mint)
                 .is_none(),
             "Attempted to accept an already accepted deposit: {deposit_id:?}"
+        );
+        assert!(
+            !self.pooled_deposits.contains_key(deposit_id),
+            "Attempted to pool funds twice for a ckSOL deposit whose funds were already pooled: {deposit_id:?}"
+        );
+        assert!(
+            self.deposits_to_pool
+                .insert(*deposit_id, *deposit_amount)
+                .is_none(),
+            "Attempted to pool funds twice for the same ckSOL deposit: {deposit_id:?}"
         );
     }
 
@@ -321,6 +338,18 @@ impl State {
             "Attempted to mint ckSOL twice for the same deposit: {deposit_id:?}",
         );
     }
+
+    pub fn process_pooled_funds(&mut self, deposit_id: &DepositId) {
+        let deposit_amount = self.deposits_to_pool.remove(deposit_id).unwrap_or_else(|| {
+            panic!("Attempted to pool funds for an unknown ckSOL deposit: {deposit_id:?}")
+        });
+        assert!(
+            self.pooled_deposits
+                .insert(*deposit_id, deposit_amount)
+                .is_none(),
+            "Attempted to pool funds twice twice for the same ckSOL deposit: {deposit_id:?}",
+        );
+    }
 }
 
 #[derive(Debug)]
@@ -367,6 +396,8 @@ impl TryFrom<InitArgs> for State {
             quarantined_deposits: BTreeMap::new(),
             minted_deposits: BTreeMap::new(),
             pending_withdrawal_requests: BTreeMap::new(),
+            deposits_to_pool: BTreeMap::new(),
+            pooled_deposits: BTreeMap::new(),
         };
         state.validate()?;
         Ok(state)

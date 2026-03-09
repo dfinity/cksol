@@ -48,6 +48,8 @@ mod state_from_init_args {
                 quarantined_deposits: BTreeMap::new(),
                 minted_deposits: BTreeMap::new(),
                 pending_withdrawal_requests: BTreeMap::new(),
+                deposits_to_pool: BTreeMap::new(),
+                pooled_deposits: BTreeMap::new(),
             }
         );
     }

@@ -31,6 +31,8 @@ pub enum EventType {
         signature: Signature,
         /// The account to which the minter should mint ckSOL.
         account: Account,
+        /// The amount that was deposited.
+        deposit_amount: Lamport,
         /// The amount of ckSOL tokens to mint for this deposit.
         /// This amount is generally lower than `deposit_amount` due
         /// to the deposit fee.
@@ -70,6 +72,13 @@ pub enum EventType {
         withdrawal_amount: Lamport,
         /// The fee retained by the minter (in lamports).
         withdrawal_fee: Lamport,
+    },
+    /// The minter pooled funds from a ckSOL deposit.
+    PooledDepositFunds {
+        /// The signature of the Solana deposit transaction.
+        signature: Signature,
+        /// The account to which the minter should mint ckSOL.
+        account: Account,
     },
 }
 

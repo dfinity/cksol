@@ -112,10 +112,12 @@ fn get_events(
             }
             EventType::AcceptedDeposit {
                 deposit_id,
+                deposit_amount,
                 amount_to_mint,
             } => event::EventType::AcceptedDeposit {
                 signature: deposit_id.signature.into(),
                 account: deposit_id.account,
+                deposit_amount,
                 amount_to_mint,
             },
             EventType::Minted {
@@ -127,6 +129,10 @@ fn get_events(
                 mint_block_index: *mint_block_index.get(),
             },
             EventType::QuarantinedDeposit(deposit_id) => event::EventType::QuarantinedDeposit {
+                signature: deposit_id.signature.into(),
+                account: deposit_id.account,
+            },
+            EventType::PooledDepositFunds(deposit_id) => event::EventType::PooledDepositFunds {
                 signature: deposit_id.signature.into(),
                 account: deposit_id.account,
             },

@@ -321,6 +321,7 @@ async fn should_allow_deposits_to_multiple_accounts_with_single_transaction() {
         events_assert = events_assert
             .expect_event_eq(EventType::AcceptedDeposit {
                 deposit_id,
+                deposit_amount: DEPOSIT_AMOUNTS[i],
                 amount_to_mint: DEPOSIT_AMOUNTS[i] - DEPOSIT_FEE,
             })
             .expect_event_eq(EventType::Minted {

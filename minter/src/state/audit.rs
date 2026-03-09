@@ -29,9 +29,10 @@ fn apply_state_transition(state: &mut State, payload: &EventType) {
         }
         EventType::AcceptedDeposit {
             deposit_id,
+            deposit_amount,
             amount_to_mint,
         } => {
-            state.process_accepted_deposit(deposit_id, amount_to_mint);
+            state.process_accepted_deposit(deposit_id, deposit_amount, amount_to_mint);
         }
         EventType::QuarantinedDeposit(deposit_id) => state.process_quarantined_deposit(deposit_id),
         EventType::Minted {
@@ -40,6 +41,7 @@ fn apply_state_transition(state: &mut State, payload: &EventType) {
         } => {
             state.process_mint(deposit_id, mint_block_index);
         }
+        EventType::PooledDepositFunds(deposit_id) => state.process_pooled_funds(deposit_id),
     }
 }
 

@@ -37,6 +37,8 @@ pub enum EventType {
         #[n(0)]
         deposit_id: DepositId,
         #[n(1)]
+        deposit_amount: Lamport,
+        #[n(2)]
         amount_to_mint: Lamport,
     },
     /// The minter discovered a Solana transaction that is a valid ckSOL
@@ -58,6 +60,9 @@ pub enum EventType {
     /// The minter burned ckSOL for a withdrawal request.
     #[n(5)]
     AccepterWithdrawSolRequest(#[n(0)] WithdrawSolRequest),
+    /// The minter pooled funds from a ckSOL deposit.
+    #[n(6)]
+    PooledDepositFunds(#[n(0)] DepositId),
 }
 
 /// Payload of the `AcceptedWithdrawSolRequest` event.

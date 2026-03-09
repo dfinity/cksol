@@ -208,12 +208,15 @@ pub mod arb {
             arb_init_args().prop_map(EventType::Init),
             arb_upgrade_args().prop_map(EventType::Upgrade),
             arb_withdraw_sol_request().prop_map(EventType::AccepterWithdrawSolRequest),
-            (arb_deposit_id(), any::<u64>()).prop_map(|(deposit_id, amount_to_mint)| {
-                EventType::AcceptedDeposit {
-                    deposit_id,
-                    amount_to_mint,
+            (arb_deposit_id(), any::<u64>(), any::<u64>()).prop_map(
+                |(deposit_id, deposit_amount, amount_to_mint)| {
+                    EventType::AcceptedDeposit {
+                        deposit_id,
+                        deposit_amount,
+                        amount_to_mint,
+                    }
                 }
-            }),
+            ),
             arb_deposit_id().prop_map(EventType::QuarantinedDeposit),
             (arb_deposit_id(), arb_ledger_mint_index()).prop_map(
                 |(deposit_id, mint_block_index)| EventType::Minted {
@@ -221,6 +224,7 @@ pub mod arb {
                     mint_block_index,
                 }
             ),
+            arb_deposit_id().prop_map(EventType::PooledDepositFunds),
         ]
     }
 
@@ -260,6 +264,7 @@ pub mod deposit {
     pub fn accepted_deposit_event() -> EventType {
         EventType::AcceptedDeposit {
             deposit_id: deposit_id(),
+            deposit_amount: DEPOSIT_AMOUNT,
             amount_to_mint: DEPOSIT_AMOUNT - DEPOSIT_FEE,
         }
     }
