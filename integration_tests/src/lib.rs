@@ -79,6 +79,7 @@ impl SetupBuilder {
             self.make_live.unwrap_or_default(),
             self.sol_rpc_install_args
                 .unwrap_or(sol_rpc_types::InstallArgs {
+                    // TODO DEFI-2643: Use `Normal` mode once proxy canister is setup
                     mode: Some(Mode::Demo),
                     ..sol_rpc_types::InstallArgs::default()
                 }),

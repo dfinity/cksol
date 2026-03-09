@@ -25,6 +25,7 @@ async fn should_update_balance() {
     let setup = SetupBuilder::new()
         .with_pocket_ic_live_mode()
         .with_sol_rpc_install_args(InstallArgs {
+            // TODO DEFI-2643: Use `Normal` mode once proxy canister is setup
             mode: Some(Mode::Demo),
             override_provider: Some(OverrideProvider {
                 override_url: Some(RegexSubstitution {
