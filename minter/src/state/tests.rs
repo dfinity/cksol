@@ -3,8 +3,9 @@ use crate::{
     runtime::TestCanisterRuntime,
     state::audit::process_event,
     test_fixtures::{
-        DEPOSIT_FEE, MINIMUM_DEPOSIT_AMOUNT, MINIMUM_WITHDRAWAL_AMOUNT, WITHDRAWAL_FEE,
-        arb::arb_event, ledger_canister_id, sol_rpc_canister_id, valid_init_args,
+        DEPOSIT_FEE, MINIMUM_DEPOSIT_AMOUNT, MINIMUM_WITHDRAWAL_AMOUNT,
+        UPDATE_BALANCE_REQUIRED_CYCLES, WITHDRAWAL_FEE, arb::arb_event, ledger_canister_id,
+        sol_rpc_canister_id, valid_init_args,
     },
 };
 use assert_matches::assert_matches;
@@ -40,11 +41,13 @@ mod state_from_init_args {
                 withdrawal_fee: WITHDRAWAL_FEE,
                 minimum_withdrawal_amount: MINIMUM_WITHDRAWAL_AMOUNT,
                 minimum_deposit_amount: MINIMUM_DEPOSIT_AMOUNT,
+                update_balance_required_cycles: UPDATE_BALANCE_REQUIRED_CYCLES,
                 pending_update_balance_requests: BTreeSet::new(),
                 pending_withdraw_sol_requests: BTreeSet::new(),
                 accepted_deposits: BTreeMap::new(),
                 quarantined_deposits: BTreeMap::new(),
                 minted_deposits: BTreeMap::new(),
+                pending_withdrawal_requests: BTreeMap::new(),
             }
         );
     }
@@ -319,6 +322,24 @@ mod state_upgrade {
             .unwrap();
 
         assert_eq!(state.minimum_withdrawal_amount(), WITHDRAWAL_FEE);
+    }
+
+    #[test]
+    fn should_update_update_balance_required_cycles() {
+        let mut state = initial_state();
+        let new_update_balance_required_cycles = (UPDATE_BALANCE_REQUIRED_CYCLES * 2) as u64;
+
+        state
+            .upgrade(UpgradeArgs {
+                update_balance_required_cycles: Some(new_update_balance_required_cycles),
+                ..Default::default()
+            })
+            .unwrap();
+
+        assert_eq!(
+            state.update_balance_required_cycles(),
+            new_update_balance_required_cycles as u128
+        );
     }
 
     // This test ensures the canister state is rolled back after a failed upgrade

@@ -1,6 +1,7 @@
 use candid::CandidType;
 use ic_canister_runtime::{IcError, IcRuntime, Runtime, StubRuntime};
 use std::{
+    collections::VecDeque,
     fmt::Debug,
     iter,
     sync::{Arc, Mutex},
@@ -10,6 +11,7 @@ pub trait CanisterRuntime {
     fn inter_canister_call_runtime(&self) -> impl Runtime;
     fn time(&self) -> u64;
     fn instruction_counter(&self) -> u64;
+    fn msg_cycles_available(&self) -> u128;
 }
 
 #[derive(Default, Debug)]
@@ -33,12 +35,18 @@ impl CanisterRuntime for IcCanisterRuntime {
     fn instruction_counter(&self) -> u64 {
         ic_cdk::api::instruction_counter()
     }
+
+    fn msg_cycles_available(&self) -> u128 {
+        ic_cdk::api::msg_cycles_available()
+    }
 }
 
+// TODO DEFI-2643: Move to test code.
 pub struct TestCanisterRuntime {
     inter_canister_call_runtime: StubRuntime,
     times: Arc<Mutex<dyn Iterator<Item = u64> + Send + Sync>>,
     instruction_counts: Arc<Mutex<dyn Iterator<Item = u64> + Send + Sync>>,
+    msg_cycles_available: Arc<Mutex<VecDeque<u128>>>,
 }
 
 impl Default for TestCanisterRuntime {
@@ -47,6 +55,7 @@ impl Default for TestCanisterRuntime {
             inter_canister_call_runtime: Default::default(),
             times: Arc::new(Mutex::new(iter::empty())),
             instruction_counts: Arc::new(Mutex::new(iter::empty())),
+            msg_cycles_available: Arc::new(Mutex::new(VecDeque::new())),
         }
     }
 }
@@ -72,12 +81,11 @@ impl TestCanisterRuntime {
         self
     }
 
-    pub fn with_stub_times<I>(mut self, times: I) -> Self
-    where
-        I: IntoIterator<Item = u64> + 'static,
-        <I as IntoIterator>::IntoIter: Send + Sync,
-    {
-        self.times = Arc::new(Mutex::new(times.into_iter()));
+    pub fn add_msg_cycles_available(self, value: u128) -> Self {
+        self.msg_cycles_available
+            .try_lock()
+            .unwrap()
+            .push_back(value);
         self
     }
 }
@@ -102,5 +110,13 @@ impl CanisterRuntime for TestCanisterRuntime {
             .unwrap()
             .next()
             .expect("No more stub instruction counts!")
+    }
+
+    fn msg_cycles_available(&self) -> u128 {
+        self.msg_cycles_available
+            .try_lock()
+            .unwrap()
+            .pop_front()
+            .expect("No more stub `msg_cycles_available`!")
     }
 }

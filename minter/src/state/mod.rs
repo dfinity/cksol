@@ -1,6 +1,10 @@
-use crate::{ledger::client::LedgerClient, numeric::LedgerMintIndex, state::event::DepositId};
+use crate::{
+    ledger::client::LedgerClient,
+    numeric::{LedgerBurnIndex, LedgerMintIndex},
+    state::event::{DepositId, WithdrawSolRequest},
+};
 use candid::Principal;
-use cksol_types::DepositStatus;
+use cksol_types::{DepositStatus, WithdrawSolStatus};
 use cksol_types_internal::{Ed25519KeyName, InitArgs, UpgradeArgs};
 use ic_canister_runtime::Runtime;
 use ic_ed25519::PublicKey;
@@ -70,11 +74,13 @@ pub struct State {
     withdrawal_fee: Lamport,
     minimum_withdrawal_amount: Lamport,
     minimum_deposit_amount: Lamport,
+    update_balance_required_cycles: u128,
     pending_update_balance_requests: BTreeSet<Account>,
     pending_withdraw_sol_requests: BTreeSet<Account>,
     accepted_deposits: BTreeMap<DepositId, Lamport>,
     quarantined_deposits: BTreeMap<DepositId, Lamport>,
     minted_deposits: BTreeMap<DepositId, MintedDeposit>,
+    pending_withdrawal_requests: BTreeMap<LedgerBurnIndex, WithdrawSolRequest>,
 }
 
 impl State {
@@ -121,6 +127,10 @@ impl State {
 
     pub fn minimum_deposit_amount(&self) -> u64 {
         self.minimum_deposit_amount
+    }
+
+    pub fn update_balance_required_cycles(&self) -> u128 {
+        self.update_balance_required_cycles
     }
 
     pub fn accepted_deposits(&self) -> &BTreeMap<DepositId, Lamport> {
@@ -214,6 +224,7 @@ impl State {
             minimum_withdrawal_amount,
             minimum_deposit_amount,
             withdrawal_fee,
+            update_balance_required_cycles,
         }: UpgradeArgs,
     ) -> Result<(), InvalidStateError> {
         if let Some(sol_rpc_canister_id) = sol_rpc_canister_id {
@@ -230,6 +241,9 @@ impl State {
         }
         if let Some(minimum_deposit_amount) = minimum_deposit_amount {
             self.minimum_deposit_amount = minimum_deposit_amount;
+        }
+        if let Some(update_balance_required_cycles) = update_balance_required_cycles {
+            self.update_balance_required_cycles = update_balance_required_cycles as u128;
         }
         self.validate()
     }
@@ -267,6 +281,26 @@ impl State {
                 .insert(*deposit_id, amount_to_mint)
                 .is_none(),
             "Attempted to quarantine already quarantined deposit: {deposit_id:?}"
+        );
+    }
+
+    pub fn withdrawal_status(&self, block_index: u64) -> WithdrawSolStatus {
+        if self
+            .pending_withdrawal_requests
+            .contains_key(&LedgerBurnIndex::from(block_index))
+        {
+            return WithdrawSolStatus::Pending;
+        }
+        WithdrawSolStatus::NotFound
+    }
+
+    fn process_accepted_withdrawal(&mut self, request: &WithdrawSolRequest) {
+        assert_eq!(
+            self.pending_withdrawal_requests
+                .insert(request.burn_block_index, request.clone()),
+            None,
+            "Attempted to accept an already accepted withdrawal request: {:?}",
+            request.burn_block_index
         );
     }
 
@@ -321,6 +355,7 @@ impl TryFrom<InitArgs> for State {
             minimum_withdrawal_amount,
             minimum_deposit_amount,
             withdrawal_fee,
+            update_balance_required_cycles,
         }: InitArgs,
     ) -> Result<Self, Self::Error> {
         let state = Self {
@@ -332,11 +367,13 @@ impl TryFrom<InitArgs> for State {
             withdrawal_fee,
             minimum_withdrawal_amount,
             minimum_deposit_amount,
+            update_balance_required_cycles: update_balance_required_cycles as u128,
             pending_update_balance_requests: BTreeSet::new(),
             pending_withdraw_sol_requests: BTreeSet::new(),
             accepted_deposits: BTreeMap::new(),
             quarantined_deposits: BTreeMap::new(),
             minted_deposits: BTreeMap::new(),
+            pending_withdrawal_requests: BTreeMap::new(),
         };
         state.validate()?;
         Ok(state)

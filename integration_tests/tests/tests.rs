@@ -10,8 +10,8 @@ use cksol_int_tests::{
     },
 };
 use cksol_types::{
-    DepositStatus, GetDepositAddressArgs, MinterInfo, UpdateBalanceArgs, UpdateBalanceError,
-    WithdrawSolArgs, WithdrawSolError, WithdrawSolStatus,
+    DepositStatus, GetDepositAddressArgs, Lamport, MinterInfo, UpdateBalanceArgs,
+    UpdateBalanceError, WithdrawSolArgs, WithdrawSolError, WithdrawSolStatus,
 };
 use cksol_types_internal::{UpgradeArgs, event::EventType, log::Priority};
 use ic_pocket_canister_runtime::{JsonRpcResponse, MockHttpOutcalls, MockHttpOutcallsBuilder};
@@ -87,10 +87,10 @@ mod lifecycle {
 
         let minter_info_before = minter.get_minter_info().await;
 
-        // Setting a deposit fee higher than the minimum withdrawal amount should fail!
+        // Setting a deposit fee higher than the minimum deposit amount should fail!
         let result = minter
             .upgrade(UpgradeArgs {
-                minimum_withdrawal_amount: Some(5_000_000),
+                minimum_deposit_amount: Some(5_000_000),
                 deposit_fee: Some(20_000_000),
                 ..UpgradeArgs::default()
             })
@@ -117,29 +117,46 @@ mod lifecycle {
 
     #[tokio::test]
     async fn should_get_minter_info_and_upgrade() {
+        const NEW_DEPOSIT_FEE: Lamport = 10;
+        const NEW_MINIMUM_WITHDRAWAL_AMOUNT: Lamport = 20;
+        const NEW_MINIMUM_DEPOSIT_AMOUNT: Lamport = 25;
+        const NEW_WITHDRAWAL_FEE: Lamport = 15;
+        const NEW_UPDATE_BALANCE_REQUIRED_CYCLES: u128 = 500_000_000_000;
+
         let setup = SetupBuilder::new().build().await;
 
-        let minter_info = setup.minter().get_minter_info().await;
+        let initial_minter_info = setup.minter().get_minter_info().await;
         assert_eq!(
-            minter_info,
+            initial_minter_info,
             MinterInfo {
                 deposit_fee: Setup::DEFAULT_DEPOSIT_FEE,
                 minimum_withdrawal_amount: Setup::DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT,
                 minimum_deposit_amount: Setup::DEFAULT_MINIMUM_DEPOSIT_AMOUNT,
                 withdrawal_fee: Setup::DEFAULT_WITHDRAWAL_FEE,
+                update_balance_required_cycles: Setup::DEFAULT_UPDATE_BALANCE_REQUIRED_CYCLES
             }
         );
 
-        let new_deposit_fee = 10;
-        let new_minimum_withdrawal_amount = 20;
-        let new_withdrawal_fee = 15;
+        // Upgrade with default args should not change any values
+        setup
+            .minter()
+            .upgrade(UpgradeArgs::default())
+            .await
+            .expect("upgrade failed");
+
+        let minter_info = setup.minter().get_minter_info().await;
+        assert_eq!(minter_info, initial_minter_info);
+
+        // Update with non-default upgrade args should update to the specified values
         setup
             .minter()
             .upgrade(UpgradeArgs {
-                deposit_fee: Some(new_deposit_fee),
-                minimum_withdrawal_amount: Some(new_minimum_withdrawal_amount),
-                withdrawal_fee: Some(new_withdrawal_fee),
-                ..Default::default()
+                sol_rpc_canister_id: None,
+                deposit_fee: Some(NEW_DEPOSIT_FEE),
+                minimum_withdrawal_amount: Some(NEW_MINIMUM_WITHDRAWAL_AMOUNT),
+                minimum_deposit_amount: Some(NEW_MINIMUM_DEPOSIT_AMOUNT),
+                withdrawal_fee: Some(NEW_WITHDRAWAL_FEE),
+                update_balance_required_cycles: Some(NEW_UPDATE_BALANCE_REQUIRED_CYCLES as u64),
             })
             .await
             .expect("upgrade failed");
@@ -148,10 +165,11 @@ mod lifecycle {
         assert_eq!(
             minter_info,
             MinterInfo {
-                deposit_fee: new_deposit_fee,
-                minimum_withdrawal_amount: new_minimum_withdrawal_amount,
-                minimum_deposit_amount: Setup::DEFAULT_MINIMUM_DEPOSIT_AMOUNT,
-                withdrawal_fee: new_withdrawal_fee,
+                deposit_fee: NEW_DEPOSIT_FEE,
+                minimum_withdrawal_amount: NEW_MINIMUM_WITHDRAWAL_AMOUNT,
+                minimum_deposit_amount: NEW_MINIMUM_DEPOSIT_AMOUNT,
+                withdrawal_fee: NEW_WITHDRAWAL_FEE,
+                update_balance_required_cycles: NEW_UPDATE_BALANCE_REQUIRED_CYCLES,
             }
         );
 
@@ -268,16 +286,6 @@ mod withdraw_sol_tests {
             err,
             WithdrawSolError::InsufficientAllowance { allowance: 0 }
         );
-
-        setup.drop().await;
-    }
-
-    #[tokio::test]
-    async fn should_return_not_found_status() {
-        let setup = SetupBuilder::new().build().await;
-
-        let status = setup.minter().withdraw_sol_status(u64::MAX).await;
-        assert_eq!(status, WithdrawSolStatus::NotFound);
 
         setup.drop().await;
     }
@@ -435,7 +443,56 @@ mod withdraw_sol_tests {
     }
 
     #[tokio::test]
-    async fn should_fail_is_already_processing() {
+    async fn should_return_withdrawal_status() {
+        const WITHDRAWAL_AMOUNT: u64 = 100_000_000;
+        const WITHDRAWAL_ADDRESS: &str = "E4MpwNnMWs2XtW5gVrxZvyS7fMq31QD5HvbxmwP45Tz3";
+
+        let initial_balance = 10 * WITHDRAWAL_AMOUNT;
+
+        let setup = SetupBuilder::new()
+            .with_initial_ledger_balances(vec![(
+                DEFAULT_CALLER_ACCOUNT,
+                Nat::from(initial_balance),
+            )])
+            .build()
+            .await;
+
+        setup
+            .ledger()
+            .approve(
+                None,
+                WITHDRAWAL_AMOUNT,
+                Account {
+                    owner: setup.minter_canister_id(),
+                    subaccount: None,
+                },
+            )
+            .await;
+
+        let result = setup
+            .minter()
+            .withdraw_sol(WithdrawSolArgs {
+                from_subaccount: None,
+                amount: WITHDRAWAL_AMOUNT,
+                address: WITHDRAWAL_ADDRESS.to_string(),
+            })
+            .await;
+
+        let block_index = result.expect("burn should succeed").block_index;
+
+        let status = setup.minter().withdraw_sol_status(block_index).await;
+        assert_eq!(status, WithdrawSolStatus::Pending);
+        // 0 is the initial mint block, should be NotFound
+        let status = setup.minter().withdraw_sol_status(0).await;
+        assert_eq!(status, WithdrawSolStatus::NotFound);
+        let status = setup.minter().withdraw_sol_status(u64::MAX).await;
+        assert_eq!(status, WithdrawSolStatus::NotFound);
+
+        setup.drop().await;
+    }
+
+    #[tokio::test]
+    async fn should_fail_if_already_processing() {
         const WITHDRAWAL_AMOUNT: u64 = 100_000_000;
         const WITHDRAWAL_ADDRESS: &str = "E4MpwNnMWs2XtW5gVrxZvyS7fMq31QD5HvbxmwP45Tz3";
 
