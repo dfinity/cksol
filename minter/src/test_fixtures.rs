@@ -1,20 +1,18 @@
 use crate::{
-    numeric::{LedgerBurnIndex, LedgerMintIndex},
+    numeric::LedgerMintIndex,
     state::{
         SchnorrPublicKey, State,
-        event::{DepositId, Event, EventType, WithdrawSolRequest},
+        event::{DepositId, Event, EventType},
         init_once_state, mutate_state,
     },
     storage::with_event_iter,
 };
 use candid::Principal;
 use cksol_types::{DepositStatus, Lamport};
-use cksol_types_internal::{Ed25519KeyName, InitArgs, UpgradeArgs};
+use cksol_types_internal::{Ed25519KeyName, InitArgs};
 use ic_ed25519::{PocketIcMasterPublicKeyId, PublicKey};
 use icrc_ledger_types::icrc1::account::Account;
-use proptest::prelude::{Just, Strategy, any, prop, prop_oneof};
 use solana_address::{Address, address};
-use solana_signature::Signature;
 use solana_transaction_status_client_types::{
     EncodedConfirmedTransactionWithStatusMeta, EncodedTransaction,
     EncodedTransactionWithStatusMeta, TransactionBinaryEncoding, UiLoadedAddresses,
@@ -72,7 +70,15 @@ pub fn init_schnorr_master_key() {
 }
 
 pub mod arb {
-    use super::*;
+    use crate::{
+        numeric::{LedgerBurnIndex, LedgerMintIndex},
+        state::event::{DepositId, Event, EventType, WithdrawSolRequest},
+    };
+    use candid::Principal;
+    use cksol_types_internal::{Ed25519KeyName, InitArgs, UpgradeArgs};
+    use icrc_ledger_types::icrc1::account::Account;
+    use proptest::prelude::{Just, Strategy, any, prop, prop_oneof};
+    use solana_signature::Signature;
 
     pub fn arb_principal() -> impl Strategy<Value = Principal> {
         prop::collection::vec(any::<u8>(), 0..=29).prop_map(|bytes| Principal::from_slice(&bytes))
