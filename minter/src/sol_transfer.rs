@@ -1,0 +1,110 @@
+use crate::{address::derive_public_key, state::SchnorrPublicKey};
+use ic_cdk::management_canister::{
+    SchnorrAlgorithm, SchnorrKeyId, SignCallError, SignWithSchnorrArgs, sign_with_schnorr,
+};
+use sol_rpc_types::Lamport;
+use solana_address::Address;
+use solana_hash::Hash;
+use solana_signature::Signature;
+use solana_transaction::{AccountMeta, Instruction, Message, Transaction};
+
+#[cfg(test)]
+mod tests;
+
+/// The Solana System Program address (all zero bytes).
+const SYSTEM_PROGRAM_ID: Address = Address::new_from_array([0u8; 32]);
+
+#[derive(Debug)]
+pub enum CreateTransactionError {
+    /// The IC management canister rejected the signing request.
+    SigningFailed(SignCallError),
+    /// The signature returned by the IC was not 64 bytes.
+    UnexpectedSignatureLength { actual: usize },
+}
+
+/// Creates a signed Solana transaction that transfers `amount` lamports
+/// from each minter-controlled address (identified by its derivation path)
+/// to the `target_address`.
+///
+/// The first derivation path's address is used as the fee payer.
+///
+/// # Panics
+///
+/// Panics if `derivation_paths` is empty.
+pub async fn create_signed_transfer_transaction(
+    master_public_key: &SchnorrPublicKey,
+    key_name: &str,
+    derivation_paths: &[Vec<Vec<u8>>],
+    target_address: Address,
+    amount: Lamport,
+    recent_blockhash: Hash,
+) -> Result<Transaction, CreateTransactionError> {
+    assert!(
+        !derivation_paths.is_empty(),
+        "BUG: derivation_paths must not be empty"
+    );
+
+    let source_addresses: Vec<Address> = derivation_paths
+        .iter()
+        .map(|path| derive_public_key(master_public_key, path.to_vec()))
+        .map(|public_key| Address::from(public_key.serialize_raw()))
+        .collect();
+
+    let fee_payer = source_addresses[0];
+
+    let instructions: Vec<Instruction> = source_addresses
+        .iter()
+        .map(|source| system_transfer_instruction(source, &target_address, amount))
+        .collect();
+
+    let message = Message::new_with_blockhash(&instructions, Some(&fee_payer), &recent_blockhash);
+    let mut transaction = Transaction::new_unsigned(message);
+    let message_bytes = transaction.message_data();
+
+    for (i, derivation_path) in derivation_paths.iter().enumerate() {
+        let response = sign_with_schnorr(&SignWithSchnorrArgs {
+            message: message_bytes.clone(),
+            derivation_path: derivation_path.clone(),
+            key_id: SchnorrKeyId {
+                algorithm: SchnorrAlgorithm::Ed25519,
+                name: key_name.to_string(),
+            },
+            aux: None,
+        })
+        .await
+        .map_err(CreateTransactionError::SigningFailed)?;
+
+        let sig_bytes: [u8; 64] = response.signature.as_slice().try_into().map_err(|_| {
+            CreateTransactionError::UnexpectedSignatureLength {
+                actual: response.signature.len(),
+            }
+        })?;
+
+        let position = transaction
+            .message
+            .account_keys
+            .iter()
+            .position(|key| *key == source_addresses[i])
+            .expect("BUG: signer address not found in message account keys");
+
+        transaction.signatures[position] = Signature::from(sig_bytes);
+    }
+
+    Ok(transaction)
+}
+
+/// Creates a Solana System Program transfer instruction.
+///
+/// The instruction data is the bincode encoding of `SystemInstruction::Transfer { lamports }`:
+/// 4 bytes (u32 LE) variant index `2` + 8 bytes (u64 LE) lamports.
+fn system_transfer_instruction(from: &Address, to: &Address, lamports: Lamport) -> Instruction {
+    let mut data = Vec::with_capacity(12);
+    data.extend_from_slice(&2u32.to_le_bytes());
+    data.extend_from_slice(&lamports.to_le_bytes());
+
+    Instruction {
+        program_id: SYSTEM_PROGRAM_ID,
+        accounts: vec![AccountMeta::new(*from, true), AccountMeta::new(*to, false)],
+        data,
+    }
+}

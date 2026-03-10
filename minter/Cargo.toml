@@ -37,7 +37,9 @@ serde = { workspace = true }
 sol_rpc_client = { workspace = true }
 sol_rpc_types = { workspace = true }
 solana-address = { workspace = true }
+solana-hash = { workspace = true }
 solana-signature = { workspace = true }
+solana-transaction = { workspace = true, features = ["bincode"] }
 solana-transaction-status-client-types = { workspace = true }
 thiserror = { workspace = true }
 

@@ -54,7 +54,7 @@ fn derive_public_key_from_account(
     derive_public_key(master_public_key, derivation_path(account))
 }
 
-fn derive_public_key(master_public_key: &SchnorrPublicKey, path: Vec<Vec<u8>>) -> PublicKey {
+pub fn derive_public_key(master_public_key: &SchnorrPublicKey, path: Vec<Vec<u8>>) -> PublicKey {
     let derivation_path = DerivationPath::new(path.into_iter().map(DerivationIndex).collect());
     let (public_key, _chain_code) = master_public_key
         .public_key
