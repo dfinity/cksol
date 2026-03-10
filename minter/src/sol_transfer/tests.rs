@@ -1,4 +1,5 @@
 use super::*;
+use ic_cdk::call::CallRejected;
 use ic_cdk::management_canister::{SignCallError, SignWithSchnorrArgs, SignWithSchnorrResult};
 use ic_ed25519::{PocketIcMasterPublicKeyId, PublicKey};
 use solana_address::Address;
@@ -21,6 +22,12 @@ impl MockSchnorrSigner {
                     })
                     .collect(),
             ),
+        }
+    }
+
+    fn with_responses(responses: Vec<Result<SignWithSchnorrResult, SignCallError>>) -> Self {
+        Self {
+            responses: RefCell::new(responses),
         }
     }
 }
@@ -170,4 +177,95 @@ async fn should_create_signed_transaction_multiple_sources() {
         .unwrap();
     assert_eq!(tx.signatures[pos_1], Signature::from(fake_sig_1));
     assert_eq!(tx.signatures[pos_2], Signature::from(fake_sig_2));
+}
+
+#[tokio::test]
+async fn should_fail_when_signing_is_rejected() {
+    let master_key = test_master_key();
+    let derivation_path = vec![vec![1u8]];
+    let target_address = Address::from([0xAA; 32]);
+    let blockhash = Hash::new_from_array([0xBB; 32]);
+
+    let signer = MockSchnorrSigner::with_responses(vec![Err(SignCallError::CallFailed(
+        CallRejected::with_rejection(4, "signing service unavailable".to_string()).into(),
+    ))]);
+
+    let result = create_signed_transfer_transaction(
+        &master_key,
+        "test_key",
+        &[derivation_path],
+        target_address,
+        500_000_000,
+        blockhash,
+        &signer,
+    )
+    .await;
+
+    assert!(matches!(
+        result,
+        Err(CreateTransactionError::SigningFailed(_))
+    ));
+}
+
+#[tokio::test]
+async fn should_fail_when_signature_has_wrong_length() {
+    let master_key = test_master_key();
+    let derivation_path = vec![vec![1u8]];
+    let target_address = Address::from([0xAA; 32]);
+    let blockhash = Hash::new_from_array([0xBB; 32]);
+
+    let signer = MockSchnorrSigner::with_responses(vec![Ok(SignWithSchnorrResult {
+        signature: vec![0x42; 32], // 32 bytes instead of 64
+    })]);
+
+    let result = create_signed_transfer_transaction(
+        &master_key,
+        "test_key",
+        &[derivation_path],
+        target_address,
+        500_000_000,
+        blockhash,
+        &signer,
+    )
+    .await;
+
+    assert!(matches!(
+        result,
+        Err(CreateTransactionError::UnexpectedSignatureLength { actual: 32 })
+    ));
+}
+
+#[tokio::test]
+async fn should_fail_when_second_signing_fails() {
+    let master_key = test_master_key();
+    let derivation_path_1 = vec![vec![1u8]];
+    let derivation_path_2 = vec![vec![2u8]];
+    let target_address = Address::from([0xCC; 32]);
+    let blockhash = Hash::new_from_array([0xDD; 32]);
+
+    // MockSchnorrSigner pops from the back: second call fails, first succeeds.
+    let signer = MockSchnorrSigner::with_responses(vec![
+        Err(SignCallError::CallFailed(
+            CallRejected::with_rejection(5, "canister trapped".to_string()).into(),
+        )),
+        Ok(SignWithSchnorrResult {
+            signature: vec![0x11; 64],
+        }),
+    ]);
+
+    let result = create_signed_transfer_transaction(
+        &master_key,
+        "test_key",
+        &[derivation_path_1, derivation_path_2],
+        target_address,
+        100_000_000,
+        blockhash,
+        &signer,
+    )
+    .await;
+
+    assert!(matches!(
+        result,
+        Err(CreateTransactionError::SigningFailed(_))
+    ));
 }
