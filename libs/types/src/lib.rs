@@ -12,9 +12,11 @@ use thiserror::Error;
 
 mod memo;
 
+// TODO DEFI-2643: Use `DepositId` instead of `Signature`
 /// The outcome of processing a Solana deposit transaction.
 #[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize, Serialize)]
 pub enum DepositStatus {
+    // TODO DEFI-2643: Add `deposit_amount` field
     /// The transaction is a valid deposit, but the corresponding ckSOL tokens
     /// have not yet been minted.
     Processing {
