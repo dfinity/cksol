@@ -73,7 +73,7 @@ pub enum EventType {
         /// The fee retained by the minter (in lamports).
         withdrawal_fee: Lamport,
     },
-    /// Sent funds consolidation transaction
+    /// Submitted a Solana transaction to consolidate deposited funds
     FundsConsolidationRequestSubmitted {
         /// Vector of the deposit accounts from which funds are being consolidated
         /// and the amount being consolidated for each account.

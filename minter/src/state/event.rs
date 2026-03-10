@@ -60,7 +60,7 @@ pub enum EventType {
     /// The minter burned ckSOL for a withdrawal request.
     #[n(5)]
     AccepterWithdrawSolRequest(#[n(0)] WithdrawSolRequest),
-    /// Sent funds consolidation transaction
+    /// Submitted a Solana transaction to consolidate deposited funds
     #[n(6)]
     FundsConsolidationRequestSubmitted {
         /// Vector of the deposit accounts from which funds are being consolidated
