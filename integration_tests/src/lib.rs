@@ -502,7 +502,7 @@ impl Canister<'_> {
             .as_ref()
             .start_canister(self.id, Some(Setup::DEFAULT_CONTROLLER))
             .await
-            .expect("Failed to stop canister");
+            .expect("Failed to start canister");
     }
 
     pub async fn stop(&self) {
