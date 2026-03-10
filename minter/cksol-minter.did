@@ -231,8 +231,10 @@ type EventType = variant {
     // deposit for the given account. ckSOL tokens have not yet been
     // minted for this deposit.
     AcceptedDeposit : record {
-        // The accepted deposit.
-        deposit_id: DepositId;
+        // The signature of the Solana deposit transaction.
+        signature: Signature;
+        // The account to which the minter should mint ckSOL.
+        account: Account;
         // The amount that was deposited.
         deposit_amount: Lamport;
         // The amount of ckSOL tokens to mint for this deposit.
@@ -248,20 +250,40 @@ type EventType = variant {
     // The deposit is quarantined to avoid any double minting and
     // will not be further processed without manual intervention.
     QuarantinedDeposit : record {
-        // The quarantined deposit.
-        deposit_id: DepositId;
+        // The signature of the Solana deposit transaction.
+        signature: Signature;
+        // The account to which the minter should mint ckSOL.
+        account: Account;
     };
     // The minter minted ckSOL in response to a deposit.
     Minted : record {
-        // The minted deposit.
-        deposit_id: DepositId;
+        // The signature of the Solana deposit transaction.
+        signature: Signature;
+        // The account to which the minter minted ckSOL.
+        account: Account;
         // The transaction index on the ckSOL ledger.
         mint_block_index: nat64;
     };
-    // The minter pooled funds from a ckSOL deposit.
-    PooledDepositFunds : record {
-        // The deposit whose funds were consolidated.
-        deposit_ids: vec DepositId;
+    // Submitted a Solana transaction to consolidate deposited funds
+    FundsConsolidationRequestSubmitted : record {
+        // Vector of the deposit accounts from which funds are being consolidated
+        // and the amount being consolidated for each account.
+        funds: vec record { Account; Lamport };
+        // Signature of the Solana transaction consolidating funds
+        // that was submitted
+        signature: Signature;
+    };
+    // Funds consolidation transaction failed
+    FundsConsolidationRequestFailed : record {
+        // Signature of the Solana transaction consolidating funds
+        // that failed.
+        signature: Signature;
+    };
+    // Funds consolidation transaction succeeded
+    FundsConsolidationRequestSucceeded : record {
+        // Signature of the Solana transaction consolidating funds
+        // that succeeded.
+        signature: Signature;
     };
 };
 
