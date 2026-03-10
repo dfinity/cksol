@@ -274,12 +274,12 @@ type EventType = variant {
         signature: Signature;
     };
     // A Solana request submitted by the minter has failed.
-    FailedTransaction {
+    FailedTransaction : record {
         // The signature of the failed Solana transaction.
         signature: Signature;
     };
     // A Solana request submitted by the minter has been finalized.
-    FinalizedTransaction {
+    FinalizedTransaction : record {
         // The signature of the finalized Solana transaction.
         signature: Signature;
     };
