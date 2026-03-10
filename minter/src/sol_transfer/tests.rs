@@ -85,9 +85,8 @@ async fn should_create_signed_transaction_single_source() {
     let blockhash = Hash::new_from_array([0xBB; 32]);
     let fake_signature = [0x42u8; 64];
 
-    let source_address = Address::from(
-        derive_public_key(&master_key, derivation_path.clone()).serialize_raw(),
-    );
+    let source_address =
+        Address::from(derive_public_key(&master_key, derivation_path.clone()).serialize_raw());
 
     let signer = MockSchnorrSigner::with_signatures(vec![fake_signature]);
     let tx = create_signed_transfer_transaction(
@@ -129,12 +128,10 @@ async fn should_create_signed_transaction_multiple_sources() {
     let fake_sig_1 = [0x11u8; 64];
     let fake_sig_2 = [0x22u8; 64];
 
-    let source_1 = Address::from(
-        derive_public_key(&master_key, derivation_path_1.clone()).serialize_raw(),
-    );
-    let source_2 = Address::from(
-        derive_public_key(&master_key, derivation_path_2.clone()).serialize_raw(),
-    );
+    let source_1 =
+        Address::from(derive_public_key(&master_key, derivation_path_1.clone()).serialize_raw());
+    let source_2 =
+        Address::from(derive_public_key(&master_key, derivation_path_2.clone()).serialize_raw());
 
     // MockSchnorrSigner pops from the back, so push in reverse order.
     let signer = MockSchnorrSigner::with_signatures(vec![fake_sig_2, fake_sig_1]);
