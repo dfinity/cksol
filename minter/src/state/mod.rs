@@ -133,10 +133,6 @@ impl State {
         self.update_balance_required_cycles
     }
 
-    pub fn accepted_deposits(&self) -> &BTreeMap<DepositId, Lamport> {
-        &self.accepted_deposits
-    }
-
     pub fn deposit_status(&self, deposit_id: &DepositId) -> Option<DepositStatus> {
         if self.quarantined_deposits.contains_key(deposit_id) {
             return Some(DepositStatus::Quarantined(deposit_id.signature.into()));
