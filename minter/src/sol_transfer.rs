@@ -1,6 +1,7 @@
 use crate::{address::derive_public_key, state::SchnorrPublicKey};
 use ic_cdk::management_canister::{
-    SchnorrAlgorithm, SchnorrKeyId, SignCallError, SignWithSchnorrArgs, sign_with_schnorr,
+    SchnorrAlgorithm, SchnorrKeyId, SignCallError, SignWithSchnorrArgs, SignWithSchnorrResult,
+    sign_with_schnorr,
 };
 use sol_rpc_types::Lamport;
 use solana_address::Address;
@@ -13,6 +14,25 @@ mod tests;
 
 /// The Solana System Program address (all zero bytes).
 const SYSTEM_PROGRAM_ID: Address = Address::new_from_array([0u8; 32]);
+
+pub trait SchnorrSigner {
+    fn sign(
+        &self,
+        args: &SignWithSchnorrArgs,
+    ) -> impl std::future::Future<Output = Result<SignWithSchnorrResult, SignCallError>>;
+}
+
+/// Production signer that delegates to the IC management canister.
+pub struct IcSchnorrSigner;
+
+impl SchnorrSigner for IcSchnorrSigner {
+    async fn sign(
+        &self,
+        args: &SignWithSchnorrArgs,
+    ) -> Result<SignWithSchnorrResult, SignCallError> {
+        sign_with_schnorr(args).await
+    }
+}
 
 #[derive(Debug)]
 pub enum CreateTransactionError {
@@ -38,6 +58,7 @@ pub async fn create_signed_transfer_transaction(
     target_address: Address,
     amount: Lamport,
     recent_blockhash: Hash,
+    signer: &impl SchnorrSigner,
 ) -> Result<Transaction, CreateTransactionError> {
     assert!(
         !derivation_paths.is_empty(),
@@ -62,17 +83,18 @@ pub async fn create_signed_transfer_transaction(
     let message_bytes = transaction.message_data();
 
     for (i, derivation_path) in derivation_paths.iter().enumerate() {
-        let response = sign_with_schnorr(&SignWithSchnorrArgs {
-            message: message_bytes.clone(),
-            derivation_path: derivation_path.clone(),
-            key_id: SchnorrKeyId {
-                algorithm: SchnorrAlgorithm::Ed25519,
-                name: key_name.to_string(),
-            },
-            aux: None,
-        })
-        .await
-        .map_err(CreateTransactionError::SigningFailed)?;
+        let response = signer
+            .sign(&SignWithSchnorrArgs {
+                message: message_bytes.clone(),
+                derivation_path: derivation_path.clone(),
+                key_id: SchnorrKeyId {
+                    algorithm: SchnorrAlgorithm::Ed25519,
+                    name: key_name.to_string(),
+                },
+                aux: None,
+            })
+            .await
+            .map_err(CreateTransactionError::SigningFailed)?;
 
         let sig_bytes: [u8; 64] = response.signature.as_slice().try_into().map_err(|_| {
             CreateTransactionError::UnexpectedSignatureLength {
