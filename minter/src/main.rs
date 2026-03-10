@@ -101,7 +101,7 @@ fn get_events(
         match event_type {
             EventType::Init(args) => event::EventType::Init(args),
             EventType::Upgrade(args) => event::EventType::Upgrade(args),
-            EventType::AccepterWithdrawSolRequest(request) => {
+            EventType::AcceptedWithdrawSolRequest(request) => {
                 event::EventType::AcceptedWithdrawSolRequest {
                     account: request.account,
                     solana_address: request.solana_address,
