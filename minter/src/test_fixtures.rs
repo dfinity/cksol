@@ -79,6 +79,7 @@ pub mod arb {
     use icrc_ledger_types::icrc1::account::Account;
     use proptest::collection::vec;
     use proptest::prelude::{Just, Strategy, any, prop, prop_oneof};
+    use sol_rpc_types::Lamport;
     use solana_signature::Signature;
 
     pub fn arb_principal() -> impl Strategy<Value = Principal> {
@@ -204,6 +205,10 @@ pub mod arb {
             )
     }
 
+    pub fn arb_pooled_funds() -> impl Strategy<Value = (Account, Lamport)> {
+        (arb_account(), any::<Lamport>()).prop_map(|(account, amount)| (account, amount))
+    }
+
     pub fn arb_event_type() -> impl Strategy<Value = EventType> {
         prop_oneof![
             arb_init_args().prop_map(EventType::Init),
@@ -225,7 +230,6 @@ pub mod arb {
                     mint_block_index,
                 }
             ),
-            vec(arb_deposit_id(), 0..10).prop_map(EventType::PooledDepositFunds),
         ]
     }
 

@@ -60,9 +60,24 @@ pub enum EventType {
     /// The minter burned ckSOL for a withdrawal request.
     #[n(5)]
     AccepterWithdrawSolRequest(#[n(0)] WithdrawSolRequest),
-    /// The minter pooled funds from ckSOL deposits.
+    /// Sent funds consolidation transaction
     #[n(6)]
-    PooledDepositFunds(#[n(0)] Vec<DepositId>),
+    FundsConsolidationRequestSubmitted {
+        /// Vector of the deposit accounts from which funds are being consolidated
+        /// and the amount being consolidated for each account.
+        #[n(0)]
+        funds: Vec<(Account, Lamport)>,
+        /// Signature of the Solana transaction consolidating funds
+        /// that was submitted
+        #[cbor(n(1), with = "cbor::signature")]
+        signature: Signature,
+    },
+    /// Funds consolidation transaction failed
+    #[n(7)]
+    FundsConsolidationRequestFailed(#[cbor(n(0), with = "cbor::signature")] Signature),
+    /// Funds consolidation transaction succeeded
+    #[n(8)]
+    FundsConsolidationRequestSucceeded(#[cbor(n(0), with = "cbor::signature")] Signature),
 }
 
 /// Payload of the `AcceptedWithdrawSolRequest` event.
@@ -91,15 +106,6 @@ pub struct DepositId {
     pub signature: Signature,
     #[n(1)]
     pub account: Account,
-}
-
-impl From<DepositId> for cksol_types_internal::event::DepositId {
-    fn from(DepositId { signature, account }: DepositId) -> Self {
-        Self {
-            signature: signature.into(),
-            account,
-        }
-    }
 }
 
 impl Storable for Event {

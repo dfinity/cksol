@@ -5,7 +5,6 @@ use cksol_types::{
     Address, DepositStatus, GetDepositAddressArgs, MinterInfo, UpdateBalanceArgs,
     UpdateBalanceError, WithdrawSolArgs, WithdrawSolError, WithdrawSolOk, WithdrawSolStatus,
 };
-use cksol_types_internal::event::DepositId;
 use cksol_types_internal::{MinterArg, log::Priority};
 use ic_http_types::{HttpRequest, HttpResponse, HttpResponseBuilder};
 use icrc_ledger_types::icrc1::account::{Account, Subaccount};
@@ -116,7 +115,8 @@ fn get_events(
                 deposit_amount,
                 amount_to_mint,
             } => event::EventType::AcceptedDeposit {
-                deposit_id: deposit_id.into(),
+                signature: deposit_id.signature.into(),
+                account: deposit_id.account,
                 deposit_amount,
                 amount_to_mint,
             },
@@ -124,15 +124,30 @@ fn get_events(
                 deposit_id,
                 mint_block_index,
             } => event::EventType::Minted {
-                deposit_id: deposit_id.into(),
+                signature: deposit_id.signature.into(),
+                account: deposit_id.account,
                 mint_block_index: *mint_block_index.get(),
             },
             EventType::QuarantinedDeposit(deposit_id) => event::EventType::QuarantinedDeposit {
-                deposit_id: deposit_id.into(),
+                signature: deposit_id.signature.into(),
+                account: deposit_id.account,
             },
-            EventType::PooledDepositFunds(deposits) => event::EventType::PooledDepositFunds {
-                deposit_ids: deposits.into_iter().map(DepositId::from).collect(),
-            },
+            EventType::FundsConsolidationRequestSubmitted { funds, signature } => {
+                event::EventType::FundsConsolidationRequestSubmitted {
+                    funds,
+                    signature: signature.into(),
+                }
+            }
+            EventType::FundsConsolidationRequestFailed(signature) => {
+                event::EventType::FundsConsolidationRequestFailed {
+                    signature: signature.into(),
+                }
+            }
+            EventType::FundsConsolidationRequestSucceeded(signature) => {
+                event::EventType::FundsConsolidationRequestSucceeded {
+                    signature: signature.into(),
+                }
+            }
         }
     }
 

@@ -11,6 +11,8 @@ use ic_ed25519::PublicKey;
 use icrc_ledger_types::icrc1::account::Account;
 use sol_rpc_client::SolRpcClient;
 use sol_rpc_types::{ConsensusStrategy, Lamport, RpcSources, SolanaCluster};
+use solana_signature::Signature;
+use std::cmp::Ordering;
 use std::{
     cell::RefCell,
     collections::{BTreeMap, BTreeSet},
@@ -81,8 +83,10 @@ pub struct State {
     quarantined_deposits: BTreeMap<DepositId, Lamport>,
     minted_deposits: BTreeMap<DepositId, MintedDeposit>,
     pending_withdrawal_requests: BTreeMap<LedgerBurnIndex, WithdrawSolRequest>,
-    deposits_to_pool: BTreeMap<DepositId, Lamport>,
-    pooled_deposits: BTreeMap<DepositId, Lamport>,
+    // TODO DEFI-2687: Sort by amount
+    funds_to_consolidate: BTreeMap<Account, Lamport>,
+    submitted_consolidation_requests: BTreeMap<Signature, Vec<(Account, Lamport)>>,
+    available_balance: Lamport,
 }
 
 impl State {
@@ -263,16 +267,10 @@ impl State {
                 .is_none(),
             "Attempted to accept an already accepted deposit: {deposit_id:?}"
         );
-        assert!(
-            !self.pooled_deposits.contains_key(deposit_id),
-            "Attempted to pool funds twice for a ckSOL deposit whose funds were already pooled: {deposit_id:?}"
-        );
-        assert!(
-            self.deposits_to_pool
-                .insert(*deposit_id, *deposit_amount)
-                .is_none(),
-            "Attempted to pool funds twice for the same ckSOL deposit: {deposit_id:?}"
-        );
+        *self
+            .funds_to_consolidate
+            .entry(deposit_id.account)
+            .or_default() += deposit_amount;
     }
 
     fn process_quarantined_deposit(&mut self, deposit_id: &DepositId) {
@@ -339,18 +337,54 @@ impl State {
         );
     }
 
-    pub fn process_pooled_funds(&mut self, deposit_ids: &Vec<DepositId>) {
-        for deposit_id in deposit_ids {
-            let deposit_amount = self.deposits_to_pool.remove(deposit_id).unwrap_or_else(|| {
-                panic!("Attempted to pool funds for an unknown ckSOL deposit: {deposit_id:?}")
-            });
-            assert!(
-                self.pooled_deposits
-                    .insert(*deposit_id, deposit_amount)
-                    .is_none(),
-                "Attempted to pool funds twice twice for the same ckSOL deposit: {deposit_id:?}",
-            );
+    fn process_consolidation_request_submitted(
+        &mut self,
+        signature: &Signature,
+        funds: &Vec<(Account, Lamport)>,
+    ) {
+        for (account, amount) in funds {
+            let balance = self
+                .funds_to_consolidate
+                .get_mut(account)
+                .unwrap_or_else(|| {
+                    panic!("Attempted to consolidate funds for empty account: {account}")
+                });
+            match amount.cmp(balance) {
+                Ordering::Greater => panic!(
+                    "Attempted to consolidate {amount} lamports from account {account}, but deposit address only contains {balance} lamports"
+                ),
+                Ordering::Equal => {
+                    self.funds_to_consolidate.remove(account);
+                }
+                Ordering::Less => *balance -= amount,
+            }
         }
+        assert!(
+            self.submitted_consolidation_requests
+                .insert(*signature, funds.clone())
+                .is_none(),
+            "Attempted to add consolidation transaction {signature:?} to submitted transactions twice"
+        );
+    }
+
+    fn process_consolidation_request_failed(&mut self, signature: &Signature) {
+        for (account, amount) in self
+            .submitted_consolidation_requests
+            .remove(signature)
+            .unwrap_or_else(|| panic!("Attempted to remove unknown transaction {signature:?} from submitted consolidation transactions"))
+        {
+            *self.funds_to_consolidate.entry(account).or_default() += amount;
+        }
+    }
+
+    fn process_consolidation_request_succeeded(&mut self, signature: &Signature) {
+        self.available_balance += self
+            .submitted_consolidation_requests
+            .remove(signature)
+            .unwrap_or_else(|| panic!("Attempted to remove unknown transaction {signature:?} from submitted consolidation transactions"))
+            .into_iter()
+            .map(|(_account, amount)| amount)
+            .sum::<Lamport>();
     }
 }
 
@@ -398,8 +432,9 @@ impl TryFrom<InitArgs> for State {
             quarantined_deposits: BTreeMap::new(),
             minted_deposits: BTreeMap::new(),
             pending_withdrawal_requests: BTreeMap::new(),
-            deposits_to_pool: BTreeMap::new(),
-            pooled_deposits: BTreeMap::new(),
+            funds_to_consolidate: BTreeMap::new(),
+            submitted_consolidation_requests: BTreeMap::new(),
+            available_balance: 0,
         };
         state.validate()?;
         Ok(state)

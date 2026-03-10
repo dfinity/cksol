@@ -41,7 +41,15 @@ fn apply_state_transition(state: &mut State, payload: &EventType) {
         } => {
             state.process_mint(deposit_id, mint_block_index);
         }
-        EventType::PooledDepositFunds(deposit_ids) => state.process_pooled_funds(deposit_ids),
+        EventType::FundsConsolidationRequestSubmitted { signature, funds } => {
+            state.process_consolidation_request_submitted(signature, funds)
+        }
+        EventType::FundsConsolidationRequestFailed(signature) => {
+            state.process_consolidation_request_failed(signature)
+        }
+        EventType::FundsConsolidationRequestSucceeded(signature) => {
+            state.process_consolidation_request_succeeded(signature)
+        }
     }
 }
 
