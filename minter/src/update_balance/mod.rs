@@ -45,7 +45,7 @@ pub async fn update_balance<R: CanisterRuntime>(
         Err(e) => {
             log!(
                 Priority::Info,
-                "Error minting tokens for deposit transaction with signature {signature}: {e}"
+                "Error minting tokens for deposit {deposit_id:?}: {e}"
             );
             Ok(DepositStatus::Processing {
                 signature: signature.into(),
@@ -64,7 +64,7 @@ async fn try_accept_deposit<R: CanisterRuntime>(
     let maybe_transaction = try_get_transaction(runtime, signature).await.map_err(|e| {
         log!(
             Priority::Info,
-            "Error fetching transaction with signature {signature}: {e}"
+            "Error fetching transaction for deposit {deposit_id:?}: {e}"
         );
         UpdateBalanceError::from(e)
     })?;
