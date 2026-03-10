@@ -57,7 +57,7 @@ pub enum EventType {
     },
     /// The minter burned ckSOL for a withdrawal request.
     #[n(5)]
-    AccepterWithdrawSolRequest(#[n(0)] WithdrawSolRequest),
+    AcceptedWithdrawSolRequest(#[n(0)] WithdrawSolRequest),
 }
 
 /// Payload of the `AcceptedWithdrawSolRequest` event.

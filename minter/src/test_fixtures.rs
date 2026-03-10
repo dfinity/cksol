@@ -207,7 +207,7 @@ pub mod arb {
         prop_oneof![
             arb_init_args().prop_map(EventType::Init),
             arb_upgrade_args().prop_map(EventType::Upgrade),
-            arb_withdraw_sol_request().prop_map(EventType::AccepterWithdrawSolRequest),
+            arb_withdraw_sol_request().prop_map(EventType::AcceptedWithdrawSolRequest),
             (arb_deposit_id(), any::<u64>()).prop_map(|(deposit_id, amount_to_mint)| {
                 EventType::AcceptedDeposit {
                     deposit_id,
