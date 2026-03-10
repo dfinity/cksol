@@ -72,12 +72,12 @@ pub enum EventType {
         #[cbor(n(1), with = "cbor::signature")]
         signature: Signature,
     },
-    /// Funds consolidation transaction failed
+    /// A Solana request submitted by the minter has failed.
     #[n(7)]
-    FundsConsolidationRequestFailed(#[cbor(n(0), with = "cbor::signature")] Signature),
-    /// Funds consolidation transaction succeeded
+    FailedTransaction(#[cbor(n(0), with = "cbor::signature")] Signature),
+    /// A Solana request submitted by the minter has been finalized.
     #[n(8)]
-    FundsConsolidationRequestSucceeded(#[cbor(n(0), with = "cbor::signature")] Signature),
+    FinalizedTransaction(#[cbor(n(0), with = "cbor::signature")] Signature),
 }
 
 /// Payload of the `AcceptedWithdrawSolRequest` event.

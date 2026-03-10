@@ -138,16 +138,12 @@ fn get_events(
                     signature: signature.into(),
                 }
             }
-            EventType::FundsConsolidationRequestFailed(signature) => {
-                event::EventType::FundsConsolidationRequestFailed {
-                    signature: signature.into(),
-                }
-            }
-            EventType::FundsConsolidationRequestSucceeded(signature) => {
-                event::EventType::FundsConsolidationRequestSucceeded {
-                    signature: signature.into(),
-                }
-            }
+            EventType::FailedTransaction(signature) => event::EventType::FailedTransaction {
+                signature: signature.into(),
+            },
+            EventType::FinalizedTransaction(signature) => event::EventType::FinalizedTransaction {
+                signature: signature.into(),
+            },
         }
     }
 

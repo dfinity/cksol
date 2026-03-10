@@ -236,8 +236,8 @@ pub mod arb {
                 .prop_map(|(signature, funds)| {
                     EventType::FundsConsolidationRequestSubmitted { signature, funds }
                 }),
-            arb_signature().prop_map(EventType::FundsConsolidationRequestFailed),
-            arb_signature().prop_map(EventType::FundsConsolidationRequestSucceeded)
+            arb_signature().prop_map(EventType::FailedTransaction),
+            arb_signature().prop_map(EventType::FinalizedTransaction)
         ]
     }
 

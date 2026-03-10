@@ -82,16 +82,14 @@ pub enum EventType {
         /// that was submitted
         signature: Signature,
     },
-    /// Funds consolidation transaction failed
-    FundsConsolidationRequestFailed {
-        /// Signature of the Solana transaction consolidating funds
-        /// that failed.
+    /// A Solana request submitted by the minter has failed.
+    FailedTransaction {
+        /// The signature of the failed Solana transaction.
         signature: Signature,
     },
-    /// Funds consolidation transaction succeeded
-    FundsConsolidationRequestSucceeded {
-        /// Signature of the Solana transaction consolidating funds
-        /// that succeeded.
+    /// A Solana request submitted by the minter has been finalized.
+    FinalizedTransaction {
+        /// The signature of the finalized Solana transaction.
         signature: Signature,
     },
 }

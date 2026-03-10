@@ -367,24 +367,25 @@ impl State {
         );
     }
 
-    fn process_consolidation_request_failed(&mut self, signature: &Signature) {
-        for (account, amount) in self
-            .submitted_consolidation_requests
-            .remove(signature)
-            .unwrap_or_else(|| panic!("Attempted to remove unknown transaction {signature:?} from submitted consolidation transactions"))
-        {
-            *self.funds_to_consolidate.entry(account).or_default() += amount;
+    fn process_failed_transaction(&mut self, signature: &Signature) {
+        if let Some(consolidated_funds) = self.submitted_consolidation_requests.remove(signature) {
+            for (account, amount) in consolidated_funds {
+                *self.funds_to_consolidate.entry(account).or_default() += amount;
+            }
+            return;
         }
+        panic!("Processed unknown failed transaction {signature:?}");
     }
 
-    fn process_consolidation_request_succeeded(&mut self, signature: &Signature) {
-        self.available_balance += self
-            .submitted_consolidation_requests
-            .remove(signature)
-            .unwrap_or_else(|| panic!("Attempted to remove unknown transaction {signature:?} from submitted consolidation transactions"))
-            .into_iter()
-            .map(|(_account, amount)| amount)
-            .sum::<Lamport>();
+    fn process_finalized_transaction(&mut self, signature: &Signature) {
+        if let Some(consolidated_funds) = self.submitted_consolidation_requests.remove(signature) {
+            self.available_balance += consolidated_funds
+                .into_iter()
+                .map(|(_account, amount)| amount)
+                .sum::<Lamport>();
+            return;
+        }
+        panic!("Processed unknown finalized transaction {signature:?}");
     }
 }
 

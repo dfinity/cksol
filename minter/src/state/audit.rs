@@ -44,11 +44,9 @@ fn apply_state_transition(state: &mut State, payload: &EventType) {
         EventType::FundsConsolidationRequestSubmitted { signature, funds } => {
             state.process_consolidation_request_submitted(signature, funds)
         }
-        EventType::FundsConsolidationRequestFailed(signature) => {
-            state.process_consolidation_request_failed(signature)
-        }
-        EventType::FundsConsolidationRequestSucceeded(signature) => {
-            state.process_consolidation_request_succeeded(signature)
+        EventType::FailedTransaction(signature) => state.process_failed_transaction(signature),
+        EventType::FinalizedTransaction(signature) => {
+            state.process_finalized_transaction(signature)
         }
     }
 }
