@@ -14,6 +14,7 @@ use canlog::log;
 use cksol_types::{DepositStatus, UpdateBalanceError};
 use cksol_types_internal::log::Priority;
 use icrc_ledger_types::icrc1::account::Account;
+use solana_signature::Signature;
 
 #[cfg(test)]
 mod tests;
@@ -21,24 +22,52 @@ mod tests;
 pub async fn update_balance<R: CanisterRuntime>(
     runtime: R,
     account: Account,
-    signature: solana_signature::Signature,
+    signature: Signature,
 ) -> Result<DepositStatus, UpdateBalanceError> {
     let _guard = update_balance_guard(account)?;
 
     let deposit_id = DepositId { account, signature };
-    if let Some(deposit_status) = read_state(|state| state.deposit_status(&deposit_id)) {
-        return Ok(deposit_status);
-    }
 
-    let maybe_transaction = try_get_transaction(&runtime, signature)
-        .await
-        .map_err(|e| {
+    let amount_to_mint = match read_state(|state| state.deposit_status(&deposit_id)) {
+        None => try_accept_deposit(&runtime, account, signature, deposit_id).await?,
+        Some(DepositStatus::Processing {
+            signature: _,
+            amount_to_mint,
+        }) => amount_to_mint,
+        // Deposit is already fully processed, nothing more to do
+        Some(status @ (DepositStatus::Quarantined(_) | DepositStatus::Minted { .. })) => {
+            return Ok(status);
+        }
+    };
+
+    match mint(&runtime, deposit_id, amount_to_mint).await {
+        Ok(deposit_status) => Ok(deposit_status),
+        Err(e) => {
             log!(
                 Priority::Info,
-                "Error fetching transaction with signature {signature}: {e}"
+                "Error minting tokens for deposit {deposit_id:?}: {e}"
             );
-            UpdateBalanceError::from(e)
-        })?;
+            Ok(DepositStatus::Processing {
+                signature: signature.into(),
+                amount_to_mint,
+            })
+        }
+    }
+}
+
+async fn try_accept_deposit<R: CanisterRuntime>(
+    runtime: &R,
+    account: Account,
+    signature: Signature,
+    deposit_id: DepositId,
+) -> Result<u64, UpdateBalanceError> {
+    let maybe_transaction = try_get_transaction(runtime, signature).await.map_err(|e| {
+        log!(
+            Priority::Info,
+            "Error fetching transaction for deposit {deposit_id:?}: {e}"
+        );
+        UpdateBalanceError::from(e)
+    })?;
 
     let transaction = match maybe_transaction {
         Some(transaction) => Ok(transaction),
@@ -72,23 +101,8 @@ pub async fn update_balance<R: CanisterRuntime>(
                 deposit_id,
                 amount_to_mint,
             },
-            &runtime,
+            runtime,
         )
     });
-
-    // TODO DEFI-2643: If minting fails, we should try again later automatically (i.e. set up a
-    //  timer that checks events to mint.
-    // TODO DEFI-2643: Handle the case where the timer execution triggers while we are awaiting the
-    //  response from the ledger and we concurrently try to mint for the same `AcceptedDeposit`
-    //  event, i.e. watch out for race conditions!
-    match mint(&runtime, deposit_id, amount_to_mint).await {
-        Ok(deposit_status) => Ok(deposit_status),
-        Err(e) => {
-            log!(
-                Priority::Info,
-                "Error minting tokens for deposit transaction with signature {signature}: {e}"
-            );
-            Ok(DepositStatus::Processing(signature.into()))
-        }
-    }
+    Ok(amount_to_mint)
 }

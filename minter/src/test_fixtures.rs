@@ -242,7 +242,10 @@ pub mod deposit {
     };
 
     pub fn deposit_status_processing() -> DepositStatus {
-        DepositStatus::Processing(deposit_transaction_signature().into())
+        DepositStatus::Processing {
+            signature: deposit_transaction_signature().into(),
+            amount_to_mint: DEPOSIT_AMOUNT - DEPOSIT_FEE,
+        }
     }
 
     pub fn deposit_status_quarantined() -> DepositStatus {

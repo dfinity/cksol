@@ -425,6 +425,10 @@ impl Ledger<'_> {
         result.blocks[0].block.clone()
     }
 
+    pub async fn start(&self) {
+        self.0.start().await;
+    }
+
     pub async fn stop(&self) {
         self.0.stop().await;
     }
@@ -491,6 +495,14 @@ impl Canister<'_> {
                 Some(Setup::DEFAULT_CONTROLLER),
             )
             .await
+    }
+
+    pub async fn start(&self) {
+        self.runtime
+            .as_ref()
+            .start_canister(self.id, Some(Setup::DEFAULT_CONTROLLER))
+            .await
+            .expect("Failed to start canister");
     }
 
     pub async fn stop(&self) {

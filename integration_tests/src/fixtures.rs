@@ -22,6 +22,7 @@ pub const DEFAULT_CALLER_ACCOUNT: Account = Account {
 pub const DEFAULT_CALLER_DEPOSIT_ADDRESS: &str = "3fnbpmbdVhcvLMAgyGirs64B4BFFftmmSpeq7tuDD6tY";
 
 pub const DEPOSIT_AMOUNT: Lamport = 500_000_000;
+pub const EXPECTED_MINT_AMOUNT: Lamport = DEPOSIT_AMOUNT - Setup::DEFAULT_DEPOSIT_FEE;
 
 /// Signature for a Solana transaction depositing [`DEPOSIT_AMOUNT`] lamports to
 /// the address [`DEFAULT_CALLER_DEPOSIT_ADDRESS`].

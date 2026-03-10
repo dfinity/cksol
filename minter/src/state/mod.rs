@@ -137,8 +137,11 @@ impl State {
         if self.quarantined_deposits.contains_key(deposit_id) {
             return Some(DepositStatus::Quarantined(deposit_id.signature.into()));
         }
-        if self.accepted_deposits.contains_key(deposit_id) {
-            return Some(DepositStatus::Processing(deposit_id.signature.into()));
+        if let Some(amount_to_mint) = self.accepted_deposits.get(deposit_id) {
+            return Some(DepositStatus::Processing {
+                signature: deposit_id.signature.into(),
+                amount_to_mint: *amount_to_mint,
+            });
         }
         if let Some(MintedDeposit {
             block_index,
