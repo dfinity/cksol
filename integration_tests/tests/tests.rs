@@ -561,6 +561,8 @@ mod withdraw_sol_tests {
 
 mod update_balance_tests {
     use super::*;
+    use cksol_int_tests::fixtures::DEPOSIT_AMOUNT;
+    use std::time::Duration;
 
     #[tokio::test]
     async fn should_fail_if_transaction_not_found() {
@@ -710,6 +712,20 @@ mod update_balance_tests {
 
         let balance_after = setup.ledger().balance_of(DEFAULT_CALLER_ACCOUNT).await;
         assert_eq!(balance_after, EXPECTED_MINT_AMOUNT);
+
+        // Deposit consolidation should be scheduled after deposit
+        let num_events_before = setup.minter().get_all_events().await.len();
+
+        setup.advance_time(Duration::from_mins(10)).await;
+        setup.tick().await;
+
+        setup.minter().assert_that_events().await.satisfy(|events| {
+            assert_eq!(events.len(), num_events_before + 1);
+            check!(matches!(
+                &events[num_events_before],
+                EventType::ConsolidatedDeposits { deposits } if deposits == &vec![(DEFAULT_CALLER_ACCOUNT, DEPOSIT_AMOUNT)]
+            ));
+        });
 
         setup.drop().await;
     }

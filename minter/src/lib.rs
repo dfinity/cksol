@@ -1,4 +1,5 @@
 pub mod address;
+mod consolidate;
 mod guard;
 mod ledger;
 pub mod lifecycle;

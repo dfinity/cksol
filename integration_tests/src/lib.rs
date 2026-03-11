@@ -24,6 +24,7 @@ use pocket_ic::{PocketIcBuilder, RejectResponse, nonblocking::PocketIc};
 use serde::de::DeserializeOwned;
 use sol_rpc_client::SolRpcClient;
 use sol_rpc_types::{Lamport, Mode, RpcAccess};
+use std::time::Duration;
 use std::{default::Default, env::var, fs, path::PathBuf, vec};
 
 pub mod events;
@@ -246,6 +247,10 @@ impl Setup {
 
     pub async fn tick(&self) -> () {
         self.env.as_ref().unwrap().tick().await
+    }
+
+    pub async fn advance_time(&self, duration: Duration) -> () {
+        self.env.as_ref().unwrap().advance_time(duration).await
     }
 
     pub async fn drop(self) {

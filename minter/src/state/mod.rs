@@ -86,6 +86,7 @@ pub struct State {
     pending_withdrawal_requests: BTreeMap<LedgerBurnIndex, WithdrawSolRequest>,
     funds_to_consolidate: BTreeMap<Account, Lamport>,
     submitted_transactions: BTreeMap<Signature, Message>,
+    active_tasks: BTreeSet<TaskType>,
 }
 
 impl State {
@@ -138,6 +139,10 @@ impl State {
         self.update_balance_required_cycles
     }
 
+    pub fn funds_to_consolidate(&self) -> &BTreeMap<Account, Lamport> {
+        &self.funds_to_consolidate
+    }
+
     pub fn deposit_status(&self, deposit_id: &DepositId) -> Option<DepositStatus> {
         if self.quarantined_deposits.contains_key(deposit_id) {
             return Some(DepositStatus::Quarantined(deposit_id.signature.into()));
@@ -186,6 +191,10 @@ impl State {
 
     pub fn pending_withdraw_sol_requests_mut(&mut self) -> &mut BTreeSet<Account> {
         &mut self.pending_withdraw_sol_requests
+    }
+
+    pub fn active_tasks_mut(&mut self) -> &mut BTreeSet<TaskType> {
+        &mut self.active_tasks
     }
 
     fn validate(&self) -> Result<(), InvalidStateError> {
@@ -415,6 +424,7 @@ impl TryFrom<InitArgs> for State {
             pending_withdrawal_requests: BTreeMap::new(),
             funds_to_consolidate: BTreeMap::new(),
             submitted_transactions: BTreeMap::new(),
+            active_tasks: BTreeSet::new(),
         };
         state.validate()?;
         Ok(state)
@@ -431,4 +441,9 @@ pub struct SchnorrPublicKey {
 pub struct MintedDeposit {
     block_index: LedgerMintIndex,
     minted_amount: Lamport,
+}
+
+#[derive(Copy, Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub enum TaskType {
+    DepositConsolidation,
 }

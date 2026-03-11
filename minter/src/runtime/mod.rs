@@ -5,16 +5,22 @@ use std::{
     fmt::Debug,
     iter,
     sync::{Arc, Mutex},
+    time::Duration,
 };
 
-pub trait CanisterRuntime {
+pub trait CanisterRuntime: Clone + 'static {
     fn inter_canister_call_runtime(&self) -> impl Runtime;
     fn time(&self) -> u64;
     fn instruction_counter(&self) -> u64;
     fn msg_cycles_available(&self) -> u128;
+    fn set_timer(
+        &self,
+        delay: Duration,
+        future: impl Future<Output = ()> + 'static,
+    ) -> ic_cdk_timers::TimerId;
 }
 
-#[derive(Default, Debug)]
+#[derive(Clone, Default, Debug)]
 pub struct IcCanisterRuntime(IcRuntime);
 
 impl IcCanisterRuntime {
@@ -39,9 +45,18 @@ impl CanisterRuntime for IcCanisterRuntime {
     fn msg_cycles_available(&self) -> u128 {
         ic_cdk::api::msg_cycles_available()
     }
+
+    fn set_timer(
+        &self,
+        delay: Duration,
+        future: impl Future<Output = ()> + 'static,
+    ) -> ic_cdk_timers::TimerId {
+        ic_cdk_timers::set_timer(delay, future)
+    }
 }
 
 // TODO DEFI-2643: Move to test code.
+#[derive(Clone)]
 pub struct TestCanisterRuntime {
     inter_canister_call_runtime: StubRuntime,
     times: Arc<Mutex<dyn Iterator<Item = u64> + Send + Sync>>,
@@ -118,5 +133,13 @@ impl CanisterRuntime for TestCanisterRuntime {
             .unwrap()
             .pop_front()
             .expect("No more stub `msg_cycles_available`!")
+    }
+
+    fn set_timer(
+        &self,
+        _delay: Duration,
+        _future: impl Future<Output = ()> + 'static,
+    ) -> ic_cdk_timers::TimerId {
+        Default::default()
     }
 }
