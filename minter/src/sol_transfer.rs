@@ -9,13 +9,11 @@ use sol_rpc_types::Lamport;
 use solana_address::Address;
 use solana_hash::Hash;
 use solana_signature::Signature;
-use solana_transaction::{AccountMeta, Instruction, Message, Transaction};
+use solana_system_interface::instruction;
+use solana_transaction::{Instruction, Message, Transaction};
 
 #[cfg(test)]
 mod tests;
-
-/// The Solana System Program address (all zero bytes).
-const SYSTEM_PROGRAM_ID: Address = Address::new_from_array([0u8; 32]);
 
 pub trait SchnorrSigner {
     fn sign(
@@ -79,7 +77,7 @@ pub async fn create_signed_transfer_transaction(
     let instructions: Vec<Instruction> = source_addresses
         .iter()
         .zip(sources)
-        .map(|(source, (_, amount))| system_transfer_instruction(source, &target_address, *amount))
+        .map(|(source, (_, amount))| instruction::transfer(source, &target_address, *amount))
         .collect();
 
     let message = Message::new_with_blockhash(&instructions, Some(&fee_payer), &recent_blockhash);
@@ -113,20 +111,4 @@ pub async fn create_signed_transfer_transaction(
     }
 
     Ok(transaction)
-}
-
-/// Creates a Solana System Program transfer instruction.
-///
-/// The instruction data is the bincode encoding of `SystemInstruction::Transfer { lamports }`:
-/// 4 bytes (u32 LE) variant index `2` + 8 bytes (u64 LE) lamports.
-fn system_transfer_instruction(from: &Address, to: &Address, lamports: Lamport) -> Instruction {
-    let mut data = Vec::with_capacity(12);
-    data.extend_from_slice(&2u32.to_le_bytes());
-    data.extend_from_slice(&lamports.to_le_bytes());
-
-    Instruction {
-        program_id: SYSTEM_PROGRAM_ID,
-        accounts: vec![AccountMeta::new(*from, true), AccountMeta::new(*to, false)],
-        data,
-    }
 }
