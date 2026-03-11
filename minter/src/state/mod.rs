@@ -17,6 +17,7 @@ use std::{
     cell::RefCell,
     collections::{BTreeMap, BTreeSet},
 };
+use num_traits::Zero;
 
 #[cfg(test)]
 mod tests;
@@ -355,13 +356,13 @@ impl State {
                 .unwrap_or_else(|| {
                     panic!("Attempted to consolidate funds for unknown account: {account:?}")
                 });
-            assert!(
-                *remaining >= *amount,
-                "Attempted to consolidate more funds than available for account {account:?}: \
-                 available {remaining}, requested {amount}"
-            );
-            *remaining -= *amount;
-            if *remaining == 0 {
+            *remaining = remaining.checked_sub(*amount).unwrap_or_else(|| {
+                panic!(
+                    "Attempted to consolidate more funds than available for account {account:?}: \
+                     available {remaining}, requested {amount}"
+                )
+            });
+            if remaining.is_zero() {
                 self.funds_to_consolidate.remove(account);
             }
         }
