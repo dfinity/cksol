@@ -273,7 +273,7 @@ type EventType = variant {
     SubmittedTransaction : record {
         // The signature of the Solana transaction.
         signature: Signature;
-        // The serialized transaction message.
+        // The serialized (unsigned) transaction message.
         transaction: blob;
     };
     // Deposited funds from user deposit accounts have been consolidated

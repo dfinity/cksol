@@ -77,7 +77,7 @@ pub enum EventType {
     SubmittedTransaction {
         /// The signature of the Solana transaction.
         signature: Signature,
-        /// The serialized transaction message.
+        /// The serialized (unsigned) transaction message.
         transaction: Vec<u8>,
     },
     /// Deposited funds from user deposit accounts have been consolidated
