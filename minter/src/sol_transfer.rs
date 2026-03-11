@@ -1,5 +1,5 @@
 use crate::{
-    address::derive_public_key,
+    address::{DerivationPath, derive_public_key},
     state::{SchnorrPublicKey, read_state},
 };
 use ic_cdk::management_canister::{
@@ -19,7 +19,7 @@ pub trait SchnorrSigner {
     fn sign(
         &self,
         message: Vec<u8>,
-        derivation_path: Vec<Vec<u8>>,
+        derivation_path: DerivationPath,
     ) -> impl std::future::Future<Output = Result<Vec<u8>, SignCallError>>;
 }
 
@@ -30,7 +30,7 @@ impl SchnorrSigner for IcSchnorrSigner {
     async fn sign(
         &self,
         message: Vec<u8>,
-        derivation_path: Vec<Vec<u8>>,
+        derivation_path: DerivationPath,
     ) -> Result<Vec<u8>, SignCallError> {
         let key_name = read_state(|s| s.master_key_name());
         let args = SignWithSchnorrArgs {
@@ -59,7 +59,7 @@ impl SchnorrSigner for IcSchnorrSigner {
 /// that is not exactly 64 bytes.
 pub async fn create_signed_transfer_transaction(
     master_public_key: &SchnorrPublicKey,
-    sources: &[(Vec<Vec<u8>>, Lamport)],
+    sources: &[(DerivationPath, Lamport)],
     target_address: Address,
     recent_blockhash: Hash,
     signer: &impl SchnorrSigner,

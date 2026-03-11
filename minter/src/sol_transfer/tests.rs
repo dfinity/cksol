@@ -28,7 +28,7 @@ impl SchnorrSigner for MockSchnorrSigner {
     async fn sign(
         &self,
         _message: Vec<u8>,
-        _derivation_path: Vec<Vec<u8>>,
+        _derivation_path: DerivationPath,
     ) -> Result<Vec<u8>, SignCallError> {
         self.responses
             .borrow_mut()
