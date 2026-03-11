@@ -1,8 +1,9 @@
-use crate::{address::derive_public_key, state::SchnorrPublicKey};
-use cksol_types_internal::Ed25519KeyName;
+use crate::{
+    address::derive_public_key,
+    state::{SchnorrPublicKey, read_state},
+};
 use ic_cdk::management_canister::{
-    SchnorrAlgorithm, SchnorrKeyId, SignCallError, SignWithSchnorrArgs, SignWithSchnorrResult,
-    sign_with_schnorr,
+    SchnorrAlgorithm, SchnorrKeyId, SignCallError, SignWithSchnorrArgs, sign_with_schnorr,
 };
 use sol_rpc_types::Lamport;
 use solana_address::Address;
@@ -19,8 +20,9 @@ const SYSTEM_PROGRAM_ID: Address = Address::new_from_array([0u8; 32]);
 pub trait SchnorrSigner {
     fn sign(
         &self,
-        args: &SignWithSchnorrArgs,
-    ) -> impl std::future::Future<Output = Result<SignWithSchnorrResult, SignCallError>>;
+        message: Vec<u8>,
+        derivation_path: Vec<Vec<u8>>,
+    ) -> impl std::future::Future<Output = Result<Vec<u8>, SignCallError>>;
 }
 
 /// Production signer that delegates to the IC management canister.
@@ -29,9 +31,21 @@ pub struct IcSchnorrSigner;
 impl SchnorrSigner for IcSchnorrSigner {
     async fn sign(
         &self,
-        args: &SignWithSchnorrArgs,
-    ) -> Result<SignWithSchnorrResult, SignCallError> {
-        sign_with_schnorr(args).await
+        message: Vec<u8>,
+        derivation_path: Vec<Vec<u8>>,
+    ) -> Result<Vec<u8>, SignCallError> {
+        let key_name = read_state(|s| s.master_key_name());
+        let args = SignWithSchnorrArgs {
+            message,
+            derivation_path,
+            key_id: SchnorrKeyId {
+                algorithm: SchnorrAlgorithm::Ed25519,
+                name: key_name.to_string(),
+            },
+            aux: None,
+        };
+        let response = sign_with_schnorr(&args).await?;
+        Ok(response.signature)
     }
 }
 
@@ -47,7 +61,6 @@ impl SchnorrSigner for IcSchnorrSigner {
 /// that is not exactly 64 bytes.
 pub async fn create_signed_transfer_transaction(
     master_public_key: &SchnorrPublicKey,
-    key_name: Ed25519KeyName,
     sources: &[(Vec<Vec<u8>>, Lamport)],
     target_address: Address,
     recent_blockhash: Hash,
@@ -73,34 +86,21 @@ pub async fn create_signed_transfer_transaction(
     let mut transaction = Transaction::new_unsigned(message);
     let message_bytes = transaction.message_data();
 
-    let sign_args: Vec<_> = sources
-        .iter()
-        .map(|(derivation_path, _)| SignWithSchnorrArgs {
-            message: message_bytes.clone(),
-            derivation_path: derivation_path.clone(),
-            key_id: SchnorrKeyId {
-                algorithm: SchnorrAlgorithm::Ed25519,
-                name: key_name.to_string(),
-            },
-            aux: None,
-        })
-        .collect();
-
-    let results = futures::future::join_all(sign_args.iter().map(|args| signer.sign(args))).await;
+    let results =
+        futures::future::join_all(sources.iter().map(|(derivation_path, _)| {
+            signer.sign(message_bytes.clone(), derivation_path.clone())
+        }))
+        .await;
 
     for (i, result) in results.into_iter().enumerate() {
-        let response = result?;
+        let signature = result?;
 
-        let sig_bytes: [u8; 64] = response
-            .signature
-            .as_slice()
-            .try_into()
-            .unwrap_or_else(|_| {
-                panic!(
-                    "BUG: expected 64-byte signature, got {} bytes",
-                    response.signature.len()
-                )
-            });
+        let sig_bytes: [u8; 64] = signature.as_slice().try_into().unwrap_or_else(|_| {
+            panic!(
+                "BUG: expected 64-byte signature, got {} bytes",
+                signature.len()
+            )
+        });
 
         let position = transaction
             .message

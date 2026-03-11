@@ -1,32 +1,23 @@
 use super::*;
 use ic_cdk::call::CallRejected;
-use ic_cdk::management_canister::{SignCallError, SignWithSchnorrArgs, SignWithSchnorrResult};
+use ic_cdk::management_canister::SignCallError;
 use ic_ed25519::{PocketIcMasterPublicKeyId, PublicKey};
 use solana_address::Address;
 use std::cell::RefCell;
 use std::collections::VecDeque;
 
 struct MockSchnorrSigner {
-    responses: RefCell<VecDeque<Result<SignWithSchnorrResult, SignCallError>>>,
+    responses: RefCell<VecDeque<Result<Vec<u8>, SignCallError>>>,
 }
 
 impl MockSchnorrSigner {
     fn with_signatures(signatures: Vec<[u8; 64]>) -> Self {
         Self {
-            responses: RefCell::new(
-                signatures
-                    .into_iter()
-                    .map(|sig| {
-                        Ok(SignWithSchnorrResult {
-                            signature: sig.to_vec(),
-                        })
-                    })
-                    .collect(),
-            ),
+            responses: RefCell::new(signatures.into_iter().map(|sig| Ok(sig.to_vec())).collect()),
         }
     }
 
-    fn with_responses(responses: Vec<Result<SignWithSchnorrResult, SignCallError>>) -> Self {
+    fn with_responses(responses: Vec<Result<Vec<u8>, SignCallError>>) -> Self {
         Self {
             responses: RefCell::new(responses.into()),
         }
@@ -36,8 +27,9 @@ impl MockSchnorrSigner {
 impl SchnorrSigner for MockSchnorrSigner {
     async fn sign(
         &self,
-        _args: &SignWithSchnorrArgs,
-    ) -> Result<SignWithSchnorrResult, SignCallError> {
+        _message: Vec<u8>,
+        _derivation_path: Vec<Vec<u8>>,
+    ) -> Result<Vec<u8>, SignCallError> {
         self.responses
             .borrow_mut()
             .pop_front()
@@ -99,7 +91,6 @@ async fn should_create_signed_transaction_single_source() {
     let signer = MockSchnorrSigner::with_signatures(vec![fake_signature]);
     let tx = create_signed_transfer_transaction(
         &master_key,
-        Ed25519KeyName::LocalDevelopment,
         &[(derivation_path, amount)],
         target_address,
         blockhash,
@@ -143,7 +134,6 @@ async fn should_create_signed_transaction_multiple_sources() {
     let signer = MockSchnorrSigner::with_signatures(vec![fake_sig_1, fake_sig_2]);
     let tx = create_signed_transfer_transaction(
         &master_key,
-        Ed25519KeyName::LocalDevelopment,
         &[(derivation_path_1, amount), (derivation_path_2, amount)],
         target_address,
         blockhash,
@@ -190,7 +180,6 @@ async fn should_fail_when_signing_is_rejected() {
 
     let result = create_signed_transfer_transaction(
         &master_key,
-        Ed25519KeyName::LocalDevelopment,
         &[(derivation_path, 500_000_000)],
         target_address,
         blockhash,
@@ -210,9 +199,7 @@ async fn should_fail_when_second_signing_fails() {
     let blockhash = Hash::new_from_array([0xDD; 32]);
 
     let signer = MockSchnorrSigner::with_responses(vec![
-        Ok(SignWithSchnorrResult {
-            signature: vec![0x11; 64],
-        }),
+        Ok(vec![0x11; 64]),
         Err(SignCallError::CallFailed(
             CallRejected::with_rejection(5, "canister trapped".to_string()).into(),
         )),
@@ -220,7 +207,6 @@ async fn should_fail_when_second_signing_fails() {
 
     let result = create_signed_transfer_transaction(
         &master_key,
-        Ed25519KeyName::LocalDevelopment,
         &[
             (derivation_path_1, 100_000_000),
             (derivation_path_2, 100_000_000),
