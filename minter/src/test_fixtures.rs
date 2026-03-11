@@ -247,7 +247,7 @@ pub mod arb {
         prop_oneof![
             arb_init_args().prop_map(EventType::Init),
             arb_upgrade_args().prop_map(EventType::Upgrade),
-            arb_withdraw_sol_request().prop_map(EventType::AccepterWithdrawSolRequest),
+            arb_withdraw_sol_request().prop_map(EventType::AcceptedWithdrawSolRequest),
             (arb_deposit_id(), any::<u64>(), any::<u64>()).prop_map(
                 |(deposit_id, deposit_amount, amount_to_mint)| {
                     EventType::AcceptedDeposit {
@@ -293,7 +293,10 @@ pub mod deposit {
     };
 
     pub fn deposit_status_processing() -> DepositStatus {
-        DepositStatus::Processing(deposit_transaction_signature().into())
+        DepositStatus::Processing {
+            signature: deposit_transaction_signature().into(),
+            amount_to_mint: DEPOSIT_AMOUNT - DEPOSIT_FEE,
+        }
     }
 
     pub fn deposit_status_quarantined() -> DepositStatus {

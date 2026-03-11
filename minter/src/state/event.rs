@@ -1,6 +1,6 @@
 use crate::numeric::{LedgerBurnIndex, LedgerMintIndex};
 use cksol_types_internal::{InitArgs, UpgradeArgs};
-use ic_stable_structures::{Storable, storable::Bound};
+use ic_stable_structures::{storable::Bound, Storable};
 use icrc_ledger_types::icrc1::account::Account;
 use minicbor::{Decode, Encode};
 use sol_rpc_types::Lamport;
@@ -59,7 +59,7 @@ pub enum EventType {
     },
     /// The minter burned ckSOL for a withdrawal request.
     #[n(5)]
-    AccepterWithdrawSolRequest(#[n(0)] WithdrawSolRequest),
+    AcceptedWithdrawSolRequest(#[n(0)] WithdrawSolRequest),
     /// Submitted a Solana transaction
     #[n(6)]
     SubmittedTransaction {

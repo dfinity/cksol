@@ -96,7 +96,7 @@ pub async fn withdraw_sol<R: CanisterRuntime>(
     mutate_state(|s| {
         process_event(
             s,
-            EventType::AccepterWithdrawSolRequest(WithdrawSolRequest {
+            EventType::AcceptedWithdrawSolRequest(WithdrawSolRequest {
                 account: from,
                 solana_address: solana_address.to_bytes(),
                 burn_block_index: block_index.into(),

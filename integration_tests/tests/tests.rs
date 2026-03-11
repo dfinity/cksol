@@ -4,7 +4,7 @@ use candid::Principal;
 use cksol_int_tests::{
     Setup, SetupBuilder,
     fixtures::{
-        DEFAULT_CALLER_ACCOUNT, DEFAULT_CALLER_DEPOSIT_ADDRESS, DEPOSIT_AMOUNT,
+        DEFAULT_CALLER_ACCOUNT, DEFAULT_CALLER_DEPOSIT_ADDRESS, EXPECTED_MINT_AMOUNT,
         SharedMockHttpOutcalls, default_update_balance_args, deposit_transaction_signature,
         get_deposit_transaction_request, get_deposit_transaction_response,
     },
@@ -625,7 +625,7 @@ mod update_balance_tests {
     }
 
     #[tokio::test]
-    async fn should_return_processing_if_minting_fails() {
+    async fn should_return_processing_if_minting_fails_and_mint_on_retry() {
         let setup = SetupBuilder::new().build().await;
 
         setup.ledger().stop().await;
@@ -633,31 +633,52 @@ mod update_balance_tests {
         let deposit_signature = deposit_transaction_signature();
 
         // First call to `update_balance` fails due to minting error
-        let result = setup
+        let first_result = setup
             .minter()
             .with_http_mocks(get_transaction_http_mocks(get_deposit_transaction_response))
             .update_balance(default_update_balance_args())
             .await;
         assert_eq!(
-            result,
-            Ok(DepositStatus::Processing(deposit_signature.clone()))
+            first_result,
+            Ok(DepositStatus::Processing {
+                signature: deposit_signature.clone(),
+                amount_to_mint: EXPECTED_MINT_AMOUNT
+            })
         );
 
-        // Second call to `update_balance` should return the same status without making any
-        // new JSON-RPC calls or trying to mint again
+        // Second call to `update_balance` while the ledger is stopped should still return
+        // the same status
+        let second_result = setup
+            .minter()
+            .update_balance(default_update_balance_args())
+            .await;
+        assert_eq!(second_result, first_result);
+
+        setup.ledger().start().await;
+
+        // Third call to update balance after re-starting the ledger should result in a
+        // successful mint (without making any additional JSON-RPC calls)
+        let balance_before = setup.ledger().balance_of(DEFAULT_CALLER_ACCOUNT).await;
+        assert_eq!(balance_before, 0);
+
         let result = setup
             .minter()
             .update_balance(default_update_balance_args())
             .await;
-        assert_eq!(result, Ok(DepositStatus::Processing(deposit_signature)));
+        assert_matches!(&result, Ok(DepositStatus::Minted {
+            minted_amount,
+            signature,
+            block_index: _,
+        }) if minted_amount == &EXPECTED_MINT_AMOUNT && signature == &deposit_signature);
+
+        let balance_after = setup.ledger().balance_of(DEFAULT_CALLER_ACCOUNT).await;
+        assert_eq!(balance_after, EXPECTED_MINT_AMOUNT);
 
         setup.drop().await;
     }
 
     #[tokio::test]
     async fn should_update_balance_only_once_with_same_deposit() {
-        const EXPECTED_MINT_AMOUNT: Lamport = DEPOSIT_AMOUNT - Setup::DEFAULT_DEPOSIT_FEE;
-
         let setup = SetupBuilder::new().build().await;
 
         let balance_before = setup.ledger().balance_of(DEFAULT_CALLER_ACCOUNT).await;

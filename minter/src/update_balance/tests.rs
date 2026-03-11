@@ -141,7 +141,7 @@ async fn should_return_processing_if_mint_fails() {
 }
 
 #[tokio::test]
-async fn should_return_processing_again_on_second_call() {
+async fn should_successfully_mint_on_second_call() {
     init_state();
     init_schnorr_master_key();
 
@@ -158,20 +158,22 @@ async fn should_return_processing_again_on_second_call() {
     let result = update_balance(runtime, DEPOSITOR_ACCOUNT, deposit_transaction_signature()).await;
     assert_eq!(result, Ok(deposit_status_processing()));
 
-    // Second call: fetches status from minter state, no JSON-RPC or minter calls
-    let runtime = TestCanisterRuntime::new();
+    // Second call: fetches status from minter state, and mints successfully without making any
+    // additional JSON-RPC calls
+    let runtime = TestCanisterRuntime::new()
+        .with_increasing_time()
+        .add_stub_response(Ok::<BlockIndex, TransferError>(BLOCK_INDEX.into()));
     let result = update_balance(runtime, DEPOSITOR_ACCOUNT, deposit_transaction_signature()).await;
-    assert_eq!(result, Ok(deposit_status_processing()));
+    assert_eq!(result, Ok(deposit_status_minted()));
 
     EventsAssert::from_recorded()
         .expect_event_eq(accepted_deposit_event())
+        .expect_event_eq(minted_event(BLOCK_INDEX))
         .assert_no_more_events();
 }
 
 #[tokio::test]
 async fn should_succeed_with_valid_deposit_transaction() {
-    const BLOCK_INDEX: u64 = 98763_u64;
-
     init_state();
     init_schnorr_master_key();
 
@@ -235,7 +237,7 @@ async fn should_quarantine_deposit() {
             .add_msg_cycles_available(UPDATE_BALANCE_REQUIRED_CYCLES)
             .add_stub_response(get_transaction_response)
     };
-    let result = tokio::spawn(async move {
+    let first_result = tokio::spawn(async move {
         update_balance(
             runtime(),
             DEPOSITOR_ACCOUNT,
@@ -244,12 +246,19 @@ async fn should_quarantine_deposit() {
         .await
     })
     .await;
-    assert!(result.is_err_and(|e| e.is_panic()));
+    assert!(first_result.is_err_and(|e| e.is_panic()));
 
     // On the second call, the deposit should have been quarantined
     let runtime = TestCanisterRuntime::new();
-    let result = update_balance(runtime, DEPOSITOR_ACCOUNT, deposit_transaction_signature()).await;
-    assert_eq!(result, Ok(deposit_status_quarantined()));
+    let second_result =
+        update_balance(runtime, DEPOSITOR_ACCOUNT, deposit_transaction_signature()).await;
+    assert_eq!(second_result, Ok(deposit_status_quarantined()));
+
+    // Calling `update_balance` again for the same deposit should return the same status
+    let runtime = TestCanisterRuntime::new();
+    let third_result =
+        update_balance(runtime, DEPOSITOR_ACCOUNT, deposit_transaction_signature()).await;
+    assert_eq!(third_result, second_result);
 
     // Only one mint event recorded
     EventsAssert::from_recorded()
