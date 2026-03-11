@@ -14,6 +14,7 @@ path = "src/main.rs"
 
 [dependencies]
 assert_matches = { workspace = true }
+bincode = { workspace = true }
 candid = { workspace = true }
 canlog = { workspace = true, features = ["derive"] }
 cksol-types = { path = "../libs/types" }
@@ -35,7 +36,6 @@ scopeguard = { workspace = true }
 serde = { workspace = true }
 sol_rpc_client = { workspace = true }
 sol_rpc_types = { workspace = true }
-bincode = { workspace = true }
 solana-address = { workspace = true }
 solana-message = { workspace = true }
 solana-signature = { workspace = true }
