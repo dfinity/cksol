@@ -140,6 +140,9 @@ fn get_events(
                 transaction: bincode::serialize(&transaction)
                     .expect("serializing transaction should succeed"),
             },
+            EventType::ConsolidatedDeposits { deposits } => {
+                event::EventType::ConsolidatedDeposits { deposits }
+            }
         }
     }
 

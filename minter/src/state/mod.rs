@@ -343,6 +343,26 @@ impl State {
             "Attempted to submit transaction with signature {signature:?} twice"
         );
     }
+
+    fn process_consolidated_deposits(&mut self, deposits: &[(Account, Lamport)]) {
+        for (account, amount) in deposits {
+            let remaining = self
+                .funds_to_consolidate
+                .get_mut(account)
+                .unwrap_or_else(|| {
+                    panic!("Attempted to consolidate funds for unknown account: {account:?}")
+                });
+            assert!(
+                *remaining >= *amount,
+                "Attempted to consolidate more funds than available for account {account:?}: \
+                 available {remaining}, requested {amount}"
+            );
+            *remaining -= *amount;
+            if *remaining == 0 {
+                self.funds_to_consolidate.remove(account);
+            }
+        }
+    }
 }
 
 #[derive(Debug)]

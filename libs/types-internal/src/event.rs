@@ -80,6 +80,13 @@ pub enum EventType {
         /// The serialized transaction message.
         transaction: Vec<u8>,
     },
+    /// Deposited funds from user deposit accounts have been consolidated
+    /// into the minter's main account.
+    ConsolidatedDeposits {
+        /// The deposit accounts from which funds were consolidated
+        /// and the amount consolidated from each account.
+        deposits: Vec<(Account, Lamport)>,
+    },
 }
 
 /// Arguments for the `get_events` endpoint.

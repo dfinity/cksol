@@ -78,6 +78,7 @@ pub mod arb {
     use cksol_types_internal::{Ed25519KeyName, InitArgs, UpgradeArgs};
     use icrc_ledger_types::icrc1::account::Account;
     use proptest::prelude::{Just, Strategy, any, prop, prop_oneof};
+    use sol_rpc_types::Lamport;
     use solana_address::Address;
     use solana_message::{Hash, Instruction, Message};
     use solana_signature::Signature;
@@ -269,6 +270,8 @@ pub mod arb {
                     transaction,
                 }
             }),
+            prop::collection::vec((arb_account(), any::<Lamport>()), 1..10)
+                .prop_map(|deposits| EventType::ConsolidatedDeposits { deposits }),
         ]
     }
 

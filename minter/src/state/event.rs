@@ -70,6 +70,15 @@ pub enum EventType {
         #[cbor(n(1), with = "cbor::message")]
         transaction: Message,
     },
+    /// Deposited funds from user deposit accounts have been consolidated
+    /// into the minter's main account.
+    #[n(7)]
+    ConsolidatedDeposits {
+        /// The deposit accounts from which funds were consolidated
+        /// and the amount consolidated from each account.
+        #[n(0)]
+        deposits: Vec<(Account, Lamport)>,
+    },
 }
 
 /// Payload of the `AcceptedWithdrawSolRequest` event.

@@ -271,6 +271,13 @@ type EventType = variant {
         // The serialized transaction message.
         transaction: blob;
     };
+    // Deposited funds from user deposit accounts have been consolidated
+    // into the minter's main account.
+    ConsolidatedDeposits : record {
+        // The deposit accounts from which funds were consolidated
+        // and the amount consolidated from each account.
+        deposits: vec record { Account; Lamport };
+    };
 };
 
 // Represents a Solana transaction depositing funds to a ckSOL account.
