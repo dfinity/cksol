@@ -1,6 +1,6 @@
 use crate::numeric::{LedgerBurnIndex, LedgerMintIndex};
 use cksol_types_internal::{InitArgs, UpgradeArgs};
-use ic_stable_structures::{storable::Bound, Storable};
+use ic_stable_structures::{Storable, storable::Bound};
 use icrc_ledger_types::icrc1::account::Account;
 use minicbor::{Decode, Encode};
 use sol_rpc_types::Lamport;
