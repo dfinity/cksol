@@ -75,8 +75,9 @@ pub async fn create_signed_transfer_transaction(
     let mut transaction = Transaction::new_unsigned(message);
     let message_bytes = transaction.message_data();
 
-    for (i, derivation_path) in derivation_paths.iter().enumerate() {
-        let args = SignWithSchnorrArgs {
+    let sign_args: Vec<_> = derivation_paths
+        .iter()
+        .map(|derivation_path| SignWithSchnorrArgs {
             message: message_bytes.clone(),
             derivation_path: derivation_path.clone(),
             key_id: SchnorrKeyId {
@@ -84,9 +85,14 @@ pub async fn create_signed_transfer_transaction(
                 name: key_name.to_string(),
             },
             aux: None,
-        };
+        })
+        .collect();
 
-        let response = signer.sign(&args).await?;
+    let results =
+        futures::future::join_all(sign_args.iter().map(|args| signer.sign(args))).await;
+
+    for (i, result) in results.into_iter().enumerate() {
+        let response = result?;
 
         let sig_bytes: [u8; 64] = response
             .signature

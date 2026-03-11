@@ -19,6 +19,7 @@ canlog = { workspace = true, features = ["derive"] }
 cksol-types = { path = "../libs/types" }
 cksol-types-internal = { path = "../libs/types-internal", features = ["event", "log"] }
 derive_more = { workspace = true }
+futures = { workspace = true }
 hex = { workspace = true }
 ic-canister-runtime = { workspace = true }
 ic-cdk = { workspace = true }

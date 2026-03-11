@@ -21,6 +21,7 @@ candid = "0.10.20"
 candid_parser = "0.3.0"
 canlog = "0.2.0"
 derive_more = { version = "2.1.1", features = ["from"] }
+futures = "0.3.31"
 hex = "0.4.3"
 ic-canister-runtime = "0.2.0"
 ic-cdk = "0.19.0"

@@ -768,6 +768,7 @@ dependencies = [
  "cksol-types",
  "cksol-types-internal",
  "derive_more",
+ "futures",
  "hex",
  "ic-canister-runtime",
  "ic-cdk",
