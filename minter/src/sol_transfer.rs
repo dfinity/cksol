@@ -88,10 +88,16 @@ pub async fn create_signed_transfer_transaction(
 
         let response = signer.sign(&args).await?;
 
-        let sig_bytes: [u8; 64] = response.signature.as_slice().try_into().expect(&format!(
-            "BUG: expected 64-byte signature, got {} bytes",
-            response.signature.len(),
-        ));
+        let sig_bytes: [u8; 64] = response
+            .signature
+            .as_slice()
+            .try_into()
+            .unwrap_or_else(|_| {
+                panic!(
+                    "BUG: expected 64-byte signature, got {} bytes",
+                    response.signature.len()
+                )
+            });
 
         let position = transaction
             .message
