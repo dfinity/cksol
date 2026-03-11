@@ -73,24 +73,12 @@ pub enum EventType {
         /// The fee retained by the minter (in lamports).
         withdrawal_fee: Lamport,
     },
-    /// Submitted a Solana transaction to consolidate deposited funds
-    FundsConsolidationRequestSubmitted {
-        /// Vector of the deposit accounts from which funds are being consolidated
-        /// and the amount being consolidated for each account.
-        funds: Vec<(Account, Lamport)>,
-        /// Signature of the Solana transaction consolidating funds
-        /// that was submitted
+    /// Submitted a Solana transaction
+    SubmittedTransaction {
+        /// The signature of the Solana transaction.
         signature: Signature,
-    },
-    /// A Solana request submitted by the minter has failed.
-    FailedTransaction {
-        /// The signature of the failed Solana transaction.
-        signature: Signature,
-    },
-    /// A Solana request submitted by the minter has been finalized.
-    FinalizedTransaction {
-        /// The signature of the finalized Solana transaction.
-        signature: Signature,
+        /// The serialized transaction message.
+        transaction: Vec<u8>,
     },
 }
 

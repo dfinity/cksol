@@ -27,7 +27,6 @@ ic-ed25519 = { workspace = true }
 ic-http-types = { workspace = true }
 ic-stable-structures = { workspace = true }
 icrc-cbor = { workspace = true }
-icrc-ledger-client-cdk = { workspace = true }
 icrc-ledger-types = { workspace = true }
 minicbor = { workspace = true, features = ["derive"] }
 num-traits = { workspace = true }
@@ -36,7 +35,9 @@ scopeguard = { workspace = true }
 serde = { workspace = true }
 sol_rpc_client = { workspace = true }
 sol_rpc_types = { workspace = true }
+bincode = { workspace = true }
 solana-address = { workspace = true }
+solana-message = { workspace = true }
 solana-signature = { workspace = true }
 solana-transaction-status-client-types = { workspace = true }
 thiserror = { workspace = true }

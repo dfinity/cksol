@@ -11,8 +11,8 @@ use ic_ed25519::PublicKey;
 use icrc_ledger_types::icrc1::account::Account;
 use sol_rpc_client::SolRpcClient;
 use sol_rpc_types::{ConsensusStrategy, Lamport, RpcSources, SolanaCluster};
+use solana_message::Message;
 use solana_signature::Signature;
-use std::cmp::Ordering;
 use std::{
     cell::RefCell,
     collections::{BTreeMap, BTreeSet},
@@ -83,10 +83,8 @@ pub struct State {
     quarantined_deposits: BTreeMap<DepositId, Lamport>,
     minted_deposits: BTreeMap<DepositId, MintedDeposit>,
     pending_withdrawal_requests: BTreeMap<LedgerBurnIndex, WithdrawSolRequest>,
-    // TODO DEFI-2687: Sort by amount
     funds_to_consolidate: BTreeMap<Account, Lamport>,
-    submitted_consolidation_requests: BTreeMap<Signature, Vec<(Account, Lamport)>>,
-    available_balance: Lamport,
+    submitted_transactions: BTreeMap<Signature, Message>,
 }
 
 impl State {
@@ -337,55 +335,13 @@ impl State {
         );
     }
 
-    fn process_consolidation_request_submitted(
-        &mut self,
-        signature: &Signature,
-        funds: &Vec<(Account, Lamport)>,
-    ) {
-        for (account, amount) in funds {
-            let balance = self
-                .funds_to_consolidate
-                .get_mut(account)
-                .unwrap_or_else(|| {
-                    panic!("Attempted to consolidate funds for empty account: {account}")
-                });
-            match amount.cmp(balance) {
-                Ordering::Greater => panic!(
-                    "Attempted to consolidate {amount} lamports from account {account}, but deposit address only contains {balance} lamports"
-                ),
-                Ordering::Equal => {
-                    self.funds_to_consolidate.remove(account);
-                }
-                Ordering::Less => *balance -= amount,
-            }
-        }
+    fn process_transaction_submitted(&mut self, signature: &Signature, message: &Message) {
         assert!(
-            self.submitted_consolidation_requests
-                .insert(*signature, funds.clone())
+            self.submitted_transactions
+                .insert(*signature, message.clone())
                 .is_none(),
-            "Attempted to add consolidation transaction {signature:?} to submitted transactions twice"
+            "Attempted to submit transaction with signature {signature:?} twice"
         );
-    }
-
-    fn process_failed_transaction(&mut self, signature: &Signature) {
-        if let Some(consolidated_funds) = self.submitted_consolidation_requests.remove(signature) {
-            for (account, amount) in consolidated_funds {
-                *self.funds_to_consolidate.entry(account).or_default() += amount;
-            }
-            return;
-        }
-        panic!("Processed unknown failed transaction {signature:?}");
-    }
-
-    fn process_finalized_transaction(&mut self, signature: &Signature) {
-        if let Some(consolidated_funds) = self.submitted_consolidation_requests.remove(signature) {
-            self.available_balance += consolidated_funds
-                .into_iter()
-                .map(|(_account, amount)| amount)
-                .sum::<Lamport>();
-            return;
-        }
-        panic!("Processed unknown finalized transaction {signature:?}");
     }
 }
 
@@ -434,8 +390,7 @@ impl TryFrom<InitArgs> for State {
             minted_deposits: BTreeMap::new(),
             pending_withdrawal_requests: BTreeMap::new(),
             funds_to_consolidate: BTreeMap::new(),
-            submitted_consolidation_requests: BTreeMap::new(),
-            available_balance: 0,
+            submitted_transactions: BTreeMap::new(),
         };
         state.validate()?;
         Ok(state)

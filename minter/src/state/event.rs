@@ -1,10 +1,10 @@
 use crate::numeric::{LedgerBurnIndex, LedgerMintIndex};
 use cksol_types_internal::{InitArgs, UpgradeArgs};
-use ic_stable_structures::Storable;
-use ic_stable_structures::storable::Bound;
+use ic_stable_structures::{Storable, storable::Bound};
 use icrc_ledger_types::icrc1::account::Account;
 use minicbor::{Decode, Encode};
 use sol_rpc_types::Lamport;
+use solana_message::Message;
 use solana_signature::Signature;
 use std::borrow::Cow;
 
@@ -60,24 +60,16 @@ pub enum EventType {
     /// The minter burned ckSOL for a withdrawal request.
     #[n(5)]
     AccepterWithdrawSolRequest(#[n(0)] WithdrawSolRequest),
-    /// Submitted a Solana transaction to consolidate deposited funds
+    /// Submitted a Solana transaction
     #[n(6)]
-    FundsConsolidationRequestSubmitted {
-        /// Vector of the deposit accounts from which funds are being consolidated
-        /// and the amount being consolidated for each account.
-        #[n(0)]
-        funds: Vec<(Account, Lamport)>,
-        /// Signature of the Solana transaction consolidating funds
-        /// that was submitted
-        #[cbor(n(1), with = "cbor::signature")]
+    SubmittedTransaction {
+        /// The transaction signature
+        #[cbor(n(0), with = "cbor::signature")]
         signature: Signature,
+        /// The transaction message
+        #[cbor(n(1), with = "cbor::message")]
+        transaction: Message,
     },
-    /// A Solana request submitted by the minter has failed.
-    #[n(7)]
-    FailedTransaction(#[cbor(n(0), with = "cbor::signature")] Signature),
-    /// A Solana request submitted by the minter has been finalized.
-    #[n(8)]
-    FinalizedTransaction(#[cbor(n(0), with = "cbor::signature")] Signature),
 }
 
 /// Payload of the `AcceptedWithdrawSolRequest` event.

@@ -264,24 +264,12 @@ type EventType = variant {
         // The transaction index on the ckSOL ledger.
         mint_block_index: nat64;
     };
-    // Submitted a Solana transaction to consolidate deposited funds
-    FundsConsolidationRequestSubmitted : record {
-        // Vector of the deposit accounts from which funds are being consolidated
-        // and the amount being consolidated for each account.
-        funds: vec record { Account; Lamport };
-        // Signature of the Solana transaction consolidating funds
-        // that was submitted
+    // Submitted a Solana transaction
+    SubmittedTransaction : record {
+        // The signature of the Solana transaction.
         signature: Signature;
-    };
-    // A Solana request submitted by the minter has failed.
-    FailedTransaction : record {
-        // The signature of the failed Solana transaction.
-        signature: Signature;
-    };
-    // A Solana request submitted by the minter has been finalized.
-    FinalizedTransaction : record {
-        // The signature of the finalized Solana transaction.
-        signature: Signature;
+        // The serialized transaction message.
+        transaction: blob;
     };
 };
 

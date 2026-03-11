@@ -1,11 +1,9 @@
-use minicbor::{
-    Decode, Encode,
-    decode::{Decoder, Error},
-    encode::{Encoder, Write},
-};
-
 pub mod id {
-    use super::*;
+    use minicbor::{
+        Decode, Encode,
+        decode::{Decoder, Error},
+        encode::{Encoder, Write},
+    };
     use phantom_newtype::Id;
 
     pub fn decode<'b, Ctx, Repr, Tag>(
@@ -31,7 +29,10 @@ pub mod id {
 }
 
 pub mod signature {
-    use super::*;
+    use minicbor::{
+        decode::{Decoder, Error},
+        encode::{Encoder, Write},
+    };
     use solana_signature::Signature;
 
     pub fn decode<Ctx>(d: &mut Decoder<'_>, _ctx: &mut Ctx) -> Result<Signature, Error> {
@@ -45,6 +46,30 @@ pub mod signature {
         _ctx: &mut Ctx,
     ) -> Result<(), minicbor::encode::Error<W::Error>> {
         e.bytes(v.as_ref())?;
+        Ok(())
+    }
+}
+
+pub mod message {
+    use minicbor::{
+        decode::{Decoder, Error},
+        encode::{Encoder, Write},
+    };
+    use solana_message::Message;
+
+    pub fn decode<Ctx>(d: &mut Decoder<'_>, _ctx: &mut Ctx) -> Result<Message, Error> {
+        let bytes = d.bytes()?;
+        bincode::deserialize(bytes).map_err(|e| Error::message(e.to_string()))
+    }
+
+    pub fn encode<Ctx, W: Write>(
+        v: &Message,
+        e: &mut Encoder<W>,
+        _ctx: &mut Ctx,
+    ) -> Result<(), minicbor::encode::Error<W::Error>> {
+        let bytes = bincode::serialize(v)
+            .map_err(|err| minicbor::encode::Error::message(err.to_string()))?;
+        e.bytes(&bytes)?;
         Ok(())
     }
 }

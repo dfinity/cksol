@@ -41,12 +41,11 @@ fn apply_state_transition(state: &mut State, payload: &EventType) {
         } => {
             state.process_mint(deposit_id, mint_block_index);
         }
-        EventType::FundsConsolidationRequestSubmitted { signature, funds } => {
-            state.process_consolidation_request_submitted(signature, funds)
-        }
-        EventType::FailedTransaction(signature) => state.process_failed_transaction(signature),
-        EventType::FinalizedTransaction(signature) => {
-            state.process_finalized_transaction(signature)
+        EventType::SubmittedTransaction {
+            signature,
+            transaction,
+        } => {
+            state.process_transaction_submitted(signature, transaction);
         }
     }
 }

@@ -132,17 +132,13 @@ fn get_events(
                 signature: deposit_id.signature.into(),
                 account: deposit_id.account,
             },
-            EventType::FundsConsolidationRequestSubmitted { funds, signature } => {
-                event::EventType::FundsConsolidationRequestSubmitted {
-                    funds,
-                    signature: signature.into(),
-                }
-            }
-            EventType::FailedTransaction(signature) => event::EventType::FailedTransaction {
+            EventType::SubmittedTransaction {
+                signature,
+                transaction,
+            } => event::EventType::SubmittedTransaction {
                 signature: signature.into(),
-            },
-            EventType::FinalizedTransaction(signature) => event::EventType::FinalizedTransaction {
-                signature: signature.into(),
+                transaction: bincode::serialize(&transaction)
+                    .expect("serializing transaction should succeed"),
             },
         }
     }
