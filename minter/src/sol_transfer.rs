@@ -88,8 +88,7 @@ pub async fn create_signed_transfer_transaction(
         })
         .collect();
 
-    let results =
-        futures::future::join_all(sign_args.iter().map(|args| signer.sign(args))).await;
+    let results = futures::future::join_all(sign_args.iter().map(|args| signer.sign(args))).await;
 
     for (i, result) in results.into_iter().enumerate() {
         let response = result?;
