@@ -4,9 +4,10 @@ use ic_cdk::management_canister::{SignCallError, SignWithSchnorrArgs, SignWithSc
 use ic_ed25519::{PocketIcMasterPublicKeyId, PublicKey};
 use solana_address::Address;
 use std::cell::RefCell;
+use std::collections::VecDeque;
 
 struct MockSchnorrSigner {
-    responses: RefCell<Vec<Result<SignWithSchnorrResult, SignCallError>>>,
+    responses: RefCell<VecDeque<Result<SignWithSchnorrResult, SignCallError>>>,
 }
 
 impl MockSchnorrSigner {
@@ -27,7 +28,7 @@ impl MockSchnorrSigner {
 
     fn with_responses(responses: Vec<Result<SignWithSchnorrResult, SignCallError>>) -> Self {
         Self {
-            responses: RefCell::new(responses),
+            responses: RefCell::new(responses.into()),
         }
     }
 }
@@ -39,7 +40,7 @@ impl SchnorrSigner for MockSchnorrSigner {
     ) -> Result<SignWithSchnorrResult, SignCallError> {
         self.responses
             .borrow_mut()
-            .pop()
+            .pop_front()
             .expect("MockSchnorrSigner: no more stub responses")
     }
 }
@@ -140,8 +141,7 @@ async fn should_create_signed_transaction_multiple_sources() {
     let source_2 =
         Address::from(derive_public_key(&master_key, derivation_path_2.clone()).serialize_raw());
 
-    // MockSchnorrSigner pops from the back, so push in reverse order.
-    let signer = MockSchnorrSigner::with_signatures(vec![fake_sig_2, fake_sig_1]);
+    let signer = MockSchnorrSigner::with_signatures(vec![fake_sig_1, fake_sig_2]);
     let tx = create_signed_transfer_transaction(
         &master_key,
         "test_key",
@@ -212,14 +212,13 @@ async fn should_fail_when_second_signing_fails() {
     let target_address = Address::from([0xCC; 32]);
     let blockhash = Hash::new_from_array([0xDD; 32]);
 
-    // MockSchnorrSigner pops from the back: second call fails, first succeeds.
     let signer = MockSchnorrSigner::with_responses(vec![
-        Err(SignCallError::CallFailed(
-            CallRejected::with_rejection(5, "canister trapped".to_string()).into(),
-        )),
         Ok(SignWithSchnorrResult {
             signature: vec![0x11; 64],
         }),
+        Err(SignCallError::CallFailed(
+            CallRejected::with_rejection(5, "canister trapped".to_string()).into(),
+        )),
     ]);
 
     let result = create_signed_transfer_transaction(
