@@ -99,7 +99,7 @@ async fn should_create_signed_transaction_single_source() {
     let signer = MockSchnorrSigner::with_signatures(vec![fake_signature]);
     let tx = create_signed_transfer_transaction(
         &master_key,
-        "test_key",
+        Ed25519KeyName::LocalDevelopment,
         &[(derivation_path, amount)],
         target_address,
         blockhash,
@@ -143,7 +143,7 @@ async fn should_create_signed_transaction_multiple_sources() {
     let signer = MockSchnorrSigner::with_signatures(vec![fake_sig_1, fake_sig_2]);
     let tx = create_signed_transfer_transaction(
         &master_key,
-        "test_key",
+        Ed25519KeyName::LocalDevelopment,
         &[(derivation_path_1, amount), (derivation_path_2, amount)],
         target_address,
         blockhash,
@@ -190,7 +190,7 @@ async fn should_fail_when_signing_is_rejected() {
 
     let result = create_signed_transfer_transaction(
         &master_key,
-        "test_key",
+        Ed25519KeyName::LocalDevelopment,
         &[(derivation_path, 500_000_000)],
         target_address,
         blockhash,
@@ -220,8 +220,11 @@ async fn should_fail_when_second_signing_fails() {
 
     let result = create_signed_transfer_transaction(
         &master_key,
-        "test_key",
-        &[(derivation_path_1, 100_000_000), (derivation_path_2, 100_000_000)],
+        Ed25519KeyName::LocalDevelopment,
+        &[
+            (derivation_path_1, 100_000_000),
+            (derivation_path_2, 100_000_000),
+        ],
         target_address,
         blockhash,
         &signer,

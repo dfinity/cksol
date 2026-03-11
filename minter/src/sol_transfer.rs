@@ -1,4 +1,5 @@
 use crate::{address::derive_public_key, state::SchnorrPublicKey};
+use cksol_types_internal::Ed25519KeyName;
 use ic_cdk::management_canister::{
     SchnorrAlgorithm, SchnorrKeyId, SignCallError, SignWithSchnorrArgs, SignWithSchnorrResult,
     sign_with_schnorr,
@@ -46,16 +47,13 @@ impl SchnorrSigner for IcSchnorrSigner {
 /// that is not exactly 64 bytes.
 pub async fn create_signed_transfer_transaction(
     master_public_key: &SchnorrPublicKey,
-    key_name: &str,
+    key_name: Ed25519KeyName,
     sources: &[(Vec<Vec<u8>>, Lamport)],
     target_address: Address,
     recent_blockhash: Hash,
     signer: &impl SchnorrSigner,
 ) -> Result<Transaction, SignCallError> {
-    assert!(
-        !sources.is_empty(),
-        "BUG: sources must not be empty"
-    );
+    assert!(!sources.is_empty(), "BUG: sources must not be empty");
 
     let source_addresses: Vec<Address> = sources
         .iter()
