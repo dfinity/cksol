@@ -34,33 +34,32 @@ impl SchnorrSigner for IcSchnorrSigner {
     }
 }
 
-/// Creates a signed Solana transaction that transfers `amount` lamports
+/// Creates a signed Solana transaction that transfers lamports
 /// from each minter-controlled address (identified by its derivation path)
 /// to the `target_address`.
 ///
-/// The first derivation path's address is used as the fee payer.
+/// The first source address is used as the fee payer.
 ///
 /// # Panics
 ///
-/// Panics if `derivation_paths` is empty or if the IC returns a signature
+/// Panics if `sources` is empty or if the IC returns a signature
 /// that is not exactly 64 bytes.
 pub async fn create_signed_transfer_transaction(
     master_public_key: &SchnorrPublicKey,
     key_name: &str,
-    derivation_paths: &[Vec<Vec<u8>>],
+    sources: &[(Vec<Vec<u8>>, Lamport)],
     target_address: Address,
-    amount: Lamport,
     recent_blockhash: Hash,
     signer: &impl SchnorrSigner,
 ) -> Result<Transaction, SignCallError> {
     assert!(
-        !derivation_paths.is_empty(),
-        "BUG: derivation_paths must not be empty"
+        !sources.is_empty(),
+        "BUG: sources must not be empty"
     );
 
-    let source_addresses: Vec<Address> = derivation_paths
+    let source_addresses: Vec<Address> = sources
         .iter()
-        .map(|path| derive_public_key(master_public_key, path.to_vec()))
+        .map(|(path, _)| derive_public_key(master_public_key, path.to_vec()))
         .map(|public_key| Address::from(public_key.serialize_raw()))
         .collect();
 
@@ -68,16 +67,17 @@ pub async fn create_signed_transfer_transaction(
 
     let instructions: Vec<Instruction> = source_addresses
         .iter()
-        .map(|source| system_transfer_instruction(source, &target_address, amount))
+        .zip(sources)
+        .map(|(source, (_, amount))| system_transfer_instruction(source, &target_address, *amount))
         .collect();
 
     let message = Message::new_with_blockhash(&instructions, Some(&fee_payer), &recent_blockhash);
     let mut transaction = Transaction::new_unsigned(message);
     let message_bytes = transaction.message_data();
 
-    let sign_args: Vec<_> = derivation_paths
+    let sign_args: Vec<_> = sources
         .iter()
-        .map(|derivation_path| SignWithSchnorrArgs {
+        .map(|(derivation_path, _)| SignWithSchnorrArgs {
             message: message_bytes.clone(),
             derivation_path: derivation_path.clone(),
             key_id: SchnorrKeyId {

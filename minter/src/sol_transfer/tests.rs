@@ -100,9 +100,8 @@ async fn should_create_signed_transaction_single_source() {
     let tx = create_signed_transfer_transaction(
         &master_key,
         "test_key",
-        &[derivation_path],
+        &[(derivation_path, amount)],
         target_address,
-        amount,
         blockhash,
         &signer,
     )
@@ -145,9 +144,8 @@ async fn should_create_signed_transaction_multiple_sources() {
     let tx = create_signed_transfer_transaction(
         &master_key,
         "test_key",
-        &[derivation_path_1, derivation_path_2],
+        &[(derivation_path_1, amount), (derivation_path_2, amount)],
         target_address,
-        amount,
         blockhash,
         &signer,
     )
@@ -193,9 +191,8 @@ async fn should_fail_when_signing_is_rejected() {
     let result = create_signed_transfer_transaction(
         &master_key,
         "test_key",
-        &[derivation_path],
+        &[(derivation_path, 500_000_000)],
         target_address,
-        500_000_000,
         blockhash,
         &signer,
     )
@@ -224,9 +221,8 @@ async fn should_fail_when_second_signing_fails() {
     let result = create_signed_transfer_transaction(
         &master_key,
         "test_key",
-        &[derivation_path_1, derivation_path_2],
+        &[(derivation_path_1, 100_000_000), (derivation_path_2, 100_000_000)],
         target_address,
-        100_000_000,
         blockhash,
         &signer,
     )
