@@ -34,14 +34,6 @@ impl SchnorrSigner for IcSchnorrSigner {
     }
 }
 
-#[derive(Debug)]
-pub enum CreateTransactionError {
-    /// The IC management canister rejected the signing request.
-    SigningFailed(SignCallError),
-    /// The signature returned by the IC was not 64 bytes.
-    UnexpectedSignatureLength { actual: usize },
-}
-
 /// Creates a signed Solana transaction that transfers `amount` lamports
 /// from each minter-controlled address (identified by its derivation path)
 /// to the `target_address`.
@@ -50,7 +42,8 @@ pub enum CreateTransactionError {
 ///
 /// # Panics
 ///
-/// Panics if `derivation_paths` is empty.
+/// Panics if `derivation_paths` is empty or if the IC returns a signature
+/// that is not exactly 64 bytes.
 pub async fn create_signed_transfer_transaction(
     master_public_key: &SchnorrPublicKey,
     key_name: &str,
@@ -59,7 +52,7 @@ pub async fn create_signed_transfer_transaction(
     amount: Lamport,
     recent_blockhash: Hash,
     signer: &impl SchnorrSigner,
-) -> Result<Transaction, CreateTransactionError> {
+) -> Result<Transaction, SignCallError> {
     assert!(
         !derivation_paths.is_empty(),
         "BUG: derivation_paths must not be empty"
@@ -93,16 +86,12 @@ pub async fn create_signed_transfer_transaction(
             aux: None,
         };
 
-        let response = signer
-            .sign(&args)
-            .await
-            .map_err(CreateTransactionError::SigningFailed)?;
+        let response = signer.sign(&args).await?;
 
-        let sig_bytes: [u8; 64] = response.signature.as_slice().try_into().map_err(|_| {
-            CreateTransactionError::UnexpectedSignatureLength {
-                actual: response.signature.len(),
-            }
-        })?;
+        let sig_bytes: [u8; 64] = response.signature.as_slice().try_into().expect(&format!(
+            "BUG: expected 64-byte signature, got {} bytes",
+            response.signature.len(),
+        ));
 
         let position = transaction
             .message
