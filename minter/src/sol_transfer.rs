@@ -83,16 +83,18 @@ pub async fn create_signed_transfer_transaction(
     let message_bytes = transaction.message_data();
 
     for (i, derivation_path) in derivation_paths.iter().enumerate() {
+        let args = SignWithSchnorrArgs {
+            message: message_bytes.clone(),
+            derivation_path: derivation_path.clone(),
+            key_id: SchnorrKeyId {
+                algorithm: SchnorrAlgorithm::Ed25519,
+                name: key_name.to_string(),
+            },
+            aux: None,
+        };
+
         let response = signer
-            .sign(&SignWithSchnorrArgs {
-                message: message_bytes.clone(),
-                derivation_path: derivation_path.clone(),
-                key_id: SchnorrKeyId {
-                    algorithm: SchnorrAlgorithm::Ed25519,
-                    name: key_name.to_string(),
-                },
-                aux: None,
-            })
+            .sign(&args)
             .await
             .map_err(CreateTransactionError::SigningFailed)?;
 
