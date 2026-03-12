@@ -1,5 +1,4 @@
 use crate::{
-    runtime::TestCanisterRuntime,
     state::event::{DepositId, EventType},
     test_fixtures::{
         BLOCK_INDEX, DEPOSIT_FEE, EventsAssert, UPDATE_BALANCE_REQUIRED_CYCLES,
@@ -12,7 +11,9 @@ use crate::{
             deposit_transaction_to_wrong_address, deposit_transaction_to_wrong_address_signature,
             minted_event, quarantined_deposit_event,
         },
-        init_schnorr_master_key, init_state, init_state_with_args, valid_init_args,
+        init_schnorr_master_key, init_state, init_state_with_args,
+        runtime::TestCanisterRuntime,
+        valid_init_args,
     },
     update_balance::update_balance,
 };

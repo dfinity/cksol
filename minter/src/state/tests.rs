@@ -1,11 +1,10 @@
 use super::{event::*, *};
 use crate::{
-    runtime::TestCanisterRuntime,
     state::audit::process_event,
     test_fixtures::{
         DEPOSIT_FEE, MINIMUM_DEPOSIT_AMOUNT, MINIMUM_WITHDRAWAL_AMOUNT,
         UPDATE_BALANCE_REQUIRED_CYCLES, WITHDRAWAL_FEE, arb::arb_event, ledger_canister_id,
-        sol_rpc_canister_id, valid_init_args,
+        runtime::TestCanisterRuntime, sol_rpc_canister_id, valid_init_args,
     },
 };
 use assert_matches::assert_matches;

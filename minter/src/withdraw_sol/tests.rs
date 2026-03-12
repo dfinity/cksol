@@ -1,7 +1,6 @@
 use crate::{
     guard::withdraw_sol_guard,
-    runtime::TestCanisterRuntime,
-    test_fixtures::{MINTER_ACCOUNT, init_state},
+    test_fixtures::{MINTER_ACCOUNT, init_state, runtime::TestCanisterRuntime},
     withdraw_sol::withdraw_sol,
 };
 use assert_matches::assert_matches;
