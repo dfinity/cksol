@@ -114,6 +114,7 @@ async fn should_create_signed_transaction_multiple_sources() {
         Address::from(derive_public_key(&master_key, derivation_path(&account_1)).serialize_raw());
     let source_2 =
         Address::from(derive_public_key(&master_key, derivation_path(&account_2)).serialize_raw());
+    // vec![] corresponds to None provided for account below.
     let source_3 = Address::from(derive_public_key(&master_key, vec![]).serialize_raw());
 
     let signer = MockSchnorrSigner::with_signatures(vec![fake_sig_1, fake_sig_2, fake_sig_3]);
@@ -131,12 +132,12 @@ async fn should_create_signed_transaction_multiple_sources() {
     .await
     .expect("transaction creation should succeed");
 
-    // Two signers => two signatures
+    // Three signers => three signatures
     assert_eq!(tx.signatures.len(), 3);
     // Fee payer is source_1
     assert_eq!(tx.message.account_keys[0], source_1);
 
-    // Two transfer instructions
+    // Three transfer instructions
     assert_eq!(tx.message.instructions.len(), 3);
 
     // Verify signatures are at correct positions
