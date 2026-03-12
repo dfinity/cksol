@@ -27,11 +27,6 @@ pub mod event;
 
 /// The minimum balance required for a Solana account to be rent-exempt.
 /// This is the rent-exemption threshold for a basic account with 0 data bytes.
-/// Value: 890,880 lamports (approximately 0.00089088 SOL).
-///
-/// This threshold ensures that when users withdraw SOL, the destination account
-/// will have enough balance to remain rent-exempt and not be garbage collected
-/// by the Solana runtime.
 pub const SOLANA_RENT_EXEMPTION_THRESHOLD: Lamport = 890_880;
 
 thread_local! {
