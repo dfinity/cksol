@@ -1,10 +1,10 @@
 use crate::numeric::{LedgerBurnIndex, LedgerMintIndex};
 use cksol_types_internal::{InitArgs, UpgradeArgs};
-use ic_stable_structures::Storable;
-use ic_stable_structures::storable::Bound;
+use ic_stable_structures::{Storable, storable::Bound};
 use icrc_ledger_types::icrc1::account::Account;
 use minicbor::{Decode, Encode};
 use sol_rpc_types::Lamport;
+use solana_message::Message;
 use solana_signature::Signature;
 use std::borrow::Cow;
 
@@ -37,6 +37,8 @@ pub enum EventType {
         #[n(0)]
         deposit_id: DepositId,
         #[n(1)]
+        deposit_amount: Lamport,
+        #[n(2)]
         amount_to_mint: Lamport,
     },
     /// The minter discovered a Solana transaction that is a valid ckSOL
@@ -58,6 +60,25 @@ pub enum EventType {
     /// The minter burned ckSOL for a withdrawal request.
     #[n(5)]
     AcceptedWithdrawSolRequest(#[n(0)] WithdrawSolRequest),
+    /// Submitted a Solana transaction
+    #[n(6)]
+    SubmittedTransaction {
+        /// The transaction signature
+        #[cbor(n(0), with = "cbor::signature")]
+        signature: Signature,
+        /// The transaction message
+        #[cbor(n(1), with = "cbor::message")]
+        transaction: Message,
+    },
+    /// Deposited funds from user deposit accounts have been consolidated
+    /// into the minter's main account.
+    #[n(7)]
+    ConsolidatedDeposits {
+        /// The deposit accounts from which funds were consolidated
+        /// and the amount consolidated from each account.
+        #[n(0)]
+        deposits: Vec<(Account, Lamport)>,
+    },
 }
 
 /// Payload of the `AcceptedWithdrawSolRequest` event.

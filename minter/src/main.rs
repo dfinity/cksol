@@ -112,10 +112,12 @@ fn get_events(
             }
             EventType::AcceptedDeposit {
                 deposit_id,
+                deposit_amount,
                 amount_to_mint,
             } => event::EventType::AcceptedDeposit {
                 signature: deposit_id.signature.into(),
                 account: deposit_id.account,
+                deposit_amount,
                 amount_to_mint,
             },
             EventType::Minted {
@@ -130,6 +132,17 @@ fn get_events(
                 signature: deposit_id.signature.into(),
                 account: deposit_id.account,
             },
+            EventType::SubmittedTransaction {
+                signature,
+                transaction,
+            } => event::EventType::SubmittedTransaction {
+                signature: signature.into(),
+                transaction: bincode::serialize(&transaction)
+                    .expect("serializing transaction should succeed"),
+            },
+            EventType::ConsolidatedDeposits { deposits } => {
+                event::EventType::ConsolidatedDeposits { deposits }
+            }
         }
     }
 

@@ -31,6 +31,8 @@ pub enum EventType {
         signature: Signature,
         /// The account to which the minter should mint ckSOL.
         account: Account,
+        /// The amount that was deposited.
+        deposit_amount: Lamport,
         /// The amount of ckSOL tokens to mint for this deposit.
         /// This amount is generally lower than `deposit_amount` due
         /// to the deposit fee.
@@ -70,6 +72,20 @@ pub enum EventType {
         withdrawal_amount: Lamport,
         /// The fee retained by the minter (in lamports).
         withdrawal_fee: Lamport,
+    },
+    /// Submitted a Solana transaction
+    SubmittedTransaction {
+        /// The signature of the Solana transaction.
+        signature: Signature,
+        /// The serialized (unsigned) transaction message.
+        transaction: Vec<u8>,
+    },
+    /// Deposited funds from user deposit accounts have been consolidated
+    /// into the minter's main account.
+    ConsolidatedDeposits {
+        /// The deposit accounts from which funds were consolidated
+        /// and the amount consolidated from each account.
+        deposits: Vec<(Account, Lamport)>,
     },
 }
 
