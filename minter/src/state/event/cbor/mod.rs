@@ -1,3 +1,6 @@
+#[cfg(test)]
+mod tests;
+
 pub mod id {
     use minicbor::{
         Decode, Encode,
