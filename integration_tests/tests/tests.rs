@@ -2,7 +2,7 @@ use assert_matches::assert_matches;
 use assert2::check;
 use candid::Principal;
 use cksol_int_tests::{
-    Setup, SetupBuilder,
+    CkSolMinter, Setup, SetupBuilder,
     fixtures::{
         DEFAULT_CALLER_ACCOUNT, DEFAULT_CALLER_DEPOSIT_ADDRESS, EXPECTED_MINT_AMOUNT,
         SharedMockHttpOutcalls, default_update_balance_args, deposit_transaction_signature,
@@ -23,12 +23,11 @@ mod get_deposit_address_tests {
     use super::*;
 
     async fn get_deposit_address(
-        setup: &Setup,
+        minter: &CkSolMinter<'_>,
         owner: Option<Principal>,
         subaccount: Option<Subaccount>,
     ) -> String {
-        setup
-            .minter()
+        minter
             .get_deposit_address(GetDepositAddressArgs { owner, subaccount })
             .await
             .to_string()
@@ -37,34 +36,34 @@ mod get_deposit_address_tests {
     #[tokio::test]
     async fn should_get_deposit_address() {
         let setup = SetupBuilder::new().build().await;
+        let minter = setup.minter();
 
         // Owner is the default caller
         assert_eq!(
-            get_deposit_address(&setup, None, None).await,
+            get_deposit_address(&minter, None, None).await,
             DEFAULT_CALLER_DEPOSIT_ADDRESS
         );
 
         // Different owner
         assert_eq!(
-            get_deposit_address(&setup, Some(Principal::from_slice(&[1])), None).await,
+            get_deposit_address(&minter, Some(Principal::from_slice(&[1])), None).await,
             "Dyh5A77LtkkYan5NJH4vvCji7WJKBQEqCDupPtmUpxoE"
         );
 
         // Owner is the default caller, but different subaccounts specified
         assert_eq!(
-            get_deposit_address(&setup, None, Some([1; 32])).await,
+            get_deposit_address(&minter, None, Some([1; 32])).await,
             "92CvpZZ43QjkMFdYzcQceRSdsV9Gkzs3pTwZ2L7Q5R8r"
         );
         assert_eq!(
-            get_deposit_address(&setup, None, Some([2; 32])).await,
+            get_deposit_address(&minter, None, Some([2; 32])).await,
             "9aordiHmHhaCQVYS8GtKrMdbf5WK6EhYhfyKPyu5S1X3"
         );
 
         // Caller is anonymous, but we specify the owner explicitly
-        let setup = setup.with_anonymous_caller();
-
+        let minter = setup.minter_with_caller(Principal::anonymous());
         assert_eq!(
-            get_deposit_address(&setup, Some(Setup::DEFAULT_CALLER), None).await,
+            get_deposit_address(&minter, Some(Setup::DEFAULT_CALLER), None).await,
             DEFAULT_CALLER_DEPOSIT_ADDRESS
         );
 
@@ -728,18 +727,15 @@ mod anonymous_caller_tests {
 
     #[tokio::test]
     async fn should_fail_for_anonymous_owner() {
-        let mut setup = SetupBuilder::new().build().await;
+        let setup = SetupBuilder::new().build().await;
 
-        for (anonymous_caller, owner) in [
+        for (caller, owner) in [
             // Caller is default caller, but the owner is specified explicitly to anonymous
-            (false, Some(Principal::anonymous())),
+            (Setup::DEFAULT_CALLER, Some(Principal::anonymous())),
             // Anonymous caller and owner not specified
-            (true, None),
+            (Principal::anonymous(), None),
         ] {
-            if anonymous_caller {
-                setup = setup.with_anonymous_caller();
-            }
-            let minter = setup.minter();
+            let minter = setup.minter_with_caller(caller);
 
             // `get_deposit_address` endpoint
             let result = minter

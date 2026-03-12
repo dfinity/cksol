@@ -89,7 +89,6 @@ pub struct Setup {
     minter_canister_id: CanisterId,
     ledger_canister_id: CanisterId,
     proxy_canister_id: Option<CanisterId>,
-    caller: Principal,
 }
 
 impl Setup {
@@ -210,7 +209,6 @@ impl Setup {
             minter_canister_id,
             ledger_canister_id,
             proxy_canister_id,
-            caller: Self::DEFAULT_CALLER,
         }
     }
 
@@ -240,8 +238,8 @@ impl Setup {
         .expect("BUG: Failed to call updateApiKeys");
     }
 
-    pub fn runtime(&self) -> PocketIcRuntime<'_> {
-        let runtime = PocketIcRuntime::new(self.env.as_ref().unwrap(), self.caller);
+    pub fn runtime(&self, caller: Principal) -> PocketIcRuntime<'_> {
+        let runtime = PocketIcRuntime::new(self.env.as_ref().unwrap(), caller);
         if let Some(proxy_canister_id) = self.proxy_canister_id {
             runtime.with_proxy_canister(proxy_canister_id)
         } else {
@@ -249,14 +247,13 @@ impl Setup {
         }
     }
 
-    pub fn with_anonymous_caller(mut self) -> Self {
-        self.caller = Principal::anonymous();
-        self
+    pub fn minter(&self) -> CkSolMinter<'_> {
+        self.minter_with_caller(Setup::DEFAULT_CALLER)
     }
 
-    pub fn minter(&self) -> CkSolMinter<'_> {
+    pub fn minter_with_caller(&self, caller: Principal) -> CkSolMinter<'_> {
         CkSolMinter(Canister {
-            runtime: self.runtime(),
+            runtime: self.runtime(caller),
             id: self.minter_canister_id,
         })
     }
@@ -267,7 +264,7 @@ impl Setup {
 
     pub fn ledger(&self) -> Ledger<'_> {
         Ledger(Canister {
-            runtime: self.runtime(),
+            runtime: self.runtime(Setup::DEFAULT_CALLER),
             id: self.ledger_canister_id,
         })
     }
