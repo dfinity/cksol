@@ -221,3 +221,36 @@ async fn should_fail_when_second_signing_fails() {
 
     assert!(result.is_err());
 }
+
+#[tokio::test]
+async fn should_fail_when_too_many_sources() {
+    let master_key = test_master_key();
+    let target_address = Address::from([0xAA; 32]);
+    let blockhash = Hash::new_from_array([0xBB; 32]);
+    let signer = MockSchnorrSigner::with_signatures(vec![]);
+
+    let sources: Vec<(Option<Account>, Lamport)> = (0..MAX_SOURCES + 1)
+        .map(|i| {
+            (
+                Some(Account {
+                    owner: Principal::from_slice(&[i as u8]),
+                    subaccount: None,
+                }),
+                100_000_000,
+            )
+        })
+        .collect();
+
+    let result = create_signed_transfer_transaction(
+        &master_key,
+        &sources,
+        target_address,
+        blockhash,
+        &signer,
+    )
+    .await;
+
+    assert!(
+        matches!(result, Err(CreateTransferError::TooManySources { max: MAX_SOURCES, got }) if got == MAX_SOURCES + 1)
+    );
+}

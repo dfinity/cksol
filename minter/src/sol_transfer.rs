@@ -12,6 +12,32 @@ use solana_hash::Hash;
 use solana_signature::Signature;
 use solana_system_interface::instruction;
 use solana_transaction::{Instruction, Message, Transaction};
+use std::fmt;
+
+pub const MAX_SOURCES: u64 = 10;
+
+#[derive(Debug)]
+pub enum CreateTransferError {
+    TooManySources { max: u64, got: u64 },
+    SigningFailed(SignCallError),
+}
+
+impl fmt::Display for CreateTransferError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::TooManySources { max, got } => {
+                write!(f, "too many sources: got {got}, max is {max}")
+            }
+            Self::SigningFailed(err) => write!(f, "signing failed: {err}"),
+        }
+    }
+}
+
+impl From<SignCallError> for CreateTransferError {
+    fn from(err: SignCallError) -> Self {
+        Self::SigningFailed(err)
+    }
+}
 
 #[cfg(test)]
 mod tests;
@@ -64,8 +90,15 @@ pub async fn create_signed_transfer_transaction(
     target_address: Address,
     recent_blockhash: Hash,
     signer: &impl SchnorrSigner,
-) -> Result<Transaction, SignCallError> {
+) -> Result<Transaction, CreateTransferError> {
     assert!(!sources.is_empty(), "BUG: sources must not be empty");
+
+    if sources.len() as u64 > MAX_SOURCES {
+        return Err(CreateTransferError::TooManySources {
+            max: MAX_SOURCES,
+            got: sources.len() as u64,
+        });
+    }
 
     let derivation_paths: Vec<DerivationPath> = sources
         .iter()
