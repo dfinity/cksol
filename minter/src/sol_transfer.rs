@@ -87,7 +87,7 @@ impl SchnorrSigner for IcSchnorrSigner {
 /// that is not exactly 64 bytes.
 pub async fn create_signed_transfer_transaction(
     master_public_key: &SchnorrPublicKey,
-    sources: &[(Option<Account>, Lamport)],
+    sources: &[(Account, Lamport)],
     target_address: Address,
     recent_blockhash: Hash,
     signer: &impl SchnorrSigner,
@@ -103,10 +103,7 @@ pub async fn create_signed_transfer_transaction(
 
     let derivation_paths: Vec<DerivationPath> = sources
         .iter()
-        .map(|(account, _)| match account {
-            Some(account) => derivation_path(account),
-            None => vec![],
-        })
+        .map(|(account, _)| derivation_path(account))
         .collect();
 
     let source_addresses: Vec<Address> = derivation_paths
