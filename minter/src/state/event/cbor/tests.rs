@@ -1,6 +1,6 @@
 use crate::{
     state::event::cbor,
-    test_fixtures::arb::{arb_signature, arb_message},
+    test_fixtures::arb::{arb_message, arb_signature},
 };
 use proptest::{prop_assert_eq, proptest};
 

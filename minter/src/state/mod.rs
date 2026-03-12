@@ -9,6 +9,7 @@ use cksol_types_internal::{Ed25519KeyName, InitArgs, UpgradeArgs};
 use ic_canister_runtime::Runtime;
 use ic_ed25519::PublicKey;
 use icrc_ledger_types::icrc1::account::Account;
+use num_traits::Zero;
 use sol_rpc_client::SolRpcClient;
 use sol_rpc_types::{ConsensusStrategy, Lamport, RpcSources, SolanaCluster};
 use solana_message::Message;
@@ -17,7 +18,6 @@ use std::{
     cell::RefCell,
     collections::{BTreeMap, BTreeSet},
 };
-use num_traits::Zero;
 
 #[cfg(test)]
 mod tests;
