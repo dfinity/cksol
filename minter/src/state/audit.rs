@@ -24,14 +24,15 @@ fn apply_state_transition(state: &mut State, payload: &EventType) {
                 .upgrade(upgrade_arg.clone())
                 .expect("applying upgrade event should succeed");
         }
-        EventType::AccepterWithdrawSolRequest(request) => {
+        EventType::AcceptedWithdrawSolRequest(request) => {
             state.process_accepted_withdrawal(request);
         }
         EventType::AcceptedDeposit {
             deposit_id,
+            deposit_amount,
             amount_to_mint,
         } => {
-            state.process_accepted_deposit(deposit_id, amount_to_mint);
+            state.process_accepted_deposit(deposit_id, deposit_amount, amount_to_mint);
         }
         EventType::QuarantinedDeposit(deposit_id) => state.process_quarantined_deposit(deposit_id),
         EventType::Minted {
@@ -39,6 +40,15 @@ fn apply_state_transition(state: &mut State, payload: &EventType) {
             mint_block_index,
         } => {
             state.process_mint(deposit_id, mint_block_index);
+        }
+        EventType::SubmittedTransaction {
+            signature,
+            transaction,
+        } => {
+            state.process_transaction_submitted(signature, transaction);
+        }
+        EventType::ConsolidatedDeposits { deposits } => {
+            state.process_consolidated_deposits(deposits);
         }
     }
 }

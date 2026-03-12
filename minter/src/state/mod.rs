@@ -9,8 +9,11 @@ use cksol_types_internal::{Ed25519KeyName, InitArgs, UpgradeArgs};
 use ic_canister_runtime::Runtime;
 use ic_ed25519::PublicKey;
 use icrc_ledger_types::icrc1::account::Account;
+use num_traits::Zero;
 use sol_rpc_client::SolRpcClient;
 use sol_rpc_types::{ConsensusStrategy, Lamport, RpcSources, SolanaCluster};
+use solana_message::Message;
+use solana_signature::Signature;
 use std::{
     cell::RefCell,
     collections::{BTreeMap, BTreeSet},
@@ -81,6 +84,8 @@ pub struct State {
     quarantined_deposits: BTreeMap<DepositId, Lamport>,
     minted_deposits: BTreeMap<DepositId, MintedDeposit>,
     pending_withdrawal_requests: BTreeMap<LedgerBurnIndex, WithdrawSolRequest>,
+    funds_to_consolidate: BTreeMap<Account, Lamport>,
+    submitted_transactions: BTreeMap<Signature, Message>,
 }
 
 impl State {
@@ -244,7 +249,12 @@ impl State {
         self.validate()
     }
 
-    fn process_accepted_deposit(&mut self, deposit_id: &DepositId, amount_to_mint: &Lamport) {
+    fn process_accepted_deposit(
+        &mut self,
+        deposit_id: &DepositId,
+        deposit_amount: &Lamport,
+        amount_to_mint: &Lamport,
+    ) {
         assert!(
             !self.quarantined_deposits.contains_key(deposit_id),
             "Attempted to accept already quarantined deposit: {deposit_id:?}"
@@ -259,6 +269,10 @@ impl State {
                 .is_none(),
             "Attempted to accept an already accepted deposit: {deposit_id:?}"
         );
+        *self
+            .funds_to_consolidate
+            .entry(deposit_id.account)
+            .or_default() += deposit_amount;
     }
 
     fn process_quarantined_deposit(&mut self, deposit_id: &DepositId) {
@@ -324,6 +338,35 @@ impl State {
             "Attempted to mint ckSOL twice for the same deposit: {deposit_id:?}",
         );
     }
+
+    fn process_transaction_submitted(&mut self, signature: &Signature, message: &Message) {
+        assert!(
+            self.submitted_transactions
+                .insert(*signature, message.clone())
+                .is_none(),
+            "Attempted to submit transaction with signature {signature:?} twice"
+        );
+    }
+
+    fn process_consolidated_deposits(&mut self, deposits: &[(Account, Lamport)]) {
+        for (account, amount) in deposits {
+            let remaining = self
+                .funds_to_consolidate
+                .get_mut(account)
+                .unwrap_or_else(|| {
+                    panic!("Attempted to consolidate funds for unknown account: {account:?}")
+                });
+            *remaining = remaining.checked_sub(*amount).unwrap_or_else(|| {
+                panic!(
+                    "Attempted to consolidate more funds than available for account {account:?}: \
+                     available {remaining}, requested {amount}"
+                )
+            });
+            if remaining.is_zero() {
+                self.funds_to_consolidate.remove(account);
+            }
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -370,6 +413,8 @@ impl TryFrom<InitArgs> for State {
             quarantined_deposits: BTreeMap::new(),
             minted_deposits: BTreeMap::new(),
             pending_withdrawal_requests: BTreeMap::new(),
+            funds_to_consolidate: BTreeMap::new(),
+            submitted_transactions: BTreeMap::new(),
         };
         state.validate()?;
         Ok(state)

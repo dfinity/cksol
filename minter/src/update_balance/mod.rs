@@ -99,6 +99,7 @@ async fn try_accept_deposit<R: CanisterRuntime>(
             state,
             EventType::AcceptedDeposit {
                 deposit_id,
+                deposit_amount,
                 amount_to_mint,
             },
             runtime,

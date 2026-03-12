@@ -78,6 +78,9 @@ pub mod arb {
     use cksol_types_internal::{Ed25519KeyName, InitArgs, UpgradeArgs};
     use icrc_ledger_types::icrc1::account::Account;
     use proptest::prelude::{Just, Strategy, any, prop, prop_oneof};
+    use sol_rpc_types::Lamport;
+    use solana_address::Address;
+    use solana_message::{Hash, Instruction, Message};
     use solana_signature::Signature;
 
     pub fn arb_principal() -> impl Strategy<Value = Principal> {
@@ -104,6 +107,43 @@ pub mod arb {
 
     pub fn arb_ledger_mint_index() -> impl Strategy<Value = LedgerMintIndex> {
         any::<u64>().prop_map(LedgerMintIndex::from)
+    }
+
+    pub fn arb_address() -> impl Strategy<Value = Address> {
+        any::<[u8; 32]>().prop_map(Address::from)
+    }
+
+    pub fn arb_hash() -> impl Strategy<Value = Hash> {
+        any::<[u8; 32]>().prop_map(Hash::from)
+    }
+
+    pub fn arb_instruction() -> impl Strategy<Value = Instruction> {
+        (
+            arb_address(),
+            prop::collection::vec(arb_address(), 0..5),
+            prop::collection::vec(any::<u8>(), 0..32),
+        )
+            .prop_map(|(program_id, accounts, data)| {
+                Instruction::new_with_bytes(
+                    program_id,
+                    &data,
+                    accounts
+                        .into_iter()
+                        .map(|a| solana_message::AccountMeta::new(a, false))
+                        .collect(),
+                )
+            })
+    }
+
+    pub fn arb_message() -> impl Strategy<Value = Message> {
+        (
+            prop::collection::vec(arb_instruction(), 1..10),
+            prop::option::of(arb_address()),
+            arb_hash(),
+        )
+            .prop_map(|(instructions, maybe_payer, blockhash)| {
+                Message::new_with_blockhash(&instructions, maybe_payer.as_ref(), &blockhash)
+            })
     }
 
     pub fn arb_ed25519_key_name() -> impl Strategy<Value = Ed25519KeyName> {
@@ -207,13 +247,16 @@ pub mod arb {
         prop_oneof![
             arb_init_args().prop_map(EventType::Init),
             arb_upgrade_args().prop_map(EventType::Upgrade),
-            arb_withdraw_sol_request().prop_map(EventType::AccepterWithdrawSolRequest),
-            (arb_deposit_id(), any::<u64>()).prop_map(|(deposit_id, amount_to_mint)| {
-                EventType::AcceptedDeposit {
-                    deposit_id,
-                    amount_to_mint,
+            arb_withdraw_sol_request().prop_map(EventType::AcceptedWithdrawSolRequest),
+            (arb_deposit_id(), any::<u64>(), any::<u64>()).prop_map(
+                |(deposit_id, deposit_amount, amount_to_mint)| {
+                    EventType::AcceptedDeposit {
+                        deposit_id,
+                        deposit_amount,
+                        amount_to_mint,
+                    }
                 }
-            }),
+            ),
             arb_deposit_id().prop_map(EventType::QuarantinedDeposit),
             (arb_deposit_id(), arb_ledger_mint_index()).prop_map(
                 |(deposit_id, mint_block_index)| EventType::Minted {
@@ -221,6 +264,14 @@ pub mod arb {
                     mint_block_index,
                 }
             ),
+            (arb_signature(), arb_message()).prop_map(|(signature, transaction)| {
+                EventType::SubmittedTransaction {
+                    signature,
+                    transaction,
+                }
+            }),
+            prop::collection::vec((arb_account(), any::<Lamport>()), 1..10)
+                .prop_map(|deposits| EventType::ConsolidatedDeposits { deposits }),
         ]
     }
 
@@ -263,6 +314,7 @@ pub mod deposit {
     pub fn accepted_deposit_event() -> EventType {
         EventType::AcceptedDeposit {
             deposit_id: deposit_id(),
+            deposit_amount: DEPOSIT_AMOUNT,
             amount_to_mint: DEPOSIT_AMOUNT - DEPOSIT_FEE,
         }
     }
