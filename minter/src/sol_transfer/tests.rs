@@ -63,7 +63,7 @@ async fn should_create_signed_transaction_single_source() {
     let signer = MockSchnorrSigner::with_signatures(vec![fake_signature]);
     let tx = create_signed_transfer_transaction(
         &master_key,
-        &[(Some(account), amount)],
+        &[(account, amount)],
         target_address,
         blockhash,
         &signer,
@@ -108,23 +108,15 @@ async fn should_create_signed_transaction_multiple_sources() {
     let blockhash = Hash::new_from_array([0xDD; 32]);
     let fake_sig_1 = [0x11u8; 64];
     let fake_sig_2 = [0x22u8; 64];
-    let fake_sig_3 = [0x33u8; 64];
 
     let source_1 =
         Address::from(derive_public_key(&master_key, derivation_path(&account_1)).serialize_raw());
     let source_2 =
         Address::from(derive_public_key(&master_key, derivation_path(&account_2)).serialize_raw());
-    // vec![] corresponds to None provided for account below.
-    let source_3 = Address::from(derive_public_key(&master_key, vec![]).serialize_raw());
-
-    let signer = MockSchnorrSigner::with_signatures(vec![fake_sig_1, fake_sig_2, fake_sig_3]);
+    let signer = MockSchnorrSigner::with_signatures(vec![fake_sig_1, fake_sig_2]);
     let tx = create_signed_transfer_transaction(
         &master_key,
-        &[
-            (Some(account_1), amount),
-            (Some(account_2), amount),
-            (None, amount),
-        ],
+        &[(account_1, amount), (account_2, amount)],
         target_address,
         blockhash,
         &signer,
@@ -132,13 +124,13 @@ async fn should_create_signed_transaction_multiple_sources() {
     .await
     .expect("transaction creation should succeed");
 
-    // Three signers => three signatures
-    assert_eq!(tx.signatures.len(), 3);
+    // Two signers => two signatures
+    assert_eq!(tx.signatures.len(), 2);
     // Fee payer is source_1
     assert_eq!(tx.message.account_keys[0], source_1);
 
-    // Three transfer instructions
-    assert_eq!(tx.message.instructions.len(), 3);
+    // Two transfer instructions
+    assert_eq!(tx.message.instructions.len(), 2);
 
     // Verify signatures are at correct positions
     let pos_1 = tx
@@ -153,20 +145,17 @@ async fn should_create_signed_transaction_multiple_sources() {
         .iter()
         .position(|k| *k == source_2)
         .unwrap();
-    let pos_3 = tx
-        .message
-        .account_keys
-        .iter()
-        .position(|k| *k == source_3)
-        .unwrap();
     assert_eq!(tx.signatures[pos_1], Signature::from(fake_sig_1));
     assert_eq!(tx.signatures[pos_2], Signature::from(fake_sig_2));
-    assert_eq!(tx.signatures[pos_3], Signature::from(fake_sig_3));
 }
 
 #[tokio::test]
 async fn should_fail_when_signing_is_rejected() {
     let master_key = test_master_key();
+    let account = Account {
+        owner: Principal::from_slice(&[1]),
+        subaccount: None,
+    };
     let target_address = Address::from([0xAA; 32]);
     let blockhash = Hash::new_from_array([0xBB; 32]);
 
@@ -176,7 +165,7 @@ async fn should_fail_when_signing_is_rejected() {
 
     let result = create_signed_transfer_transaction(
         &master_key,
-        &[(None, 500_000_000)],
+        &[(account, 500_000_000)],
         target_address,
         blockhash,
         &signer,
@@ -209,10 +198,7 @@ async fn should_fail_when_second_signing_fails() {
 
     let result = create_signed_transfer_transaction(
         &master_key,
-        &[
-            (Some(account_1), 100_000_000),
-            (Some(account_2), 100_000_000),
-        ],
+        &[(account_1, 100_000_000), (account_2, 100_000_000)],
         target_address,
         blockhash,
         &signer,
@@ -229,13 +215,13 @@ async fn should_fail_when_too_many_sources() {
     let blockhash = Hash::new_from_array([0xBB; 32]);
     let signer = MockSchnorrSigner::with_signatures(vec![]);
 
-    let sources: Vec<(Option<Account>, Lamport)> = (0..MAX_SOURCES + 1)
+    let sources: Vec<(Account, Lamport)> = (0..MAX_SOURCES + 1)
         .map(|i| {
             (
-                Some(Account {
+                Account {
                     owner: Principal::from_slice(&[i as u8]),
                     subaccount: None,
-                }),
+                },
                 100_000_000,
             )
         })
@@ -261,13 +247,13 @@ async fn should_no_fail_for_max_sources() {
     let target_address = Address::from([0xAA; 32]);
     let blockhash = Hash::new_from_array([0xBB; 32]);
 
-    let sources: Vec<(Option<Account>, Lamport)> = (0..MAX_SOURCES)
+    let sources: Vec<(Account, Lamport)> = (0..MAX_SOURCES)
         .map(|i| {
             (
-                Some(Account {
+                Account {
                     owner: Principal::from_slice(&[i as u8 + 1; 29]),
                     subaccount: Some([3u8; 32]),
-                }),
+                },
                 u64::MAX,
             )
         })
