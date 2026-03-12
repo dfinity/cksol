@@ -769,6 +769,7 @@ dependencies = [
  "cksol-types",
  "cksol-types-internal",
  "derive_more",
+ "futures",
  "hex",
  "ic-canister-runtime",
  "ic-cdk",
@@ -787,8 +788,11 @@ dependencies = [
  "sol_rpc_client",
  "sol_rpc_types",
  "solana-address 2.3.0",
+ "solana-hash 4.2.0",
  "solana-message",
  "solana-signature",
+ "solana-system-interface 3.1.0",
+ "solana-transaction",
  "solana-transaction-status-client-types",
  "thiserror 2.0.18",
  "tokio",
@@ -5471,7 +5475,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a95a6f2e23ed861d6444ad4a6d6896c418d7d101b960787e65a8e33157cee81b"
 dependencies = [
  "num-traits",
+ "serde",
+ "serde_derive",
  "solana-address 2.3.0",
+ "solana-instruction",
  "solana-msg",
  "solana-program-error",
 ]
