@@ -4,6 +4,7 @@ use crate::{
     ledger::mint,
     runtime::CanisterRuntime,
     state::{
+        AcceptedDeposit,
         audit::process_event,
         event::{DepositId, EventType},
         mutate_state, read_state,
@@ -28,12 +29,19 @@ pub async fn update_balance<R: CanisterRuntime>(
 
     let deposit_id = DepositId { account, signature };
 
-    let amount_to_mint = match read_state(|state| state.deposit_status(&deposit_id)) {
+    let AcceptedDeposit {
+        deposit_amount,
+        amount_to_mint,
+    } = match read_state(|state| state.deposit_status(&deposit_id)) {
         None => try_accept_deposit(&runtime, account, signature, deposit_id).await?,
         Some(DepositStatus::Processing {
-            signature: _,
+            deposit_amount,
             amount_to_mint,
-        }) => amount_to_mint,
+            signature: _,
+        }) => AcceptedDeposit {
+            deposit_amount,
+            amount_to_mint,
+        },
         // Deposit is already fully processed, nothing more to do
         Some(status @ (DepositStatus::Quarantined(_) | DepositStatus::Minted { .. })) => {
             return Ok(status);
@@ -48,8 +56,9 @@ pub async fn update_balance<R: CanisterRuntime>(
                 "Error minting tokens for deposit {deposit_id:?}: {e}"
             );
             Ok(DepositStatus::Processing {
-                signature: signature.into(),
+                deposit_amount,
                 amount_to_mint,
+                signature: signature.into(),
             })
         }
     }
@@ -60,7 +69,7 @@ async fn try_accept_deposit<R: CanisterRuntime>(
     account: Account,
     signature: Signature,
     deposit_id: DepositId,
-) -> Result<u64, UpdateBalanceError> {
+) -> Result<AcceptedDeposit, UpdateBalanceError> {
     let maybe_transaction = try_get_transaction(runtime, signature).await.map_err(|e| {
         log!(
             Priority::Info,
@@ -105,5 +114,8 @@ async fn try_accept_deposit<R: CanisterRuntime>(
             runtime,
         )
     });
-    Ok(amount_to_mint)
+    Ok(AcceptedDeposit {
+        deposit_amount,
+        amount_to_mint,
+    })
 }

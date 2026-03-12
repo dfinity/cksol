@@ -80,7 +80,7 @@ pub struct State {
     update_balance_required_cycles: u128,
     pending_update_balance_requests: BTreeSet<Account>,
     pending_withdraw_sol_requests: BTreeSet<Account>,
-    accepted_deposits: BTreeMap<DepositId, Lamport>,
+    accepted_deposits: BTreeMap<DepositId, AcceptedDeposit>,
     quarantined_deposits: BTreeMap<DepositId, Lamport>,
     minted_deposits: BTreeMap<DepositId, MintedDeposit>,
     pending_withdrawal_requests: BTreeMap<LedgerBurnIndex, WithdrawSolRequest>,
@@ -142,10 +142,15 @@ impl State {
         if self.quarantined_deposits.contains_key(deposit_id) {
             return Some(DepositStatus::Quarantined(deposit_id.signature.into()));
         }
-        if let Some(amount_to_mint) = self.accepted_deposits.get(deposit_id) {
+        if let Some(AcceptedDeposit {
+            deposit_amount,
+            amount_to_mint,
+        }) = self.accepted_deposits.get(deposit_id)
+        {
             return Some(DepositStatus::Processing {
-                signature: deposit_id.signature.into(),
+                deposit_amount: *deposit_amount,
                 amount_to_mint: *amount_to_mint,
+                signature: deposit_id.signature.into(),
             });
         }
         if let Some(MintedDeposit {
@@ -265,7 +270,13 @@ impl State {
         );
         assert!(
             self.accepted_deposits
-                .insert(*deposit_id, *amount_to_mint)
+                .insert(
+                    *deposit_id,
+                    AcceptedDeposit {
+                        deposit_amount: *deposit_amount,
+                        amount_to_mint: *amount_to_mint,
+                    }
+                )
                 .is_none(),
             "Attempted to accept an already accepted deposit: {deposit_id:?}"
         );
@@ -280,7 +291,7 @@ impl State {
             !self.minted_deposits.contains_key(deposit_id),
             "Attempted to quarantine an already minted deposit: {deposit_id:?}"
         );
-        let amount_to_mint = self
+        let AcceptedDeposit { amount_to_mint, .. } = self
             .accepted_deposits
             .remove(deposit_id)
             .unwrap_or_else(|| {
@@ -319,7 +330,7 @@ impl State {
             !self.quarantined_deposits.contains_key(deposit_id),
             "Attempted to mint ckSOL for a quarantined deposit: {deposit_id:?}",
         );
-        let amount_to_mint = self
+        let AcceptedDeposit { amount_to_mint, .. } = self
             .accepted_deposits
             .remove(deposit_id)
             .unwrap_or_else(|| {
@@ -425,6 +436,12 @@ impl TryFrom<InitArgs> for State {
 pub struct SchnorrPublicKey {
     pub public_key: PublicKey,
     pub chain_code: [u8; 32],
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AcceptedDeposit {
+    pub deposit_amount: Lamport,
+    pub amount_to_mint: Lamport,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
