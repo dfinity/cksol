@@ -268,16 +268,15 @@ impl State {
             !self.minted_deposits.contains_key(deposit_id),
             "Attempted to accept an already minted deposit: {deposit_id:?}"
         );
-        assert!(
-            self.accepted_deposits
-                .insert(
-                    *deposit_id,
-                    AcceptedDeposit {
-                        deposit_amount: *deposit_amount,
-                        amount_to_mint: *amount_to_mint,
-                    }
-                )
-                .is_none(),
+        assert_eq!(
+            self.accepted_deposits.insert(
+                *deposit_id,
+                AcceptedDeposit {
+                    deposit_amount: *deposit_amount,
+                    amount_to_mint: *amount_to_mint,
+                }
+            ),
+            None,
             "Attempted to accept an already accepted deposit: {deposit_id:?}"
         );
         *self
@@ -297,10 +296,10 @@ impl State {
             .unwrap_or_else(|| {
                 panic!("Attempted to quarantine an unknown deposit: {deposit_id:?}")
             });
-        assert!(
+        assert_eq!(
             self.quarantined_deposits
-                .insert(*deposit_id, amount_to_mint)
-                .is_none(),
+                .insert(*deposit_id, amount_to_mint),
+            None,
             "Attempted to quarantine already quarantined deposit: {deposit_id:?}"
         );
     }
@@ -336,25 +335,24 @@ impl State {
             .unwrap_or_else(|| {
                 panic!("Attempted to mint ckSOL for an unknown deposit: {deposit_id:?}")
             });
-        assert!(
-            self.minted_deposits
-                .insert(
-                    *deposit_id,
-                    MintedDeposit {
-                        block_index: *mint_block_index,
-                        minted_amount: amount_to_mint,
-                    }
-                )
-                .is_none(),
+        assert_eq!(
+            self.minted_deposits.insert(
+                *deposit_id,
+                MintedDeposit {
+                    block_index: *mint_block_index,
+                    minted_amount: amount_to_mint,
+                }
+            ),
+            None,
             "Attempted to mint ckSOL twice for the same deposit: {deposit_id:?}",
         );
     }
 
     fn process_transaction_submitted(&mut self, signature: &Signature, message: &Message) {
-        assert!(
+        assert_eq!(
             self.submitted_transactions
-                .insert(*signature, message.clone())
-                .is_none(),
+                .insert(*signature, message.clone()),
+            None,
             "Attempted to submit transaction with signature {signature:?} twice"
         );
     }
