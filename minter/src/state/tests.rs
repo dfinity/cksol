@@ -1,4 +1,5 @@
 use super::{event::*, *};
+use crate::state::SOLANA_RENT_EXEMPTION_THRESHOLD;
 use crate::{
     runtime::TestCanisterRuntime,
     state::audit::process_event,
@@ -8,7 +9,6 @@ use crate::{
         sol_rpc_canister_id, valid_init_args,
     },
 };
-use crate::state::SOLANA_RENT_EXEMPTION_THRESHOLD;
 use assert_matches::assert_matches;
 use cksol_types_internal::{Ed25519KeyName, InitArgs, UpgradeArgs};
 use ic_stable_structures::Storable;
