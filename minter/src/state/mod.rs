@@ -25,6 +25,15 @@ mod tests;
 pub mod audit;
 pub mod event;
 
+/// The minimum balance required for a Solana account to be rent-exempt.
+/// This is the rent-exemption threshold for a basic account with 0 data bytes.
+/// Value: 890,880 lamports (approximately 0.00089088 SOL).
+///
+/// This threshold ensures that when users withdraw SOL, the destination account
+/// will have enough balance to remain rent-exempt and not be garbage collected
+/// by the Solana runtime.
+pub const SOLANA_RENT_EXEMPTION_THRESHOLD: Lamport = 890_880;
+
 thread_local! {
     static STATE: RefCell<Option<State>> = RefCell::default();
 }
@@ -214,6 +223,12 @@ impl State {
                 withdrawal_fee: self.withdrawal_fee,
             });
         }
+        if self.minimum_withdrawal_amount < SOLANA_RENT_EXEMPTION_THRESHOLD {
+            return Err(InvalidStateError::MinimumWithdrawalBelowRentExemption {
+                minimum_withdrawal_amount: self.minimum_withdrawal_amount,
+                rent_exemption_threshold: SOLANA_RENT_EXEMPTION_THRESHOLD,
+            });
+        }
         Ok(())
     }
 
@@ -369,7 +384,7 @@ impl State {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum InvalidStateError {
     InvalidCanisterId(String),
     InvalidMinimumDepositAmount {
@@ -379,6 +394,10 @@ pub enum InvalidStateError {
     InvalidMinimumWithdrawalAmount {
         minimum_withdrawal_amount: u64,
         withdrawal_fee: u64,
+    },
+    MinimumWithdrawalBelowRentExemption {
+        minimum_withdrawal_amount: u64,
+        rent_exemption_threshold: u64,
     },
 }
 
