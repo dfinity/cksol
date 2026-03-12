@@ -254,3 +254,35 @@ async fn should_fail_when_too_many_sources() {
         matches!(result, Err(CreateTransferError::TooManySources { max: MAX_SOURCES, got }) if got == MAX_SOURCES + 1)
     );
 }
+
+#[tokio::test]
+async fn should_no_fail_for_max_sources() {
+    let master_key = test_master_key();
+    let target_address = Address::from([0xAA; 32]);
+    let blockhash = Hash::new_from_array([0xBB; 32]);
+
+    let sources: Vec<(Option<Account>, Lamport)> = (0..MAX_SOURCES)
+        .map(|i| {
+            (
+                Some(Account {
+                    owner: Principal::from_slice(&[i as u8; 29]),
+                    subaccount: Some([3u8; 32]),
+                }),
+                u64::MAX,
+            )
+        })
+        .collect();
+
+    let signer = MockSchnorrSigner::with_signatures(vec![[0x11u8; 64]; MAX_SOURCES as usize]);
+
+    let result = create_signed_transfer_transaction(
+        &master_key,
+        &sources,
+        target_address,
+        blockhash,
+        &signer,
+    )
+    .await;
+
+    assert!(result.is_ok());
+}

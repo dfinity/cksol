@@ -15,6 +15,7 @@ use solana_transaction::{Instruction, Message, Transaction};
 use std::fmt;
 
 pub const MAX_SOURCES: u64 = 10;
+pub const MAX_TX_SIZE: usize = 1_232;
 
 #[derive(Debug)]
 pub enum CreateTransferError {
@@ -125,6 +126,8 @@ pub async fn create_signed_transfer_transaction(
     let message = Message::new_with_blockhash(&instructions, Some(&fee_payer), &recent_blockhash);
     let mut transaction = Transaction::new_unsigned(message);
     let message_bytes = transaction.message_data();
+    // message_size + signature_count * signature_size should not exceed tx size limit.
+    assert!(message_bytes.len() + sources.len() * 64 < MAX_TX_SIZE);
 
     let results = futures::future::join_all(
         derivation_paths
