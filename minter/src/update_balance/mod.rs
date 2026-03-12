@@ -4,7 +4,7 @@ use crate::{
     ledger::mint,
     runtime::CanisterRuntime,
     state::{
-        AcceptedDeposit,
+        Deposit,
         audit::process_event,
         event::{DepositId, EventType},
         mutate_state, read_state,
@@ -29,7 +29,7 @@ pub async fn update_balance<R: CanisterRuntime>(
 
     let deposit_id = DepositId { account, signature };
 
-    let AcceptedDeposit {
+    let Deposit {
         deposit_amount,
         amount_to_mint,
     } = match read_state(|state| state.deposit_status(&deposit_id)) {
@@ -38,7 +38,7 @@ pub async fn update_balance<R: CanisterRuntime>(
             deposit_amount,
             amount_to_mint,
             signature: _,
-        }) => AcceptedDeposit {
+        }) => Deposit {
             deposit_amount,
             amount_to_mint,
         },
@@ -69,7 +69,7 @@ async fn try_accept_deposit<R: CanisterRuntime>(
     account: Account,
     signature: Signature,
     deposit_id: DepositId,
-) -> Result<AcceptedDeposit, UpdateBalanceError> {
+) -> Result<Deposit, UpdateBalanceError> {
     let maybe_transaction = try_get_transaction(runtime, signature).await.map_err(|e| {
         log!(
             Priority::Info,
@@ -114,7 +114,7 @@ async fn try_accept_deposit<R: CanisterRuntime>(
             runtime,
         )
     });
-    Ok(AcceptedDeposit {
+    Ok(Deposit {
         deposit_amount,
         amount_to_mint,
     })
