@@ -81,7 +81,7 @@ pub struct State {
     pending_update_balance_requests: BTreeSet<Account>,
     pending_withdraw_sol_requests: BTreeSet<Account>,
     accepted_deposits: BTreeMap<DepositId, AcceptedDeposit>,
-    quarantined_deposits: BTreeMap<DepositId, Lamport>,
+    quarantined_deposits: BTreeMap<DepositId, AcceptedDeposit>,
     minted_deposits: BTreeMap<DepositId, MintedDeposit>,
     pending_withdrawal_requests: BTreeMap<LedgerBurnIndex, WithdrawSolRequest>,
     funds_to_consolidate: BTreeMap<Account, Lamport>,
@@ -155,6 +155,7 @@ impl State {
         }
         if let Some(MintedDeposit {
             block_index,
+            deposit_amount: _,
             minted_amount,
         }) = self.minted_deposits.get(deposit_id)
         {
@@ -290,7 +291,7 @@ impl State {
             !self.minted_deposits.contains_key(deposit_id),
             "Attempted to quarantine an already minted deposit: {deposit_id:?}"
         );
-        let AcceptedDeposit { amount_to_mint, .. } = self
+        let accepted_deposit = self
             .accepted_deposits
             .remove(deposit_id)
             .unwrap_or_else(|| {
@@ -298,7 +299,7 @@ impl State {
             });
         assert_eq!(
             self.quarantined_deposits
-                .insert(*deposit_id, amount_to_mint),
+                .insert(*deposit_id, accepted_deposit),
             None,
             "Attempted to quarantine already quarantined deposit: {deposit_id:?}"
         );
@@ -329,7 +330,10 @@ impl State {
             !self.quarantined_deposits.contains_key(deposit_id),
             "Attempted to mint ckSOL for a quarantined deposit: {deposit_id:?}",
         );
-        let AcceptedDeposit { amount_to_mint, .. } = self
+        let AcceptedDeposit {
+            deposit_amount,
+            amount_to_mint,
+        } = self
             .accepted_deposits
             .remove(deposit_id)
             .unwrap_or_else(|| {
@@ -340,6 +344,7 @@ impl State {
                 *deposit_id,
                 MintedDeposit {
                     block_index: *mint_block_index,
+                    deposit_amount,
                     minted_amount: amount_to_mint,
                 }
             ),
@@ -445,5 +450,6 @@ pub struct AcceptedDeposit {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MintedDeposit {
     block_index: LedgerMintIndex,
+    deposit_amount: Lamport,
     minted_amount: Lamport,
 }
