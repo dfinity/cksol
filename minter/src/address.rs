@@ -68,7 +68,7 @@ pub(crate) fn derive_public_key(
     public_key
 }
 
-fn derivation_path(account: &Account) -> DerivationPath {
+pub(crate) fn derivation_path(account: &Account) -> DerivationPath {
     const SCHEMA_V1: u8 = 1;
     vec![
         vec![SCHEMA_V1],

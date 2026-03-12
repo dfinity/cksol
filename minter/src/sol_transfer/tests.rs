@@ -1,4 +1,5 @@
 use super::*;
+use candid::Principal;
 use ic_cdk::call::CallRejected;
 use ic_cdk::management_canister::SignCallError;
 use ic_ed25519::{PocketIcMasterPublicKeyId, PublicKey};
@@ -47,19 +48,22 @@ fn test_master_key() -> SchnorrPublicKey {
 #[tokio::test]
 async fn should_create_signed_transaction_single_source() {
     let master_key = test_master_key();
-    let derivation_path = vec![vec![1u8], vec![2u8, 3u8]];
+    let account = Account {
+        owner: Principal::from_slice(&[1, 2, 3]),
+        subaccount: None,
+    };
     let target_address = Address::from([0xAA; 32]);
     let amount: Lamport = 500_000_000;
     let blockhash = Hash::new_from_array([0xBB; 32]);
     let fake_signature = [0x42u8; 64];
 
     let source_address =
-        Address::from(derive_public_key(&master_key, derivation_path.clone()).serialize_raw());
+        Address::from(derive_public_key(&master_key, derivation_path(&account)).serialize_raw());
 
     let signer = MockSchnorrSigner::with_signatures(vec![fake_signature]);
     let tx = create_signed_transfer_transaction(
         &master_key,
-        &[(derivation_path, amount)],
+        &[(Some(account), amount)],
         target_address,
         blockhash,
         &signer,
@@ -91,23 +95,35 @@ async fn should_create_signed_transaction_single_source() {
 #[tokio::test]
 async fn should_create_signed_transaction_multiple_sources() {
     let master_key = test_master_key();
-    let derivation_path_1 = vec![vec![1u8]];
-    let derivation_path_2 = vec![vec![2u8]];
+    let account_1 = Account {
+        owner: Principal::from_slice(&[1]),
+        subaccount: None,
+    };
+    let account_2 = Account {
+        owner: Principal::from_slice(&[2]),
+        subaccount: None,
+    };
     let target_address = Address::from([0xCC; 32]);
     let amount: Lamport = 100_000_000;
     let blockhash = Hash::new_from_array([0xDD; 32]);
     let fake_sig_1 = [0x11u8; 64];
     let fake_sig_2 = [0x22u8; 64];
+    let fake_sig_3 = [0x33u8; 64];
 
     let source_1 =
-        Address::from(derive_public_key(&master_key, derivation_path_1.clone()).serialize_raw());
+        Address::from(derive_public_key(&master_key, derivation_path(&account_1)).serialize_raw());
     let source_2 =
-        Address::from(derive_public_key(&master_key, derivation_path_2.clone()).serialize_raw());
+        Address::from(derive_public_key(&master_key, derivation_path(&account_2)).serialize_raw());
+    let source_3 = Address::from(derive_public_key(&master_key, vec![]).serialize_raw());
 
-    let signer = MockSchnorrSigner::with_signatures(vec![fake_sig_1, fake_sig_2]);
+    let signer = MockSchnorrSigner::with_signatures(vec![fake_sig_1, fake_sig_2, fake_sig_3]);
     let tx = create_signed_transfer_transaction(
         &master_key,
-        &[(derivation_path_1, amount), (derivation_path_2, amount)],
+        &[
+            (Some(account_1), amount),
+            (Some(account_2), amount),
+            (None, amount),
+        ],
         target_address,
         blockhash,
         &signer,
@@ -116,12 +132,12 @@ async fn should_create_signed_transaction_multiple_sources() {
     .expect("transaction creation should succeed");
 
     // Two signers => two signatures
-    assert_eq!(tx.signatures.len(), 2);
+    assert_eq!(tx.signatures.len(), 3);
     // Fee payer is source_1
     assert_eq!(tx.message.account_keys[0], source_1);
 
     // Two transfer instructions
-    assert_eq!(tx.message.instructions.len(), 2);
+    assert_eq!(tx.message.instructions.len(), 3);
 
     // Verify signatures are at correct positions
     let pos_1 = tx
@@ -136,14 +152,20 @@ async fn should_create_signed_transaction_multiple_sources() {
         .iter()
         .position(|k| *k == source_2)
         .unwrap();
+    let pos_3 = tx
+        .message
+        .account_keys
+        .iter()
+        .position(|k| *k == source_3)
+        .unwrap();
     assert_eq!(tx.signatures[pos_1], Signature::from(fake_sig_1));
     assert_eq!(tx.signatures[pos_2], Signature::from(fake_sig_2));
+    assert_eq!(tx.signatures[pos_3], Signature::from(fake_sig_3));
 }
 
 #[tokio::test]
 async fn should_fail_when_signing_is_rejected() {
     let master_key = test_master_key();
-    let derivation_path = vec![vec![1u8]];
     let target_address = Address::from([0xAA; 32]);
     let blockhash = Hash::new_from_array([0xBB; 32]);
 
@@ -153,7 +175,7 @@ async fn should_fail_when_signing_is_rejected() {
 
     let result = create_signed_transfer_transaction(
         &master_key,
-        &[(derivation_path, 500_000_000)],
+        &[(None, 500_000_000)],
         target_address,
         blockhash,
         &signer,
@@ -166,8 +188,14 @@ async fn should_fail_when_signing_is_rejected() {
 #[tokio::test]
 async fn should_fail_when_second_signing_fails() {
     let master_key = test_master_key();
-    let derivation_path_1 = vec![vec![1u8]];
-    let derivation_path_2 = vec![vec![2u8]];
+    let account_1 = Account {
+        owner: Principal::from_slice(&[1]),
+        subaccount: None,
+    };
+    let account_2 = Account {
+        owner: Principal::from_slice(&[2]),
+        subaccount: None,
+    };
     let target_address = Address::from([0xCC; 32]);
     let blockhash = Hash::new_from_array([0xDD; 32]);
 
@@ -181,8 +209,8 @@ async fn should_fail_when_second_signing_fails() {
     let result = create_signed_transfer_transaction(
         &master_key,
         &[
-            (derivation_path_1, 100_000_000),
-            (derivation_path_2, 100_000_000),
+            (Some(account_1), 100_000_000),
+            (Some(account_2), 100_000_000),
         ],
         target_address,
         blockhash,

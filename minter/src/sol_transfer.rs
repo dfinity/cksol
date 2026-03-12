@@ -1,10 +1,11 @@
 use crate::{
-    address::{DerivationPath, derive_public_key},
+    address::{DerivationPath, derivation_path, derive_public_key},
     state::{SchnorrPublicKey, read_state},
 };
 use ic_cdk::management_canister::{
     SchnorrAlgorithm, SchnorrKeyId, SignCallError, SignWithSchnorrArgs, sign_with_schnorr,
 };
+use icrc_ledger_types::icrc1::account::Account;
 use sol_rpc_types::Lamport;
 use solana_address::Address;
 use solana_hash::Hash;
@@ -59,16 +60,24 @@ impl SchnorrSigner for IcSchnorrSigner {
 /// that is not exactly 64 bytes.
 pub async fn create_signed_transfer_transaction(
     master_public_key: &SchnorrPublicKey,
-    sources: &[(DerivationPath, Lamport)],
+    sources: &[(Option<Account>, Lamport)],
     target_address: Address,
     recent_blockhash: Hash,
     signer: &impl SchnorrSigner,
 ) -> Result<Transaction, SignCallError> {
     assert!(!sources.is_empty(), "BUG: sources must not be empty");
 
-    let source_addresses: Vec<Address> = sources
+    let derivation_paths: Vec<DerivationPath> = sources
         .iter()
-        .map(|(path, _)| derive_public_key(master_public_key, path.to_vec()))
+        .map(|(account, _)| match account {
+            Some(account) => derivation_path(account),
+            None => vec![],
+        })
+        .collect();
+
+    let source_addresses: Vec<Address> = derivation_paths
+        .iter()
+        .map(|path| derive_public_key(master_public_key, path.to_vec()))
         .map(|public_key| Address::from(public_key.serialize_raw()))
         .collect();
 
@@ -84,11 +93,12 @@ pub async fn create_signed_transfer_transaction(
     let mut transaction = Transaction::new_unsigned(message);
     let message_bytes = transaction.message_data();
 
-    let results =
-        futures::future::join_all(sources.iter().map(|(derivation_path, _)| {
-            signer.sign(message_bytes.clone(), derivation_path.clone())
-        }))
-        .await;
+    let results = futures::future::join_all(
+        derivation_paths
+            .iter()
+            .map(|derivation_path| signer.sign(message_bytes.clone(), derivation_path.clone())),
+    )
+    .await;
 
     for (i, result) in results.into_iter().enumerate() {
         let signature = result?;
