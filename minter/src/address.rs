@@ -17,7 +17,7 @@ pub async fn get_deposit_address(account: Account) -> Address {
     Address::from(public_key.serialize_raw())
 }
 
-async fn lazy_get_schnorr_master_key() -> SchnorrPublicKey {
+pub async fn lazy_get_schnorr_master_key() -> SchnorrPublicKey {
     if let Some(public_key) = read_state(|s| s.minter_public_key().cloned()) {
         return public_key;
     }

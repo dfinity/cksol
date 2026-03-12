@@ -1,6 +1,9 @@
 use candid::Principal;
 use canlog::{Log, Sort};
-use cksol_minter::{runtime::IcCanisterRuntime, state::read_state};
+use cksol_minter::consolidate::{DEPOSIT_CONSOLIDATION_DELAY, consolidate_deposits};
+use cksol_minter::{
+    address::lazy_get_schnorr_master_key, runtime::IcCanisterRuntime, state::read_state,
+};
 use cksol_types::{
     Address, DepositStatus, GetDepositAddressArgs, MinterInfo, UpdateBalanceArgs,
     UpdateBalanceError, WithdrawSolArgs, WithdrawSolError, WithdrawSolOk, WithdrawSolStatus,
@@ -8,7 +11,7 @@ use cksol_types::{
 use cksol_types_internal::{MinterArg, log::Priority};
 use ic_http_types::{HttpRequest, HttpResponse, HttpResponseBuilder};
 use icrc_ledger_types::icrc1::account::{Account, Subaccount};
-use std::str::FromStr;
+use std::{str::FromStr, time::Duration};
 
 #[ic_cdk::init]
 fn init(args: MinterArg) {
@@ -20,6 +23,7 @@ fn init(args: MinterArg) {
             ic_cdk::trap("cannot init canister state with upgrade args");
         }
     }
+    setup_timers();
 }
 
 #[ic_cdk::post_upgrade]
@@ -35,6 +39,7 @@ fn post_upgrade(args: Option<MinterArg>) {
             cksol_minter::lifecycle::post_upgrade(None, IcCanisterRuntime::new());
         }
     }
+    setup_timers();
 }
 
 #[ic_cdk::update]
@@ -243,6 +248,16 @@ fn assert_non_anonymous_account(
         "the owner must be non-anonymous"
     );
     Account { owner, subaccount }
+}
+
+fn setup_timers() {
+    ic_cdk_timers::set_timer(Duration::from_secs(0), async {
+        // Initialize the minter's Ed25519 public key
+        let _ = lazy_get_schnorr_master_key().await;
+    });
+    ic_cdk_timers::set_timer_interval(DEPOSIT_CONSOLIDATION_DELAY, async || {
+        consolidate_deposits(IcCanisterRuntime::new()).await;
+    });
 }
 
 fn main() {}

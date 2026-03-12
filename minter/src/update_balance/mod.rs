@@ -1,4 +1,3 @@
-use crate::consolidate::schedule_deposit_consolidation;
 use crate::{
     address::get_deposit_address,
     guard::update_balance_guard,
@@ -106,8 +105,5 @@ async fn try_accept_deposit<R: CanisterRuntime>(
             runtime,
         )
     });
-
-    schedule_deposit_consolidation(runtime.clone());
-
     Ok(amount_to_mint)
 }
