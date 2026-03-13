@@ -332,10 +332,7 @@ impl State {
         WithdrawSolStatus::NotFound
     }
 
-    pub fn next_pending_withdrawal_requests(
-        &self,
-        size: usize,
-    ) -> Option<Vec<WithdrawSolRequest>> {
+    pub fn next_pending_withdrawal_requests(&self, size: usize) -> Option<Vec<WithdrawSolRequest>> {
         if self.pending_withdrawal_requests.is_empty() {
             return None;
         }
