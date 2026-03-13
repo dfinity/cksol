@@ -296,7 +296,7 @@ impl Drop for Setup {
 pub struct CkSolMinter<'a>(Canister<'a>);
 
 impl CkSolMinter<'_> {
-    pub async fn get_deposit_address(&self, args: GetDepositAddressArgs) -> Address {
+    pub async fn get_deposit_address(&self, args: impl Into<GetDepositAddressArgs>) -> Address {
         self.try_get_deposit_address(args)
             .await
             .expect("get_deposit_address failed")
@@ -304,10 +304,10 @@ impl CkSolMinter<'_> {
 
     pub async fn try_get_deposit_address(
         &self,
-        args: GetDepositAddressArgs,
+        args: impl Into<GetDepositAddressArgs>,
     ) -> Result<Address, String> {
         self.0
-            .try_update_call("get_deposit_address", (args,), 0)
+            .try_update_call("get_deposit_address", (args.into(),), 0)
             .await
     }
 

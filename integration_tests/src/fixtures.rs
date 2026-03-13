@@ -12,6 +12,7 @@ use pocket_ic::nonblocking::PocketIc;
 use serde_json::json;
 use sol_rpc_types::Lamport;
 use std::{str::FromStr, sync::Arc};
+use solana_address::{address, Address};
 use tokio::sync::Mutex;
 
 pub const DEFAULT_CALLER_ACCOUNT: Account = Account {
@@ -20,6 +21,7 @@ pub const DEFAULT_CALLER_ACCOUNT: Account = Account {
 };
 
 pub const DEFAULT_CALLER_DEPOSIT_ADDRESS: &str = "Cybe9JqZKtmhBoVGNHBxRVMUndZno5vNj5bS9GqTCty1";
+pub const MINTER_ADDRESS: Address = address!("5G64DcCfSFRTwZWSTjub1qGRYrJFLeNMkYjfgCfKi1fi");
 
 pub const DEPOSIT_AMOUNT: Lamport = 500_000_000;
 pub const EXPECTED_MINT_AMOUNT: Lamport = DEPOSIT_AMOUNT - Setup::DEFAULT_DEPOSIT_FEE;
