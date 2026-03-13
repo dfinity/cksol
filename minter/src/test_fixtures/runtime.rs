@@ -4,6 +4,7 @@ use ic_canister_runtime::{IcError, Runtime, StubRuntime};
 use std::{
     iter,
     sync::{Arc, Mutex},
+    time::Duration,
 };
 
 #[derive(Clone, Default)]
@@ -57,6 +58,14 @@ impl CanisterRuntime for TestCanisterRuntime {
 
     fn msg_cycles_available(&self) -> u128 {
         self.msg_cycles_available.next()
+    }
+
+    fn set_timer(
+        &self,
+        _delay: Duration,
+        _future: impl Future<Output = ()> + 'static,
+    ) -> ic_cdk_timers::TimerId {
+        Default::default()
     }
 }
 

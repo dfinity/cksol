@@ -86,6 +86,7 @@ pub struct State {
     pending_withdrawal_requests: BTreeMap<LedgerBurnIndex, WithdrawSolRequest>,
     funds_to_consolidate: BTreeMap<Account, Lamport>,
     submitted_transactions: BTreeMap<Signature, Message>,
+    active_tasks: BTreeSet<TaskType>,
 }
 
 impl State {
@@ -136,6 +137,10 @@ impl State {
 
     pub fn update_balance_required_cycles(&self) -> u128 {
         self.update_balance_required_cycles
+    }
+
+    pub fn funds_to_consolidate(&self) -> &BTreeMap<Account, Lamport> {
+        &self.funds_to_consolidate
     }
 
     pub fn deposit_status(&self, deposit_id: &DepositId) -> Option<DepositStatus> {
@@ -191,6 +196,10 @@ impl State {
 
     pub fn pending_withdraw_sol_requests_mut(&mut self) -> &mut BTreeSet<Account> {
         &mut self.pending_withdraw_sol_requests
+    }
+
+    pub fn active_tasks_mut(&mut self) -> &mut BTreeSet<TaskType> {
+        &mut self.active_tasks
     }
 
     fn validate(&self) -> Result<(), InvalidStateError> {
@@ -424,6 +433,7 @@ impl TryFrom<InitArgs> for State {
             pending_withdrawal_requests: BTreeMap::new(),
             funds_to_consolidate: BTreeMap::new(),
             submitted_transactions: BTreeMap::new(),
+            active_tasks: BTreeSet::new(),
         };
         state.validate()?;
         Ok(state)
@@ -446,4 +456,10 @@ pub struct Deposit {
 pub struct MintedDeposit {
     pub block_index: LedgerMintIndex,
     pub deposit: Deposit,
+}
+
+#[derive(Copy, Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub enum TaskType {
+    DepositConsolidation,
+    Mint,
 }

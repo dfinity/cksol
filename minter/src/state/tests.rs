@@ -49,6 +49,7 @@ mod state_from_init_args {
                 pending_withdrawal_requests: BTreeMap::new(),
                 funds_to_consolidate: BTreeMap::new(),
                 submitted_transactions: BTreeMap::new(),
+                active_tasks: BTreeSet::new(),
             }
         );
     }
