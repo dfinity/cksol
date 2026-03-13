@@ -15,9 +15,15 @@ pub async fn consolidate_deposits<R: CanisterRuntime>(runtime: R) {
         Err(_) => return,
     };
 
-    while let Some(funds_to_consolidate) =
-        read_state(|state| state.next_funds_to_consolidate(MAX_CONSOLIDATIONS_PER_TRANSACTION))
-    {
+    while read_state(|state| !state.funds_to_consolidate().is_empty()) {
+        let funds_to_consolidate = read_state(|state| {
+            state
+                .funds_to_consolidate()
+                .clone()
+                .into_iter()
+                .take(MAX_CONSOLIDATIONS_PER_TRANSACTION)
+                .collect()
+        });
         mutate_state(|state| {
             process_event(
                 state,
