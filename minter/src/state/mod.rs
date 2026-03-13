@@ -332,6 +332,22 @@ impl State {
         WithdrawSolStatus::NotFound
     }
 
+    pub fn next_pending_withdrawal_requests(
+        &self,
+        size: usize,
+    ) -> Option<Vec<WithdrawSolRequest>> {
+        if self.pending_withdrawal_requests.is_empty() {
+            return None;
+        }
+        Some(
+            self.pending_withdrawal_requests
+                .values()
+                .take(size)
+                .cloned()
+                .collect(),
+        )
+    }
+
     fn process_accepted_withdrawal(&mut self, request: &WithdrawSolRequest) {
         assert_eq!(
             self.pending_withdrawal_requests
@@ -470,4 +486,5 @@ pub struct MintedDeposit {
 #[derive(Copy, Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum TaskType {
     DepositConsolidation,
+    WithdrawalProcessing,
 }

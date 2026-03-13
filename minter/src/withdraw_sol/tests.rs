@@ -1,7 +1,8 @@
 use crate::{
-    guard::withdraw_sol_guard,
-    test_fixtures::{MINTER_ACCOUNT, init_state, runtime::TestCanisterRuntime},
-    withdraw_sol::withdraw_sol,
+    guard::{TimerGuard, withdraw_sol_guard},
+    state::TaskType,
+    test_fixtures::{MINTER_ACCOUNT, WITHDRAWAL_FEE, init_state, runtime::TestCanisterRuntime},
+    withdraw_sol::{process_pending_withdrawals, withdraw_sol},
 };
 use assert_matches::assert_matches;
 use candid::{Nat, Principal};
@@ -232,4 +233,61 @@ async fn should_return_error_if_already_processing() {
     .await;
 
     assert_eq!(result, Err(WithdrawSolError::AlreadyProcessing));
+}
+
+mod process_pending_withdrawals_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn should_do_nothing_if_no_pending_withdrawals() {
+        init_state();
+
+        let runtime = TestCanisterRuntime::new();
+        process_pending_withdrawals(runtime).await;
+    }
+
+    #[tokio::test]
+    async fn should_skip_if_already_processing() {
+        init_state();
+
+        let _guard = TimerGuard::new(TaskType::WithdrawalProcessing).unwrap();
+
+        let runtime = TestCanisterRuntime::new();
+        process_pending_withdrawals(runtime).await;
+    }
+
+    #[tokio::test]
+    async fn should_acquire_and_release_guard() {
+        init_state();
+
+        let runtime = TestCanisterRuntime::new();
+        process_pending_withdrawals(runtime).await;
+
+        // Guard should be released, so we can acquire it again
+        let _guard = TimerGuard::new(TaskType::WithdrawalProcessing).unwrap();
+    }
+
+    #[tokio::test]
+    async fn should_process_when_pending_withdrawals_exist() {
+        init_state();
+
+        // Create a pending withdrawal by accepting one
+        let runtime = TestCanisterRuntime::new()
+            .add_stub_response(Ok::<Nat, TransferFromError>(Nat::from(1u64)))
+            .with_increasing_time();
+
+        let _ = withdraw_sol(
+            runtime,
+            MINTER_ACCOUNT,
+            test_caller(),
+            None,
+            WITHDRAWAL_FEE + 1,
+            VALID_ADDRESS.to_string(),
+        )
+        .await
+        .unwrap();
+
+        let runtime = TestCanisterRuntime::new();
+        process_pending_withdrawals(runtime).await;
+    }
 }

@@ -1,4 +1,5 @@
 use std::str::FromStr;
+use std::time::Duration;
 
 use candid::Principal;
 use cksol_types::{WithdrawSolError, WithdrawSolOk};
@@ -8,15 +9,20 @@ use num_traits::ToPrimitive;
 use solana_address::Address;
 
 use crate::{
-    guard::withdraw_sol_guard,
+    guard::{TimerGuard, withdraw_sol_guard},
     ledger::burn,
     runtime::CanisterRuntime,
     state::{
+        TaskType,
         audit::process_event,
         event::{EventType, WithdrawSolRequest},
         mutate_state, read_state,
     },
 };
+
+pub const WITHDRAWAL_PROCESSING_DELAY: Duration = Duration::from_mins(1);
+// The maximum number of withdrawal requests to process in a single timer invocation.
+const MAX_WITHDRAWALS_PER_BATCH: usize = 10;
 
 #[cfg(test)]
 mod tests;
@@ -107,7 +113,18 @@ pub async fn withdraw_sol<R: CanisterRuntime>(
         )
     });
 
-    // TODO DEFI-2671: trigger the timer to process pending withdrawals.
-
     Ok(WithdrawSolOk { block_index })
+}
+
+pub async fn process_pending_withdrawals<R: CanisterRuntime>(_runtime: R) {
+    let _guard = match TimerGuard::new(TaskType::WithdrawalProcessing) {
+        Ok(guard) => guard,
+        Err(_) => return,
+    };
+
+    if let Some(_pending_requests) =
+        read_state(|state| state.next_pending_withdrawal_requests(MAX_WITHDRAWALS_PER_BATCH))
+    {
+        // TODO DEFI-2671: Build and submit withdrawal transactions
+    }
 }
