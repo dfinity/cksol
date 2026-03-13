@@ -2,9 +2,14 @@ use crate::{runtime::CanisterRuntime, state::read_state};
 use cksol_types::UpdateBalanceError;
 use derive_more::From;
 use ic_canister_runtime::IcError;
-use sol_rpc_types::{CommitmentLevel, GetTransactionEncoding, Lamport, MultiRpcResult, RpcError};
+use sol_rpc_types::{
+    CommitmentLevel, GetTransactionEncoding, Lamport, MultiRpcResult, RpcError, Slot,
+    TransactionDetails,
+};
 use solana_address::Address;
+use solana_hash::Hash;
 use solana_transaction_status_client_types::EncodedConfirmedTransactionWithStatusMeta;
+use std::str::FromStr;
 use thiserror::Error;
 
 #[cfg(test)]
