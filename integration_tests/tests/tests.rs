@@ -18,6 +18,7 @@ use cksol_types_internal::{UpgradeArgs, event::EventType, log::Priority};
 use ic_pocket_canister_runtime::{JsonRpcResponse, MockHttpOutcalls, MockHttpOutcallsBuilder};
 use icrc_ledger_types::icrc1::account::Subaccount;
 use serde_json::json;
+use std::time::Duration;
 use tokio::join;
 
 mod get_deposit_address_tests {
@@ -556,8 +557,6 @@ mod withdraw_sol_tests {
 
 mod update_balance_tests {
     use super::*;
-    use cksol_int_tests::fixtures::DEPOSIT_AMOUNT;
-    use std::time::Duration;
 
     #[tokio::test]
     async fn should_fail_if_transaction_not_found() {
