@@ -1,5 +1,4 @@
 use crate::{
-    runtime::TestCanisterRuntime,
     test_fixtures::{
         UPDATE_BALANCE_REQUIRED_CYCLES,
         deposit::{
@@ -7,6 +6,7 @@ use crate::{
             deposit_transaction_to_wrong_address,
         },
         init_state,
+        runtime::TestCanisterRuntime,
     },
     transaction::{
         GetDepositAmountError, GetTransactionError, get_deposit_amount_to_address,
