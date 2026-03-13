@@ -139,17 +139,8 @@ impl State {
         self.update_balance_required_cycles
     }
 
-    pub fn next_funds_to_consolidate(&self, size: usize) -> Option<Vec<(Account, Lamport)>> {
-        if self.funds_to_consolidate.is_empty() {
-            return None;
-        }
-        Some(
-            self.funds_to_consolidate
-                .iter()
-                .take(size)
-                .map(|(account, amount)| (*account, *amount))
-                .collect(),
-        )
+    pub fn funds_to_consolidate(&self) -> &BTreeMap<Account, Lamport> {
+        &self.funds_to_consolidate
     }
 
     pub fn deposit_status(&self, deposit_id: &DepositId) -> Option<DepositStatus> {
