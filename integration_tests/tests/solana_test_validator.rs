@@ -3,7 +3,7 @@ use candid::Principal;
 use cksol_int_tests::{Setup, SetupBuilder};
 use cksol_types::{DepositStatus, GetDepositAddressArgs, UpdateBalanceArgs};
 use icrc_ledger_types::icrc1::account::Account;
-use sol_rpc_types::{InstallArgs, Lamport, Mode, OverrideProvider, RegexSubstitution};
+use sol_rpc_types::{InstallArgs, Lamport, OverrideProvider, RegexSubstitution};
 use solana_address::Address;
 use solana_client::{rpc_client::RpcClient, rpc_config::CommitmentConfig};
 use solana_keypair::{Keypair, Signer};
@@ -23,10 +23,9 @@ async fn should_update_balance() {
     const EXPECTED_MINT_AMOUNT: Lamport = DEPOSIT_AMOUNT - Setup::DEFAULT_DEPOSIT_FEE;
 
     let setup = SetupBuilder::new()
+        .with_proxy_canister()
         .with_pocket_ic_live_mode()
         .with_sol_rpc_install_args(InstallArgs {
-            // TODO DEFI-2643: Use `Normal` mode once proxy canister is setup
-            mode: Some(Mode::Demo),
             override_provider: Some(OverrideProvider {
                 override_url: Some(RegexSubstitution {
                     pattern: ".*".into(),

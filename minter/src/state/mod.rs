@@ -80,8 +80,8 @@ pub struct State {
     update_balance_required_cycles: u128,
     pending_update_balance_requests: BTreeSet<Account>,
     pending_withdraw_sol_requests: BTreeSet<Account>,
-    accepted_deposits: BTreeMap<DepositId, Lamport>,
-    quarantined_deposits: BTreeMap<DepositId, Lamport>,
+    accepted_deposits: BTreeMap<DepositId, Deposit>,
+    quarantined_deposits: BTreeMap<DepositId, Deposit>,
     minted_deposits: BTreeMap<DepositId, MintedDeposit>,
     pending_withdrawal_requests: BTreeMap<LedgerBurnIndex, WithdrawSolRequest>,
     funds_to_consolidate: BTreeMap<Account, Lamport>,
@@ -156,20 +156,25 @@ impl State {
         if self.quarantined_deposits.contains_key(deposit_id) {
             return Some(DepositStatus::Quarantined(deposit_id.signature.into()));
         }
-        if let Some(amount_to_mint) = self.accepted_deposits.get(deposit_id) {
+        if let Some(Deposit {
+            deposit_amount,
+            amount_to_mint,
+        }) = self.accepted_deposits.get(deposit_id)
+        {
             return Some(DepositStatus::Processing {
-                signature: deposit_id.signature.into(),
+                deposit_amount: *deposit_amount,
                 amount_to_mint: *amount_to_mint,
+                signature: deposit_id.signature.into(),
             });
         }
         if let Some(MintedDeposit {
             block_index,
-            minted_amount,
+            deposit: Deposit { amount_to_mint, .. },
         }) = self.minted_deposits.get(deposit_id)
         {
             return Some(DepositStatus::Minted {
                 block_index: *block_index.get(),
-                minted_amount: *minted_amount,
+                minted_amount: *amount_to_mint,
                 signature: deposit_id.signature.into(),
             });
         }
@@ -281,10 +286,15 @@ impl State {
             !self.minted_deposits.contains_key(deposit_id),
             "Attempted to accept an already minted deposit: {deposit_id:?}"
         );
-        assert!(
-            self.accepted_deposits
-                .insert(*deposit_id, *amount_to_mint)
-                .is_none(),
+        assert_eq!(
+            self.accepted_deposits.insert(
+                *deposit_id,
+                Deposit {
+                    deposit_amount: *deposit_amount,
+                    amount_to_mint: *amount_to_mint,
+                }
+            ),
+            None,
             "Attempted to accept an already accepted deposit: {deposit_id:?}"
         );
         *self
@@ -298,16 +308,16 @@ impl State {
             !self.minted_deposits.contains_key(deposit_id),
             "Attempted to quarantine an already minted deposit: {deposit_id:?}"
         );
-        let amount_to_mint = self
+        let accepted_deposit = self
             .accepted_deposits
             .remove(deposit_id)
             .unwrap_or_else(|| {
                 panic!("Attempted to quarantine an unknown deposit: {deposit_id:?}")
             });
-        assert!(
+        assert_eq!(
             self.quarantined_deposits
-                .insert(*deposit_id, amount_to_mint)
-                .is_none(),
+                .insert(*deposit_id, accepted_deposit),
+            None,
             "Attempted to quarantine already quarantined deposit: {deposit_id:?}"
         );
     }
@@ -337,31 +347,30 @@ impl State {
             !self.quarantined_deposits.contains_key(deposit_id),
             "Attempted to mint ckSOL for a quarantined deposit: {deposit_id:?}",
         );
-        let amount_to_mint = self
+        let deposit = self
             .accepted_deposits
             .remove(deposit_id)
             .unwrap_or_else(|| {
                 panic!("Attempted to mint ckSOL for an unknown deposit: {deposit_id:?}")
             });
-        assert!(
-            self.minted_deposits
-                .insert(
-                    *deposit_id,
-                    MintedDeposit {
-                        block_index: *mint_block_index,
-                        minted_amount: amount_to_mint,
-                    }
-                )
-                .is_none(),
+        assert_eq!(
+            self.minted_deposits.insert(
+                *deposit_id,
+                MintedDeposit {
+                    block_index: *mint_block_index,
+                    deposit,
+                }
+            ),
+            None,
             "Attempted to mint ckSOL twice for the same deposit: {deposit_id:?}",
         );
     }
 
     fn process_transaction_submitted(&mut self, signature: &Signature, message: &Message) {
-        assert!(
+        assert_eq!(
             self.submitted_transactions
-                .insert(*signature, message.clone())
-                .is_none(),
+                .insert(*signature, message.clone()),
+            None,
             "Attempted to submit transaction with signature {signature:?} twice"
         );
     }
@@ -446,10 +455,16 @@ pub struct SchnorrPublicKey {
     pub chain_code: [u8; 32],
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Deposit {
+    pub deposit_amount: Lamport,
+    pub amount_to_mint: Lamport,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MintedDeposit {
-    block_index: LedgerMintIndex,
-    minted_amount: Lamport,
+    pub block_index: LedgerMintIndex,
+    pub deposit: Deposit,
 }
 
 #[derive(Copy, Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]

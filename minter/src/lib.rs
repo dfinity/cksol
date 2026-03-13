@@ -5,6 +5,7 @@ mod ledger;
 pub mod lifecycle;
 mod numeric;
 pub mod runtime;
+pub mod sol_transfer;
 pub mod state;
 pub mod storage;
 pub mod transaction;
