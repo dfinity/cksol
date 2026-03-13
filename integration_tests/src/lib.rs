@@ -181,7 +181,7 @@ impl Setup {
                     }),
                 )
                 .await;
-            assert_eq!(proxy_canister_id, Setup::DEFAULT_CALLER,);
+            assert_eq!(proxy_canister_id, Setup::DEFAULT_CALLER);
             env.add_cycles(proxy_canister_id, u64::MAX as u128).await;
 
             env.install_canister(
