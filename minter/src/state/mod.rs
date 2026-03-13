@@ -461,4 +461,5 @@ pub struct MintedDeposit {
 #[derive(Copy, Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum TaskType {
     DepositConsolidation,
+    Mint,
 }
