@@ -2,7 +2,7 @@ use assert_matches::assert_matches;
 use assert2::check;
 use candid::Principal;
 use cksol_int_tests::{
-    Setup, SetupBuilder,
+    CkSolMinter, Setup, SetupBuilder,
     fixtures::{
         DEFAULT_CALLER_ACCOUNT, DEFAULT_CALLER_DEPOSIT_ADDRESS, DEPOSIT_AMOUNT,
         EXPECTED_MINT_AMOUNT, SharedMockHttpOutcalls, default_update_balance_args,
@@ -24,12 +24,11 @@ mod get_deposit_address_tests {
     use super::*;
 
     async fn get_deposit_address(
-        setup: &Setup,
+        minter: &CkSolMinter<'_>,
         owner: Option<Principal>,
         subaccount: Option<Subaccount>,
     ) -> String {
-        setup
-            .minter()
+        minter
             .get_deposit_address(GetDepositAddressArgs { owner, subaccount })
             .await
             .to_string()
@@ -38,39 +37,34 @@ mod get_deposit_address_tests {
     #[tokio::test]
     async fn should_get_deposit_address() {
         let setup = SetupBuilder::new().build().await;
+        let minter = setup.minter();
 
         // Owner is the default caller
         assert_eq!(
-            get_deposit_address(&setup, None, None).await,
+            get_deposit_address(&minter, None, None).await,
             DEFAULT_CALLER_DEPOSIT_ADDRESS
         );
 
         // Different owner
         assert_eq!(
-            get_deposit_address(&setup, Some(Principal::from_slice(&[1])), None).await,
+            get_deposit_address(&minter, Some(Principal::from_slice(&[1])), None).await,
             "Dyh5A77LtkkYan5NJH4vvCji7WJKBQEqCDupPtmUpxoE"
         );
 
         // Owner is the default caller, but different subaccounts specified
         assert_eq!(
-            get_deposit_address(&setup, None, Some([1; 32])).await,
-            "HB8XFVocoLig1KKpp5w41noDi4QN7SUx6HPWV7CKsaVR"
+            get_deposit_address(&minter, None, Some([1; 32])).await,
+            "92CvpZZ43QjkMFdYzcQceRSdsV9Gkzs3pTwZ2L7Q5R8r"
         );
         assert_eq!(
-            get_deposit_address(&setup, None, Some([2; 32])).await,
-            "Hu9cz6aPzLcyJWexefTthALmKBKZTiqt5TomTg2qwD2N"
+            get_deposit_address(&minter, None, Some([2; 32])).await,
+            "9aordiHmHhaCQVYS8GtKrMdbf5WK6EhYhfyKPyu5S1X3"
         );
-
-        setup.drop().await;
 
         // Caller is anonymous, but we specify the owner explicitly
-        let setup = SetupBuilder::new()
-            .with_caller(Principal::anonymous())
-            .build()
-            .await;
-
+        let minter = setup.minter_with_caller(Principal::anonymous());
         assert_eq!(
-            get_deposit_address(&setup, Some(Setup::DEFAULT_CALLER), None).await,
+            get_deposit_address(&minter, Some(Setup::DEFAULT_CALLER), None).await,
             DEFAULT_CALLER_DEPOSIT_ADDRESS
         );
 
@@ -569,7 +563,7 @@ mod update_balance_tests {
             JsonRpcResponse::from(json!({"jsonrpc": "2.0", "result": null, "id": 0}))
         }
 
-        let setup = SetupBuilder::new().build().await;
+        let setup = SetupBuilder::new().with_proxy_canister().build().await;
 
         let result = setup
             .minter()
@@ -584,7 +578,7 @@ mod update_balance_tests {
 
     #[tokio::test]
     async fn should_fail_for_concurrent_access() {
-        let setup = SetupBuilder::new().build().await;
+        let setup = SetupBuilder::new().with_proxy_canister().build().await;
 
         // Both minters use the same mocks, whichever gets the guard first will consume them
         let mocks = SharedMockHttpOutcalls::new(get_transaction_http_mocks(
@@ -627,7 +621,7 @@ mod update_balance_tests {
 
     #[tokio::test]
     async fn should_return_processing_if_minting_fails_and_mint_on_retry() {
-        let setup = SetupBuilder::new().build().await;
+        let setup = SetupBuilder::new().with_proxy_canister().build().await;
 
         setup.ledger().stop().await;
 
@@ -681,7 +675,7 @@ mod update_balance_tests {
 
     #[tokio::test]
     async fn should_update_balance_only_once_with_same_deposit() {
-        let setup = SetupBuilder::new().build().await;
+        let setup = SetupBuilder::new().with_proxy_canister().build().await;
 
         let balance_before = setup.ledger().balance_of(DEFAULT_CALLER_ACCOUNT).await;
         assert_eq!(balance_before, 0);
@@ -735,7 +729,7 @@ mod anonymous_caller_tests {
 
     #[tokio::test]
     async fn should_fail_for_anonymous_owner() {
-        let mut setup = SetupBuilder::new().build().await;
+        let setup = SetupBuilder::new().build().await;
 
         for (caller, owner) in [
             // Caller is default caller, but the owner is specified explicitly to anonymous
@@ -743,8 +737,7 @@ mod anonymous_caller_tests {
             // Anonymous caller and owner not specified
             (Principal::anonymous(), None),
         ] {
-            setup = setup.with_caller(caller);
-            let minter = setup.minter();
+            let minter = setup.minter_with_caller(caller);
 
             // `get_deposit_address` endpoint
             let result = minter
