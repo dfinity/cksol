@@ -294,8 +294,9 @@ pub mod deposit {
 
     pub fn deposit_status_processing() -> DepositStatus {
         DepositStatus::Processing {
-            signature: deposit_transaction_signature().into(),
+            deposit_amount: DEPOSIT_AMOUNT,
             amount_to_mint: DEPOSIT_AMOUNT - DEPOSIT_FEE,
+            signature: deposit_transaction_signature().into(),
         }
     }
 

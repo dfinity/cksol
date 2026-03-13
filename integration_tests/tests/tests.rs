@@ -4,9 +4,10 @@ use candid::Principal;
 use cksol_int_tests::{
     Setup, SetupBuilder,
     fixtures::{
-        DEFAULT_CALLER_ACCOUNT, DEFAULT_CALLER_DEPOSIT_ADDRESS, EXPECTED_MINT_AMOUNT,
-        SharedMockHttpOutcalls, default_update_balance_args, deposit_transaction_signature,
-        get_deposit_transaction_request, get_deposit_transaction_response,
+        DEFAULT_CALLER_ACCOUNT, DEFAULT_CALLER_DEPOSIT_ADDRESS, DEPOSIT_AMOUNT,
+        EXPECTED_MINT_AMOUNT, SharedMockHttpOutcalls, default_update_balance_args,
+        deposit_transaction_signature, get_deposit_transaction_request,
+        get_deposit_transaction_response,
     },
 };
 use cksol_types::{
@@ -641,8 +642,9 @@ mod update_balance_tests {
         assert_eq!(
             first_result,
             Ok(DepositStatus::Processing {
+                deposit_amount: DEPOSIT_AMOUNT,
+                amount_to_mint: EXPECTED_MINT_AMOUNT,
                 signature: deposit_signature.clone(),
-                amount_to_mint: EXPECTED_MINT_AMOUNT
             })
         );
 
