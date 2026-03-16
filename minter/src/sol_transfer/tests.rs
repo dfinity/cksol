@@ -1,11 +1,9 @@
 use super::*;
+use crate::test_fixtures::{init_schnorr_master_key, init_state};
 use candid::Principal;
-use ic_cdk::call::CallRejected;
-use ic_cdk::management_canister::SignCallError;
-use ic_ed25519::{PocketIcMasterPublicKeyId, PublicKey};
+use ic_cdk::{call::CallRejected, management_canister::SignCallError};
 use solana_address::Address;
-use std::cell::RefCell;
-use std::collections::VecDeque;
+use std::{cell::RefCell, collections::VecDeque};
 
 struct MockSchnorrSigner {
     responses: RefCell<VecDeque<Result<Vec<u8>, SignCallError>>>,
@@ -38,33 +36,40 @@ impl SchnorrSigner for MockSchnorrSigner {
     }
 }
 
-fn test_master_key() -> SchnorrPublicKey {
-    SchnorrPublicKey {
-        public_key: PublicKey::pocketic_key(PocketIcMasterPublicKeyId::Key1),
-        chain_code: [1; 32],
-    }
+fn setup() {
+    init_state();
+    init_schnorr_master_key();
+}
+
+fn derive_address(account: &Account) -> Address {
+    let master_key = read_state(|s| s.minter_public_key().cloned().unwrap());
+    Address::from(derive_public_key(&master_key, derivation_path(account)).serialize_raw())
 }
 
 #[tokio::test]
-async fn should_create_signed_transaction_single_source() {
-    let master_key = test_master_key();
-    let account = Account {
+async fn should_create_signed_transaction_with_single_source() {
+    setup();
+    let source_account = Account {
         owner: Principal::from_slice(&[1, 2, 3]),
         subaccount: None,
     };
-    let target_address = Address::from([0xAA; 32]);
+    let target_account = Account {
+        owner: Principal::from_slice(&[4, 5, 6]),
+        subaccount: None,
+    };
     let amount: Lamport = 500_000_000;
     let blockhash = Hash::new_from_array([0xBB; 32]);
     let fake_signature = [0x42u8; 64];
 
-    let source_address =
-        Address::from(derive_public_key(&master_key, derivation_path(&account)).serialize_raw());
+    let source_address = derive_address(&source_account);
+    let target_address = derive_address(&target_account);
 
+    // Fee payer is the source, so only one signature needed
     let signer = MockSchnorrSigner::with_signatures(vec![fake_signature]);
     let tx = create_signed_transfer_transaction(
-        &master_key,
-        &[(account, amount)],
-        target_address,
+        source_account,
+        &[(source_account, amount)],
+        target_account,
         blockhash,
         &signer,
     )
@@ -93,8 +98,8 @@ async fn should_create_signed_transaction_single_source() {
 }
 
 #[tokio::test]
-async fn should_create_signed_transaction_multiple_sources() {
-    let master_key = test_master_key();
+async fn should_create_signed_transaction_with_multiple_sources() {
+    setup();
     let account_1 = Account {
         owner: Principal::from_slice(&[1]),
         subaccount: None,
@@ -103,21 +108,24 @@ async fn should_create_signed_transaction_multiple_sources() {
         owner: Principal::from_slice(&[2]),
         subaccount: None,
     };
-    let target_address = Address::from([0xCC; 32]);
+    let target_account = Account {
+        owner: Principal::from_slice(&[3]),
+        subaccount: None,
+    };
     let amount: Lamport = 100_000_000;
     let blockhash = Hash::new_from_array([0xDD; 32]);
     let fake_sig_1 = [0x11u8; 64];
     let fake_sig_2 = [0x22u8; 64];
 
-    let source_1 =
-        Address::from(derive_public_key(&master_key, derivation_path(&account_1)).serialize_raw());
-    let source_2 =
-        Address::from(derive_public_key(&master_key, derivation_path(&account_2)).serialize_raw());
+    let source_1 = derive_address(&account_1);
+    let source_2 = derive_address(&account_2);
+
+    // Fee payer (account_1) signature first, then account_2
     let signer = MockSchnorrSigner::with_signatures(vec![fake_sig_1, fake_sig_2]);
     let tx = create_signed_transfer_transaction(
-        &master_key,
+        account_1,
         &[(account_1, amount), (account_2, amount)],
-        target_address,
+        target_account,
         blockhash,
         &signer,
     )
@@ -151,12 +159,15 @@ async fn should_create_signed_transaction_multiple_sources() {
 
 #[tokio::test]
 async fn should_fail_when_signing_is_rejected() {
-    let master_key = test_master_key();
-    let account = Account {
+    setup();
+    let source_account = Account {
         owner: Principal::from_slice(&[1]),
         subaccount: None,
     };
-    let target_address = Address::from([0xAA; 32]);
+    let target_account = Account {
+        owner: Principal::from_slice(&[2]),
+        subaccount: None,
+    };
     let blockhash = Hash::new_from_array([0xBB; 32]);
 
     let signer = MockSchnorrSigner::with_responses(vec![Err(SignCallError::CallFailed(
@@ -164,9 +175,9 @@ async fn should_fail_when_signing_is_rejected() {
     ))]);
 
     let result = create_signed_transfer_transaction(
-        &master_key,
-        &[(account, 500_000_000)],
-        target_address,
+        source_account,
+        &[(source_account, 500_000_000)],
+        target_account,
         blockhash,
         &signer,
     )
@@ -177,7 +188,7 @@ async fn should_fail_when_signing_is_rejected() {
 
 #[tokio::test]
 async fn should_fail_when_second_signing_fails() {
-    let master_key = test_master_key();
+    setup();
     let account_1 = Account {
         owner: Principal::from_slice(&[1]),
         subaccount: None,
@@ -186,7 +197,10 @@ async fn should_fail_when_second_signing_fails() {
         owner: Principal::from_slice(&[2]),
         subaccount: None,
     };
-    let target_address = Address::from([0xCC; 32]);
+    let target_account = Account {
+        owner: Principal::from_slice(&[3]),
+        subaccount: None,
+    };
     let blockhash = Hash::new_from_array([0xDD; 32]);
 
     let signer = MockSchnorrSigner::with_responses(vec![
@@ -197,9 +211,9 @@ async fn should_fail_when_second_signing_fails() {
     ]);
 
     let result = create_signed_transfer_transaction(
-        &master_key,
+        account_1,
         &[(account_1, 100_000_000), (account_2, 100_000_000)],
-        target_address,
+        target_account,
         blockhash,
         &signer,
     )
@@ -209,13 +223,18 @@ async fn should_fail_when_second_signing_fails() {
 }
 
 #[tokio::test]
-async fn should_fail_when_too_many_sources() {
-    let master_key = test_master_key();
-    let target_address = Address::from([0xAA; 32]);
+async fn should_fail_when_too_many_signatures() {
+    setup();
+    let target_account = Account {
+        owner: Principal::from_slice(&[0xFF]),
+        subaccount: None,
+    };
     let blockhash = Hash::new_from_array([0xBB; 32]);
     let signer = MockSchnorrSigner::with_signatures(vec![]);
 
-    let sources: Vec<(Account, Lamport)> = (0..MAX_SOURCES + 1)
+    // Create MAX_SIGNATURES sources with a SEPARATE fee payer, resulting in MAX_SIGNATURES + 1
+    // signatures
+    let sources: Vec<(Account, Lamport)> = (0..MAX_SIGNATURES)
         .map(|i| {
             (
                 Account {
@@ -227,27 +246,33 @@ async fn should_fail_when_too_many_sources() {
         })
         .collect();
 
-    let result = create_signed_transfer_transaction(
-        &master_key,
-        &sources,
-        target_address,
-        blockhash,
-        &signer,
-    )
-    .await;
+    // Fee payer is NOT in sources, so total signatures = sources + 1 = MAX_SIGNATURES + 1
+    let fee_payer = Account {
+        owner: Principal::from_slice(&[0xFE]),
+        subaccount: None,
+    };
+
+    let result =
+        create_signed_transfer_transaction(fee_payer, &sources, target_account, blockhash, &signer)
+            .await;
 
     assert!(
-        matches!(result, Err(CreateTransferError::TooManySources { max: MAX_SOURCES, got }) if got == MAX_SOURCES + 1)
+        matches!(result, Err(CreateTransferError::TooManySignatures { max: MAX_SIGNATURES, got }) if got == MAX_SIGNATURES + 1)
     );
 }
 
 #[tokio::test]
-async fn should_no_fail_for_max_sources() {
-    let master_key = test_master_key();
-    let target_address = Address::from([0xAA; 32]);
+async fn should_not_fail_for_max_signatures() {
+    setup();
+    let target_account = Account {
+        owner: Principal::from_slice(&[0xFF]),
+        subaccount: None,
+    };
     let blockhash = Hash::new_from_array([0xBB; 32]);
 
-    let sources: Vec<(Account, Lamport)> = (0..MAX_SOURCES)
+    // Create MAX_SIGNATURES - 1 sources with a SEPARATE fee payer, resulting in exactly
+    // MAX_SIGNATURES signatures
+    let sources: Vec<(Account, Lamport)> = (0..MAX_SIGNATURES - 1)
         .map(|i| {
             (
                 Account {
@@ -259,16 +284,82 @@ async fn should_no_fail_for_max_sources() {
         })
         .collect();
 
-    let signer = MockSchnorrSigner::with_signatures(vec![[0x11u8; 64]; MAX_SOURCES as usize]);
+    // Fee payer is NOT in sources, so total signatures = sources + 1 = MAX_SIGNATURES
+    let fee_payer = Account {
+        owner: Principal::from_slice(&[0xFE]),
+        subaccount: None,
+    };
 
-    let result = create_signed_transfer_transaction(
-        &master_key,
-        &sources,
-        target_address,
-        blockhash,
-        &signer,
-    )
-    .await;
+    let signer = MockSchnorrSigner::with_signatures(vec![[0x11u8; 64]; MAX_SIGNATURES as usize]);
+
+    let result =
+        create_signed_transfer_transaction(fee_payer, &sources, target_account, blockhash, &signer)
+            .await;
 
     assert!(result.is_ok());
+}
+
+#[tokio::test]
+async fn should_create_signed_transaction_with_fee_payer() {
+    setup();
+    let fee_payer_account = Account {
+        owner: Principal::from_slice(&[1]),
+        subaccount: None,
+    };
+    let other_source = Account {
+        owner: Principal::from_slice(&[2]),
+        subaccount: None,
+    };
+    let target_account = Account {
+        owner: Principal::from_slice(&[3]),
+        subaccount: None,
+    };
+    let amount: Lamport = 100_000_000;
+    let blockhash = Hash::new_from_array([0xAA; 32]);
+
+    let fee_payer_address = derive_address(&fee_payer_account);
+    let other_address = derive_address(&other_source);
+
+    for sources in [
+        // Fee payer *not* in sources
+        vec![(other_source, amount)],
+        // Fee payer in sources
+        vec![(fee_payer_account, amount), (other_source, amount)],
+    ] {
+        // Two signatures needed in both cases (fee payer + other source)
+        let signer = MockSchnorrSigner::with_signatures(vec![[0x11u8; 64], [0x22u8; 64]]);
+        let tx = create_signed_transfer_transaction(
+            fee_payer_account,
+            &sources,
+            target_account,
+            blockhash,
+            &signer,
+        )
+        .await
+        .expect("transaction creation should succeed");
+
+        // Fee payer is always at position 0
+        assert_eq!(tx.message.account_keys[0], fee_payer_address);
+
+        // Two unique signers => two signatures
+        assert_eq!(tx.signatures.len(), 2);
+
+        assert_eq!(tx.message.instructions.len(), sources.len());
+
+        // Verify all signers have non-default signatures
+        let fee_payer_pos = tx
+            .message
+            .account_keys
+            .iter()
+            .position(|k| *k == fee_payer_address)
+            .unwrap();
+        let other_pos = tx
+            .message
+            .account_keys
+            .iter()
+            .position(|k| *k == other_address)
+            .unwrap();
+        assert_ne!(tx.signatures[fee_payer_pos], Signature::default());
+        assert_ne!(tx.signatures[other_pos], Signature::default());
+    }
 }
