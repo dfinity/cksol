@@ -69,8 +69,7 @@ impl SchnorrSigner for IcSchnorrSigner {
 ///
 /// # Panics
 ///
-/// Panics if `sources` is empty or if the IC returns a signature
-/// that is not exactly 64 bytes.
+/// Panics if the IC returns a signature that is not exactly 64 bytes.
 pub async fn create_signed_transfer_transaction(
     fee_payer_account: Account,
     sources: &[(Account, Lamport)],
@@ -78,8 +77,6 @@ pub async fn create_signed_transfer_transaction(
     recent_blockhash: Hash,
     signer: &impl SchnorrSigner,
 ) -> Result<Transaction, CreateTransferError> {
-    assert!(!sources.is_empty(), "BUG: sources must not be empty");
-
     let master_public_key = lazy_get_schnorr_master_key().await;
 
     let derive_address = |account: &Account| -> (DerivationPath, Address) {
