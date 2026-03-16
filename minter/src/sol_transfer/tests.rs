@@ -69,7 +69,7 @@ async fn should_create_signed_transaction_with_single_source() {
     let tx = create_signed_transfer_transaction(
         source_account,
         &[(source_account, amount)],
-        target_account, // fee payer is the source
+        target_account,
         blockhash,
         &signer,
     )
@@ -125,7 +125,7 @@ async fn should_create_signed_transaction_with_multiple_sources() {
     let tx = create_signed_transfer_transaction(
         account_1,
         &[(account_1, amount), (account_2, amount)],
-        target_account, // fee payer
+        target_account,
         blockhash,
         &signer,
     )
