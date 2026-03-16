@@ -64,8 +64,8 @@ impl SchnorrSigner for IcSchnorrSigner {
 }
 
 /// Creates a signed Solana transaction that transfers lamports from
-/// each minter-controlled address (identified by its derivation path)
-/// to the destination account's derived address.
+/// each minter-controlled address (identified by its account) to the
+/// destination account's derived address.
 ///
 /// # Panics
 ///

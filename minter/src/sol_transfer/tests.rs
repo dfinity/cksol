@@ -300,66 +300,7 @@ async fn should_not_fail_for_max_signatures() {
 }
 
 #[tokio::test]
-async fn should_create_signed_transaction_with_separate_fee_payer() {
-    setup();
-    let source_account = Account {
-        owner: Principal::from_slice(&[1]),
-        subaccount: None,
-    };
-    let fee_payer_account = Account {
-        owner: Principal::from_slice(&[2]),
-        subaccount: None,
-    };
-    let target_account = Account {
-        owner: Principal::from_slice(&[3]),
-        subaccount: None,
-    };
-    let amount: Lamport = 100_000_000;
-    let blockhash = Hash::new_from_array([0xAA; 32]);
-
-    let source_address = derive_address(&source_account);
-    let fee_payer_address = derive_address(&fee_payer_account);
-
-    // Fee payer is NOT in sources, so two signatures needed
-    let signer = MockSchnorrSigner::with_signatures(vec![[0x11u8; 64], [0x22u8; 64]]);
-    let tx = create_signed_transfer_transaction(
-        fee_payer_account,
-        &[(source_account, amount)],
-        target_account, // fee payer is separate from source
-        blockhash,
-        &signer,
-    )
-    .await
-    .expect("transaction creation should succeed");
-
-    // Fee payer is at position 0
-    assert_eq!(tx.message.account_keys[0], fee_payer_address);
-
-    // Two signers => two signatures (fee payer + source)
-    assert_eq!(tx.signatures.len(), 2);
-
-    // One transfer instruction
-    assert_eq!(tx.message.instructions.len(), 1);
-
-    // Verify both signers have non-default signatures
-    let fee_payer_pos = tx
-        .message
-        .account_keys
-        .iter()
-        .position(|k| *k == fee_payer_address)
-        .unwrap();
-    let source_pos = tx
-        .message
-        .account_keys
-        .iter()
-        .position(|k| *k == source_address)
-        .unwrap();
-    assert_ne!(tx.signatures[fee_payer_pos], Signature::default());
-    assert_ne!(tx.signatures[source_pos], Signature::default());
-}
-
-#[tokio::test]
-async fn should_create_signed_transaction_with_fee_payer_also_in_sources() {
+async fn should_create_signed_transaction_with_fee_payer() {
     setup();
     let fee_payer_account = Account {
         owner: Principal::from_slice(&[1]),
@@ -374,47 +315,51 @@ async fn should_create_signed_transaction_with_fee_payer_also_in_sources() {
         subaccount: None,
     };
     let amount: Lamport = 100_000_000;
-    let blockhash = Hash::new_from_array([0xCC; 32]);
-    let fee_payer_sig = [0x11u8; 64];
-    let other_sig = [0x22u8; 64];
+    let blockhash = Hash::new_from_array([0xAA; 32]);
 
     let fee_payer_address = derive_address(&fee_payer_account);
     let other_address = derive_address(&other_source);
 
-    // Fee payer IS in sources, so only two unique signers
-    let signer = MockSchnorrSigner::with_signatures(vec![fee_payer_sig, other_sig]);
-    let tx = create_signed_transfer_transaction(
-        fee_payer_account,
-        &[(fee_payer_account, amount), (other_source, amount)],
-        target_account, // fee payer is also a source
-        blockhash,
-        &signer,
-    )
-    .await
-    .expect("transaction creation should succeed");
+    for sources in [
+        // Fee payer *not* in sources
+        vec![(other_source, amount)],
+        // Fee payer in sources
+        vec![(fee_payer_account, amount), (other_source, amount)],
+    ] {
+        // Two signatures needed in both cases (fee payer + other source)
+        let signer = MockSchnorrSigner::with_signatures(vec![[0x11u8; 64], [0x22u8; 64]]);
+        let tx = create_signed_transfer_transaction(
+            fee_payer_account,
+            &sources,
+            target_account,
+            blockhash,
+            &signer,
+        )
+        .await
+        .expect("transaction creation should succeed");
 
-    // Fee payer is at position 0
-    assert_eq!(tx.message.account_keys[0], fee_payer_address);
+        // Fee payer is always at position 0
+        assert_eq!(tx.message.account_keys[0], fee_payer_address);
 
-    // Two unique signers => two signatures
-    assert_eq!(tx.signatures.len(), 2);
+        // Two unique signers => two signatures
+        assert_eq!(tx.signatures.len(), 2);
 
-    // Two transfer instructions
-    assert_eq!(tx.message.instructions.len(), 2);
+        assert_eq!(tx.message.instructions.len(), sources.len());
 
-    // Verify signatures are at correct positions
-    let fee_payer_pos = tx
-        .message
-        .account_keys
-        .iter()
-        .position(|k| *k == fee_payer_address)
-        .unwrap();
-    let other_pos = tx
-        .message
-        .account_keys
-        .iter()
-        .position(|k| *k == other_address)
-        .unwrap();
-    assert_eq!(tx.signatures[fee_payer_pos], Signature::from(fee_payer_sig));
-    assert_eq!(tx.signatures[other_pos], Signature::from(other_sig));
+        // Verify all signers have non-default signatures
+        let fee_payer_pos = tx
+            .message
+            .account_keys
+            .iter()
+            .position(|k| *k == fee_payer_address)
+            .unwrap();
+        let other_pos = tx
+            .message
+            .account_keys
+            .iter()
+            .position(|k| *k == other_address)
+            .unwrap();
+        assert_ne!(tx.signatures[fee_payer_pos], Signature::default());
+        assert_ne!(tx.signatures[other_pos], Signature::default());
+    }
 }
