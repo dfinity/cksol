@@ -72,9 +72,9 @@ impl SchnorrSigner for IcSchnorrSigner {
 /// Panics if `sources` is empty or if the IC returns a signature
 /// that is not exactly 64 bytes.
 pub async fn create_signed_transfer_transaction(
+    fee_payer_account: Account,
     sources: &[(Account, Lamport)],
     destination_account: Account,
-    fee_payer_account: Account,
     recent_blockhash: Hash,
     signer: &impl SchnorrSigner,
 ) -> Result<Transaction, CreateTransferError> {

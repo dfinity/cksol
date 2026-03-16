@@ -67,9 +67,9 @@ async fn should_create_signed_transaction_with_single_source() {
     // Fee payer is the source, so only one signature needed
     let signer = MockSchnorrSigner::with_signatures(vec![fake_signature]);
     let tx = create_signed_transfer_transaction(
+        source_account,
         &[(source_account, amount)],
-        target_account,
-        source_account, // fee payer is the source
+        target_account, // fee payer is the source
         blockhash,
         &signer,
     )
@@ -123,9 +123,9 @@ async fn should_create_signed_transaction_with_multiple_sources() {
     // Fee payer (account_1) signature first, then account_2
     let signer = MockSchnorrSigner::with_signatures(vec![fake_sig_1, fake_sig_2]);
     let tx = create_signed_transfer_transaction(
+        account_1,
         &[(account_1, amount), (account_2, amount)],
-        target_account,
-        account_1, // fee payer
+        target_account, // fee payer
         blockhash,
         &signer,
     )
@@ -175,9 +175,9 @@ async fn should_fail_when_signing_is_rejected() {
     ))]);
 
     let result = create_signed_transfer_transaction(
+        source_account,
         &[(source_account, 500_000_000)],
         target_account,
-        source_account,
         blockhash,
         &signer,
     )
@@ -211,9 +211,9 @@ async fn should_fail_when_second_signing_fails() {
     ]);
 
     let result = create_signed_transfer_transaction(
+        account_1,
         &[(account_1, 100_000_000), (account_2, 100_000_000)],
         target_account,
-        account_1,
         blockhash,
         &signer,
     )
@@ -253,7 +253,7 @@ async fn should_fail_when_too_many_signatures() {
     };
 
     let result =
-        create_signed_transfer_transaction(&sources, target_account, fee_payer, blockhash, &signer)
+        create_signed_transfer_transaction(fee_payer, &sources, target_account, blockhash, &signer)
             .await;
 
     assert!(
@@ -293,7 +293,7 @@ async fn should_not_fail_for_max_signatures() {
     let signer = MockSchnorrSigner::with_signatures(vec![[0x11u8; 64]; MAX_SIGNATURES as usize]);
 
     let result =
-        create_signed_transfer_transaction(&sources, target_account, fee_payer, blockhash, &signer)
+        create_signed_transfer_transaction(fee_payer, &sources, target_account, blockhash, &signer)
             .await;
 
     assert!(result.is_ok());
@@ -323,9 +323,9 @@ async fn should_create_signed_transaction_with_separate_fee_payer() {
     // Fee payer is NOT in sources, so two signatures needed
     let signer = MockSchnorrSigner::with_signatures(vec![[0x11u8; 64], [0x22u8; 64]]);
     let tx = create_signed_transfer_transaction(
+        fee_payer_account,
         &[(source_account, amount)],
-        target_account,
-        fee_payer_account, // fee payer is separate from source
+        target_account, // fee payer is separate from source
         blockhash,
         &signer,
     )
@@ -384,9 +384,9 @@ async fn should_create_signed_transaction_with_fee_payer_also_in_sources() {
     // Fee payer IS in sources, so only two unique signers
     let signer = MockSchnorrSigner::with_signatures(vec![fee_payer_sig, other_sig]);
     let tx = create_signed_transfer_transaction(
+        fee_payer_account,
         &[(fee_payer_account, amount), (other_source, amount)],
-        target_account,
-        fee_payer_account, // fee payer is also a source
+        target_account, // fee payer is also a source
         blockhash,
         &signer,
     )
