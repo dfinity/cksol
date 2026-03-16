@@ -53,9 +53,9 @@ fn apply_state_transition(state: &mut State, payload: &EventType) {
         EventType::SentWithdrawalTransaction {
             request,
             signature,
-            ..
+            transaction,
         } => {
-            state.process_sent_withdrawal_transaction(request, signature);
+            state.process_sent_withdrawal_transaction(request, signature, transaction);
         }
     }
 }

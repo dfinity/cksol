@@ -84,7 +84,7 @@ pub struct State {
     quarantined_deposits: BTreeMap<DepositId, Deposit>,
     minted_deposits: BTreeMap<DepositId, MintedDeposit>,
     pending_withdrawal_requests: BTreeMap<LedgerBurnIndex, WithdrawSolRequest>,
-    sent_withdrawal_requests: BTreeMap<LedgerBurnIndex, Signature>,
+    sent_withdrawal_requests: BTreeMap<LedgerBurnIndex, SentWithdrawalTransaction>,
     funds_to_consolidate: BTreeMap<Account, Lamport>,
     submitted_transactions: BTreeMap<Signature, Message>,
     active_tasks: BTreeSet<TaskType>,
@@ -319,9 +319,9 @@ impl State {
         if self.pending_withdrawal_requests.contains_key(&burn_index) {
             return WithdrawSolStatus::Pending;
         }
-        if let Some(signature) = self.sent_withdrawal_requests.get(&burn_index) {
+        if let Some(sent) = self.sent_withdrawal_requests.get(&burn_index) {
             return WithdrawSolStatus::TxSent(SolTransaction {
-                transaction_hash: signature.to_string(),
+                transaction_hash: sent.signature.to_string(),
             });
         }
         WithdrawSolStatus::NotFound
@@ -387,6 +387,7 @@ impl State {
         &mut self,
         request: &WithdrawSolRequest,
         signature: &Signature,
+        transaction: &Message,
     ) {
         let removed = self
             .pending_withdrawal_requests
@@ -403,8 +404,14 @@ impl State {
             request.burn_block_index
         );
         assert_eq!(
-            self.sent_withdrawal_requests
-                .insert(request.burn_block_index, *signature),
+            self.sent_withdrawal_requests.insert(
+                request.burn_block_index,
+                SentWithdrawalTransaction {
+                    request: request.clone(),
+                    signature: *signature,
+                    transaction: transaction.clone(),
+                }
+            ),
             None,
             "Attempted to send transaction for already sent withdrawal request: {:?}",
             request.burn_block_index
@@ -502,6 +509,13 @@ pub struct Deposit {
 pub struct MintedDeposit {
     pub block_index: LedgerMintIndex,
     pub deposit: Deposit,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SentWithdrawalTransaction {
+    pub request: WithdrawSolRequest,
+    pub signature: Signature,
+    pub transaction: Message,
 }
 
 #[derive(Copy, Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
