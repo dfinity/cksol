@@ -8,10 +8,14 @@ use icrc_ledger_types::icrc2::transfer_from::TransferFromError;
 use num_traits::ToPrimitive;
 use solana_address::Address;
 
+use canlog::log;
+use cksol_types_internal::log::Priority;
+
 use crate::{
     guard::{TimerGuard, withdraw_sol_guard},
     ledger::burn,
     runtime::CanisterRuntime,
+    sol_transfer::{IcSchnorrSigner, create_signed_transfer_transaction},
     state::{
         TaskType,
         audit::process_event,
@@ -116,15 +120,78 @@ pub async fn withdraw_sol<R: CanisterRuntime>(
     Ok(WithdrawSolOk { block_index })
 }
 
-pub async fn process_pending_withdrawals<R: CanisterRuntime>(_runtime: R) {
+pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: R) {
     let _guard = match TimerGuard::new(TaskType::WithdrawalProcessing) {
         Ok(guard) => guard,
         Err(_) => return,
     };
 
-    if let Some(_pending_requests) =
+    let Some(pending_requests) =
         read_state(|state| state.next_pending_withdrawal_requests(MAX_WITHDRAWALS_PER_BATCH))
+    else {
+        return;
+    };
+
+    let master_public_key = match read_state(|s| s.minter_public_key().cloned()) {
+        Some(key) => key,
+        None => {
+            log!(Priority::Debug, "Minter public key not yet available, skipping withdrawal processing");
+            return;
+        }
+    };
+
+    let recent_blockhash = match read_state(|state| state.sol_rpc_client(runtime.inter_canister_call_runtime()))
+        .estimate_recent_blockhash()
+        .send()
+        .await
     {
-        // TODO DEFI-2671: Build and submit withdrawal transactions
+        Ok(blockhash) => blockhash,
+        Err(errors) => {
+            log!(Priority::Debug, "Failed to estimate recent blockhash: {errors:?}");
+            return;
+        }
+    };
+
+    let minter_account: Account = ic_cdk::api::canister_self().into();
+    let signer = IcSchnorrSigner;
+
+    for request in pending_requests {
+        let destination = Address::from(request.solana_address);
+        let transfer_amount = request
+            .withdrawal_amount
+            .checked_sub(request.withdrawal_fee)
+            .expect("BUG: withdrawal_amount must be >= withdrawal_fee");
+
+        let transaction = match create_signed_transfer_transaction(
+            &master_public_key,
+            &[(minter_account, transfer_amount)],
+            destination,
+            recent_blockhash,
+            &signer,
+        )
+        .await
+        {
+            Ok(tx) => tx,
+            Err(e) => {
+                log!(Priority::Debug, "Failed to create withdrawal transaction for burn index {:?}: {e}", request.burn_block_index);
+                continue;
+            }
+        };
+
+        let signature = transaction.signatures[0];
+
+        mutate_state(|state| {
+            process_event(
+                state,
+                EventType::SentWithdrawalTransaction {
+                    request: request.clone(),
+                    signature,
+                    transaction: transaction.message.clone(),
+                },
+                &runtime,
+            )
+        });
+
+        // TODO: Send the transaction to the Solana network via RPC
     }
 }

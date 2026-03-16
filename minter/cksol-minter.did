@@ -285,6 +285,17 @@ type EventType = variant {
         // and the amount consolidated from each account.
         deposits: vec record { Account; Lamport };
     };
+    // A withdrawal transaction was signed and is ready to be sent to the network.
+    SentWithdrawalTransaction : record {
+        // The burn transaction index on the ckSOL ledger.
+        burn_block_index: nat64;
+        // The destination Solana address.
+        solana_address: blob;
+        // The transaction signature.
+        signature: Signature;
+        // The serialized (unsigned) transaction message.
+        transaction: blob;
+    };
 };
 
 // Represents a Solana transaction depositing funds to a ckSOL account.

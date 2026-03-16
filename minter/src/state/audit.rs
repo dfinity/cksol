@@ -50,6 +50,13 @@ fn apply_state_transition(state: &mut State, payload: &EventType) {
         EventType::ConsolidatedDeposits { deposits } => {
             state.process_consolidated_deposits(deposits);
         }
+        EventType::SentWithdrawalTransaction {
+            request,
+            signature,
+            ..
+        } => {
+            state.process_sent_withdrawal_transaction(request, signature);
+        }
     }
 }
 

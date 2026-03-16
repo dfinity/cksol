@@ -79,6 +79,19 @@ pub enum EventType {
         #[n(0)]
         deposits: Vec<(Account, Lamport)>,
     },
+    /// A withdrawal transaction was signed and is ready to be sent to the network.
+    #[n(8)]
+    SentWithdrawalTransaction {
+        /// The withdrawal request included in this transaction.
+        #[n(0)]
+        request: WithdrawSolRequest,
+        /// The transaction signature.
+        #[cbor(n(1), with = "cbor::signature")]
+        signature: Signature,
+        /// The transaction message.
+        #[cbor(n(2), with = "cbor::message")]
+        transaction: Message,
+    },
 }
 
 /// Payload of the `AcceptedWithdrawSolRequest` event.

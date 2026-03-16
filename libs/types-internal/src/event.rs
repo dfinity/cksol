@@ -87,6 +87,17 @@ pub enum EventType {
         /// and the amount consolidated from each account.
         deposits: Vec<(Account, Lamport)>,
     },
+    /// A withdrawal transaction was signed and is ready to be sent to the network.
+    SentWithdrawalTransaction {
+        /// The burn transaction index on the ckSOL ledger.
+        burn_block_index: u64,
+        /// The destination Solana address.
+        solana_address: [u8; 32],
+        /// The transaction signature.
+        signature: Signature,
+        /// The serialized (unsigned) transaction message.
+        transaction: Vec<u8>,
+    },
 }
 
 /// Arguments for the `get_events` endpoint.

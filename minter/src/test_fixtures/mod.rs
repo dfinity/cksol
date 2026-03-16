@@ -274,6 +274,13 @@ pub mod arb {
             }),
             prop::collection::vec((arb_account(), any::<Lamport>()), 1..10)
                 .prop_map(|deposits| EventType::ConsolidatedDeposits { deposits }),
+            (arb_withdraw_sol_request(), arb_signature(), arb_message()).prop_map(
+                |(request, signature, transaction)| EventType::SentWithdrawalTransaction {
+                    request,
+                    signature,
+                    transaction,
+                },
+            ),
         ]
     }
 
