@@ -11,8 +11,8 @@ use icrc_ledger_types::{
 use pocket_ic::nonblocking::PocketIc;
 use serde_json::json;
 use sol_rpc_types::Lamport;
+use solana_address::{Address, address};
 use std::{str::FromStr, sync::Arc};
-use solana_address::{address, Address};
 use tokio::sync::Mutex;
 
 pub const DEFAULT_CALLER_ACCOUNT: Account = Account {

@@ -11,7 +11,7 @@ use cksol_types_internal::log::Priority;
 use ic_canister_runtime::Runtime;
 use icrc_ledger_types::icrc1::account::Account;
 use sol_rpc_client::SolRpcClient;
-use sol_rpc_types::{Lamport, MultiRpcResult, RpcError};
+use sol_rpc_types::{Lamport, MultiRpcResult};
 use solana_hash::Hash;
 use solana_signature::Signature;
 use std::time::Duration;

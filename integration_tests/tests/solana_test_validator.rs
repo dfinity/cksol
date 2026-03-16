@@ -152,6 +152,6 @@ async fn get_solana_balance(address: &Address) -> Lamport {
         SOLANA_VALIDATOR_URL.to_string(),
         CommitmentConfig::confirmed(),
     )
-        .get_balance(address)
-        .expect("Failed to get Solana balance")
+    .get_balance(address)
+    .expect("Failed to get Solana balance")
 }

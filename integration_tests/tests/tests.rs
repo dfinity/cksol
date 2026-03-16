@@ -18,7 +18,6 @@ use cksol_types_internal::{UpgradeArgs, event::EventType, log::Priority};
 use ic_pocket_canister_runtime::{JsonRpcResponse, MockHttpOutcalls, MockHttpOutcallsBuilder};
 use icrc_ledger_types::icrc1::account::Subaccount;
 use serde_json::json;
-use std::time::Duration;
 use tokio::join;
 
 mod get_deposit_address_tests {
