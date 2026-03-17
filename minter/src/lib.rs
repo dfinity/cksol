@@ -1,7 +1,7 @@
 pub mod address;
 pub mod consolidate;
-mod guard;
 mod cycles;
+mod guard;
 mod ledger;
 pub mod lifecycle;
 mod numeric;

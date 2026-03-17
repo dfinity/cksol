@@ -15,7 +15,10 @@ pub fn check_caller_available_cycles<R: CanisterRuntime>(
 ) -> Result<u128, InsufficientCyclesError> {
     let available = runtime.msg_cycles_available();
     if available < expected {
-        return Err(InsufficientCyclesError { expected, received: available });
+        return Err(InsufficientCyclesError {
+            expected,
+            received: available,
+        });
     }
     Ok(available)
 }
