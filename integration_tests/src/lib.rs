@@ -24,6 +24,7 @@ use pocket_ic::{PocketIcBuilder, RejectResponse, nonblocking::PocketIc};
 use serde::de::DeserializeOwned;
 use sol_rpc_client::SolRpcClient;
 use sol_rpc_types::{Lamport, RpcAccess};
+use std::ops::Deref;
 use std::{default::Default, env::var, fs, path::PathBuf, time::Duration, vec};
 
 pub mod events;
@@ -88,6 +89,7 @@ pub struct Setup {
     env: Option<PocketIc>,
     minter_canister_id: CanisterId,
     ledger_canister_id: CanisterId,
+    sol_rpc_canister_id: CanisterId,
     proxy_canister_id: Option<CanisterId>,
 }
 
@@ -208,6 +210,7 @@ impl Setup {
             env: Some(env),
             minter_canister_id,
             ledger_canister_id,
+            sol_rpc_canister_id,
             proxy_canister_id,
         }
     }
@@ -269,6 +272,23 @@ impl Setup {
         })
     }
 
+    pub fn proxy(&self) -> Canister<'_> {
+        Canister {
+            runtime: self.runtime(Setup::DEFAULT_CALLER),
+            id: self
+                .proxy_canister_id
+                .expect("Proxy canister not installed"),
+        }
+    }
+
+    pub fn sol_rpc(&self) -> SolRpcClient<PocketIcRuntime<'_>> {
+        SolRpcClient::builder(
+            self.runtime(Setup::DEFAULT_CALLER),
+            self.sol_rpc_canister_id,
+        )
+        .build()
+    }
+
     pub async fn tick(&self) -> () {
         self.env.as_ref().unwrap().tick().await
     }
@@ -295,6 +315,14 @@ impl Drop for Setup {
 
 pub struct CkSolMinter<'a>(Canister<'a>);
 
+impl<'a> Deref for CkSolMinter<'a> {
+    type Target = Canister<'a>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 impl CkSolMinter<'_> {
     pub async fn get_deposit_address(&self, args: GetDepositAddressArgs) -> Address {
         self.try_get_deposit_address(args)
@@ -306,8 +334,7 @@ impl CkSolMinter<'_> {
         &self,
         args: GetDepositAddressArgs,
     ) -> Result<Address, String> {
-        self.0
-            .try_update_call("get_deposit_address", (args,), 0)
+        self.try_update_call("get_deposit_address", (args,), 0)
             .await
     }
 
@@ -343,8 +370,7 @@ impl CkSolMinter<'_> {
         args: UpdateBalanceArgs,
         cycles: u128,
     ) -> Result<Result<DepositStatus, UpdateBalanceError>, String> {
-        self.0
-            .try_update_call("update_balance", (args,), cycles)
+        self.try_update_call("update_balance", (args,), cycles)
             .await
     }
 
@@ -352,17 +378,16 @@ impl CkSolMinter<'_> {
         &self,
         args: WithdrawSolArgs,
     ) -> Result<WithdrawSolOk, WithdrawSolError> {
-        self.0.update_call("withdraw_sol", (args,), 0).await
+        self.update_call("withdraw_sol", (args,), 0).await
     }
 
     pub async fn withdraw_sol_status(&self, block_index: u64) -> WithdrawSolStatus {
-        self.0
-            .update_call("withdraw_sol_status", (block_index,), 0)
+        self.update_call("withdraw_sol_status", (block_index,), 0)
             .await
     }
 
     pub async fn get_minter_info(&self) -> MinterInfo {
-        self.0.query_call("get_minter_info", ()).await
+        self.query_call("get_minter_info", ()).await
     }
 
     pub async fn retrieve_logs(&self, priority: &Priority) -> Vec<LogEntry<Priority>> {
@@ -372,7 +397,7 @@ impl CkSolMinter<'_> {
             headers: vec![],
             body: Default::default(),
         };
-        let response: HttpResponse = self.0.query_call("http_request", (request,)).await;
+        let response: HttpResponse = self.query_call("http_request", (request,)).await;
         serde_json::from_slice::<Log<Priority>>(&response.body)
             .expect("failed to parse SOL RPC canister log")
             .entries
@@ -402,7 +427,6 @@ impl CkSolMinter<'_> {
         use cksol_types_internal::event::GetEventsArgs;
 
         let call_result = self
-            .0
             .runtime
             .as_ref()
             .query_call(
@@ -416,13 +440,6 @@ impl CkSolMinter<'_> {
         Decode!(&call_result, GetEventsResult).unwrap()
     }
 
-    pub async fn upgrade(
-        &self,
-        upgrade_args: cksol_types_internal::UpgradeArgs,
-    ) -> Result<(), RejectResponse> {
-        self.0.upgrade(upgrade_args).await
-    }
-
     pub fn with_http_mocks(mut self, mocks: impl ExecuteHttpOutcallMocks + 'static) -> Self {
         self.0 = self.0.with_http_mocks(mocks);
         self
@@ -431,10 +448,17 @@ impl CkSolMinter<'_> {
 
 pub struct Ledger<'a>(Canister<'a>);
 
+impl<'a> Deref for Ledger<'a> {
+    type Target = Canister<'a>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 impl Ledger<'_> {
     pub async fn balance_of(&self, account: Account) -> u64 {
-        self.0
-            .update_call::<_, Nat>("icrc1_balance_of", (account,), 0)
+        self.update_call::<_, Nat>("icrc1_balance_of", (account,), 0)
             .await
             .0
             .to_u64()
@@ -457,8 +481,7 @@ impl Ledger<'_> {
             memo: None,
             created_at_time: None,
         };
-        self.0
-            .update_call::<_, Result<Nat, ApproveError>>("icrc2_approve", (args,), 0)
+        self.update_call::<_, Result<Nat, ApproveError>>("icrc2_approve", (args,), 0)
             .await
             .expect("approve call failed")
             .0
@@ -471,18 +494,10 @@ impl Ledger<'_> {
             start: Nat::from(block_index),
             length: Nat::from(1u64),
         }];
-        let result: GetBlocksResult = self.0.query_call("icrc3_get_blocks", (args,)).await;
+        let result: GetBlocksResult = self.query_call("icrc3_get_blocks", (args,)).await;
         assert_eq!(result.blocks.len(), 1);
         assert_eq!(result.blocks[0].id, Nat::from(block_index));
         result.blocks[0].block.clone()
-    }
-
-    pub async fn start(&self) {
-        self.0.start().await;
-    }
-
-    pub async fn stop(&self) {
-        self.0.stop().await;
     }
 }
 
@@ -573,6 +588,10 @@ impl Canister<'_> {
     pub fn with_http_mocks(mut self, mocks: impl ExecuteHttpOutcallMocks + 'static) -> Self {
         self.runtime = self.runtime.with_http_mocks(mocks);
         self
+    }
+
+    pub async fn cycle_balance(&self) -> u128 {
+        self.runtime.as_ref().cycle_balance(self.id).await
     }
 }
 
