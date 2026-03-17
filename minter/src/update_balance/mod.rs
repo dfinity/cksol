@@ -71,10 +71,8 @@ async fn try_accept_deposit<R: CanisterRuntime>(
     signature: Signature,
     deposit_id: DepositId,
 ) -> Result<Deposit, UpdateBalanceError> {
-    let cycles_to_attach = check_caller_available_cycles(
-        runtime,
-        read_state(|state| state.update_balance_required_cycles()),
-    )?;
+    let cycles_to_attach = read_state(|state| state.update_balance_required_cycles());
+    check_caller_available_cycles(runtime, cycles_to_attach)?;
 
     let maybe_transaction = try_get_transaction(runtime, signature, cycles_to_attach)
         .await
@@ -87,7 +85,10 @@ async fn try_accept_deposit<R: CanisterRuntime>(
         })?;
 
     // Charge only the cost of making the `getTransaction` call to the SOL RPC canister
-    charge_caller_cycles(runtime, cycles_to_attach - runtime.msg_cycles_refunded());
+    charge_caller_cycles(
+        runtime,
+        cycles_to_attach.saturating_sub(runtime.msg_cycles_refunded()),
+    );
 
     let transaction = match maybe_transaction {
         Some(transaction) => Ok(transaction),
