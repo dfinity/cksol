@@ -16,10 +16,11 @@ mod memo;
 /// The outcome of processing a Solana deposit transaction.
 #[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize, Serialize)]
 pub enum DepositStatus {
-    // TODO DEFI-2643: Add `deposit_amount` field
     /// The transaction is a valid deposit, but the corresponding ckSOL tokens
     /// have not yet been minted.
     Processing {
+        /// The deposit amount.
+        deposit_amount: Lamport,
         /// The amount to mint (deposit amount minus fees).
         amount_to_mint: Lamport,
         /// The Solana transaction that caused the balance update.

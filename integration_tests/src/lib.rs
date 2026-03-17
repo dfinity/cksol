@@ -23,8 +23,8 @@ use num_traits::cast::ToPrimitive;
 use pocket_ic::{PocketIcBuilder, RejectResponse, nonblocking::PocketIc};
 use serde::de::DeserializeOwned;
 use sol_rpc_client::SolRpcClient;
-use sol_rpc_types::{Lamport, Mode, RpcAccess};
-use std::{default::Default, env::var, fs, path::PathBuf, vec};
+use sol_rpc_types::{Lamport, RpcAccess};
+use std::{default::Default, env::var, fs, path::PathBuf, time::Duration, vec};
 
 pub mod events;
 pub mod fixtures;
@@ -39,20 +39,15 @@ pub enum PocketIcMode {
 
 #[derive(Default)]
 pub struct SetupBuilder {
-    caller: Option<Principal>,
     make_live: Option<PocketIcMode>,
     sol_rpc_install_args: Option<sol_rpc_types::InstallArgs>,
     initial_ledger_balances: Option<Vec<(Account, Nat)>>,
+    proxy_canister: bool,
 }
 
 impl SetupBuilder {
     pub fn new() -> Self {
         Self::default()
-    }
-
-    pub fn with_caller(mut self, caller: Principal) -> Self {
-        self.caller = Some(caller);
-        self
     }
 
     pub fn with_initial_ledger_balances(
@@ -73,17 +68,17 @@ impl SetupBuilder {
         self
     }
 
+    pub fn with_proxy_canister(mut self) -> Self {
+        self.proxy_canister = true;
+        self
+    }
+
     pub async fn build(self) -> Setup {
         Setup::new(
-            self.caller,
             self.make_live.unwrap_or_default(),
-            self.sol_rpc_install_args
-                .unwrap_or(sol_rpc_types::InstallArgs {
-                    // TODO DEFI-2643: Use `Normal` mode once proxy canister is setup
-                    mode: Some(Mode::Demo),
-                    ..sol_rpc_types::InstallArgs::default()
-                }),
+            self.sol_rpc_install_args.unwrap_or_default(),
             self.initial_ledger_balances,
+            self.proxy_canister,
         )
         .await
     }
@@ -93,24 +88,25 @@ pub struct Setup {
     env: Option<PocketIc>,
     minter_canister_id: CanisterId,
     ledger_canister_id: CanisterId,
-    caller: Option<Principal>,
+    proxy_canister_id: Option<CanisterId>,
 }
 
 impl Setup {
     pub const DEFAULT_DEPOSIT_FEE: Lamport = 10_000_000; // 0.01 SOL
     pub const DEFAULT_WITHDRAWAL_FEE: Lamport = 1_000_000; // 0.001 SOL
     pub const DEFAULT_CONTROLLER: Principal = Principal::from_slice(&[0x9d, 0xf7, 0x01]);
-    pub const DEFAULT_CALLER: Principal = Principal::from_slice(&[0x9d, 0xf7, 0x02]);
+    pub const DEFAULT_CALLER: Principal =
+        Principal::from_slice(&[0xff, 0xff, 0xff, 0xff, 0xff, 0xe0, 0x0, 0x3, 0x1, 0x1]);
     // Must be >= DEFAULT_WITHDRAWAL_FEE + SOLANA_RENT_EXEMPTION_THRESHOLD (890,880)
     pub const DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT: Lamport = 2_000_000; // 0.002 SOL
     pub const DEFAULT_MINIMUM_DEPOSIT_AMOUNT: Lamport = 10_000_000; // 0.01 SOL
     pub const DEFAULT_UPDATE_BALANCE_REQUIRED_CYCLES: u128 = 1_000_000_000_000;
 
     pub async fn new(
-        caller: Option<Principal>,
         make_live: PocketIcMode,
         sol_rpc_install_args: sol_rpc_types::InstallArgs,
         initial_ledger_balances: Option<Vec<(Account, Nat)>>,
+        with_proxy_canister: bool,
     ) -> Self {
         let env = PocketIcBuilder::new()
             .with_nns_subnet() //make_live requires NNS subnet.
@@ -173,6 +169,34 @@ impl Setup {
         )
         .await;
 
+        // Install proxy canister
+        let proxy_canister_id = if with_proxy_canister {
+            let proxy_canister_id = env
+                .create_canister_with_settings(
+                    None,
+                    Some(CanisterSettings {
+                        // Only controllers have access to the proxy service, so we also allow
+                        // the default caller
+                        controllers: Some(vec![Self::DEFAULT_CONTROLLER, Setup::DEFAULT_CALLER]),
+                        ..CanisterSettings::default()
+                    }),
+                )
+                .await;
+            assert_eq!(proxy_canister_id, Setup::DEFAULT_CALLER);
+            env.add_cycles(proxy_canister_id, u64::MAX as u128).await;
+
+            env.install_canister(
+                proxy_canister_id,
+                proxy_wasm().await,
+                Encode!().unwrap(),
+                Some(Self::DEFAULT_CONTROLLER),
+            )
+            .await;
+            Some(proxy_canister_id)
+        } else {
+            None
+        };
+
         let env = if let PocketIcMode::LiveMode = make_live {
             let mut env = env;
             let _ = env.make_live(None).await;
@@ -185,7 +209,7 @@ impl Setup {
             env: Some(env),
             minter_canister_id,
             ledger_canister_id,
-            caller,
+            proxy_canister_id,
         }
     }
 
@@ -215,16 +239,22 @@ impl Setup {
         .expect("BUG: Failed to call updateApiKeys");
     }
 
-    pub fn runtime(&self) -> PocketIcRuntime<'_> {
-        PocketIcRuntime::new(
-            self.env.as_ref().unwrap(),
-            self.caller.unwrap_or(Self::DEFAULT_CALLER),
-        )
+    pub fn runtime(&self, caller: Principal) -> PocketIcRuntime<'_> {
+        let runtime = PocketIcRuntime::new(self.env.as_ref().unwrap(), caller);
+        if let Some(proxy_canister_id) = self.proxy_canister_id {
+            runtime.with_proxy_canister(proxy_canister_id)
+        } else {
+            runtime
+        }
     }
 
     pub fn minter(&self) -> CkSolMinter<'_> {
+        self.minter_with_caller(Setup::DEFAULT_CALLER)
+    }
+
+    pub fn minter_with_caller(&self, caller: Principal) -> CkSolMinter<'_> {
         CkSolMinter(Canister {
-            runtime: self.runtime(),
+            runtime: self.runtime(caller),
             id: self.minter_canister_id,
         })
     }
@@ -235,18 +265,17 @@ impl Setup {
 
     pub fn ledger(&self) -> Ledger<'_> {
         Ledger(Canister {
-            runtime: self.runtime(),
+            runtime: self.runtime(Setup::DEFAULT_CALLER),
             id: self.ledger_canister_id,
         })
     }
 
-    pub fn with_caller(mut self, caller: Principal) -> Self {
-        self.caller = Some(caller);
-        self
-    }
-
     pub async fn tick(&self) -> () {
         self.env.as_ref().unwrap().tick().await
+    }
+
+    pub async fn advance_time(&self, duration: Duration) -> () {
+        self.env.as_ref().unwrap().advance_time(duration).await
     }
 
     pub async fn drop(self) {
@@ -278,7 +307,9 @@ impl CkSolMinter<'_> {
         &self,
         args: GetDepositAddressArgs,
     ) -> Result<Address, String> {
-        self.0.try_update_call("get_deposit_address", (args,)).await
+        self.0
+            .try_update_call("get_deposit_address", (args,), 0)
+            .await
     }
 
     pub async fn update_balance(
@@ -290,23 +321,44 @@ impl CkSolMinter<'_> {
             .expect("update_balance failed")
     }
 
+    pub async fn update_balance_with_cycles(
+        &self,
+        args: UpdateBalanceArgs,
+        cycles: u128,
+    ) -> Result<DepositStatus, UpdateBalanceError> {
+        self.try_update_balance_with_cycles(args, cycles)
+            .await
+            .expect("update_balance failed")
+    }
+
     pub async fn try_update_balance(
         &self,
         args: UpdateBalanceArgs,
     ) -> Result<Result<DepositStatus, UpdateBalanceError>, String> {
-        self.0.try_update_call("update_balance", (args,)).await
+        self.try_update_balance_with_cycles(args, Setup::DEFAULT_UPDATE_BALANCE_REQUIRED_CYCLES)
+            .await
+    }
+
+    pub async fn try_update_balance_with_cycles(
+        &self,
+        args: UpdateBalanceArgs,
+        cycles: u128,
+    ) -> Result<Result<DepositStatus, UpdateBalanceError>, String> {
+        self.0
+            .try_update_call("update_balance", (args,), cycles)
+            .await
     }
 
     pub async fn withdraw_sol(
         &self,
         args: WithdrawSolArgs,
     ) -> Result<WithdrawSolOk, WithdrawSolError> {
-        self.0.update_call("withdraw_sol", (args,)).await
+        self.0.update_call("withdraw_sol", (args,), 0).await
     }
 
     pub async fn withdraw_sol_status(&self, block_index: u64) -> WithdrawSolStatus {
         self.0
-            .update_call("withdraw_sol_status", (block_index,))
+            .update_call("withdraw_sol_status", (block_index,), 0)
             .await
     }
 
@@ -383,7 +435,7 @@ pub struct Ledger<'a>(Canister<'a>);
 impl Ledger<'_> {
     pub async fn balance_of(&self, account: Account) -> u64 {
         self.0
-            .update_call::<_, Nat>("icrc1_balance_of", (account,))
+            .update_call::<_, Nat>("icrc1_balance_of", (account,), 0)
             .await
             .0
             .to_u64()
@@ -407,7 +459,7 @@ impl Ledger<'_> {
             created_at_time: None,
         };
         self.0
-            .update_call::<_, Result<Nat, ApproveError>>("icrc2_approve", (args,))
+            .update_call::<_, Result<Nat, ApproveError>>("icrc2_approve", (args,), 0)
             .await
             .expect("approve call failed")
             .0
@@ -441,23 +493,28 @@ pub struct Canister<'a> {
 }
 
 impl Canister<'_> {
-    async fn update_call<In, Out>(&self, method: &str, args: In) -> Out
+    async fn update_call<In, Out>(&self, method: &str, args: In, cycles: u128) -> Out
     where
         In: ArgumentEncoder + Send,
         Out: CandidType + DeserializeOwned,
     {
-        self.try_update_call(method, args)
+        self.try_update_call(method, args, cycles)
             .await
             .unwrap_or_else(|e| panic!("Update call failed: {e}"))
     }
 
-    async fn try_update_call<In, Out>(&self, method: &str, args: In) -> Result<Out, String>
+    async fn try_update_call<In, Out>(
+        &self,
+        method: &str,
+        args: In,
+        cycles: u128,
+    ) -> Result<Out, String>
     where
         In: ArgumentEncoder + Send,
         Out: CandidType + DeserializeOwned,
     {
         self.runtime
-            .update_call(self.id, method, args, 0)
+            .update_call(self.id, method, args, cycles)
             .await
             .map_err(|e| format!("{:?}", e))
     }
@@ -554,6 +611,13 @@ async fn sol_rpc_wasm() -> Vec<u8> {
 async fn ledger_wasm() -> Vec<u8> {
     const DOWNLOAD_PATH: &str = "../wasms/ic-icrc1-ledger.wasm.gz";
     const DOWNLOAD_URL: &str = "https://github.com/dfinity/ic/releases/download/ledger-suite-icrc-2026-02-02/ic-icrc1-ledger.wasm.gz";
+    canister_wasm(DOWNLOAD_PATH, DOWNLOAD_URL).await
+}
+
+async fn proxy_wasm() -> Vec<u8> {
+    const DOWNLOAD_PATH: &str = "../wasms/proxy.wasm";
+    const DOWNLOAD_URL: &str =
+        "https://github.com/dfinity/proxy-canister/releases/download/v0.1.0/proxy.wasm";
     canister_wasm(DOWNLOAD_PATH, DOWNLOAD_URL).await
 }
 

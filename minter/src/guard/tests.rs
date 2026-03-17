@@ -1,5 +1,6 @@
 use crate::{
-    guard::{GuardError, MAX_CONCURRENT, update_balance_guard},
+    guard::{GuardError, MAX_CONCURRENT, TimerGuard, TimerGuardError, update_balance_guard},
+    state::TaskType,
     test_fixtures::init_state,
 };
 use candid::Principal;
@@ -16,48 +17,97 @@ fn account(id: u64, sub: Option<u8>) -> Account {
     }
 }
 
-#[test]
-fn should_prevent_concurrent_access_to_same_account() {
-    init_state();
+mod guard {
+    use super::*;
 
-    // Effectively the same Account
-    let account1 = account(0, None);
-    let account2 = account(0, Some(0));
-    {
+    #[test]
+    fn should_prevent_concurrent_access_to_same_account() {
+        init_state();
+
+        // Effectively the same Account
+        let account1 = account(0, None);
+        let account2 = account(0, Some(0));
+        {
+            let _guard = update_balance_guard(account1).unwrap();
+            let res = update_balance_guard(account2).err();
+            assert_eq!(res, Some(GuardError::AlreadyProcessing));
+        }
         let _guard = update_balance_guard(account1).unwrap();
-        let res = update_balance_guard(account2).err();
-        assert_eq!(res, Some(GuardError::AlreadyProcessing));
     }
-    let _guard = update_balance_guard(account1).unwrap();
-}
 
-#[test]
-fn should_allow_access_after_guard_has_been_dropped() {
-    init_state();
+    #[test]
+    fn should_allow_access_after_guard_has_been_dropped() {
+        init_state();
 
-    let account = account(0, None);
-    {
+        let account = account(0, None);
+        {
+            let _guard = update_balance_guard(account).unwrap();
+        }
         let _guard = update_balance_guard(account).unwrap();
     }
-    let _guard = update_balance_guard(account).unwrap();
+
+    #[test]
+    fn should_prevent_more_than_max_concurrent_access() {
+        init_state();
+
+        let guards: Vec<_> = (0..MAX_CONCURRENT / 2)
+            .map(|id| {
+                update_balance_guard(account(0, Some(id as u8))).unwrap_or_else(|e| {
+                    panic!("Could not create guard for subaccount {id}: {e:#?}")
+                })
+            })
+            .chain((MAX_CONCURRENT / 2..MAX_CONCURRENT).map(|id| {
+                update_balance_guard(account(id as u64, None))
+                    .unwrap_or_else(|e| panic!("Could not create guard for principal {id}: {e:#?}"))
+            }))
+            .collect();
+        assert_eq!(guards.len(), MAX_CONCURRENT);
+        let account = account(MAX_CONCURRENT as u64 + 1, None);
+        let res = update_balance_guard(account).err();
+        assert_eq!(res, Some(GuardError::TooManyConcurrentRequests));
+    }
 }
 
-#[test]
-fn should_prevent_more_than_max_concurrent_access() {
-    init_state();
+mod timer_guard {
+    use super::*;
 
-    let guards: Vec<_> = (0..MAX_CONCURRENT / 2)
-        .map(|id| {
-            update_balance_guard(account(0, Some(id as u8)))
-                .unwrap_or_else(|e| panic!("Could not create guard for subaccount {id}: {e:#?}"))
-        })
-        .chain((MAX_CONCURRENT / 2..MAX_CONCURRENT).map(|id| {
-            update_balance_guard(account(id as u64, None))
-                .unwrap_or_else(|e| panic!("Could not create guard for principal {id}: {e:#?}"))
-        }))
-        .collect();
-    assert_eq!(guards.len(), MAX_CONCURRENT);
-    let account = account(MAX_CONCURRENT as u64 + 1, None);
-    let res = update_balance_guard(account).err();
-    assert_eq!(res, Some(GuardError::TooManyConcurrentRequests));
+    #[test]
+    fn should_create_guard_successfully() {
+        init_state();
+
+        let guard = TimerGuard::new(TaskType::DepositConsolidation);
+        assert!(guard.is_ok());
+    }
+
+    #[test]
+    fn should_prevent_concurrent_access_to_same_task() {
+        init_state();
+
+        let _guard = TimerGuard::new(TaskType::DepositConsolidation).unwrap();
+        let result = TimerGuard::new(TaskType::DepositConsolidation);
+
+        assert_eq!(result, Err(TimerGuardError::AlreadyProcessing));
+    }
+
+    #[test]
+    fn should_allow_access_after_guard_has_been_dropped() {
+        init_state();
+
+        {
+            let _guard = TimerGuard::new(TaskType::DepositConsolidation).unwrap();
+        }
+
+        let guard = TimerGuard::new(TaskType::DepositConsolidation);
+        assert!(guard.is_ok());
+    }
+
+    #[test]
+    fn should_allow_concurrent_access_to_different_tasks() {
+        init_state();
+
+        let _guard1 = TimerGuard::new(TaskType::DepositConsolidation).unwrap();
+        let guard2 = TimerGuard::new(TaskType::Mint);
+
+        assert!(guard2.is_ok());
+    }
 }

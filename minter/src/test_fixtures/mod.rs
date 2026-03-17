@@ -20,6 +20,8 @@ use solana_transaction_status_client_types::{
 };
 use std::{collections::VecDeque, str::FromStr};
 
+pub mod runtime;
+
 pub const BLOCK_INDEX: u64 = 98763_u64;
 pub const DEPOSIT_FEE: Lamport = 10_000_000; // 0.01 SOL
 pub const WITHDRAWAL_FEE: Lamport = 5_000_000; // 0.005 SOL
@@ -294,8 +296,9 @@ pub mod deposit {
 
     pub fn deposit_status_processing() -> DepositStatus {
         DepositStatus::Processing {
-            signature: deposit_transaction_signature().into(),
+            deposit_amount: DEPOSIT_AMOUNT,
             amount_to_mint: DEPOSIT_AMOUNT - DEPOSIT_FEE,
+            signature: deposit_transaction_signature().into(),
         }
     }
 

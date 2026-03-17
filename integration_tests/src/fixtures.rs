@@ -19,7 +19,7 @@ pub const DEFAULT_CALLER_ACCOUNT: Account = Account {
     subaccount: None,
 };
 
-pub const DEFAULT_CALLER_DEPOSIT_ADDRESS: &str = "3fnbpmbdVhcvLMAgyGirs64B4BFFftmmSpeq7tuDD6tY";
+pub const DEFAULT_CALLER_DEPOSIT_ADDRESS: &str = "Cybe9JqZKtmhBoVGNHBxRVMUndZno5vNj5bS9GqTCty1";
 
 pub const DEPOSIT_AMOUNT: Lamport = 500_000_000;
 pub const EXPECTED_MINT_AMOUNT: Lamport = DEPOSIT_AMOUNT - Setup::DEFAULT_DEPOSIT_FEE;
@@ -28,9 +28,9 @@ pub const EXPECTED_MINT_AMOUNT: Lamport = DEPOSIT_AMOUNT - Setup::DEFAULT_DEPOSI
 /// the address [`DEFAULT_CALLER_DEPOSIT_ADDRESS`].
 /// Explorer link to transaction on Solana Devnet [here].
 ///
-/// [here]: https://explorer.solana.com/tx/5b5QLKzj24LtvBLSyKkQCrdSDp9Y66y48ns2vxbp4qTHnRSYd1jtFW9vwKXjbyLFFNpNupcRdvhsCpHTc7g6E77U?cluster=devnet
+/// [here]: https://explorer.solana.com/tx/5N4jM4eZGdeKJdFVFM7pY5GU79juLiJE7gALPpYXD1fkZEWkwc2cMW48Frxo8HkbRxLiSy5WkqLSEwb48Mam4amT?cluster=devnet
 pub const DEPOSIT_TRANSACTION_SIGNATURE: &str =
-    "5b5QLKzj24LtvBLSyKkQCrdSDp9Y66y48ns2vxbp4qTHnRSYd1jtFW9vwKXjbyLFFNpNupcRdvhsCpHTc7g6E77U";
+    "5N4jM4eZGdeKJdFVFM7pY5GU79juLiJE7gALPpYXD1fkZEWkwc2cMW48Frxo8HkbRxLiSy5WkqLSEwb48Mam4amT";
 
 pub fn deposit_transaction_signature() -> Signature {
     Signature::from_str(DEPOSIT_TRANSACTION_SIGNATURE).unwrap()
@@ -69,7 +69,7 @@ pub fn get_deposit_transaction_request() -> JsonRpcRequestMatcher {
 ///     "id": 1,
 ///     "method": "getTransaction",
 ///     "params": [
-///         "5b5QLKzj24LtvBLSyKkQCrdSDp9Y66y48ns2vxbp4qTHnRSYd1jtFW9vwKXjbyLFFNpNupcRdvhsCpHTc7g6E77U",
+///         "5N4jM4eZGdeKJdFVFM7pY5GU79juLiJE7gALPpYXD1fkZEWkwc2cMW48Frxo8HkbRxLiSy5WkqLSEwb48Mam4amT",
 ///         "base64"
 ///     ]
 /// }'
@@ -78,7 +78,7 @@ pub fn get_deposit_transaction_response() -> JsonRpcResponse {
     JsonRpcResponse::from(json!({
         "jsonrpc": "2.0",
         "result": {
-            "blockTime": 1771842069,
+            "blockTime": 1772109375,
             "meta": {
                 "computeUnitsConsumed": 150,
                 "costUnits": 1481,
@@ -94,14 +94,14 @@ pub fn get_deposit_transaction_response() -> JsonRpcResponse {
                     "Program 11111111111111111111111111111111 success"
                 ],
                 "postBalances": [
-                    395806440,
-                    1000000000,
+                    4895801440_u64,
+                    500000000,
                     1
                 ],
                 "postTokenBalances": [],
                 "preBalances": [
-                    895811440,
-                    500000000,
+                    5395806440_u64,
+                    0,
                     1
                 ],
                 "preTokenBalances": [],
@@ -110,9 +110,9 @@ pub fn get_deposit_transaction_response() -> JsonRpcResponse {
                     "Ok": null
                 }
             },
-            "slot": 444101463,
+            "slot": 444797867,
             "transaction": [
-                "AeV0KXYwhK0c6hKAXSKU0imPXE6vdSbzek8yUgxLbdGelH5CfCBX/r0R973eRJm/cece7VCf63bfHPXC8px69AcBAAEDIg5JU11WGypQAKfOpxcE0+UIiKney1G6hf+6GRXcmscnpwFQ/UrMJ1PeTEdnddpynJZVZBAGM5/4YyiEZlx8QQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOi6jUt2z2U/z9Kr4J2FrD7kS9YN/76NVpbnBD27jOzQBAgIAAQwCAAAAAGXNHQAAAAA=",
+                "Ado7qZrS2+XlOxCKlqFvtqzPQwvkbexjBYX9skG0JPuuFkwMe84uuIJnkzJumblHEWfuckKgoFqAOtmU0e2/oA4BAAEDIg5JU11WGypQAKfOpxcE0+UIiKney1G6hf+6GRXcmsex8D/gzAX2xhtlU/yePL5FYisYvQgGX/u3TyCP76Ea9AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAANGG6Jzufiyr0XO6naCKA8ZwrP6mGXfGtQf97Ki/UleMBAgIAAQwCAAAAAGXNHQAAAAA=",
                 "base64"
             ]
         },

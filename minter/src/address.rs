@@ -2,12 +2,14 @@ use crate::state::{SchnorrPublicKey, mutate_state, read_state};
 use ic_cdk::management_canister::{
     SchnorrAlgorithm, SchnorrKeyId, SchnorrPublicKeyArgs, schnorr_public_key,
 };
-use ic_ed25519::{DerivationIndex, DerivationPath, PublicKey};
+use ic_ed25519::{DerivationIndex, DerivationPath as IcDerivationPath, PublicKey};
 use icrc_ledger_types::icrc1::account::Account;
 use solana_address::Address;
 
 #[cfg(test)]
 mod tests;
+
+pub(crate) type DerivationPath = Vec<Vec<u8>>;
 
 pub async fn get_deposit_address(account: Account) -> Address {
     let master_public_key = lazy_get_schnorr_master_key().await;
@@ -17,7 +19,7 @@ pub async fn get_deposit_address(account: Account) -> Address {
     Address::from(public_key.serialize_raw())
 }
 
-async fn lazy_get_schnorr_master_key() -> SchnorrPublicKey {
+pub async fn lazy_get_schnorr_master_key() -> SchnorrPublicKey {
     if let Some(public_key) = read_state(|s| s.minter_public_key().cloned()) {
         return public_key;
     }
@@ -54,8 +56,11 @@ fn derive_public_key_from_account(
     derive_public_key(master_public_key, derivation_path(account))
 }
 
-fn derive_public_key(master_public_key: &SchnorrPublicKey, path: Vec<Vec<u8>>) -> PublicKey {
-    let derivation_path = DerivationPath::new(path.into_iter().map(DerivationIndex).collect());
+pub(crate) fn derive_public_key(
+    master_public_key: &SchnorrPublicKey,
+    path: DerivationPath,
+) -> PublicKey {
+    let derivation_path = IcDerivationPath::new(path.into_iter().map(DerivationIndex).collect());
     let (public_key, _chain_code) = master_public_key
         .public_key
         .derive_subkey_with_chain_code(&derivation_path, &master_public_key.chain_code);
@@ -63,7 +68,7 @@ fn derive_public_key(master_public_key: &SchnorrPublicKey, path: Vec<Vec<u8>>) -
     public_key
 }
 
-fn derivation_path(account: &Account) -> Vec<Vec<u8>> {
+pub(crate) fn derivation_path(account: &Account) -> DerivationPath {
     const SCHEMA_V1: u8 = 1;
     vec![
         vec![SCHEMA_V1],
