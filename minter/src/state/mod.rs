@@ -85,7 +85,7 @@ pub struct State {
     minted_deposits: BTreeMap<DepositId, MintedDeposit>,
     pending_withdrawal_requests: BTreeMap<LedgerBurnIndex, WithdrawSolRequest>,
     funds_to_consolidate: BTreeMap<Account, Lamport>,
-    submitted_transactions: BTreeMap<Signature, Message>,
+    submitted_transactions: BTreeMap<Signature, SubmittedTransaction>,
     active_tasks: BTreeSet<TaskType>,
 }
 
@@ -141,6 +141,10 @@ impl State {
 
     pub fn funds_to_consolidate(&self) -> &BTreeMap<Account, Lamport> {
         &self.funds_to_consolidate
+    }
+
+    pub fn submitted_transactions(&self) -> &BTreeMap<Signature, SubmittedTransaction> {
+        &self.submitted_transactions
     }
 
     pub fn deposit_status(&self, deposit_id: &DepositId) -> Option<DepositStatus> {
@@ -357,10 +361,20 @@ impl State {
         );
     }
 
-    fn process_transaction_submitted(&mut self, signature: &Signature, message: &Message) {
+    fn process_transaction_submitted(
+        &mut self,
+        signature: &Signature,
+        message: &Message,
+        signers: &[Account],
+    ) {
         assert_eq!(
-            self.submitted_transactions
-                .insert(*signature, message.clone()),
+            self.submitted_transactions.insert(
+                *signature,
+                SubmittedTransaction {
+                    message: message.clone(),
+                    signers: signers.to_vec(),
+                }
+            ),
             None,
             "Attempted to submit transaction with signature {signature:?} twice"
         );
@@ -384,6 +398,12 @@ impl State {
                 self.funds_to_consolidate.remove(account);
             }
         }
+    }
+
+    /// Removes a submitted transaction from tracking.
+    /// This is used when a transaction is confirmed or replaced.
+    pub fn remove_submitted_transaction(&mut self, signature: &Signature) {
+        self.submitted_transactions.remove(signature);
     }
 }
 
@@ -458,8 +478,19 @@ pub struct MintedDeposit {
     pub deposit: Deposit,
 }
 
+/// A transaction that has been submitted to the Solana network.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SubmittedTransaction {
+    /// The transaction message containing instructions and blockhash.
+    pub message: Message,
+    /// The accounts whose keys are used to sign the transaction.
+    /// The order matches the signature positions in the transaction.
+    pub signers: Vec<Account>,
+}
+
 #[derive(Copy, Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum TaskType {
     DepositConsolidation,
     Mint,
+    ResubmitTransactions,
 }

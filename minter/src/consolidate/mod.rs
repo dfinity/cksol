@@ -1,4 +1,5 @@
 use crate::{
+    address::{derivation_path, derive_public_key, lazy_get_schnorr_master_key},
     guard::TimerGuard,
     runtime::CanisterRuntime,
     sol_transfer::{
@@ -11,8 +12,10 @@ use canlog::log;
 use cksol_types_internal::log::Priority;
 use icrc_ledger_types::icrc1::account::Account;
 use sol_rpc_types::Lamport;
+use solana_address::Address;
 use solana_hash::Hash;
 use solana_signature::Signature;
+use std::collections::HashMap;
 use std::time::Duration;
 use thiserror::Error;
 
@@ -94,6 +97,15 @@ async fn submit_consolidation_transaction<R: CanisterRuntime>(
     )
     .await?;
 
+    // Build the signers list in the same order as they appear in the message's
+    // account_keys (i.e., matching signature positions).
+    let signers = signers_from_message(
+        &transaction.message,
+        minter_account,
+        funds_to_consolidate.iter().map(|(account, _)| *account),
+    )
+    .await;
+
     let message = transaction.message.clone();
     let signature = submit_transaction(runtime, transaction).await?;
 
@@ -112,10 +124,46 @@ async fn submit_consolidation_transaction<R: CanisterRuntime>(
             EventType::SubmittedTransaction {
                 signature,
                 transaction: message,
+                signers,
             },
             runtime,
         )
     });
 
     Ok(signature)
+}
+
+/// Builds the signers list in the same order as the message's account_keys.
+async fn signers_from_message(
+    message: &solana_message::Message,
+    fee_payer: Account,
+    source_accounts: impl Iterator<Item = Account>,
+) -> Vec<Account> {
+    let master_public_key = lazy_get_schnorr_master_key().await;
+
+    // Build a map from address to account
+    let mut address_to_account: HashMap<Address, Account> = HashMap::new();
+
+    // Add fee payer
+    let fee_payer_pubkey = derive_public_key(&master_public_key, derivation_path(&fee_payer));
+    let fee_payer_address = Address::from(fee_payer_pubkey.serialize_raw());
+    address_to_account.insert(fee_payer_address, fee_payer);
+
+    // Add source accounts
+    for account in source_accounts {
+        let pubkey = derive_public_key(&master_public_key, derivation_path(&account));
+        let address = Address::from(pubkey.serialize_raw());
+        address_to_account.insert(address, account);
+    }
+
+    // Extract signers in the order they appear in account_keys
+    let num_signers = message.header.num_required_signatures as usize;
+    message.account_keys[..num_signers]
+        .iter()
+        .map(|address| {
+            *address_to_account
+                .get(address)
+                .expect("BUG: signer address not found in account map")
+        })
+        .collect()
 }

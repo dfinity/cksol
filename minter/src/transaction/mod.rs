@@ -2,12 +2,15 @@ use crate::{runtime::CanisterRuntime, state::read_state};
 use cksol_types::UpdateBalanceError;
 use derive_more::From;
 use ic_canister_runtime::IcError;
-use sol_rpc_types::{CommitmentLevel, GetTransactionEncoding, Lamport, MultiRpcResult, RpcError};
+use sol_rpc_types::{
+    CommitmentLevel, GetSlotParams, GetTransactionEncoding, Lamport, MultiRpcResult, RpcError,
+};
 use solana_address::Address;
 use solana_hash::Hash;
 use solana_signature::Signature;
 use solana_transaction::Transaction;
 use solana_transaction_status_client_types::EncodedConfirmedTransactionWithStatusMeta;
+use solana_transaction_status_client_types::TransactionStatus;
 use thiserror::Error;
 
 #[cfg(test)]
@@ -87,6 +90,58 @@ pub async fn get_recent_blockhash<R: CanisterRuntime>(
 pub enum GetRecentBlockhashError {
     #[error("Failed to estimate recent blockhash: {0:?}")]
     Failed(Vec<String>),
+}
+
+pub async fn get_slot<R: CanisterRuntime>(runtime: &R) -> Result<u64, GetSlotError> {
+    let client = read_state(|state| state.sol_rpc_client(runtime.inter_canister_call_runtime()));
+    match client
+        .get_slot()
+        .with_params(GetSlotParams {
+            commitment: Some(CommitmentLevel::Finalized),
+            ..Default::default()
+        })
+        .send()
+        .await
+    {
+        MultiRpcResult::Consistent(Ok(slot)) => Ok(slot),
+        MultiRpcResult::Consistent(Err(e)) => Err(GetSlotError::RpcError(e)),
+        MultiRpcResult::Inconsistent(_) => Err(GetSlotError::InconsistentRpcResults),
+    }
+}
+
+#[derive(Debug, PartialEq, Error, From)]
+pub enum GetSlotError {
+    #[error("RPC error while fetching slot: {0}")]
+    RpcError(RpcError),
+    #[error("Inconsistent RPC results for slot")]
+    InconsistentRpcResults,
+}
+
+/// Gets the status of a signature.
+/// Returns Some(status) if the transaction has been processed, None otherwise.
+pub async fn get_signature_status<R: CanisterRuntime>(
+    runtime: &R,
+    signature: Signature,
+) -> Result<Option<TransactionStatus>, GetSignatureStatusError> {
+    let client = read_state(|state| state.sol_rpc_client(runtime.inter_canister_call_runtime()));
+    match client
+        .get_signature_statuses(std::iter::once(&signature))
+        .map_err(GetSignatureStatusError::RpcError)?
+        .send()
+        .await
+    {
+        MultiRpcResult::Consistent(Ok(statuses)) => Ok(statuses.into_iter().next().flatten()),
+        MultiRpcResult::Consistent(Err(e)) => Err(GetSignatureStatusError::RpcError(e)),
+        MultiRpcResult::Inconsistent(_) => Err(GetSignatureStatusError::InconsistentRpcResults),
+    }
+}
+
+#[derive(Debug, PartialEq, Error, From)]
+pub enum GetSignatureStatusError {
+    #[error("RPC error while fetching signature status: {0}")]
+    RpcError(RpcError),
+    #[error("Inconsistent RPC results for signature status")]
+    InconsistentRpcResults,
 }
 
 pub fn get_deposit_amount_to_address(

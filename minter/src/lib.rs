@@ -4,6 +4,7 @@ mod guard;
 mod ledger;
 pub mod lifecycle;
 mod numeric;
+pub mod resubmit;
 pub mod runtime;
 pub mod sol_transfer;
 pub mod state;
