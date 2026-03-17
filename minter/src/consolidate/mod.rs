@@ -94,7 +94,8 @@ async fn submit_consolidation_transaction<R: CanisterRuntime>(
     )
     .await?;
 
-    let signature = submit_transaction(runtime, transaction.clone()).await?;
+    let message = transaction.message.clone();
+    let signature = submit_transaction(runtime, transaction).await?;
 
     mutate_state(|state| {
         process_event(
@@ -110,7 +111,7 @@ async fn submit_consolidation_transaction<R: CanisterRuntime>(
             state,
             EventType::SubmittedTransaction {
                 signature,
-                transaction: transaction.message,
+                transaction: message,
             },
             runtime,
         )
