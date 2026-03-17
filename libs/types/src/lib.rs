@@ -4,6 +4,7 @@
 #![forbid(missing_docs)]
 
 use candid::{CandidType, Nat, Principal};
+use derive_more::From;
 use icrc_ledger_types::icrc1::account::Subaccount;
 pub use memo::{BurnMemo, MAX_SERIALIZED_MEMO_BYTES, Memo, MintMemo};
 use serde::{Deserialize, Serialize};
@@ -73,6 +74,9 @@ pub struct UpdateBalanceArgs {
 /// An error from the `update_balance` ckSOL minter endpoint.
 #[derive(Debug, Clone, PartialEq, CandidType, Deserialize, Error)]
 pub enum UpdateBalanceError {
+    /// Insufficient cycles attached by the caller to complete the [`update_balance`] call.
+    #[error(transparent)]
+    InsufficientCycles(#[from] InsufficientCyclesError),
     /// The minter experiences temporary issues, try the call again later.
     #[error("Transient error, try the call again later: {0}")]
     TemporarilyUnavailable(String),
@@ -99,6 +103,16 @@ pub enum UpdateBalanceError {
         /// The amount that was deposited.
         deposit_amount: Lamport,
     },
+}
+
+/// Insufficient cycles attached by the caller to complete the call.
+#[derive(Debug, Clone, PartialEq, CandidType, Deserialize, Error)]
+#[error("Insufficient cycles attached, expected {expected} but got {received}")]
+pub struct InsufficientCyclesError {
+    /// The amount of cycles received by the minter.
+    pub expected: u128,
+    /// The amount of cycles the call requires.
+    pub received: u128,
 }
 
 /// Arguments for a request to the `withdraw_sol` ckSOL minter endpoint.

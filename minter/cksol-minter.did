@@ -54,6 +54,8 @@ type UpdateBalanceArgs = record {
 
 // An error from the `update_balance` ckSOL minter endpoint.
 type UpdateBalanceError = variant {
+    // Insufficient cycles attached by the caller to complete the [`update_balance`] call.
+    InsufficientCycles : InsufficientCyclesError;
     // The minter experiences temporary issues, try the call again later.
     TemporarilyUnavailable : text;
     // There is already a concurrent `update_balance` invocation from the same caller.
@@ -72,6 +74,14 @@ type UpdateBalanceError = variant {
         // The amount that was deposited.
         deposit_amount: Lamport;
     };
+};
+
+// Insufficient cycles attached by the caller to complete the call.
+type InsufficientCyclesError = record {
+    // The amount of cycles received by the minter.
+    expected: nat;
+    // The amount of cycles the call requires.
+    received: nat;
 };
 
 // The outcome of processing a Solana deposit transaction.
