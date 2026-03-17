@@ -39,17 +39,17 @@ impl TestCanisterRuntime {
     }
 
     pub fn add_msg_cycles_accept(mut self, value: u128) -> Self {
-        self.msg_cycles_accept = self.msg_cycles_accept.chain(iter::once(value));
+        self.msg_cycles_accept = self.msg_cycles_accept.add(value);
         self
     }
 
     pub fn add_msg_cycles_available(mut self, value: u128) -> Self {
-        self.msg_cycles_available = self.msg_cycles_available.chain(iter::once(value));
+        self.msg_cycles_available = self.msg_cycles_available.add(value);
         self
     }
 
     pub fn add_msg_cycles_refunded(mut self, value: u128) -> Self {
-        self.msg_cycles_refunded = self.msg_cycles_refunded.chain(iter::once(value));
+        self.msg_cycles_refunded = self.msg_cycles_refunded.add(value);
         self
     }
 }

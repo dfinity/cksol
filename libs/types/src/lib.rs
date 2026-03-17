@@ -4,7 +4,6 @@
 #![forbid(missing_docs)]
 
 use candid::{CandidType, Nat, Principal};
-use derive_more::From;
 use icrc_ledger_types::icrc1::account::Subaccount;
 pub use memo::{BurnMemo, MAX_SERIALIZED_MEMO_BYTES, Memo, MintMemo};
 use serde::{Deserialize, Serialize};
