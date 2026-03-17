@@ -1,8 +1,7 @@
 use super::{event::*, *};
-use crate::state::SOLANA_RENT_EXEMPTION_THRESHOLD;
 use crate::{
     runtime::TestCanisterRuntime,
-    state::audit::process_event,
+    state::{SOLANA_RENT_EXEMPTION_THRESHOLD, audit::process_event},
     test_fixtures::{
         DEPOSIT_FEE, MINIMUM_DEPOSIT_AMOUNT, MINIMUM_WITHDRAWAL_AMOUNT,
         UPDATE_BALANCE_REQUIRED_CYCLES, WITHDRAWAL_FEE, arb::arb_event, ledger_canister_id,
@@ -100,18 +99,20 @@ mod state_from_init_args {
 
     #[test]
     fn should_fail_when_minimum_withdrawal_amount_too_low() {
-        let insufficient_minimum_withdrawal_amount = WITHDRAWAL_FEE / 2;
+        let minimum_required = WITHDRAWAL_FEE + SOLANA_RENT_EXEMPTION_THRESHOLD;
+        let insufficient_minimum_withdrawal_amount = minimum_required - 1;
         let args = InitArgs {
             minimum_withdrawal_amount: insufficient_minimum_withdrawal_amount,
             ..valid_init_args()
         };
 
-        assert_matches!(
+        assert_eq!(
             State::try_from(args),
             Err(InvalidStateError::InvalidMinimumWithdrawalAmount {
-                minimum_withdrawal_amount,
-                withdrawal_fee
-            }) if minimum_withdrawal_amount == insufficient_minimum_withdrawal_amount && withdrawal_fee == WITHDRAWAL_FEE
+                minimum_withdrawal_amount: insufficient_minimum_withdrawal_amount,
+                withdrawal_fee: WITHDRAWAL_FEE,
+                rent_exemption_threshold: SOLANA_RENT_EXEMPTION_THRESHOLD,
+            })
         );
     }
 
@@ -133,38 +134,15 @@ mod state_from_init_args {
     }
 
     #[test]
-    fn should_fail_when_minimum_withdrawal_amount_below_rent_exemption() {
-        let below_rent_exemption = SOLANA_RENT_EXEMPTION_THRESHOLD - 1;
+    fn should_succeed_when_minimum_withdrawal_amount_equals_required_minimum() {
+        let minimum_required = WITHDRAWAL_FEE + SOLANA_RENT_EXEMPTION_THRESHOLD;
         let args = InitArgs {
-            minimum_withdrawal_amount: below_rent_exemption,
-            // Ensure withdrawal_fee is also below rent exemption so we test
-            // the rent exemption check, not the fee check
-            withdrawal_fee: below_rent_exemption / 2,
-            ..valid_init_args()
-        };
-
-        assert_eq!(
-            State::try_from(args),
-            Err(InvalidStateError::MinimumWithdrawalBelowRentExemption {
-                minimum_withdrawal_amount: below_rent_exemption,
-                rent_exemption_threshold: SOLANA_RENT_EXEMPTION_THRESHOLD,
-            })
-        );
-    }
-
-    #[test]
-    fn should_succeed_when_minimum_withdrawal_amount_equals_rent_exemption() {
-        let args = InitArgs {
-            minimum_withdrawal_amount: SOLANA_RENT_EXEMPTION_THRESHOLD,
-            withdrawal_fee: SOLANA_RENT_EXEMPTION_THRESHOLD / 2,
+            minimum_withdrawal_amount: minimum_required,
             ..valid_init_args()
         };
 
         let state = State::try_from(args).unwrap();
-        assert_eq!(
-            state.minimum_withdrawal_amount(),
-            SOLANA_RENT_EXEMPTION_THRESHOLD
-        );
+        assert_eq!(state.minimum_withdrawal_amount(), minimum_required);
     }
 }
 
@@ -315,102 +293,56 @@ mod state_upgrade {
     }
 
     #[test]
-    fn should_fail_when_new_withdrawal_fee_exceeds_minimum_withdrawal_amount() {
+    fn should_fail_when_new_withdrawal_fee_makes_minimum_withdrawal_amount_invalid() {
         let mut state = initial_state();
-        let new_withdrawal_fee = MINIMUM_WITHDRAWAL_AMOUNT + 1;
+        // Set withdrawal_fee such that withdrawal_fee + rent_exemption > minimum_withdrawal_amount
+        let new_withdrawal_fee = MINIMUM_WITHDRAWAL_AMOUNT;
 
-        assert_matches!(
+        assert_eq!(
             state.upgrade(UpgradeArgs {
                 withdrawal_fee: Some(new_withdrawal_fee),
                 ..Default::default()
             }),
             Err(InvalidStateError::InvalidMinimumWithdrawalAmount {
-                minimum_withdrawal_amount,
-                withdrawal_fee
-            }) if minimum_withdrawal_amount == MINIMUM_WITHDRAWAL_AMOUNT && withdrawal_fee == new_withdrawal_fee
-        );
-    }
-
-    #[test]
-    fn should_fail_when_new_minimum_withdrawal_amount_below_withdrawal_fee() {
-        let mut state = initial_state();
-        let new_minimum_withdrawal_amount = WITHDRAWAL_FEE - 1;
-
-        assert_matches!(
-            state.upgrade(UpgradeArgs {
-                minimum_withdrawal_amount: Some(new_minimum_withdrawal_amount),
-                ..Default::default()
-            }),
-            Err(InvalidStateError::InvalidMinimumWithdrawalAmount {
-                minimum_withdrawal_amount,
-                withdrawal_fee
-            }) if minimum_withdrawal_amount == new_minimum_withdrawal_amount && withdrawal_fee == WITHDRAWAL_FEE
-        );
-    }
-
-    #[test]
-    fn should_succeed_when_minimum_withdrawal_amount_equals_withdrawal_fee() {
-        let mut state = initial_state();
-
-        state
-            .upgrade(UpgradeArgs {
-                minimum_withdrawal_amount: Some(WITHDRAWAL_FEE),
-                ..Default::default()
-            })
-            .unwrap();
-
-        assert_eq!(state.minimum_withdrawal_amount(), WITHDRAWAL_FEE);
-    }
-
-    #[test]
-    fn should_fail_when_new_minimum_withdrawal_amount_below_rent_exemption() {
-        let mut state = initial_state();
-        let below_rent_exemption = SOLANA_RENT_EXEMPTION_THRESHOLD - 1;
-
-        // First, lower the withdrawal fee so we can test the rent exemption check
-        state
-            .upgrade(UpgradeArgs {
-                withdrawal_fee: Some(below_rent_exemption / 2),
-                ..Default::default()
-            })
-            .unwrap();
-
-        assert_eq!(
-            state.upgrade(UpgradeArgs {
-                minimum_withdrawal_amount: Some(below_rent_exemption),
-                ..Default::default()
-            }),
-            Err(InvalidStateError::MinimumWithdrawalBelowRentExemption {
-                minimum_withdrawal_amount: below_rent_exemption,
+                minimum_withdrawal_amount: MINIMUM_WITHDRAWAL_AMOUNT,
+                withdrawal_fee: new_withdrawal_fee,
                 rent_exemption_threshold: SOLANA_RENT_EXEMPTION_THRESHOLD,
             })
         );
     }
 
     #[test]
-    fn should_succeed_when_new_minimum_withdrawal_amount_equals_rent_exemption() {
+    fn should_fail_when_new_minimum_withdrawal_amount_below_required_minimum() {
         let mut state = initial_state();
-
-        // First, lower the withdrawal fee so we can set minimum_withdrawal_amount
-        // to exactly the rent exemption threshold
-        state
-            .upgrade(UpgradeArgs {
-                withdrawal_fee: Some(SOLANA_RENT_EXEMPTION_THRESHOLD / 2),
-                ..Default::default()
-            })
-            .unwrap();
-
-        state
-            .upgrade(UpgradeArgs {
-                minimum_withdrawal_amount: Some(SOLANA_RENT_EXEMPTION_THRESHOLD),
-                ..Default::default()
-            })
-            .unwrap();
+        let minimum_required = WITHDRAWAL_FEE + SOLANA_RENT_EXEMPTION_THRESHOLD;
+        let new_minimum_withdrawal_amount = minimum_required - 1;
 
         assert_eq!(
-            state.minimum_withdrawal_amount(),
-            SOLANA_RENT_EXEMPTION_THRESHOLD
+            state.upgrade(UpgradeArgs {
+                minimum_withdrawal_amount: Some(new_minimum_withdrawal_amount),
+                ..Default::default()
+            }),
+            Err(InvalidStateError::InvalidMinimumWithdrawalAmount {
+                minimum_withdrawal_amount: new_minimum_withdrawal_amount,
+                withdrawal_fee: WITHDRAWAL_FEE,
+                rent_exemption_threshold: SOLANA_RENT_EXEMPTION_THRESHOLD,
+            })
         );
+    }
+
+    #[test]
+    fn should_succeed_when_minimum_withdrawal_amount_equals_required_minimum() {
+        let mut state = initial_state();
+        let minimum_required = WITHDRAWAL_FEE + SOLANA_RENT_EXEMPTION_THRESHOLD;
+
+        state
+            .upgrade(UpgradeArgs {
+                minimum_withdrawal_amount: Some(minimum_required),
+                ..Default::default()
+            })
+            .unwrap();
+
+        assert_eq!(state.minimum_withdrawal_amount(), minimum_required);
     }
 
     #[test]

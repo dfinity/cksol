@@ -212,15 +212,11 @@ impl State {
                 deposit_fee: self.deposit_fee,
             });
         }
-        if self.minimum_withdrawal_amount < self.withdrawal_fee {
+        let minimum_required = self.withdrawal_fee + SOLANA_RENT_EXEMPTION_THRESHOLD;
+        if self.minimum_withdrawal_amount < minimum_required {
             return Err(InvalidStateError::InvalidMinimumWithdrawalAmount {
                 minimum_withdrawal_amount: self.minimum_withdrawal_amount,
                 withdrawal_fee: self.withdrawal_fee,
-            });
-        }
-        if self.minimum_withdrawal_amount < SOLANA_RENT_EXEMPTION_THRESHOLD {
-            return Err(InvalidStateError::MinimumWithdrawalBelowRentExemption {
-                minimum_withdrawal_amount: self.minimum_withdrawal_amount,
                 rent_exemption_threshold: SOLANA_RENT_EXEMPTION_THRESHOLD,
             });
         }
@@ -389,9 +385,6 @@ pub enum InvalidStateError {
     InvalidMinimumWithdrawalAmount {
         minimum_withdrawal_amount: u64,
         withdrawal_fee: u64,
-    },
-    MinimumWithdrawalBelowRentExemption {
-        minimum_withdrawal_amount: u64,
         rent_exemption_threshold: u64,
     },
 }
