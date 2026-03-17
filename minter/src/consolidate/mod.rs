@@ -5,13 +5,12 @@ use crate::{
         CreateTransferError, IcSchnorrSigner, MAX_SIGNATURES, create_signed_transfer_transaction,
     },
     state::{TaskType, audit::process_event, event::EventType, mutate_state, read_state},
+    transaction::{SubmitTransactionError, get_recent_blockhash, submit_transaction},
 };
 use canlog::log;
 use cksol_types_internal::log::Priority;
-use ic_canister_runtime::Runtime;
 use icrc_ledger_types::icrc1::account::Account;
-use sol_rpc_client::SolRpcClient;
-use sol_rpc_types::{Lamport, MultiRpcResult};
+use sol_rpc_types::Lamport;
 use solana_hash::Hash;
 use solana_signature::Signature;
 use std::time::Duration;
@@ -41,15 +40,10 @@ pub async fn consolidate_deposits<R: CanisterRuntime>(runtime: R) {
             .collect()
     });
 
-    // TODO DEFI-2670: Use `try_send` to avoid panic in case of `IcError`
-    let recent_blockhash = match sol_rpc_client(&runtime)
-        .estimate_recent_blockhash()
-        .send()
-        .await
-    {
+    let recent_blockhash = match get_recent_blockhash(&runtime).await {
         Ok(blockhash) => blockhash,
         Err(e) => {
-            log!(Priority::Info, "Failed to fetch recent blockhash: {e:?}");
+            log!(Priority::Info, "Failed to fetch recent blockhash: {e}");
             return;
         }
     };
@@ -74,11 +68,19 @@ async fn try_submit_consolidation_transaction<R: CanisterRuntime>(
     }
 }
 
+#[derive(Debug, Error)]
+enum ConsolidationError {
+    #[error("failed to create transaction: {0}")]
+    CreateTransactionFailed(#[from] CreateTransferError),
+    #[error("failed to submit transaction: {0}")]
+    SubmitTransactionFailed(#[from] SubmitTransactionError),
+}
+
 async fn submit_consolidation_transaction<R: CanisterRuntime>(
     runtime: &R,
     funds_to_consolidate: Vec<(Account, Lamport)>,
     recent_blockhash: Hash,
-) -> Result<Signature, SubmitTransactionError> {
+) -> Result<Signature, ConsolidationError> {
     let minter_account = Account {
         owner: ic_cdk::api::canister_self(),
         subaccount: None,
@@ -92,26 +94,7 @@ async fn submit_consolidation_transaction<R: CanisterRuntime>(
     )
     .await?;
 
-    let signature = match sol_rpc_client(runtime)
-        .send_transaction(transaction.clone())
-        .try_send()
-        .await
-    {
-        Ok(MultiRpcResult::Consistent(Ok(signature))) => signature,
-        Ok(MultiRpcResult::Consistent(Err(e))) => {
-            return Err(SubmitTransactionError::SendTransactionCallFailed(
-                e.to_string(),
-            ));
-        }
-        Ok(MultiRpcResult::Inconsistent(_)) => {
-            return Err(SubmitTransactionError::SendTransactionConsensusError);
-        }
-        Err(e) => {
-            return Err(SubmitTransactionError::SendTransactionCallFailed(
-                e.to_string(),
-            ));
-        }
-    };
+    let signature = submit_transaction(runtime, transaction.clone()).await?;
 
     mutate_state(|state| {
         process_event(
@@ -134,18 +117,4 @@ async fn submit_consolidation_transaction<R: CanisterRuntime>(
     });
 
     Ok(signature)
-}
-
-fn sol_rpc_client<R: CanisterRuntime>(runtime: &R) -> SolRpcClient<impl Runtime> {
-    read_state(|state| state.sol_rpc_client(runtime.inter_canister_call_runtime()))
-}
-
-#[derive(Debug, Error)]
-enum SubmitTransactionError {
-    #[error("failed to create transaction: {0}")]
-    CreateTransactionFailed(#[from] CreateTransferError),
-    #[error("inconsistent `sendTransaction` results")]
-    SendTransactionConsensusError,
-    #[error("`sendTransaction` call failed: {0}")]
-    SendTransactionCallFailed(String),
 }

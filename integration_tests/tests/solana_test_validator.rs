@@ -164,10 +164,10 @@ async fn confirm_transaction(rpc: &RpcClient, signature: &Signature, commitment:
         let response = rpc
             .confirm_transaction_with_commitment(signature, commitment)
             .await;
-        if let Ok(result) = response {
-            if result.value {
-                return;
-            }
+        if let Ok(result) = response
+            && result.value
+        {
+            return;
         }
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
