@@ -108,9 +108,9 @@ pub enum UpdateBalanceError {
 #[derive(Debug, Clone, PartialEq, CandidType, Deserialize, Error)]
 #[error("Insufficient cycles attached, expected {expected} but got {received}")]
 pub struct InsufficientCyclesError {
-    /// The amount of cycles received by the minter.
-    pub expected: u128,
     /// The amount of cycles the call requires.
+    pub expected: u128,
+    /// The amount of cycles received by the minter (attached by the caller).
     pub received: u128,
 }
 

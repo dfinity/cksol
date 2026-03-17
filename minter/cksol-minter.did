@@ -78,9 +78,9 @@ type UpdateBalanceError = variant {
 
 // Insufficient cycles attached by the caller to complete the call.
 type InsufficientCyclesError = record {
-    // The amount of cycles received by the minter.
-    expected: nat;
     // The amount of cycles the call requires.
+    expected: nat;
+    // The amount of cycles received by the minter.
     received: nat;
 };
 
