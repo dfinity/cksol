@@ -13,12 +13,13 @@ mod tests;
 pub async fn try_get_transaction<R: CanisterRuntime>(
     runtime: &R,
     signature: solana_signature::Signature,
+    cycles_to_attach: u128,
 ) -> Result<Option<EncodedConfirmedTransactionWithStatusMeta>, GetTransactionError> {
     let result = read_state(|state| state.sol_rpc_client(runtime.inter_canister_call_runtime()))
         .get_transaction(signature)
         .with_encoding(GetTransactionEncoding::Base64)
         .with_commitment(CommitmentLevel::Finalized)
-        .with_cycles(runtime.msg_cycles_available())
+        .with_cycles(cycles_to_attach)
         .try_send()
         .await;
     // TODO DEFI-2643: Accept (cost of call to SOL RPC canister) cycles from caller

@@ -12,7 +12,9 @@ pub struct TestCanisterRuntime {
     inter_canister_call_runtime: StubRuntime,
     times: Stubs<u64>,
     instruction_counts: Stubs<u64>,
+    msg_cycles_accept: Stubs<u128>,
     msg_cycles_available: Stubs<u128>,
+    msg_cycles_refunded: Stubs<u128>,
 }
 
 impl TestCanisterRuntime {
@@ -36,8 +38,18 @@ impl TestCanisterRuntime {
         self
     }
 
+    pub fn add_msg_cycles_accept(mut self, value: u128) -> Self {
+        self.msg_cycles_accept = self.msg_cycles_accept.chain(iter::once(value));
+        self
+    }
+
     pub fn add_msg_cycles_available(mut self, value: u128) -> Self {
-        self.msg_cycles_available = self.msg_cycles_available.add(value);
+        self.msg_cycles_available = self.msg_cycles_available.chain(iter::once(value));
+        self
+    }
+
+    pub fn add_msg_cycles_refunded(mut self, value: u128) -> Self {
+        self.msg_cycles_refunded = self.msg_cycles_refunded.chain(iter::once(value));
         self
     }
 }
@@ -56,8 +68,17 @@ impl CanisterRuntime for TestCanisterRuntime {
         self.instruction_counts.next()
     }
 
+    fn msg_cycles_accept(&self, amount: u128) -> u128 {
+        assert_eq!(self.msg_cycles_accept.next(), amount);
+        amount
+    }
+
     fn msg_cycles_available(&self) -> u128 {
         self.msg_cycles_available.next()
+    }
+
+    fn msg_cycles_refunded(&self) -> u128 {
+        self.msg_cycles_refunded.next()
     }
 
     fn set_timer(
