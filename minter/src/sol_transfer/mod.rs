@@ -7,13 +7,14 @@ use ic_cdk::management_canister::{
     SchnorrAlgorithm, SchnorrKeyId, SignCallError, SignWithSchnorrArgs, sign_with_schnorr,
 };
 use icrc_ledger_types::icrc1::account::Account;
+use indexmap::IndexSet;
 use sol_rpc_types::Lamport;
 use solana_address::Address;
 use solana_hash::Hash;
 use solana_signature::Signature;
 use solana_system_interface::instruction;
 use solana_transaction::{Instruction, Message, Transaction};
-use std::collections::BTreeSet;
+use std::iter;
 use thiserror::Error;
 
 pub const MAX_SIGNATURES: u64 = 10;
@@ -77,52 +78,33 @@ pub async fn create_signed_transfer_transaction(
     recent_blockhash: Hash,
     signer: &impl SchnorrSigner,
 ) -> Result<Transaction, CreateTransferError> {
-    let master_public_key = lazy_get_schnorr_master_key().await;
-
-    let derive_address = |account: &Account| -> (DerivationPath, Address) {
-        let derivation_path = derivation_path(account);
-        let public_key = derive_public_key(&master_public_key, derivation_path.to_vec());
-        (derivation_path, Address::from(public_key.serialize_raw()))
-    };
-
-    let (_, target_address) = derive_address(&destination_account);
-    let (fee_payer_derivation_path, fee_payer_address) = derive_address(&fee_payer_account);
-
-    let (source_derivation_paths, source_addresses): (Vec<_>, Vec<_>) = sources
-        .iter()
-        .map(|(account, _)| derive_address(account))
-        .unzip();
-
-    // Ensure source accounts are unique
-    let unique_source_addresses = source_addresses.iter().collect::<BTreeSet<_>>();
-    assert_eq!(
-        unique_source_addresses.len(),
-        source_addresses.len(),
-        "BUG: source accounts must be unique"
-    );
-
-    // Add fee payer account to signers if it is not also a source account
-    let is_fee_payer_in_sources = unique_source_addresses.contains(&fee_payer_address);
-    let (mut signer_derivation_paths, mut signer_addresses) =
-        (source_derivation_paths, source_addresses.clone());
-    if !is_fee_payer_in_sources {
-        signer_derivation_paths.push(fee_payer_derivation_path);
-        signer_addresses.push(fee_payer_address);
-    }
-
-    // Check signature count after determining unique signers
-    let num_signatures = signer_addresses.len() as u64;
-    if num_signatures > MAX_SIGNATURES {
+    // Order signers in the order their signatures should be included in the serialized transaction.
+    // The fee payer is always at index 0, followed by deduplicated signers for each instruction.
+    let signer_accounts: IndexSet<_> = iter::once(&fee_payer_account)
+        .chain(sources.iter().map(|(account, _)| account))
+        .collect();
+    if signer_accounts.len() as u64 > MAX_SIGNATURES {
         return Err(CreateTransferError::TooManySignatures {
             max: MAX_SIGNATURES,
-            got: num_signatures,
+            got: signer_accounts.len() as u64,
         });
     }
 
-    let instructions: Vec<Instruction> = source_addresses
+    let master_public_key = lazy_get_schnorr_master_key().await;
+    let derive_address = |account: &Account| -> Address {
+        Address::from(
+            derive_public_key(&master_public_key, derivation_path(account)).serialize_raw(),
+        )
+    };
+
+    let target_address = derive_address(&destination_account);
+    let fee_payer_address = derive_address(&fee_payer_account);
+
+    let instructions: Vec<Instruction> = sources
         .iter()
-        .zip(sources)
-        .map(|(source, (_, amount))| instruction::transfer(source, &target_address, *amount))
+        .map(|(account, amount)| {
+            instruction::transfer(&derive_address(account), &target_address, *amount)
+        })
         .collect();
 
     let message =
@@ -130,35 +112,26 @@ pub async fn create_signed_transfer_transaction(
     let mut transaction = Transaction::new_unsigned(message);
     let message_bytes = transaction.message_data();
 
-    // message_size + signature_count * signature_size should not exceed tx size limit.
-    assert!(message_bytes.len() + signer_addresses.len() * BYTES_PER_SIGNATURE < MAX_TX_SIZE);
+    // Check serialized transaction size does not exceed maximum Solana transaction size:
+    assert!(1 + message_bytes.len() + signer_accounts.len() * BYTES_PER_SIGNATURE < MAX_TX_SIZE);
 
-    let results = futures::future::join_all(
-        signer_derivation_paths
+    let signatures = futures::future::try_join_all(
+        signer_accounts
             .iter()
-            .map(|derivation_path| signer.sign(message_bytes.clone(), derivation_path.clone())),
+            .map(|account| signer.sign(message_bytes.clone(), derivation_path(account))),
     )
-    .await;
+    .await?
+    .into_iter()
+    .map(signature_from_bytes)
+    .collect();
 
-    for (i, result) in results.into_iter().enumerate() {
-        let signature = result?;
-
-        let sig_bytes: [u8; 64] = signature.as_slice().try_into().unwrap_or_else(|_| {
-            panic!(
-                "BUG: expected 64-byte signature, got {} bytes",
-                signature.len()
-            )
-        });
-
-        let position = transaction
-            .message
-            .account_keys
-            .iter()
-            .position(|key| *key == signer_addresses[i])
-            .expect("BUG: signer address not found in message account keys");
-
-        transaction.signatures[position] = Signature::from(sig_bytes);
-    }
+    transaction.signatures = signatures;
 
     Ok(transaction)
+}
+
+fn signature_from_bytes(bytes: Vec<u8>) -> Signature {
+    <[u8; 64]>::try_from(bytes.as_slice())
+        .unwrap_or_else(|_| panic!("BUG: expected 64-byte signature, got {} bytes", bytes.len()))
+        .into()
 }

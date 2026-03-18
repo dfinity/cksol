@@ -781,6 +781,7 @@ dependencies = [
  "ic-stable-structures 0.7.2",
  "icrc-cbor",
  "icrc-ledger-types",
+ "indexmap",
  "minicbor",
  "num-traits",
  "phantom_newtype",

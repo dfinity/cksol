@@ -1,6 +1,6 @@
-use crate::state::{SchnorrPublicKey, mutate_state, read_state};
+use crate::state::{mutate_state, read_state, SchnorrPublicKey};
 use ic_cdk::management_canister::{
-    SchnorrAlgorithm, SchnorrKeyId, SchnorrPublicKeyArgs, schnorr_public_key,
+    schnorr_public_key, SchnorrAlgorithm, SchnorrKeyId, SchnorrPublicKeyArgs,
 };
 use ic_ed25519::{DerivationIndex, DerivationPath as IcDerivationPath, PublicKey};
 use icrc_ledger_types::icrc1::account::Account;
@@ -47,6 +47,13 @@ pub async fn lazy_get_schnorr_master_key() -> SchnorrPublicKey {
 
     mutate_state(|s| s.set_once_minter_public_key(schnorr_public_key.clone()));
     schnorr_public_key
+}
+
+pub(crate) fn derive_address(
+    master_public_key: &SchnorrPublicKey,
+    path: DerivationPath,
+) -> Address {
+    Address::from(derive_public_key(master_public_key, path).serialize_raw())
 }
 
 fn derive_public_key_from_account(
