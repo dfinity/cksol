@@ -11,13 +11,14 @@ use cksol_int_tests::{
     },
 };
 use cksol_types::{
-    DepositStatus, GetDepositAddressArgs, Lamport, MinterInfo, UpdateBalanceArgs,
-    UpdateBalanceError, WithdrawSolArgs, WithdrawSolError, WithdrawSolStatus,
+    DepositStatus, GetDepositAddressArgs, InsufficientCyclesError, Lamport, MinterInfo,
+    UpdateBalanceArgs, UpdateBalanceError, WithdrawSolArgs, WithdrawSolError, WithdrawSolStatus,
 };
 use cksol_types_internal::{UpgradeArgs, event::EventType, log::Priority};
 use ic_pocket_canister_runtime::{JsonRpcResponse, MockHttpOutcalls, MockHttpOutcallsBuilder};
 use icrc_ledger_types::icrc1::account::Subaccount;
 use serde_json::json;
+use sol_rpc_types::{CommitmentLevel, ConsensusStrategy, GetTransactionEncoding, RpcConfig};
 use tokio::join;
 
 mod get_deposit_address_tests {
@@ -559,6 +560,31 @@ mod update_balance_tests {
     use super::*;
 
     #[tokio::test]
+    async fn should_fail_with_insufficient_cycles() {
+        let setup = SetupBuilder::new().with_proxy_canister().build().await;
+
+        let result = setup
+            .minter()
+            .update_balance_with_cycles(
+                default_update_balance_args(),
+                Setup::DEFAULT_UPDATE_BALANCE_REQUIRED_CYCLES - 1,
+            )
+            .await;
+
+        assert_eq!(
+            result,
+            Err(UpdateBalanceError::InsufficientCycles(
+                InsufficientCyclesError {
+                    expected: Setup::DEFAULT_UPDATE_BALANCE_REQUIRED_CYCLES,
+                    received: Setup::DEFAULT_UPDATE_BALANCE_REQUIRED_CYCLES - 1,
+                }
+            ))
+        );
+
+        setup.drop().await;
+    }
+
+    #[tokio::test]
     async fn should_fail_if_transaction_not_found() {
         fn transaction_not_found_response() -> JsonRpcResponse {
             JsonRpcResponse::from(json!({"jsonrpc": "2.0", "result": null, "id": 0}))
@@ -711,6 +737,36 @@ mod update_balance_tests {
         setup.drop().await;
     }
 
+    #[tokio::test]
+    async fn should_refund_extra_cycles() {
+        let setup = SetupBuilder::new().with_proxy_canister().build().await;
+
+        let get_transaction_cycles_cost = get_transaction_cycles_cost(&setup).await;
+
+        let caller_cycles_before = setup.proxy().cycle_balance().await;
+        let minter_cycles_before = setup.minter().cycle_balance().await;
+
+        let result = setup
+            .minter()
+            .with_http_mocks(get_transaction_http_mocks(get_deposit_transaction_response))
+            .update_balance(default_update_balance_args())
+            .await;
+        assert_matches!(result, Ok(DepositStatus::Minted { .. }));
+
+        let caller_cycles_after = setup.proxy().cycle_balance().await;
+        let minter_cycles_after = setup.minter().cycle_balance().await;
+
+        // The caller should be charged only the actual cost of making the RPC call
+        assert!(get_transaction_cycles_cost > 0);
+        assert_eq!(
+            caller_cycles_before - caller_cycles_after,
+            get_transaction_cycles_cost,
+        );
+        assert_eq!(minter_cycles_after, minter_cycles_before);
+
+        setup.drop().await;
+    }
+
     fn get_transaction_http_mocks(response: impl Fn() -> JsonRpcResponse) -> MockHttpOutcalls {
         MockHttpOutcallsBuilder::new()
             .given(get_deposit_transaction_request().with_id(0))
@@ -722,6 +778,27 @@ mod update_balance_tests {
             .given(get_deposit_transaction_request().with_id(3))
             .respond_with(response().with_id(3))
             .build()
+    }
+
+    async fn get_transaction_cycles_cost(setup: &Setup) -> u128 {
+        setup
+            .sol_rpc()
+            .get_transaction(solana_signature::Signature::from(
+                deposit_transaction_signature(),
+            ))
+            .with_rpc_config(RpcConfig {
+                response_size_estimate: Some(2_000_000),
+                response_consensus: Some(ConsensusStrategy::Threshold {
+                    min: 3,
+                    total: Some(4),
+                }),
+            })
+            .with_encoding(GetTransactionEncoding::Base64)
+            .with_commitment(CommitmentLevel::Finalized)
+            .request_cost()
+            .send()
+            .await
+            .expect("Failed to get cycles cost for `getTransaction` request")
     }
 }
 

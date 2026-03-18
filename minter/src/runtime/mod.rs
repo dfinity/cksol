@@ -5,7 +5,9 @@ pub trait CanisterRuntime: Clone + 'static {
     fn inter_canister_call_runtime(&self) -> impl Runtime;
     fn time(&self) -> u64;
     fn instruction_counter(&self) -> u64;
+    fn msg_cycles_accept(&self, amount: u128) -> u128;
     fn msg_cycles_available(&self) -> u128;
+    fn msg_cycles_refunded(&self) -> u128;
     fn set_timer(
         &self,
         delay: Duration,
@@ -35,8 +37,16 @@ impl CanisterRuntime for IcCanisterRuntime {
         ic_cdk::api::instruction_counter()
     }
 
+    fn msg_cycles_accept(&self, amount: u128) -> u128 {
+        ic_cdk::api::msg_cycles_accept(amount)
+    }
+
     fn msg_cycles_available(&self) -> u128 {
         ic_cdk::api::msg_cycles_available()
+    }
+
+    fn msg_cycles_refunded(&self) -> u128 {
+        ic_cdk::api::msg_cycles_refunded()
     }
 
     fn set_timer(

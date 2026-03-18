@@ -36,7 +36,12 @@ mod get_transaction_tests {
             .add_msg_cycles_available(UPDATE_BALANCE_REQUIRED_CYCLES)
             .add_stub_error(IcError::CallPerformFailed);
 
-        let result = try_get_transaction(&runtime, deposit_transaction_signature()).await;
+        let result = try_get_transaction(
+            &runtime,
+            deposit_transaction_signature(),
+            UPDATE_BALANCE_REQUIRED_CYCLES,
+        )
+        .await;
 
         assert_eq!(
             result,
@@ -58,7 +63,12 @@ mod get_transaction_tests {
             .add_msg_cycles_available(UPDATE_BALANCE_REQUIRED_CYCLES)
             .add_stub_response(MultiRpcResult::Consistent(Err(rpc_error.clone())));
 
-        let result = try_get_transaction(&runtime, deposit_transaction_signature()).await;
+        let result = try_get_transaction(
+            &runtime,
+            deposit_transaction_signature(),
+            UPDATE_BALANCE_REQUIRED_CYCLES,
+        )
+        .await;
 
         assert_eq!(result, Err(GetTransactionError::RpcError(rpc_error)));
     }
@@ -82,7 +92,12 @@ mod get_transaction_tests {
             .add_msg_cycles_available(UPDATE_BALANCE_REQUIRED_CYCLES)
             .add_stub_response(MultiRpcResult::Inconsistent(results));
 
-        let result = try_get_transaction(&runtime, deposit_transaction_signature()).await;
+        let result = try_get_transaction(
+            &runtime,
+            deposit_transaction_signature(),
+            UPDATE_BALANCE_REQUIRED_CYCLES,
+        )
+        .await;
 
         assert_eq!(result, Err(GetTransactionError::InconsistentRpcResults));
     }
@@ -95,7 +110,12 @@ mod get_transaction_tests {
             .add_msg_cycles_available(UPDATE_BALANCE_REQUIRED_CYCLES)
             .add_stub_response(MultiRpcResult::Consistent(Ok(None)));
 
-        let result = try_get_transaction(&runtime, deposit_transaction_signature()).await;
+        let result = try_get_transaction(
+            &runtime,
+            deposit_transaction_signature(),
+            UPDATE_BALANCE_REQUIRED_CYCLES,
+        )
+        .await;
 
         assert_eq!(result, Ok(None))
     }
@@ -110,7 +130,12 @@ mod get_transaction_tests {
                 deposit_transaction().try_into().unwrap(),
             ))));
 
-        let result = try_get_transaction(&runtime, deposit_transaction_signature()).await;
+        let result = try_get_transaction(
+            &runtime,
+            deposit_transaction_signature(),
+            UPDATE_BALANCE_REQUIRED_CYCLES,
+        )
+        .await;
 
         assert_eq!(result, Ok(Some(deposit_transaction())))
     }
