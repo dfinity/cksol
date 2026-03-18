@@ -4,6 +4,9 @@ use derive_more::From;
 use ic_canister_runtime::IcError;
 use sol_rpc_types::{CommitmentLevel, GetTransactionEncoding, Lamport, MultiRpcResult, RpcError};
 use solana_address::Address;
+use solana_hash::Hash;
+use solana_signature::Signature;
+use solana_transaction::Transaction;
 use solana_transaction_status_client_types::EncodedConfirmedTransactionWithStatusMeta;
 use thiserror::Error;
 
@@ -12,13 +15,14 @@ mod tests;
 
 pub async fn try_get_transaction<R: CanisterRuntime>(
     runtime: &R,
-    signature: solana_signature::Signature,
+    signature: Signature,
+    cycles_to_attach: u128,
 ) -> Result<Option<EncodedConfirmedTransactionWithStatusMeta>, GetTransactionError> {
     let result = read_state(|state| state.sol_rpc_client(runtime.inter_canister_call_runtime()))
         .get_transaction(signature)
         .with_encoding(GetTransactionEncoding::Base64)
         .with_commitment(CommitmentLevel::Finalized)
-        .with_cycles(runtime.msg_cycles_available())
+        .with_cycles(cycles_to_attach)
         .try_send()
         .await;
     // TODO DEFI-2643: Accept (cost of call to SOL RPC canister) cycles from caller
@@ -43,6 +47,47 @@ impl From<GetTransactionError> for UpdateBalanceError {
     fn from(error: GetTransactionError) -> Self {
         UpdateBalanceError::TemporarilyUnavailable(error.to_string())
     }
+}
+
+pub async fn submit_transaction<R: CanisterRuntime>(
+    runtime: &R,
+    transaction: Transaction,
+) -> Result<Signature, SubmitTransactionError> {
+    let client = read_state(|state| state.sol_rpc_client(runtime.inter_canister_call_runtime()));
+    match client.send_transaction(transaction).try_send().await {
+        Ok(MultiRpcResult::Consistent(Ok(signature))) => Ok(signature),
+        Ok(MultiRpcResult::Consistent(Err(e))) => Err(SubmitTransactionError::RpcError(e)),
+        Ok(MultiRpcResult::Inconsistent(_)) => Err(SubmitTransactionError::InconsistentRpcResults),
+        Err(e) => Err(SubmitTransactionError::IcError(e)),
+    }
+}
+
+#[derive(Debug, PartialEq, Error, From)]
+pub enum SubmitTransactionError {
+    #[error("Error while calling SOL RPC canister: {0}")]
+    IcError(IcError),
+    #[error("RPC error while sending transaction: {0}")]
+    RpcError(RpcError),
+    #[error("Inconsistent RPC results for sendTransaction")]
+    InconsistentRpcResults,
+}
+
+pub async fn get_recent_blockhash<R: CanisterRuntime>(
+    runtime: &R,
+) -> Result<Hash, GetRecentBlockhashError> {
+    let client = read_state(|state| state.sol_rpc_client(runtime.inter_canister_call_runtime()));
+    match client.estimate_recent_blockhash().send().await {
+        Ok(blockhash) => Ok(blockhash),
+        Err(errors) => Err(GetRecentBlockhashError::Failed(
+            errors.into_iter().map(|e| e.to_string()).collect(),
+        )),
+    }
+}
+
+#[derive(Debug, PartialEq, Error)]
+pub enum GetRecentBlockhashError {
+    #[error("Failed to estimate recent blockhash: {0:?}")]
+    Failed(Vec<String>),
 }
 
 pub fn get_deposit_amount_to_address(

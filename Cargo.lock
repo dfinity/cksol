@@ -733,6 +733,7 @@ dependencies = [
  "canlog",
  "cksol-types",
  "cksol-types-internal",
+ "futures",
  "ic-canister-runtime",
  "ic-http-types",
  "ic-management-canister-types",
