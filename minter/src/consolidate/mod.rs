@@ -1,4 +1,5 @@
 use crate::{
+    address::{derivation_path, derive_public_key},
     guard::TimerGuard,
     runtime::CanisterRuntime,
     sol_transfer::{
@@ -11,6 +12,7 @@ use canlog::log;
 use cksol_types_internal::log::Priority;
 use icrc_ledger_types::icrc1::account::Account;
 use sol_rpc_types::Lamport;
+use solana_address::Address;
 use solana_hash::Hash;
 use solana_signature::Signature;
 use std::time::Duration;
@@ -87,10 +89,15 @@ async fn submit_consolidation_transaction<R: CanisterRuntime>(
         owner: ic_cdk::api::canister_self(),
         subaccount: None,
     };
+    let master_key = read_state(|s| s.minter_public_key().cloned().unwrap());
+    let minter_address = Address::from(
+        derive_public_key(&master_key, derivation_path(&minter_account)).serialize_raw(),
+    );
+
     let transaction = create_signed_transfer_transaction(
         minter_account,
         &funds_to_consolidate,
-        minter_account,
+        minter_address,
         recent_blockhash,
         &IcSchnorrSigner,
     )

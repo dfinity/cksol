@@ -132,25 +132,21 @@ pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: R) {
         return;
     };
 
-    let master_public_key = match read_state(|s| s.minter_public_key().cloned()) {
-        Some(key) => key,
-        None => {
-            log!(Priority::Error, "Minter public key not yet available, skipping withdrawal processing");
-            return;
-        }
-    };
-
-    let recent_blockhash = match read_state(|state| state.sol_rpc_client(runtime.inter_canister_call_runtime()))
-        .estimate_recent_blockhash()
-        .send()
-        .await
-    {
-        Ok(blockhash) => blockhash,
-        Err(errors) => {
-            log!(Priority::Error, "Failed to estimate recent blockhash: {errors:?}");
-            return;
-        }
-    };
+    let recent_blockhash =
+        match read_state(|state| state.sol_rpc_client(runtime.inter_canister_call_runtime()))
+            .estimate_recent_blockhash()
+            .send()
+            .await
+        {
+            Ok(blockhash) => blockhash,
+            Err(errors) => {
+                log!(
+                    Priority::Error,
+                    "Failed to estimate recent blockhash: {errors:?}"
+                );
+                return;
+            }
+        };
 
     let minter_account: Account = ic_cdk::api::canister_self().into();
     let signer = IcSchnorrSigner;
@@ -163,7 +159,7 @@ pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: R) {
             .expect("BUG: withdrawal_amount must be >= withdrawal_fee");
 
         let transaction = match create_signed_transfer_transaction(
-            &master_public_key,
+            minter_account,
             &[(minter_account, transfer_amount)],
             destination,
             recent_blockhash,
@@ -173,7 +169,11 @@ pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: R) {
         {
             Ok(tx) => tx,
             Err(e) => {
-                log!(Priority::Error, "Failed to create withdrawal transaction for burn index {:?}: {e}", request.burn_block_index);
+                log!(
+                    Priority::Error,
+                    "Failed to create withdrawal transaction for burn index {:?}: {e}",
+                    request.burn_block_index
+                );
                 continue;
             }
         };

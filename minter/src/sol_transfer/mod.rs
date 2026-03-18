@@ -73,7 +73,7 @@ impl SchnorrSigner for IcSchnorrSigner {
 pub async fn create_signed_transfer_transaction(
     fee_payer_account: Account,
     sources: &[(Account, Lamport)],
-    destination_account: Account,
+    target_address: Address,
     recent_blockhash: Hash,
     signer: &impl SchnorrSigner,
 ) -> Result<Transaction, CreateTransferError> {
@@ -85,7 +85,6 @@ pub async fn create_signed_transfer_transaction(
         (derivation_path, Address::from(public_key.serialize_raw()))
     };
 
-    let (_, target_address) = derive_address(&destination_account);
     let (fee_payer_derivation_path, fee_payer_address) = derive_address(&fee_payer_account);
 
     let (source_derivation_paths, source_addresses): (Vec<_>, Vec<_>) = sources
