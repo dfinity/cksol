@@ -240,9 +240,12 @@ async fn should_return_error_if_already_processing() {
 
 mod process_pending_withdrawals_tests {
     use super::*;
+    use canlog::Log;
     use crate::state::event::EventType;
     use crate::test_fixtures::EventsAssert;
     use assert_matches::assert_matches;
+    use cksol_types_internal::log::Priority;
+    use sol_rpc_types::{MultiRpcResult, RpcError};
 
     #[tokio::test]
     async fn should_do_nothing_if_no_pending_withdrawals() {
@@ -335,5 +338,64 @@ mod process_pending_withdrawals_tests {
                 });
             })
             .assert_no_more_events();
+    }
+
+    #[tokio::test]
+    async fn should_log_error_when_blockhash_fetch_fails() {
+        init_state();
+
+        let minter_self = Principal::from_slice(&[0, 1, 2, 3, 4]);
+
+        // Create a pending withdrawal
+        let runtime = TestCanisterRuntime::new()
+            .add_stub_response(Ok::<Nat, TransferFromError>(Nat::from(1u64)))
+            .with_canister_self(minter_self)
+            .with_increasing_time();
+
+        let _ = withdraw_sol(
+            &runtime,
+            MINTER_ACCOUNT,
+            test_caller(),
+            None,
+            WITHDRAWAL_FEE + 1,
+            VALID_ADDRESS.to_string(),
+        )
+        .await
+        .unwrap();
+
+        type SendSlotResult = MultiRpcResult<sol_rpc_types::Slot>;
+
+        // estimate_recent_blockhash retries getSlot 3 times before giving up
+        let runtime = TestCanisterRuntime::new()
+            .add_stub_response(SendSlotResult::Consistent(Err(
+                RpcError::ValidationError("slot unavailable".to_string()),
+            )))
+            .add_stub_response(SendSlotResult::Consistent(Err(
+                RpcError::ValidationError("slot unavailable".to_string()),
+            )))
+            .add_stub_response(SendSlotResult::Consistent(Err(
+                RpcError::ValidationError("slot unavailable".to_string()),
+            )))
+            .with_canister_self(minter_self);
+
+        process_pending_withdrawals(&runtime).await;
+
+        // No withdrawal transaction event should be recorded
+        EventsAssert::from_recorded()
+            .expect_event(|e| {
+                assert_matches!(e, EventType::AcceptedWithdrawSolRequest(_));
+            })
+            .assert_no_more_events();
+
+        // An error should be logged
+        let mut log: Log<Priority> = Log::default();
+        log.push_logs(Priority::Error);
+        assert!(
+            log.entries
+                .iter()
+                .any(|e| e.message.contains("Failed to estimate recent blockhash")),
+            "Expected error log about blockhash failure, got: {:?}",
+            log.entries
+        );
     }
 }
