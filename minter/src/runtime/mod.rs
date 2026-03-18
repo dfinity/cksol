@@ -1,3 +1,4 @@
+use candid::Principal;
 use ic_canister_runtime::{IcRuntime, Runtime};
 use std::{fmt::Debug, time::Duration};
 
@@ -13,6 +14,7 @@ pub trait CanisterRuntime: Clone + 'static {
         delay: Duration,
         future: impl Future<Output = ()> + 'static,
     ) -> ic_cdk_timers::TimerId;
+    fn canister_self(&self) -> Principal;
 }
 
 #[derive(Clone, Default, Debug)]
@@ -55,5 +57,9 @@ impl CanisterRuntime for IcCanisterRuntime {
         future: impl Future<Output = ()> + 'static,
     ) -> ic_cdk_timers::TimerId {
         ic_cdk_timers::set_timer(delay, future)
+    }
+
+    fn canister_self(&self) -> Principal {
+        ic_cdk::api::canister_self()
     }
 }

@@ -148,7 +148,7 @@ pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: R) {
             }
         };
 
-    let minter_account: Account = ic_cdk::api::canister_self().into();
+    let minter_account: Account = runtime.canister_self().into();
     let signer = IcSchnorrSigner;
 
     for request in pending_requests {

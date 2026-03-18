@@ -86,7 +86,7 @@ async fn submit_consolidation_transaction<R: CanisterRuntime>(
     recent_blockhash: Hash,
 ) -> Result<Signature, ConsolidationError> {
     let minter_account = Account {
-        owner: ic_cdk::api::canister_self(),
+        owner: runtime.canister_self(),
         subaccount: None,
     };
     let master_key = read_state(|s| s.minter_public_key().cloned().unwrap());

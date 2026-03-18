@@ -1,5 +1,5 @@
 use crate::runtime::CanisterRuntime;
-use candid::CandidType;
+use candid::{CandidType, Principal};
 use ic_canister_runtime::{IcError, Runtime, StubRuntime};
 use std::{
     iter,
@@ -15,6 +15,7 @@ pub struct TestCanisterRuntime {
     msg_cycles_accept: Stubs<u128>,
     msg_cycles_available: Stubs<u128>,
     msg_cycles_refunded: Stubs<u128>,
+    canister_self: Option<Principal>,
 }
 
 impl TestCanisterRuntime {
@@ -52,6 +53,11 @@ impl TestCanisterRuntime {
         self.msg_cycles_refunded = self.msg_cycles_refunded.add(value);
         self
     }
+
+    pub fn with_canister_self(mut self, canister_self: Principal) -> Self {
+        self.canister_self = Some(canister_self);
+        self
+    }
 }
 
 impl CanisterRuntime for TestCanisterRuntime {
@@ -87,6 +93,11 @@ impl CanisterRuntime for TestCanisterRuntime {
         _future: impl Future<Output = ()> + 'static,
     ) -> ic_cdk_timers::TimerId {
         Default::default()
+    }
+
+    fn canister_self(&self) -> Principal {
+        self.canister_self
+            .expect("TestCanisterRuntime was not initialized with canister_self")
     }
 }
 
