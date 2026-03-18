@@ -49,13 +49,6 @@ pub async fn lazy_get_schnorr_master_key() -> SchnorrPublicKey {
     schnorr_public_key
 }
 
-pub(crate) fn derive_address(
-    master_public_key: &SchnorrPublicKey,
-    path: DerivationPath,
-) -> Address {
-    Address::from(derive_public_key(master_public_key, path).serialize_raw())
-}
-
 fn derive_public_key_from_account(
     master_public_key: &SchnorrPublicKey,
     account: &Account,
