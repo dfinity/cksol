@@ -15,7 +15,7 @@ use crate::{
     guard::{TimerGuard, withdraw_sol_guard},
     ledger::burn,
     runtime::CanisterRuntime,
-    sol_transfer::{IcSchnorrSigner, create_signed_transfer_transaction},
+    sol_transfer::{IcSchnorrSigner, SchnorrSigner, create_signed_transfer_transaction},
     state::{
         TaskType,
         audit::process_event,
@@ -121,6 +121,13 @@ pub async fn withdraw_sol<R: CanisterRuntime>(
 }
 
 pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: R) {
+    process_pending_withdrawals_with_signer(runtime, &IcSchnorrSigner).await;
+}
+
+pub async fn process_pending_withdrawals_with_signer<R: CanisterRuntime>(
+    runtime: R,
+    signer: &impl SchnorrSigner,
+) {
     let _guard = match TimerGuard::new(TaskType::WithdrawalProcessing) {
         Ok(guard) => guard,
         Err(_) => return,
@@ -149,7 +156,6 @@ pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: R) {
         };
 
     let minter_account: Account = runtime.canister_self().into();
-    let signer = IcSchnorrSigner;
 
     for request in pending_requests {
         let destination = Address::from(request.solana_address);
@@ -163,7 +169,7 @@ pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: R) {
             &[(minter_account, transfer_amount)],
             destination,
             recent_blockhash,
-            &signer,
+            signer,
         )
         .await
         {

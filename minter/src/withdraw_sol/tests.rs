@@ -1,8 +1,11 @@
 use crate::{
     guard::{TimerGuard, withdraw_sol_guard},
     state::TaskType,
-    test_fixtures::{MINTER_ACCOUNT, WITHDRAWAL_FEE, init_state, runtime::TestCanisterRuntime},
-    withdraw_sol::{process_pending_withdrawals, withdraw_sol},
+    test_fixtures::{
+        MINTER_ACCOUNT, WITHDRAWAL_FEE, init_schnorr_master_key, init_state,
+        runtime::TestCanisterRuntime,
+    },
+    withdraw_sol::{process_pending_withdrawals, process_pending_withdrawals_with_signer, withdraw_sol},
 };
 use assert_matches::assert_matches;
 use candid::{Nat, Principal};
@@ -237,6 +240,38 @@ async fn should_return_error_if_already_processing() {
 
 mod process_pending_withdrawals_tests {
     use super::*;
+    use crate::sol_transfer::SchnorrSigner;
+    use crate::address::DerivationPath;
+    use ic_cdk::management_canister::SignCallError;
+    use std::cell::RefCell;
+    use std::collections::VecDeque;
+
+    struct MockSchnorrSigner {
+        responses: RefCell<VecDeque<Result<Vec<u8>, SignCallError>>>,
+    }
+
+    impl MockSchnorrSigner {
+        fn with_signatures(signatures: Vec<[u8; 64]>) -> Self {
+            Self {
+                responses: RefCell::new(
+                    signatures.into_iter().map(|sig| Ok(sig.to_vec())).collect(),
+                ),
+            }
+        }
+    }
+
+    impl SchnorrSigner for MockSchnorrSigner {
+        async fn sign(
+            &self,
+            _message: Vec<u8>,
+            _derivation_path: DerivationPath,
+        ) -> Result<Vec<u8>, SignCallError> {
+            self.responses
+                .borrow_mut()
+                .pop_front()
+                .expect("MockSchnorrSigner: no more stub responses")
+        }
+    }
 
     #[tokio::test]
     async fn should_do_nothing_if_no_pending_withdrawals() {
@@ -270,10 +305,14 @@ mod process_pending_withdrawals_tests {
     #[tokio::test]
     async fn should_process_when_pending_withdrawals_exist() {
         init_state();
+        init_schnorr_master_key();
+
+        let minter_self = Principal::from_slice(&[0, 1, 2, 3, 4]);
 
         // Create a pending withdrawal by accepting one
         let runtime = TestCanisterRuntime::new()
             .add_stub_response(Ok::<Nat, TransferFromError>(Nat::from(1u64)))
+            .with_canister_self(minter_self)
             .with_increasing_time();
 
         let _ = withdraw_sol(
@@ -287,7 +326,29 @@ mod process_pending_withdrawals_tests {
         .await
         .unwrap();
 
-        let runtime = TestCanisterRuntime::new();
-        process_pending_withdrawals(runtime).await;
+        type SendSlotResult = sol_rpc_types::MultiRpcResult<sol_rpc_types::Slot>;
+        type SendBlockResult = sol_rpc_types::MultiRpcResult<sol_rpc_types::ConfirmedBlock>;
+
+        let runtime = TestCanisterRuntime::new()
+            // estimate_recent_blockhash: getSlot + getBlock
+            .add_stub_response(SendSlotResult::Consistent(Ok(1)))
+            .add_stub_response(SendBlockResult::Consistent(Ok(
+                sol_rpc_types::ConfirmedBlock {
+                    previous_blockhash: Default::default(),
+                    blockhash: solana_hash::Hash::new_from_array([0x42; 32]).into(),
+                    parent_slot: 0,
+                    block_time: None,
+                    block_height: None,
+                    signatures: None,
+                    rewards: None,
+                    num_reward_partitions: None,
+                    transactions: None,
+                },
+            )))
+            .with_canister_self(minter_self)
+            .with_increasing_time();
+
+        let signer = MockSchnorrSigner::with_signatures(vec![[0x42; 64]]);
+        process_pending_withdrawals_with_signer(runtime, &signer).await;
     }
 }
