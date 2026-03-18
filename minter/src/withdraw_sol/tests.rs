@@ -26,7 +26,7 @@ async fn should_return_error_if_calling_ledger_fails() {
     let runtime = TestCanisterRuntime::new().add_stub_error(IcError::CallPerformFailed);
 
     let result = withdraw_sol(
-        runtime,
+        &runtime,
         MINTER_ACCOUNT,
         test_caller(),
         None,
@@ -50,7 +50,7 @@ async fn should_return_error_if_ledger_unavailable() {
     ));
 
     let result = withdraw_sol(
-        runtime,
+        &runtime,
         MINTER_ACCOUNT,
         test_caller(),
         None,
@@ -78,7 +78,7 @@ async fn should_return_error_if_insufficient_allowance() {
     ));
 
     let result = withdraw_sol(
-        runtime,
+        &runtime,
         MINTER_ACCOUNT,
         test_caller(),
         None,
@@ -104,7 +104,7 @@ async fn should_return_error_if_insufficient_funds() {
     ));
 
     let result = withdraw_sol(
-        runtime,
+        &runtime,
         MINTER_ACCOUNT,
         test_caller(),
         None,
@@ -131,7 +131,7 @@ async fn should_return_generic_error() {
     ));
 
     let result = withdraw_sol(
-        runtime,
+        &runtime,
         MINTER_ACCOUNT,
         test_caller(),
         None,
@@ -158,7 +158,7 @@ async fn should_return_ok_if_burn_succeeds() {
         .with_increasing_time();
 
     let result = withdraw_sol(
-        runtime,
+        &runtime,
         MINTER_ACCOUNT,
         test_caller(),
         None,
@@ -182,7 +182,7 @@ async fn should_return_error_if_address_malformed() {
     let runtime = TestCanisterRuntime::new();
 
     let result = withdraw_sol(
-        runtime,
+        &runtime,
         MINTER_ACCOUNT,
         test_caller(),
         None,
@@ -202,7 +202,7 @@ async fn should_panic_if_caller_is_anonymous() {
     let runtime = TestCanisterRuntime::new();
 
     let _ = withdraw_sol(
-        runtime,
+        &runtime,
         MINTER_ACCOUNT,
         Principal::anonymous(),
         None,
@@ -226,7 +226,7 @@ async fn should_return_error_if_already_processing() {
     let runtime = TestCanisterRuntime::new();
 
     let result = withdraw_sol(
-        runtime,
+        &runtime,
         MINTER_ACCOUNT,
         caller,
         None,
@@ -240,13 +240,16 @@ async fn should_return_error_if_already_processing() {
 
 mod process_pending_withdrawals_tests {
     use super::*;
+    use crate::state::event::EventType;
+    use crate::test_fixtures::EventsAssert;
+    use assert_matches::assert_matches;
 
     #[tokio::test]
     async fn should_do_nothing_if_no_pending_withdrawals() {
         init_state();
 
         let runtime = TestCanisterRuntime::new();
-        process_pending_withdrawals(runtime).await;
+        process_pending_withdrawals(&runtime).await;
     }
 
     #[tokio::test]
@@ -256,7 +259,7 @@ mod process_pending_withdrawals_tests {
         let _guard = TimerGuard::new(TaskType::WithdrawalProcessing).unwrap();
 
         let runtime = TestCanisterRuntime::new();
-        process_pending_withdrawals(runtime).await;
+        process_pending_withdrawals(&runtime).await;
     }
 
     #[tokio::test]
@@ -264,7 +267,7 @@ mod process_pending_withdrawals_tests {
         init_state();
 
         let runtime = TestCanisterRuntime::new();
-        process_pending_withdrawals(runtime).await;
+        process_pending_withdrawals(&runtime).await;
 
         // Guard should be released, so we can acquire it again
         let _guard = TimerGuard::new(TaskType::WithdrawalProcessing).unwrap();
@@ -280,25 +283,6 @@ mod process_pending_withdrawals_tests {
         // Create a pending withdrawal by accepting one
         let runtime = TestCanisterRuntime::new()
             .add_stub_response(Ok::<Nat, TransferFromError>(Nat::from(1u64)))
-            .with_canister_self(minter_self)
-            .with_increasing_time();
-
-        let _ = withdraw_sol(
-            runtime,
-            MINTER_ACCOUNT,
-            test_caller(),
-            None,
-            WITHDRAWAL_FEE + 1,
-            VALID_ADDRESS.to_string(),
-        )
-        .await
-        .unwrap();
-
-        type SendSlotResult = sol_rpc_types::MultiRpcResult<sol_rpc_types::Slot>;
-        type SendBlockResult = sol_rpc_types::MultiRpcResult<sol_rpc_types::ConfirmedBlock>;
-
-        let runtime = TestCanisterRuntime::new()
-            // estimate_recent_blockhash: getSlot + getBlock
             .add_stub_response(SendSlotResult::Consistent(Ok(1)))
             .add_stub_response(SendBlockResult::Consistent(Ok(
                 sol_rpc_types::ConfirmedBlock {
@@ -317,6 +301,35 @@ mod process_pending_withdrawals_tests {
             .with_canister_self(minter_self)
             .with_increasing_time();
 
-        process_pending_withdrawals(runtime).await;
+        let _ = withdraw_sol(
+            &runtime,
+            MINTER_ACCOUNT,
+            test_caller(),
+            None,
+            WITHDRAWAL_FEE + 1,
+            VALID_ADDRESS.to_string(),
+        )
+        .await
+        .unwrap();
+
+        type SendSlotResult = sol_rpc_types::MultiRpcResult<sol_rpc_types::Slot>;
+        type SendBlockResult = sol_rpc_types::MultiRpcResult<sol_rpc_types::ConfirmedBlock>;
+
+        process_pending_withdrawals(&runtime).await;
+
+        EventsAssert::from_recorded()
+            .expect_event(|e| {
+                assert_matches!(e, EventType::AcceptedWithdrawSolRequest(req) => {
+                    assert_eq!(req.withdrawal_amount, WITHDRAWAL_FEE + 1);
+                    assert_eq!(req.withdrawal_fee, WITHDRAWAL_FEE);
+                });
+            })
+            .expect_event(|e| {
+                assert_matches!(e, EventType::SentWithdrawalTransaction { request, .. } => {
+                    assert_eq!(request.withdrawal_amount, WITHDRAWAL_FEE + 1);
+                    assert_eq!(request.withdrawal_fee, WITHDRAWAL_FEE);
+                });
+            })
+            .assert_no_more_events();
     }
 }

@@ -72,7 +72,7 @@ async fn withdraw_sol(args: WithdrawSolArgs) -> Result<WithdrawSolOk, WithdrawSo
     let minter_account: Account = ic_cdk::api::canister_self().into();
 
     cksol_minter::withdraw_sol::withdraw_sol(
-        IcCanisterRuntime::new(),
+        &IcCanisterRuntime::new(),
         minter_account,
         ic_cdk::api::msg_caller(),
         args.from_subaccount,
@@ -273,7 +273,7 @@ fn setup_timers() {
         consolidate_deposits(IcCanisterRuntime::new()).await;
     });
     ic_cdk_timers::set_timer_interval(WITHDRAWAL_PROCESSING_DELAY, async || {
-        process_pending_withdrawals(IcCanisterRuntime::new()).await;
+        process_pending_withdrawals(&IcCanisterRuntime::new()).await;
     });
 }
 

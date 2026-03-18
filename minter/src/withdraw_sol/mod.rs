@@ -32,7 +32,7 @@ const MAX_WITHDRAWALS_PER_BATCH: usize = 10;
 mod tests;
 
 pub async fn withdraw_sol<R: CanisterRuntime>(
-    runtime: R,
+    runtime: &R,
     minter_account: Account,
     caller: Principal,
     from_subaccount: Option<Subaccount>,
@@ -53,7 +53,7 @@ pub async fn withdraw_sol<R: CanisterRuntime>(
     let solana_address = Address::from_str(&address)
         .map_err(|e| WithdrawSolError::MalformedAddress(e.to_string()))?;
 
-    let block_index = burn(&runtime, minter_account, from, amount, solana_address)
+    let block_index = burn(runtime, minter_account, from, amount, solana_address)
         .await
         .map_err(|e| match e {
             crate::ledger::BurnError::IcError(ic_error) => {
@@ -113,14 +113,14 @@ pub async fn withdraw_sol<R: CanisterRuntime>(
                 withdrawal_amount: amount,
                 withdrawal_fee,
             }),
-            &runtime,
+            runtime,
         )
     });
 
     Ok(WithdrawSolOk { block_index })
 }
 
-pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: R) {
+pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: &R) {
     let _guard = match TimerGuard::new(TaskType::WithdrawalProcessing) {
         Ok(guard) => guard,
         Err(_) => return,
@@ -188,7 +188,7 @@ pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: R) {
                     signature,
                     transaction: transaction.message.clone(),
                 },
-                &runtime,
+                runtime,
             )
         });
 
