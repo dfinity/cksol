@@ -17,6 +17,7 @@ use std::time::Duration;
 use thiserror::Error;
 
 pub const DEPOSIT_CONSOLIDATION_DELAY: Duration = Duration::from_mins(10);
+const MAX_CONCURRENT_TRANSACTIONS: usize = 10;
 
 pub async fn consolidate_deposits<R: CanisterRuntime>(runtime: R) {
     let _guard = match TimerGuard::new(TaskType::DepositConsolidation) {
@@ -40,18 +41,19 @@ pub async fn consolidate_deposits<R: CanisterRuntime>(runtime: R) {
             .collect()
     });
 
-    let recent_blockhash = match get_recent_blockhash(&runtime).await {
-        Ok(blockhash) => blockhash,
-        Err(e) => {
-            log!(Priority::Info, "Failed to fetch recent blockhash: {e}");
-            return;
-        }
-    };
-
-    let _ = futures::future::join_all(funds_to_consolidate.into_iter().map(|funds| {
-        try_submit_consolidation_transaction(runtime.clone(), funds, recent_blockhash)
-    }))
-    .await;
+    for round in funds_to_consolidate.chunks(MAX_CONCURRENT_TRANSACTIONS) {
+        let recent_blockhash = match get_recent_blockhash(&runtime).await {
+            Ok(blockhash) => blockhash,
+            Err(e) => {
+                log!(Priority::Info, "Failed to fetch recent blockhash: {e}");
+                return;
+            }
+        };
+        let _ = futures::future::join_all(round.iter().cloned().map(|funds| {
+            try_submit_consolidation_transaction(runtime.clone(), funds, recent_blockhash)
+        }))
+        .await;
+    }
 }
 
 async fn try_submit_consolidation_transaction<R: CanisterRuntime>(
