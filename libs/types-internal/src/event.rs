@@ -91,6 +91,15 @@ pub enum EventType {
         /// and the amount consolidated from each account.
         deposits: Vec<(Account, Lamport)>,
     },
+    /// A previously submitted transaction was resubmitted with a new signature.
+    ResubmittedTransaction {
+        /// The signature of the old transaction being replaced.
+        old_signature: Signature,
+        /// The signature of the new transaction.
+        new_signature: Signature,
+        /// The slot of the new blockhash used in the resubmitted transaction.
+        new_slot: Slot,
+    },
 }
 
 /// Arguments for the `get_events` endpoint.

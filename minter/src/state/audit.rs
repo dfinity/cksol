@@ -52,6 +52,13 @@ fn apply_state_transition(state: &mut State, payload: &EventType) {
         EventType::ConsolidatedDeposits { deposits } => {
             state.process_consolidated_deposits(deposits);
         }
+        EventType::ResubmittedTransaction {
+            old_signature,
+            new_signature,
+            new_slot,
+        } => {
+            state.process_transaction_resubmitted(old_signature, new_signature, *new_slot);
+        }
     }
 }
 

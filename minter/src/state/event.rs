@@ -85,6 +85,20 @@ pub enum EventType {
         #[n(0)]
         deposits: Vec<(Account, Lamport)>,
     },
+    /// A previously submitted transaction was resubmitted with a new signature.
+    /// The transaction message and signers remain the same.
+    #[n(8)]
+    ResubmittedTransaction {
+        /// The signature of the old transaction being replaced
+        #[cbor(n(0), with = "cbor::signature")]
+        old_signature: Signature,
+        /// The signature of the new transaction
+        #[cbor(n(1), with = "cbor::signature")]
+        new_signature: Signature,
+        /// The slot of the new blockhash used in the resubmitted transaction
+        #[n(2)]
+        new_slot: Slot,
+    },
 }
 
 /// Payload of the `AcceptedWithdrawSolRequest` event.

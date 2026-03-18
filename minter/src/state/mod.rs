@@ -403,6 +403,30 @@ impl State {
             }
         }
     }
+
+    fn process_transaction_resubmitted(
+        &mut self,
+        old_signature: &Signature,
+        new_signature: &Signature,
+        new_slot: Slot,
+    ) {
+        let old_transaction = self
+            .submitted_transactions
+            .remove(old_signature)
+            .unwrap_or_else(|| {
+                panic!("Attempted to resubmit unknown transaction with signature {old_signature:?}")
+            });
+        let new_transaction = SubmittedTransaction {
+            slot: new_slot,
+            ..old_transaction
+        };
+        assert_eq!(
+            self.submitted_transactions
+                .insert(*new_signature, new_transaction),
+            None,
+            "Attempted to resubmit transaction with signature {new_signature:?} that already exists"
+        );
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
