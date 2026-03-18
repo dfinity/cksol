@@ -16,20 +16,20 @@ use solana_transaction::{Instruction, Message, Transaction};
 use std::collections::BTreeSet;
 use thiserror::Error;
 
-pub const MAX_SIGNATURES: u64 = 10;
+#[cfg(test)]
+mod tests;
+
+pub const MAX_TRANSFERS_PER_TX: u64 = 10;
 pub const MAX_TX_SIZE: usize = 1_232;
 const BYTES_PER_SIGNATURE: usize = 64;
 
 #[derive(Debug, Error, From)]
 pub enum CreateTransferError {
-    #[error("too many signatures: got {got}, max is {max}")]
-    TooManySignatures { max: u64, got: u64 },
+    #[error("too many sources: got {got}, max is {max}")]
+    TooManySources { max: u64, got: u64 },
     #[error("signing failed: {0}")]
     SigningFailed(SignCallError),
 }
-
-#[cfg(test)]
-mod tests;
 
 pub trait SchnorrSigner {
     fn sign(
@@ -77,6 +77,13 @@ pub async fn create_signed_transfer_transaction(
     recent_blockhash: Hash,
     signer: &impl SchnorrSigner,
 ) -> Result<Transaction, CreateTransferError> {
+    if sources.len() as u64 > MAX_TRANSFERS_PER_TX {
+        return Err(CreateTransferError::TooManySources {
+            max: MAX_TRANSFERS_PER_TX,
+            got: sources.len() as u64,
+        });
+    }
+
     let master_public_key = lazy_get_schnorr_master_key().await;
 
     let derive_address = |account: &Account| -> (DerivationPath, Address) {
@@ -108,15 +115,6 @@ pub async fn create_signed_transfer_transaction(
     if !is_fee_payer_in_sources {
         signer_derivation_paths.push(fee_payer_derivation_path);
         signer_addresses.push(fee_payer_address);
-    }
-
-    // Check signature count after determining unique signers
-    let num_signatures = signer_addresses.len() as u64;
-    if num_signatures > MAX_SIGNATURES {
-        return Err(CreateTransferError::TooManySignatures {
-            max: MAX_SIGNATURES,
-            got: num_signatures,
-        });
     }
 
     let instructions: Vec<Instruction> = source_addresses
