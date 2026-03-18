@@ -36,7 +36,6 @@ ic-test-utilities-load-wasm = { git = "https://github.com/dfinity/ic", tag = "re
 icrc-cbor = "0.1.0"
 icrc-ledger-client-cdk = "0.1.4"
 icrc-ledger-types = "0.1.12"
-itertools = "0.14.0"
 minicbor = "0.19.1"
 num-traits = "0.2.19"
 phantom_newtype = "0.2.0"
