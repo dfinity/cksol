@@ -2,6 +2,8 @@ use candid::Principal;
 use ic_canister_runtime::{IcRuntime, Runtime};
 use std::{fmt::Debug, time::Duration};
 
+use crate::sol_transfer::{IcSchnorrSigner, SchnorrSigner};
+
 pub trait CanisterRuntime: Clone + 'static {
     fn inter_canister_call_runtime(&self) -> impl Runtime;
     fn time(&self) -> u64;
@@ -15,6 +17,7 @@ pub trait CanisterRuntime: Clone + 'static {
         future: impl Future<Output = ()> + 'static,
     ) -> ic_cdk_timers::TimerId;
     fn canister_self(&self) -> Principal;
+    fn schnorr_signer(&self) -> impl SchnorrSigner;
 }
 
 #[derive(Clone, Default, Debug)]
@@ -61,5 +64,9 @@ impl CanisterRuntime for IcCanisterRuntime {
 
     fn canister_self(&self) -> Principal {
         ic_cdk::api::canister_self()
+    }
+
+    fn schnorr_signer(&self) -> impl SchnorrSigner {
+        IcSchnorrSigner
     }
 }

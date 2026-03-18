@@ -5,7 +5,7 @@ use crate::{
         MINTER_ACCOUNT, WITHDRAWAL_FEE, init_schnorr_master_key, init_state,
         runtime::TestCanisterRuntime,
     },
-    withdraw_sol::{process_pending_withdrawals, process_pending_withdrawals_with_signer, withdraw_sol},
+    withdraw_sol::{process_pending_withdrawals, withdraw_sol},
 };
 use assert_matches::assert_matches;
 use candid::{Nat, Principal};
@@ -240,38 +240,6 @@ async fn should_return_error_if_already_processing() {
 
 mod process_pending_withdrawals_tests {
     use super::*;
-    use crate::sol_transfer::SchnorrSigner;
-    use crate::address::DerivationPath;
-    use ic_cdk::management_canister::SignCallError;
-    use std::cell::RefCell;
-    use std::collections::VecDeque;
-
-    struct MockSchnorrSigner {
-        responses: RefCell<VecDeque<Result<Vec<u8>, SignCallError>>>,
-    }
-
-    impl MockSchnorrSigner {
-        fn with_signatures(signatures: Vec<[u8; 64]>) -> Self {
-            Self {
-                responses: RefCell::new(
-                    signatures.into_iter().map(|sig| Ok(sig.to_vec())).collect(),
-                ),
-            }
-        }
-    }
-
-    impl SchnorrSigner for MockSchnorrSigner {
-        async fn sign(
-            &self,
-            _message: Vec<u8>,
-            _derivation_path: DerivationPath,
-        ) -> Result<Vec<u8>, SignCallError> {
-            self.responses
-                .borrow_mut()
-                .pop_front()
-                .expect("MockSchnorrSigner: no more stub responses")
-        }
-    }
 
     #[tokio::test]
     async fn should_do_nothing_if_no_pending_withdrawals() {
@@ -345,10 +313,10 @@ mod process_pending_withdrawals_tests {
                     transactions: None,
                 },
             )))
+            .add_schnorr_signature([0x42; 64])
             .with_canister_self(minter_self)
             .with_increasing_time();
 
-        let signer = MockSchnorrSigner::with_signatures(vec![[0x42; 64]]);
-        process_pending_withdrawals_with_signer(runtime, &signer).await;
+        process_pending_withdrawals(runtime).await;
     }
 }

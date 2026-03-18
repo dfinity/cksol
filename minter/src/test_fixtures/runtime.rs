@@ -1,7 +1,9 @@
-use crate::runtime::CanisterRuntime;
+use crate::{address::DerivationPath, runtime::CanisterRuntime, sol_transfer::SchnorrSigner};
 use candid::{CandidType, Principal};
 use ic_canister_runtime::{IcError, Runtime, StubRuntime};
+use ic_cdk::management_canister::SignCallError;
 use std::{
+    collections::VecDeque,
     iter,
     sync::{Arc, Mutex},
     time::Duration,
@@ -16,6 +18,7 @@ pub struct TestCanisterRuntime {
     msg_cycles_available: Stubs<u128>,
     msg_cycles_refunded: Stubs<u128>,
     canister_self: Option<Principal>,
+    schnorr_signer: MockSchnorrSigner,
 }
 
 impl TestCanisterRuntime {
@@ -58,6 +61,11 @@ impl TestCanisterRuntime {
         self.canister_self = Some(canister_self);
         self
     }
+
+    pub fn add_schnorr_signature(mut self, signature: [u8; 64]) -> Self {
+        self.schnorr_signer.responses.add(Ok(signature.to_vec()));
+        self
+    }
 }
 
 impl CanisterRuntime for TestCanisterRuntime {
@@ -98,6 +106,46 @@ impl CanisterRuntime for TestCanisterRuntime {
     fn canister_self(&self) -> Principal {
         self.canister_self
             .expect("TestCanisterRuntime was not initialized with canister_self")
+    }
+
+    fn schnorr_signer(&self) -> impl SchnorrSigner {
+        self.schnorr_signer.clone()
+    }
+}
+
+#[derive(Clone, Default)]
+pub struct MockSchnorrSigner {
+    responses: SharedVecDeque<Result<Vec<u8>, SignCallError>>,
+}
+
+impl SchnorrSigner for MockSchnorrSigner {
+    async fn sign(
+        &self,
+        _message: Vec<u8>,
+        _derivation_path: DerivationPath,
+    ) -> Result<Vec<u8>, SignCallError> {
+        self.responses
+            .pop_front()
+            .expect("MockSchnorrSigner: no more stub responses")
+    }
+}
+
+#[derive(Clone)]
+struct SharedVecDeque<T>(Arc<Mutex<VecDeque<T>>>);
+
+impl<T> Default for SharedVecDeque<T> {
+    fn default() -> Self {
+        Self(Arc::new(Mutex::new(VecDeque::new())))
+    }
+}
+
+impl<T> SharedVecDeque<T> {
+    fn add(&mut self, value: T) {
+        self.0.try_lock().unwrap().push_back(value);
+    }
+
+    fn pop_front(&self) -> Option<T> {
+        self.0.try_lock().unwrap().pop_front()
     }
 }
 
