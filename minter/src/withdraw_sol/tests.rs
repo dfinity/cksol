@@ -250,6 +250,8 @@ mod process_pending_withdrawals_tests {
 
         let runtime = TestCanisterRuntime::new();
         process_pending_withdrawals(&runtime).await;
+
+        EventsAssert::assert_no_events_recorded();
     }
 
     #[tokio::test]
@@ -260,6 +262,8 @@ mod process_pending_withdrawals_tests {
 
         let runtime = TestCanisterRuntime::new();
         process_pending_withdrawals(&runtime).await;
+
+        EventsAssert::assert_no_events_recorded();
     }
 
     #[tokio::test]
