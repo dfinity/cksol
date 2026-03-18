@@ -1,6 +1,6 @@
-use crate::state::{mutate_state, read_state, SchnorrPublicKey};
+use crate::state::{SchnorrPublicKey, mutate_state, read_state};
 use ic_cdk::management_canister::{
-    schnorr_public_key, SchnorrAlgorithm, SchnorrKeyId, SchnorrPublicKeyArgs,
+    SchnorrAlgorithm, SchnorrKeyId, SchnorrPublicKeyArgs, schnorr_public_key,
 };
 use ic_ed25519::{DerivationIndex, DerivationPath as IcDerivationPath, PublicKey};
 use icrc_ledger_types::icrc1::account::Account;

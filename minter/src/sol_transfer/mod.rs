@@ -68,6 +68,9 @@ impl SchnorrSigner for IcSchnorrSigner {
 /// each minter-controlled address (identified by its account) to the
 /// destination account's derived address.
 ///
+/// Returns the signed transaction and the list of signer accounts
+/// (in signature order: fee payer first, then sources).
+///
 /// # Panics
 ///
 /// Panics if the IC returns a signature that is not exactly 64 bytes.
@@ -77,7 +80,7 @@ pub async fn create_signed_transfer_transaction(
     destination_account: Account,
     recent_blockhash: Hash,
     signer: &impl SchnorrSigner,
-) -> Result<Transaction, CreateTransferError> {
+) -> Result<(Transaction, Vec<Account>), CreateTransferError> {
     // Order signers in the order their signatures should be included in the serialized transaction.
     // The fee payer is always at index 0, followed by deduplicated signers for each instruction.
     let signer_accounts: IndexSet<_> = iter::once(&fee_payer_account)
@@ -127,7 +130,8 @@ pub async fn create_signed_transfer_transaction(
 
     transaction.signatures = signatures;
 
-    Ok(transaction)
+    let signers = signer_accounts.into_iter().cloned().collect();
+    Ok((transaction, signers))
 }
 
 fn signature_from_bytes(bytes: Vec<u8>) -> Signature {

@@ -87,7 +87,7 @@ async fn submit_consolidation_transaction<R: CanisterRuntime>(
         owner: ic_cdk::api::canister_self(),
         subaccount: None,
     };
-    let transaction = create_signed_transfer_transaction(
+    let (transaction, signers) = create_signed_transfer_transaction(
         minter_account,
         &funds_to_consolidate,
         minter_account,
@@ -114,6 +114,7 @@ async fn submit_consolidation_transaction<R: CanisterRuntime>(
             EventType::SubmittedTransaction {
                 signature,
                 transaction: message,
+                signers,
             },
             runtime,
         )
