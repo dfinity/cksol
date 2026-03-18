@@ -240,10 +240,10 @@ async fn should_return_error_if_already_processing() {
 
 mod process_pending_withdrawals_tests {
     use super::*;
-    use canlog::Log;
     use crate::state::event::EventType;
     use crate::test_fixtures::EventsAssert;
     use assert_matches::assert_matches;
+    use canlog::Log;
     use cksol_types_internal::log::Priority;
     use sol_rpc_types::{MultiRpcResult, RpcError};
 
@@ -346,9 +346,21 @@ mod process_pending_withdrawals_tests {
 
         let minter_self = Principal::from_slice(&[0, 1, 2, 3, 4]);
 
+        type SendSlotResult = MultiRpcResult<sol_rpc_types::Slot>;
+
         // Create a pending withdrawal
         let runtime = TestCanisterRuntime::new()
             .add_stub_response(Ok::<Nat, TransferFromError>(Nat::from(1u64)))
+            // estimate_recent_blockhash retries getSlot 3 times before giving up
+            .add_stub_response(SendSlotResult::Consistent(Err(RpcError::ValidationError(
+                "slot unavailable".to_string(),
+            ))))
+            .add_stub_response(SendSlotResult::Consistent(Err(RpcError::ValidationError(
+                "slot unavailable".to_string(),
+            ))))
+            .add_stub_response(SendSlotResult::Consistent(Err(RpcError::ValidationError(
+                "slot unavailable".to_string(),
+            ))))
             .with_canister_self(minter_self)
             .with_increasing_time();
 
@@ -362,21 +374,6 @@ mod process_pending_withdrawals_tests {
         )
         .await
         .unwrap();
-
-        type SendSlotResult = MultiRpcResult<sol_rpc_types::Slot>;
-
-        // estimate_recent_blockhash retries getSlot 3 times before giving up
-        let runtime = TestCanisterRuntime::new()
-            .add_stub_response(SendSlotResult::Consistent(Err(
-                RpcError::ValidationError("slot unavailable".to_string()),
-            )))
-            .add_stub_response(SendSlotResult::Consistent(Err(
-                RpcError::ValidationError("slot unavailable".to_string()),
-            )))
-            .add_stub_response(SendSlotResult::Consistent(Err(
-                RpcError::ValidationError("slot unavailable".to_string()),
-            )))
-            .with_canister_self(minter_self);
 
         process_pending_withdrawals(&runtime).await;
 
