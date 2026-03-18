@@ -118,6 +118,22 @@ pub struct MockSchnorrSigner {
     responses: SharedVecDeque<Result<Vec<u8>, SignCallError>>,
 }
 
+impl MockSchnorrSigner {
+    pub fn with_signatures(signatures: Vec<[u8; 64]>) -> Self {
+        Self {
+            responses: SharedVecDeque::from_iter(
+                signatures.into_iter().map(|sig| Ok(sig.to_vec())),
+            ),
+        }
+    }
+
+    pub fn with_responses(responses: Vec<Result<Vec<u8>, SignCallError>>) -> Self {
+        Self {
+            responses: SharedVecDeque::from_iter(responses),
+        }
+    }
+}
+
 impl SchnorrSigner for MockSchnorrSigner {
     async fn sign(
         &self,
@@ -140,6 +156,10 @@ impl<T> Default for SharedVecDeque<T> {
 }
 
 impl<T> SharedVecDeque<T> {
+    fn from_iter(iter: impl IntoIterator<Item = T>) -> Self {
+        Self(Arc::new(Mutex::new(iter.into_iter().collect())))
+    }
+
     fn add(&mut self, value: T) {
         self.0.try_lock().unwrap().push_back(value);
     }

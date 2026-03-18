@@ -1,40 +1,8 @@
 use super::*;
-use crate::test_fixtures::{init_schnorr_master_key, init_state};
+use crate::test_fixtures::{init_schnorr_master_key, init_state, runtime::MockSchnorrSigner};
 use candid::Principal;
 use ic_cdk::{call::CallRejected, management_canister::SignCallError};
 use solana_address::Address;
-use std::{cell::RefCell, collections::VecDeque};
-
-struct MockSchnorrSigner {
-    responses: RefCell<VecDeque<Result<Vec<u8>, SignCallError>>>,
-}
-
-impl MockSchnorrSigner {
-    fn with_signatures(signatures: Vec<[u8; 64]>) -> Self {
-        Self {
-            responses: RefCell::new(signatures.into_iter().map(|sig| Ok(sig.to_vec())).collect()),
-        }
-    }
-
-    fn with_responses(responses: Vec<Result<Vec<u8>, SignCallError>>) -> Self {
-        Self {
-            responses: RefCell::new(responses.into()),
-        }
-    }
-}
-
-impl SchnorrSigner for MockSchnorrSigner {
-    async fn sign(
-        &self,
-        _message: Vec<u8>,
-        _derivation_path: DerivationPath,
-    ) -> Result<Vec<u8>, SignCallError> {
-        self.responses
-            .borrow_mut()
-            .pop_front()
-            .expect("MockSchnorrSigner: no more stub responses")
-    }
-}
 
 fn setup() {
     init_state();
