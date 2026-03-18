@@ -24,8 +24,7 @@ use pocket_ic::{PocketIcBuilder, RejectResponse, nonblocking::PocketIc};
 use serde::de::DeserializeOwned;
 use sol_rpc_client::SolRpcClient;
 use sol_rpc_types::{Lamport, RpcAccess};
-use std::ops::Deref;
-use std::{default::Default, env::var, fs, path::PathBuf, time::Duration, vec};
+use std::{default::Default, env::var, fs, ops::Deref, path::PathBuf, time::Duration, vec};
 
 pub mod events;
 pub mod fixtures;
@@ -99,7 +98,8 @@ impl Setup {
     pub const DEFAULT_CONTROLLER: Principal = Principal::from_slice(&[0x9d, 0xf7, 0x01]);
     pub const DEFAULT_CALLER: Principal =
         Principal::from_slice(&[0xff, 0xff, 0xff, 0xff, 0xff, 0xe0, 0x0, 0x3, 0x1, 0x1]);
-    pub const DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT: Lamport = 1_000_000; // 0.001 SOL
+    // Must be >= DEFAULT_WITHDRAWAL_FEE + SOLANA_RENT_EXEMPTION_THRESHOLD (890,880)
+    pub const DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT: Lamport = 2_000_000; // 0.002 SOL
     pub const DEFAULT_MINIMUM_DEPOSIT_AMOUNT: Lamport = 10_000_000; // 0.01 SOL
     pub const DEFAULT_UPDATE_BALANCE_REQUIRED_CYCLES: u128 = 1_000_000_000_000;
 
@@ -324,7 +324,7 @@ impl<'a> Deref for CkSolMinter<'a> {
 }
 
 impl CkSolMinter<'_> {
-    pub async fn get_deposit_address(&self, args: GetDepositAddressArgs) -> Address {
+    pub async fn get_deposit_address(&self, args: impl Into<GetDepositAddressArgs>) -> Address {
         self.try_get_deposit_address(args)
             .await
             .expect("get_deposit_address failed")
@@ -332,9 +332,9 @@ impl CkSolMinter<'_> {
 
     pub async fn try_get_deposit_address(
         &self,
-        args: GetDepositAddressArgs,
+        args: impl Into<GetDepositAddressArgs>,
     ) -> Result<Address, String> {
-        self.try_update_call("get_deposit_address", (args,), 0)
+        self.try_update_call("get_deposit_address", (args.into(),), 0)
             .await
     }
 

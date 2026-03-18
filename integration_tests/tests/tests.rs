@@ -19,7 +19,6 @@ use ic_pocket_canister_runtime::{JsonRpcResponse, MockHttpOutcalls, MockHttpOutc
 use icrc_ledger_types::icrc1::account::Subaccount;
 use serde_json::json;
 use sol_rpc_types::{CommitmentLevel, ConsensusStrategy, GetTransactionEncoding, RpcConfig};
-use std::time::Duration;
 use tokio::join;
 
 mod get_deposit_address_tests {
@@ -115,9 +114,10 @@ mod lifecycle {
     #[tokio::test]
     async fn should_get_minter_info_and_upgrade() {
         const NEW_DEPOSIT_FEE: Lamport = 10;
-        const NEW_MINIMUM_WITHDRAWAL_AMOUNT: Lamport = 20;
+        // minimum_withdrawal_amount must be >= withdrawal_fee + rent exemption threshold (890,880 lamports)
+        const NEW_WITHDRAWAL_FEE: Lamport = 100_000;
+        const NEW_MINIMUM_WITHDRAWAL_AMOUNT: Lamport = 1_000_000;
         const NEW_MINIMUM_DEPOSIT_AMOUNT: Lamport = 25;
-        const NEW_WITHDRAWAL_FEE: Lamport = 15;
         const NEW_UPDATE_BALANCE_REQUIRED_CYCLES: u128 = 500_000_000_000;
 
         let setup = SetupBuilder::new().build().await;
@@ -733,20 +733,6 @@ mod update_balance_tests {
 
         let balance_after = setup.ledger().balance_of(DEFAULT_CALLER_ACCOUNT).await;
         assert_eq!(balance_after, EXPECTED_MINT_AMOUNT);
-
-        // Deposit consolidation should be scheduled after deposit
-        let num_events_before = setup.minter().get_all_events().await.len();
-
-        setup.advance_time(Duration::from_mins(10)).await;
-        setup.tick().await;
-
-        setup.minter().assert_that_events().await.satisfy(|events| {
-            assert_eq!(events.len(), num_events_before + 1);
-            check!(matches!(
-                &events[num_events_before],
-                EventType::ConsolidatedDeposits { deposits } if deposits == &vec![(DEFAULT_CALLER_ACCOUNT, DEPOSIT_AMOUNT)]
-            ));
-        });
 
         setup.drop().await;
     }

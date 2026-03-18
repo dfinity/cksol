@@ -9,13 +9,15 @@ use crate::{
         runtime::TestCanisterRuntime,
     },
     transaction::{
-        GetDepositAmountError, GetTransactionError, get_deposit_amount_to_address,
-        try_get_transaction,
+        GetDepositAmountError, GetRecentBlockhashError, GetTransactionError,
+        SubmitTransactionError, get_deposit_amount_to_address, get_recent_blockhash,
+        submit_transaction, try_get_transaction,
     },
 };
 use assert_matches::assert_matches;
 use ic_canister_runtime::IcError;
 use sol_rpc_types::{HttpOutcallError, RpcError, RpcSource, SupportedRpcProviderId};
+use solana_transaction::{Message, Transaction};
 use solana_transaction_status_client_types::{EncodedTransaction, TransactionBinaryEncoding};
 
 // TODO DEFI-2643: Test behavior with cycles
@@ -185,5 +187,156 @@ mod get_deposit_amount_tests {
         let result = get_deposit_amount_to_address(transaction, DEPOSIT_ADDRESS);
 
         assert_eq!(result, Ok(DEPOSIT_AMOUNT));
+    }
+}
+
+mod submit_transaction_tests {
+    use super::*;
+
+    type SendTransactionResult = sol_rpc_types::MultiRpcResult<sol_rpc_types::Signature>;
+
+    #[tokio::test]
+    async fn should_return_signature_on_success() {
+        init_state();
+
+        let expected_signature = signature();
+        let runtime = TestCanisterRuntime::new().add_stub_response(
+            SendTransactionResult::Consistent(Ok(expected_signature.clone())),
+        );
+
+        let result = submit_transaction(&runtime, transaction()).await;
+
+        assert_eq!(result, Ok(expected_signature.into()));
+    }
+
+    #[tokio::test]
+    async fn should_fail_on_ic_error() {
+        init_state();
+
+        let runtime = TestCanisterRuntime::new().add_stub_error(IcError::CallPerformFailed);
+
+        let result = submit_transaction(&runtime, transaction()).await;
+
+        assert_eq!(
+            result,
+            Err(SubmitTransactionError::IcError(IcError::CallPerformFailed))
+        );
+    }
+
+    #[tokio::test]
+    async fn should_fail_on_rpc_error() {
+        init_state();
+
+        let rpc_error = RpcError::HttpOutcallError(HttpOutcallError::InvalidHttpJsonRpcResponse {
+            status: 500,
+            body: "Internal server error".to_string(),
+            parsing_error: None,
+        });
+
+        let runtime = TestCanisterRuntime::new()
+            .add_stub_response(SendTransactionResult::Consistent(Err(rpc_error.clone())));
+
+        let result = submit_transaction(&runtime, transaction()).await;
+
+        assert_eq!(result, Err(SubmitTransactionError::RpcError(rpc_error)));
+    }
+
+    #[tokio::test]
+    async fn should_fail_on_inconsistent_results() {
+        init_state();
+
+        let results = vec![
+            (
+                RpcSource::Supported(SupportedRpcProviderId::AnkrMainnet),
+                Ok(solana_signature::Signature::from([0x11; 64]).into()),
+            ),
+            (
+                RpcSource::Supported(SupportedRpcProviderId::DrpcMainnet),
+                Ok(solana_signature::Signature::from([0x22; 64]).into()),
+            ),
+        ];
+
+        let runtime = TestCanisterRuntime::new()
+            .add_stub_response(SendTransactionResult::Inconsistent(results));
+
+        let result = submit_transaction(&runtime, transaction()).await;
+
+        assert_eq!(result, Err(SubmitTransactionError::InconsistentRpcResults));
+    }
+
+    fn transaction() -> Transaction {
+        let message = Message::new(&[], None);
+        Transaction {
+            signatures: vec![signature().into()],
+            message,
+        }
+    }
+
+    fn signature() -> sol_rpc_types::Signature {
+        solana_signature::Signature::from([0x42; 64]).into()
+    }
+}
+
+mod get_recent_blockhash_tests {
+    use super::*;
+
+    type SendSlotResult = sol_rpc_types::MultiRpcResult<sol_rpc_types::Slot>;
+    type SendBlockResult = sol_rpc_types::MultiRpcResult<sol_rpc_types::ConfirmedBlock>;
+
+    #[tokio::test]
+    async fn should_return_blockhash_on_success() {
+        init_state();
+
+        let runtime = TestCanisterRuntime::new()
+            .add_stub_response(SendSlotResult::Consistent(Ok(978458723)))
+            .add_stub_response(SendBlockResult::Consistent(Ok(block())));
+
+        let result = get_recent_blockhash(&runtime).await;
+
+        assert_eq!(result, Ok(blockhash().into()));
+    }
+
+    #[tokio::test]
+    async fn should_fail_after_retrying() {
+        init_state();
+        let runtime = TestCanisterRuntime::new()
+            .add_stub_response(SendSlotResult::Consistent(Err(RpcError::ValidationError(
+                "Error 1".to_string(),
+            ))))
+            .add_stub_response(SendSlotResult::Consistent(Err(RpcError::ValidationError(
+                "Error 2".to_string(),
+            ))))
+            .add_stub_response(SendSlotResult::Consistent(Err(RpcError::ValidationError(
+                "Error 3".to_string(),
+            ))));
+
+        let result = get_recent_blockhash(&runtime).await;
+
+        assert_eq!(
+            result,
+            Err(GetRecentBlockhashError::Failed(vec![
+                "Error while fetching slot: Validation error: Error 1".to_string(),
+                "Error while fetching slot: Validation error: Error 2".to_string(),
+                "Error while fetching slot: Validation error: Error 3".to_string()
+            ]))
+        );
+    }
+
+    fn blockhash() -> sol_rpc_types::Hash {
+        solana_hash::Hash::from([0x42; 32]).into()
+    }
+
+    fn block() -> sol_rpc_types::ConfirmedBlock {
+        sol_rpc_types::ConfirmedBlock {
+            previous_blockhash: Default::default(),
+            blockhash: blockhash(),
+            parent_slot: 0,
+            block_time: None,
+            block_height: None,
+            signatures: None,
+            rewards: None,
+            num_reward_partitions: None,
+            transactions: None,
+        }
     }
 }

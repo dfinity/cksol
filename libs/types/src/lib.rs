@@ -4,7 +4,7 @@
 #![forbid(missing_docs)]
 
 use candid::{CandidType, Nat, Principal};
-use icrc_ledger_types::icrc1::account::Subaccount;
+use icrc_ledger_types::icrc1::account::{Account, Subaccount};
 pub use memo::{BurnMemo, MAX_SERIALIZED_MEMO_BYTES, Memo, MintMemo};
 use serde::{Deserialize, Serialize};
 pub use sol_rpc_types::{Lamport, Pubkey as Address, Signature};
@@ -54,6 +54,15 @@ pub struct GetDepositAddressArgs {
     pub owner: Option<Principal>,
     /// The subaccount to deposit funds to.
     pub subaccount: Option<Subaccount>,
+}
+
+impl From<Account> for GetDepositAddressArgs {
+    fn from(account: Account) -> Self {
+        Self {
+            owner: Some(account.owner),
+            subaccount: account.subaccount,
+        }
+    }
 }
 
 /// Arguments for a request to the `update_balance` ckSOL minter endpoint.
