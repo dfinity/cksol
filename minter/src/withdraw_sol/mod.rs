@@ -153,6 +153,12 @@ pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: &R) {
 
     for request in pending_requests {
         let destination = Address::from(request.solana_address);
+
+        // TODO: we need to check whether the minter has enough funds in the main account.
+        // We probably need to add a state.minter_balance variable and update it
+        // here and while consolidating funds.
+        // If there are not enough funds for the withdrawal we simply continue.
+
         let transfer_amount = request
             .withdrawal_amount
             .checked_sub(request.withdrawal_fee)
