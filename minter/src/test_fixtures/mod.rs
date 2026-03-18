@@ -269,7 +269,7 @@ pub mod arb {
             (
                 arb_signature(),
                 arb_message(),
-                prop::collection::vec(arb_account(), 1..5),
+                prop::collection::vec(arb_account(), 1..10),
             )
                 .prop_map(|(signature, transaction, signers)| {
                     EventType::SubmittedTransaction {
