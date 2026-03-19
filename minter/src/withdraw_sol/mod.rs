@@ -121,10 +121,17 @@ pub async fn withdraw_sol<R: CanisterRuntime>(
 }
 
 pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: &R) {
+    log!(Priority::Info, "processing pending withdrawals");
+
     let _guard = match TimerGuard::new(TaskType::WithdrawalProcessing) {
         Ok(guard) => guard,
-        Err(_) => return,
+        Err(_) => {
+            log!(Priority::Info, "failed to obtain guard, exiting");
+            return;
+        }
     };
+
+    log!(Priority::Info, "guard obtained");
 
     let Some(pending_requests) =
         read_state(|state| state.next_pending_withdrawal_requests(MAX_WITHDRAWALS_PER_BATCH))

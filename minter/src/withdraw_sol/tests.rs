@@ -273,7 +273,15 @@ mod process_pending_withdrawals_tests {
         let runtime = TestCanisterRuntime::new();
         process_pending_withdrawals(&runtime).await;
 
-        EventsAssert::assert_no_events_recorded();
+        let mut log: Log<Priority> = Log::default();
+        log.push_logs(Priority::Info);
+        assert!(
+            log.entries
+                .iter()
+                .any(|e| e.message.contains("failed to obtain guard, exiting")),
+            "Expected info about failing to obtain guard, got: {:?}",
+            log.entries
+        );
     }
 
     #[tokio::test]
