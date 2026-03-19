@@ -1,4 +1,4 @@
-use super::runtime::Stubs;
+use super::stubs::Stubs;
 use crate::{address::DerivationPath, signer::SchnorrSigner};
 use ic_cdk::management_canister::SignCallError;
 

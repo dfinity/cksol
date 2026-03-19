@@ -22,6 +22,7 @@ use std::{collections::VecDeque, str::FromStr};
 
 pub mod runtime;
 pub mod signer;
+mod stubs;
 
 pub const BLOCK_INDEX: u64 = 98763_u64;
 pub const DEPOSIT_FEE: Lamport = 10_000_000; // 0.01 SOL
