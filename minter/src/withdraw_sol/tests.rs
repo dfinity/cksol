@@ -241,6 +241,7 @@ async fn should_return_error_if_already_processing() {
 mod process_pending_withdrawals_tests {
     use super::*;
     use crate::test_fixtures::EventsAssert;
+    use crate::withdraw_sol::MAX_WITHDRAWALS_PER_BATCH;
     use crate::{state::event::EventType, withdraw_sol::withdraw_sol_status};
     use assert_matches::assert_matches;
     use canlog::Log;
@@ -286,12 +287,29 @@ mod process_pending_withdrawals_tests {
         let _guard = TimerGuard::new(TaskType::WithdrawalProcessing).unwrap();
     }
 
+    async fn withdraw(runtime: &TestCanisterRuntime, count: u8) {
+        for i in 1..count + 1 {
+            let _ = withdraw_sol(
+                runtime,
+                MINTER_ACCOUNT,
+                Principal::from_slice(&[1, i]).into(),
+                None,
+                WITHDRAWAL_FEE + 1,
+                VALID_ADDRESS.to_string(),
+            )
+            .await
+            .unwrap();
+        }
+    }
+
     #[tokio::test]
     async fn should_process_when_pending_withdrawals_exist() {
         init_state();
         init_schnorr_master_key();
 
         let minter_self = Principal::from_slice(&[0, 1, 2, 3, 4]);
+
+        let fake_sig = [0x42; 64];
 
         let runtime = TestCanisterRuntime::new()
             // ledger burn response for withdraw_sol
@@ -300,20 +318,11 @@ mod process_pending_withdrawals_tests {
             .add_stub_response(SendSlotResult::Consistent(Ok(1)))
             .add_stub_response(SendBlockResult::Consistent(Ok(get_confirmed_block())))
             // schnorr signing response
-            .add_schnorr_signature([0x42; 64])
+            .add_schnorr_signature(fake_sig)
             .with_canister_self(minter_self)
             .with_increasing_time();
 
-        let WithdrawSolOk { block_index } = withdraw_sol(
-            &runtime,
-            MINTER_ACCOUNT,
-            test_caller(),
-            None,
-            WITHDRAWAL_FEE + 1,
-            VALID_ADDRESS.to_string(),
-        )
-        .await
-        .unwrap();
+        withdraw(&runtime, 1).await;
 
         process_pending_withdrawals(&runtime).await;
 
@@ -325,17 +334,15 @@ mod process_pending_withdrawals_tests {
                 });
             })
             .expect_event(|e| {
-                assert_matches!(e, EventType::SentWithdrawalTransaction { request, .. } => {
+                assert_matches!(e, EventType::SentWithdrawalTransaction {request, signature, .. } => {
                     assert_eq!(request.withdrawal_amount, WITHDRAWAL_FEE + 1);
                     assert_eq!(request.withdrawal_fee, WITHDRAWAL_FEE);
+                    assert_eq!(signature, fake_sig.into());
                 });
             })
             .assert_no_more_events();
 
-        assert_matches!(
-            withdraw_sol_status(block_index),
-            WithdrawSolStatus::TxSent(_)
-        );
+        assert_matches!(withdraw_sol_status(1), WithdrawSolStatus::TxSent(_));
     }
 
     #[tokio::test]
@@ -360,16 +367,7 @@ mod process_pending_withdrawals_tests {
             .with_canister_self(minter_self)
             .with_increasing_time();
 
-        let WithdrawSolOk { block_index } = withdraw_sol(
-            &runtime,
-            MINTER_ACCOUNT,
-            test_caller(),
-            None,
-            WITHDRAWAL_FEE + 1,
-            VALID_ADDRESS.to_string(),
-        )
-        .await
-        .unwrap();
+        withdraw(&runtime, 1).await;
 
         process_pending_withdrawals(&runtime).await;
 
@@ -391,7 +389,7 @@ mod process_pending_withdrawals_tests {
             log.entries
         );
 
-        assert_eq!(withdraw_sol_status(block_index), WithdrawSolStatus::Pending);
+        assert_eq!(withdraw_sol_status(1), WithdrawSolStatus::Pending);
     }
 
     #[tokio::test]
@@ -400,9 +398,6 @@ mod process_pending_withdrawals_tests {
         init_schnorr_master_key();
 
         let minter_self = Principal::from_slice(&[0, 1, 2, 3, 4]);
-
-        type SendSlotResult = sol_rpc_types::MultiRpcResult<sol_rpc_types::Slot>;
-        type SendBlockResult = sol_rpc_types::MultiRpcResult<sol_rpc_types::ConfirmedBlock>;
 
         let runtime = TestCanisterRuntime::new()
             // responses for burn blocks
@@ -419,30 +414,7 @@ mod process_pending_withdrawals_tests {
             .with_canister_self(minter_self)
             .with_increasing_time();
 
-        let caller_1 = Principal::from_slice(&[1]);
-        let caller_2 = Principal::from_slice(&[1]);
-
-        let WithdrawSolOk { block_index: idx1 } = withdraw_sol(
-            &runtime,
-            MINTER_ACCOUNT,
-            caller_1,
-            None,
-            WITHDRAWAL_FEE + 1,
-            VALID_ADDRESS.to_string(),
-        )
-        .await
-        .unwrap();
-
-        let WithdrawSolOk { block_index: idx2 } = withdraw_sol(
-            &runtime,
-            MINTER_ACCOUNT,
-            caller_2,
-            None,
-            WITHDRAWAL_FEE + 1,
-            VALID_ADDRESS.to_string(),
-        )
-        .await
-        .unwrap();
+        withdraw(&runtime, 2).await;
 
         process_pending_withdrawals(&runtime).await;
 
@@ -451,20 +423,22 @@ mod process_pending_withdrawals_tests {
                 assert_matches!(e, EventType::AcceptedWithdrawSolRequest(req) => {
                     assert_eq!(req.withdrawal_amount, WITHDRAWAL_FEE + 1);
                     assert_eq!(req.withdrawal_fee, WITHDRAWAL_FEE);
-                    assert_eq!(req.account, caller_1.into());
+                    assert_eq!(req.account, Principal::from_slice(&[1, 1]).into());
                 });
             })
             .expect_event(|e| {
                 assert_matches!(e, EventType::AcceptedWithdrawSolRequest(req) => {
                     assert_eq!(req.withdrawal_amount, WITHDRAWAL_FEE + 1);
                     assert_eq!(req.withdrawal_fee, WITHDRAWAL_FEE);
-                    assert_eq!(req.account, caller_2.into());
+                    assert_eq!(req.account, Principal::from_slice(&[1, 2]).into());
                 });
             })
             .expect_event(|e| {
                 assert_matches!(e, EventType::SentWithdrawalTransaction { request, .. } => {
                     assert_eq!(request.withdrawal_amount, WITHDRAWAL_FEE + 1);
                     assert_eq!(request.withdrawal_fee, WITHDRAWAL_FEE);
+                    assert_eq!(request.account, Principal::from_slice(&[1, 1]).into());
+
                 });
             })
             .assert_no_more_events();
@@ -473,19 +447,70 @@ mod process_pending_withdrawals_tests {
         let mut log: Log<Priority> = Log::default();
         log.push_logs(Priority::Error);
         assert!(
-            log.entries.iter().any(|e| e.message.contains(&format!(
-                "Failed to create withdrawal transaction for burn index {idx2}"
-            ))),
+            log.entries.iter().any(|e| e
+                .message
+                .contains("Failed to create withdrawal transaction for burn index 2")),
             "Expected error log about sig failure, got: {:?}",
             log.entries
         );
 
-        assert_matches!(withdraw_sol_status(idx1), WithdrawSolStatus::TxSent(_));
-        assert_matches!(withdraw_sol_status(idx2), WithdrawSolStatus::Pending);
+        assert_matches!(withdraw_sol_status(1), WithdrawSolStatus::TxSent(_));
+        assert_matches!(withdraw_sol_status(2), WithdrawSolStatus::Pending);
     }
 
-    fn get_confirmed_block() -> sol_rpc_types::ConfirmedBlock {
-        sol_rpc_types::ConfirmedBlock {
+    #[tokio::test]
+    async fn should_process_up_to_max() {
+        init_state();
+        init_schnorr_master_key();
+
+        let request_count = MAX_WITHDRAWALS_PER_BATCH as u64 + 1;
+
+        let minter_self = Principal::from_slice(&[0, 1, 2, 3, 4]);
+
+        let mut runtime = TestCanisterRuntime::new()
+            .with_canister_self(minter_self)
+            .with_increasing_time();
+        // withdraw ledger burn responses
+        for i in 0..request_count {
+            runtime = runtime.add_stub_response(Ok::<Nat, TransferFromError>(Nat::from(i)));
+        }
+        // responses for recent block hash
+        runtime = runtime
+            .add_stub_response(SendSlotResult::Consistent(Ok(1)))
+            .add_stub_response(SendBlockResult::Consistent(Ok(get_confirmed_block())));
+        // signatures for the first batch of withdrawals
+        for _ in 0..MAX_WITHDRAWALS_PER_BATCH {
+            runtime = runtime.add_schnorr_signature([0x42; 64]);
+        }
+        // responses for recent block hash and signature for the second batch
+        runtime = runtime
+            .add_stub_response(SendSlotResult::Consistent(Ok(1)))
+            .add_stub_response(SendBlockResult::Consistent(Ok(get_confirmed_block())))
+            .add_schnorr_signature([0x42; 64]);
+
+        withdraw(&runtime, request_count as u8).await;
+
+        process_pending_withdrawals(&runtime).await;
+
+        for i in 0..MAX_WITHDRAWALS_PER_BATCH {
+            assert_matches!(withdraw_sol_status(i as u64), WithdrawSolStatus::TxSent(_));
+        }
+        // last withdrawal was not yet processed
+        assert_matches!(
+            withdraw_sol_status(MAX_WITHDRAWALS_PER_BATCH as u64),
+            WithdrawSolStatus::Pending
+        );
+
+        process_pending_withdrawals(&runtime).await;
+
+        // all withdrawals are now processed
+        for i in 0..request_count {
+            assert_matches!(withdraw_sol_status(i as u64), WithdrawSolStatus::TxSent(_));
+        }
+    }
+
+    fn get_confirmed_block() -> ConfirmedBlock {
+        ConfirmedBlock {
             previous_blockhash: Default::default(),
             blockhash: solana_hash::Hash::new_from_array([0x42; 32]).into(),
             parent_slot: 0,
