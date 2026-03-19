@@ -66,6 +66,11 @@ impl TestCanisterRuntime {
         self.schnorr_signer.responses.add(Ok(signature.to_vec()));
         self
     }
+
+    pub fn add_schnorr_signing_error(mut self, error: SignCallError) -> Self {
+        self.schnorr_signer.responses.add(Err(error));
+        self
+    }
 }
 
 impl CanisterRuntime for TestCanisterRuntime {
