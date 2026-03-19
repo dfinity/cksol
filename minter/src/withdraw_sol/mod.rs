@@ -131,8 +131,6 @@ pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: &R) {
         }
     };
 
-    log!(Priority::Info, "guard obtained");
-
     let Some(pending_requests) =
         read_state(|state| state.next_pending_withdrawal_requests(MAX_WITHDRAWALS_PER_BATCH))
     else {

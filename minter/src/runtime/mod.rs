@@ -1,8 +1,7 @@
+use crate::sol_transfer::{IcSchnorrSigner, SchnorrSigner};
 use candid::Principal;
 use ic_canister_runtime::{IcRuntime, Runtime};
 use std::{fmt::Debug, time::Duration};
-
-use crate::sol_transfer::{IcSchnorrSigner, SchnorrSigner};
 
 pub trait CanisterRuntime: Clone + 'static {
     fn inter_canister_call_runtime(&self) -> impl Runtime;
