@@ -266,12 +266,18 @@ pub mod arb {
                     mint_block_index,
                 }
             ),
-            (arb_signature(), arb_message()).prop_map(|(signature, transaction)| {
-                EventType::SubmittedTransaction {
-                    signature,
-                    transaction,
-                }
-            }),
+            (
+                arb_signature(),
+                arb_message(),
+                prop::collection::vec(arb_account(), 1..10),
+            )
+                .prop_map(|(signature, transaction, signers)| {
+                    EventType::SubmittedTransaction {
+                        signature,
+                        transaction,
+                        signers,
+                    }
+                }),
             prop::collection::vec((arb_account(), any::<Lamport>()), 1..10)
                 .prop_map(|deposits| EventType::ConsolidatedDeposits { deposits }),
         ]

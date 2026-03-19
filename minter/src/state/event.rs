@@ -69,6 +69,9 @@ pub enum EventType {
         /// The transaction message
         #[cbor(n(1), with = "cbor::message")]
         transaction: Message,
+        /// The signing accounts in signature order (fee payer first)
+        #[n(2)]
+        signers: Vec<Account>,
     },
     /// Deposited funds from user deposit accounts have been consolidated
     /// into the minter's main account.

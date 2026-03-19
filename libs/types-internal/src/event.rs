@@ -79,6 +79,8 @@ pub enum EventType {
         signature: Signature,
         /// The serialized (unsigned) transaction message.
         transaction: Vec<u8>,
+        /// The signing accounts in signature order (fee payer first).
+        signers: Vec<Account>,
     },
     /// Deposited funds from user deposit accounts have been consolidated
     /// into the minter's main account.
