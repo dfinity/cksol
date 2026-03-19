@@ -1,5 +1,5 @@
 use crate::{
-    address::{derivation_path, derive_public_key},
+    address::{derivation_path, derive_public_key, lazy_get_schnorr_master_key},
     guard::TimerGuard,
     runtime::CanisterRuntime,
     sol_transfer::{
@@ -89,7 +89,7 @@ async fn submit_consolidation_transaction<R: CanisterRuntime>(
         owner: runtime.canister_self(),
         subaccount: None,
     };
-    let master_key = read_state(|s| s.minter_public_key().cloned().unwrap());
+    let master_key = lazy_get_schnorr_master_key().await;
     let minter_address = Address::from(
         derive_public_key(&master_key, derivation_path(&minter_account)).serialize_raw(),
     );
