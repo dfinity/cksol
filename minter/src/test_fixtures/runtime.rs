@@ -166,11 +166,11 @@ impl<T> SharedVecDeque<T> {
     }
 
     fn add(&mut self, value: T) {
-        self.0.try_lock().unwrap().push_back(value);
+        self.0.lock().unwrap().push_back(value);
     }
 
     fn pop_front(&self) -> Option<T> {
-        self.0.try_lock().unwrap().pop_front()
+        self.0.lock().unwrap().pop_front()
     }
 }
 
@@ -180,7 +180,7 @@ struct Stubs<T>(Arc<Mutex<Box<dyn Iterator<Item = T> + Send>>>);
 impl<T: 'static + Send> Stubs<T> {
     pub fn next(&self) -> T {
         self.0
-            .try_lock()
+            .lock()
             .unwrap()
             .next()
             .expect("No more stub values!")
