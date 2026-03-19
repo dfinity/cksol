@@ -1,7 +1,7 @@
 use crate::{address::DerivationPath, runtime::CanisterRuntime, signer::SchnorrSigner};
 use candid::CandidType;
-use ic_cdk::management_canister::SignCallError;
 use ic_canister_runtime::{IcError, Runtime, StubRuntime};
+use ic_cdk::management_canister::SignCallError;
 use std::{
     iter,
     sync::{Arc, Mutex},

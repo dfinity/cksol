@@ -6,7 +6,7 @@ mod ledger;
 pub mod lifecycle;
 mod numeric;
 pub mod runtime;
-pub mod signer;
+mod signer;
 pub mod sol_transfer;
 pub mod state;
 pub mod storage;
