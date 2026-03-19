@@ -156,28 +156,41 @@ pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: &R) {
     let minter_account: Account = runtime.canister_self().into();
     let signer = runtime.schnorr_signer();
 
-    for request in pending_requests {
-        let destination = Address::from(request.solana_address);
+    // TODO: we need to check whether the minter has enough funds in the main account.
+    // We probably need to add a state.minter_balance variable and update it
+    // here and while consolidating funds.
+    // If there are not enough funds for the withdrawal we simply continue.
 
-        // TODO: we need to check whether the minter has enough funds in the main account.
-        // We probably need to add a state.minter_balance variable and update it
-        // here and while consolidating funds.
-        // If there are not enough funds for the withdrawal we simply continue.
+    let withdrawal_params: Vec<_> = pending_requests
+        .iter()
+        .map(|request| {
+            let destination = Address::from(request.solana_address);
+            let transfer_amount = request
+                .withdrawal_amount
+                .checked_sub(request.withdrawal_fee)
+                .expect("BUG: withdrawal_amount must be >= withdrawal_fee");
+            let sources = vec![(minter_account, transfer_amount)];
+            (sources, destination)
+        })
+        .collect();
 
-        let transfer_amount = request
-            .withdrawal_amount
-            .checked_sub(request.withdrawal_fee)
-            .expect("BUG: withdrawal_amount must be >= withdrawal_fee");
+    let sign_futures: Vec<_> = withdrawal_params
+        .iter()
+        .map(|(sources, destination)| {
+            create_signed_transfer_transaction(
+                minter_account,
+                sources,
+                *destination,
+                recent_blockhash,
+                &signer,
+            )
+        })
+        .collect();
 
-        let transaction = match create_signed_transfer_transaction(
-            minter_account,
-            &[(minter_account, transfer_amount)],
-            destination,
-            recent_blockhash,
-            &signer,
-        )
-        .await
-        {
+    let results = futures::future::join_all(sign_futures).await;
+
+    for (request, result) in pending_requests.into_iter().zip(results) {
+        let transaction = match result {
             Ok(tx) => tx,
             Err(e) => {
                 log!(
