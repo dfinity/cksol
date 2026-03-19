@@ -94,12 +94,13 @@ async fn submit_consolidation_transaction<R: CanisterRuntime>(
         derive_public_key(&master_key, derivation_path(&minter_account)).serialize_raw(),
     );
 
+    let signer = runtime.schnorr_signer();
     let (transaction, signers) = create_signed_transfer_transaction(
         minter_account,
         &funds_to_consolidate,
         minter_address,
         recent_blockhash,
-        &IcSchnorrSigner,
+        signer,
     )
     .await?;
 
