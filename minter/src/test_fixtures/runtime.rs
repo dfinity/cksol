@@ -179,11 +179,7 @@ struct Stubs<T>(Arc<Mutex<Box<dyn Iterator<Item = T> + Send>>>);
 
 impl<T: 'static + Send> Stubs<T> {
     pub fn next(&self) -> T {
-        self.0
-            .lock()
-            .unwrap()
-            .next()
-            .expect("No more stub values!")
+        self.0.lock().unwrap().next().expect("No more stub values!")
     }
 
     pub fn chain<I>(self, other: I) -> Self
