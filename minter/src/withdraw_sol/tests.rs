@@ -300,7 +300,7 @@ mod process_pending_withdrawals_tests {
             let _ = withdraw_sol(
                 runtime,
                 MINTER_ACCOUNT,
-                Principal::from_slice(&[1, i]).into(),
+                Principal::from_slice(&[1, i]),
                 None,
                 WITHDRAWAL_FEE + 1,
                 VALID_ADDRESS.to_string(),
@@ -513,7 +513,7 @@ mod process_pending_withdrawals_tests {
 
         // all withdrawals are now processed
         for i in 0..request_count {
-            assert_matches!(withdraw_sol_status(i as u64), WithdrawSolStatus::TxSent(_));
+            assert_matches!(withdraw_sol_status(i), WithdrawSolStatus::TxSent(_));
         }
     }
 
