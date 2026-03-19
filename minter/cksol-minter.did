@@ -289,6 +289,8 @@ type EventType = variant {
         transaction: blob;
         // The signing accounts in signature order (fee payer first).
         signers: vec Account;
+        // The slot of the blockhash used in the transaction.
+        slot: nat64;
     };
     // Deposited funds from user deposit accounts have been consolidated
     // into the minter's main account.

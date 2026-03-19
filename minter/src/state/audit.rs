@@ -45,8 +45,9 @@ fn apply_state_transition(state: &mut State, payload: &EventType) {
             signature,
             transaction,
             signers,
+            slot,
         } => {
-            state.process_transaction_submitted(signature, transaction, signers);
+            state.process_transaction_submitted(signature, transaction, signers, *slot);
         }
         EventType::ConsolidatedDeposits { deposits } => {
             state.process_consolidated_deposits(deposits);

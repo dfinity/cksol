@@ -5,12 +5,12 @@ use crate::{
         CreateTransferError, IcSchnorrSigner, MAX_SIGNATURES, create_signed_transfer_transaction,
     },
     state::{TaskType, audit::process_event, event::EventType, mutate_state, read_state},
-    transaction::{SubmitTransactionError, get_recent_blockhash, submit_transaction},
+    transaction::{SubmitTransactionError, get_recent_blockhash, get_slot, submit_transaction},
 };
 use canlog::log;
 use cksol_types_internal::log::Priority;
 use icrc_ledger_types::icrc1::account::Account;
-use sol_rpc_types::Lamport;
+use sol_rpc_types::{Lamport, Slot};
 use solana_hash::Hash;
 use solana_signature::Signature;
 use std::time::Duration;
@@ -49,8 +49,17 @@ pub async fn consolidate_deposits<R: CanisterRuntime>(runtime: R) {
                 return;
             }
         };
+        // TODO DEFI-2670: Update `sol_rpc_client` to return the slot along with the blockhash
+        //  in `estimate_recent_blockhash`, then remove this separate call to `getSlot`.
+        let slot = match get_slot(&runtime).await {
+            Ok(slot) => slot,
+            Err(e) => {
+                log!(Priority::Info, "Failed to fetch slot: {e}");
+                return;
+            }
+        };
         let _ = futures::future::join_all(round.iter().cloned().map(|funds| {
-            try_submit_consolidation_transaction(runtime.clone(), funds, recent_blockhash)
+            try_submit_consolidation_transaction(runtime.clone(), funds, slot, recent_blockhash)
         }))
         .await;
     }
@@ -59,9 +68,12 @@ pub async fn consolidate_deposits<R: CanisterRuntime>(runtime: R) {
 async fn try_submit_consolidation_transaction<R: CanisterRuntime>(
     runtime: R,
     funds_to_consolidate: Vec<(Account, Lamport)>,
+    slot: Slot,
     recent_blockhash: Hash,
 ) -> Option<Signature> {
-    match submit_consolidation_transaction(&runtime, funds_to_consolidate, recent_blockhash).await {
+    match submit_consolidation_transaction(&runtime, funds_to_consolidate, slot, recent_blockhash)
+        .await
+    {
         Ok(signature) => Some(signature),
         Err(e) => {
             log!(Priority::Info, "Deposit consolidation failed: {e}");
@@ -81,6 +93,7 @@ enum ConsolidationError {
 async fn submit_consolidation_transaction<R: CanisterRuntime>(
     runtime: &R,
     funds_to_consolidate: Vec<(Account, Lamport)>,
+    slot: Slot,
     recent_blockhash: Hash,
 ) -> Result<Signature, ConsolidationError> {
     let minter_account = Account {
@@ -115,6 +128,7 @@ async fn submit_consolidation_transaction<R: CanisterRuntime>(
                 signature,
                 transaction: message,
                 signers,
+                slot,
             },
             runtime,
         )

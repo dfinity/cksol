@@ -3,7 +3,7 @@ use cksol_types_internal::{InitArgs, UpgradeArgs};
 use ic_stable_structures::{Storable, storable::Bound};
 use icrc_ledger_types::icrc1::account::Account;
 use minicbor::{Decode, Encode};
-use sol_rpc_types::Lamport;
+use sol_rpc_types::{Lamport, Slot};
 use solana_message::Message;
 use solana_signature::Signature;
 use std::borrow::Cow;
@@ -72,6 +72,9 @@ pub enum EventType {
         /// The signing accounts in signature order (fee payer first)
         #[n(2)]
         signers: Vec<Account>,
+        /// The slot of the blockhash used in the transaction
+        #[n(3)]
+        slot: Slot,
     },
     /// Deposited funds from user deposit accounts have been consolidated
     /// into the minter's main account.
