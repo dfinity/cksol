@@ -1,7 +1,7 @@
-use crate::{address::DerivationPath, runtime::CanisterRuntime, signer::SchnorrSigner};
+use super::signer::MockSchnorrSigner;
+use crate::{runtime::CanisterRuntime, signer::SchnorrSigner};
 use candid::CandidType;
 use ic_canister_runtime::{IcError, Runtime, StubRuntime};
-use ic_cdk::management_canister::SignCallError;
 use std::{
     iter,
     sync::{Arc, Mutex},
@@ -56,57 +56,6 @@ impl TestCanisterRuntime {
     }
 }
 
-#[derive(Clone)]
-pub struct MockSchnorrSigner {
-    responses: Stubs<Result<Vec<u8>, SignCallError>>,
-}
-
-impl Default for MockSchnorrSigner {
-    fn default() -> Self {
-        Self {
-            responses: iter::repeat_with(|| Ok(vec![0u8; 64])).into(),
-        }
-    }
-}
-
-impl MockSchnorrSigner {
-    pub fn with_signatures(
-        signatures: impl IntoIterator<Item = [u8; 64], IntoIter: Send + 'static>,
-    ) -> Self {
-        Self {
-            responses: signatures.into_iter().map(|sig| Ok(sig.to_vec())).into(),
-        }
-    }
-
-    pub fn with_responses(
-        responses: impl IntoIterator<Item = Result<Vec<u8>, SignCallError>, IntoIter: Send + 'static>,
-    ) -> Self {
-        Self {
-            responses: responses.into_iter().into(),
-        }
-    }
-
-    pub fn add_signature(mut self, signature: [u8; 64]) -> Self {
-        self.responses = self.responses.add(Ok(signature.to_vec()));
-        self
-    }
-
-    pub fn add_response(mut self, response: Result<Vec<u8>, SignCallError>) -> Self {
-        self.responses = self.responses.add(response);
-        self
-    }
-}
-
-impl SchnorrSigner for MockSchnorrSigner {
-    async fn sign(
-        &self,
-        _message: Vec<u8>,
-        _derivation_path: DerivationPath,
-    ) -> Result<Vec<u8>, SignCallError> {
-        self.responses.next()
-    }
-}
-
 impl CanisterRuntime for TestCanisterRuntime {
     fn inter_canister_call_runtime(&self) -> impl Runtime {
         // This clone returns a new reference to the same stubs
@@ -148,7 +97,7 @@ impl CanisterRuntime for TestCanisterRuntime {
 }
 
 #[derive(Clone)]
-struct Stubs<T>(Arc<Mutex<Box<dyn Iterator<Item = T> + Send>>>);
+pub(super) struct Stubs<T>(Arc<Mutex<Box<dyn Iterator<Item = T> + Send>>>);
 
 impl<T: 'static + Send> Stubs<T> {
     pub fn next(&self) -> T {

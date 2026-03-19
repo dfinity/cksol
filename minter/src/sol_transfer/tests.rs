@@ -1,7 +1,7 @@
 use super::*;
 use crate::{
     state::read_state,
-    test_fixtures::{MockSchnorrSigner, init_schnorr_master_key, init_state},
+    test_fixtures::{init_schnorr_master_key, init_state, signer::MockSchnorrSigner},
 };
 use candid::Principal;
 use ic_cdk::{call::CallRejected, management_canister::SignCallError};
