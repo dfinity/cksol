@@ -1,6 +1,6 @@
 use crate::{
     address::{DerivationPath, derivation_path, derive_public_key, lazy_get_schnorr_master_key},
-    signer::SchnorrSigner,
+    signer::{SchnorrSigner, sign_message_bytes},
 };
 use derive_more::From;
 use ic_cdk::management_canister::SignCallError;
@@ -8,7 +8,6 @@ use icrc_ledger_types::icrc1::account::Account;
 use sol_rpc_types::Lamport;
 use solana_address::Address;
 use solana_hash::Hash;
-use solana_signature::Signature;
 use solana_system_interface::instruction;
 use solana_transaction::{Instruction, Message, Transaction};
 use std::{collections::BTreeMap, iter};
@@ -103,21 +102,8 @@ pub async fn create_signed_transfer_transaction(
         })
         .unzip();
 
-    transaction.signatures = futures::future::try_join_all(
-        signer_derivation_paths
-            .into_iter()
-            .map(|derivation_path| signer.sign(message_bytes.clone(), derivation_path)),
-    )
-    .await?
-    .into_iter()
-    .map(signature_from_bytes)
-    .collect();
+    transaction.signatures =
+        sign_message_bytes(signer_derivation_paths, signer, message_bytes).await?;
 
     Ok((transaction, signer_accounts))
-}
-
-fn signature_from_bytes(bytes: Vec<u8>) -> Signature {
-    <[u8; 64]>::try_from(bytes.as_slice())
-        .unwrap_or_else(|_| panic!("BUG: expected 64-byte signature, got {} bytes", bytes.len()))
-        .into()
 }

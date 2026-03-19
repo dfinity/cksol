@@ -2,6 +2,7 @@ use crate::{address::DerivationPath, state::read_state};
 use ic_cdk::management_canister::{
     SchnorrAlgorithm, SchnorrKeyId, SignCallError, SignWithSchnorrArgs, sign_with_schnorr,
 };
+use solana_signature::Signature;
 
 pub trait SchnorrSigner {
     fn sign(
@@ -34,4 +35,27 @@ impl SchnorrSigner for IcSchnorrSigner {
         let response = sign_with_schnorr(&args).await?;
         Ok(response.signature)
     }
+}
+
+pub async fn sign_message_bytes(
+    derivation_paths: impl IntoIterator<Item = DerivationPath>,
+    signer: &impl SchnorrSigner,
+    message_bytes: Vec<u8>,
+) -> Result<Vec<Signature>, SignCallError> {
+    fn signature_from_bytes(bytes: Vec<u8>) -> Signature {
+        <[u8; 64]>::try_from(bytes.as_slice())
+            .unwrap_or_else(|_| {
+                panic!("BUG: expected 64-byte signature, got {} bytes", bytes.len())
+            })
+            .into()
+    }
+    let futures = derivation_paths
+        .into_iter()
+        .map(|derivation_path| signer.sign(message_bytes.clone(), derivation_path));
+    let signatures = futures::future::try_join_all(futures)
+        .await?
+        .into_iter()
+        .map(signature_from_bytes)
+        .collect();
+    Ok(signatures)
 }
