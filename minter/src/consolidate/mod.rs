@@ -2,9 +2,7 @@ use crate::{
     address::{derivation_path, derive_public_key, lazy_get_schnorr_master_key},
     guard::TimerGuard,
     runtime::CanisterRuntime,
-    sol_transfer::{
-        CreateTransferError, IcSchnorrSigner, MAX_SIGNATURES, create_signed_transfer_transaction,
-    },
+    sol_transfer::{CreateTransferError, MAX_SIGNATURES, create_signed_transfer_transaction},
     state::{TaskType, audit::process_event, event::EventType, mutate_state, read_state},
     transaction::{SubmitTransactionError, get_recent_blockhash, submit_transaction},
 };
@@ -100,7 +98,7 @@ async fn submit_consolidation_transaction<R: CanisterRuntime>(
         &funds_to_consolidate,
         minter_address,
         recent_blockhash,
-        signer,
+        &signer,
     )
     .await?;
 
