@@ -1,3 +1,5 @@
+use crate::test_fixtures::EventsAssert;
+use crate::withdraw_sol::MAX_WITHDRAWALS_PER_BATCH;
 use crate::{
     guard::{TimerGuard, withdraw_sol_guard},
     state::TaskType,
@@ -7,11 +9,18 @@ use crate::{
     },
     withdraw_sol::{process_pending_withdrawals, withdraw_sol},
 };
+use crate::{state::event::EventType, withdraw_sol::withdraw_sol_status};
 use assert_matches::assert_matches;
 use candid::{Nat, Principal};
+use canlog::Log;
+use cksol_types::WithdrawSolStatus;
 use cksol_types::{WithdrawSolError, WithdrawSolOk};
+use cksol_types_internal::log::Priority;
 use ic_canister_runtime::IcError;
+use ic_cdk::call::CallRejected;
+use ic_cdk::management_canister::SignCallError;
 use icrc_ledger_types::{icrc1::account::Account, icrc2::transfer_from::TransferFromError};
+use sol_rpc_types::{ConfirmedBlock, MultiRpcResult, RpcError, Slot};
 
 const VALID_ADDRESS: &str = "E4MpwNnMWs2XtW5gVrxZvyS7fMq31QD5HvbxmwP45Tz3";
 
@@ -240,16 +249,6 @@ async fn should_return_error_if_already_processing() {
 
 mod process_pending_withdrawals_tests {
     use super::*;
-    use crate::test_fixtures::EventsAssert;
-    use crate::withdraw_sol::MAX_WITHDRAWALS_PER_BATCH;
-    use crate::{state::event::EventType, withdraw_sol::withdraw_sol_status};
-    use assert_matches::assert_matches;
-    use canlog::Log;
-    use cksol_types::WithdrawSolStatus;
-    use cksol_types_internal::log::Priority;
-    use ic_cdk::call::CallRejected;
-    use ic_cdk::management_canister::SignCallError;
-    use sol_rpc_types::{ConfirmedBlock, MultiRpcResult, RpcError, Slot};
 
     type SendSlotResult = MultiRpcResult<Slot>;
     type SendBlockResult = MultiRpcResult<ConfirmedBlock>;
