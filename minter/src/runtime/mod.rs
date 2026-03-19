@@ -1,8 +1,10 @@
+use crate::signer::{IcSchnorrSigner, SchnorrSigner};
 use ic_canister_runtime::{IcRuntime, Runtime};
 use std::{fmt::Debug, time::Duration};
 
 pub trait CanisterRuntime: Clone + 'static {
     fn inter_canister_call_runtime(&self) -> impl Runtime;
+    fn signer(&self) -> impl SchnorrSigner;
     fn time(&self) -> u64;
     fn instruction_counter(&self) -> u64;
     fn msg_cycles_accept(&self, amount: u128) -> u128;
@@ -27,6 +29,10 @@ impl IcCanisterRuntime {
 impl CanisterRuntime for IcCanisterRuntime {
     fn inter_canister_call_runtime(&self) -> impl Runtime {
         self.0
+    }
+
+    fn signer(&self) -> impl SchnorrSigner {
+        IcSchnorrSigner
     }
 
     fn time(&self) -> u64 {

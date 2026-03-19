@@ -1,5 +1,8 @@
 use super::*;
-use crate::test_fixtures::{init_schnorr_master_key, init_state};
+use crate::{
+    state::read_state,
+    test_fixtures::{init_schnorr_master_key, init_state},
+};
 use candid::Principal;
 use ic_cdk::{call::CallRejected, management_canister::SignCallError};
 use solana_address::Address;

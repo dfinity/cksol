@@ -1,5 +1,6 @@
-use crate::runtime::CanisterRuntime;
+use crate::{address::DerivationPath, runtime::CanisterRuntime, signer::SchnorrSigner};
 use candid::CandidType;
+use ic_cdk::management_canister::SignCallError;
 use ic_canister_runtime::{IcError, Runtime, StubRuntime};
 use std::{
     iter,
@@ -54,10 +55,28 @@ impl TestCanisterRuntime {
     }
 }
 
+/// Test signer that returns a fixed signature.
+#[derive(Clone, Default)]
+pub struct TestSchnorrSigner;
+
+impl SchnorrSigner for TestSchnorrSigner {
+    async fn sign(
+        &self,
+        _message: Vec<u8>,
+        _derivation_path: DerivationPath,
+    ) -> Result<Vec<u8>, SignCallError> {
+        Ok(vec![0u8; 64])
+    }
+}
+
 impl CanisterRuntime for TestCanisterRuntime {
     fn inter_canister_call_runtime(&self) -> impl Runtime {
         // This clone returns a new reference to the same stubs
         self.inter_canister_call_runtime.clone()
+    }
+
+    fn signer(&self) -> impl SchnorrSigner {
+        TestSchnorrSigner
     }
 
     fn time(&self) -> u64 {
