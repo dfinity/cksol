@@ -1,6 +1,6 @@
 use crate::{
     address::{DerivationPath, derivation_path, derive_public_key, lazy_get_schnorr_master_key},
-    signer::{SchnorrSigner, sign_message_bytes},
+    signer::{SchnorrSigner, sign_bytes},
 };
 use derive_more::From;
 use ic_cdk::management_canister::SignCallError;
@@ -102,8 +102,7 @@ pub async fn create_signed_transfer_transaction(
         })
         .unzip();
 
-    transaction.signatures =
-        sign_message_bytes(signer_derivation_paths, signer, message_bytes).await?;
+    transaction.signatures = sign_bytes(signer_derivation_paths, signer, message_bytes).await?;
 
     Ok((transaction, signer_accounts))
 }

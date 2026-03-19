@@ -55,7 +55,6 @@ impl TestCanisterRuntime {
     }
 }
 
-/// Test signer that returns a fixed signature.
 #[derive(Clone, Default)]
 pub struct TestSchnorrSigner;
 

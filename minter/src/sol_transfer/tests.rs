@@ -6,6 +6,7 @@ use crate::{
 use candid::Principal;
 use ic_cdk::{call::CallRejected, management_canister::SignCallError};
 use solana_address::Address;
+use solana_signature::Signature;
 use std::{cell::RefCell, collections::VecDeque};
 
 struct MockSchnorrSigner {
