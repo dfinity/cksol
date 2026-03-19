@@ -34,7 +34,7 @@ async fn should_create_signed_transaction_with_single_source() {
 
     // Fee payer is the source, so only one signature needed
     let signer = MockSchnorrSigner::with_signatures(vec![fake_signature]);
-    let tx = create_signed_transfer_transaction(
+    let (tx, signers) = create_signed_transfer_transaction(
         source_account,
         &[(source_account, amount)],
         target_address,
@@ -43,6 +43,9 @@ async fn should_create_signed_transaction_with_single_source() {
     )
     .await
     .expect("transaction creation should succeed");
+
+    // Verify signers list
+    assert_eq!(signers, vec![source_account]);
 
     // Fee payer is the source address
     assert_eq!(tx.message.account_keys[0], source_address);
@@ -90,7 +93,7 @@ async fn should_create_signed_transaction_with_multiple_sources() {
 
     // Fee payer (account_1) signature first, then account_2
     let signer = MockSchnorrSigner::with_signatures(vec![fake_sig_1, fake_sig_2]);
-    let tx = create_signed_transfer_transaction(
+    let (tx, signers) = create_signed_transfer_transaction(
         account_1,
         &[(account_1, amount), (account_2, amount)],
         derive_address(&target_account),
@@ -99,6 +102,9 @@ async fn should_create_signed_transaction_with_multiple_sources() {
     )
     .await
     .expect("transaction creation should succeed");
+
+    // Verify signers list (fee payer first, then sources)
+    assert_eq!(signers, vec![account_1, account_2]);
 
     // Two signers => two signatures
     assert_eq!(tx.signatures.len(), 2);
@@ -306,7 +312,7 @@ async fn should_create_signed_transaction_with_fee_payer() {
     ] {
         // Two signatures needed in both cases (fee payer + other source)
         let signer = MockSchnorrSigner::with_signatures(vec![[0x11u8; 64], [0x22u8; 64]]);
-        let tx = create_signed_transfer_transaction(
+        let (tx, signers) = create_signed_transfer_transaction(
             fee_payer_account,
             &sources,
             derive_address(&target_account),
@@ -315,6 +321,9 @@ async fn should_create_signed_transaction_with_fee_payer() {
         )
         .await
         .expect("transaction creation should succeed");
+
+        // Verify signers list (fee payer first, deduplicated)
+        assert_eq!(signers, vec![fee_payer_account, other_source]);
 
         // Fee payer is always at position 0
         assert_eq!(tx.message.account_keys[0], fee_payer_address);

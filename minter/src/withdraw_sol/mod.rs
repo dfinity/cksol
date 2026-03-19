@@ -184,7 +184,7 @@ pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: &R) {
             }
         };
 
-        let signature = transaction.signatures[0];
+        let signature = transaction.0.signatures[0];
 
         mutate_state(|state| {
             process_event(
@@ -192,7 +192,7 @@ pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: &R) {
                 EventType::SentWithdrawalTransaction {
                     request: request.clone(),
                     signature,
-                    transaction: transaction.message.clone(),
+                    transaction: transaction.0.message.clone(),
                 },
                 runtime,
             )

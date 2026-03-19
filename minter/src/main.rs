@@ -141,10 +141,12 @@ fn get_events(
             EventType::SubmittedTransaction {
                 signature,
                 transaction,
+                signers,
             } => event::EventType::SubmittedTransaction {
                 signature: signature.into(),
                 transaction: bincode::serialize(&transaction)
                     .expect("serializing transaction should succeed"),
+                signers,
             },
             EventType::ConsolidatedDeposits { deposits } => {
                 event::EventType::ConsolidatedDeposits { deposits }

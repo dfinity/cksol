@@ -90,7 +90,7 @@ pub struct State {
     pending_withdrawal_requests: BTreeMap<LedgerBurnIndex, WithdrawSolRequest>,
     sent_withdrawal_requests: BTreeMap<LedgerBurnIndex, SentWithdrawalTransaction>,
     funds_to_consolidate: BTreeMap<Account, Lamport>,
-    submitted_transactions: BTreeMap<Signature, Message>,
+    submitted_transactions: BTreeMap<Signature, SubmittedTransaction>,
     active_tasks: BTreeSet<TaskType>,
 }
 
@@ -380,10 +380,20 @@ impl State {
         );
     }
 
-    fn process_transaction_submitted(&mut self, signature: &Signature, message: &Message) {
+    fn process_transaction_submitted(
+        &mut self,
+        signature: &Signature,
+        message: &Message,
+        signers: &[Account],
+    ) {
         assert_eq!(
-            self.submitted_transactions
-                .insert(*signature, message.clone()),
+            self.submitted_transactions.insert(
+                *signature,
+                SubmittedTransaction {
+                    message: message.clone(),
+                    signers: signers.to_vec(),
+                }
+            ),
             None,
             "Attempted to submit transaction with signature {signature:?} twice"
         );
@@ -530,4 +540,10 @@ pub enum TaskType {
     DepositConsolidation,
     Mint,
     WithdrawalProcessing,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SubmittedTransaction {
+    pub message: Message,
+    pub signers: Vec<Account>,
 }
