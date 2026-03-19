@@ -240,10 +240,11 @@ async fn should_return_error_if_already_processing() {
 
 mod process_pending_withdrawals_tests {
     use super::*;
-    use crate::state::event::EventType;
     use crate::test_fixtures::EventsAssert;
+    use crate::{state::event::EventType, withdraw_sol::withdraw_sol_status};
     use assert_matches::assert_matches;
     use canlog::Log;
+    use cksol_types::WithdrawSolStatus;
     use cksol_types_internal::log::Priority;
     use sol_rpc_types::{MultiRpcResult, RpcError};
 
@@ -308,7 +309,7 @@ mod process_pending_withdrawals_tests {
             .with_canister_self(minter_self)
             .with_increasing_time();
 
-        let _ = withdraw_sol(
+        let WithdrawSolOk { block_index } = withdraw_sol(
             &runtime,
             MINTER_ACCOUNT,
             test_caller(),
@@ -338,6 +339,11 @@ mod process_pending_withdrawals_tests {
                 });
             })
             .assert_no_more_events();
+
+        assert_matches!(
+            withdraw_sol_status(block_index),
+            WithdrawSolStatus::TxSent(_)
+        );
     }
 
     #[tokio::test]
@@ -364,7 +370,7 @@ mod process_pending_withdrawals_tests {
             .with_canister_self(minter_self)
             .with_increasing_time();
 
-        let _ = withdraw_sol(
+        let WithdrawSolOk { block_index } = withdraw_sol(
             &runtime,
             MINTER_ACCOUNT,
             test_caller(),
@@ -394,5 +400,7 @@ mod process_pending_withdrawals_tests {
             "Expected error log about blockhash failure, got: {:?}",
             log.entries
         );
+
+        assert_eq!(withdraw_sol_status(block_index), WithdrawSolStatus::Pending);
     }
 }

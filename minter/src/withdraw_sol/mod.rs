@@ -2,7 +2,7 @@ use std::str::FromStr;
 use std::time::Duration;
 
 use candid::Principal;
-use cksol_types::{WithdrawSolError, WithdrawSolOk};
+use cksol_types::{WithdrawSolError, WithdrawSolOk, WithdrawSolStatus};
 use icrc_ledger_types::icrc1::account::{Account, Subaccount};
 use icrc_ledger_types::icrc2::transfer_from::TransferFromError;
 use num_traits::ToPrimitive;
@@ -200,4 +200,8 @@ pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: &R) {
 
         // TODO: Send the transaction to the Solana network via RPC
     }
+}
+
+pub fn withdraw_sol_status(block_index: u64) -> WithdrawSolStatus {
+    read_state(|s| s.withdrawal_status(block_index))
 }
