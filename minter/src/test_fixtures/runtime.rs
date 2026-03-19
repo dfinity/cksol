@@ -11,6 +11,7 @@ use std::{
 #[derive(Clone, Default)]
 pub struct TestCanisterRuntime {
     inter_canister_call_runtime: StubRuntime,
+    signer: MockSchnorrSigner,
     times: Stubs<u64>,
     instruction_counts: Stubs<u64>,
     msg_cycles_accept: Stubs<u128>,
@@ -55,16 +56,54 @@ impl TestCanisterRuntime {
     }
 }
 
-#[derive(Clone, Default)]
-pub struct TestSchnorrSigner;
+#[derive(Clone)]
+pub struct MockSchnorrSigner {
+    responses: Stubs<Result<Vec<u8>, SignCallError>>,
+}
 
-impl SchnorrSigner for TestSchnorrSigner {
+impl Default for MockSchnorrSigner {
+    fn default() -> Self {
+        Self {
+            responses: iter::repeat_with(|| Ok(vec![0u8; 64])).into(),
+        }
+    }
+}
+
+impl MockSchnorrSigner {
+    pub fn with_signatures(
+        signatures: impl IntoIterator<Item = [u8; 64], IntoIter: Send + 'static>,
+    ) -> Self {
+        Self {
+            responses: signatures.into_iter().map(|sig| Ok(sig.to_vec())).into(),
+        }
+    }
+
+    pub fn with_responses(
+        responses: impl IntoIterator<Item = Result<Vec<u8>, SignCallError>, IntoIter: Send + 'static>,
+    ) -> Self {
+        Self {
+            responses: responses.into_iter().into(),
+        }
+    }
+
+    pub fn add_signature(mut self, signature: [u8; 64]) -> Self {
+        self.responses = self.responses.add(Ok(signature.to_vec()));
+        self
+    }
+
+    pub fn add_response(mut self, response: Result<Vec<u8>, SignCallError>) -> Self {
+        self.responses = self.responses.add(response);
+        self
+    }
+}
+
+impl SchnorrSigner for MockSchnorrSigner {
     async fn sign(
         &self,
         _message: Vec<u8>,
         _derivation_path: DerivationPath,
     ) -> Result<Vec<u8>, SignCallError> {
-        Ok(vec![0u8; 64])
+        self.responses.next()
     }
 }
 
@@ -75,7 +114,7 @@ impl CanisterRuntime for TestCanisterRuntime {
     }
 
     fn signer(&self) -> impl SchnorrSigner {
-        TestSchnorrSigner
+        self.signer.clone()
     }
 
     fn time(&self) -> u64 {
