@@ -19,6 +19,7 @@ use ic_pocket_canister_runtime::{JsonRpcResponse, MockHttpOutcalls, MockHttpOutc
 use icrc_ledger_types::icrc1::account::Subaccount;
 use serde_json::json;
 use sol_rpc_types::{CommitmentLevel, ConsensusStrategy, GetTransactionEncoding, RpcConfig};
+use std::time::Duration;
 use tokio::join;
 
 mod get_deposit_address_tests {
@@ -550,6 +551,27 @@ mod withdraw_sol_tests {
                 .any(|r| matches!(r, Err(WithdrawSolError::AlreadyProcessing))),
             "Expected one AlreadyProcessing result, got: {:?}",
             results
+        );
+
+        setup.drop().await;
+    }
+
+    #[tokio::test]
+    async fn should_start_withdrawal_processing_timer() {
+        let setup = SetupBuilder::new().build().await;
+
+        setup
+            .advance_time(Duration::from_mins(1) + Duration::from_secs(1))
+            .await;
+        setup.tick().await;
+
+        let logs = setup.minter().retrieve_logs(&Priority::Info).await;
+
+        assert!(
+            logs.iter()
+                .any(|e| e.message.contains("processing pending withdrawals")),
+            "Expected info about processing pending withdrawals, got: {:?}",
+            logs
         );
 
         setup.drop().await;
