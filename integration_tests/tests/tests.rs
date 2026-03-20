@@ -6,8 +6,9 @@ use cksol_int_tests::{
     fixtures::{
         DEFAULT_CALLER_ACCOUNT, DEFAULT_CALLER_DEPOSIT_ADDRESS, DEPOSIT_AMOUNT,
         EXPECTED_MINT_AMOUNT, SharedMockHttpOutcalls, default_update_balance_args,
-        deposit_transaction_signature, get_deposit_transaction_request,
-        get_deposit_transaction_response,
+        deposit_transaction_signature, get_block_request, get_block_response,
+        get_deposit_transaction_response, get_slot_request, get_slot_response,
+        get_transaction_http_mocks, send_transaction_request, send_transaction_response,
     },
 };
 use cksol_types::{
@@ -19,6 +20,7 @@ use ic_pocket_canister_runtime::{JsonRpcResponse, MockHttpOutcalls, MockHttpOutc
 use icrc_ledger_types::icrc1::account::Subaccount;
 use serde_json::json;
 use sol_rpc_types::{CommitmentLevel, ConsensusStrategy, GetTransactionEncoding, RpcConfig};
+use std::time::Duration;
 use tokio::join;
 
 mod get_deposit_address_tests {
@@ -767,19 +769,6 @@ mod update_balance_tests {
         setup.drop().await;
     }
 
-    fn get_transaction_http_mocks(response: impl Fn() -> JsonRpcResponse) -> MockHttpOutcalls {
-        MockHttpOutcallsBuilder::new()
-            .given(get_deposit_transaction_request().with_id(0))
-            .respond_with(response().with_id(0))
-            .given(get_deposit_transaction_request().with_id(1))
-            .respond_with(response().with_id(1))
-            .given(get_deposit_transaction_request().with_id(2))
-            .respond_with(response().with_id(2))
-            .given(get_deposit_transaction_request().with_id(3))
-            .respond_with(response().with_id(3))
-            .build()
-    }
-
     async fn get_transaction_cycles_cost(setup: &Setup) -> u128 {
         setup
             .sol_rpc()
@@ -838,5 +827,85 @@ mod anonymous_caller_tests {
         }
 
         setup.drop().await;
+    }
+}
+
+mod consolidation_tests {
+    use super::*;
+
+    const DEPOSIT_CONSOLIDATION_DELAY: Duration = Duration::from_secs(600);
+
+    #[tokio::test]
+    async fn should_consolidate_deposits_after_timer() {
+        let setup = SetupBuilder::new().with_proxy_canister().build().await;
+
+        let result = setup
+            .minter()
+            .with_http_mocks(get_transaction_http_mocks(get_deposit_transaction_response))
+            .update_balance(default_update_balance_args())
+            .await;
+        assert_matches!(result, Ok(DepositStatus::Minted { .. }));
+
+        // Advance time past the consolidation delay to trigger the timer
+        setup.advance_time(DEPOSIT_CONSOLIDATION_DELAY).await;
+        setup
+            .execute_http_mocks(http_mocks_for_deposit_consolidation())
+            .await;
+
+        // Verify consolidation events were recorded
+        let events_after = setup.minter().get_all_events().await;
+        assert!(
+            events_after
+                .iter()
+                .any(|e| matches!(e.payload, EventType::ConsolidatedDeposits { .. })),
+            "Expected ConsolidatedDeposits event. Events: {events_after:?}"
+        );
+        assert!(
+            events_after
+                .iter()
+                .any(|e| matches!(e.payload, EventType::SubmittedTransaction { .. })),
+            "Expected SubmittedTransaction event. Events: {events_after:?}"
+        );
+
+        // Verify the consolidated deposits match the deposit amount
+        for event in &events_after {
+            if let EventType::ConsolidatedDeposits { deposits } = &event.payload {
+                let total: Lamport = deposits.iter().map(|(_, amount)| amount).sum();
+                assert_eq!(
+                    total, DEPOSIT_AMOUNT,
+                    "Consolidated amount should match the deposit amount"
+                );
+            }
+        }
+
+        setup.drop().await;
+    }
+
+    // Returns the required HTTP outcall mocks for executing the deposit concolidation task
+    fn http_mocks_for_deposit_consolidation() -> MockHttpOutcalls {
+        const SLOT: u64 = 100_000_000;
+        const BLOCKHASH: &str = "4sGjMW1sUnHzSxGspuhpqLDx6wiyjNtZAMdL4VZHirAn";
+        const TX_SIGNATURE: &str = "5VERv8NMvzbJMEkV8xnrLkEaWRtSz9CosKDYjCJjBRnbJLgp8uirBgmQpjKhoR4tjF3ZpRzrFmBV6UjKdiSZkQUW";
+
+        let mut mocks = MockHttpOutcallsBuilder::new();
+        // getSlot requests (IDs 4-7)
+        for id in 4..8 {
+            mocks = mocks
+                .given(get_slot_request().with_id(id))
+                .respond_with(get_slot_response(SLOT).with_id(id));
+        }
+        // getBlock requests (IDs 8-11)
+        for id in 8..12 {
+            mocks = mocks
+                .given(get_block_request(SLOT).with_id(id))
+                .respond_with(get_block_response(BLOCKHASH).with_id(id));
+        }
+        // sendTransaction requests (IDs 12-15)
+        for id in 12..16 {
+            mocks = mocks
+                .given(send_transaction_request().with_id(id))
+                .respond_with(send_transaction_response(TX_SIGNATURE).with_id(id));
+        }
+        mocks.build()
     }
 }
