@@ -17,6 +17,9 @@ use solana_transaction::Transaction;
 use std::time::Duration;
 use thiserror::Error;
 
+#[cfg(test)]
+mod tests;
+
 pub const RESUBMIT_TRANSACTIONS_DELAY: Duration = Duration::from_secs(60);
 const MAX_BLOCKHASH_AGE: Slot = 150;
 const MAX_CONCURRENT_TRANSACTIONS: usize = 10;
