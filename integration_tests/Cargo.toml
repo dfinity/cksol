@@ -9,7 +9,10 @@ license.workspace = true
 
 [dependencies]
 async-trait = { workspace = true }
+axum = { workspace = true }
+axum-reverse-proxy = { workspace = true }
 candid = { workspace = true }
+canhttp = { workspace = true }
 canlog = { workspace = true }
 cksol-types = { path = "../libs/types" }
 cksol-types-internal = { path = "../libs/types-internal", features = ["log", "event"] }

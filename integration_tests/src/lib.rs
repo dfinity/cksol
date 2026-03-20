@@ -28,6 +28,7 @@ use std::{default::Default, env::var, fs, ops::Deref, path::PathBuf, time::Durat
 
 pub mod events;
 pub mod fixtures;
+pub mod json_rpc_reverse_proxy;
 pub mod ledger_init_args;
 
 #[derive(Default)]
@@ -43,6 +44,7 @@ pub struct SetupBuilder {
     sol_rpc_install_args: Option<sol_rpc_types::InstallArgs>,
     initial_ledger_balances: Option<Vec<(Account, Nat)>>,
     proxy_canister: bool,
+    json_rpc_proxy: Option<(String, u16)>,
 }
 
 impl SetupBuilder {
@@ -73,14 +75,46 @@ impl SetupBuilder {
         self
     }
 
+    /// Route all SOL RPC traffic through a JSON-RPC proxy that can block
+    /// requests by method name. Use [`Setup::proxy`] to toggle the blocklist.
+    pub fn with_json_rpc_proxy(mut self, target_url: &str, port: u16) -> Self {
+        self.json_rpc_proxy = Some((target_url.to_string(), port));
+        self
+    }
+
     pub async fn build(self) -> Setup {
-        Setup::new(
+        use sol_rpc_types::{OverrideProvider, RegexSubstitution};
+
+        let proxy = match &self.json_rpc_proxy {
+            Some((target_url, port)) => {
+                Some(json_rpc_reverse_proxy::JsonRpcReverseProxy::start(target_url, *port).await)
+            }
+            None => None,
+        };
+
+        let sol_rpc_install_args = match &proxy {
+            Some(p) => {
+                let mut args = self.sol_rpc_install_args.unwrap_or_default();
+                args.override_provider = Some(OverrideProvider {
+                    override_url: Some(RegexSubstitution {
+                        pattern: ".*".into(),
+                        replacement: p.url(),
+                    }),
+                });
+                args
+            }
+            None => self.sol_rpc_install_args.unwrap_or_default(),
+        };
+
+        let mut setup = Setup::new(
             self.make_live.unwrap_or_default(),
-            self.sol_rpc_install_args.unwrap_or_default(),
+            sol_rpc_install_args,
             self.initial_ledger_balances,
             self.proxy_canister,
         )
-        .await
+        .await;
+        setup.json_rpc_proxy = proxy;
+        setup
     }
 }
 
@@ -90,6 +124,7 @@ pub struct Setup {
     ledger_canister_id: CanisterId,
     sol_rpc_canister_id: CanisterId,
     proxy_canister_id: Option<CanisterId>,
+    json_rpc_proxy: Option<json_rpc_reverse_proxy::JsonRpcReverseProxy>,
 }
 
 impl Setup {
@@ -102,6 +137,12 @@ impl Setup {
     pub const DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT: Lamport = 2_000_000; // 0.002 SOL
     pub const DEFAULT_MINIMUM_DEPOSIT_AMOUNT: Lamport = 10_000_000; // 0.01 SOL
     pub const DEFAULT_UPDATE_BALANCE_REQUIRED_CYCLES: u128 = 1_000_000_000_000;
+
+    pub fn json_rpc_proxy(&self) -> &json_rpc_reverse_proxy::JsonRpcReverseProxy {
+        self.json_rpc_proxy
+            .as_ref()
+            .expect("Setup was not built with a JSON-RPC proxy")
+    }
 
     pub async fn new(
         make_live: PocketIcMode,
@@ -212,6 +253,7 @@ impl Setup {
             ledger_canister_id,
             sol_rpc_canister_id,
             proxy_canister_id,
+            json_rpc_proxy: None,
         }
     }
 
