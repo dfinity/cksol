@@ -110,9 +110,11 @@ async fn submit_consolidation_transaction<R: CanisterRuntime>(
     )
     .await?;
 
+    let signature = transaction.signatures[0];
     let message = transaction.message.clone();
-    let signature = submit_transaction(runtime, transaction).await?;
 
+    // Record events before trying to submit the transaction to ensure we don't
+    // resubmit the same transaction twice in case submission fails.
     mutate_state(|state| {
         process_event(
             state,
@@ -134,6 +136,12 @@ async fn submit_consolidation_transaction<R: CanisterRuntime>(
             runtime,
         )
     });
+
+    let result = submit_transaction(runtime, transaction).await?;
+    assert_eq!(
+        signature, result,
+        "BUG: Expected transaction signature to be {signature}, but got {result}"
+    );
 
     Ok(signature)
 }

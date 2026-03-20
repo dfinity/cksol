@@ -75,16 +75,17 @@ async fn should_submit_single_consolidation_request() {
     let deposit_amount = 1_000_000_000_u64;
     add_funds_to_consolidate(vec![(deposit_account, deposit_amount)]);
 
-    let consolidation_signature = Signature::from([0xAA; 64]);
+    // Fee payer signature is first in the transaction and becomes the transaction ID
+    let fee_payer_signature = Signature::from([0x11; 64]);
     let runtime = TestCanisterRuntime::new()
         .with_increasing_time()
         .add_stub_response(SlotResult::Consistent(Ok(100)))
         .add_stub_response(BlockResult::Consistent(Ok(block())))
         .add_stub_response(SendTransactionResult::Consistent(Ok(
-            consolidation_signature.into(),
+            fee_payer_signature.into()
         )))
         // Two signatures needed: fee payer (minter) + source (deposit account)
-        .add_signature([0x11; 64])
+        .add_signature(fee_payer_signature.into())
         .add_signature([0x22; 64]);
 
     consolidate_deposits(runtime).await;
@@ -107,7 +108,46 @@ async fn should_submit_single_consolidation_request() {
         })
         .expect_event(|e| {
             assert_matches!(e, EventType::SubmittedTransaction { signature, .. }
-                if signature == consolidation_signature
+                if signature == fee_payer_signature
+            )
+        })
+        .assert_no_more_events();
+}
+
+#[tokio::test]
+async fn should_record_events_even_if_transaction_submission_fails() {
+    setup();
+
+    let deposit_account = account(0);
+    let deposit_amount = 1_000_000_000_u64;
+    add_funds_to_consolidate(vec![(deposit_account, deposit_amount)]);
+
+    let fee_payer_signature = Signature::from([0x11; 64]);
+    let runtime = TestCanisterRuntime::new()
+        .with_increasing_time()
+        .add_stub_response(SlotResult::Consistent(Ok(100)))
+        .add_stub_response(BlockResult::Consistent(Ok(block())))
+        // Transaction submission call fails (e.g. due to inconsistent results)
+        .add_stub_response(SendTransactionResult::Inconsistent(vec![]))
+        .add_signature(fee_payer_signature.into())
+        .add_signature([0x22; 64]);
+
+    consolidate_deposits(runtime).await;
+
+    EventsAssert::from_recorded()
+        .expect_event(|e| {
+            assert_matches!(e, EventType::AcceptedDeposit { deposit_id, deposit_amount: amount, ..}
+                if deposit_id.account == deposit_account && amount == deposit_amount
+            )
+        })
+        .expect_event(|e| {
+            assert_matches!(e, EventType::ConsolidatedDeposits { deposits }
+                if deposits == vec![(deposit_account, deposit_amount)]
+            )
+        })
+        .expect_event(|e| {
+            assert_matches!(e, EventType::SubmittedTransaction { signature, .. }
+                if signature == fee_payer_signature
             )
         })
         .assert_no_more_events();
@@ -127,18 +167,22 @@ async fn should_submit_multiple_consolidation_batches() {
     let batch_1_size = MAX_TRANSFERS_PER_CONSOLIDATION; // 9 accounts
     let batch_2_size = NUM_DEPOSITS - batch_1_size; // 2 accounts
 
-    let batch_1_signature = Signature::from([0xAA; 64]);
-    let batch_2_signature = Signature::from([0xBB; 64]);
+    // Fee payer signatures (first signature in each batch) become transaction IDs
+    let fee_payer_signature_1 = Signature::from([0x00; 64]); // index 0
+    let fee_payer_signature_2 = Signature::from([0x0A; 64]); // index 10
+
     let mut runtime = TestCanisterRuntime::new()
         .with_increasing_time()
         .add_stub_response(SlotResult::Consistent(Ok(100)))
         .add_stub_response(BlockResult::Consistent(Ok(block())))
-        .add_stub_response(SendTransactionResult::Consistent(Ok(batch_1_signature.into())))
-        .add_stub_response(SendTransactionResult::Consistent(Ok(batch_2_signature.into())));
+        .add_stub_response(SendTransactionResult::Consistent(Ok(
+            fee_payer_signature_1.into()
+        )))
+        .add_stub_response(SendTransactionResult::Consistent(Ok(
+            fee_payer_signature_2.into()
+        )));
 
     // Signatures needed: fee payer + each source account per batch
-    // Batch 1: 1 fee payer + 9 sources = 10 signatures
-    // Batch 2: 1 fee payer + 2 sources = 3 signatures
     for i in 0..13 {
         runtime = runtime.add_signature([i as u8; 64]);
     }
@@ -163,7 +207,7 @@ async fn should_submit_multiple_consolidation_batches() {
         })
         .expect_event(|e| {
             assert_matches!(e, EventType::SubmittedTransaction { signature, .. }
-                if signature == batch_1_signature
+                if signature == fee_payer_signature_1
             )
         });
     // Batch 2: 2 deposits consolidated together
@@ -175,7 +219,7 @@ async fn should_submit_multiple_consolidation_batches() {
         })
         .expect_event(|e| {
             assert_matches!(e, EventType::SubmittedTransaction { signature, .. }
-                if signature == batch_2_signature
+                if signature == fee_payer_signature_2
             )
         });
     events_assert.assert_no_more_events();
