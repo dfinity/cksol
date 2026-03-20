@@ -1,16 +1,13 @@
 use crate::{
     address::{DerivationPath, derivation_path, derive_public_key, lazy_get_schnorr_master_key},
-    state::read_state,
+    signer::{SchnorrSigner, sign_bytes},
 };
 use derive_more::From;
-use ic_cdk::management_canister::{
-    SchnorrAlgorithm, SchnorrKeyId, SignCallError, SignWithSchnorrArgs, sign_with_schnorr,
-};
+use ic_cdk::management_canister::SignCallError;
 use icrc_ledger_types::icrc1::account::Account;
 use sol_rpc_types::Lamport;
 use solana_address::Address;
 use solana_hash::Hash;
-use solana_signature::Signature;
 use solana_system_interface::instruction;
 use solana_transaction::{Instruction, Message, Transaction};
 use std::{collections::BTreeMap, iter};
@@ -30,38 +27,6 @@ pub enum CreateTransferError {
 
 #[cfg(test)]
 mod tests;
-
-pub trait SchnorrSigner {
-    fn sign(
-        &self,
-        message: Vec<u8>,
-        derivation_path: DerivationPath,
-    ) -> impl Future<Output = Result<Vec<u8>, SignCallError>>;
-}
-
-/// Production signer that delegates to the IC management canister.
-pub struct IcSchnorrSigner;
-
-impl SchnorrSigner for IcSchnorrSigner {
-    async fn sign(
-        &self,
-        message: Vec<u8>,
-        derivation_path: DerivationPath,
-    ) -> Result<Vec<u8>, SignCallError> {
-        let key_name = read_state(|s| s.master_key_name());
-        let args = SignWithSchnorrArgs {
-            message,
-            derivation_path,
-            key_id: SchnorrKeyId {
-                algorithm: SchnorrAlgorithm::Ed25519,
-                name: key_name.to_string(),
-            },
-            aux: None,
-        };
-        let response = sign_with_schnorr(&args).await?;
-        Ok(response.signature)
-    }
-}
 
 /// Creates a signed Solana transaction that transfers lamports from
 /// each minter-controlled address (identified by its account) to the
@@ -136,21 +101,7 @@ pub async fn create_signed_transfer_transaction(
         })
         .unzip();
 
-    transaction.signatures = futures::future::try_join_all(
-        signer_derivation_paths
-            .into_iter()
-            .map(|derivation_path| signer.sign(message_bytes.clone(), derivation_path)),
-    )
-    .await?
-    .into_iter()
-    .map(signature_from_bytes)
-    .collect();
+    transaction.signatures = sign_bytes(signer_derivation_paths, signer, message_bytes).await?;
 
     Ok((transaction, signer_accounts))
-}
-
-fn signature_from_bytes(bytes: Vec<u8>) -> Signature {
-    <[u8; 64]>::try_from(bytes.as_slice())
-        .unwrap_or_else(|_| panic!("BUG: expected 64-byte signature, got {} bytes", bytes.len()))
-        .into()
 }

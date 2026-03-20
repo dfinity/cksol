@@ -285,6 +285,8 @@ type EventType = variant {
         transaction: blob;
         // The signing accounts in signature order (fee payer first).
         signers: vec Account;
+        // The slot of the blockhash used in the transaction.
+        slot: nat64;
     };
     // Deposited funds from user deposit accounts have been consolidated
     // into the minter's main account.
@@ -303,6 +305,15 @@ type EventType = variant {
         signature: Signature;
         // The serialized (unsigned) transaction message.
         transaction: blob;
+    };
+    // A previously submitted transaction was resubmitted with a new signature.
+    ResubmittedTransaction : record {
+        // The signature of the old transaction being replaced.
+        old_signature: Signature;
+        // The signature of the new transaction.
+        new_signature: Signature;
+        // The slot of the new blockhash used in the resubmitted transaction.
+        new_slot: nat64;
     };
 };
 

@@ -9,8 +9,8 @@ use crate::{
         runtime::TestCanisterRuntime,
     },
     transaction::{
-        GetDepositAmountError, GetRecentBlockhashError, GetTransactionError,
-        SubmitTransactionError, get_deposit_amount_to_address, get_recent_blockhash,
+        GetDepositAmountError, GetRecentBlockhashError, GetSlotError, GetTransactionError,
+        SubmitTransactionError, get_deposit_amount_to_address, get_recent_blockhash, get_slot,
         submit_transaction, try_get_transaction,
     },
 };
@@ -338,5 +338,77 @@ mod get_recent_blockhash_tests {
             num_reward_partitions: None,
             transactions: None,
         }
+    }
+}
+
+mod get_slot_tests {
+    use super::*;
+
+    type SlotResult = sol_rpc_types::MultiRpcResult<sol_rpc_types::Slot>;
+
+    #[tokio::test]
+    async fn should_return_slot_on_success() {
+        init_state();
+
+        let runtime =
+            TestCanisterRuntime::new().add_stub_response(SlotResult::Consistent(Ok(123456)));
+
+        let result = get_slot(&runtime).await;
+
+        assert_eq!(result, Ok(123456));
+    }
+
+    #[tokio::test]
+    async fn should_fail_on_rpc_error() {
+        init_state();
+
+        let rpc_error = RpcError::ValidationError("Invalid slot".to_string());
+        let runtime = TestCanisterRuntime::new()
+            .add_stub_response(SlotResult::Consistent(Err(rpc_error.clone())));
+
+        let result = get_slot(&runtime).await;
+
+        assert_eq!(result, Err(GetSlotError::RpcError(rpc_error)));
+    }
+
+    #[tokio::test]
+    async fn should_retry_on_inconsistent_results() {
+        init_state();
+
+        let runtime = TestCanisterRuntime::new()
+            .add_stub_response(SlotResult::Inconsistent(vec![]))
+            .add_stub_response(SlotResult::Consistent(Ok(789012)));
+
+        let result = get_slot(&runtime).await;
+
+        assert_eq!(result, Ok(789012));
+    }
+
+    #[tokio::test]
+    async fn should_fail_after_max_retries_on_inconsistent_results() {
+        init_state();
+
+        let runtime = TestCanisterRuntime::new()
+            .add_stub_response(SlotResult::Inconsistent(vec![]))
+            .add_stub_response(SlotResult::Inconsistent(vec![]))
+            .add_stub_response(SlotResult::Inconsistent(vec![]));
+
+        let result = get_slot(&runtime).await;
+
+        assert_eq!(result, Err(GetSlotError::InconsistentRpcResults));
+    }
+
+    #[tokio::test]
+    async fn should_succeed_on_last_retry() {
+        init_state();
+
+        let runtime = TestCanisterRuntime::new()
+            .add_stub_response(SlotResult::Inconsistent(vec![]))
+            .add_stub_response(SlotResult::Inconsistent(vec![]))
+            .add_stub_response(SlotResult::Consistent(Ok(999999)));
+
+        let result = get_slot(&runtime).await;
+
+        assert_eq!(result, Ok(999999));
     }
 }

@@ -1,17 +1,13 @@
-use crate::{address::DerivationPath, runtime::CanisterRuntime, sol_transfer::SchnorrSigner};
-use candid::{CandidType, Principal};
+use super::{signer::MockSchnorrSigner, stubs::Stubs};
+use crate::{runtime::CanisterRuntime, signer::SchnorrSigner};
+use candid::CandidType;
 use ic_canister_runtime::{IcError, Runtime, StubRuntime};
-use ic_cdk::management_canister::SignCallError;
-use std::{
-    collections::VecDeque,
-    iter,
-    sync::{Arc, Mutex},
-    time::Duration,
-};
+use std::time::Duration;
 
 #[derive(Clone, Default)]
 pub struct TestCanisterRuntime {
     inter_canister_call_runtime: StubRuntime,
+    signer: MockSchnorrSigner,
     times: Stubs<u64>,
     instruction_counts: Stubs<u64>,
     msg_cycles_accept: Stubs<u128>,
@@ -77,6 +73,10 @@ impl CanisterRuntime for TestCanisterRuntime {
     fn inter_canister_call_runtime(&self) -> impl Runtime {
         // This clone returns a new reference to the same stubs
         self.inter_canister_call_runtime.clone()
+    }
+
+    fn signer(&self) -> impl SchnorrSigner {
+        self.signer.clone()
     }
 
     fn time(&self) -> u64 {
@@ -171,43 +171,5 @@ impl<T> SharedVecDeque<T> {
 
     fn pop_front(&self) -> Option<T> {
         self.0.lock().unwrap().pop_front()
-    }
-}
-
-#[derive(Clone)]
-struct Stubs<T>(Arc<Mutex<Box<dyn Iterator<Item = T> + Send>>>);
-
-impl<T: 'static + Send> Stubs<T> {
-    pub fn next(&self) -> T {
-        self.0.lock().unwrap().next().expect("No more stub values!")
-    }
-
-    pub fn chain<I>(self, other: I) -> Self
-    where
-        I: IntoIterator<Item = T> + 'static,
-        I::IntoIter: Send,
-    {
-        let old_iter = Arc::into_inner(self.0).unwrap().into_inner().unwrap();
-        Self(Arc::new(Mutex::new(Box::new(old_iter.chain(other)))))
-    }
-
-    pub fn add(self, value: T) -> Self {
-        self.chain(iter::once(value))
-    }
-}
-
-impl<T: 'static + Send> Default for Stubs<T> {
-    fn default() -> Self {
-        Self(Arc::new(Mutex::new(Box::new(iter::empty()))))
-    }
-}
-
-impl<T, I> From<I> for Stubs<T>
-where
-    T: 'static,
-    I: IntoIterator<Item = T, IntoIter: Send> + 'static,
-{
-    fn from(stubs: I) -> Self {
-        Self(Arc::new(Mutex::new(Box::new(stubs.into_iter()))))
     }
 }

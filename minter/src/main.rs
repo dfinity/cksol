@@ -142,11 +142,13 @@ fn get_events(
                 signature,
                 transaction,
                 signers,
+                slot,
             } => event::EventType::SubmittedTransaction {
                 signature: signature.into(),
                 transaction: bincode::serialize(&transaction)
                     .expect("serializing transaction should succeed"),
                 signers,
+                slot,
             },
             EventType::ConsolidatedDeposits { deposits } => {
                 event::EventType::ConsolidatedDeposits { deposits }
@@ -161,6 +163,15 @@ fn get_events(
                 signature: signature.into(),
                 transaction: bincode::serialize(&transaction)
                     .expect("serializing transaction should succeed"),
+            },
+            EventType::ResubmittedTransaction {
+                old_signature,
+                new_signature,
+                new_slot,
+            } => event::EventType::ResubmittedTransaction {
+                old_signature: old_signature.into(),
+                new_signature: new_signature.into(),
+                new_slot,
             },
         }
     }

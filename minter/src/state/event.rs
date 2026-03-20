@@ -3,7 +3,7 @@ use cksol_types_internal::{InitArgs, UpgradeArgs};
 use ic_stable_structures::{Storable, storable::Bound};
 use icrc_ledger_types::icrc1::account::Account;
 use minicbor::{Decode, Encode};
-use sol_rpc_types::Lamport;
+use sol_rpc_types::{Lamport, Slot};
 use solana_message::Message;
 use solana_signature::Signature;
 use std::borrow::Cow;
@@ -72,6 +72,9 @@ pub enum EventType {
         /// The signing accounts in signature order (fee payer first)
         #[n(2)]
         signers: Vec<Account>,
+        /// The slot of the blockhash used in the transaction
+        #[n(3)]
+        slot: Slot,
     },
     /// Deposited funds from user deposit accounts have been consolidated
     /// into the minter's main account.
@@ -82,8 +85,22 @@ pub enum EventType {
         #[n(0)]
         deposits: Vec<(Account, Lamport)>,
     },
-    /// A withdrawal transaction was signed and is ready to be sent to the network.
+    /// A previously submitted transaction was resubmitted with a new signature.
+    /// The transaction message and signers remain the same.
     #[n(8)]
+    ResubmittedTransaction {
+        /// The signature of the old transaction being replaced
+        #[cbor(n(0), with = "cbor::signature")]
+        old_signature: Signature,
+        /// The signature of the new transaction
+        #[cbor(n(1), with = "cbor::signature")]
+        new_signature: Signature,
+        /// The slot of the new blockhash used in the resubmitted transaction
+        #[n(2)]
+        new_slot: Slot,
+    },
+    /// A withdrawal transaction was signed and is ready to be sent to the network.
+    #[n(9)]
     SentWithdrawalTransaction {
         /// The withdrawal request included in this transaction.
         #[n(0)]

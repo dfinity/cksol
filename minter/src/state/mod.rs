@@ -11,7 +11,7 @@ use ic_ed25519::PublicKey;
 use icrc_ledger_types::icrc1::account::Account;
 use num_traits::Zero;
 use sol_rpc_client::SolRpcClient;
-use sol_rpc_types::{ConsensusStrategy, Lamport, RpcSources, SolanaCluster};
+use sol_rpc_types::{ConsensusStrategy, Lamport, RpcSources, Slot, SolanaCluster};
 use solana_message::Message;
 use solana_signature::Signature;
 use std::{
@@ -385,6 +385,7 @@ impl State {
         signature: &Signature,
         message: &Message,
         signers: &[Account],
+        slot: Slot,
     ) {
         assert_eq!(
             self.submitted_transactions.insert(
@@ -392,6 +393,7 @@ impl State {
                 SubmittedTransaction {
                     message: message.clone(),
                     signers: signers.to_vec(),
+                    slot,
                 }
             ),
             None,
@@ -452,6 +454,30 @@ impl State {
                 self.funds_to_consolidate.remove(account);
             }
         }
+    }
+
+    fn process_transaction_resubmitted(
+        &mut self,
+        old_signature: &Signature,
+        new_signature: &Signature,
+        new_slot: Slot,
+    ) {
+        let old_transaction = self
+            .submitted_transactions
+            .remove(old_signature)
+            .unwrap_or_else(|| {
+                panic!("Attempted to resubmit unknown transaction with signature {old_signature:?}")
+            });
+        let new_transaction = SubmittedTransaction {
+            slot: new_slot,
+            ..old_transaction
+        };
+        assert_eq!(
+            self.submitted_transactions
+                .insert(*new_signature, new_transaction),
+            None,
+            "Attempted to resubmit transaction with signature {new_signature:?} that already exists"
+        );
     }
 }
 
@@ -546,4 +572,5 @@ pub enum TaskType {
 pub struct SubmittedTransaction {
     pub message: Message,
     pub signers: Vec<Account>,
+    pub slot: Slot,
 }

@@ -4,7 +4,7 @@ use crate::{InitArgs, UpgradeArgs};
 use candid::CandidType;
 use icrc_ledger_types::icrc1::account::Account;
 use serde::Deserialize;
-use sol_rpc_types::{Lamport, Signature};
+use sol_rpc_types::{Lamport, Signature, Slot};
 
 /// A minter event that can be serialized to Candid.
 #[derive(Clone, Debug, CandidType, Deserialize)]
@@ -81,6 +81,8 @@ pub enum EventType {
         transaction: Vec<u8>,
         /// The signing accounts in signature order (fee payer first).
         signers: Vec<Account>,
+        /// The slot of the blockhash used in the transaction.
+        slot: Slot,
     },
     /// Deposited funds from user deposit accounts have been consolidated
     /// into the minter's main account.
@@ -99,6 +101,15 @@ pub enum EventType {
         signature: Signature,
         /// The serialized (unsigned) transaction message.
         transaction: Vec<u8>,
+    },
+    /// A previously submitted transaction was resubmitted with a new signature.
+    ResubmittedTransaction {
+        /// The signature of the old transaction being replaced.
+        old_signature: Signature,
+        /// The signature of the new transaction.
+        new_signature: Signature,
+        /// The slot of the new blockhash used in the resubmitted transaction.
+        new_slot: Slot,
     },
 }
 

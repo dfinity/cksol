@@ -8,10 +8,11 @@ use crate::{
     storage::with_event_iter,
 };
 use candid::Principal;
-use cksol_types::{DepositStatus, Lamport};
+use cksol_types::DepositStatus;
 use cksol_types_internal::{Ed25519KeyName, InitArgs};
 use ic_ed25519::{PocketIcMasterPublicKeyId, PublicKey};
 use icrc_ledger_types::icrc1::account::Account;
+use sol_rpc_types::Lamport;
 use solana_address::{Address, address};
 use solana_transaction_status_client_types::{
     EncodedConfirmedTransactionWithStatusMeta, EncodedTransaction,
@@ -21,6 +22,8 @@ use solana_transaction_status_client_types::{
 use std::{collections::VecDeque, str::FromStr};
 
 pub mod runtime;
+pub mod signer;
+mod stubs;
 
 pub const BLOCK_INDEX: u64 = 98763_u64;
 pub const DEPOSIT_FEE: Lamport = 10_000_000; // 0.01 SOL
@@ -80,7 +83,7 @@ pub mod arb {
     use cksol_types_internal::{Ed25519KeyName, InitArgs, UpgradeArgs};
     use icrc_ledger_types::icrc1::account::Account;
     use proptest::prelude::{Just, Strategy, any, prop, prop_oneof};
-    use sol_rpc_types::Lamport;
+    use sol_rpc_types::{Lamport, Slot};
     use solana_address::Address;
     use solana_message::{Hash, Instruction, Message};
     use solana_signature::Signature;
@@ -270,12 +273,14 @@ pub mod arb {
                 arb_signature(),
                 arb_message(),
                 prop::collection::vec(arb_account(), 1..10),
+                any::<Slot>(),
             )
-                .prop_map(|(signature, transaction, signers)| {
+                .prop_map(|(signature, transaction, signers, slot)| {
                     EventType::SubmittedTransaction {
                         signature,
                         transaction,
                         signers,
+                        slot,
                     }
                 }),
             prop::collection::vec((arb_account(), any::<Lamport>()), 1..10)
@@ -285,6 +290,15 @@ pub mod arb {
                     request,
                     signature,
                     transaction,
+                }
+            ),
+            (arb_signature(), arb_signature(), any::<Slot>()).prop_map(
+                |(old_signature, new_signature, new_slot)| {
+                    EventType::ResubmittedTransaction {
+                        old_signature,
+                        new_signature,
+                        new_slot,
+                    }
                 },
             ),
         ]
