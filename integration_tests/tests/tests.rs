@@ -15,7 +15,9 @@ use cksol_types::{
     UpdateBalanceArgs, UpdateBalanceError, WithdrawSolArgs, WithdrawSolError, WithdrawSolStatus,
 };
 use cksol_types_internal::{UpgradeArgs, event::EventType, log::Priority};
-use ic_pocket_canister_runtime::{JsonRpcResponse, MockHttpOutcalls, MockHttpOutcallsBuilder};
+use ic_pocket_canister_runtime::{
+    JsonRpcRequestMatcher, JsonRpcResponse, MockHttpOutcalls, MockHttpOutcallsBuilder,
+};
 use icrc_ledger_types::icrc1::account::Subaccount;
 use serde_json::json;
 use sol_rpc_types::{CommitmentLevel, ConsensusStrategy, GetTransactionEncoding, RpcConfig};
@@ -557,24 +559,99 @@ mod withdraw_sol_tests {
     }
 
     #[tokio::test]
-    async fn should_start_withdrawal_processing_timer() {
-        let setup = SetupBuilder::new().build().await;
+    async fn should_process_pending_withdrawals() {
+        const WITHDRAWAL_AMOUNT: u64 = 100_000_000;
+        const WITHDRAWAL_ADDRESS: &str = "E4MpwNnMWs2XtW5gVrxZvyS7fMq31QD5HvbxmwP45Tz3";
+        let withdrawal_address_bytes = Address::from_str(WITHDRAWAL_ADDRESS)
+            .expect("failed to decode address")
+            .to_bytes();
+
+        let setup = SetupBuilder::new()
+            .with_initial_ledger_balances(vec![(
+                DEFAULT_CALLER_ACCOUNT,
+                Nat::from(10 * WITHDRAWAL_AMOUNT),
+            )])
+            .build()
+            .await;
+
+        setup
+            .ledger()
+            .approve(
+                None,
+                WITHDRAWAL_AMOUNT,
+                Account {
+                    owner: setup.minter_canister_id(),
+                    subaccount: None,
+                },
+            )
+            .await;
+
+        let WithdrawSolOk { block_index } = setup
+            .minter()
+            .withdraw_sol(WithdrawSolArgs {
+                from_subaccount: None,
+                amount: WITHDRAWAL_AMOUNT,
+                address: WITHDRAWAL_ADDRESS.to_string(),
+            })
+            .await
+            .expect("withdraw_sol should succeed");
 
         setup
             .advance_time(Duration::from_mins(1) + Duration::from_secs(1))
             .await;
-        setup.tick().await;
+        setup
+            .tick_with_http_mocks(estimate_blockhash_http_mocks())
+            .await;
 
-        let logs = setup.minter().retrieve_logs(&Priority::Info).await;
-
-        assert!(
-            logs.iter()
-                .any(|e| e.message.contains("processing pending withdrawals")),
-            "Expected info about processing pending withdrawals, got: {:?}",
-            logs
-        );
+        setup.minter().assert_that_events().await.satisfy(|events| {
+            check!(events.iter().any(|e| matches!(
+                e,
+                EventType::SentWithdrawalTransaction {
+                    burn_block_index,
+                    solana_address,
+                    ..
+                } if *burn_block_index == block_index && *solana_address == withdrawal_address_bytes
+            )));
+        });
 
         setup.drop().await;
+    }
+
+    fn estimate_blockhash_http_mocks() -> MockHttpOutcalls {
+        let get_slot_response = || {
+            JsonRpcResponse::from(json!({
+                "jsonrpc": "2.0",
+                "result": 1,
+                "id": 0
+            }))
+        };
+
+        let get_block_response = || {
+            JsonRpcResponse::from(json!({
+                "jsonrpc": "2.0",
+                "result": {
+                    "blockHeight": 1,
+                    "blockTime": 1700000000_u64,
+                    "blockhash": "4sGjMW1sUnHzSxGspuhpqLDx6wiyjNtZAMdL4VZHirAn",
+                    "parentSlot": 0,
+                    "previousBlockhash": "11111111111111111111111111111111"
+                },
+                "id": 0
+            }))
+        };
+
+        let mut builder = MockHttpOutcallsBuilder::new();
+        for id in 0..4u64 {
+            builder = builder
+                .given(JsonRpcRequestMatcher::with_method("getSlot").with_id(id))
+                .respond_with(get_slot_response().with_id(id))
+        }
+        for id in 4..8u64 {
+            builder = builder
+                .given(JsonRpcRequestMatcher::with_method("getBlock").with_id(id))
+                .respond_with(get_block_response().with_id(id))
+        }
+        builder.build()
     }
 }
 

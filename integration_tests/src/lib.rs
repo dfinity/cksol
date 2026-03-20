@@ -293,6 +293,12 @@ impl Setup {
         self.env.as_ref().unwrap().tick().await
     }
 
+    pub async fn tick_with_http_mocks(&self, mut mocks: impl ExecuteHttpOutcallMocks) -> () {
+        let env = self.env.as_ref().unwrap();
+        env.tick().await;
+        mocks.execute_http_outcall_mocks(env).await;
+    }
+
     pub async fn advance_time(&self, duration: Duration) -> () {
         self.env.as_ref().unwrap().advance_time(duration).await
     }
