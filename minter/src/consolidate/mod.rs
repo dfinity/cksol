@@ -137,11 +137,7 @@ async fn submit_consolidation_transaction<R: CanisterRuntime>(
         )
     });
 
-    let result = submit_transaction(runtime, transaction).await?;
-    assert_eq!(
-        signature, result,
-        "BUG: Expected transaction signature to be {signature}, but got {result}"
-    );
+    submit_transaction(runtime, transaction).await?;
 
     Ok(signature)
 }
