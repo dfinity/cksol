@@ -1,7 +1,8 @@
 use super::{signer::MockSchnorrSigner, stubs::Stubs};
 use crate::{runtime::CanisterRuntime, signer::SchnorrSigner};
-use candid::CandidType;
+use candid::{CandidType, Principal};
 use ic_canister_runtime::{IcError, Runtime, StubRuntime};
+use ic_cdk::management_canister::SignCallError;
 use std::time::Duration;
 
 #[derive(Clone, Default)]
@@ -59,12 +60,12 @@ impl TestCanisterRuntime {
     }
 
     pub fn add_schnorr_signature(mut self, signature: [u8; 64]) -> Self {
-        self.schnorr_signer.responses.add(Ok(signature.to_vec()));
+        self.schnorr_signer = self.schnorr_signer.add_signature(signature);
         self
     }
 
     pub fn add_schnorr_signing_error(mut self, error: SignCallError) -> Self {
-        self.schnorr_signer.responses.add(Err(error));
+        self.schnorr_signer = self.schnorr_signer.add_response(Err(error));
         self
     }
 }
@@ -115,61 +116,5 @@ impl CanisterRuntime for TestCanisterRuntime {
 
     fn schnorr_signer(&self) -> impl SchnorrSigner {
         self.schnorr_signer.clone()
-    }
-}
-
-#[derive(Clone, Default)]
-pub struct MockSchnorrSigner {
-    responses: SharedVecDeque<Result<Vec<u8>, SignCallError>>,
-}
-
-impl MockSchnorrSigner {
-    pub fn with_signatures(signatures: Vec<[u8; 64]>) -> Self {
-        Self {
-            responses: SharedVecDeque::from_iter(
-                signatures.into_iter().map(|sig| Ok(sig.to_vec())),
-            ),
-        }
-    }
-
-    pub fn with_responses(responses: Vec<Result<Vec<u8>, SignCallError>>) -> Self {
-        Self {
-            responses: SharedVecDeque::from_iter(responses),
-        }
-    }
-}
-
-impl SchnorrSigner for MockSchnorrSigner {
-    async fn sign(
-        &self,
-        _message: Vec<u8>,
-        _derivation_path: DerivationPath,
-    ) -> Result<Vec<u8>, SignCallError> {
-        self.responses
-            .pop_front()
-            .expect("MockSchnorrSigner: no more stub responses")
-    }
-}
-
-#[derive(Clone)]
-struct SharedVecDeque<T>(Arc<Mutex<VecDeque<T>>>);
-
-impl<T> Default for SharedVecDeque<T> {
-    fn default() -> Self {
-        Self(Arc::new(Mutex::new(VecDeque::new())))
-    }
-}
-
-impl<T> SharedVecDeque<T> {
-    fn from_iter(iter: impl IntoIterator<Item = T>) -> Self {
-        Self(Arc::new(Mutex::new(iter.into_iter().collect())))
-    }
-
-    fn add(&mut self, value: T) {
-        self.0.lock().unwrap().push_back(value);
-    }
-
-    fn pop_front(&self) -> Option<T> {
-        self.0.lock().unwrap().pop_front()
     }
 }
