@@ -86,7 +86,7 @@ async fn should_submit_single_consolidation_request() {
         // get_slot call
         .add_stub_response(SlotResult::Consistent(Ok(slot)))
         .add_stub_response(SendTransactionResult::Consistent(Ok(
-            fee_payer_signature.into(),
+            fee_payer_signature.into()
         )))
         // Two signatures needed: fee payer (minter) + source (deposit account)
         .add_signature(fee_payer_signature.into())
@@ -188,10 +188,10 @@ async fn should_submit_multiple_consolidation_batches() {
         // get_slot call
         .add_stub_response(SlotResult::Consistent(Ok(slot)))
         .add_stub_response(SendTransactionResult::Consistent(Ok(
-            fee_payer_signature_1.into(),
+            fee_payer_signature_1.into()
         )))
         .add_stub_response(SendTransactionResult::Consistent(Ok(
-            fee_payer_signature_2.into(),
+            fee_payer_signature_2.into()
         )));
 
     // Signatures needed: fee payer + each source account per batch
