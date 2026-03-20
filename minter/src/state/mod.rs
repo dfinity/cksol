@@ -11,7 +11,7 @@ use ic_ed25519::PublicKey;
 use icrc_ledger_types::icrc1::account::Account;
 use num_traits::Zero;
 use sol_rpc_client::SolRpcClient;
-use sol_rpc_types::{ConsensusStrategy, Lamport, RpcSources, SolanaCluster};
+use sol_rpc_types::{ConsensusStrategy, Lamport, RpcSources, Slot, SolanaCluster};
 use solana_message::Message;
 use solana_signature::Signature;
 use std::{
@@ -368,6 +368,7 @@ impl State {
         signature: &Signature,
         message: &Message,
         signers: &[Account],
+        slot: Slot,
     ) {
         assert_eq!(
             self.submitted_transactions.insert(
@@ -375,6 +376,7 @@ impl State {
                 SubmittedTransaction {
                     message: message.clone(),
                     signers: signers.to_vec(),
+                    slot,
                 }
             ),
             None,
@@ -485,4 +487,5 @@ pub enum TaskType {
 pub struct SubmittedTransaction {
     pub message: Message,
     pub signers: Vec<Account>,
+    pub slot: Slot,
 }
