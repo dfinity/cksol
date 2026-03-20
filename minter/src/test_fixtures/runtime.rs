@@ -4,7 +4,6 @@ use candid::{CandidType, Principal};
 use ic_canister_runtime::{IcError, Runtime, StubRuntime};
 use std::time::Duration;
 
-/// A fixed principal used for the minter canister in tests.
 pub const TEST_CANISTER_ID: Principal = Principal::from_slice(&[0xCA; 10]);
 
 #[derive(Clone, Default)]
