@@ -1,8 +1,11 @@
 use super::{signer::MockSchnorrSigner, stubs::Stubs};
 use crate::{runtime::CanisterRuntime, signer::SchnorrSigner};
-use candid::CandidType;
+use candid::{CandidType, Principal};
 use ic_canister_runtime::{IcError, Runtime, StubRuntime};
 use std::time::Duration;
+
+/// A fixed principal used for the minter canister in tests.
+pub const TEST_CANISTER_ID: Principal = Principal::from_slice(&[0xCA; 10]);
 
 #[derive(Clone, Default)]
 pub struct TestCanisterRuntime {
@@ -50,6 +53,11 @@ impl TestCanisterRuntime {
         self.msg_cycles_refunded = self.msg_cycles_refunded.add(value);
         self
     }
+
+    pub fn add_signature(mut self, signature: [u8; 64]) -> Self {
+        self.signer = self.signer.add_signature(signature);
+        self
+    }
 }
 
 impl CanisterRuntime for TestCanisterRuntime {
@@ -60,6 +68,10 @@ impl CanisterRuntime for TestCanisterRuntime {
 
     fn signer(&self) -> impl SchnorrSigner {
         self.signer.clone()
+    }
+
+    fn canister_self(&self) -> Principal {
+        TEST_CANISTER_ID
     }
 
     fn time(&self) -> u64 {
