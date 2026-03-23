@@ -22,10 +22,7 @@ type SendTransactionResult = MultiRpcResult<sol_rpc_types::Signature>;
 async fn should_return_early_if_no_transactions_to_resubmit() {
     setup();
 
-    let runtime = TestCanisterRuntime::new()
-        .with_increasing_time()
-        // get_slot for current slot check
-        .add_stub_response(SlotResult::Consistent(Ok(200)));
+    let runtime = TestCanisterRuntime::new().with_increasing_time();
 
     resubmit_transactions(runtime).await;
 
