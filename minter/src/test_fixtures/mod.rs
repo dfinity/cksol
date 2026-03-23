@@ -285,12 +285,12 @@ pub mod arb {
                 }),
             prop::collection::vec((arb_account(), any::<Lamport>()), 1..10)
                 .prop_map(|deposits| EventType::ConsolidatedDeposits { deposits }),
-            (arb_ledger_burn_index(), arb_signature()).prop_map(
-                |(burn_block_index, signature)| EventType::SentWithdrawalTransaction {
+            (arb_ledger_burn_index(), arb_signature()).prop_map(|(burn_block_index, signature)| {
+                EventType::SentWithdrawalTransaction {
                     burn_block_index,
                     signature,
                 }
-            ),
+            }),
             (arb_signature(), arb_signature(), any::<Slot>()).prop_map(
                 |(old_signature, new_signature, new_slot)| {
                     EventType::ResubmittedTransaction {
