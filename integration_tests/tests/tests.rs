@@ -881,7 +881,7 @@ mod consolidation_tests {
         setup.drop().await;
     }
 
-    // Returns the required HTTP outcall mocks for executing the deposit concolidation task
+    // Returns the required HTTP outcall mocks for executing the deposit consolidation task
     fn http_mocks_for_deposit_consolidation() -> MockHttpOutcalls {
         const SLOT: u64 = 100_000_000;
         const BLOCKHASH: &str = "4sGjMW1sUnHzSxGspuhpqLDx6wiyjNtZAMdL4VZHirAn";
