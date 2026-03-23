@@ -161,6 +161,11 @@ fn get_events(
                 new_signature: new_signature.into(),
                 new_slot,
             },
+            EventType::FinalizedTransaction { signature } => {
+                event::EventType::FinalizedTransaction {
+                    signature: signature.into(),
+                }
+            }
         }
     }
 
