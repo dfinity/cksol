@@ -888,20 +888,26 @@ mod consolidation_tests {
         const TX_SIGNATURE: &str = "5VERv8NMvzbJMEkV8xnrLkEaWRtSz9CosKDYjCJjBRnbJLgp8uirBgmQpjKhoR4tjF3ZpRzrFmBV6UjKdiSZkQUW";
 
         let mut mocks = MockHttpOutcallsBuilder::new();
-        // getSlot requests (IDs 4-7)
+        // getSlot requests for estimate_recent_blockhash (IDs 4-7)
         for id in 4..8 {
             mocks = mocks
                 .given(get_slot_request().with_id(id))
                 .respond_with(get_slot_response(SLOT).with_id(id));
         }
-        // getBlock requests (IDs 8-11)
+        // getBlock requests for estimate_recent_blockhash (IDs 8-11)
         for id in 8..12 {
             mocks = mocks
                 .given(get_block_request(SLOT).with_id(id))
                 .respond_with(get_block_response(BLOCKHASH).with_id(id));
         }
-        // sendTransaction requests (IDs 12-15)
+        // getSlot requests for get_slot (IDs 12-15)
         for id in 12..16 {
+            mocks = mocks
+                .given(get_slot_request().with_id(id))
+                .respond_with(get_slot_response(SLOT).with_id(id));
+        }
+        // sendTransaction requests (IDs 16-19)
+        for id in 16..20 {
             mocks = mocks
                 .given(send_transaction_request().with_id(id))
                 .respond_with(send_transaction_response(TX_SIGNATURE).with_id(id));
