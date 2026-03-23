@@ -77,6 +77,5 @@ wasms/*.wasm.gz
 test-ledger/
 proptest-regressions/
 
-# Claude code
-.claude
-CLAUDE.md
+# Claude Code settings
+.claude/settings.local.json
