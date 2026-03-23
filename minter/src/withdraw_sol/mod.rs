@@ -208,9 +208,8 @@ pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: &R) {
             process_event(
                 state,
                 EventType::SentWithdrawalTransaction {
-                    request: request.clone(),
+                    burn_block_index: request.burn_block_index,
                     signature,
-                    transaction: transaction.0.message.clone(),
                 },
                 runtime,
             )

@@ -562,9 +562,6 @@ mod withdraw_sol_tests {
     async fn should_process_pending_withdrawals() {
         const WITHDRAWAL_AMOUNT: u64 = 100_000_000;
         const WITHDRAWAL_ADDRESS: &str = "E4MpwNnMWs2XtW5gVrxZvyS7fMq31QD5HvbxmwP45Tz3";
-        let withdrawal_address_bytes = Address::from_str(WITHDRAWAL_ADDRESS)
-            .expect("failed to decode address")
-            .to_bytes();
 
         let setup = SetupBuilder::new()
             .with_initial_ledger_balances(vec![(
@@ -608,9 +605,8 @@ mod withdraw_sol_tests {
                 e,
                 EventType::SentWithdrawalTransaction {
                     burn_block_index,
-                    solana_address,
                     ..
-                } if *burn_block_index == block_index && *solana_address == withdrawal_address_bytes
+                } if *burn_block_index == block_index
             )));
         });
 

@@ -53,11 +53,10 @@ fn apply_state_transition(state: &mut State, payload: &EventType) {
             state.process_consolidated_deposits(deposits);
         }
         EventType::SentWithdrawalTransaction {
-            request,
+            burn_block_index,
             signature,
-            transaction,
         } => {
-            state.process_sent_withdrawal_transaction(request, signature, transaction);
+            state.process_sent_withdrawal_transaction(burn_block_index, signature);
         }
         EventType::ResubmittedTransaction {
             old_signature,

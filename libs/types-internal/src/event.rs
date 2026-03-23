@@ -95,12 +95,8 @@ pub enum EventType {
     SentWithdrawalTransaction {
         /// The burn transaction index on the ckSOL ledger.
         burn_block_index: u64,
-        /// The destination Solana address.
-        solana_address: [u8; 32],
         /// The transaction signature.
         signature: Signature,
-        /// The serialized (unsigned) transaction message.
-        transaction: Vec<u8>,
     },
     /// A previously submitted transaction was resubmitted with a new signature.
     ResubmittedTransaction {

@@ -154,15 +154,11 @@ fn get_events(
                 event::EventType::ConsolidatedDeposits { deposits }
             }
             EventType::SentWithdrawalTransaction {
-                request,
+                burn_block_index,
                 signature,
-                transaction,
             } => event::EventType::SentWithdrawalTransaction {
-                burn_block_index: *request.burn_block_index.get(),
-                solana_address: request.solana_address,
+                burn_block_index: *burn_block_index.get(),
                 signature: signature.into(),
-                transaction: bincode::serialize(&transaction)
-                    .expect("serializing transaction should succeed"),
             },
             EventType::ResubmittedTransaction {
                 old_signature,

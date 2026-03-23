@@ -1,3 +1,4 @@
+use crate::numeric::LedgerBurnIndex;
 use crate::test_fixtures::EventsAssert;
 use crate::withdraw_sol::MAX_WITHDRAWALS_PER_BATCH;
 use crate::{
@@ -341,9 +342,7 @@ mod process_pending_withdrawals_tests {
                 });
             })
             .expect_event(|e| {
-                assert_matches!(e, EventType::SentWithdrawalTransaction {request, signature, .. } => {
-                    assert_eq!(request.withdrawal_amount, WITHDRAWAL_FEE + 1);
-                    assert_eq!(request.withdrawal_fee, WITHDRAWAL_FEE);
+                assert_matches!(e, EventType::SentWithdrawalTransaction { signature, .. } => {
                     assert_eq!(signature, fake_sig.into());
                 });
             })
@@ -441,11 +440,8 @@ mod process_pending_withdrawals_tests {
                 });
             })
             .expect_event(|e| {
-                assert_matches!(e, EventType::SentWithdrawalTransaction { request, .. } => {
-                    assert_eq!(request.withdrawal_amount, WITHDRAWAL_FEE + 1);
-                    assert_eq!(request.withdrawal_fee, WITHDRAWAL_FEE);
-                    assert_eq!(request.account, Principal::from_slice(&[1, 1]).into());
-
+                assert_matches!(e, EventType::SentWithdrawalTransaction { burn_block_index, .. } => {
+                    assert_eq!(burn_block_index, LedgerBurnIndex::from(1u64));
                 });
             })
             .assert_no_more_events();

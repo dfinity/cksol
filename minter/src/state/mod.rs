@@ -88,7 +88,7 @@ pub struct State {
     quarantined_deposits: BTreeMap<DepositId, Deposit>,
     minted_deposits: BTreeMap<DepositId, MintedDeposit>,
     pending_withdrawal_requests: BTreeMap<LedgerBurnIndex, WithdrawSolRequest>,
-    sent_withdrawal_requests: BTreeMap<LedgerBurnIndex, SentWithdrawalTransaction>,
+    sent_withdrawal_requests: BTreeMap<LedgerBurnIndex, Signature>,
     funds_to_consolidate: BTreeMap<Account, Lamport>,
     submitted_transactions: BTreeMap<Signature, SubmittedTransaction>,
     active_tasks: BTreeSet<TaskType>,
@@ -325,9 +325,9 @@ impl State {
         if self.pending_withdrawal_requests.contains_key(&burn_index) {
             return WithdrawSolStatus::Pending;
         }
-        if let Some(sent) = self.sent_withdrawal_requests.get(&burn_index) {
+        if let Some(sent_signature) = self.sent_withdrawal_requests.get(&burn_index) {
             return WithdrawSolStatus::TxSent(SolTransaction {
-                transaction_hash: sent.signature.to_string(),
+                transaction_hash: sent_signature.to_string(),
             });
         }
         WithdrawSolStatus::NotFound
@@ -403,36 +403,22 @@ impl State {
 
     fn process_sent_withdrawal_transaction(
         &mut self,
-        request: &WithdrawSolRequest,
+        burn_block_index: &LedgerBurnIndex,
         signature: &Signature,
-        transaction: &Message,
     ) {
-        let removed = self
-            .pending_withdrawal_requests
-            .remove(&request.burn_block_index)
-            .unwrap_or_else(|| {
-                panic!(
-                    "Attempted to send transaction for unknown withdrawal request: {:?}",
-                    request.burn_block_index
-                )
-            });
-        assert_eq!(
-            removed, *request,
-            "Withdrawal request mismatch for burn index {:?}",
-            request.burn_block_index
+        assert!(
+            self.pending_withdrawal_requests
+                .remove(burn_block_index)
+                .is_some(),
+            "Attempted to send transaction for unknown withdrawal request: {:?}",
+            burn_block_index
         );
         assert_eq!(
-            self.sent_withdrawal_requests.insert(
-                request.burn_block_index,
-                SentWithdrawalTransaction {
-                    request: request.clone(),
-                    signature: *signature,
-                    transaction: transaction.clone(),
-                }
-            ),
+            self.sent_withdrawal_requests
+                .insert(*burn_block_index, *signature),
             None,
             "Attempted to send transaction for already sent withdrawal request: {:?}",
-            request.burn_block_index
+            burn_block_index
         );
     }
 
@@ -552,13 +538,6 @@ pub struct Deposit {
 pub struct MintedDeposit {
     pub block_index: LedgerMintIndex,
     pub deposit: Deposit,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SentWithdrawalTransaction {
-    pub request: WithdrawSolRequest,
-    pub signature: Signature,
-    pub transaction: Message,
 }
 
 #[derive(Copy, Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
