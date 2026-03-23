@@ -27,10 +27,6 @@ pub async fn consolidate_deposits<R: CanisterRuntime>(runtime: R) {
         Err(_) => return,
     };
 
-    if read_state(|state| state.funds_to_consolidate().is_empty()) {
-        return;
-    }
-
     let funds_to_consolidate: Vec<_> = read_state(|state| {
         state
             .funds_to_consolidate()
@@ -41,6 +37,9 @@ pub async fn consolidate_deposits<R: CanisterRuntime>(runtime: R) {
             .map(|c| c.to_vec())
             .collect()
     });
+    if funds_to_consolidate.is_empty() {
+        return;
+    }
 
     for round in funds_to_consolidate.chunks(MAX_CONCURRENT_TRANSACTIONS) {
         let recent_blockhash = match get_recent_blockhash(&runtime).await {

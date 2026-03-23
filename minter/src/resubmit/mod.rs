@@ -30,6 +30,10 @@ pub async fn resubmit_transactions<R: CanisterRuntime>(runtime: R) {
         Err(_) => return,
     };
 
+    if read_state(|state| state.submitted_transactions().is_empty()) {
+        return;
+    }
+
     let current_slot = match get_slot(&runtime).await {
         Ok(slot) => slot,
         Err(e) => {
@@ -37,7 +41,6 @@ pub async fn resubmit_transactions<R: CanisterRuntime>(runtime: R) {
             return;
         }
     };
-
     let mut expired_transactions = read_state(|state| {
         state
             .submitted_transactions()
@@ -124,11 +127,7 @@ async fn resubmit_transaction_with_new_blockhash<R: CanisterRuntime>(
         )
     });
 
-    let result = submit_transaction(runtime, transaction).await?;
-    assert_eq!(
-        new_signature, result,
-        "BUG: Expected new transaction signature to be {new_signature}, but got {result}"
-    );
+    submit_transaction(runtime, transaction).await?;
 
     Ok(new_signature)
 }
