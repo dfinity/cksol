@@ -13,14 +13,14 @@ use solana_transaction::{Instruction, Message, Transaction};
 use std::{collections::BTreeMap, iter};
 use thiserror::Error;
 
-pub const MAX_SIGNATURES: u64 = 10;
+pub const MAX_TRANSFERS: usize = 10;
 pub const MAX_TX_SIZE: usize = 1_232;
 const BYTES_PER_SIGNATURE: usize = 64;
 
 #[derive(Debug, Error, From)]
 pub enum CreateTransferError {
-    #[error("too many signatures: got {got}, max is {max}")]
-    TooManySignatures { max: u64, got: u64 },
+    #[error("too many transfers: got {got}, max is {max}")]
+    TooManyTransfers { max: usize, got: usize },
     #[error("signing failed: {0}")]
     SigningFailed(SignCallError),
 }
@@ -71,16 +71,22 @@ pub async fn create_signed_transfer_transaction(
     let mut transaction = Transaction::new_unsigned(message);
     let message_bytes = transaction.message_data();
 
-    let num_signatures = transaction.message.signer_keys().len();
-    if num_signatures as u64 > MAX_SIGNATURES {
-        return Err(CreateTransferError::TooManySignatures {
-            max: MAX_SIGNATURES,
-            got: num_signatures as u64,
+    if sources.len() > MAX_TRANSFERS {
+        return Err(CreateTransferError::TooManyTransfers {
+            max: MAX_TRANSFERS,
+            got: sources.len(),
         });
     }
 
-    // Check serialized transaction size does not exceed maximum Solana transaction size:
-    assert!(1 + message_bytes.len() + num_signatures * BYTES_PER_SIGNATURE < MAX_TX_SIZE);
+    let num_signers = transaction.message.signer_keys().len();
+    let total_size = 1 + message_bytes.len() + num_signers * BYTES_PER_SIGNATURE;
+    assert!(
+        total_size <= MAX_TX_SIZE,
+        "Transaction size {total_size} exceeds maximum {MAX_TX_SIZE} \
+         (message={}, signers={num_signers}, accounts={})",
+        message_bytes.len(),
+        transaction.message.account_keys.len()
+    );
 
     // Build a map with all signer addresses and re-order entries to match the
     // order of the message account keys

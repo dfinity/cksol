@@ -210,9 +210,7 @@ async fn should_fail_when_too_many_signatures() {
     let blockhash = Hash::new_from_array([0xBB; 32]);
     let signer = MockSchnorrSigner::with_signatures(vec![]);
 
-    // Create MAX_SIGNATURES sources with a SEPARATE fee payer, resulting in MAX_SIGNATURES + 1
-    // signatures
-    let sources: Vec<(Account, Lamport)> = (0..MAX_SIGNATURES)
+    let sources: Vec<(Account, Lamport)> = (0..MAX_TRANSFERS + 1)
         .map(|i| {
             (
                 Account {
@@ -224,7 +222,6 @@ async fn should_fail_when_too_many_signatures() {
         })
         .collect();
 
-    // Fee payer is NOT in sources, so total signatures = sources + 1 = MAX_SIGNATURES + 1
     let fee_payer = Account {
         owner: Principal::from_slice(&[0xFE]),
         subaccount: None,
@@ -235,22 +232,21 @@ async fn should_fail_when_too_many_signatures() {
             .await;
 
     assert!(
-        matches!(result, Err(CreateTransferError::TooManySignatures { max: MAX_SIGNATURES, got }) if got == MAX_SIGNATURES + 1)
+        matches!(result, Err(CreateTransferError::TooManyTransfers { max: MAX_TRANSFERS, got }) if got == MAX_TRANSFERS + 1)
     );
 }
 
 #[tokio::test]
-async fn should_not_fail_for_max_signatures() {
+async fn should_not_fail_for_max_transfers() {
     setup();
-    let target_account = Account {
-        owner: Principal::from_slice(&[0xFF]),
+    // Fee payer is also the destination (like in consolidation)
+    let fee_payer_and_destination = Account {
+        owner: Principal::from_slice(&[0xFE]),
         subaccount: None,
     };
     let blockhash = Hash::new_from_array([0xBB; 32]);
 
-    // Create MAX_SIGNATURES - 1 sources with a SEPARATE fee payer, resulting in exactly
-    // MAX_SIGNATURES signatures
-    let sources: Vec<(Account, Lamport)> = (0..MAX_SIGNATURES - 1)
+    let sources: Vec<(Account, Lamport)> = (0..MAX_TRANSFERS)
         .map(|i| {
             (
                 Account {
@@ -262,17 +258,17 @@ async fn should_not_fail_for_max_signatures() {
         })
         .collect();
 
-    // Fee payer is NOT in sources, so total signatures = sources + 1 = MAX_SIGNATURES
-    let fee_payer = Account {
-        owner: Principal::from_slice(&[0xFE]),
-        subaccount: None,
-    };
+    // fee payer + MAX_TRANSFERS sources = MAX_TRANSFERS + 1 signers
+    let signer = MockSchnorrSigner::with_signatures(vec![[0x11u8; 64]; MAX_TRANSFERS + 1]);
 
-    let signer = MockSchnorrSigner::with_signatures(vec![[0x11u8; 64]; MAX_SIGNATURES as usize]);
-
-    let result =
-        create_signed_transfer_transaction(fee_payer, &sources, target_account, blockhash, &signer)
-            .await;
+    let result = create_signed_transfer_transaction(
+        fee_payer_and_destination,
+        &sources,
+        fee_payer_and_destination,
+        blockhash,
+        &signer,
+    )
+    .await;
 
     assert!(result.is_ok());
 }

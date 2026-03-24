@@ -1,7 +1,7 @@
 use crate::{
     guard::TimerGuard,
     runtime::CanisterRuntime,
-    sol_transfer::{CreateTransferError, MAX_SIGNATURES, create_signed_transfer_transaction},
+    sol_transfer::{CreateTransferError, MAX_TRANSFERS, create_signed_transfer_transaction},
     state::{TaskType, audit::process_event, event::EventType, mutate_state, read_state},
     transaction::{SubmitTransactionError, get_recent_blockhash, get_slot, submit_transaction},
 };
@@ -19,7 +19,7 @@ mod tests;
 
 pub const DEPOSIT_CONSOLIDATION_DELAY: Duration = Duration::from_mins(10);
 const MAX_CONCURRENT_TRANSACTIONS: usize = 10;
-const MAX_TRANSFERS_PER_CONSOLIDATION: usize = MAX_SIGNATURES as usize - 1;
+pub(crate) const MAX_TRANSFERS_PER_CONSOLIDATION: usize = MAX_TRANSFERS;
 
 pub async fn consolidate_deposits<R: CanisterRuntime>(runtime: R) {
     let _guard = match TimerGuard::new(TaskType::DepositConsolidation) {
