@@ -3,6 +3,7 @@ use async_trait::async_trait;
 use cksol_types::{GetDepositAddressArgs, Signature, UpdateBalanceArgs};
 use ic_pocket_canister_runtime::{
     ExecuteHttpOutcallMocks, JsonRpcRequestMatcher, JsonRpcResponse, MockHttpOutcalls,
+    MockHttpOutcallsBuilder,
 };
 use icrc_ledger_types::{
     icrc::generic_value::{ICRC3Value, Value},
@@ -155,4 +156,73 @@ pub fn get_memo(block: ICRC3Value) -> Vec<u8> {
     let memo = tx_map.get("memo").expect("should have a memo");
     let memo_blob = memo.clone().as_blob().expect("memo should be a blob");
     memo_blob.into_vec()
+}
+
+/// Creates HTTP mocks for `getTransaction` RPC calls.
+pub fn get_transaction_http_mocks(response: impl Fn() -> JsonRpcResponse) -> MockHttpOutcalls {
+    MockHttpOutcallsBuilder::new()
+        .given(get_deposit_transaction_request().with_id(0))
+        .respond_with(response().with_id(0))
+        .given(get_deposit_transaction_request().with_id(1))
+        .respond_with(response().with_id(1))
+        .given(get_deposit_transaction_request().with_id(2))
+        .respond_with(response().with_id(2))
+        .given(get_deposit_transaction_request().with_id(3))
+        .respond_with(response().with_id(3))
+        .build()
+}
+
+/// JSON-RPC request matcher for `getSlot`.
+pub fn get_slot_request() -> JsonRpcRequestMatcher {
+    JsonRpcRequestMatcher::with_method("getSlot")
+}
+
+/// JSON-RPC response for `getSlot`.
+pub fn get_slot_response(slot: u64) -> JsonRpcResponse {
+    JsonRpcResponse::from(json!({
+        "jsonrpc": "2.0",
+        "result": slot,
+        "id": 1
+    }))
+}
+
+/// JSON-RPC request matcher for `getBlock`.
+pub fn get_block_request(slot: u64) -> JsonRpcRequestMatcher {
+    JsonRpcRequestMatcher::with_method("getBlock").with_params(json!([
+        slot,
+        {
+            "transactionDetails": "none",
+            "rewards": false,
+            "maxSupportedTransactionVersion": 0
+        }
+    ]))
+}
+
+/// JSON-RPC response for `getBlock`.
+pub fn get_block_response(blockhash: &str) -> JsonRpcResponse {
+    JsonRpcResponse::from(json!({
+        "jsonrpc": "2.0",
+        "result": {
+            "blockhash": blockhash,
+            "previousBlockhash": "CzBVNFJkh7WkQDfJUiDjLc7kPrJd8kR2yiCvwBUhSe7Y",
+            "parentSlot": 449819444,
+            "blockTime": 1700000000_i64,
+            "blockHeight": 449819444
+        },
+        "id": 1
+    }))
+}
+
+/// JSON-RPC request matcher for `sendTransaction`.
+pub fn send_transaction_request() -> JsonRpcRequestMatcher {
+    JsonRpcRequestMatcher::with_method("sendTransaction")
+}
+
+/// JSON-RPC response for `sendTransaction`.
+pub fn send_transaction_response(signature: &str) -> JsonRpcResponse {
+    JsonRpcResponse::from(json!({
+        "jsonrpc": "2.0",
+        "result": signature,
+        "id": 1
+    }))
 }
