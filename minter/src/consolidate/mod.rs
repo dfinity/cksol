@@ -114,7 +114,7 @@ async fn submit_consolidation_transaction<R: CanisterRuntime>(
     let message = transaction.message.clone();
 
     // Record events before trying to submit the transaction to ensure we don't
-    // resubmit the same transaction twice in case submission fails.
+    // resubmit the same transaction twice in case of a failed submission.
     mutate_state(|state| {
         process_event(
             state,
