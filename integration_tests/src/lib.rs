@@ -312,11 +312,25 @@ impl Setup {
         }
     }
 
+    pub async fn check_metrics(self) -> ic_metrics_assert::MetricsAssert<Self> {
+        ic_metrics_assert::MetricsAssert::from_async_http_query(self).await
+    }
+
     pub async fn drop(self) {
         let mut setup = self;
         if let Some(env) = setup.env.take() {
             env.drop().await
         }
+    }
+}
+
+impl ic_metrics_assert::PocketIcAsyncHttpQuery for Setup {
+    fn get_pocket_ic(&self) -> &PocketIc {
+        self.env.as_ref().unwrap()
+    }
+
+    fn get_canister_id(&self) -> CanisterId {
+        self.minter_canister_id
     }
 }
 

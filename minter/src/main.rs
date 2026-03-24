@@ -10,6 +10,7 @@ use cksol_types::{
 };
 use cksol_types_internal::{MinterArg, log::Priority};
 use ic_http_types::{HttpRequest, HttpResponse, HttpResponseBuilder};
+use ic_metrics_encoder::MetricsEncoder;
 use icrc_ledger_types::icrc1::account::{Account, Subaccount};
 use std::{str::FromStr, time::Duration};
 
@@ -191,7 +192,19 @@ fn get_minter_info() -> MinterInfo {
 fn http_request(request: HttpRequest) -> HttpResponse {
     match request.path() {
         "/metrics" => {
-            todo!("DEFI-2670: add metrics")
+            let mut writer = MetricsEncoder::new(vec![], ic_cdk::api::time() as i64 / 1_000_000);
+
+            match cksol_minter::metrics::encode_metrics(&mut writer) {
+                Ok(()) => HttpResponseBuilder::ok()
+                    .header("Content-Type", "text/plain; version=0.0.4")
+                    .header("Cache-Control", "no-store")
+                    .with_body_and_content_length(writer.into_inner())
+                    .build(),
+                Err(err) => {
+                    HttpResponseBuilder::server_error(format!("Failed to encode metrics: {err}"))
+                        .build()
+                }
+            }
         }
         "/logs" => {
             let max_skip_timestamp = match request.raw_query_param("time") {

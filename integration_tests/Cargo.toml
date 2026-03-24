@@ -16,6 +16,7 @@ cksol-types-internal = { path = "../libs/types-internal", features = ["log", "ev
 ic-canister-runtime = { workspace = true }
 ic-http-types = { workspace = true }
 ic-management-canister-types = { workspace = true }
+ic-metrics-assert = { workspace = true }
 ic-pocket-canister-runtime = { workspace = true }
 ic-test-utilities-load-wasm = { workspace = true }
 icrc-ledger-types = { workspace = true }
