@@ -276,9 +276,9 @@ mod process_pending_withdrawals_tests {
         let mut log: Log<Priority> = Log::default();
         log.push_logs(Priority::Info);
         assert!(
-            log.entries
-                .iter()
-                .any(|e| e.message.contains("failed to obtain guard, exiting")),
+            log.entries.iter().any(|e| e
+                .message
+                .contains("failed to obtain WithdrawalProcessing guard, exiting")),
             "Expected info about failing to obtain guard, got: {:?}",
             log.entries
         );

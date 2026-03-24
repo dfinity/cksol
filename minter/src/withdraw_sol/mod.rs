@@ -121,12 +121,13 @@ pub async fn withdraw_sol<R: CanisterRuntime>(
 }
 
 pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: &R) {
-    log!(Priority::Info, "processing pending withdrawals");
-
     let _guard = match TimerGuard::new(TaskType::WithdrawalProcessing) {
         Ok(guard) => guard,
         Err(_) => {
-            log!(Priority::Info, "failed to obtain guard, exiting");
+            log!(
+                Priority::Info,
+                "failed to obtain WithdrawalProcessing guard, exiting"
+            );
             return;
         }
     };
