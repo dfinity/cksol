@@ -17,7 +17,6 @@ pub trait CanisterRuntime: Clone + 'static {
         future: impl Future<Output = ()> + 'static,
     ) -> ic_cdk_timers::TimerId;
     fn canister_self(&self) -> Principal;
-    fn schnorr_signer(&self) -> impl SchnorrSigner;
 }
 
 #[derive(Clone, Default, Debug)]
@@ -68,9 +67,5 @@ impl CanisterRuntime for IcCanisterRuntime {
 
     fn canister_self(&self) -> Principal {
         ic_cdk::api::canister_self()
-    }
-
-    fn schnorr_signer(&self) -> impl SchnorrSigner {
-        IcSchnorrSigner
     }
 }

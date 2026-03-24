@@ -15,7 +15,6 @@ pub struct TestCanisterRuntime {
     msg_cycles_available: Stubs<u128>,
     msg_cycles_refunded: Stubs<u128>,
     canister_self: Option<Principal>,
-    schnorr_signer: MockSchnorrSigner,
 }
 
 impl TestCanisterRuntime {
@@ -60,12 +59,12 @@ impl TestCanisterRuntime {
     }
 
     pub fn add_schnorr_signature(mut self, signature: [u8; 64]) -> Self {
-        self.schnorr_signer = self.schnorr_signer.add_signature(signature);
+        self.signer = self.signer.add_signature(signature);
         self
     }
 
     pub fn add_schnorr_signing_error(mut self, error: SignCallError) -> Self {
-        self.schnorr_signer = self.schnorr_signer.add_response(Err(error));
+        self.signer = self.signer.add_response(Err(error));
         self
     }
 }
@@ -112,9 +111,5 @@ impl CanisterRuntime for TestCanisterRuntime {
     fn canister_self(&self) -> Principal {
         self.canister_self
             .expect("TestCanisterRuntime was not initialized with canister_self")
-    }
-
-    fn schnorr_signer(&self) -> impl SchnorrSigner {
-        self.schnorr_signer.clone()
     }
 }

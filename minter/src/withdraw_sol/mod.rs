@@ -154,7 +154,7 @@ pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: &R) {
         };
 
     let minter_account: Account = runtime.canister_self().into();
-    let signer = runtime.schnorr_signer();
+    let signer = runtime.signer();
 
     // TODO: we need to check whether the minter has enough funds in the main account.
     // We probably need to add a state.minter_balance variable and update it
