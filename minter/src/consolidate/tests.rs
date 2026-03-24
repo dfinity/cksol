@@ -1,14 +1,14 @@
-use super::{consolidate_deposits, MAX_TRANSFERS_PER_CONSOLIDATION};
+use super::{MAX_TRANSFERS_PER_CONSOLIDATION, consolidate_deposits};
 use crate::{
     state::{
+        TaskType,
         audit::process_event,
         event::{DepositId, EventType},
         mutate_state,
-        TaskType,
     },
     test_fixtures::{
-        init_schnorr_master_key, init_state, runtime::TestCanisterRuntime, EventsAssert,
-        DEPOSIT_FEE,
+        DEPOSIT_FEE, EventsAssert, init_schnorr_master_key, init_state,
+        runtime::TestCanisterRuntime,
     },
 };
 use assert_matches::assert_matches;
