@@ -148,6 +148,10 @@ impl State {
         &self.funds_to_consolidate
     }
 
+    pub fn submitted_transactions(&self) -> &BTreeMap<Signature, SubmittedTransaction> {
+        &self.submitted_transactions
+    }
+
     pub fn deposit_status(&self, deposit_id: &DepositId) -> Option<DepositStatus> {
         if self.quarantined_deposits.contains_key(deposit_id) {
             return Some(DepositStatus::Quarantined(deposit_id.signature.into()));
@@ -544,6 +548,7 @@ pub struct MintedDeposit {
 pub enum TaskType {
     DepositConsolidation,
     Mint,
+    MonitorSubmittedTransactions,
     WithdrawalProcessing,
 }
 

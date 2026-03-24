@@ -20,6 +20,9 @@ use icrc_ledger_types::{
     icrc3::blocks::{GetBlocksRequest, GetBlocksResult, ICRC3GenericBlock},
 };
 use num_traits::cast::ToPrimitive;
+pub use pocket_ic::common::rest::{
+    CanisterHttpReply, CanisterHttpRequest, CanisterHttpResponse, MockCanisterHttpResponse,
+};
 use pocket_ic::{PocketIcBuilder, RejectResponse, nonblocking::PocketIc};
 use serde::de::DeserializeOwned;
 use sol_rpc_client::SolRpcClient;
@@ -301,6 +304,18 @@ impl Setup {
 
     pub async fn advance_time(&self, duration: Duration) -> () {
         self.env.as_ref().unwrap().advance_time(duration).await
+    }
+
+    pub async fn execute_http_mocks(&self, mut mocks: impl ExecuteHttpOutcallMocks) {
+        const MAX_ITERATIONS: usize = 20;
+        let env = self.env.as_ref().unwrap();
+
+        for _ in 0..MAX_ITERATIONS {
+            self.tick().await;
+            self.advance_time(Duration::from_nanos(1)).await;
+
+            mocks.execute_http_outcall_mocks(env).await;
+        }
     }
 
     pub async fn drop(self) {

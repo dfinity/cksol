@@ -324,7 +324,7 @@ mod process_pending_withdrawals_tests {
             .add_stub_response(SendSlotResult::Consistent(Ok(1)))
             .add_stub_response(SendBlockResult::Consistent(Ok(get_confirmed_block())))
             // schnorr signing response
-            .add_schnorr_signature(fake_sig)
+            .add_signature(fake_sig)
             .with_increasing_time();
 
         withdraw(&runtime, 1).await;
@@ -405,7 +405,7 @@ mod process_pending_withdrawals_tests {
             .add_stub_response(SendSlotResult::Consistent(Ok(1)))
             .add_stub_response(SendBlockResult::Consistent(Ok(get_confirmed_block())))
             // one successful signature and one failed
-            .add_schnorr_signature([0x42; 64])
+            .add_signature([0x42; 64])
             .add_schnorr_signing_error(SignCallError::CallFailed(
                 CallRejected::with_rejection(4, "signing service unavailable".to_string()).into(),
             ))
@@ -470,13 +470,13 @@ mod process_pending_withdrawals_tests {
             .add_stub_response(SendBlockResult::Consistent(Ok(get_confirmed_block())));
         // signatures for the first batch of withdrawals
         for _ in 0..MAX_WITHDRAWALS_PER_BATCH {
-            runtime = runtime.add_schnorr_signature([0x42; 64]);
+            runtime = runtime.add_signature([0x42; 64]);
         }
         // responses for recent block hash and signature for the second batch
         runtime = runtime
             .add_stub_response(SendSlotResult::Consistent(Ok(1)))
             .add_stub_response(SendBlockResult::Consistent(Ok(get_confirmed_block())))
-            .add_schnorr_signature([0x42; 64]);
+            .add_signature([0x42; 64]);
 
         withdraw(&runtime, request_count as u8).await;
 

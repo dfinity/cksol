@@ -6,6 +6,7 @@ use std::{fmt::Debug, time::Duration};
 pub trait CanisterRuntime: Clone + 'static {
     fn inter_canister_call_runtime(&self) -> impl Runtime;
     fn signer(&self) -> impl SchnorrSigner;
+    fn canister_self(&self) -> Principal;
     fn time(&self) -> u64;
     fn instruction_counter(&self) -> u64;
     fn msg_cycles_accept(&self, amount: u128) -> u128;
@@ -16,7 +17,6 @@ pub trait CanisterRuntime: Clone + 'static {
         delay: Duration,
         future: impl Future<Output = ()> + 'static,
     ) -> ic_cdk_timers::TimerId;
-    fn canister_self(&self) -> Principal;
 }
 
 #[derive(Clone, Default, Debug)]
@@ -35,6 +35,10 @@ impl CanisterRuntime for IcCanisterRuntime {
 
     fn signer(&self) -> impl SchnorrSigner {
         IcSchnorrSigner
+    }
+
+    fn canister_self(&self) -> Principal {
+        ic_cdk::api::canister_self()
     }
 
     fn time(&self) -> u64 {
@@ -63,9 +67,5 @@ impl CanisterRuntime for IcCanisterRuntime {
         future: impl Future<Output = ()> + 'static,
     ) -> ic_cdk_timers::TimerId {
         ic_cdk_timers::set_timer(delay, future)
-    }
-
-    fn canister_self(&self) -> Principal {
-        ic_cdk::api::canister_self()
     }
 }

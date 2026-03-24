@@ -54,7 +54,7 @@ impl TestCanisterRuntime {
         self
     }
 
-    pub fn add_schnorr_signature(mut self, signature: [u8; 64]) -> Self {
+    pub fn add_signature(mut self, signature: [u8; 64]) -> Self {
         self.signer = self.signer.add_signature(signature);
         self
     }
@@ -73,6 +73,10 @@ impl CanisterRuntime for TestCanisterRuntime {
 
     fn signer(&self) -> impl SchnorrSigner {
         self.signer.clone()
+    }
+
+    fn canister_self(&self) -> Principal {
+        TEST_CANISTER_ID
     }
 
     fn time(&self) -> u64 {
@@ -102,9 +106,5 @@ impl CanisterRuntime for TestCanisterRuntime {
         _future: impl Future<Output = ()> + 'static,
     ) -> ic_cdk_timers::TimerId {
         Default::default()
-    }
-
-    fn canister_self(&self) -> Principal {
-        TEST_CANISTER_ID
     }
 }

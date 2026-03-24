@@ -1,6 +1,7 @@
 use candid::Principal;
 use canlog::{Log, Sort};
 use cksol_minter::consolidate::{DEPOSIT_CONSOLIDATION_DELAY, consolidate_deposits};
+use cksol_minter::monitor::{MONITOR_SUBMITTED_TRANSACTIONS_DELAY, monitor_submitted_transactions};
 use cksol_minter::withdraw_sol::{WITHDRAWAL_PROCESSING_DELAY, process_pending_withdrawals};
 use cksol_minter::{
     address::lazy_get_schnorr_master_key, runtime::IcCanisterRuntime, state::read_state,
@@ -283,6 +284,9 @@ fn setup_timers() {
     });
     ic_cdk_timers::set_timer_interval(WITHDRAWAL_PROCESSING_DELAY, async || {
         process_pending_withdrawals(&IcCanisterRuntime::new()).await;
+    });
+    ic_cdk_timers::set_timer_interval(MONITOR_SUBMITTED_TRANSACTIONS_DELAY, async || {
+        monitor_submitted_transactions(IcCanisterRuntime::new()).await;
     });
 }
 
