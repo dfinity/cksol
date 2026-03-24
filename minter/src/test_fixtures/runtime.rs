@@ -5,6 +5,8 @@ use ic_canister_runtime::{IcError, Runtime, StubRuntime};
 use ic_cdk::management_canister::SignCallError;
 use std::time::Duration;
 
+pub const TEST_CANISTER_ID: Principal = Principal::from_slice(&[0xCA; 10]);
+
 #[derive(Clone, Default)]
 pub struct TestCanisterRuntime {
     inter_canister_call_runtime: StubRuntime,
@@ -14,7 +16,6 @@ pub struct TestCanisterRuntime {
     msg_cycles_accept: Stubs<u128>,
     msg_cycles_available: Stubs<u128>,
     msg_cycles_refunded: Stubs<u128>,
-    canister_self: Option<Principal>,
 }
 
 impl TestCanisterRuntime {
@@ -50,11 +51,6 @@ impl TestCanisterRuntime {
 
     pub fn add_msg_cycles_refunded(mut self, value: u128) -> Self {
         self.msg_cycles_refunded = self.msg_cycles_refunded.add(value);
-        self
-    }
-
-    pub fn with_canister_self(mut self, canister_self: Principal) -> Self {
-        self.canister_self = Some(canister_self);
         self
     }
 
@@ -109,7 +105,6 @@ impl CanisterRuntime for TestCanisterRuntime {
     }
 
     fn canister_self(&self) -> Principal {
-        self.canister_self
-            .expect("TestCanisterRuntime was not initialized with canister_self")
+        TEST_CANISTER_ID
     }
 }

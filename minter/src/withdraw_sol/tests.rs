@@ -315,8 +315,6 @@ mod process_pending_withdrawals_tests {
         init_state();
         init_schnorr_master_key();
 
-        let minter_self = Principal::from_slice(&[0, 1, 2, 3, 4]);
-
         let fake_sig = [0x42; 64];
 
         let runtime = TestCanisterRuntime::new()
@@ -327,7 +325,6 @@ mod process_pending_withdrawals_tests {
             .add_stub_response(SendBlockResult::Consistent(Ok(get_confirmed_block())))
             // schnorr signing response
             .add_schnorr_signature(fake_sig)
-            .with_canister_self(minter_self)
             .with_increasing_time();
 
         withdraw(&runtime, 1).await;
@@ -355,8 +352,6 @@ mod process_pending_withdrawals_tests {
     async fn should_log_error_when_blockhash_fetch_fails() {
         init_state();
 
-        let minter_self = Principal::from_slice(&[0, 1, 2, 3, 4]);
-
         let runtime = TestCanisterRuntime::new()
             // ledger burn response for withdraw_sol
             .add_stub_response(Ok::<Nat, TransferFromError>(Nat::from(1u64)))
@@ -370,7 +365,6 @@ mod process_pending_withdrawals_tests {
             .add_stub_response(SendSlotResult::Consistent(Err(RpcError::ValidationError(
                 "slot unavailable".to_string(),
             ))))
-            .with_canister_self(minter_self)
             .with_increasing_time();
 
         withdraw(&runtime, 1).await;
@@ -403,8 +397,6 @@ mod process_pending_withdrawals_tests {
         init_state();
         init_schnorr_master_key();
 
-        let minter_self = Principal::from_slice(&[0, 1, 2, 3, 4]);
-
         let runtime = TestCanisterRuntime::new()
             // responses for burn blocks
             .add_stub_response(Ok::<Nat, TransferFromError>(Nat::from(1u64)))
@@ -417,7 +409,6 @@ mod process_pending_withdrawals_tests {
             .add_schnorr_signing_error(SignCallError::CallFailed(
                 CallRejected::with_rejection(4, "signing service unavailable".to_string()).into(),
             ))
-            .with_canister_self(minter_self)
             .with_increasing_time();
 
         withdraw(&runtime, 2).await;
@@ -468,11 +459,7 @@ mod process_pending_withdrawals_tests {
 
         let request_count = MAX_WITHDRAWALS_PER_BATCH as u64 + 1;
 
-        let minter_self = Principal::from_slice(&[0, 1, 2, 3, 4]);
-
-        let mut runtime = TestCanisterRuntime::new()
-            .with_canister_self(minter_self)
-            .with_increasing_time();
+        let mut runtime = TestCanisterRuntime::new().with_increasing_time();
         // withdraw ledger burn responses
         for i in 0..request_count {
             runtime = runtime.add_stub_response(Ok::<Nat, TransferFromError>(Nat::from(i)));
