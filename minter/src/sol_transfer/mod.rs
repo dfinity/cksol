@@ -29,8 +29,8 @@ pub enum CreateTransferError {
 mod tests;
 
 /// Creates a signed Solana transaction that transfers lamports from
-/// each minter-controlled address (identified by its account) to the
-/// destination account's derived address.
+/// each minter-controlled address (identified by its account)
+/// to `target_address` Solana address.
 ///
 /// Returns the signed transaction and the list of signer accounts
 /// (in signature order: fee payer first, then sources).
