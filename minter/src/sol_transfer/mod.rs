@@ -13,6 +13,9 @@ use solana_transaction::{Instruction, Message, Transaction};
 use std::{collections::BTreeMap, iter};
 use thiserror::Error;
 
+#[cfg(test)]
+mod tests;
+
 pub const MAX_SIGNATURES: u64 = 10;
 pub const MAX_TX_SIZE: usize = 1_232;
 const BYTES_PER_SIGNATURE: usize = 64;
@@ -24,9 +27,6 @@ pub enum CreateTransferError {
     #[error("signing failed: {0}")]
     SigningFailed(SignCallError),
 }
-
-#[cfg(test)]
-mod tests;
 
 /// Creates a signed Solana transaction that transfers lamports from
 /// each minter-controlled address (identified by its account) to the
