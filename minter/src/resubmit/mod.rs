@@ -51,6 +51,8 @@ pub async fn resubmit_transactions<R: CanisterRuntime>(runtime: R) {
     });
 
     while !expired_transactions.is_empty() {
+        // TODO DEFI-2670: Combine these two calls once `sol_rpc_client::SolRpcClient`
+        //  `get_recent_block` method is released.
         let new_blockhash = match get_recent_blockhash(&runtime).await {
             Ok(blockhash) => blockhash,
             Err(e) => {
