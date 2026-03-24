@@ -163,7 +163,7 @@ async fn should_record_events_even_if_transaction_submission_fails() {
 
 #[tokio::test]
 async fn should_submit_multiple_consolidation_batches() {
-    const NUM_DEPOSITS: usize = 11;
+    const NUM_DEPOSITS: usize = MAX_TRANSFERS_PER_CONSOLIDATION + 1;
     setup();
 
     let funds: Vec<_> = (0..NUM_DEPOSITS)
@@ -172,12 +172,12 @@ async fn should_submit_multiple_consolidation_batches() {
     add_funds_to_consolidate(funds.clone());
 
     // Calculate expected batch sizes, i.e. the number of transfers per transaction submitted
-    let batch_1_size = MAX_TRANSFERS_PER_CONSOLIDATION; // 9 accounts
-    let batch_2_size = NUM_DEPOSITS - batch_1_size; // 2 accounts
+    const BATCH_1_SIZE: usize = MAX_TRANSFERS_PER_CONSOLIDATION;
+    const BATCH_2_SIZE: usize = NUM_DEPOSITS - BATCH_1_SIZE;
 
     // Fee payer signatures (first signature in each batch) become transaction IDs
-    let fee_payer_signature_1 = Signature::from([0x00; 64]); // index 0
-    let fee_payer_signature_2 = Signature::from([0x0A; 64]); // index 10
+    let fee_payer_signature_1 = Signature::from([0; 64]);
+    let fee_payer_signature_2 = Signature::from([(BATCH_1_SIZE + 1) as u8; 64]);
     let slot = 100;
 
     let mut runtime = TestCanisterRuntime::new()
@@ -194,8 +194,8 @@ async fn should_submit_multiple_consolidation_batches() {
             fee_payer_signature_2.into()
         )));
 
-    // Signatures needed: fee payer + each source account per batch
-    for i in 0..13 {
+    // Signatures needed: 2 x for fee payer (1 for each batch) + 1x for each source account
+    for i in 0..(2 + NUM_DEPOSITS) {
         runtime = runtime.add_signature([i as u8; 64]);
     }
 
@@ -210,11 +210,11 @@ async fn should_submit_multiple_consolidation_batches() {
             )
         });
     }
-    // Batch 1: 9 deposits consolidated together
+    // Batch 1:
     events_assert = events_assert
         .expect_event(|e| {
             assert_matches!(e, EventType::ConsolidatedDeposits { deposits }
-                    if deposits.len() == batch_1_size
+                    if deposits.len() == BATCH_1_SIZE
             )
         })
         .expect_event(|e| {
@@ -222,11 +222,11 @@ async fn should_submit_multiple_consolidation_batches() {
                 if signature == fee_payer_signature_1 && event_slot == slot
             )
         });
-    // Batch 2: 2 deposits consolidated together
+    // Batch 2:
     events_assert = events_assert
         .expect_event(|e| {
             assert_matches!(e, EventType::ConsolidatedDeposits { deposits }
-                if deposits.len() == batch_2_size
+                if deposits.len() == BATCH_2_SIZE
             )
         })
         .expect_event(|e| {
