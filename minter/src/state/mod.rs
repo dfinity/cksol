@@ -509,7 +509,7 @@ pub struct MintedDeposit {
 pub enum TaskType {
     DepositConsolidation,
     Mint,
-    ResubmitTransactions,
+    MonitorSubmittedTransactions,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

@@ -1,7 +1,7 @@
 use candid::Principal;
 use canlog::{Log, Sort};
 use cksol_minter::consolidate::{DEPOSIT_CONSOLIDATION_DELAY, consolidate_deposits};
-use cksol_minter::resubmit::{RESUBMIT_TRANSACTIONS_DELAY, resubmit_transactions};
+use cksol_minter::monitor::{MONITOR_SUBMITTED_TRANSACTIONS_DELAY, monitor_submitted_transactions};
 use cksol_minter::{
     address::lazy_get_schnorr_master_key, runtime::IcCanisterRuntime, state::read_state,
 };
@@ -272,8 +272,8 @@ fn setup_timers() {
     ic_cdk_timers::set_timer_interval(DEPOSIT_CONSOLIDATION_DELAY, async || {
         consolidate_deposits(IcCanisterRuntime::new()).await;
     });
-    ic_cdk_timers::set_timer_interval(RESUBMIT_TRANSACTIONS_DELAY, async || {
-        resubmit_transactions(IcCanisterRuntime::new()).await;
+    ic_cdk_timers::set_timer_interval(MONITOR_SUBMITTED_TRANSACTIONS_DELAY, async || {
+        monitor_submitted_transactions(IcCanisterRuntime::new()).await;
     });
 }
 

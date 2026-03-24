@@ -20,12 +20,12 @@ use thiserror::Error;
 #[cfg(test)]
 mod tests;
 
-pub const RESUBMIT_TRANSACTIONS_DELAY: Duration = Duration::from_secs(60);
+pub const MONITOR_SUBMITTED_TRANSACTIONS_DELAY: Duration = Duration::from_secs(60);
 const MAX_BLOCKHASH_AGE: Slot = 150;
 const MAX_CONCURRENT_TRANSACTIONS: usize = 10;
 
-pub async fn resubmit_transactions<R: CanisterRuntime>(runtime: R) {
-    let _guard = match TimerGuard::new(TaskType::ResubmitTransactions) {
+pub async fn monitor_submitted_transactions<R: CanisterRuntime>(runtime: R) {
+    let _guard = match TimerGuard::new(TaskType::MonitorSubmittedTransactions) {
         Ok(guard) => guard,
         Err(_) => return,
     };

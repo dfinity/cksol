@@ -1,4 +1,4 @@
-use super::{MAX_BLOCKHASH_AGE, resubmit_transactions};
+use super::{MAX_BLOCKHASH_AGE, monitor_submitted_transactions};
 use crate::{
     address::derive_public_key,
     state::{TaskType, audit::process_event, event::EventType, mutate_state, read_state},
@@ -24,7 +24,7 @@ async fn should_return_early_if_no_transactions_to_resubmit() {
 
     let runtime = TestCanisterRuntime::new().with_increasing_time();
 
-    resubmit_transactions(runtime).await;
+    monitor_submitted_transactions(runtime).await;
 
     EventsAssert::assert_no_events_recorded();
 }
@@ -35,10 +35,11 @@ async fn should_return_early_if_task_already_active() {
     add_submitted_transaction(Signature::from([0x01; 64]), 10);
 
     mutate_state(|s| {
-        s.active_tasks_mut().insert(TaskType::ResubmitTransactions);
+        s.active_tasks_mut()
+            .insert(TaskType::MonitorSubmittedTransactions);
     });
 
-    resubmit_transactions(TestCanisterRuntime::new()).await;
+    monitor_submitted_transactions(TestCanisterRuntime::new()).await;
 
     // Only SubmittedTransaction event from setup, no resubmission events
     EventsAssert::from_recorded()
@@ -57,7 +58,7 @@ async fn should_return_early_if_fetching_current_slot_fails() {
         .add_stub_response(error.clone())
         .add_stub_response(error);
 
-    resubmit_transactions(runtime).await;
+    monitor_submitted_transactions(runtime).await;
 
     // Only SubmittedTransaction event from setup, no resubmission events
     EventsAssert::from_recorded()
@@ -78,7 +79,7 @@ async fn should_not_resubmit_if_transaction_not_expired() {
         .with_increasing_time()
         .add_stub_response(SlotResult::Consistent(Ok(current_slot)));
 
-    resubmit_transactions(runtime).await;
+    monitor_submitted_transactions(runtime).await;
 
     // Only SubmittedTransaction event from setup, no resubmission
     EventsAssert::from_recorded()
@@ -118,7 +119,7 @@ async fn should_resubmit_single_expired_transaction() {
         // Signature for re-signing (only fee payer since message has no other signers)
         .add_signature(new_signature.into());
 
-    resubmit_transactions(runtime).await;
+    monitor_submitted_transactions(runtime).await;
 
     EventsAssert::from_recorded()
         .expect_event(|e| assert_matches!(e, EventType::SubmittedTransaction { .. }))
@@ -167,7 +168,7 @@ async fn should_record_event_even_if_submission_fails() {
         .add_stub_response(SendTransactionResult::Inconsistent(vec![]))
         .add_signature(new_signature.into());
 
-    resubmit_transactions(runtime).await;
+    monitor_submitted_transactions(runtime).await;
 
     // ResubmittedTransaction event should still be recorded
     EventsAssert::from_recorded()
