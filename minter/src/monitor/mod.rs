@@ -1,19 +1,26 @@
 use crate::{
     address::derivation_path,
+    constants::MAX_CONCURRENT_RPC_CALLS,
     guard::TimerGuard,
     runtime::CanisterRuntime,
     signer::sign_bytes,
     state::{TaskType, audit::process_event, event::EventType, mutate_state, read_state},
-    transaction::{SubmitTransactionError, get_recent_blockhash, get_slot, submit_transaction},
+    transaction::{
+        SubmitTransactionError, get_recent_blockhash, get_signature_statuses, get_slot,
+        submit_transaction,
+    },
 };
 use canlog::log;
 use cksol_types_internal::log::Priority;
 use ic_cdk::management_canister::SignCallError;
 use icrc_ledger_types::icrc1::account::Account;
+use itertools::Itertools;
 use sol_rpc_types::Slot;
 use solana_message::Message;
 use solana_signature::Signature;
 use solana_transaction::Transaction;
+use solana_transaction_status_client_types::TransactionConfirmationStatus;
+use std::collections::BTreeSet;
 use std::time::Duration;
 use thiserror::Error;
 
@@ -22,7 +29,7 @@ mod tests;
 
 pub const MONITOR_SUBMITTED_TRANSACTIONS_DELAY: Duration = Duration::from_secs(60);
 const MAX_BLOCKHASH_AGE: Slot = 150;
-const MAX_CONCURRENT_TRANSACTIONS: usize = 10;
+const MAX_SIGNATURES_PER_STATUS_CHECK: usize = 256;
 
 pub async fn monitor_submitted_transactions<R: CanisterRuntime>(runtime: R) {
     let _guard = match TimerGuard::new(TaskType::MonitorSubmittedTransactions) {
@@ -30,7 +37,31 @@ pub async fn monitor_submitted_transactions<R: CanisterRuntime>(runtime: R) {
         Err(_) => return,
     };
 
-    if read_state(|state| state.submitted_transactions().is_empty()) {
+    let all_transactions: Vec<_> = read_state(|state| {
+        state
+            .submitted_transactions()
+            .iter()
+            .map(|(sig, tx)| (*sig, tx.message.clone(), tx.signers.clone(), tx.slot))
+            .collect()
+    });
+    if all_transactions.is_empty() {
+        return;
+    }
+
+    let statuses = check_transaction_statuses(&runtime, &all_transactions).await;
+
+    for signature in statuses.finalized {
+        log!(Priority::Info, "Transaction {signature} finalized");
+        mutate_state(|state| {
+            process_event(
+                state,
+                EventType::FinalizedTransaction { signature },
+                &runtime,
+            )
+        });
+    }
+
+    if statuses.not_found.is_empty() {
         return;
     }
 
@@ -41,26 +72,90 @@ pub async fn monitor_submitted_transactions<R: CanisterRuntime>(runtime: R) {
             return;
         }
     };
-    let mut expired_transactions = read_state(|state| {
-        state
-            .submitted_transactions()
-            .iter()
-            .filter(|(_, tx)| tx.slot + MAX_BLOCKHASH_AGE < current_slot)
-            .map(|(sig, tx)| (*sig, tx.message.clone(), tx.signers.clone()))
-            .collect::<Vec<_>>()
-    });
 
-    while !expired_transactions.is_empty() {
-        // TODO DEFI-2670: Combine these two calls once `sol_rpc_client::SolRpcClient`
-        //  `get_recent_block` method is released.
-        let new_blockhash = match get_recent_blockhash(&runtime).await {
+    let to_resubmit: Vec<_> = all_transactions
+        .into_iter()
+        .filter(|(sig, _, _, slot)| {
+            statuses.not_found.contains(sig) && slot + MAX_BLOCKHASH_AGE < current_slot
+        })
+        .collect();
+
+    resubmit_expired_transactions(&runtime, to_resubmit).await;
+}
+
+/// Result of checking transaction statuses.
+struct TransactionStatuses {
+    /// Transactions confirmed as finalized on-chain.
+    finalized: BTreeSet<Signature>,
+    /// Transactions with no on-chain status (safe to resubmit if expired).
+    not_found: BTreeSet<Signature>,
+    // Transactions that are in-flight (Processed/Confirmed) or whose status
+    // check failed are implicitly excluded — they appear in neither set.
+}
+
+async fn check_transaction_statuses<R: CanisterRuntime>(
+    runtime: &R,
+    transactions: &[(Signature, Message, Vec<Account>, Slot)],
+) -> TransactionStatuses {
+    let signatures: Vec<Signature> = transactions.iter().map(|(sig, _, _, _)| *sig).collect();
+    let batches: Vec<Vec<Signature>> = signatures
+        .into_iter()
+        .chunks(MAX_SIGNATURES_PER_STATUS_CHECK)
+        .into_iter()
+        .map(Iterator::collect)
+        .collect();
+
+    let mut result = TransactionStatuses {
+        finalized: BTreeSet::new(),
+        not_found: BTreeSet::new(),
+    };
+
+    for round in &batches.into_iter().chunks(MAX_CONCURRENT_RPC_CALLS) {
+        let batch_results: Vec<_> = futures::future::join_all(round.map(async |batch| {
+            match get_signature_statuses(runtime, &batch).await {
+                Ok(statuses) => Some((batch, statuses)),
+                Err(e) => {
+                    log!(Priority::Info, "Failed to check transaction statuses: {e}");
+                    None
+                }
+            }
+        }))
+        .await;
+
+        for (sigs, statuses) in batch_results.into_iter().flatten() {
+            for (signature, status) in sigs.iter().zip(statuses) {
+                match status {
+                    Some(s)
+                        if s.confirmation_status
+                            == Some(TransactionConfirmationStatus::Finalized) =>
+                    {
+                        result.finalized.insert(*signature);
+                    }
+                    Some(_) => {} // in-flight (Processed/Confirmed)
+                    None => {
+                        result.not_found.insert(*signature);
+                    }
+                }
+            }
+        }
+    }
+
+    result
+}
+
+async fn resubmit_expired_transactions<R: CanisterRuntime>(
+    runtime: &R,
+    expired: Vec<(Signature, Message, Vec<Account>, Slot)>,
+) {
+    for round in &expired.into_iter().chunks(MAX_CONCURRENT_RPC_CALLS) {
+        let new_blockhash = match get_recent_blockhash(runtime).await {
             Ok(blockhash) => blockhash,
             Err(e) => {
                 log!(Priority::Info, "Failed to get recent blockhash: {e}");
                 return;
             }
         };
-        let new_slot = match get_slot(&runtime).await {
+        let new_slot = match get_slot(runtime).await {
             Ok(slot) => slot,
             Err(e) => {
                 log!(Priority::Info, "Failed to get slot: {e}");
@@ -68,10 +163,9 @@ pub async fn monitor_submitted_transactions<R: CanisterRuntime>(runtime: R) {
             }
         };
 
-        let batch_size = MAX_CONCURRENT_TRANSACTIONS.min(expired_transactions.len());
-        let futures = expired_transactions.drain(..batch_size).map(
-            async |(old_signature, message, signers)| match resubmit_transaction_with_new_blockhash(
-                &runtime,
+        futures::future::join_all(round.map(async |(old_signature, message, signers, _)| {
+            match try_resubmit_transaction(
+                runtime,
                 old_signature,
                 message,
                 signers,
@@ -80,21 +174,21 @@ pub async fn monitor_submitted_transactions<R: CanisterRuntime>(runtime: R) {
             )
             .await
             {
-                Ok(new_signature) => log!(
+                Ok(new_sig) => log!(
                     Priority::Info,
-                    "Resubmitted transaction {old_signature} with new signature {new_signature}"
+                    "Resubmitted transaction {old_signature} as {new_sig}"
                 ),
                 Err(e) => log!(
                     Priority::Info,
                     "Failed to resubmit transaction {old_signature}: {e}"
                 ),
-            },
-        );
-        futures::future::join_all(futures).await;
+            }
+        }))
+        .await;
     }
 }
 
-async fn resubmit_transaction_with_new_blockhash<R: CanisterRuntime>(
+async fn try_resubmit_transaction<R: CanisterRuntime>(
     runtime: &R,
     old_signature: Signature,
     message: Message,
@@ -115,8 +209,6 @@ async fn resubmit_transaction_with_new_blockhash<R: CanisterRuntime>(
 
     let new_signature = transaction.signatures[0];
 
-    // Record the resubmission event before submitting the transaction to ensure we don't
-    // resubmit the same transaction twice in case of a panic during submission.
     mutate_state(|state| {
         process_event(
             state,

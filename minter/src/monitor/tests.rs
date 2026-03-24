@@ -9,7 +9,10 @@ use crate::{
 };
 use assert_matches::assert_matches;
 use ic_ed25519::{PocketIcMasterPublicKeyId, PublicKey};
-use sol_rpc_types::{ConfirmedBlock, MultiRpcResult, RpcError, Slot};
+use sol_rpc_types::{
+    ConfirmedBlock, MultiRpcResult, RpcError, Slot, TransactionConfirmationStatus,
+    TransactionStatus,
+};
 use solana_hash::Hash;
 use solana_message::Message;
 use solana_signature::Signature;
@@ -17,14 +20,13 @@ use solana_signature::Signature;
 type SlotResult = MultiRpcResult<Slot>;
 type BlockResult = MultiRpcResult<ConfirmedBlock>;
 type SendTransactionResult = MultiRpcResult<sol_rpc_types::Signature>;
+type SignatureStatusesResult = MultiRpcResult<Vec<Option<TransactionStatus>>>;
 
 #[tokio::test]
-async fn should_return_early_if_no_transactions_to_resubmit() {
+async fn should_return_early_if_no_submitted_transactions() {
     setup();
 
-    let runtime = TestCanisterRuntime::new().with_increasing_time();
-
-    monitor_submitted_transactions(runtime).await;
+    monitor_submitted_transactions(TestCanisterRuntime::new().with_increasing_time()).await;
 
     EventsAssert::assert_no_events_recorded();
 }
@@ -41,7 +43,6 @@ async fn should_return_early_if_task_already_active() {
 
     monitor_submitted_transactions(TestCanisterRuntime::new()).await;
 
-    // Only SubmittedTransaction event from setup, no resubmission events
     EventsAssert::from_recorded()
         .expect_event(|e| assert_matches!(e, EventType::SubmittedTransaction { .. }))
         .assert_no_more_events();
@@ -60,130 +61,360 @@ async fn should_return_early_if_fetching_current_slot_fails() {
 
     monitor_submitted_transactions(runtime).await;
 
-    // Only SubmittedTransaction event from setup, no resubmission events
     EventsAssert::from_recorded()
         .expect_event(|e| assert_matches!(e, EventType::SubmittedTransaction { .. }))
         .assert_no_more_events();
 }
 
-#[tokio::test]
-async fn should_not_resubmit_if_transaction_not_expired() {
-    setup();
+mod finalization {
+    use super::*;
 
-    let original_slot = 100;
-    add_submitted_transaction(Signature::from([0x01; 64]), original_slot);
+    #[tokio::test]
+    async fn should_finalize_transaction_with_finalized_status() {
+        setup();
 
-    // Current slot is within MAX_BLOCKHASH_AGE of original slot
-    let current_slot = original_slot + MAX_BLOCKHASH_AGE - 1;
-    let runtime = TestCanisterRuntime::new()
-        .with_increasing_time()
-        .add_stub_response(SlotResult::Consistent(Ok(current_slot)));
+        let signature = Signature::from([0x01; 64]);
+        add_submitted_transaction(signature, 100);
 
-    monitor_submitted_transactions(runtime).await;
+        let runtime = TestCanisterRuntime::new()
+            .with_increasing_time()
+            .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![Some(
+                finalized_status(100),
+            )])));
 
-    // Only SubmittedTransaction event from setup, no resubmission
-    EventsAssert::from_recorded()
-        .expect_event(|e| assert_matches!(e, EventType::SubmittedTransaction { .. }))
-        .assert_no_more_events();
+        monitor_submitted_transactions(runtime).await;
 
-    // Transaction should still be in submitted_transactions
-    read_state(|s| {
-        assert_eq!(s.submitted_transactions().len(), 1);
-    });
+        EventsAssert::from_recorded()
+            .expect_event(|e| assert_matches!(e, EventType::SubmittedTransaction { .. }))
+            .expect_event(|e| {
+                assert_matches!(
+                    e,
+                    EventType::FinalizedTransaction { signature: sig } if sig == signature
+                )
+            })
+            .assert_no_more_events();
+
+        read_state(|s| assert!(s.submitted_transactions().is_empty()));
+    }
+
+    #[tokio::test]
+    async fn should_finalize_transaction_even_after_blockhash_expired() {
+        setup();
+
+        let signature = Signature::from([0x01; 64]);
+        add_submitted_transaction(signature, 10);
+
+        let runtime = TestCanisterRuntime::new()
+            .with_increasing_time()
+            .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![Some(
+                finalized_status(10),
+            )])));
+
+        monitor_submitted_transactions(runtime).await;
+
+        EventsAssert::from_recorded()
+            .expect_event(|e| assert_matches!(e, EventType::SubmittedTransaction { .. }))
+            .expect_event(|e| {
+                assert_matches!(
+                    e,
+                    EventType::FinalizedTransaction { signature: sig } if sig == signature
+                )
+            })
+            .assert_no_more_events();
+
+        read_state(|s| assert!(s.submitted_transactions().is_empty()));
+    }
+
+    #[tokio::test]
+    async fn should_not_finalize_transaction_with_confirmed_status() {
+        setup();
+
+        add_submitted_transaction(Signature::from([0x01; 64]), 100);
+
+        let runtime = TestCanisterRuntime::new()
+            .with_increasing_time()
+            .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![Some(
+                TransactionStatus {
+                    slot: 100,
+                    status: Ok(()),
+                    err: None,
+                    confirmation_status: Some(TransactionConfirmationStatus::Confirmed),
+                },
+            )])));
+
+        monitor_submitted_transactions(runtime).await;
+
+        EventsAssert::from_recorded()
+            .expect_event(|e| assert_matches!(e, EventType::SubmittedTransaction { .. }))
+            .assert_no_more_events();
+
+        read_state(|s| assert_eq!(s.submitted_transactions().len(), 1));
+    }
+
+    #[tokio::test]
+    async fn should_not_resubmit_confirmed_transaction_even_if_expired() {
+        setup();
+
+        let original_slot = 10;
+        add_submitted_transaction(Signature::from([0x01; 64]), original_slot);
+
+        let runtime = TestCanisterRuntime::new()
+            .with_increasing_time()
+            .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![Some(
+                TransactionStatus {
+                    slot: original_slot,
+                    status: Ok(()),
+                    err: None,
+                    confirmation_status: Some(TransactionConfirmationStatus::Confirmed),
+                },
+            )])));
+
+        monitor_submitted_transactions(runtime).await;
+
+        EventsAssert::from_recorded()
+            .expect_event(|e| assert_matches!(e, EventType::SubmittedTransaction { .. }))
+            .assert_no_more_events();
+
+        read_state(|s| assert_eq!(s.submitted_transactions().len(), 1));
+    }
+
+    #[tokio::test]
+    async fn should_not_finalize_transaction_with_no_status() {
+        setup();
+
+        let original_slot = 100;
+        add_submitted_transaction(Signature::from([0x01; 64]), original_slot);
+
+        // Non-expired, so no getSlot needed after status check
+        let current_slot = original_slot + MAX_BLOCKHASH_AGE - 1;
+        let runtime = TestCanisterRuntime::new()
+            .with_increasing_time()
+            .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![None])))
+            .add_stub_response(SlotResult::Consistent(Ok(current_slot)));
+
+        monitor_submitted_transactions(runtime).await;
+
+        EventsAssert::from_recorded()
+            .expect_event(|e| assert_matches!(e, EventType::SubmittedTransaction { .. }))
+            .assert_no_more_events();
+
+        read_state(|s| assert_eq!(s.submitted_transactions().len(), 1));
+    }
+
+    #[tokio::test]
+    async fn should_finalize_multiple_transactions_in_one_batch() {
+        setup();
+
+        let sig_a = Signature::from([0x01; 64]);
+        let sig_b = Signature::from([0x02; 64]);
+        let sig_c = Signature::from([0x03; 64]);
+        add_submitted_transaction(sig_a, 100);
+        add_submitted_transaction(sig_b, 100);
+        add_submitted_transaction(sig_c, 100);
+
+        let runtime = TestCanisterRuntime::new()
+            .with_increasing_time()
+            .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![
+                Some(finalized_status(100)),
+                None,
+                Some(finalized_status(100)),
+            ])))
+            // getSlot for the one not_found transaction
+            .add_stub_response(SlotResult::Consistent(Ok(100)));
+
+        monitor_submitted_transactions(runtime).await;
+
+        EventsAssert::from_recorded()
+            .expect_event(|e| assert_matches!(e, EventType::SubmittedTransaction { .. }))
+            .expect_event(|e| assert_matches!(e, EventType::SubmittedTransaction { .. }))
+            .expect_event(|e| assert_matches!(e, EventType::SubmittedTransaction { .. }))
+            .expect_event(|e| assert_matches!(e, EventType::FinalizedTransaction { .. }))
+            .expect_event(|e| assert_matches!(e, EventType::FinalizedTransaction { .. }))
+            .assert_no_more_events();
+
+        read_state(|s| {
+            assert_eq!(s.submitted_transactions().len(), 1);
+            assert!(s.submitted_transactions().contains_key(&sig_b));
+        });
+    }
+
+    fn finalized_status(slot: Slot) -> TransactionStatus {
+        TransactionStatus {
+            slot,
+            status: Ok(()),
+            err: None,
+            confirmation_status: Some(TransactionConfirmationStatus::Finalized),
+        }
+    }
 }
 
-#[tokio::test]
-async fn should_resubmit_single_expired_transaction() {
-    setup();
+mod resubmission {
+    use super::*;
 
-    let old_signature = Signature::from([0x01; 64]);
-    let original_slot = 10;
-    add_submitted_transaction(old_signature, original_slot);
+    #[tokio::test]
+    async fn should_resubmit_expired_transaction_with_no_status() {
+        setup();
 
-    // Current slot is past MAX_BLOCKHASH_AGE
-    let current_slot = original_slot + MAX_BLOCKHASH_AGE + 1;
-    let new_slot = current_slot + 5;
-    let new_signature = Signature::from([0xAA; 64]);
+        let old_signature = Signature::from([0x01; 64]);
+        let original_slot = 10;
+        add_submitted_transaction(old_signature, original_slot);
 
-    let runtime = TestCanisterRuntime::new()
-        .with_increasing_time()
-        // get_slot for current slot check
-        .add_stub_response(SlotResult::Consistent(Ok(current_slot)))
-        // get_recent_blockhash calls
-        .add_stub_response(SlotResult::Consistent(Ok(new_slot)))
-        .add_stub_response(BlockResult::Consistent(Ok(block())))
-        // get_slot for new slot
-        .add_stub_response(SlotResult::Consistent(Ok(new_slot)))
-        // submit_transaction
-        .add_stub_response(SendTransactionResult::Consistent(Ok(new_signature.into())))
-        // Signature for re-signing (only fee payer since message has no other signers)
-        .add_signature(new_signature.into());
+        let current_slot = original_slot + MAX_BLOCKHASH_AGE + 1;
+        let new_slot = current_slot + 5;
+        let new_signature = Signature::from([0xAA; 64]);
 
-    monitor_submitted_transactions(runtime).await;
+        let runtime = TestCanisterRuntime::new()
+            .with_increasing_time()
+            // getSignatureStatuses: not found
+            .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![None])))
+            // getSlot for expiry check
+            .add_stub_response(SlotResult::Consistent(Ok(current_slot)))
+            // get_recent_blockhash (getSlot + getBlock)
+            .add_stub_response(SlotResult::Consistent(Ok(new_slot)))
+            .add_stub_response(BlockResult::Consistent(Ok(block())))
+            // get_slot for new slot
+            .add_stub_response(SlotResult::Consistent(Ok(new_slot)))
+            .add_stub_response(SendTransactionResult::Consistent(Ok(new_signature.into())))
+            .add_signature(new_signature.into());
 
-    EventsAssert::from_recorded()
-        .expect_event(|e| assert_matches!(e, EventType::SubmittedTransaction { .. }))
-        .expect_event(|e| {
-            assert_matches!(
-                e,
-                EventType::ResubmittedTransaction {
-                    old_signature: old_sig,
-                    new_signature: new_sig,
-                    new_slot: slot,
-                } if old_sig == old_signature && new_sig == new_signature && slot == new_slot
-            )
-        })
-        .assert_no_more_events();
+        monitor_submitted_transactions(runtime).await;
 
-    // Old transaction should be replaced with new one
-    read_state(|s| {
-        assert_eq!(s.submitted_transactions().len(), 1);
-        assert!(s.submitted_transactions().contains_key(&new_signature));
-        assert!(!s.submitted_transactions().contains_key(&old_signature));
-    });
-}
+        EventsAssert::from_recorded()
+            .expect_event(|e| assert_matches!(e, EventType::SubmittedTransaction { .. }))
+            .expect_event(|e| {
+                assert_matches!(
+                    e,
+                    EventType::ResubmittedTransaction {
+                        old_signature: old_sig,
+                        new_signature: new_sig,
+                        new_slot: slot,
+                    } if old_sig == old_signature && new_sig == new_signature && slot == new_slot
+                )
+            })
+            .assert_no_more_events();
 
-#[tokio::test]
-async fn should_record_event_even_if_submission_fails() {
-    setup();
+        read_state(|s| {
+            assert_eq!(s.submitted_transactions().len(), 1);
+            assert!(s.submitted_transactions().contains_key(&new_signature));
+        });
+    }
 
-    let old_signature = Signature::from([0x01; 64]);
-    let original_slot = 10;
-    add_submitted_transaction(old_signature, original_slot);
+    #[tokio::test]
+    async fn should_not_resubmit_expired_transaction_if_status_check_fails() {
+        setup();
 
-    let current_slot = original_slot + MAX_BLOCKHASH_AGE + 1;
-    let new_slot = current_slot + 5;
-    let new_signature = Signature::from([0xAA; 64]);
+        add_submitted_transaction(Signature::from([0x01; 64]), 10);
 
-    let runtime = TestCanisterRuntime::new()
-        .with_increasing_time()
-        // get_slot for current slot check
-        .add_stub_response(SlotResult::Consistent(Ok(current_slot)))
-        // get_recent_blockhash calls
-        .add_stub_response(SlotResult::Consistent(Ok(new_slot)))
-        .add_stub_response(BlockResult::Consistent(Ok(block())))
-        // get_slot for new slot
-        .add_stub_response(SlotResult::Consistent(Ok(new_slot)))
-        // submit_transaction fails
-        .add_stub_response(SendTransactionResult::Inconsistent(vec![]))
-        .add_signature(new_signature.into());
+        let runtime = TestCanisterRuntime::new()
+            .with_increasing_time()
+            .add_stub_response(SignatureStatusesResult::Consistent(Err(
+                RpcError::ValidationError("Error".to_string()),
+            )));
 
-    monitor_submitted_transactions(runtime).await;
+        monitor_submitted_transactions(runtime).await;
 
-    // ResubmittedTransaction event should still be recorded
-    EventsAssert::from_recorded()
-        .expect_event(|e| assert_matches!(e, EventType::SubmittedTransaction { .. }))
-        .expect_event(|e| {
-            assert_matches!(
-                e,
-                EventType::ResubmittedTransaction {
-                    old_signature: old_sig,
-                    new_signature: new_sig,
-                    new_slot: slot,
-                } if old_sig == old_signature && new_sig == new_signature && slot == new_slot
-            )
-        })
-        .assert_no_more_events();
+        EventsAssert::from_recorded()
+            .expect_event(|e| assert_matches!(e, EventType::SubmittedTransaction { .. }))
+            .assert_no_more_events();
+
+        read_state(|s| assert_eq!(s.submitted_transactions().len(), 1));
+    }
+
+    #[tokio::test]
+    async fn should_record_resubmission_event_even_if_submission_fails() {
+        setup();
+
+        let old_signature = Signature::from([0x01; 64]);
+        let original_slot = 10;
+        add_submitted_transaction(old_signature, original_slot);
+
+        let current_slot = original_slot + MAX_BLOCKHASH_AGE + 1;
+        let new_slot = current_slot + 5;
+        let new_signature = Signature::from([0xAA; 64]);
+
+        let runtime = TestCanisterRuntime::new()
+            .with_increasing_time()
+            .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![None])))
+            .add_stub_response(SlotResult::Consistent(Ok(current_slot)))
+            .add_stub_response(SlotResult::Consistent(Ok(new_slot)))
+            .add_stub_response(BlockResult::Consistent(Ok(block())))
+            .add_stub_response(SlotResult::Consistent(Ok(new_slot)))
+            .add_stub_response(SendTransactionResult::Inconsistent(vec![]))
+            .add_signature(new_signature.into());
+
+        monitor_submitted_transactions(runtime).await;
+
+        EventsAssert::from_recorded()
+            .expect_event(|e| assert_matches!(e, EventType::SubmittedTransaction { .. }))
+            .expect_event(|e| {
+                assert_matches!(
+                    e,
+                    EventType::ResubmittedTransaction {
+                        old_signature: old_sig,
+                        new_signature: new_sig,
+                        new_slot: slot,
+                    } if old_sig == old_signature && new_sig == new_signature && slot == new_slot
+                )
+            })
+            .assert_no_more_events();
+    }
+
+    #[tokio::test]
+    async fn should_resubmit_multiple_expired_transactions_in_batches() {
+        use crate::constants::MAX_CONCURRENT_RPC_CALLS;
+
+        setup();
+
+        let num_transactions = MAX_CONCURRENT_RPC_CALLS + 2; // 12 → 2 rounds
+        let original_slot = 10;
+        for i in 0..num_transactions {
+            add_submitted_transaction(Signature::from([i as u8; 64]), original_slot);
+        }
+
+        let current_slot = original_slot + MAX_BLOCKHASH_AGE + 1;
+        let new_slot = current_slot + 5;
+
+        let mut runtime = TestCanisterRuntime::new()
+            .with_increasing_time()
+            // getSignatureStatuses: all not found
+            .add_stub_response(SignatureStatusesResult::Consistent(Ok(
+                vec![None; num_transactions],
+            )))
+            // getSlot for expiry check
+            .add_stub_response(SlotResult::Consistent(Ok(current_slot)))
+            // Round 1: get_recent_blockhash + get_slot
+            .add_stub_response(SlotResult::Consistent(Ok(new_slot)))
+            .add_stub_response(BlockResult::Consistent(Ok(block())))
+            .add_stub_response(SlotResult::Consistent(Ok(new_slot)));
+
+        for i in 0..MAX_CONCURRENT_RPC_CALLS {
+            runtime = runtime
+                .add_stub_response(SendTransactionResult::Consistent(Ok(Signature::from(
+                    [0xA0 + i as u8; 64],
+                )
+                .into())))
+                .add_signature([0xA0 + i as u8; 64]);
+        }
+
+        // Round 2: get_recent_blockhash + get_slot
+        runtime = runtime
+            .add_stub_response(SlotResult::Consistent(Ok(new_slot)))
+            .add_stub_response(BlockResult::Consistent(Ok(block())))
+            .add_stub_response(SlotResult::Consistent(Ok(new_slot)));
+
+        for i in 0..2_usize {
+            runtime = runtime
+                .add_stub_response(SendTransactionResult::Consistent(Ok(Signature::from(
+                    [0xB0 + i as u8; 64],
+                )
+                .into())))
+                .add_signature([0xB0 + i as u8; 64]);
+        }
+
+        monitor_submitted_transactions(runtime).await;
+
+        read_state(|s| assert_eq!(s.submitted_transactions().len(), num_transactions));
+    }
 }
 
 fn setup() {

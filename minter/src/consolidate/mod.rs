@@ -22,6 +22,8 @@ use thiserror::Error;
 #[cfg(test)]
 mod tests;
 
+use crate::constants::MAX_CONCURRENT_RPC_CALLS;
+
 pub const DEPOSIT_CONSOLIDATION_DELAY: Duration = Duration::from_mins(10);
 const MAX_CONCURRENT_TRANSACTIONS: usize = 10;
 pub(crate) const MAX_TRANSFERS_PER_CONSOLIDATION: usize = MAX_SIGNATURES as usize - 1;
