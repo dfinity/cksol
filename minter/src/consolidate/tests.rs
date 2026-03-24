@@ -4,7 +4,7 @@ use crate::{
     state::{
         TaskType,
         audit::process_event,
-        event::{DepositId, EventType},
+        event::{DepositId, EventType, TransactionPurpose},
         mutate_state,
     },
     test_fixtures::{
@@ -74,9 +74,7 @@ async fn should_return_early_if_fetching_blockhash_fails() {
 async fn should_submit_single_consolidation_request() {
     setup();
 
-    let deposit_account = account(0);
-    let deposit_amount = 1_000_000_000_u64;
-    add_funds_to_consolidate(vec![(deposit_account, deposit_amount)]);
+    add_funds_to_consolidate(vec![(account(0), 1_000_000_000)]);
 
     let fee_payer_signature = Signature::from([0x11; 64]);
     let slot = 100;
@@ -98,12 +96,15 @@ async fn should_submit_single_consolidation_request() {
     EventsAssert::from_recorded()
         .expect_event(|e| assert_matches!(e, EventType::AcceptedDeposit { .. }))
         .expect_event(|e| assert_matches!(e, EventType::Minted { .. }))
-        .expect_event_eq(EventType::ConsolidatedDeposits {
-            mint_indices: vec![LedgerMintIndex::from(0_u64)],
-        })
         .expect_event(|e| {
-            assert_matches!(e, EventType::SubmittedTransaction { signature, slot: event_slot, .. }
-                if signature == fee_payer_signature && event_slot == slot
+            assert_matches!(e, EventType::SubmittedTransaction {
+                signature,
+                slot: event_slot,
+                purpose: TransactionPurpose::ConsolidateDeposits { mint_indices },
+                ..
+            } if signature == fee_payer_signature
+              && event_slot == slot
+              && mint_indices == vec![LedgerMintIndex::from(0_u64)]
             )
         })
         .assert_no_more_events();
@@ -113,9 +114,7 @@ async fn should_submit_single_consolidation_request() {
 async fn should_record_events_even_if_transaction_submission_fails() {
     setup();
 
-    let deposit_account = account(0);
-    let deposit_amount = 1_000_000_000_u64;
-    add_funds_to_consolidate(vec![(deposit_account, deposit_amount)]);
+    add_funds_to_consolidate(vec![(account(0), 1_000_000_000)]);
 
     let fee_payer_signature = Signature::from([0x11; 64]);
     let slot = 100;
@@ -136,12 +135,11 @@ async fn should_record_events_even_if_transaction_submission_fails() {
     EventsAssert::from_recorded()
         .expect_event(|e| assert_matches!(e, EventType::AcceptedDeposit { .. }))
         .expect_event(|e| assert_matches!(e, EventType::Minted { .. }))
-        .expect_event_eq(EventType::ConsolidatedDeposits {
-            mint_indices: vec![LedgerMintIndex::from(0_u64)],
-        })
         .expect_event(|e| {
-            assert_matches!(e, EventType::SubmittedTransaction { signature, slot: event_slot, .. }
-                if signature == fee_payer_signature && event_slot == slot
+            assert_matches!(e, EventType::SubmittedTransaction {
+                purpose: TransactionPurpose::ConsolidateDeposits { mint_indices },
+                ..
+            } if mint_indices == vec![LedgerMintIndex::from(0_u64)]
             )
         })
         .assert_no_more_events();
@@ -191,29 +189,31 @@ async fn should_submit_multiple_consolidation_batches() {
             .expect_event(|e| assert_matches!(e, EventType::Minted { .. }));
     }
     // Batch 1:
-    events_assert = events_assert
-        .expect_event_eq(EventType::ConsolidatedDeposits {
-            mint_indices: (0..BATCH_1_SIZE as u64)
-                .map(LedgerMintIndex::from)
-                .collect(),
-        })
-        .expect_event(|e| {
-            assert_matches!(e, EventType::SubmittedTransaction { signature, slot: event_slot, .. }
-                if signature == fee_payer_signature_1 && event_slot == slot
-            )
-        });
+    let batch_1_indices: Vec<_> = (0..BATCH_1_SIZE as u64)
+        .map(LedgerMintIndex::from)
+        .collect();
+    events_assert = events_assert.expect_event(move |e| {
+        assert_matches!(e, EventType::SubmittedTransaction {
+            signature,
+            purpose: TransactionPurpose::ConsolidateDeposits { mint_indices },
+            ..
+        } if signature == fee_payer_signature_1
+          && mint_indices == batch_1_indices
+        )
+    });
     // Batch 2:
-    events_assert = events_assert
-        .expect_event_eq(EventType::ConsolidatedDeposits {
-            mint_indices: (BATCH_1_SIZE as u64..NUM_DEPOSITS as u64)
-                .map(LedgerMintIndex::from)
-                .collect(),
-        })
-        .expect_event(|e| {
-            assert_matches!(e, EventType::SubmittedTransaction { signature, slot: event_slot, .. }
-                if signature == fee_payer_signature_2 && event_slot == slot
-            )
-        });
+    let batch_2_indices: Vec<_> = (BATCH_1_SIZE as u64..NUM_DEPOSITS as u64)
+        .map(LedgerMintIndex::from)
+        .collect();
+    events_assert = events_assert.expect_event(move |e| {
+        assert_matches!(e, EventType::SubmittedTransaction {
+            signature,
+            purpose: TransactionPurpose::ConsolidateDeposits { mint_indices },
+            ..
+        } if signature == fee_payer_signature_2
+          && mint_indices == batch_2_indices
+        )
+    });
     events_assert.assert_no_more_events();
 }
 
@@ -249,12 +249,13 @@ async fn should_consolidate_multiple_deposits_to_same_account_in_single_transfer
         .expect_event(|e| assert_matches!(e, EventType::Minted { .. }))
         .expect_event(|e| assert_matches!(e, EventType::AcceptedDeposit { .. }))
         .expect_event(|e| assert_matches!(e, EventType::Minted { .. }))
-        .expect_event_eq(EventType::ConsolidatedDeposits {
-            mint_indices: vec![LedgerMintIndex::from(0_u64), LedgerMintIndex::from(1_u64)],
-        })
         .expect_event(|e| {
-            assert_matches!(e, EventType::SubmittedTransaction { signature, .. }
-                if signature == fee_payer_signature
+            assert_matches!(e, EventType::SubmittedTransaction {
+                signature,
+                purpose: TransactionPurpose::ConsolidateDeposits { mint_indices },
+                ..
+            } if signature == fee_payer_signature
+              && mint_indices == vec![LedgerMintIndex::from(0_u64), LedgerMintIndex::from(1_u64)]
             )
         })
         .assert_no_more_events();

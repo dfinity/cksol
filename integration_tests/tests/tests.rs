@@ -15,10 +15,12 @@ use cksol_types::{
     DepositStatus, GetDepositAddressArgs, InsufficientCyclesError, Lamport, MinterInfo,
     UpdateBalanceArgs, UpdateBalanceError, WithdrawSolArgs, WithdrawSolError, WithdrawSolStatus,
 };
-use cksol_types_internal::{UpgradeArgs, event::EventType, log::Priority};
-use ic_pocket_canister_runtime::{
-    JsonRpcRequestMatcher, JsonRpcResponse, MockHttpOutcalls, MockHttpOutcallsBuilder,
+use cksol_types_internal::{
+    UpgradeArgs,
+    event::{EventType, TransactionPurpose},
+    log::Priority,
 };
+use ic_pocket_canister_runtime::{JsonRpcResponse, MockHttpOutcalls, MockHttpOutcallsBuilder};
 use icrc_ledger_types::icrc1::account::Subaccount;
 use serde_json::json;
 use sol_rpc_types::{CommitmentLevel, ConsensusStrategy, GetTransactionEncoding, RpcConfig};
@@ -604,10 +606,10 @@ mod withdraw_sol_tests {
         setup.minter().assert_that_events().await.satisfy(|events| {
             check!(events.iter().any(|e| matches!(
                 e,
-                EventType::SentWithdrawalTransaction {
-                    transactions,
+                EventType::SubmittedTransaction {
+                    purpose: TransactionPurpose::WithdrawSol { burn_indices },
                     ..
-                } if transactions.iter().any(|(idx, _)| *idx == block_index)
+                } if burn_indices == &[block_index]
             )));
         });
 
@@ -618,15 +620,20 @@ mod withdraw_sol_tests {
         let mut builder = MockHttpOutcallsBuilder::new();
         for id in 0..4u64 {
             builder = builder
-                .given(JsonRpcRequestMatcher::with_method("getSlot").with_id(id))
+                .given(get_slot_request().with_id(id))
                 .respond_with(get_slot_response(1).with_id(id))
         }
         for id in 4..8u64 {
             builder = builder
-                .given(JsonRpcRequestMatcher::with_method("getBlock").with_id(id))
+                .given(get_block_request(1).with_id(id))
                 .respond_with(
                     get_block_response("4sGjMW1sUnHzSxGspuhpqLDx6wiyjNtZAMdL4VZHirAn").with_id(id),
                 )
+        }
+        for id in 8..12u64 {
+            builder = builder
+                .given(get_slot_request().with_id(id))
+                .respond_with(get_slot_response(1).with_id(id))
         }
         builder.build()
     }
@@ -918,7 +925,8 @@ mod consolidation_tests {
             .with_http_mocks(get_transaction_http_mocks(get_deposit_transaction_response))
             .update_balance(default_update_balance_args())
             .await;
-        assert_matches!(result, Ok(DepositStatus::Minted { .. }));
+        let mint_block_index =
+            assert_matches!(result, Ok(DepositStatus::Minted { block_index, .. }) => block_index);
 
         // Advance time past the consolidation delay to trigger the timer
         setup.advance_time(DEPOSIT_CONSOLIDATION_DELAY).await;
@@ -928,27 +936,13 @@ mod consolidation_tests {
 
         // Verify consolidation events were recorded
         let events_after = setup.minter().get_all_events().await;
-        assert!(
-            events_after
-                .iter()
-                .any(|e| matches!(e.payload, EventType::ConsolidatedDeposits { .. })),
-            "Expected ConsolidatedDeposits event. Events: {events_after:?}"
-        );
-        assert!(
-            events_after
-                .iter()
-                .any(|e| matches!(e.payload, EventType::SubmittedTransaction { .. })),
-            "Expected SubmittedTransaction event. Events: {events_after:?}"
-        );
-
-        for event in &events_after {
-            if let EventType::ConsolidatedDeposits { mint_indices } = &event.payload {
-                assert!(
-                    !mint_indices.is_empty(),
-                    "ConsolidatedDeposits should contain at least one mint index"
-                );
-            }
-        }
+        check!(events_after.iter().any(|e| matches!(
+            &e.payload,
+            EventType::SubmittedTransaction {
+                purpose: TransactionPurpose::ConsolidateDeposits { mint_indices },
+                ..
+            } if mint_indices == &[mint_block_index]
+        )));
 
         setup.drop().await;
     }

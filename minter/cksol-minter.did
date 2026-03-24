@@ -229,6 +229,20 @@ type AcceptedWithdrawSolRequest = record {
     withdrawal_fee : Lamport;
 };
 
+// The purpose of a submitted Solana transaction.
+type TransactionPurpose = variant {
+    // Consolidate deposited funds into the minter's main account.
+    ConsolidateDeposits : record {
+        // The ledger mint indices of the deposits being consolidated.
+        mint_indices: vec nat64;
+    };
+    // Withdraw SOL to users' Solana addresses.
+    WithdrawSol : record {
+        // The ledger burn indices of the withdrawal requests included in this transaction.
+        burn_indices: vec nat64;
+    };
+};
+
 // A minter event payload.
 type EventType = variant {
     // The minter initialization event.
@@ -277,7 +291,7 @@ type EventType = variant {
         // The transaction index on the ckSOL ledger.
         mint_block_index: nat64;
     };
-    // Submitted a Solana transaction
+    // Submitted a Solana transaction.
     SubmittedTransaction : record {
         // The signature of the Solana transaction.
         signature: Signature;
@@ -287,17 +301,8 @@ type EventType = variant {
         signers: vec Account;
         // The slot of the blockhash used in the transaction.
         slot: nat64;
-    };
-    // Deposited funds from user deposit accounts have been consolidated
-    // into the minter's main account.
-    ConsolidatedDeposits : record {
-        // The mint indices of the deposits that were consolidated.
-        mint_indices: vec nat64;
-    };
-    // A withdrawal transaction was signed and is ready to be sent to the network.
-    SentWithdrawalTransaction : record {
-        // The burn block indices and corresponding transaction signatures.
-        transactions: vec record { nat64; Signature };
+        // The purpose of this transaction.
+        purpose: TransactionPurpose;
     };
     // A previously submitted transaction was resubmitted with a new signature.
     ResubmittedTransaction : record {
