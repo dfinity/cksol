@@ -867,13 +867,11 @@ mod consolidation_tests {
             "Expected SubmittedTransaction event. Events: {events_after:?}"
         );
 
-        // Verify the consolidated deposits match the deposit amount
         for event in &events_after {
-            if let EventType::ConsolidatedDeposits { deposits } = &event.payload {
-                let total: Lamport = deposits.iter().map(|(_, amount)| amount).sum();
-                assert_eq!(
-                    total, DEPOSIT_AMOUNT,
-                    "Consolidated amount should match the deposit amount"
+            if let EventType::ConsolidatedDeposits { mint_indices } = &event.payload {
+                assert!(
+                    !mint_indices.is_empty(),
+                    "ConsolidatedDeposits should contain at least one mint index"
                 );
             }
         }

@@ -149,8 +149,10 @@ fn get_events(
                 signers,
                 slot,
             },
-            EventType::ConsolidatedDeposits { deposits } => {
-                event::EventType::ConsolidatedDeposits { deposits }
+            EventType::ConsolidatedDeposits { mint_indices } => {
+                event::EventType::ConsolidatedDeposits {
+                    mint_indices: mint_indices.iter().map(|idx| *idx.get()).collect(),
+                }
             }
             EventType::ResubmittedTransaction {
                 old_signature,

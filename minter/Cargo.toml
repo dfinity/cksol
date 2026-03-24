@@ -31,6 +31,7 @@ ic-http-types = { workspace = true }
 ic-stable-structures = { workspace = true }
 icrc-cbor = { workspace = true }
 icrc-ledger-types = { workspace = true }
+itertools = { workspace = true }
 minicbor = { workspace = true, features = ["derive"] }
 num-traits = { workspace = true }
 phantom_newtype = { workspace = true }

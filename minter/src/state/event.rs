@@ -80,10 +80,9 @@ pub enum EventType {
     /// into the minter's main account.
     #[n(7)]
     ConsolidatedDeposits {
-        /// The deposit accounts from which funds were consolidated
-        /// and the amount consolidated from each account.
-        #[n(0)]
-        deposits: Vec<(Account, Lamport)>,
+        /// The mint indices of the deposits that were consolidated.
+        #[cbor(n(0), with = "cbor::mint_indices")]
+        mint_indices: Vec<LedgerMintIndex>,
     },
     /// A previously submitted transaction was resubmitted with a new signature.
     /// The transaction message and signers remain the same.
