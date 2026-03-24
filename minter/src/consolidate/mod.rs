@@ -14,8 +14,12 @@ use solana_signature::Signature;
 use std::time::Duration;
 use thiserror::Error;
 
+#[cfg(test)]
+mod tests;
+
 pub const DEPOSIT_CONSOLIDATION_DELAY: Duration = Duration::from_mins(10);
 const MAX_CONCURRENT_TRANSACTIONS: usize = 10;
+const MAX_TRANSFERS_PER_CONSOLIDATION: usize = MAX_SIGNATURES as usize - 1;
 
 pub async fn consolidate_deposits<R: CanisterRuntime>(runtime: R) {
     let _guard = match TimerGuard::new(TaskType::DepositConsolidation) {
@@ -33,8 +37,7 @@ pub async fn consolidate_deposits<R: CanisterRuntime>(runtime: R) {
             .clone()
             .into_iter()
             .collect::<Vec<_>>()
-            // Need to account for fee payer signature
-            .chunks(MAX_SIGNATURES as usize - 1)
+            .chunks(MAX_TRANSFERS_PER_CONSOLIDATION)
             .map(|c| c.to_vec())
             .collect()
     });
@@ -95,7 +98,7 @@ async fn submit_consolidation_transaction<R: CanisterRuntime>(
     recent_blockhash: Hash,
 ) -> Result<Signature, ConsolidationError> {
     let minter_account = Account {
-        owner: ic_cdk::api::canister_self(),
+        owner: runtime.canister_self(),
         subaccount: None,
     };
     let (transaction, signers) = create_signed_transfer_transaction(
@@ -107,9 +110,11 @@ async fn submit_consolidation_transaction<R: CanisterRuntime>(
     )
     .await?;
 
+    let signature = transaction.signatures[0];
     let message = transaction.message.clone();
-    let signature = submit_transaction(runtime, transaction).await?;
 
+    // Record events before trying to submit the transaction to ensure we don't
+    // resubmit the same transaction twice in case of a failed submission.
     mutate_state(|state| {
         process_event(
             state,
@@ -131,6 +136,8 @@ async fn submit_consolidation_transaction<R: CanisterRuntime>(
             runtime,
         )
     });
+
+    submit_transaction(runtime, transaction).await?;
 
     Ok(signature)
 }
