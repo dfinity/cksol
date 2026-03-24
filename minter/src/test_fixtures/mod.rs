@@ -292,6 +292,7 @@ pub mod arb {
                     new_slot,
                 },
             ),
+            arb_signature().prop_map(|signature| EventType::FinalizedTransaction { signature }),
         ]
     }
 

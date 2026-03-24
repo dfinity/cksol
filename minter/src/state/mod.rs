@@ -431,6 +431,14 @@ impl State {
             "Attempted to resubmit transaction with signature {new_signature:?} that already exists"
         );
     }
+
+    fn process_transaction_finalized(&mut self, signature: &Signature) {
+        self.submitted_transactions
+            .remove(signature)
+            .unwrap_or_else(|| {
+                panic!("Attempted to finalize unknown transaction with signature {signature:?}")
+            });
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
