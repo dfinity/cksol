@@ -132,11 +132,22 @@ pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: &R) {
         }
     };
 
-    let Some(pending_requests) =
-        read_state(|state| state.next_pending_withdrawal_requests(MAX_WITHDRAWALS_PER_BATCH))
-    else {
+    // TODO: we should batch requests into up to N chunks of size M, each chunk
+    // should be a separate transaction containing multiple withdrawal requests.
+    // M is the max withdrawals per tx, N is max tx per round.
+
+    let pending_requests: Vec<WithdrawSolRequest> = read_state(|state| {
+        state
+            .pending_withdrawal_requests()
+            .values()
+            .take(MAX_WITHDRAWALS_PER_BATCH)
+            .cloned()
+            .collect()
+    });
+
+    if pending_requests.is_empty() {
         return;
-    };
+    }
 
     let recent_blockhash =
         match read_state(|state| state.sol_rpc_client(runtime.inter_canister_call_runtime()))
