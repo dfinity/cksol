@@ -1,5 +1,6 @@
 use super::{MAX_TRANSFERS_PER_CONSOLIDATION, consolidate_deposits};
 use crate::{
+    numeric::LedgerMintIndex,
     state::{
         TaskType,
         audit::process_event,
@@ -22,7 +23,7 @@ type BlockResult = MultiRpcResult<ConfirmedBlock>;
 type SendTransactionResult = MultiRpcResult<sol_rpc_types::Signature>;
 
 #[tokio::test]
-async fn should_return_early_if_no_funds_to_consolidate() {
+async fn should_return_early_if_no_deposits_to_consolidate() {
     setup();
 
     consolidate_deposits(TestCanisterRuntime::new()).await;
@@ -41,9 +42,10 @@ async fn should_return_early_if_task_already_active() {
 
     consolidate_deposits(TestCanisterRuntime::new()).await;
 
-    // Only AcceptedDeposit event from setup, no consolidation events
+    // Only events from setup
     EventsAssert::from_recorded()
         .expect_event(|e| assert_matches!(e, EventType::AcceptedDeposit { .. }))
+        .expect_event(|e| assert_matches!(e, EventType::Minted { .. }))
         .assert_no_more_events();
 }
 
@@ -61,9 +63,10 @@ async fn should_return_early_if_fetching_blockhash_fails() {
 
     consolidate_deposits(runtime).await;
 
-    // Only AcceptedDeposit event from setup, no consolidation events
+    // Only events from setup
     EventsAssert::from_recorded()
         .expect_event(|e| assert_matches!(e, EventType::AcceptedDeposit { .. }))
+        .expect_event(|e| assert_matches!(e, EventType::Minted { .. }))
         .assert_no_more_events();
 }
 
@@ -75,7 +78,6 @@ async fn should_submit_single_consolidation_request() {
     let deposit_amount = 1_000_000_000_u64;
     add_funds_to_consolidate(vec![(deposit_account, deposit_amount)]);
 
-    // Fee payer signature is first in the transaction and becomes the transaction ID
     let fee_payer_signature = Signature::from([0x11; 64]);
     let slot = 100;
     let runtime = TestCanisterRuntime::new()
@@ -88,27 +90,16 @@ async fn should_submit_single_consolidation_request() {
         .add_stub_response(SendTransactionResult::Consistent(Ok(
             fee_payer_signature.into()
         )))
-        // Two signatures needed: fee payer (minter) + source (deposit account)
         .add_signature(fee_payer_signature.into())
         .add_signature([0x22; 64]);
 
     consolidate_deposits(runtime).await;
 
     EventsAssert::from_recorded()
-        .expect_event(|e| {
-            assert_matches!(
-                e,
-                EventType::AcceptedDeposit {
-                    deposit_id,
-                    deposit_amount: amount,
-                    ..
-                } if deposit_id.account == deposit_account && amount == deposit_amount
-            )
-        })
-        .expect_event(|e| {
-            assert_matches!(e, EventType::ConsolidatedDeposits { deposits }
-                if deposits == vec![(deposit_account, deposit_amount)]
-            )
+        .expect_event(|e| assert_matches!(e, EventType::AcceptedDeposit { .. }))
+        .expect_event(|e| assert_matches!(e, EventType::Minted { .. }))
+        .expect_event_eq(EventType::ConsolidatedDeposits {
+            mint_indices: vec![LedgerMintIndex::from(0_u64)],
         })
         .expect_event(|e| {
             assert_matches!(e, EventType::SubmittedTransaction { signature, slot: event_slot, .. }
@@ -135,7 +126,7 @@ async fn should_record_events_even_if_transaction_submission_fails() {
         .add_stub_response(BlockResult::Consistent(Ok(block())))
         // get_slot call
         .add_stub_response(SlotResult::Consistent(Ok(slot)))
-        // Transaction submission call fails (e.g. due to inconsistent results)
+        // Transaction submission fails
         .add_stub_response(SendTransactionResult::Inconsistent(vec![]))
         .add_signature(fee_payer_signature.into())
         .add_signature([0x22; 64]);
@@ -143,15 +134,10 @@ async fn should_record_events_even_if_transaction_submission_fails() {
     consolidate_deposits(runtime).await;
 
     EventsAssert::from_recorded()
-        .expect_event(|e| {
-            assert_matches!(e, EventType::AcceptedDeposit { deposit_id, deposit_amount: amount, ..}
-                if deposit_id.account == deposit_account && amount == deposit_amount
-            )
-        })
-        .expect_event(|e| {
-            assert_matches!(e, EventType::ConsolidatedDeposits { deposits }
-                if deposits == vec![(deposit_account, deposit_amount)]
-            )
+        .expect_event(|e| assert_matches!(e, EventType::AcceptedDeposit { .. }))
+        .expect_event(|e| assert_matches!(e, EventType::Minted { .. }))
+        .expect_event_eq(EventType::ConsolidatedDeposits {
+            mint_indices: vec![LedgerMintIndex::from(0_u64)],
         })
         .expect_event(|e| {
             assert_matches!(e, EventType::SubmittedTransaction { signature, slot: event_slot, .. }
@@ -171,11 +157,8 @@ async fn should_submit_multiple_consolidation_batches() {
         .collect();
     add_funds_to_consolidate(funds.clone());
 
-    // Calculate expected batch sizes, i.e. the number of transfers per transaction submitted
     const BATCH_1_SIZE: usize = MAX_TRANSFERS_PER_CONSOLIDATION;
-    const BATCH_2_SIZE: usize = NUM_DEPOSITS - BATCH_1_SIZE;
 
-    // Fee payer signatures (first signature in each batch) become transaction IDs
     let fee_payer_signature_1 = Signature::from([0; 64]);
     let fee_payer_signature_2 = Signature::from([(BATCH_1_SIZE + 1) as u8; 64]);
     let slot = 100;
@@ -194,7 +177,6 @@ async fn should_submit_multiple_consolidation_batches() {
             fee_payer_signature_2.into()
         )));
 
-    // Signatures needed: 2 x for fee payer (1 for each batch) + 1x for each source account
     for i in 0..(2 + NUM_DEPOSITS) {
         runtime = runtime.add_signature([i as u8; 64]);
     }
@@ -202,20 +184,18 @@ async fn should_submit_multiple_consolidation_batches() {
     consolidate_deposits(runtime).await;
 
     let mut events_assert = EventsAssert::from_recorded();
-    // AcceptedDeposit events from setup
-    for (account, amount) in funds.iter().cloned() {
-        events_assert = events_assert.expect_event(move |e| {
-            assert_matches!(e, EventType::AcceptedDeposit { deposit_id, deposit_amount, .. }
-                if deposit_id.account == account && deposit_amount == amount
-            )
-        });
+    // Events from setup
+    for _ in 0..NUM_DEPOSITS {
+        events_assert = events_assert
+            .expect_event(|e| assert_matches!(e, EventType::AcceptedDeposit { .. }))
+            .expect_event(|e| assert_matches!(e, EventType::Minted { .. }));
     }
     // Batch 1:
     events_assert = events_assert
-        .expect_event(|e| {
-            assert_matches!(e, EventType::ConsolidatedDeposits { deposits }
-                    if deposits.len() == BATCH_1_SIZE
-            )
+        .expect_event_eq(EventType::ConsolidatedDeposits {
+            mint_indices: (0..BATCH_1_SIZE as u64)
+                .map(LedgerMintIndex::from)
+                .collect(),
         })
         .expect_event(|e| {
             assert_matches!(e, EventType::SubmittedTransaction { signature, slot: event_slot, .. }
@@ -224,10 +204,10 @@ async fn should_submit_multiple_consolidation_batches() {
         });
     // Batch 2:
     events_assert = events_assert
-        .expect_event(|e| {
-            assert_matches!(e, EventType::ConsolidatedDeposits { deposits }
-                if deposits.len() == BATCH_2_SIZE
-            )
+        .expect_event_eq(EventType::ConsolidatedDeposits {
+            mint_indices: (BATCH_1_SIZE as u64..NUM_DEPOSITS as u64)
+                .map(LedgerMintIndex::from)
+                .collect(),
         })
         .expect_event(|e| {
             assert_matches!(e, EventType::SubmittedTransaction { signature, slot: event_slot, .. }
@@ -235,6 +215,49 @@ async fn should_submit_multiple_consolidation_batches() {
             )
         });
     events_assert.assert_no_more_events();
+}
+
+#[tokio::test]
+async fn should_consolidate_multiple_deposits_to_same_account_in_single_transfer() {
+    setup();
+
+    let deposit_account = account(0);
+    // Two deposits to the same account
+    add_funds_to_consolidate(vec![
+        (deposit_account, 500_000_000),
+        (deposit_account, 300_000_000),
+    ]);
+
+    let fee_payer_signature = Signature::from([0x11; 64]);
+    let slot = 100;
+    let runtime = TestCanisterRuntime::new()
+        .with_increasing_time()
+        .add_stub_response(SlotResult::Consistent(Ok(slot)))
+        .add_stub_response(BlockResult::Consistent(Ok(block())))
+        .add_stub_response(SlotResult::Consistent(Ok(slot)))
+        .add_stub_response(SendTransactionResult::Consistent(Ok(
+            fee_payer_signature.into()
+        )))
+        // Only TWO signatures: fee payer + one source account (not two)
+        .add_signature(fee_payer_signature.into())
+        .add_signature([0x22; 64]);
+
+    consolidate_deposits(runtime).await;
+
+    EventsAssert::from_recorded()
+        .expect_event(|e| assert_matches!(e, EventType::AcceptedDeposit { .. }))
+        .expect_event(|e| assert_matches!(e, EventType::Minted { .. }))
+        .expect_event(|e| assert_matches!(e, EventType::AcceptedDeposit { .. }))
+        .expect_event(|e| assert_matches!(e, EventType::Minted { .. }))
+        .expect_event_eq(EventType::ConsolidatedDeposits {
+            mint_indices: vec![LedgerMintIndex::from(0_u64), LedgerMintIndex::from(1_u64)],
+        })
+        .expect_event(|e| {
+            assert_matches!(e, EventType::SubmittedTransaction { signature, .. }
+                if signature == fee_payer_signature
+            )
+        })
+        .assert_no_more_events();
 }
 
 fn setup() {
@@ -255,6 +278,8 @@ fn add_funds_to_consolidate(funds: Vec<(Account, u64)>) {
             account,
             signature: Signature::from([i as u8; 64]),
         };
+        let mint_block_index = LedgerMintIndex::from(i as u64);
+        let runtime = TestCanisterRuntime::new().with_increasing_time();
         mutate_state(|state| {
             process_event(
                 state,
@@ -263,7 +288,17 @@ fn add_funds_to_consolidate(funds: Vec<(Account, u64)>) {
                     deposit_amount: amount,
                     amount_to_mint: amount - DEPOSIT_FEE,
                 },
-                &TestCanisterRuntime::new().with_increasing_time(),
+                &runtime,
+            )
+        });
+        mutate_state(|state| {
+            process_event(
+                state,
+                EventType::Minted {
+                    deposit_id,
+                    mint_block_index,
+                },
+                &runtime,
             )
         });
     }

@@ -87,9 +87,8 @@ pub enum EventType {
     /// Deposited funds from user deposit accounts have been consolidated
     /// into the minter's main account.
     ConsolidatedDeposits {
-        /// The deposit accounts from which funds were consolidated
-        /// and the amount consolidated from each account.
-        deposits: Vec<(Account, Lamport)>,
+        /// The mint indices of the deposits that were consolidated.
+        mint_indices: Vec<u64>,
     },
     /// A withdrawal transaction was signed and is ready to be sent to the network.
     SentWithdrawalTransaction {
