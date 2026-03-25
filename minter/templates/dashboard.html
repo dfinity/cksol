@@ -1,0 +1,218 @@
+{% macro solscan_address_link(address) -%}
+<a href="https://solscan.io/account/{{address}}"><code>{{address}}</code></a>
+{%- endmacro %}
+
+{% macro solscan_tx_link(signature) -%}
+<a href="https://solscan.io/tx/{{signature}}"><code>{{signature}}</code></a>
+{%- endmacro %}
+
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <title>ckSOL Minter Dashboard</title>
+    <style>
+        body {
+            font-family: monospace;
+        }
+
+        table {
+            border: solid;
+            text-align: left;
+            width: 100%;
+            border-width: thin;
+        }
+
+        h3 {
+            font-variant: small-caps;
+            margin-top: 30px;
+            margin-bottom: 5px;
+        }
+
+        table table {
+            font-size: small;
+        }
+
+        .background {
+            margin: 0;
+            padding: 0;
+        }
+
+        .content {
+            max-width: 100vw;
+            width: fit-content;
+            margin: 0 auto;
+        }
+
+        tbody tr:nth-child(odd) {
+            background-color: #eeeeee;
+        }
+
+        .numeric {
+            text-align: right;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="background">
+        <div class="content">
+            <h3 id="metadata">Metadata</h3>
+            <table>
+                <tbody>
+                    <tr id="minter-address">
+                        <th>Minter address</th>
+                        <td>{% if !minter_address.is_empty() %}{% call solscan_address_link(minter_address) %}{% else %}N/A{% endif %}</td>
+                    </tr>
+                    <tr id="ledger-canister-id">
+                        <th>ckSOL ledger canister ID</th>
+                        <td><code>{{ ledger_canister_id }}</code></td>
+                    </tr>
+                    <tr id="sol-rpc-canister-id">
+                        <th>Sol RPC canister ID</th>
+                        <td><code>{{ sol_rpc_canister_id }}</code></td>
+                    </tr>
+                    <tr id="key-name">
+                        <th>Ed25519 key name</th>
+                        <td><code>{{ master_key_name }}</code></td>
+                    </tr>
+                    <tr id="deposit-fee">
+                        <th>Deposit fee (lamports)</th>
+                        <td class="numeric">{{ deposit_fee }}</td>
+                    </tr>
+                    <tr id="withdrawal-fee">
+                        <th>Withdrawal fee (lamports)</th>
+                        <td class="numeric">{{ withdrawal_fee }}</td>
+                    </tr>
+                    <tr id="minimum-deposit-amount">
+                        <th>Minimum deposit amount (lamports)</th>
+                        <td class="numeric">{{ minimum_deposit_amount }}</td>
+                    </tr>
+                    <tr id="minimum-withdrawal-amount">
+                        <th>Minimum withdrawal amount (lamports)</th>
+                        <td class="numeric">{{ minimum_withdrawal_amount }}</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h3 id="counts">Counts</h3>
+            <table>
+                <tbody>
+                    <tr>
+                        <th>Accepted deposits</th>
+                        <td class="numeric">{{ accepted_deposits_count }}</td>
+                    </tr>
+                    <tr>
+                        <th>Quarantined deposits</th>
+                        <td class="numeric">{{ quarantined_deposits_count }}</td>
+                    </tr>
+                    <tr>
+                        <th>Minted deposits</th>
+                        <td class="numeric">{{ minted_deposits_count }}</td>
+                    </tr>
+                    <tr>
+                        <th>Pending withdrawal requests</th>
+                        <td class="numeric">{{ pending_withdrawal_requests_count }}</td>
+                    </tr>
+                    <tr>
+                        <th>Sent withdrawal requests</th>
+                        <td class="numeric">{{ sent_withdrawal_requests_count }}</td>
+                    </tr>
+                    <tr>
+                        <th>Submitted transactions</th>
+                        <td class="numeric">{{ submitted_transactions_count }}</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            {% if !deposits_to_consolidate.is_empty() %}
+            <h3 id="deposits-to-consolidate">Deposits to consolidate</h3>
+            <table>
+                <thead>
+                <tr>
+                    <th>Mint Index</th>
+                    <th>Account</th>
+                    <th>Amount (lamports)</th>
+                </tr>
+                </thead>
+                <tbody>
+                {% for (mint_index, account, amount) in deposits_to_consolidate %}
+                <tr>
+                    <td class="numeric">{{ mint_index }}</td>
+                    <td><code>{{ account }}</code></td>
+                    <td class="numeric">{{ amount }}</td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            {% endif %}
+
+            {% if !pending_withdrawal_requests.is_empty() %}
+            <h3 id="pending-withdrawal-requests">Pending withdrawal requests</h3>
+            <table>
+                <thead>
+                <tr>
+                    <th>Burn Index</th>
+                    <th>From</th>
+                    <th>To</th>
+                    <th>Amount (lamports)</th>
+                    <th>Fee (lamports)</th>
+                </tr>
+                </thead>
+                <tbody>
+                {% for req in pending_withdrawal_requests %}
+                <tr>
+                    <td class="numeric">{{ req.burn_index }}</td>
+                    <td><code>{{ req.from }}</code></td>
+                    <td>{% call solscan_address_link(req.to) %}</td>
+                    <td class="numeric">{{ req.amount }}</td>
+                    <td class="numeric">{{ req.fee }}</td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            {% endif %}
+
+            {% if !sent_withdrawal_requests.is_empty() %}
+            <h3 id="sent-withdrawal-requests">Sent withdrawal requests</h3>
+            <table>
+                <thead>
+                <tr>
+                    <th>Burn Index</th>
+                    <th>Transaction Signature</th>
+                </tr>
+                </thead>
+                <tbody>
+                {% for (burn_index, signature) in sent_withdrawal_requests %}
+                <tr>
+                    <td class="numeric">{{ burn_index }}</td>
+                    <td>{% call solscan_tx_link(signature) %}</td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            {% endif %}
+
+            {% if !submitted_transactions.is_empty() %}
+            <h3 id="submitted-transactions">Submitted transactions</h3>
+            <table>
+                <thead>
+                <tr>
+                    <th>Signature</th>
+                    <th>Slot</th>
+                </tr>
+                </thead>
+                <tbody>
+                {% for (signature, slot) in submitted_transactions %}
+                <tr>
+                    <td>{% call solscan_tx_link(signature) %}</td>
+                    <td class="numeric">{{ slot }}</td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            {% endif %}
+        </div>
+    </div>
+</body>
+</html>
