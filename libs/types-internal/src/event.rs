@@ -105,9 +105,14 @@ pub enum EventType {
         /// The slot of the new blockhash used in the resubmitted transaction.
         new_slot: Slot,
     },
-    /// A previously submitted Solana transaction has been finalized.
-    FinalizedTransaction {
-        /// The signature of the finalized Solana transaction.
+    /// A previously submitted Solana transaction has been finalized successfully.
+    SucceededTransaction {
+        /// The signature of the succeeded Solana transaction.
+        signature: Signature,
+    },
+    /// A previously submitted Solana transaction has failed.
+    FailedTransaction {
+        /// The signature of the failed Solana transaction.
         signature: Signature,
     },
 }

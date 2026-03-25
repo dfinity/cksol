@@ -90,7 +90,9 @@ pub struct State {
     pending_withdrawal_requests: BTreeMap<LedgerBurnIndex, WithdrawSolRequest>,
     sent_withdrawal_requests: BTreeMap<LedgerBurnIndex, Signature>,
     funds_to_consolidate: BTreeMap<Account, Lamport>,
-    submitted_transactions: BTreeMap<Signature, SubmittedTransaction>,
+    submitted_transactions: BTreeMap<Signature, SolanaTransaction>,
+    succeeded_transactions: BTreeSet<Signature>,
+    failed_transactions: BTreeMap<Signature, SolanaTransaction>,
     active_tasks: BTreeSet<TaskType>,
 }
 
@@ -148,8 +150,16 @@ impl State {
         &self.funds_to_consolidate
     }
 
-    pub fn submitted_transactions(&self) -> &BTreeMap<Signature, SubmittedTransaction> {
+    pub fn submitted_transactions(&self) -> &BTreeMap<Signature, SolanaTransaction> {
         &self.submitted_transactions
+    }
+
+    pub fn succeeded_transactions(&self) -> &BTreeSet<Signature> {
+        &self.succeeded_transactions
+    }
+
+    pub fn failed_transactions(&self) -> &BTreeMap<Signature, SolanaTransaction> {
+        &self.failed_transactions
     }
 
     pub fn deposit_status(&self, deposit_id: &DepositId) -> Option<DepositStatus> {
@@ -382,10 +392,18 @@ impl State {
         signers: &[Account],
         slot: Slot,
     ) {
+        assert!(
+            !self.succeeded_transactions.contains(signature),
+            "Attempted to submit already succeeded transaction {signature:?}"
+        );
+        assert!(
+            !self.failed_transactions.contains_key(signature),
+            "Attempted to submit already failed transaction {signature:?}"
+        );
         assert_eq!(
             self.submitted_transactions.insert(
                 *signature,
-                SubmittedTransaction {
+                SolanaTransaction {
                     message: message.clone(),
                     signers: signers.to_vec(),
                     slot,
@@ -449,7 +467,15 @@ impl State {
             .unwrap_or_else(|| {
                 panic!("Attempted to resubmit unknown transaction with signature {old_signature:?}")
             });
-        let new_transaction = SubmittedTransaction {
+        assert!(
+            !self.succeeded_transactions.contains(new_signature),
+            "Attempted to resubmit with signature {new_signature:?} that already succeeded"
+        );
+        assert!(
+            !self.failed_transactions.contains_key(new_signature),
+            "Attempted to resubmit with signature {new_signature:?} that already failed"
+        );
+        let new_transaction = SolanaTransaction {
             slot: new_slot,
             ..old_transaction
         };
@@ -461,12 +487,38 @@ impl State {
         );
     }
 
-    fn process_transaction_finalized(&mut self, signature: &Signature) {
+    fn process_transaction_succeeded(&mut self, signature: &Signature) {
+        assert!(
+            !self.failed_transactions.contains_key(signature),
+            "Attempted to mark already failed transaction {signature:?} as succeeded"
+        );
         self.submitted_transactions
             .remove(signature)
             .unwrap_or_else(|| {
-                panic!("Attempted to finalize unknown transaction with signature {signature:?}")
+                panic!("Attempted to mark unknown transaction {signature:?} as succeeded")
             });
+        assert!(
+            self.succeeded_transactions.insert(*signature),
+            "Attempted to mark transaction {signature:?} as succeeded twice"
+        );
+    }
+
+    fn process_transaction_failed(&mut self, signature: &Signature) {
+        assert!(
+            !self.succeeded_transactions.contains(signature),
+            "Attempted to mark already succeeded transaction {signature:?} as failed"
+        );
+        let transaction = self
+            .submitted_transactions
+            .remove(signature)
+            .unwrap_or_else(|| {
+                panic!("Attempted to mark unknown transaction {signature:?} as failed")
+            });
+        assert_eq!(
+            self.failed_transactions.insert(*signature, transaction),
+            None,
+            "Attempted to fail transaction {signature:?} twice"
+        );
     }
 }
 
@@ -518,6 +570,8 @@ impl TryFrom<InitArgs> for State {
             sent_withdrawal_requests: BTreeMap::new(),
             funds_to_consolidate: BTreeMap::new(),
             submitted_transactions: BTreeMap::new(),
+            succeeded_transactions: BTreeSet::new(),
+            failed_transactions: BTreeMap::new(),
             active_tasks: BTreeSet::new(),
         };
         state.validate()?;
@@ -552,7 +606,7 @@ pub enum TaskType {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SubmittedTransaction {
+pub struct SolanaTransaction {
     pub message: Message,
     pub signers: Vec<Account>,
     pub slot: Slot,

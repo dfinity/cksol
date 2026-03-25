@@ -50,6 +50,8 @@ mod state_from_init_args {
                 sent_withdrawal_requests: BTreeMap::new(),
                 funds_to_consolidate: BTreeMap::new(),
                 submitted_transactions: BTreeMap::new(),
+                succeeded_transactions: BTreeSet::new(),
+                failed_transactions: BTreeMap::new(),
                 active_tasks: BTreeSet::new(),
             }
         );

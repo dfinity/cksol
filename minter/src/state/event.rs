@@ -99,10 +99,10 @@ pub enum EventType {
         #[n(2)]
         new_slot: Slot,
     },
-    /// A previously submitted Solana transaction has been finalized.
+    /// A previously submitted Solana transaction has been finalized successfully.
     #[n(9)]
-    FinalizedTransaction {
-        /// The signature of the finalized Solana transaction.
+    SucceededTransaction {
+        /// The signature of the succeeded Solana transaction.
         #[cbor(n(0), with = "cbor::signature")]
         signature: Signature,
     },
@@ -112,6 +112,13 @@ pub enum EventType {
         /// The burn block indices and corresponding transaction signatures.
         #[cbor(n(0), with = "cbor::burn_index_signature_vec")]
         transactions: Vec<(LedgerBurnIndex, Signature)>,
+    },
+    /// A previously submitted Solana transaction has failed.
+    #[n(11)]
+    FailedTransaction {
+        /// The signature of the failed Solana transaction.
+        #[cbor(n(0), with = "cbor::signature")]
+        signature: Signature,
     },
 }
 
