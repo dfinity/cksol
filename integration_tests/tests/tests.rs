@@ -211,6 +211,8 @@ mod withdraw_sol_tests {
 
     use super::*;
 
+    const WITHDRAWAL_PROCESSING_DELAY: Duration = Duration::from_mins(1);
+
     #[tokio::test]
     async fn should_validate_solana_address() {
         let setup = SetupBuilder::new().build().await;
@@ -594,9 +596,7 @@ mod withdraw_sol_tests {
             .await
             .expect("withdraw_sol should succeed");
 
-        setup
-            .advance_time(Duration::from_mins(1) + Duration::from_secs(1))
-            .await;
+        setup.advance_time(WITHDRAWAL_PROCESSING_DELAY).await;
         setup
             .execute_http_mocks(estimate_blockhash_http_mocks())
             .await;
