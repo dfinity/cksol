@@ -206,9 +206,8 @@ mod finalization {
         read_state(|s| assert_eq!(s.submitted_transactions().len(), 1));
     }
 
-    // TODO: handle errored transactions (e.g., quarantine, retry, or alert).
     #[tokio::test]
-    async fn should_not_finalize_transaction_with_error() {
+    async fn should_record_failed_transaction_event_on_error() {
         setup();
 
         let signature = Signature::from([0x01; 64]);
@@ -229,9 +228,22 @@ mod finalization {
 
         EventsAssert::from_recorded()
             .expect_event(|e| assert_matches!(e, EventType::SubmittedTransaction { .. }))
+            .expect_event(|e| {
+                assert_matches!(
+                    e,
+                    EventType::FailedTransaction {
+                        signature: sig,
+                        error,
+                    } if sig == signature && error.contains("InsufficientFundsForFee")
+                )
+            })
             .assert_no_more_events();
 
-        read_state(|s| assert_eq!(s.submitted_transactions().len(), 1));
+        read_state(|s| {
+            assert!(s.submitted_transactions().is_empty());
+            assert_eq!(s.failed_transactions().len(), 1);
+            assert!(s.failed_transactions().contains_key(&signature));
+        });
     }
 
     #[tokio::test]

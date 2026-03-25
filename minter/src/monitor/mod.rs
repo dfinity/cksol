@@ -51,11 +51,20 @@ pub async fn monitor_submitted_transactions<R: CanisterRuntime>(runtime: R) {
     let statuses = check_transaction_statuses(&runtime, &all_transactions).await;
 
     for (signature, error) in &statuses.errored {
-        // TODO: handle errored transactions (e.g., quarantine, retry, or alert).
         log!(
             Priority::Info,
             "Transaction {signature} finalized with error: {error}"
         );
+        mutate_state(|state| {
+            process_event(
+                state,
+                EventType::FailedTransaction {
+                    signature: *signature,
+                    error: error.clone(),
+                },
+                &runtime,
+            )
+        });
     }
 
     for signature in &statuses.finalized {
