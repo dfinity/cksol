@@ -41,13 +41,11 @@ jobs:
 
   reproducible-build:
     runs-on: ubuntu-22.04
+    env:
+      RUSTC_WRAPPER: ""
     steps:
       - name: 'Checkout'
         uses: actions/checkout@v4
-
-      - name: 'Setup sccache'
-        uses: mozilla-actions/sccache-action@v0.0.9
-
       # TODO DEFI-2641: setup reproducible build with Docker
       - name: Docker build
         run: |
