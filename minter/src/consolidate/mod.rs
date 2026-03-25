@@ -1,5 +1,6 @@
 use crate::{
     address::{derivation_path, derive_public_key, lazy_get_schnorr_master_key},
+    constants::MAX_CONCURRENT_RPC_CALLS,
     guard::TimerGuard,
     numeric::LedgerMintIndex,
     runtime::CanisterRuntime,
@@ -22,10 +23,8 @@ use thiserror::Error;
 #[cfg(test)]
 mod tests;
 
-use crate::constants::MAX_CONCURRENT_RPC_CALLS;
-
 pub const DEPOSIT_CONSOLIDATION_DELAY: Duration = Duration::from_mins(10);
-const MAX_CONCURRENT_TRANSACTIONS: usize = 10;
+
 pub(crate) const MAX_TRANSFERS_PER_CONSOLIDATION: usize = MAX_SIGNATURES as usize - 1;
 
 pub async fn consolidate_deposits<R: CanisterRuntime>(runtime: R) {
@@ -44,7 +43,7 @@ pub async fn consolidate_deposits<R: CanisterRuntime>(runtime: R) {
 
     for round in &consolidation_rounds
         .into_iter()
-        .chunks(MAX_CONCURRENT_TRANSACTIONS)
+        .chunks(MAX_CONCURRENT_RPC_CALLS)
     {
         let recent_blockhash = match get_recent_blockhash(&runtime).await {
             Ok(blockhash) => blockhash,
