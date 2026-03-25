@@ -64,8 +64,11 @@ fn apply_state_transition(state: &mut State, payload: &EventType) {
         } => {
             state.process_transaction_resubmitted(old_signature, new_signature, *new_slot);
         }
-        EventType::FinalizedTransaction { signature } => {
-            state.process_transaction_finalized(signature);
+        EventType::SucceededTransaction { signature } => {
+            state.process_transaction_succeeded(signature);
+        }
+        EventType::FailedTransaction { signature } => {
+            state.process_transaction_failed(signature);
         }
     }
 }

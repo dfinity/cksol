@@ -296,7 +296,8 @@ pub mod arb {
                     }
                 },
             ),
-            arb_signature().prop_map(|signature| EventType::FinalizedTransaction { signature }),
+            arb_signature().prop_map(|signature| EventType::SucceededTransaction { signature }),
+            arb_signature().prop_map(|signature| EventType::FailedTransaction { signature }),
         ]
     }
 
