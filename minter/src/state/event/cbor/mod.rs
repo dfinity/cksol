@@ -65,7 +65,9 @@ pub mod burn_index_signature_vec {
         d: &mut Decoder<'_>,
         _ctx: &mut Ctx,
     ) -> Result<Vec<(LedgerBurnIndex, Signature)>, Error> {
-        let len = d.array()?.ok_or_else(|| Error::message("expected definite-length array"))?;
+        let len = d
+            .array()?
+            .ok_or_else(|| Error::message("expected definite-length array"))?;
         let mut result = Vec::with_capacity(len as usize);
         for _ in 0..len {
             d.array()?;
