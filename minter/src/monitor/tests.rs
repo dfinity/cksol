@@ -1,7 +1,12 @@
 use super::{MAX_BLOCKHASH_AGE, monitor_submitted_transactions};
 use crate::{
     address::derive_public_key,
-    state::{TaskType, audit::process_event, event::EventType, mutate_state, read_state},
+    state::{
+        TaskType,
+        audit::process_event,
+        event::{EventType, VersionedMessage},
+        mutate_state, read_state,
+    },
     test_fixtures::{
         EventsAssert, MINTER_ACCOUNT, init_schnorr_master_key, init_state,
         runtime::TestCanisterRuntime,
@@ -209,7 +214,7 @@ fn add_submitted_transaction(signature: Signature, slot: Slot) {
             state,
             EventType::SubmittedTransaction {
                 signature,
-                message,
+                message: VersionedMessage::Legacy(message),
                 signers: vec![MINTER_ACCOUNT],
                 slot,
                 purpose: crate::state::event::TransactionPurpose::ConsolidateDeposits {

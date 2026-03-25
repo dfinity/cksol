@@ -77,7 +77,9 @@ pub fn init_schnorr_master_key() {
 pub mod arb {
     use crate::{
         numeric::{LedgerBurnIndex, LedgerMintIndex},
-        state::event::{DepositId, Event, EventType, TransactionPurpose, WithdrawSolRequest},
+        state::event::{
+            DepositId, Event, EventType, TransactionPurpose, VersionedMessage, WithdrawSolRequest,
+        },
     };
     use candid::Principal;
     use cksol_types_internal::{Ed25519KeyName, InitArgs, UpgradeArgs};
@@ -285,7 +287,7 @@ pub mod arb {
                 .prop_map(|(signature, message, signers, slot, purpose)| {
                     EventType::SubmittedTransaction {
                         signature,
-                        message,
+                        message: VersionedMessage::Legacy(message),
                         signers,
                         slot,
                         purpose,

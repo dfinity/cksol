@@ -229,6 +229,12 @@ type AcceptedWithdrawSolRequest = record {
     withdrawal_fee : Lamport;
 };
 
+// A versioned Solana transaction message.
+type VersionedTransactionMessage = variant {
+    // A legacy Solana transaction message, serialized with bincode.
+    Legacy : blob;
+};
+
 // The purpose of a submitted Solana transaction.
 type TransactionPurpose = variant {
     // Consolidate deposited funds into the minter's main account.
@@ -295,8 +301,8 @@ type EventType = variant {
     SubmittedTransaction : record {
         // The signature of the Solana transaction.
         signature: Signature;
-        // The serialized (unsigned) transaction message.
-        transaction: blob;
+        // The versioned transaction message.
+        transaction: VersionedTransactionMessage;
         // The signing accounts in signature order (fee payer first).
         signers: vec Account;
         // The slot of the blockhash used in the transaction.

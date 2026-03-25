@@ -8,6 +8,18 @@ use solana_message::Message;
 use solana_signature::Signature;
 use std::borrow::Cow;
 
+/// A versioned Solana transaction message, allowing the minter to support
+/// both legacy and versioned (v0) transactions in the future.
+#[derive(Clone, Eq, PartialEq, Debug, Decode, Encode)]
+pub enum VersionedMessage {
+    #[n(0)]
+    Legacy(
+        #[n(0)]
+        #[cbor(with = "cbor::message")]
+        Message,
+    ),
+}
+
 mod cbor;
 
 #[derive(Eq, PartialEq, Debug, Decode, Encode)]
@@ -66,9 +78,9 @@ pub enum EventType {
         /// The transaction signature.
         #[cbor(n(0), with = "cbor::signature")]
         signature: Signature,
-        /// The unsigned transaction message.
-        #[cbor(n(1), with = "cbor::message")]
-        message: Message,
+        /// The versioned transaction message.
+        #[n(1)]
+        message: VersionedMessage,
         /// The signing accounts in signature order (fee payer first).
         #[n(2)]
         signers: Vec<Account>,

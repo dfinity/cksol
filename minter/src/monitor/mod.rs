@@ -3,7 +3,12 @@ use crate::{
     guard::TimerGuard,
     runtime::CanisterRuntime,
     signer::sign_bytes,
-    state::{TaskType, audit::process_event, event::EventType, mutate_state, read_state},
+    state::{
+        TaskType,
+        audit::process_event,
+        event::{EventType, VersionedMessage},
+        mutate_state, read_state,
+    },
     transaction::{SubmitTransactionError, get_recent_blockhash, get_slot, submit_transaction},
 };
 use canlog::log;
@@ -11,7 +16,6 @@ use cksol_types_internal::log::Priority;
 use ic_cdk::management_canister::SignCallError;
 use icrc_ledger_types::icrc1::account::Account;
 use sol_rpc_types::Slot;
-use solana_message::Message;
 use solana_signature::Signature;
 use solana_transaction::Transaction;
 use std::time::Duration;
@@ -97,12 +101,12 @@ pub async fn monitor_submitted_transactions<R: CanisterRuntime>(runtime: R) {
 async fn resubmit_transaction_with_new_blockhash<R: CanisterRuntime>(
     runtime: &R,
     old_signature: Signature,
-    message: Message,
+    versioned_message: VersionedMessage,
     signers: Vec<Account>,
     new_slot: Slot,
     new_blockhash: solana_hash::Hash,
 ) -> Result<Signature, ResubmitError> {
-    let mut message = message;
+    let VersionedMessage::Legacy(mut message) = versioned_message;
     message.recent_blockhash = new_blockhash;
 
     let mut transaction = Transaction::new_unsigned(message);
