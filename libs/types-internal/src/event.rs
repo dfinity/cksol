@@ -107,6 +107,11 @@ pub enum EventType {
         /// The slot of the new blockhash used in the resubmitted transaction.
         new_slot: Slot,
     },
+    /// A previously submitted Solana transaction has been finalized.
+    FinalizedTransaction {
+        /// The signature of the finalized Solana transaction.
+        signature: Signature,
+    },
 }
 
 /// Arguments for the `get_events` endpoint.

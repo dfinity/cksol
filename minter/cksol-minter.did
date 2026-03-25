@@ -311,6 +311,11 @@ type EventType = variant {
         // The slot of the new blockhash used in the resubmitted transaction.
         new_slot: nat64;
     };
+    // A previously submitted Solana transaction has been finalized.
+    FinalizedTransaction : record {
+        // The signature of the finalized Solana transaction.
+        signature: Signature;
+    };
 };
 
 // Represents a Solana transaction depositing funds to a ckSOL account.

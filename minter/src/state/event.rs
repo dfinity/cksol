@@ -99,8 +99,15 @@ pub enum EventType {
         #[n(2)]
         new_slot: Slot,
     },
-    /// A withdrawal transaction was signed and is ready to be sent to the network.
+    /// A previously submitted Solana transaction has been finalized.
     #[n(9)]
+    FinalizedTransaction {
+        /// The signature of the finalized Solana transaction.
+        #[cbor(n(0), with = "cbor::signature")]
+        signature: Signature,
+    },
+    /// A withdrawal transaction was signed and is ready to be sent to the network.
+    #[n(10)]
     SentWithdrawalTransaction {
         /// The burn transaction index on the ckSOL ledger.
         #[cbor(n(0), with = "cbor::id")]

@@ -300,6 +300,7 @@ pub mod arb {
                     }
                 },
             ),
+            arb_signature().prop_map(|signature| EventType::FinalizedTransaction { signature }),
         ]
     }
 
