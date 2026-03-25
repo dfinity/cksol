@@ -3,6 +3,7 @@ use askama::Template;
 use candid::Principal;
 use ic_http_types::HttpRequest;
 use sol_rpc_types::Lamport;
+use std::cmp::Reverse;
 use std::str::FromStr;
 
 #[cfg(test)]
@@ -14,8 +15,8 @@ const DEFAULT_PAGE_SIZE: usize = 100;
 
 #[derive(Default, Clone)]
 pub struct DashboardPaginationParameters {
-    pub submitted_transactions_start: usize,
-    pub sent_withdrawal_requests_start: usize,
+    pub minted_deposits_start: usize,
+    pub withdrawal_transactions_start: usize,
 }
 
 impl DashboardPaginationParameters {
@@ -29,8 +30,8 @@ impl DashboardPaginationParameters {
         }
 
         Ok(Self {
-            submitted_transactions_start: parse(req, "submitted_transactions_start")?,
-            sent_withdrawal_requests_start: parse(req, "sent_withdrawal_requests_start")?,
+            minted_deposits_start: parse(req, "minted_deposits_start")?,
+            withdrawal_transactions_start: parse(req, "withdrawal_transactions_start")?,
         })
     }
 }
@@ -123,12 +124,30 @@ impl DashboardTablePagination {
 // --- Dashboard data ---
 
 #[derive(Clone)]
+pub struct DashboardMintedDeposit {
+    pub signature: String,
+    pub account: String,
+    pub deposit_amount: Lamport,
+    pub minted_amount: Lamport,
+    pub mint_block_index: String,
+}
+
+#[derive(Clone)]
 pub struct DashboardWithdrawalRequest {
     pub burn_index: String,
     pub from: String,
     pub to: String,
     pub amount: Lamport,
     pub fee: Lamport,
+}
+
+#[derive(Clone)]
+pub struct DashboardWithdrawalTransaction {
+    pub burn_index: String,
+    pub to: String,
+    pub amount: Lamport,
+    pub signature: String,
+    pub status: String,
 }
 
 #[derive(Template)]
@@ -144,14 +163,10 @@ pub struct DashboardTemplate {
     pub minimum_withdrawal_amount: u64,
     pub accepted_deposits_count: usize,
     pub quarantined_deposits_count: usize,
-    pub minted_deposits_count: usize,
-    pub pending_withdrawal_requests_count: usize,
-    pub sent_withdrawal_requests_count: usize,
-    pub submitted_transactions_count: usize,
     pub deposits_to_consolidate: Vec<(String, String, Lamport)>,
     pub pending_withdrawal_requests: Vec<DashboardWithdrawalRequest>,
-    pub sent_withdrawal_requests_table: DashboardPaginatedTable<(String, String)>,
-    pub submitted_transactions_table: DashboardPaginatedTable<(String, u64)>,
+    pub minted_deposits_table: DashboardPaginatedTable<DashboardMintedDeposit>,
+    pub withdrawal_transactions_table: DashboardPaginatedTable<DashboardWithdrawalTransaction>,
 }
 
 impl DashboardTemplate {
@@ -174,6 +189,28 @@ impl DashboardTemplate {
             })
             .collect();
 
+        let mut minted_deposits: Vec<_> = state
+            .minted_deposits()
+            .iter()
+            .map(|(deposit_id, minted)| DashboardMintedDeposit {
+                signature: deposit_id.signature.to_string(),
+                account: deposit_id.account.to_string(),
+                deposit_amount: minted.deposit.deposit_amount,
+                minted_amount: minted.deposit.amount_to_mint,
+                mint_block_index: minted.block_index.to_string(),
+            })
+            .collect();
+        minted_deposits.sort_unstable_by_key(|d| Reverse(d.mint_block_index.clone()));
+
+        let minted_deposits_table = DashboardPaginatedTable::from_items(
+            &minted_deposits,
+            pagination.minted_deposits_start,
+            DEFAULT_PAGE_SIZE,
+            5,
+            "minted-deposits",
+            "minted_deposits_start",
+        );
+
         let pending_withdrawal_requests: Vec<_> = state
             .pending_withdrawal_requests()
             .iter()
@@ -186,34 +223,48 @@ impl DashboardTemplate {
             })
             .collect();
 
-        let sent_withdrawal_requests: Vec<_> = state
+        let mut withdrawal_transactions: Vec<_> = state
             .sent_withdrawal_requests()
             .iter()
-            .map(|(burn_index, sig)| (burn_index.to_string(), sig.to_string()))
+            .map(|(burn_index, sig)| {
+                let sig_str = sig.to_string();
+                let status = if state.succeeded_transactions().contains(sig) {
+                    "Succeeded"
+                } else if state.failed_transactions().contains_key(sig) {
+                    "Failed"
+                } else if state.submitted_transactions().contains_key(sig) {
+                    "Submitted"
+                } else {
+                    "Unknown"
+                };
+                let to = state
+                    .pending_withdrawal_requests()
+                    .get(burn_index)
+                    .map(|req| solana_address::Address::from(req.solana_address).to_string())
+                    .unwrap_or_default();
+                let amount = state
+                    .pending_withdrawal_requests()
+                    .get(burn_index)
+                    .map(|req| req.withdrawal_amount)
+                    .unwrap_or(0);
+                DashboardWithdrawalTransaction {
+                    burn_index: burn_index.to_string(),
+                    to,
+                    amount,
+                    signature: sig_str,
+                    status: status.to_string(),
+                }
+            })
             .collect();
+        withdrawal_transactions.sort_unstable_by_key(|tx| Reverse(tx.burn_index.clone()));
 
-        let sent_withdrawal_requests_table = DashboardPaginatedTable::from_items(
-            &sent_withdrawal_requests,
-            pagination.sent_withdrawal_requests_start,
+        let withdrawal_transactions_table = DashboardPaginatedTable::from_items(
+            &withdrawal_transactions,
+            pagination.withdrawal_transactions_start,
             DEFAULT_PAGE_SIZE,
-            2,
-            "sent-withdrawal-requests",
-            "sent_withdrawal_requests_start",
-        );
-
-        let submitted_transactions: Vec<_> = state
-            .submitted_transactions()
-            .iter()
-            .map(|(sig, tx)| (sig.to_string(), tx.slot))
-            .collect();
-
-        let submitted_transactions_table = DashboardPaginatedTable::from_items(
-            &submitted_transactions,
-            pagination.submitted_transactions_start,
-            DEFAULT_PAGE_SIZE,
-            2,
-            "submitted-transactions",
-            "submitted_transactions_start",
+            5,
+            "withdrawal-transactions",
+            "withdrawal_transactions_start",
         );
 
         DashboardTemplate {
@@ -227,14 +278,10 @@ impl DashboardTemplate {
             minimum_withdrawal_amount: state.minimum_withdrawal_amount(),
             accepted_deposits_count: state.accepted_deposits().len(),
             quarantined_deposits_count: state.quarantined_deposits().len(),
-            minted_deposits_count: state.minted_deposits().len(),
-            pending_withdrawal_requests_count: state.pending_withdrawal_requests().len(),
-            sent_withdrawal_requests_count: state.sent_withdrawal_requests().len(),
-            submitted_transactions_count: state.submitted_transactions().len(),
             deposits_to_consolidate,
             pending_withdrawal_requests,
-            sent_withdrawal_requests_table,
-            submitted_transactions_table,
+            minted_deposits_table,
+            withdrawal_transactions_table,
         }
     }
 }

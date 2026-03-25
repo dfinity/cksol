@@ -1,10 +1,15 @@
 use crate::dashboard::{DashboardPaginationParameters, DashboardTemplate};
 use crate::state::State;
+use crate::state::audit::process_event;
+use crate::state::event::EventType;
 use crate::test_fixtures::{
     DEPOSIT_FEE, MINIMUM_DEPOSIT_AMOUNT, MINIMUM_WITHDRAWAL_AMOUNT, WITHDRAWAL_FEE,
-    ledger_canister_id, sol_rpc_canister_id, valid_init_args,
+    ledger_canister_id, runtime::TestCanisterRuntime, sol_rpc_canister_id, valid_init_args,
 };
 use askama::Template;
+use solana_hash::Hash;
+use solana_message::Message;
+use solana_signature::Signature;
 
 fn initial_state() -> State {
     State::try_from(valid_init_args()).expect("valid init args")
@@ -12,6 +17,18 @@ fn initial_state() -> State {
 
 fn initial_dashboard() -> DashboardTemplate {
     DashboardTemplate::from_state(&initial_state(), DashboardPaginationParameters::default())
+}
+
+fn runtime() -> TestCanisterRuntime {
+    TestCanisterRuntime::new().with_increasing_time()
+}
+
+fn dummy_message() -> Message {
+    Message::new_with_blockhash(
+        &[],
+        Some(&solana_address::Address::from([0xAA; 32])),
+        &Hash::default(),
+    )
 }
 
 #[test]
@@ -52,14 +69,14 @@ fn should_display_metadata() {
 }
 
 #[test]
-fn should_display_zero_counts_initially() {
+fn should_display_empty_state() {
     let dashboard = initial_dashboard();
 
     DashboardAssert::assert_that(dashboard)
+        .has_no_elements_matching("#minted-deposits + table")
         .has_no_elements_matching("#deposits-to-consolidate + table")
         .has_no_elements_matching("#pending-withdrawal-requests + table")
-        .has_no_elements_matching("#sent-withdrawal-requests + table")
-        .has_no_elements_matching("#submitted-transactions + table");
+        .has_no_elements_matching("#withdrawal-transactions + table");
 }
 
 #[test]
@@ -74,39 +91,120 @@ fn should_display_minter_address_when_not_set() {
 }
 
 #[test]
-fn should_display_solscan_links_for_submitted_transactions() {
-    use crate::state::audit::process_event;
-    use crate::state::event::EventType;
-    use crate::test_fixtures::runtime::TestCanisterRuntime;
-    use solana_hash::Hash;
-    use solana_message::Message;
-    use solana_signature::Signature;
+fn should_display_minted_deposits() {
+    use crate::state::event::DepositId;
+    use crate::test_fixtures::MINTER_ACCOUNT;
 
     let mut state = initial_state();
-    let signature = Signature::from([0x01; 64]);
-    let message = Message::new_with_blockhash(
-        &[],
-        Some(&solana_address::Address::from([0xAA; 32])),
-        &Hash::default(),
-    );
-    let runtime = TestCanisterRuntime::new().with_increasing_time();
+    let runtime = runtime();
+    let deposit_id = DepositId {
+        signature: Signature::from([0x01; 64]),
+        account: MINTER_ACCOUNT,
+    };
+
     process_event(
         &mut state,
-        EventType::SubmittedTransaction {
-            signature,
-            transaction: message,
-            signers: vec![],
-            slot: 42,
+        EventType::AcceptedDeposit {
+            deposit_id,
+            deposit_amount: 1_000_000,
+            amount_to_mint: 990_000,
+        },
+        &runtime,
+    );
+    process_event(
+        &mut state,
+        EventType::Minted {
+            deposit_id,
+            mint_block_index: 42_u64.into(),
         },
         &runtime,
     );
 
     let dashboard = DashboardTemplate::from_state(&state, DashboardPaginationParameters::default());
 
-    let assert = DashboardAssert::assert_that(dashboard);
-    assert.has_links_satisfying(
-        |href| href.contains("solscan.io/tx/"),
-        |href| href.contains(&signature.to_string()),
+    DashboardAssert::assert_that(dashboard)
+        .has_table_row_value(
+            "#minted-deposits + table > tbody > tr:nth-child(1)",
+            &[
+                &deposit_id.signature.to_string(),
+                &MINTER_ACCOUNT.to_string(),
+                "1000000",
+                "990000",
+                "42",
+            ],
+            "minted deposits",
+        )
+        .has_links_satisfying(
+            |href| href.contains("solscan.io/tx/"),
+            |href| href.contains(&deposit_id.signature.to_string()),
+        );
+}
+
+#[test]
+fn should_display_withdrawal_transaction_status() {
+    use crate::test_fixtures::MINTER_ACCOUNT;
+
+    let mut state = initial_state();
+    let runtime = runtime();
+    let solana_address = [0xBB; 32];
+
+    // Accept a withdrawal request
+    process_event(
+        &mut state,
+        EventType::AcceptedWithdrawSolRequest(crate::state::event::WithdrawSolRequest {
+            account: MINTER_ACCOUNT,
+            solana_address,
+            burn_block_index: 10_u64.into(),
+            withdrawal_amount: 500_000,
+            withdrawal_fee: 5_000,
+        }),
+        &runtime,
+    );
+
+    // Submit a transaction for it
+    let sig = Signature::from([0x02; 64]);
+    process_event(
+        &mut state,
+        EventType::SubmittedTransaction {
+            signature: sig,
+            transaction: dummy_message(),
+            signers: vec![MINTER_ACCOUNT],
+            slot: 100,
+        },
+        &runtime,
+    );
+
+    // Mark it as sent
+    process_event(
+        &mut state,
+        EventType::SentWithdrawalTransaction {
+            transactions: vec![(10_u64.into(), sig)],
+        },
+        &runtime,
+    );
+
+    // Before finalization: status should be "Submitted"
+    let dashboard = DashboardTemplate::from_state(&state, DashboardPaginationParameters::default());
+    DashboardAssert::assert_that(dashboard).has_table_row_value_in_column(
+        "#withdrawal-transactions + table > tbody > tr:nth-child(1)",
+        4,
+        "Submitted",
+        "withdrawal status before finalization",
+    );
+
+    // After success: status should be "Succeeded"
+    process_event(
+        &mut state,
+        EventType::SucceededTransaction { signature: sig },
+        &runtime,
+    );
+
+    let dashboard = DashboardTemplate::from_state(&state, DashboardPaginationParameters::default());
+    DashboardAssert::assert_that(dashboard).has_table_row_value_in_column(
+        "#withdrawal-transactions + table > tbody > tr:nth-child(1)",
+        4,
+        "Succeeded",
+        "withdrawal status after success",
     );
 }
 
@@ -120,6 +218,8 @@ fn should_not_display_pagination_for_small_tables() {
         "should not show pagination when tables are empty"
     );
 }
+
+// --- Assertion helpers ---
 
 struct DashboardAssert {
     rendered_html: String,
@@ -157,6 +257,63 @@ impl DashboardAssert {
         assert_eq!(
             string_value.trim(),
             expected_value,
+            "{}. Rendered html: {}",
+            error_msg,
+            self.rendered_html
+        );
+        self
+    }
+
+    fn has_table_row_value(
+        &self,
+        selector: &str,
+        expected_values: &[&str],
+        error_msg: &str,
+    ) -> &Self {
+        let css_selector = scraper::Selector::parse(selector).unwrap();
+        let element = self.actual.select(&css_selector).next().unwrap_or_else(|| {
+            panic!(
+                "expected element for selector '{selector}', got none. Rendered html: {}",
+                self.rendered_html
+            )
+        });
+        let values: Vec<_> = element
+            .text()
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .collect();
+        assert_eq!(
+            values, expected_values,
+            "{}. Rendered html: {}",
+            error_msg, self.rendered_html
+        );
+        self
+    }
+
+    fn has_table_row_value_in_column(
+        &self,
+        selector: &str,
+        column_index: usize,
+        expected_value: &str,
+        error_msg: &str,
+    ) -> &Self {
+        let css_selector = scraper::Selector::parse(selector).unwrap();
+        let element = self.actual.select(&css_selector).next().unwrap_or_else(|| {
+            panic!(
+                "expected element for selector '{selector}', got none. Rendered html: {}",
+                self.rendered_html
+            )
+        });
+        let values: Vec<_> = element
+            .text()
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .collect();
+        assert_eq!(
+            values
+                .get(column_index)
+                .expect("column index out of bounds"),
+            &expected_value,
             "{}. Rendered html: {}",
             error_msg,
             self.rendered_html

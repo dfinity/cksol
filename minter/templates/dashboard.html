@@ -92,38 +92,43 @@
                         <th>Minimum withdrawal amount (lamports)</th>
                         <td class="numeric">{{ minimum_withdrawal_amount }}</td>
                     </tr>
-                </tbody>
-            </table>
-
-            <h3 id="counts">Counts</h3>
-            <table>
-                <tbody>
-                    <tr>
-                        <th>Accepted deposits</th>
+                    <tr id="accepted-deposits-count">
+                        <th>Accepted deposits (pending mint)</th>
                         <td class="numeric">{{ accepted_deposits_count }}</td>
                     </tr>
-                    <tr>
+                    <tr id="quarantined-deposits-count">
                         <th>Quarantined deposits</th>
                         <td class="numeric">{{ quarantined_deposits_count }}</td>
                     </tr>
-                    <tr>
-                        <th>Minted deposits</th>
-                        <td class="numeric">{{ minted_deposits_count }}</td>
-                    </tr>
-                    <tr>
-                        <th>Pending withdrawal requests</th>
-                        <td class="numeric">{{ pending_withdrawal_requests_count }}</td>
-                    </tr>
-                    <tr>
-                        <th>Sent withdrawal requests</th>
-                        <td class="numeric">{{ sent_withdrawal_requests_count }}</td>
-                    </tr>
-                    <tr>
-                        <th>Submitted transactions</th>
-                        <td class="numeric">{{ submitted_transactions_count }}</td>
-                    </tr>
                 </tbody>
             </table>
+
+            {% if !minted_deposits_table.is_empty() %}
+            <h3 id="minted-deposits">Minted deposits</h3>
+            <table>
+                <thead>
+                <tr>
+                    <th>Deposit Txn</th>
+                    <th>Account</th>
+                    <th>Deposit Amount (lamports)</th>
+                    <th>Minted Amount (lamports)</th>
+                    <th>Mint Block Index</th>
+                </tr>
+                </thead>
+                <tbody>
+                {% for deposit in minted_deposits_table.current_page %}
+                <tr>
+                    <td>{% call solscan_tx_link(deposit.signature) %}</td>
+                    <td><code>{{ deposit.account }}</code></td>
+                    <td class="numeric">{{ deposit.deposit_amount }}</td>
+                    <td class="numeric">{{ deposit.minted_amount }}</td>
+                    <td class="numeric">{{ deposit.mint_block_index }}</td>
+                </tr>
+                {% endfor %}
+                {% if minted_deposits_table.has_more_than_one_page() %}{{ minted_deposits_table.pagination|safe }}{% endif %}
+                </tbody>
+            </table>
+            {% endif %}
 
             {% if !deposits_to_consolidate.is_empty() %}
             <h3 id="deposits-to-consolidate">Deposits to consolidate</h3>
@@ -173,44 +178,29 @@
             </table>
             {% endif %}
 
-            {% if !sent_withdrawal_requests_table.is_empty() %}
-            <h3 id="sent-withdrawal-requests">Sent withdrawal requests</h3>
+            {% if !withdrawal_transactions_table.is_empty() %}
+            <h3 id="withdrawal-transactions">Withdrawal transactions</h3>
             <table>
                 <thead>
                 <tr>
                     <th>Burn Index</th>
-                    <th>Transaction Signature</th>
+                    <th>To</th>
+                    <th>Amount (lamports)</th>
+                    <th>Txn Signature</th>
+                    <th>Status</th>
                 </tr>
                 </thead>
                 <tbody>
-                {% for (burn_index, signature) in sent_withdrawal_requests_table.current_page %}
+                {% for tx in withdrawal_transactions_table.current_page %}
                 <tr>
-                    <td class="numeric">{{ burn_index }}</td>
-                    <td>{% call solscan_tx_link(signature) %}</td>
+                    <td class="numeric">{{ tx.burn_index }}</td>
+                    <td>{% if !tx.to.is_empty() %}{% call solscan_address_link(tx.to) %}{% else %}N/A{% endif %}</td>
+                    <td class="numeric">{{ tx.amount }}</td>
+                    <td>{% call solscan_tx_link(tx.signature) %}</td>
+                    <td>{{ tx.status }}</td>
                 </tr>
                 {% endfor %}
-                {% if sent_withdrawal_requests_table.has_more_than_one_page() %}{{ sent_withdrawal_requests_table.pagination|safe }}{% endif %}
-                </tbody>
-            </table>
-            {% endif %}
-
-            {% if !submitted_transactions_table.is_empty() %}
-            <h3 id="submitted-transactions">Submitted transactions</h3>
-            <table>
-                <thead>
-                <tr>
-                    <th>Signature</th>
-                    <th>Slot</th>
-                </tr>
-                </thead>
-                <tbody>
-                {% for (signature, slot) in submitted_transactions_table.current_page %}
-                <tr>
-                    <td>{% call solscan_tx_link(signature) %}</td>
-                    <td class="numeric">{{ slot }}</td>
-                </tr>
-                {% endfor %}
-                {% if submitted_transactions_table.has_more_than_one_page() %}{{ submitted_transactions_table.pagination|safe }}{% endif %}
+                {% if withdrawal_transactions_table.has_more_than_one_page() %}{{ withdrawal_transactions_table.pagination|safe }}{% endif %}
                 </tbody>
             </table>
             {% endif %}
