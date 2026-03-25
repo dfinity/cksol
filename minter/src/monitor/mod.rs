@@ -60,19 +60,18 @@ pub async fn monitor_submitted_transactions<R: CanisterRuntime>(runtime: R) {
                 state,
                 EventType::FailedTransaction {
                     signature: *signature,
-                    error: error.clone(),
                 },
                 &runtime,
             )
         });
     }
 
-    for signature in &statuses.finalized {
+    for signature in &statuses.succeeded {
         log!(Priority::Info, "Transaction {signature} finalized");
         mutate_state(|state| {
             process_event(
                 state,
-                EventType::FinalizedTransaction {
+                EventType::SucceededTransaction {
                     signature: *signature,
                 },
                 &runtime,
@@ -122,7 +121,7 @@ pub async fn monitor_submitted_transactions<R: CanisterRuntime>(runtime: R) {
 /// Result of checking transaction statuses.
 struct TransactionStatuses {
     /// Transactions confirmed as finalized on-chain without errors.
-    finalized: BTreeSet<Signature>,
+    succeeded: BTreeSet<Signature>,
     /// Transactions that finalized with an on-chain error.
     errored: BTreeMap<Signature, String>,
     /// Transactions with no on-chain status (safe to resubmit if expired).
@@ -144,7 +143,7 @@ async fn check_transaction_statuses<R: CanisterRuntime>(
         .collect();
 
     let mut result = TransactionStatuses {
-        finalized: BTreeSet::new(),
+        succeeded: BTreeSet::new(),
         errored: BTreeMap::new(),
         not_found: BTreeSet::new(),
     };
@@ -171,7 +170,7 @@ async fn check_transaction_statuses<R: CanisterRuntime>(
                         if let Some(err) = s.err {
                             result.errored.insert(*signature, format!("{err:?}"));
                         } else {
-                            result.finalized.insert(*signature);
+                            result.succeeded.insert(*signature);
                         }
                     }
                     Some(_) => {} // in-flight (Processed/Confirmed)

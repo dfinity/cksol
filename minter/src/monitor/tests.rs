@@ -89,12 +89,15 @@ mod finalization {
             .expect_event(|e| {
                 assert_matches!(
                     e,
-                    EventType::FinalizedTransaction { signature: sig } if sig == signature
+                    EventType::SucceededTransaction { signature: sig } if sig == signature
                 )
             })
             .assert_no_more_events();
 
-        read_state(|s| assert!(s.submitted_transactions().is_empty()));
+        read_state(|s| {
+            assert!(s.submitted_transactions().is_empty());
+            assert!(s.succeeded_transactions().contains(&signature));
+        });
     }
 
     #[tokio::test]
@@ -117,12 +120,15 @@ mod finalization {
             .expect_event(|e| {
                 assert_matches!(
                     e,
-                    EventType::FinalizedTransaction { signature: sig } if sig == signature
+                    EventType::SucceededTransaction { signature: sig } if sig == signature
                 )
             })
             .assert_no_more_events();
 
-        read_state(|s| assert!(s.submitted_transactions().is_empty()));
+        read_state(|s| {
+            assert!(s.submitted_transactions().is_empty());
+            assert!(s.succeeded_transactions().contains(&signature));
+        });
     }
 
     #[tokio::test]
@@ -233,8 +239,7 @@ mod finalization {
                     e,
                     EventType::FailedTransaction {
                         signature: sig,
-                        error,
-                    } if sig == signature && error.contains("InsufficientFundsForFee")
+                    } if sig == signature
                 )
             })
             .assert_no_more_events();
@@ -273,8 +278,8 @@ mod finalization {
             .expect_event(|e| assert_matches!(e, EventType::SubmittedTransaction { .. }))
             .expect_event(|e| assert_matches!(e, EventType::SubmittedTransaction { .. }))
             .expect_event(|e| assert_matches!(e, EventType::SubmittedTransaction { .. }))
-            .expect_event(|e| assert_matches!(e, EventType::FinalizedTransaction { .. }))
-            .expect_event(|e| assert_matches!(e, EventType::FinalizedTransaction { .. }))
+            .expect_event(|e| assert_matches!(e, EventType::SucceededTransaction { .. }))
+            .expect_event(|e| assert_matches!(e, EventType::SucceededTransaction { .. }))
             .assert_no_more_events();
 
         read_state(|s| {
