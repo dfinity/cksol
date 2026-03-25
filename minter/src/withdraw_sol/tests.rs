@@ -1,6 +1,6 @@
-use crate::numeric::LedgerBurnIndex;
+use crate::sol_transfer::MAX_WITHDRAWALS_PER_TX;
 use crate::test_fixtures::EventsAssert;
-use crate::withdraw_sol::MAX_WITHDRAWALS_PER_BATCH;
+use crate::withdraw_sol::MAX_CONCURRENT_WITHDRAWAL_TXS;
 use crate::{
     guard::{TimerGuard, withdraw_sol_guard},
     state::TaskType,
@@ -350,6 +350,56 @@ mod process_pending_withdrawals_tests {
     }
 
     #[tokio::test]
+    async fn should_batch_multiple_withdrawals_into_one_tx() {
+        init_state();
+        init_schnorr_master_key();
+
+        let fake_sig = [0x42; 64];
+
+        let mut runtime = TestCanisterRuntime::new().with_increasing_time();
+        // ledger burn responses for 3 withdrawals
+        for i in 1..=3u64 {
+            runtime = runtime.add_stub_response(Ok::<Nat, TransferFromError>(Nat::from(i)));
+        }
+        // responses for recent block hash
+        runtime = runtime
+            .add_stub_response(SendSlotResult::Consistent(Ok(1)))
+            .add_stub_response(SendBlockResult::Consistent(Ok(get_confirmed_block())))
+            // one signing call for the batch
+            .add_signature(fake_sig);
+
+        withdraw(&runtime, 3).await;
+
+        process_pending_withdrawals(&runtime).await;
+
+        EventsAssert::from_recorded()
+            .expect_event(|e| {
+                assert_matches!(e, EventType::AcceptedWithdrawSolRequest(_));
+            })
+            .expect_event(|e| {
+                assert_matches!(e, EventType::AcceptedWithdrawSolRequest(_));
+            })
+            .expect_event(|e| {
+                assert_matches!(e, EventType::AcceptedWithdrawSolRequest(_));
+            })
+            .expect_event(|e| {
+                assert_matches!(e, EventType::SentWithdrawalTransaction { transactions, .. } => {
+                    // All 3 withdrawals share the same transaction
+                    assert_eq!(transactions.len(), 3);
+                    let sig: solana_signature::Signature = fake_sig.into();
+                    for (_, tx_sig) in transactions {
+                        assert_eq!(tx_sig, sig);
+                    }
+                });
+            })
+            .assert_no_more_events();
+
+        for i in 1..=3u64 {
+            assert_matches!(withdraw_sol_status(i), WithdrawSolStatus::TxSent(_));
+        }
+    }
+
+    #[tokio::test]
     async fn should_log_error_when_blockhash_fetch_fails() {
         init_state();
 
@@ -394,7 +444,7 @@ mod process_pending_withdrawals_tests {
     }
 
     #[tokio::test]
-    async fn should_not_process_pending_withdrawal_sig_error() {
+    async fn should_not_process_batch_on_sig_error() {
         init_state();
         init_schnorr_master_key();
 
@@ -405,8 +455,7 @@ mod process_pending_withdrawals_tests {
             // responses for recent block hash
             .add_stub_response(SendSlotResult::Consistent(Ok(1)))
             .add_stub_response(SendBlockResult::Consistent(Ok(get_confirmed_block())))
-            // one successful signature and one failed
-            .add_signature([0x42; 64])
+            // signing fails for the batch (both withdrawals are in the same tx)
             .add_schnorr_signing_error(SignCallError::CallFailed(
                 CallRejected::with_rejection(4, "signing service unavailable".to_string()).into(),
             ))
@@ -431,12 +480,6 @@ mod process_pending_withdrawals_tests {
                     assert_eq!(req.account, Principal::from_slice(&[1, 2]).into());
                 });
             })
-            .expect_event(|e| {
-                assert_matches!(e, EventType::SentWithdrawalTransaction { transactions, .. } => {
-                    assert_eq!(transactions.len(), 1);
-                    assert_eq!(transactions[0].0, LedgerBurnIndex::from(1u64));
-                });
-            })
             .assert_no_more_events();
 
         // An error should be logged
@@ -445,12 +488,13 @@ mod process_pending_withdrawals_tests {
         assert!(
             log.entries.iter().any(|e| e
                 .message
-                .contains("Failed to create withdrawal transaction for burn index 2")),
+                .contains("Failed to create withdrawal transaction for burn indices")),
             "Expected error log about sig failure, got: {:?}",
             log.entries
         );
 
-        assert_matches!(withdraw_sol_status(1), WithdrawSolStatus::TxSent(_));
+        // Both withdrawals remain pending since they were in the same batch
+        assert_matches!(withdraw_sol_status(1), WithdrawSolStatus::Pending);
         assert_matches!(withdraw_sol_status(2), WithdrawSolStatus::Pending);
     }
 
@@ -459,7 +503,9 @@ mod process_pending_withdrawals_tests {
         init_state();
         init_schnorr_master_key();
 
-        let request_count = MAX_WITHDRAWALS_PER_BATCH as u64 + 1;
+        let max_per_invocation = MAX_WITHDRAWALS_PER_TX * MAX_CONCURRENT_WITHDRAWAL_TXS;
+        // Create one more than the max to verify the overflow stays pending
+        let request_count = max_per_invocation as u64 + 1;
 
         let mut runtime = TestCanisterRuntime::new().with_increasing_time();
         // withdraw ledger burn responses
@@ -470,11 +516,11 @@ mod process_pending_withdrawals_tests {
         runtime = runtime
             .add_stub_response(SendSlotResult::Consistent(Ok(1)))
             .add_stub_response(SendBlockResult::Consistent(Ok(get_confirmed_block())));
-        // signatures for the first batch of withdrawals
-        for _ in 0..MAX_WITHDRAWALS_PER_BATCH {
+        // one signature per transaction (batch of up to MAX_WITHDRAWALS_PER_TX)
+        for _ in 0..MAX_CONCURRENT_WITHDRAWAL_TXS {
             runtime = runtime.add_signature([0x42; 64]);
         }
-        // responses for recent block hash and signature for the second batch
+        // responses for the second invocation (1 remaining withdrawal)
         runtime = runtime
             .add_stub_response(SendSlotResult::Consistent(Ok(1)))
             .add_stub_response(SendBlockResult::Consistent(Ok(get_confirmed_block())))
@@ -484,12 +530,12 @@ mod process_pending_withdrawals_tests {
 
         process_pending_withdrawals(&runtime).await;
 
-        for i in 0..MAX_WITHDRAWALS_PER_BATCH {
+        for i in 0..max_per_invocation {
             assert_matches!(withdraw_sol_status(i as u64), WithdrawSolStatus::TxSent(_));
         }
         // last withdrawal was not yet processed
         assert_matches!(
-            withdraw_sol_status(MAX_WITHDRAWALS_PER_BATCH as u64),
+            withdraw_sol_status(max_per_invocation as u64),
             WithdrawSolStatus::Pending
         );
 

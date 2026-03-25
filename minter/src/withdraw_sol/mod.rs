@@ -3,6 +3,7 @@ use std::time::Duration;
 
 use candid::Principal;
 use cksol_types::{WithdrawSolError, WithdrawSolOk, WithdrawSolStatus};
+use itertools::Itertools;
 use icrc_ledger_types::icrc1::account::{Account, Subaccount};
 use icrc_ledger_types::icrc2::transfer_from::TransferFromError;
 use num_traits::ToPrimitive;
@@ -15,7 +16,7 @@ use crate::{
     guard::{TimerGuard, withdraw_sol_guard},
     ledger::burn,
     runtime::CanisterRuntime,
-    sol_transfer::create_signed_transfer_transaction,
+    sol_transfer::{MAX_WITHDRAWALS_PER_TX, create_signed_withdrawal_transaction},
     state::{
         TaskType,
         audit::process_event,
@@ -25,8 +26,8 @@ use crate::{
 };
 
 pub const WITHDRAWAL_PROCESSING_DELAY: Duration = Duration::from_mins(1);
-// The maximum number of withdrawal requests to process in a single timer invocation.
-const MAX_WITHDRAWALS_PER_BATCH: usize = 10;
+/// The maximum number of withdrawal transactions to submit concurrently.
+const MAX_CONCURRENT_WITHDRAWAL_TXS: usize = 10;
 
 #[cfg(test)]
 mod tests;
@@ -132,15 +133,12 @@ pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: &R) {
         }
     };
 
-    // TODO: we should batch requests into up to N chunks of size M, each chunk
-    // should be a separate transaction containing multiple withdrawal requests.
-    // M is the max withdrawals per tx, N is max tx per round.
-
+    let max_withdrawals = MAX_WITHDRAWALS_PER_TX * MAX_CONCURRENT_WITHDRAWAL_TXS;
     let pending_requests: Vec<WithdrawSolRequest> = read_state(|state| {
         state
             .pending_withdrawal_requests()
             .values()
-            .take(MAX_WITHDRAWALS_PER_BATCH)
+            .take(max_withdrawals)
             .cloned()
             .collect()
     });
@@ -173,26 +171,36 @@ pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: &R) {
     // here and while consolidating funds.
     // If there are not enough funds for the withdrawal we simply continue.
 
-    let withdrawal_params: Vec<_> = pending_requests
+    let batches: Vec<Vec<&WithdrawSolRequest>> = pending_requests
         .iter()
-        .map(|request| {
-            let destination = Address::from(request.solana_address);
-            let transfer_amount = request
-                .withdrawal_amount
-                .checked_sub(request.withdrawal_fee)
-                .expect("BUG: withdrawal_amount must be >= withdrawal_fee");
-            let sources = vec![(minter_account, transfer_amount)];
-            (sources, destination)
+        .chunks(MAX_WITHDRAWALS_PER_TX)
+        .into_iter()
+        .map(Iterator::collect)
+        .collect();
+
+    let batch_destinations: Vec<Vec<_>> = batches
+        .iter()
+        .map(|batch| {
+            batch
+                .iter()
+                .map(|request| {
+                    let destination = Address::from(request.solana_address);
+                    let transfer_amount = request
+                        .withdrawal_amount
+                        .checked_sub(request.withdrawal_fee)
+                        .expect("BUG: withdrawal_amount must be >= withdrawal_fee");
+                    (destination, transfer_amount)
+                })
+                .collect()
         })
         .collect();
 
-    let sign_futures: Vec<_> = withdrawal_params
+    let sign_futures: Vec<_> = batch_destinations
         .iter()
-        .map(|(sources, destination)| {
-            create_signed_transfer_transaction(
+        .map(|destinations| {
+            create_signed_withdrawal_transaction(
                 minter_account,
-                sources,
-                *destination,
+                destinations,
                 recent_blockhash,
                 &signer,
             )
@@ -201,27 +209,31 @@ pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: &R) {
 
     let results = futures::future::join_all(sign_futures).await;
 
-    for (request, result) in pending_requests.into_iter().zip(results) {
-        let transaction = match result {
+    for (batch, result) in batches.into_iter().zip(results) {
+        let (transaction, _signers) = match result {
             Ok(tx) => tx,
             Err(e) => {
+                let burn_indices: Vec<_> =
+                    batch.iter().map(|r| r.burn_block_index).collect();
                 log!(
                     Priority::Error,
-                    "Failed to create withdrawal transaction for burn index {:?}: {e}",
-                    request.burn_block_index
+                    "Failed to create withdrawal transaction for burn indices {burn_indices:?}: {e}",
                 );
                 continue;
             }
         };
 
-        let signature = transaction.0.signatures[0];
+        let signature = transaction.signatures[0];
+
+        let transactions: Vec<_> = batch
+            .iter()
+            .map(|request| (request.burn_block_index, signature))
+            .collect();
 
         mutate_state(|state| {
             process_event(
                 state,
-                EventType::SentWithdrawalTransaction {
-                    transactions: vec![(request.burn_block_index, signature)],
-                },
+                EventType::SentWithdrawalTransaction { transactions },
                 runtime,
             )
         });
