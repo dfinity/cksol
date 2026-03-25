@@ -52,11 +52,10 @@ fn apply_state_transition(state: &mut State, payload: &EventType) {
         EventType::ConsolidatedDeposits { deposits } => {
             state.process_consolidated_deposits(deposits);
         }
-        EventType::SentWithdrawalTransaction {
-            burn_block_index,
-            signature,
-        } => {
-            state.process_sent_withdrawal_transaction(burn_block_index, signature);
+        EventType::SentWithdrawalTransaction { transactions } => {
+            for (burn_block_index, signature) in transactions {
+                state.process_sent_withdrawal_transaction(burn_block_index, signature);
+            }
         }
         EventType::ResubmittedTransaction {
             old_signature,

@@ -93,10 +93,8 @@ pub enum EventType {
     },
     /// A withdrawal transaction was signed and is ready to be sent to the network.
     SentWithdrawalTransaction {
-        /// The burn transaction index on the ckSOL ledger.
-        burn_block_index: u64,
-        /// The transaction signature.
-        signature: Signature,
+        /// The burn block indices and corresponding transaction signatures.
+        transactions: Vec<(u64, Signature)>,
     },
     /// A previously submitted transaction was resubmitted with a new signature.
     ResubmittedTransaction {

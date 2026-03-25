@@ -154,13 +154,14 @@ fn get_events(
             EventType::ConsolidatedDeposits { deposits } => {
                 event::EventType::ConsolidatedDeposits { deposits }
             }
-            EventType::SentWithdrawalTransaction {
-                burn_block_index,
-                signature,
-            } => event::EventType::SentWithdrawalTransaction {
-                burn_block_index: *burn_block_index.get(),
-                signature: signature.into(),
-            },
+            EventType::SentWithdrawalTransaction { transactions } => {
+                event::EventType::SentWithdrawalTransaction {
+                    transactions: transactions
+                        .iter()
+                        .map(|(idx, sig)| (*idx.get(), sig.into()))
+                        .collect(),
+                }
+            }
             EventType::ResubmittedTransaction {
                 old_signature,
                 new_signature,

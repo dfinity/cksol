@@ -109,12 +109,9 @@ pub enum EventType {
     /// A withdrawal transaction was signed and is ready to be sent to the network.
     #[n(10)]
     SentWithdrawalTransaction {
-        /// The burn transaction index on the ckSOL ledger.
-        #[cbor(n(0), with = "cbor::id")]
-        burn_block_index: LedgerBurnIndex,
-        /// The transaction signature.
-        #[cbor(n(1), with = "cbor::signature")]
-        signature: Signature,
+        /// The burn block indices and corresponding transaction signatures.
+        #[cbor(n(0), with = "cbor::burn_index_signature_vec")]
+        transactions: Vec<(LedgerBurnIndex, Signature)>,
     },
 }
 

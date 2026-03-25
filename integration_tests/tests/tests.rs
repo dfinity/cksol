@@ -605,9 +605,9 @@ mod withdraw_sol_tests {
             check!(events.iter().any(|e| matches!(
                 e,
                 EventType::SentWithdrawalTransaction {
-                    burn_block_index,
+                    transactions,
                     ..
-                } if *burn_block_index == block_index
+                } if transactions.iter().any(|(idx, _)| *idx == block_index)
             )));
         });
 

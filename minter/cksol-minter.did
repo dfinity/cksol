@@ -297,10 +297,8 @@ type EventType = variant {
     };
     // A withdrawal transaction was signed and is ready to be sent to the network.
     SentWithdrawalTransaction : record {
-        // The burn transaction index on the ckSOL ledger.
-        burn_block_index: nat64;
-        // The transaction signature.
-        signature: Signature;
+        // The burn block indices and corresponding transaction signatures.
+        transactions: vec record { nat64; Signature };
     };
     // A previously submitted transaction was resubmitted with a new signature.
     ResubmittedTransaction : record {

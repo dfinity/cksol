@@ -339,8 +339,9 @@ mod process_pending_withdrawals_tests {
                 });
             })
             .expect_event(|e| {
-                assert_matches!(e, EventType::SentWithdrawalTransaction { signature, .. } => {
-                    assert_eq!(signature, fake_sig.into());
+                assert_matches!(e, EventType::SentWithdrawalTransaction { transactions, .. } => {
+                    assert_eq!(transactions.len(), 1);
+                    assert_eq!(transactions[0].1, fake_sig.into());
                 });
             })
             .assert_no_more_events();
@@ -431,8 +432,9 @@ mod process_pending_withdrawals_tests {
                 });
             })
             .expect_event(|e| {
-                assert_matches!(e, EventType::SentWithdrawalTransaction { burn_block_index, .. } => {
-                    assert_eq!(burn_block_index, LedgerBurnIndex::from(1u64));
+                assert_matches!(e, EventType::SentWithdrawalTransaction { transactions, .. } => {
+                    assert_eq!(transactions.len(), 1);
+                    assert_eq!(transactions[0].0, LedgerBurnIndex::from(1u64));
                 });
             })
             .assert_no_more_events();
