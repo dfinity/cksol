@@ -1,7 +1,123 @@
 use crate::state::State;
 use askama::Template;
 use candid::Principal;
+use ic_http_types::HttpRequest;
 use sol_rpc_types::Lamport;
+use std::str::FromStr;
+
+const DEFAULT_PAGE_SIZE: usize = 100;
+
+// --- Pagination ---
+
+#[derive(Default, Clone)]
+pub struct DashboardPaginationParameters {
+    pub submitted_transactions_start: usize,
+    pub sent_withdrawal_requests_start: usize,
+}
+
+impl DashboardPaginationParameters {
+    pub fn from_query_params(req: &HttpRequest) -> Result<Self, String> {
+        fn parse(req: &HttpRequest, param: &str) -> Result<usize, String> {
+            Ok(match req.raw_query_param(param) {
+                Some(arg) => usize::from_str(arg)
+                    .map_err(|_| format!("failed to parse the '{param}' parameter"))?,
+                None => 0,
+            })
+        }
+
+        Ok(Self {
+            submitted_transactions_start: parse(req, "submitted_transactions_start")?,
+            sent_withdrawal_requests_start: parse(req, "sent_withdrawal_requests_start")?,
+        })
+    }
+}
+
+#[derive(Clone)]
+pub struct DashboardPaginatedTable<T> {
+    pub current_page: Vec<T>,
+    pub pagination: DashboardTablePagination,
+}
+
+impl<T: Clone> DashboardPaginatedTable<T> {
+    pub fn from_items(
+        items: &[T],
+        current_page_offset: usize,
+        page_size: usize,
+        num_cols: usize,
+        table_reference: &str,
+        page_offset_query_param: &str,
+    ) -> Self {
+        Self {
+            current_page: items
+                .iter()
+                .skip(current_page_offset)
+                .take(page_size)
+                .cloned()
+                .collect(),
+            pagination: DashboardTablePagination::new(
+                items.len(),
+                current_page_offset,
+                page_size,
+                num_cols,
+                table_reference,
+                page_offset_query_param,
+            ),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.current_page.is_empty()
+    }
+
+    pub fn has_more_than_one_page(&self) -> bool {
+        self.pagination.pages.len() > 1
+    }
+}
+
+#[derive(Clone)]
+pub struct DashboardTablePage {
+    pub index: usize,
+    pub offset: usize,
+}
+
+#[derive(Template, Clone)]
+#[template(path = "pagination.html")]
+pub struct DashboardTablePagination {
+    pub table_id: String,
+    pub table_width: usize,
+    pub page_offset_query_param: String,
+    pub current_page_index: usize,
+    pub pages: Vec<DashboardTablePage>,
+}
+
+impl DashboardTablePagination {
+    fn new(
+        num_items: usize,
+        current_offset: usize,
+        page_size: usize,
+        table_width: usize,
+        table_reference: &str,
+        page_offset_query_param: &str,
+    ) -> Self {
+        let pages = (0..num_items)
+            .step_by(page_size)
+            .enumerate()
+            .map(|(index, offset)| DashboardTablePage {
+                index: index + 1,
+                offset,
+            })
+            .collect();
+        Self {
+            table_id: String::from(table_reference),
+            page_offset_query_param: String::from(page_offset_query_param),
+            table_width,
+            current_page_index: current_offset / page_size + 1,
+            pages,
+        }
+    }
+}
+
+// --- Dashboard data ---
 
 #[derive(Clone)]
 pub struct DashboardWithdrawalRequest {
@@ -31,12 +147,12 @@ pub struct DashboardTemplate {
     pub submitted_transactions_count: usize,
     pub deposits_to_consolidate: Vec<(String, String, Lamport)>,
     pub pending_withdrawal_requests: Vec<DashboardWithdrawalRequest>,
-    pub sent_withdrawal_requests: Vec<(String, String)>,
-    pub submitted_transactions: Vec<(String, u64)>,
+    pub sent_withdrawal_requests_table: DashboardPaginatedTable<(String, String)>,
+    pub submitted_transactions_table: DashboardPaginatedTable<(String, u64)>,
 }
 
 impl DashboardTemplate {
-    pub fn from_state(state: &State) -> Self {
+    pub fn from_state(state: &State, pagination: DashboardPaginationParameters) -> Self {
         let minter_address = state
             .minter_public_key()
             .map(|key| {
@@ -73,11 +189,29 @@ impl DashboardTemplate {
             .map(|(burn_index, sig)| (burn_index.to_string(), sig.to_string()))
             .collect();
 
+        let sent_withdrawal_requests_table = DashboardPaginatedTable::from_items(
+            &sent_withdrawal_requests,
+            pagination.sent_withdrawal_requests_start,
+            DEFAULT_PAGE_SIZE,
+            2,
+            "sent-withdrawal-requests",
+            "sent_withdrawal_requests_start",
+        );
+
         let submitted_transactions: Vec<_> = state
             .submitted_transactions()
             .iter()
             .map(|(sig, tx)| (sig.to_string(), tx.slot))
             .collect();
+
+        let submitted_transactions_table = DashboardPaginatedTable::from_items(
+            &submitted_transactions,
+            pagination.submitted_transactions_start,
+            DEFAULT_PAGE_SIZE,
+            2,
+            "submitted-transactions",
+            "submitted_transactions_start",
+        );
 
         DashboardTemplate {
             minter_address,
@@ -96,8 +230,8 @@ impl DashboardTemplate {
             submitted_transactions_count: state.submitted_transactions().len(),
             deposits_to_consolidate,
             pending_withdrawal_requests,
-            sent_withdrawal_requests,
-            submitted_transactions,
+            sent_withdrawal_requests_table,
+            submitted_transactions_table,
         }
     }
 }

@@ -173,7 +173,7 @@
             </table>
             {% endif %}
 
-            {% if !sent_withdrawal_requests.is_empty() %}
+            {% if !sent_withdrawal_requests_table.is_empty() %}
             <h3 id="sent-withdrawal-requests">Sent withdrawal requests</h3>
             <table>
                 <thead>
@@ -183,17 +183,18 @@
                 </tr>
                 </thead>
                 <tbody>
-                {% for (burn_index, signature) in sent_withdrawal_requests %}
+                {% for (burn_index, signature) in sent_withdrawal_requests_table.current_page %}
                 <tr>
                     <td class="numeric">{{ burn_index }}</td>
                     <td>{% call solscan_tx_link(signature) %}</td>
                 </tr>
                 {% endfor %}
+                {% if sent_withdrawal_requests_table.has_more_than_one_page() %}{{ sent_withdrawal_requests_table.pagination|safe }}{% endif %}
                 </tbody>
             </table>
             {% endif %}
 
-            {% if !submitted_transactions.is_empty() %}
+            {% if !submitted_transactions_table.is_empty() %}
             <h3 id="submitted-transactions">Submitted transactions</h3>
             <table>
                 <thead>
@@ -203,12 +204,13 @@
                 </tr>
                 </thead>
                 <tbody>
-                {% for (signature, slot) in submitted_transactions %}
+                {% for (signature, slot) in submitted_transactions_table.current_page %}
                 <tr>
                     <td>{% call solscan_tx_link(signature) %}</td>
                     <td class="numeric">{{ slot }}</td>
                 </tr>
                 {% endfor %}
+                {% if submitted_transactions_table.has_more_than_one_page() %}{{ submitted_transactions_table.pagination|safe }}{% endif %}
                 </tbody>
             </table>
             {% endif %}
