@@ -14,6 +14,8 @@ env:
   POCKET_IC_SERVER_VERSION: "12.0.0"
   CARGO_TERM_COLOR: always
   RUSTFLAGS: "-Dwarnings"
+  RUSTC_WRAPPER: "sccache"
+  SCCACHE_GHA_ENABLED: "true"
 
 jobs:
   lint:
@@ -22,6 +24,9 @@ jobs:
       - name: 'Checkout'
         uses: actions/checkout@v4
 
+      - name: 'Setup sccache'
+        uses: mozilla-actions/sccache-action@v0.0.9
+
       - name: 'Check code'
         run: |
           cargo fmt --all -- --check
@@ -29,7 +34,7 @@ jobs:
           cargo clippy --locked --verbose --target wasm32-unknown-unknown -p cksol-minter -- -D clippy::all
 
       - name: 'Install cargo-sort'
-        run: cargo install cargo-sort
+        uses: taiki-e/install-action@cargo-sort
 
       - name: 'Check Cargo.toml'
         run: cargo sort --workspace --check
@@ -39,6 +44,10 @@ jobs:
     steps:
       - name: 'Checkout'
         uses: actions/checkout@v4
+
+      - name: 'Setup sccache'
+        uses: mozilla-actions/sccache-action@v0.0.9
+
       # TODO DEFI-2641: setup reproducible build with Docker
       - name: Docker build
         run: |
@@ -62,6 +71,10 @@ jobs:
     steps:
       - name: 'Checkout'
         uses: actions/checkout@v4
+
+      - name: 'Setup sccache'
+        uses: mozilla-actions/sccache-action@v0.0.9
+
       - name: 'Run unit tests'
         run: cargo test --locked --workspace --exclude cksol-int-tests
 
@@ -71,6 +84,9 @@ jobs:
     steps:
       - name: 'Checkout'
         uses: actions/checkout@v4
+
+      - name: 'Setup sccache'
+        uses: mozilla-actions/sccache-action@v0.0.9
 
       - name: 'Download Artifacts'
         uses: actions/download-artifact@v4
