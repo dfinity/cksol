@@ -291,9 +291,8 @@ type EventType = variant {
     // Deposited funds from user deposit accounts have been consolidated
     // into the minter's main account.
     ConsolidatedDeposits : record {
-        // The deposit accounts from which funds were consolidated
-        // and the amount consolidated from each account.
-        deposits: vec record { Account; Lamport };
+        // The mint indices of the deposits that were consolidated.
+        mint_indices: vec nat64;
     };
     // A withdrawal transaction was signed and is ready to be sent to the network.
     SentWithdrawalTransaction : record {

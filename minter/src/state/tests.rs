@@ -48,7 +48,7 @@ mod state_from_init_args {
                 minted_deposits: BTreeMap::new(),
                 pending_withdrawal_requests: BTreeMap::new(),
                 sent_withdrawal_requests: BTreeMap::new(),
-                funds_to_consolidate: BTreeMap::new(),
+                deposits_to_consolidate: BTreeMap::new(),
                 submitted_transactions: BTreeMap::new(),
                 active_tasks: BTreeSet::new(),
             }
