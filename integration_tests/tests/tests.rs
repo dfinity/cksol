@@ -598,7 +598,7 @@ mod withdraw_sol_tests {
             .advance_time(Duration::from_mins(1) + Duration::from_secs(1))
             .await;
         setup
-            .tick_with_http_mocks(estimate_blockhash_http_mocks())
+            .execute_http_mocks(estimate_blockhash_http_mocks())
             .await;
 
         setup.minter().assert_that_events().await.satisfy(|events| {
