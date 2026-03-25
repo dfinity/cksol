@@ -91,6 +91,11 @@ pub enum EventType {
         /// and the amount consolidated from each account.
         deposits: Vec<(Account, Lamport)>,
     },
+    /// A withdrawal transaction was signed and is ready to be sent to the network.
+    SentWithdrawalTransaction {
+        /// The burn block indices and corresponding transaction signatures.
+        transactions: Vec<(u64, Signature)>,
+    },
     /// A previously submitted transaction was resubmitted with a new signature.
     ResubmittedTransaction {
         /// The signature of the old transaction being replaced.

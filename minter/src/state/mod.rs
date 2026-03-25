@@ -4,7 +4,7 @@ use crate::{
     state::event::{DepositId, WithdrawSolRequest},
 };
 use candid::Principal;
-use cksol_types::{DepositStatus, WithdrawSolStatus};
+use cksol_types::{DepositStatus, SolTransaction, WithdrawSolStatus};
 use cksol_types_internal::{Ed25519KeyName, InitArgs, UpgradeArgs};
 use ic_canister_runtime::Runtime;
 use ic_ed25519::PublicKey;
@@ -88,6 +88,7 @@ pub struct State {
     quarantined_deposits: BTreeMap<DepositId, Deposit>,
     minted_deposits: BTreeMap<DepositId, MintedDeposit>,
     pending_withdrawal_requests: BTreeMap<LedgerBurnIndex, WithdrawSolRequest>,
+    sent_withdrawal_requests: BTreeMap<LedgerBurnIndex, Signature>,
     funds_to_consolidate: BTreeMap<Account, Lamport>,
     submitted_transactions: BTreeMap<Signature, SubmittedTransaction>,
     active_tasks: BTreeSet<TaskType>,
@@ -324,13 +325,20 @@ impl State {
     }
 
     pub fn withdrawal_status(&self, block_index: u64) -> WithdrawSolStatus {
-        if self
-            .pending_withdrawal_requests
-            .contains_key(&LedgerBurnIndex::from(block_index))
-        {
+        let burn_index = LedgerBurnIndex::from(block_index);
+        if self.pending_withdrawal_requests.contains_key(&burn_index) {
             return WithdrawSolStatus::Pending;
         }
+        if let Some(sent_signature) = self.sent_withdrawal_requests.get(&burn_index) {
+            return WithdrawSolStatus::TxSent(SolTransaction {
+                transaction_hash: sent_signature.to_string(),
+            });
+        }
         WithdrawSolStatus::NotFound
+    }
+
+    pub fn pending_withdrawal_requests(&self) -> &BTreeMap<LedgerBurnIndex, WithdrawSolRequest> {
+        &self.pending_withdrawal_requests
     }
 
     fn process_accepted_withdrawal(&mut self, request: &WithdrawSolRequest) {
@@ -385,6 +393,27 @@ impl State {
             ),
             None,
             "Attempted to submit transaction with signature {signature:?} twice"
+        );
+    }
+
+    fn process_sent_withdrawal_transaction(
+        &mut self,
+        burn_block_index: &LedgerBurnIndex,
+        signature: &Signature,
+    ) {
+        assert!(
+            self.pending_withdrawal_requests
+                .remove(burn_block_index)
+                .is_some(),
+            "Attempted to send transaction for unknown withdrawal request: {:?}",
+            burn_block_index
+        );
+        assert_eq!(
+            self.sent_withdrawal_requests
+                .insert(*burn_block_index, *signature),
+            None,
+            "Attempted to send transaction for already sent withdrawal request: {:?}",
+            burn_block_index
         );
     }
 
@@ -486,6 +515,7 @@ impl TryFrom<InitArgs> for State {
             quarantined_deposits: BTreeMap::new(),
             minted_deposits: BTreeMap::new(),
             pending_withdrawal_requests: BTreeMap::new(),
+            sent_withdrawal_requests: BTreeMap::new(),
             funds_to_consolidate: BTreeMap::new(),
             submitted_transactions: BTreeMap::new(),
             active_tasks: BTreeSet::new(),
@@ -518,6 +548,7 @@ pub enum TaskType {
     DepositConsolidation,
     Mint,
     MonitorSubmittedTransactions,
+    WithdrawalProcessing,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
