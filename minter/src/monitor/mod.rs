@@ -37,11 +37,11 @@ pub async fn monitor_submitted_transactions<R: CanisterRuntime>(runtime: R) {
         Err(_) => return,
     };
 
-    let all_transactions: Vec<_> = read_state(|state| {
+    let all_transactions: Vec<(Signature, Slot)> = read_state(|state| {
         state
             .submitted_transactions()
             .iter()
-            .map(|(sig, tx)| (*sig, tx.message.clone(), tx.signers.clone(), tx.slot))
+            .map(|(sig, tx)| (*sig, tx.slot))
             .collect()
     });
     if all_transactions.is_empty() {
@@ -73,12 +73,29 @@ pub async fn monitor_submitted_transactions<R: CanisterRuntime>(runtime: R) {
         }
     };
 
-    let to_resubmit: Vec<_> = all_transactions
+    let expired_signatures: BTreeSet<Signature> = all_transactions
         .into_iter()
-        .filter(|(sig, _, _, slot)| {
+        .filter(|(sig, slot)| {
             statuses.not_found.contains(sig) && slot + MAX_BLOCKHASH_AGE < current_slot
         })
+        .map(|(sig, _)| sig)
         .collect();
+
+    if expired_signatures.is_empty() {
+        return;
+    }
+
+    let to_resubmit: Vec<_> = read_state(|state| {
+        expired_signatures
+            .iter()
+            .filter_map(|sig| {
+                state
+                    .submitted_transactions()
+                    .get(sig)
+                    .map(|tx| (*sig, tx.message.clone(), tx.signers.clone()))
+            })
+            .collect()
+    });
 
     resubmit_expired_transactions(&runtime, to_resubmit).await;
 }
@@ -95,9 +112,9 @@ struct TransactionStatuses {
 
 async fn check_transaction_statuses<R: CanisterRuntime>(
     runtime: &R,
-    transactions: &[(Signature, Message, Vec<Account>, Slot)],
+    transactions: &[(Signature, Slot)],
 ) -> TransactionStatuses {
-    let signatures: Vec<Signature> = transactions.iter().map(|(sig, _, _, _)| *sig).collect();
+    let signatures: Vec<Signature> = transactions.iter().map(|(sig, _)| *sig).collect();
     let batches: Vec<Vec<Signature>> = signatures
         .into_iter()
         .chunks(MAX_SIGNATURES_PER_STATUS_CHECK)
@@ -145,7 +162,7 @@ async fn check_transaction_statuses<R: CanisterRuntime>(
 
 async fn resubmit_expired_transactions<R: CanisterRuntime>(
     runtime: &R,
-    expired: Vec<(Signature, Message, Vec<Account>, Slot)>,
+    expired: Vec<(Signature, Message, Vec<Account>)>,
 ) {
     for round in &expired.into_iter().chunks(MAX_CONCURRENT_RPC_CALLS) {
         let new_blockhash = match get_recent_blockhash(runtime).await {
@@ -163,7 +180,7 @@ async fn resubmit_expired_transactions<R: CanisterRuntime>(
             }
         };
 
-        futures::future::join_all(round.map(async |(old_signature, message, signers, _)| {
+        futures::future::join_all(round.map(async |(old_signature, message, signers)| {
             match try_resubmit_transaction(
                 runtime,
                 old_signature,
