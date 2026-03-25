@@ -20,7 +20,7 @@ use solana_message::Message;
 use solana_signature::Signature;
 use solana_transaction::Transaction;
 use solana_transaction_status_client_types::TransactionConfirmationStatus;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 use thiserror::Error;
 
@@ -50,12 +50,22 @@ pub async fn monitor_submitted_transactions<R: CanisterRuntime>(runtime: R) {
 
     let statuses = check_transaction_statuses(&runtime, &all_transactions).await;
 
-    for signature in statuses.finalized {
+    for (signature, error) in &statuses.errored {
+        // TODO: handle errored transactions (e.g., quarantine, retry, or alert).
+        log!(
+            Priority::Info,
+            "Transaction {signature} finalized with error: {error}"
+        );
+    }
+
+    for signature in &statuses.finalized {
         log!(Priority::Info, "Transaction {signature} finalized");
         mutate_state(|state| {
             process_event(
                 state,
-                EventType::FinalizedTransaction { signature },
+                EventType::FinalizedTransaction {
+                    signature: *signature,
+                },
                 &runtime,
             )
         });
@@ -102,8 +112,10 @@ pub async fn monitor_submitted_transactions<R: CanisterRuntime>(runtime: R) {
 
 /// Result of checking transaction statuses.
 struct TransactionStatuses {
-    /// Transactions confirmed as finalized on-chain.
+    /// Transactions confirmed as finalized on-chain without errors.
     finalized: BTreeSet<Signature>,
+    /// Transactions that finalized with an on-chain error.
+    errored: BTreeMap<Signature, String>,
     /// Transactions with no on-chain status (safe to resubmit if expired).
     not_found: BTreeSet<Signature>,
     // Transactions that are in-flight (Processed/Confirmed) or whose status
@@ -124,6 +136,7 @@ async fn check_transaction_statuses<R: CanisterRuntime>(
 
     let mut result = TransactionStatuses {
         finalized: BTreeSet::new(),
+        errored: BTreeMap::new(),
         not_found: BTreeSet::new(),
     };
 
@@ -146,7 +159,11 @@ async fn check_transaction_statuses<R: CanisterRuntime>(
                         if s.confirmation_status
                             == Some(TransactionConfirmationStatus::Finalized) =>
                     {
-                        result.finalized.insert(*signature);
+                        if let Some(err) = s.err {
+                            result.errored.insert(*signature, format!("{err:?}"));
+                        } else {
+                            result.finalized.insert(*signature);
+                        }
                     }
                     Some(_) => {} // in-flight (Processed/Confirmed)
                     None => {

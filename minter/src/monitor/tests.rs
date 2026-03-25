@@ -11,7 +11,7 @@ use assert_matches::assert_matches;
 use ic_ed25519::{PocketIcMasterPublicKeyId, PublicKey};
 use sol_rpc_types::{
     ConfirmedBlock, MultiRpcResult, RpcError, Slot, TransactionConfirmationStatus,
-    TransactionStatus,
+    TransactionError, TransactionStatus,
 };
 use solana_hash::Hash;
 use solana_message::Message;
@@ -126,71 +126,104 @@ mod finalization {
     }
 
     #[tokio::test]
-    async fn should_not_finalize_transaction_with_confirmed_status() {
+    async fn should_not_finalize_confirmed_transaction_with_recent_slot() {
+        should_not_finalize(
+            100,
+            Some(TransactionStatus {
+                slot: 100,
+                status: Ok(()),
+                err: None,
+                confirmation_status: Some(TransactionConfirmationStatus::Confirmed),
+            }),
+            None,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn should_not_finalize_confirmed_transaction_with_expired_slot() {
+        should_not_finalize(
+            10,
+            Some(TransactionStatus {
+                slot: 10,
+                status: Ok(()),
+                err: None,
+                confirmation_status: Some(TransactionConfirmationStatus::Confirmed),
+            }),
+            None,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn should_not_finalize_processed_transaction() {
+        should_not_finalize(
+            100,
+            Some(TransactionStatus {
+                slot: 100,
+                status: Ok(()),
+                err: None,
+                confirmation_status: Some(TransactionConfirmationStatus::Processed),
+            }),
+            None,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn should_not_finalize_transaction_with_no_status() {
+        should_not_finalize(
+            100,
+            None,
+            Some(SlotResult::Consistent(Ok(100 + MAX_BLOCKHASH_AGE - 1))),
+        )
+        .await;
+    }
+
+    async fn should_not_finalize(
+        slot: Slot,
+        status: Option<TransactionStatus>,
+        get_slot_response: Option<SlotResult>,
+    ) {
         setup();
 
-        add_submitted_transaction(Signature::from([0x01; 64]), 100);
+        add_submitted_transaction(Signature::from([0x01; 64]), slot);
+
+        let mut runtime = TestCanisterRuntime::new()
+            .with_increasing_time()
+            .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![status])));
+
+        if let Some(slot_response) = get_slot_response {
+            runtime = runtime.add_stub_response(slot_response);
+        }
+
+        monitor_submitted_transactions(runtime).await;
+
+        EventsAssert::from_recorded()
+            .expect_event(|e| assert_matches!(e, EventType::SubmittedTransaction { .. }))
+            .assert_no_more_events();
+
+        read_state(|s| assert_eq!(s.submitted_transactions().len(), 1));
+    }
+
+    // TODO: handle errored transactions (e.g., quarantine, retry, or alert).
+    #[tokio::test]
+    async fn should_not_finalize_transaction_with_error() {
+        setup();
+
+        let signature = Signature::from([0x01; 64]);
+        add_submitted_transaction(signature, 100);
 
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
             .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![Some(
                 TransactionStatus {
                     slot: 100,
-                    status: Ok(()),
-                    err: None,
-                    confirmation_status: Some(TransactionConfirmationStatus::Confirmed),
+                    status: Err(TransactionError::InsufficientFundsForFee),
+                    err: Some(TransactionError::InsufficientFundsForFee),
+                    confirmation_status: Some(TransactionConfirmationStatus::Finalized),
                 },
             )])));
-
-        monitor_submitted_transactions(runtime).await;
-
-        EventsAssert::from_recorded()
-            .expect_event(|e| assert_matches!(e, EventType::SubmittedTransaction { .. }))
-            .assert_no_more_events();
-
-        read_state(|s| assert_eq!(s.submitted_transactions().len(), 1));
-    }
-
-    #[tokio::test]
-    async fn should_not_resubmit_confirmed_transaction_even_if_expired() {
-        setup();
-
-        let original_slot = 10;
-        add_submitted_transaction(Signature::from([0x01; 64]), original_slot);
-
-        let runtime = TestCanisterRuntime::new()
-            .with_increasing_time()
-            .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![Some(
-                TransactionStatus {
-                    slot: original_slot,
-                    status: Ok(()),
-                    err: None,
-                    confirmation_status: Some(TransactionConfirmationStatus::Confirmed),
-                },
-            )])));
-
-        monitor_submitted_transactions(runtime).await;
-
-        EventsAssert::from_recorded()
-            .expect_event(|e| assert_matches!(e, EventType::SubmittedTransaction { .. }))
-            .assert_no_more_events();
-
-        read_state(|s| assert_eq!(s.submitted_transactions().len(), 1));
-    }
-
-    #[tokio::test]
-    async fn should_not_finalize_transaction_with_no_status() {
-        setup();
-
-        let original_slot = 100;
-        add_submitted_transaction(Signature::from([0x01; 64]), original_slot);
-
-        // Non-expired, so no getSlot needed after status check
-        let current_slot = original_slot + MAX_BLOCKHASH_AGE - 1;
-        let runtime = TestCanisterRuntime::new()
-            .with_increasing_time()
-            .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![None])))
-            .add_stub_response(SlotResult::Consistent(Ok(current_slot)));
 
         monitor_submitted_transactions(runtime).await;
 
