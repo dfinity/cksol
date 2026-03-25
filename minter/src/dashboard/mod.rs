@@ -5,6 +5,9 @@ use ic_http_types::HttpRequest;
 use sol_rpc_types::Lamport;
 use std::str::FromStr;
 
+#[cfg(test)]
+mod tests;
+
 const DEFAULT_PAGE_SIZE: usize = 100;
 
 // --- Pagination ---
