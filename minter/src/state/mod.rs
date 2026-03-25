@@ -88,15 +88,10 @@ pub struct State {
     minted_deposits: BTreeMap<DepositId, MintedDeposit>,
     pending_withdrawal_requests: BTreeMap<LedgerBurnIndex, WithdrawSolRequest>,
     sent_withdrawal_requests: BTreeMap<LedgerBurnIndex, Signature>,
-<<<<<<< lpahlavi/failed-transaction-event
-    funds_to_consolidate: BTreeMap<Account, Lamport>,
+    deposits_to_consolidate: BTreeMap<LedgerMintIndex, (Account, Lamport)>,
     submitted_transactions: BTreeMap<Signature, SolanaTransaction>,
     succeeded_transactions: BTreeSet<Signature>,
     failed_transactions: BTreeMap<Signature, SolanaTransaction>,
-=======
-    deposits_to_consolidate: BTreeMap<LedgerMintIndex, (Account, Lamport)>,
-    submitted_transactions: BTreeMap<Signature, SubmittedTransaction>,
->>>>>>> main
     active_tasks: BTreeSet<TaskType>,
 }
 
