@@ -13,6 +13,9 @@ use solana_transaction::{Instruction, Message, Transaction};
 use std::{collections::BTreeMap, iter};
 use thiserror::Error;
 
+#[cfg(test)]
+mod tests;
+
 pub const MAX_SIGNATURES: u64 = 10;
 pub const MAX_TX_SIZE: usize = 1_232;
 const BYTES_PER_SIGNATURE: usize = 64;
@@ -25,12 +28,9 @@ pub enum CreateTransferError {
     SigningFailed(SignCallError),
 }
 
-#[cfg(test)]
-mod tests;
-
 /// Creates a signed Solana transaction that transfers lamports from
-/// each minter-controlled address (identified by its account) to the
-/// destination account's derived address.
+/// each minter-controlled address (identified by its account)
+/// to `target_address` Solana address.
 ///
 /// Returns the signed transaction and the list of signer accounts
 /// (in signature order: fee payer first, then sources).
@@ -41,7 +41,7 @@ mod tests;
 pub async fn create_signed_transfer_transaction(
     fee_payer_account: Account,
     sources: &[(Account, Lamport)],
-    destination_account: Account,
+    target_address: Address,
     recent_blockhash: Hash,
     signer: &impl SchnorrSigner,
 ) -> Result<(Transaction, Vec<Account>), CreateTransferError> {
@@ -52,7 +52,6 @@ pub async fn create_signed_transfer_transaction(
         (derivation_path, public_key.serialize_raw().into())
     };
 
-    let (_, target_address) = derive_address(&destination_account);
     let (fee_payer_derivation_path, fee_payer_address) = derive_address(&fee_payer_account);
 
     let (source_derivation_paths, source_addresses): (Vec<_>, Vec<_>) = sources

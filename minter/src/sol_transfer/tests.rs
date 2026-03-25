@@ -41,7 +41,7 @@ async fn should_create_signed_transaction_with_single_source() {
     let (tx, signers) = create_signed_transfer_transaction(
         source_account,
         &[(source_account, amount)],
-        target_account,
+        target_address,
         blockhash,
         &signer,
     )
@@ -100,7 +100,7 @@ async fn should_create_signed_transaction_with_multiple_sources() {
     let (tx, signers) = create_signed_transfer_transaction(
         account_1,
         &[(account_1, amount), (account_2, amount)],
-        target_account,
+        derive_address(&target_account),
         blockhash,
         &signer,
     )
@@ -155,7 +155,7 @@ async fn should_fail_when_signing_is_rejected() {
     let result = create_signed_transfer_transaction(
         source_account,
         &[(source_account, 500_000_000)],
-        target_account,
+        derive_address(&target_account),
         blockhash,
         &signer,
     )
@@ -191,7 +191,7 @@ async fn should_fail_when_second_signing_fails() {
     let result = create_signed_transfer_transaction(
         account_1,
         &[(account_1, 100_000_000), (account_2, 100_000_000)],
-        target_account,
+        derive_address(&target_account),
         blockhash,
         &signer,
     )
@@ -230,9 +230,14 @@ async fn should_fail_when_too_many_signatures() {
         subaccount: None,
     };
 
-    let result =
-        create_signed_transfer_transaction(fee_payer, &sources, target_account, blockhash, &signer)
-            .await;
+    let result = create_signed_transfer_transaction(
+        fee_payer,
+        &sources,
+        derive_address(&target_account),
+        blockhash,
+        &signer,
+    )
+    .await;
 
     assert!(
         matches!(result, Err(CreateTransferError::TooManySignatures { max: MAX_SIGNATURES, got }) if got == MAX_SIGNATURES + 1)
@@ -270,9 +275,14 @@ async fn should_not_fail_for_max_signatures() {
 
     let signer = MockSchnorrSigner::with_signatures(vec![[0x11u8; 64]; MAX_SIGNATURES as usize]);
 
-    let result =
-        create_signed_transfer_transaction(fee_payer, &sources, target_account, blockhash, &signer)
-            .await;
+    let result = create_signed_transfer_transaction(
+        fee_payer,
+        &sources,
+        derive_address(&target_account),
+        blockhash,
+        &signer,
+    )
+    .await;
 
     assert!(result.is_ok());
 }
@@ -309,7 +319,7 @@ async fn should_create_signed_transaction_with_fee_payer() {
         let (tx, signers) = create_signed_transfer_transaction(
             fee_payer_account,
             &sources,
-            target_account,
+            derive_address(&target_account),
             blockhash,
             &signer,
         )

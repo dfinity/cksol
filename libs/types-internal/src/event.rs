@@ -90,6 +90,11 @@ pub enum EventType {
         /// The mint indices of the deposits that were consolidated.
         mint_indices: Vec<u64>,
     },
+    /// A withdrawal transaction was signed and is ready to be sent to the network.
+    SentWithdrawalTransaction {
+        /// The burn block indices and corresponding transaction signatures.
+        transactions: Vec<(u64, Signature)>,
+    },
     /// A previously submitted transaction was resubmitted with a new signature.
     ResubmittedTransaction {
         /// The signature of the old transaction being replaced.
@@ -98,6 +103,11 @@ pub enum EventType {
         new_signature: Signature,
         /// The slot of the new blockhash used in the resubmitted transaction.
         new_slot: Slot,
+    },
+    /// A previously submitted Solana transaction has been finalized.
+    FinalizedTransaction {
+        /// The signature of the finalized Solana transaction.
+        signature: Signature,
     },
 }
 

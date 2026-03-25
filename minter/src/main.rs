@@ -1,6 +1,8 @@
 use candid::Principal;
 use canlog::{Log, Sort};
 use cksol_minter::consolidate::{DEPOSIT_CONSOLIDATION_DELAY, consolidate_deposits};
+use cksol_minter::monitor::{MONITOR_SUBMITTED_TRANSACTIONS_DELAY, monitor_submitted_transactions};
+use cksol_minter::withdraw_sol::{WITHDRAWAL_PROCESSING_DELAY, process_pending_withdrawals};
 use cksol_minter::{
     address::lazy_get_schnorr_master_key, runtime::IcCanisterRuntime, state::read_state,
 };
@@ -71,7 +73,7 @@ async fn withdraw_sol(args: WithdrawSolArgs) -> Result<WithdrawSolOk, WithdrawSo
     let minter_account: Account = ic_cdk::api::canister_self().into();
 
     cksol_minter::withdraw_sol::withdraw_sol(
-        IcCanisterRuntime::new(),
+        &IcCanisterRuntime::new(),
         minter_account,
         ic_cdk::api::msg_caller(),
         args.from_subaccount,
@@ -82,8 +84,8 @@ async fn withdraw_sol(args: WithdrawSolArgs) -> Result<WithdrawSolOk, WithdrawSo
 }
 
 #[ic_cdk::update]
-async fn withdraw_sol_status(block_index: u64) -> WithdrawSolStatus {
-    read_state(|s| s.withdrawal_status(block_index))
+fn withdraw_sol_status(block_index: u64) -> WithdrawSolStatus {
+    cksol_minter::withdraw_sol::withdraw_sol_status(block_index)
 }
 
 #[ic_cdk::query]
@@ -154,6 +156,14 @@ fn get_events(
                     mint_indices: mint_indices.iter().map(|idx| *idx.get()).collect(),
                 }
             }
+            EventType::SentWithdrawalTransaction { transactions } => {
+                event::EventType::SentWithdrawalTransaction {
+                    transactions: transactions
+                        .iter()
+                        .map(|(idx, sig)| (*idx.get(), sig.into()))
+                        .collect(),
+                }
+            }
             EventType::ResubmittedTransaction {
                 old_signature,
                 new_signature,
@@ -163,6 +173,11 @@ fn get_events(
                 new_signature: new_signature.into(),
                 new_slot,
             },
+            EventType::FinalizedTransaction { signature } => {
+                event::EventType::FinalizedTransaction {
+                    signature: signature.into(),
+                }
+            }
         }
     }
 
@@ -212,10 +227,12 @@ fn http_request(request: HttpRequest) -> HttpResponse {
 
             match request.raw_query_param("priority").map(Priority::from_str) {
                 Some(Ok(priority)) => match priority {
+                    Priority::Error => log.push_logs(Priority::Error),
                     Priority::Info => log.push_logs(Priority::Info),
                     Priority::Debug => log.push_logs(Priority::Debug),
                 },
                 Some(Err(_)) | None => {
+                    log.push_logs(Priority::Error);
                     log.push_logs(Priority::Info);
                     log.push_logs(Priority::Debug);
                 }
@@ -272,6 +289,12 @@ fn setup_timers() {
     });
     ic_cdk_timers::set_timer_interval(DEPOSIT_CONSOLIDATION_DELAY, async || {
         consolidate_deposits(IcCanisterRuntime::new()).await;
+    });
+    ic_cdk_timers::set_timer_interval(WITHDRAWAL_PROCESSING_DELAY, async || {
+        process_pending_withdrawals(&IcCanisterRuntime::new()).await;
+    });
+    ic_cdk_timers::set_timer_interval(MONITOR_SUBMITTED_TRANSACTIONS_DELAY, async || {
+        monitor_submitted_transactions(IcCanisterRuntime::new()).await;
     });
 }
 

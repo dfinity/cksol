@@ -2,6 +2,7 @@ use super::{signer::MockSchnorrSigner, stubs::Stubs};
 use crate::{runtime::CanisterRuntime, signer::SchnorrSigner};
 use candid::{CandidType, Principal};
 use ic_canister_runtime::{IcError, Runtime, StubRuntime};
+use ic_cdk::management_canister::SignCallError;
 use std::time::Duration;
 
 pub const TEST_CANISTER_ID: Principal = Principal::from_slice(&[0xCA; 10]);
@@ -55,6 +56,11 @@ impl TestCanisterRuntime {
 
     pub fn add_signature(mut self, signature: [u8; 64]) -> Self {
         self.signer = self.signer.add_signature(signature);
+        self
+    }
+
+    pub fn add_schnorr_signing_error(mut self, error: SignCallError) -> Self {
+        self.signer = self.signer.add_response(Err(error));
         self
     }
 }

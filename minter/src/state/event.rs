@@ -98,6 +98,20 @@ pub enum EventType {
         #[n(2)]
         new_slot: Slot,
     },
+    /// A previously submitted Solana transaction has been finalized.
+    #[n(9)]
+    FinalizedTransaction {
+        /// The signature of the finalized Solana transaction.
+        #[cbor(n(0), with = "cbor::signature")]
+        signature: Signature,
+    },
+    /// A withdrawal transaction was signed and is ready to be sent to the network.
+    #[n(10)]
+    SentWithdrawalTransaction {
+        /// The burn block indices and corresponding transaction signatures.
+        #[cbor(n(0), with = "cbor::burn_index_signature_vec")]
+        transactions: Vec<(LedgerBurnIndex, Signature)>,
+    },
 }
 
 /// Payload of the `AcceptedWithdrawSolRequest` event.
