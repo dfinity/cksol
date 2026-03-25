@@ -615,38 +615,18 @@ mod withdraw_sol_tests {
     }
 
     fn estimate_blockhash_http_mocks() -> MockHttpOutcalls {
-        let get_slot_response = || {
-            JsonRpcResponse::from(json!({
-                "jsonrpc": "2.0",
-                "result": 1,
-                "id": 0
-            }))
-        };
-
-        let get_block_response = || {
-            JsonRpcResponse::from(json!({
-                "jsonrpc": "2.0",
-                "result": {
-                    "blockHeight": 1,
-                    "blockTime": 1700000000_u64,
-                    "blockhash": "4sGjMW1sUnHzSxGspuhpqLDx6wiyjNtZAMdL4VZHirAn",
-                    "parentSlot": 0,
-                    "previousBlockhash": "11111111111111111111111111111111"
-                },
-                "id": 0
-            }))
-        };
-
         let mut builder = MockHttpOutcallsBuilder::new();
         for id in 0..4u64 {
             builder = builder
                 .given(JsonRpcRequestMatcher::with_method("getSlot").with_id(id))
-                .respond_with(get_slot_response().with_id(id))
+                .respond_with(get_slot_response(1).with_id(id))
         }
         for id in 4..8u64 {
             builder = builder
                 .given(JsonRpcRequestMatcher::with_method("getBlock").with_id(id))
-                .respond_with(get_block_response().with_id(id))
+                .respond_with(
+                    get_block_response("4sGjMW1sUnHzSxGspuhpqLDx6wiyjNtZAMdL4VZHirAn").with_id(id),
+                )
         }
         builder.build()
     }
