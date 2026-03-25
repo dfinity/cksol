@@ -783,6 +783,7 @@ dependencies = [
  "ic-stable-structures 0.7.2",
  "icrc-cbor",
  "icrc-ledger-types",
+ "itertools 0.14.0",
  "minicbor",
  "num-traits",
  "phantom_newtype",

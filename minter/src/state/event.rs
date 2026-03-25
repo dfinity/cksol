@@ -80,10 +80,9 @@ pub enum EventType {
     /// into the minter's main account.
     #[n(7)]
     ConsolidatedDeposits {
-        /// The deposit accounts from which funds were consolidated
-        /// and the amount consolidated from each account.
-        #[n(0)]
-        deposits: Vec<(Account, Lamport)>,
+        /// The mint indices of the deposits that were consolidated.
+        #[cbor(n(0), with = "cbor::mint_indices")]
+        mint_indices: Vec<LedgerMintIndex>,
     },
     /// A previously submitted transaction was resubmitted with a new signature.
     /// The transaction message and signers remain the same.
@@ -98,6 +97,20 @@ pub enum EventType {
         /// The slot of the new blockhash used in the resubmitted transaction
         #[n(2)]
         new_slot: Slot,
+    },
+    /// A previously submitted Solana transaction has been finalized.
+    #[n(9)]
+    FinalizedTransaction {
+        /// The signature of the finalized Solana transaction.
+        #[cbor(n(0), with = "cbor::signature")]
+        signature: Signature,
+    },
+    /// A withdrawal transaction was signed and is ready to be sent to the network.
+    #[n(10)]
+    SentWithdrawalTransaction {
+        /// The burn block indices and corresponding transaction signatures.
+        #[cbor(n(0), with = "cbor::burn_index_signature_vec")]
+        transactions: Vec<(LedgerBurnIndex, Signature)>,
     },
 }
 

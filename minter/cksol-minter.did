@@ -208,10 +208,6 @@ type WithdrawSolStatus = variant {
     // Withdrawal request is waiting to be processed.
     Pending;
 
-    // Transaction fees were estimated and a Solana transaction was created.
-    // Transaction is not signed yet.
-    TxCreated;
-
     // Solana transaction was signed and is sent to the network.
     TxSent : SolTransaction;
 
@@ -295,9 +291,13 @@ type EventType = variant {
     // Deposited funds from user deposit accounts have been consolidated
     // into the minter's main account.
     ConsolidatedDeposits : record {
-        // The deposit accounts from which funds were consolidated
-        // and the amount consolidated from each account.
-        deposits: vec record { Account; Lamport };
+        // The mint indices of the deposits that were consolidated.
+        mint_indices: vec nat64;
+    };
+    // A withdrawal transaction was signed and is ready to be sent to the network.
+    SentWithdrawalTransaction : record {
+        // The burn block indices and corresponding transaction signatures.
+        transactions: vec record { nat64; Signature };
     };
     // A previously submitted transaction was resubmitted with a new signature.
     ResubmittedTransaction : record {
@@ -307,6 +307,11 @@ type EventType = variant {
         new_signature: Signature;
         // The slot of the new blockhash used in the resubmitted transaction.
         new_slot: nat64;
+    };
+    // A previously submitted Solana transaction has been finalized.
+    FinalizedTransaction : record {
+        // The signature of the finalized Solana transaction.
+        signature: Signature;
     };
 };
 

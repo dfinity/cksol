@@ -16,7 +16,9 @@ use cksol_types::{
     UpdateBalanceArgs, UpdateBalanceError, WithdrawSolArgs, WithdrawSolError, WithdrawSolStatus,
 };
 use cksol_types_internal::{UpgradeArgs, event::EventType, log::Priority};
-use ic_pocket_canister_runtime::{JsonRpcResponse, MockHttpOutcalls, MockHttpOutcallsBuilder};
+use ic_pocket_canister_runtime::{
+    JsonRpcRequestMatcher, JsonRpcResponse, MockHttpOutcalls, MockHttpOutcallsBuilder,
+};
 use icrc_ledger_types::icrc1::account::Subaccount;
 use serde_json::json;
 use sol_rpc_types::{CommitmentLevel, ConsensusStrategy, GetTransactionEncoding, RpcConfig};
@@ -208,6 +210,8 @@ mod withdraw_sol_tests {
     use solana_address::Address;
 
     use super::*;
+
+    const WITHDRAWAL_PROCESSING_DELAY: Duration = Duration::from_mins(1);
 
     #[tokio::test]
     async fn should_validate_solana_address() {
@@ -556,6 +560,76 @@ mod withdraw_sol_tests {
 
         setup.drop().await;
     }
+
+    #[tokio::test]
+    async fn should_process_pending_withdrawals() {
+        const WITHDRAWAL_AMOUNT: u64 = 100_000_000;
+        const WITHDRAWAL_ADDRESS: &str = "E4MpwNnMWs2XtW5gVrxZvyS7fMq31QD5HvbxmwP45Tz3";
+
+        let setup = SetupBuilder::new()
+            .with_initial_ledger_balances(vec![(
+                DEFAULT_CALLER_ACCOUNT,
+                Nat::from(10 * WITHDRAWAL_AMOUNT),
+            )])
+            .build()
+            .await;
+
+        setup
+            .ledger()
+            .approve(
+                None,
+                WITHDRAWAL_AMOUNT,
+                Account {
+                    owner: setup.minter_canister_id(),
+                    subaccount: None,
+                },
+            )
+            .await;
+
+        let WithdrawSolOk { block_index } = setup
+            .minter()
+            .withdraw_sol(WithdrawSolArgs {
+                from_subaccount: None,
+                amount: WITHDRAWAL_AMOUNT,
+                address: WITHDRAWAL_ADDRESS.to_string(),
+            })
+            .await
+            .expect("withdraw_sol should succeed");
+
+        setup.advance_time(WITHDRAWAL_PROCESSING_DELAY).await;
+        setup
+            .execute_http_mocks(estimate_blockhash_http_mocks())
+            .await;
+
+        setup.minter().assert_that_events().await.satisfy(|events| {
+            check!(events.iter().any(|e| matches!(
+                e,
+                EventType::SentWithdrawalTransaction {
+                    transactions,
+                    ..
+                } if transactions.iter().any(|(idx, _)| *idx == block_index)
+            )));
+        });
+
+        setup.drop().await;
+    }
+
+    fn estimate_blockhash_http_mocks() -> MockHttpOutcalls {
+        let mut builder = MockHttpOutcallsBuilder::new();
+        for id in 0..4u64 {
+            builder = builder
+                .given(JsonRpcRequestMatcher::with_method("getSlot").with_id(id))
+                .respond_with(get_slot_response(1).with_id(id))
+        }
+        for id in 4..8u64 {
+            builder = builder
+                .given(JsonRpcRequestMatcher::with_method("getBlock").with_id(id))
+                .respond_with(
+                    get_block_response("4sGjMW1sUnHzSxGspuhpqLDx6wiyjNtZAMdL4VZHirAn").with_id(id),
+                )
+        }
+        builder.build()
+    }
 }
 
 mod update_balance_tests {
@@ -867,13 +941,11 @@ mod consolidation_tests {
             "Expected SubmittedTransaction event. Events: {events_after:?}"
         );
 
-        // Verify the consolidated deposits match the deposit amount
         for event in &events_after {
-            if let EventType::ConsolidatedDeposits { deposits } = &event.payload {
-                let total: Lamport = deposits.iter().map(|(_, amount)| amount).sum();
-                assert_eq!(
-                    total, DEPOSIT_AMOUNT,
-                    "Consolidated amount should match the deposit amount"
+            if let EventType::ConsolidatedDeposits { mint_indices } = &event.payload {
+                assert!(
+                    !mint_indices.is_empty(),
+                    "ConsolidatedDeposits should contain at least one mint index"
                 );
             }
         }

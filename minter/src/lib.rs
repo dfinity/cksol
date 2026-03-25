@@ -5,6 +5,7 @@ mod guard;
 mod ledger;
 pub mod lifecycle;
 pub mod metrics;
+pub mod monitor;
 mod numeric;
 pub mod runtime;
 mod signer;

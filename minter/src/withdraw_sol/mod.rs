@@ -1,28 +1,38 @@
 use std::str::FromStr;
+use std::time::Duration;
 
 use candid::Principal;
-use cksol_types::{WithdrawSolError, WithdrawSolOk};
+use cksol_types::{WithdrawSolError, WithdrawSolOk, WithdrawSolStatus};
 use icrc_ledger_types::icrc1::account::{Account, Subaccount};
 use icrc_ledger_types::icrc2::transfer_from::TransferFromError;
 use num_traits::ToPrimitive;
 use solana_address::Address;
 
+use canlog::log;
+use cksol_types_internal::log::Priority;
+
 use crate::{
-    guard::withdraw_sol_guard,
+    guard::{TimerGuard, withdraw_sol_guard},
     ledger::burn,
     runtime::CanisterRuntime,
+    sol_transfer::create_signed_transfer_transaction,
     state::{
+        TaskType,
         audit::process_event,
         event::{EventType, WithdrawSolRequest},
         mutate_state, read_state,
     },
 };
 
+pub const WITHDRAWAL_PROCESSING_DELAY: Duration = Duration::from_mins(1);
+// The maximum number of withdrawal requests to process in a single timer invocation.
+const MAX_WITHDRAWALS_PER_BATCH: usize = 10;
+
 #[cfg(test)]
 mod tests;
 
 pub async fn withdraw_sol<R: CanisterRuntime>(
-    runtime: R,
+    runtime: &R,
     minter_account: Account,
     caller: Principal,
     from_subaccount: Option<Subaccount>,
@@ -43,7 +53,7 @@ pub async fn withdraw_sol<R: CanisterRuntime>(
     let solana_address = Address::from_str(&address)
         .map_err(|e| WithdrawSolError::MalformedAddress(e.to_string()))?;
 
-    let block_index = burn(&runtime, minter_account, from, amount, solana_address)
+    let block_index = burn(runtime, minter_account, from, amount, solana_address)
         .await
         .map_err(|e| match e {
             crate::ledger::BurnError::IcError(ic_error) => {
@@ -103,11 +113,123 @@ pub async fn withdraw_sol<R: CanisterRuntime>(
                 withdrawal_amount: amount,
                 withdrawal_fee,
             }),
-            &runtime,
+            runtime,
         )
     });
 
-    // TODO DEFI-2671: trigger the timer to process pending withdrawals.
-
     Ok(WithdrawSolOk { block_index })
+}
+
+pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: &R) {
+    let _guard = match TimerGuard::new(TaskType::WithdrawalProcessing) {
+        Ok(guard) => guard,
+        Err(_) => {
+            log!(
+                Priority::Info,
+                "failed to obtain WithdrawalProcessing guard, exiting"
+            );
+            return;
+        }
+    };
+
+    // TODO: we should batch requests into up to N chunks of size M, each chunk
+    // should be a separate transaction containing multiple withdrawal requests.
+    // M is the max withdrawals per tx, N is max tx per round.
+
+    let pending_requests: Vec<WithdrawSolRequest> = read_state(|state| {
+        state
+            .pending_withdrawal_requests()
+            .values()
+            .take(MAX_WITHDRAWALS_PER_BATCH)
+            .cloned()
+            .collect()
+    });
+
+    if pending_requests.is_empty() {
+        return;
+    }
+
+    let recent_blockhash =
+        match read_state(|state| state.sol_rpc_client(runtime.inter_canister_call_runtime()))
+            .estimate_recent_blockhash()
+            .send()
+            .await
+        {
+            Ok(blockhash) => blockhash,
+            Err(errors) => {
+                log!(
+                    Priority::Error,
+                    "Failed to estimate recent blockhash: {errors:?}"
+                );
+                return;
+            }
+        };
+
+    let minter_account: Account = runtime.canister_self().into();
+    let signer = runtime.signer();
+
+    // TODO: we need to check whether the minter has enough funds in the main account.
+    // We probably need to add a state.minter_balance variable and update it
+    // here and while consolidating funds.
+    // If there are not enough funds for the withdrawal we simply continue.
+
+    let withdrawal_params: Vec<_> = pending_requests
+        .iter()
+        .map(|request| {
+            let destination = Address::from(request.solana_address);
+            let transfer_amount = request
+                .withdrawal_amount
+                .checked_sub(request.withdrawal_fee)
+                .expect("BUG: withdrawal_amount must be >= withdrawal_fee");
+            let sources = vec![(minter_account, transfer_amount)];
+            (sources, destination)
+        })
+        .collect();
+
+    let sign_futures: Vec<_> = withdrawal_params
+        .iter()
+        .map(|(sources, destination)| {
+            create_signed_transfer_transaction(
+                minter_account,
+                sources,
+                *destination,
+                recent_blockhash,
+                &signer,
+            )
+        })
+        .collect();
+
+    let results = futures::future::join_all(sign_futures).await;
+
+    for (request, result) in pending_requests.into_iter().zip(results) {
+        let transaction = match result {
+            Ok(tx) => tx,
+            Err(e) => {
+                log!(
+                    Priority::Error,
+                    "Failed to create withdrawal transaction for burn index {:?}: {e}",
+                    request.burn_block_index
+                );
+                continue;
+            }
+        };
+
+        let signature = transaction.0.signatures[0];
+
+        mutate_state(|state| {
+            process_event(
+                state,
+                EventType::SentWithdrawalTransaction {
+                    transactions: vec![(request.burn_block_index, signature)],
+                },
+                runtime,
+            )
+        });
+
+        // TODO: Send the transaction to the Solana network via RPC
+    }
+}
+
+pub fn withdraw_sol_status(block_index: u64) -> WithdrawSolStatus {
+    read_state(|s| s.withdrawal_status(block_index))
 }

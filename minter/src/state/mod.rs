@@ -4,12 +4,11 @@ use crate::{
     state::event::{DepositId, WithdrawSolRequest},
 };
 use candid::Principal;
-use cksol_types::{DepositStatus, WithdrawSolStatus};
+use cksol_types::{DepositStatus, SolTransaction, WithdrawSolStatus};
 use cksol_types_internal::{Ed25519KeyName, InitArgs, UpgradeArgs};
 use ic_canister_runtime::Runtime;
 use ic_ed25519::PublicKey;
 use icrc_ledger_types::icrc1::account::Account;
-use num_traits::Zero;
 use sol_rpc_client::SolRpcClient;
 use sol_rpc_types::{ConsensusStrategy, Lamport, RpcSources, Slot, SolanaCluster};
 use solana_message::Message;
@@ -88,7 +87,8 @@ pub struct State {
     quarantined_deposits: BTreeMap<DepositId, Deposit>,
     minted_deposits: BTreeMap<DepositId, MintedDeposit>,
     pending_withdrawal_requests: BTreeMap<LedgerBurnIndex, WithdrawSolRequest>,
-    funds_to_consolidate: BTreeMap<Account, Lamport>,
+    sent_withdrawal_requests: BTreeMap<LedgerBurnIndex, Signature>,
+    deposits_to_consolidate: BTreeMap<LedgerMintIndex, (Account, Lamport)>,
     submitted_transactions: BTreeMap<Signature, SubmittedTransaction>,
     active_tasks: BTreeSet<TaskType>,
 }
@@ -143,8 +143,12 @@ impl State {
         self.update_balance_required_cycles
     }
 
-    pub fn funds_to_consolidate(&self) -> &BTreeMap<Account, Lamport> {
-        &self.funds_to_consolidate
+    pub fn deposits_to_consolidate(&self) -> &BTreeMap<LedgerMintIndex, (Account, Lamport)> {
+        &self.deposits_to_consolidate
+    }
+
+    pub fn submitted_transactions(&self) -> &BTreeMap<Signature, SubmittedTransaction> {
+        &self.submitted_transactions
     }
 
     pub fn deposit_status(&self, deposit_id: &DepositId) -> Option<DepositStatus> {
@@ -294,10 +298,6 @@ impl State {
             None,
             "Attempted to accept an already accepted deposit: {deposit_id:?}"
         );
-        *self
-            .funds_to_consolidate
-            .entry(deposit_id.account)
-            .or_default() += deposit_amount;
     }
 
     fn process_quarantined_deposit(&mut self, deposit_id: &DepositId) {
@@ -320,13 +320,20 @@ impl State {
     }
 
     pub fn withdrawal_status(&self, block_index: u64) -> WithdrawSolStatus {
-        if self
-            .pending_withdrawal_requests
-            .contains_key(&LedgerBurnIndex::from(block_index))
-        {
+        let burn_index = LedgerBurnIndex::from(block_index);
+        if self.pending_withdrawal_requests.contains_key(&burn_index) {
             return WithdrawSolStatus::Pending;
         }
+        if let Some(sent_signature) = self.sent_withdrawal_requests.get(&burn_index) {
+            return WithdrawSolStatus::TxSent(SolTransaction {
+                transaction_hash: sent_signature.to_string(),
+            });
+        }
         WithdrawSolStatus::NotFound
+    }
+
+    pub fn pending_withdrawal_requests(&self) -> &BTreeMap<LedgerBurnIndex, WithdrawSolRequest> {
+        &self.pending_withdrawal_requests
     }
 
     fn process_accepted_withdrawal(&mut self, request: &WithdrawSolRequest) {
@@ -350,6 +357,14 @@ impl State {
             .unwrap_or_else(|| {
                 panic!("Attempted to mint ckSOL for an unknown deposit: {deposit_id:?}")
             });
+        assert_eq!(
+            self.deposits_to_consolidate.insert(
+                *mint_block_index,
+                (deposit_id.account, deposit.deposit_amount)
+            ),
+            None,
+            "Attempted to consolidate funds for an already consolidated mint index: {mint_block_index:?}",
+        );
         assert_eq!(
             self.minted_deposits.insert(
                 *deposit_id,
@@ -384,23 +399,34 @@ impl State {
         );
     }
 
-    fn process_consolidated_deposits(&mut self, deposits: &[(Account, Lamport)]) {
-        for (account, amount) in deposits {
-            let remaining = self
-                .funds_to_consolidate
-                .get_mut(account)
+    fn process_sent_withdrawal_transaction(
+        &mut self,
+        burn_block_index: &LedgerBurnIndex,
+        signature: &Signature,
+    ) {
+        assert!(
+            self.pending_withdrawal_requests
+                .remove(burn_block_index)
+                .is_some(),
+            "Attempted to send transaction for unknown withdrawal request: {:?}",
+            burn_block_index
+        );
+        assert_eq!(
+            self.sent_withdrawal_requests
+                .insert(*burn_block_index, *signature),
+            None,
+            "Attempted to send transaction for already sent withdrawal request: {:?}",
+            burn_block_index
+        );
+    }
+
+    fn process_consolidated_deposits(&mut self, mint_indices: &[LedgerMintIndex]) {
+        for mint_index in mint_indices {
+            self.deposits_to_consolidate
+                .remove(mint_index)
                 .unwrap_or_else(|| {
-                    panic!("Attempted to consolidate funds for unknown account: {account:?}")
+                    panic!("Attempted to consolidate funds for unknown mint index: {mint_index:?}")
                 });
-            *remaining = remaining.checked_sub(*amount).unwrap_or_else(|| {
-                panic!(
-                    "Attempted to consolidate more funds than available for account {account:?}: \
-                     available {remaining}, requested {amount}"
-                )
-            });
-            if remaining.is_zero() {
-                self.funds_to_consolidate.remove(account);
-            }
         }
     }
 
@@ -426,6 +452,14 @@ impl State {
             None,
             "Attempted to resubmit transaction with signature {new_signature:?} that already exists"
         );
+    }
+
+    fn process_transaction_finalized(&mut self, signature: &Signature) {
+        self.submitted_transactions
+            .remove(signature)
+            .unwrap_or_else(|| {
+                panic!("Attempted to finalize unknown transaction with signature {signature:?}")
+            });
     }
 }
 
@@ -474,7 +508,8 @@ impl TryFrom<InitArgs> for State {
             quarantined_deposits: BTreeMap::new(),
             minted_deposits: BTreeMap::new(),
             pending_withdrawal_requests: BTreeMap::new(),
-            funds_to_consolidate: BTreeMap::new(),
+            sent_withdrawal_requests: BTreeMap::new(),
+            deposits_to_consolidate: BTreeMap::new(),
             submitted_transactions: BTreeMap::new(),
             active_tasks: BTreeSet::new(),
         };
@@ -505,6 +540,8 @@ pub struct MintedDeposit {
 pub enum TaskType {
     DepositConsolidation,
     Mint,
+    MonitorSubmittedTransactions,
+    WithdrawalProcessing,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

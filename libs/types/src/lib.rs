@@ -207,10 +207,6 @@ pub enum WithdrawSolStatus {
     /// Withdrawal request is waiting to be processed.
     Pending,
 
-    /// Transaction fees were estimated and a Solana transaction was created.
-    /// Transaction is not signed yet.
-    TxCreated,
-
     /// Solana transaction was signed and is sent to the network.
     TxSent(SolTransaction),
 
