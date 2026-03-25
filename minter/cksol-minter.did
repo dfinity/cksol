@@ -206,6 +206,10 @@ type TxFinalizedStatus = variant {
         transaction_hash : text;
         effective_transaction_fee: opt nat;
     };
+    // Transaction failed.
+    Failure : record {
+        transaction_hash : text;
+    };
 };
 
 // Retrieve the status of a withdrawal request.

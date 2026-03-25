@@ -207,6 +207,11 @@ pub enum TxFinalizedStatus {
         /// The fee that was payed by the user.
         effective_transaction_fee: Option<Nat>,
     },
+    /// The transaction failed.
+    Failure {
+        /// The Solana transaction hash.
+        transaction_hash: String,
+    },
 }
 
 /// Retrieve the status of a withdrawal request.

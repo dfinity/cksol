@@ -673,3 +673,127 @@ mod process_pending_withdrawals_tests {
         }
     }
 }
+
+mod withdrawal_finalization_tests {
+    use super::*;
+    use crate::state::{audit::process_event, event::EventType, mutate_state, read_state};
+    use cksol_types::TxFinalizedStatus;
+    use solana_hash::Hash;
+    use solana_message::Message;
+    use solana_signature::Signature;
+
+    fn setup_sent_withdrawal(burn_block_index: u64) -> Signature {
+        let signature = Signature::from([burn_block_index as u8 + 1; 64]);
+        let runtime = TestCanisterRuntime::new().with_increasing_time();
+
+        mutate_state(|state| {
+            process_event(
+                state,
+                EventType::AcceptedWithdrawSolRequest(crate::state::event::WithdrawSolRequest {
+                    account: MINTER_ACCOUNT,
+                    solana_address: [0u8; 32],
+                    burn_block_index: burn_block_index.into(),
+                    withdrawal_amount: WITHDRAWAL_FEE + 1,
+                    withdrawal_fee: WITHDRAWAL_FEE,
+                }),
+                &runtime,
+            )
+        });
+        mutate_state(|state| {
+            process_event(
+                state,
+                EventType::SentWithdrawalTransaction {
+                    transactions: vec![(burn_block_index.into(), signature)],
+                },
+                &runtime,
+            )
+        });
+        mutate_state(|state| {
+            process_event(
+                state,
+                EventType::SubmittedTransaction {
+                    signature,
+                    transaction: Message::new_with_blockhash(&[], None, &Hash::default()),
+                    signers: vec![MINTER_ACCOUNT],
+                    slot: 1,
+                },
+                &runtime,
+            )
+        });
+
+        signature
+    }
+
+    #[test]
+    fn should_report_tx_finalized_after_succeeded_transaction() {
+        init_state();
+        let signature = setup_sent_withdrawal(1);
+        let runtime = TestCanisterRuntime::new().with_increasing_time();
+
+        assert_matches!(withdraw_sol_status(1), WithdrawSolStatus::TxSent(_));
+
+        mutate_state(|state| {
+            process_event(
+                state,
+                EventType::SucceededTransaction { signature },
+                &runtime,
+            )
+        });
+
+        assert_matches!(
+            withdraw_sol_status(1),
+            WithdrawSolStatus::TxFinalized(TxFinalizedStatus::Success { transaction_hash, .. })
+                if transaction_hash == signature.to_string()
+        );
+    }
+
+    #[test]
+    fn should_report_tx_failed_after_failed_transaction() {
+        init_state();
+        let signature = setup_sent_withdrawal(1);
+        let runtime = TestCanisterRuntime::new().with_increasing_time();
+
+        assert_matches!(withdraw_sol_status(1), WithdrawSolStatus::TxSent(_));
+
+        mutate_state(|state| {
+            process_event(state, EventType::FailedTransaction { signature }, &runtime)
+        });
+
+        assert_matches!(
+            withdraw_sol_status(1),
+            WithdrawSolStatus::TxFinalized(TxFinalizedStatus::Failure { transaction_hash })
+                if transaction_hash == signature.to_string()
+        );
+    }
+
+    #[test]
+    fn should_not_affect_withdrawal_status_for_consolidation_transaction() {
+        init_state();
+        let signature = Signature::from([0x42; 64]);
+        let runtime = TestCanisterRuntime::new().with_increasing_time();
+
+        mutate_state(|state| {
+            process_event(
+                state,
+                EventType::SubmittedTransaction {
+                    signature,
+                    transaction: Message::new_with_blockhash(&[], None, &Hash::default()),
+                    signers: vec![MINTER_ACCOUNT],
+                    slot: 1,
+                },
+                &runtime,
+            )
+        });
+
+        mutate_state(|state| {
+            process_event(
+                state,
+                EventType::SucceededTransaction { signature },
+                &runtime,
+            )
+        });
+
+        // No withdrawal status should be affected
+        assert_matches!(withdraw_sol_status(0), WithdrawSolStatus::NotFound);
+    }
+}

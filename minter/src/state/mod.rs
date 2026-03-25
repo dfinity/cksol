@@ -4,7 +4,7 @@ use crate::{
     state::event::{DepositId, TransactionPurpose, VersionedMessage, WithdrawSolRequest},
 };
 use candid::Principal;
-use cksol_types::{DepositStatus, SolTransaction, WithdrawSolStatus};
+use cksol_types::{DepositStatus, SolTransaction, TxFinalizedStatus, WithdrawSolStatus};
 use cksol_types_internal::SolanaNetwork;
 use cksol_types_internal::{Ed25519KeyName, InitArgs, UpgradeArgs};
 use ic_canister_runtime::Runtime;
@@ -96,6 +96,8 @@ pub struct State {
     minted_deposits: BTreeMap<DepositId, MintedDeposit>,
     pending_withdrawal_requests: BTreeMap<LedgerBurnIndex, WithdrawSolRequest>,
     sent_withdrawal_requests: BTreeMap<LedgerBurnIndex, Signature>,
+    finalized_withdrawal_requests: BTreeMap<LedgerBurnIndex, Signature>,
+    failed_withdrawal_requests: BTreeMap<LedgerBurnIndex, Signature>,
     deposits_to_consolidate: BTreeMap<LedgerMintIndex, (Account, Lamport)>,
     submitted_transactions: BTreeMap<Signature, SolanaTransaction>,
     succeeded_transactions: BTreeSet<Signature>,
@@ -348,9 +350,20 @@ impl State {
         if self.pending_withdrawal_requests.contains_key(&burn_index) {
             return WithdrawSolStatus::Pending;
         }
-        if let Some(sent_signature) = self.sent_withdrawal_requests.get(&burn_index) {
+        if let Some(signature) = self.sent_withdrawal_requests.get(&burn_index) {
             return WithdrawSolStatus::TxSent(SolTransaction {
-                transaction_hash: sent_signature.to_string(),
+                transaction_hash: signature.to_string(),
+            });
+        }
+        if let Some(signature) = self.finalized_withdrawal_requests.get(&burn_index) {
+            return WithdrawSolStatus::TxFinalized(TxFinalizedStatus::Success {
+                transaction_hash: signature.to_string(),
+                effective_transaction_fee: None,
+            });
+        }
+        if let Some(signature) = self.failed_withdrawal_requests.get(&burn_index) {
+            return WithdrawSolStatus::TxFinalized(TxFinalizedStatus::Failure {
+                transaction_hash: signature.to_string(),
             });
         }
         WithdrawSolStatus::NotFound
@@ -510,6 +523,10 @@ impl State {
             self.succeeded_transactions.insert(*signature),
             "Attempted to mark transaction {signature:?} as succeeded twice"
         );
+        for burn_index in self.take_withdrawal_requests_by_signature(signature) {
+            self.finalized_withdrawal_requests
+                .insert(burn_index, *signature);
+        }
     }
 
     fn process_transaction_failed(&mut self, signature: &Signature) {
@@ -528,6 +545,26 @@ impl State {
             None,
             "Attempted to fail transaction {signature:?} twice"
         );
+        for burn_index in self.take_withdrawal_requests_by_signature(signature) {
+            self.failed_withdrawal_requests
+                .insert(burn_index, *signature);
+        }
+    }
+
+    fn take_withdrawal_requests_by_signature(
+        &mut self,
+        signature: &Signature,
+    ) -> Vec<LedgerBurnIndex> {
+        let burn_indices: Vec<_> = self
+            .sent_withdrawal_requests
+            .iter()
+            .filter(|(_, sig)| *sig == signature)
+            .map(|(idx, _)| *idx)
+            .collect();
+        for idx in &burn_indices {
+            self.sent_withdrawal_requests.remove(idx);
+        }
+        burn_indices
     }
 }
 
@@ -579,6 +616,8 @@ impl TryFrom<InitArgs> for State {
             minted_deposits: BTreeMap::new(),
             pending_withdrawal_requests: BTreeMap::new(),
             sent_withdrawal_requests: BTreeMap::new(),
+            finalized_withdrawal_requests: BTreeMap::new(),
+            failed_withdrawal_requests: BTreeMap::new(),
             deposits_to_consolidate: BTreeMap::new(),
             submitted_transactions: BTreeMap::new(),
             succeeded_transactions: BTreeSet::new(),
