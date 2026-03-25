@@ -987,3 +987,24 @@ mod consolidation_tests {
         mocks.build()
     }
 }
+
+mod metrics_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn should_serve_metrics() {
+        let setup = SetupBuilder::new().build().await;
+
+        setup
+            .check_metrics()
+            .await
+            .assert_contains_metric_matching(r#"stable_memory_bytes \d+ \d+"#)
+            .assert_contains_metric_matching(r#"heap_memory_bytes \d+ \d+"#)
+            .assert_contains_metric_matching(r#"cycle_balance\{canister="cksol-minter"\} \d+ \d+"#)
+            // Only the canister init event should have been recorded
+            .assert_contains_metric_matching(r#"total_event_count 1 \d+"#)
+            .into()
+            .drop()
+            .await;
+    }
+}

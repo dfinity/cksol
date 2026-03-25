@@ -737,6 +737,7 @@ dependencies = [
  "ic-canister-runtime",
  "ic-http-types",
  "ic-management-canister-types",
+ "ic-metrics-assert",
  "ic-pocket-canister-runtime",
  "ic-test-utilities-load-wasm",
  "icrc-ledger-types",
@@ -778,6 +779,7 @@ dependencies = [
  "ic-dummy-getrandom-for-wasm",
  "ic-ed25519",
  "ic-http-types",
+ "ic-metrics-encoder",
  "ic-stable-structures 0.7.2",
  "icrc-cbor",
  "icrc-ledger-types",
@@ -2132,6 +2134,26 @@ dependencies = [
  "serde",
  "serde_bytes",
 ]
+
+[[package]]
+name = "ic-metrics-assert"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "44a54a56b268fae5165b4ad0ca95324400b9ed20c8c42b541496bda1618736a1"
+dependencies = [
+ "async-trait",
+ "candid",
+ "ic-http-types",
+ "ic-management-canister-types",
+ "pocket-ic",
+ "regex",
+]
+
+[[package]]
+name = "ic-metrics-encoder"
+version = "1.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "36e10842d8cc059a437567811d966cd8fab06e79d3382e4535db2a501cadb192"
 
 [[package]]
 name = "ic-pocket-canister-runtime"
