@@ -622,9 +622,9 @@ mod withdraw_sol_tests {
             other => panic!("Expected TxSent, got: {other:?}"),
         };
 
-        // Advance time to trigger resubmission of the expired transaction.
-        // The original transaction was submitted at INITIAL_SLOT, so
-        // the current slot must be > INITIAL_SLOT + 150 (MAX_BLOCKHASH_AGE).
+        // Advance time to trigger resubmission. The mocked slot
+        // (INITIAL_SLOT + 200) exceeds INITIAL_SLOT + 150 (MAX_BLOCKHASH_AGE),
+        // so the original transaction is now considered expired.
         const MONITOR_DELAY: Duration = Duration::from_secs(60);
         setup.advance_time(MONITOR_DELAY).await;
         setup
