@@ -134,6 +134,8 @@ pub struct DashboardMintedDeposit {
 #[template(path = "dashboard.html")]
 pub struct DashboardTemplate {
     pub minter_address: String,
+    pub minter_public_key_hex: String,
+    pub chain_code_hex: String,
     pub ledger_canister_id: Principal,
     pub sol_rpc_canister_id: Principal,
     pub master_key_name: String,
@@ -146,15 +148,19 @@ pub struct DashboardTemplate {
 
 impl DashboardTemplate {
     pub fn from_state(state: &State, pagination: DashboardPaginationParameters) -> Self {
-        let minter_address = state
+        let (minter_address, minter_public_key_hex, chain_code_hex) = match state
             .minter_public_key()
-            .map(|key| {
-                crate::address::derive_public_key(key, vec![])
+        {
+            Some(key) => {
+                let addr: solana_address::Address = crate::address::derive_public_key(key, vec![])
                     .serialize_raw()
-                    .into()
-            })
-            .map(|addr: solana_address::Address| addr.to_string())
-            .unwrap_or_default();
+                    .into();
+                let pk_hex = hex::encode(key.public_key.serialize_raw());
+                let cc_hex = hex::encode(key.chain_code);
+                (addr.to_string(), pk_hex, cc_hex)
+            }
+            None => (String::new(), String::new(), String::new()),
+        };
 
         let mut minted_deposits: Vec<_> = state
             .minted_deposits()
@@ -180,6 +186,8 @@ impl DashboardTemplate {
 
         DashboardTemplate {
             minter_address,
+            minter_public_key_hex,
+            chain_code_hex,
             ledger_canister_id: state.ledger_canister_id(),
             sol_rpc_canister_id: state.sol_rpc_canister_id(),
             master_key_name: format!("{:?}", state.master_key_name()),

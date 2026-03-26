@@ -52,6 +52,20 @@
             text-align: right;
         }
 
+        #output-deposit-address-error {
+            color: red;
+            font-style: italic;
+        }
+
+        #output-deposit-address-ok {
+            margin-top: 10px;
+            font-family: monospace;
+        }
+
+        .deposit-input {
+            width: 63ch;
+            font-family: monospace;
+        }
     </style>
 </head>
 
@@ -96,6 +110,17 @@
                 </tbody>
             </table>
 
+            {% if !minter_public_key_hex.is_empty() %}
+            <h3 id="deposit-address-derivation">Deposit address derivation</h3>
+            <form id="form-deposit-address">
+                Principal: <input id="input-principal" class="deposit-input" type="text">
+                <br>
+                Subaccount (hex, optional): <input id="input-subaccount" class="deposit-input" type="text">
+                <span id="output-deposit-address-error"></span>
+                <div id="output-deposit-address-ok"></div>
+            </form>
+            {% endif %}
+
             {% if !minted_deposits_table.is_empty() %}
             <h3 id="minted-deposits">Minted deposits</h3>
             <table>
@@ -125,5 +150,49 @@
         </div>
     </div>
 
+    {% if !minter_public_key_hex.is_empty() %}
+    <script>
+        {% include "derive_deposit_address.js" %}
+
+        const MINTER_PUBLIC_KEY_HEX = "{{ minter_public_key_hex }}";
+        const CHAIN_CODE_HEX = "{{ chain_code_hex }}";
+
+        window.addEventListener("load", function () {
+            document.getElementById("form-deposit-address").addEventListener("keypress", function (event) {
+                if (event.keyCode == 13) {
+                    event.preventDefault();
+                    return false;
+                }
+            });
+
+            function recomputeAddress() {
+                let principal = document.getElementById("input-principal").value.trim();
+                let subaccount = document.getElementById("input-subaccount").value.trim();
+                let ok_output = document.getElementById("output-deposit-address-ok");
+                let err_output = document.getElementById("output-deposit-address-error");
+                if (!principal) {
+                    ok_output.innerHTML = "";
+                    err_output.innerHTML = "";
+                    return;
+                }
+                try {
+                    let address = window.deriveDepositAddress(MINTER_PUBLIC_KEY_HEX, CHAIN_CODE_HEX, principal, subaccount);
+                    ok_output.innerHTML = "Deposit address: <a href='https://solscan.io/account/" + address + "'><code>" + address + "</code></a>";
+                    err_output.innerHTML = "";
+                } catch (e) {
+                    ok_output.innerHTML = "";
+                    err_output.innerHTML = e.message;
+                }
+            }
+
+            for (let id of ["input-principal", "input-subaccount"]) {
+                let el = document.getElementById(id);
+                el.addEventListener("change", recomputeAddress);
+                el.addEventListener("keypress", recomputeAddress);
+                el.addEventListener("input", recomputeAddress);
+            }
+        });
+    </script>
+    {% endif %}
 </body>
 </html>

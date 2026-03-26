@@ -69,10 +69,36 @@ fn should_display_empty_state() {
 fn should_display_minter_address_when_not_set() {
     let dashboard = initial_dashboard();
 
-    DashboardAssert::assert_that(dashboard).has_string_value(
-        "#minter-address > td",
-        "N/A",
-        "expected N/A when minter address not set",
+    DashboardAssert::assert_that(dashboard)
+        .has_string_value(
+            "#minter-address > td",
+            "N/A",
+            "expected N/A when minter address not set",
+        )
+        .has_no_elements_matching("#form-deposit-address");
+}
+
+#[test]
+fn should_display_deposit_address_form_when_key_is_set() {
+    use crate::state::SchnorrPublicKey;
+    use ic_ed25519::{PocketIcMasterPublicKeyId, PublicKey};
+
+    let mut state = initial_state();
+    state.set_once_minter_public_key(SchnorrPublicKey {
+        public_key: PublicKey::pocketic_key(PocketIcMasterPublicKeyId::DfxTestKey),
+        chain_code: [1; 32],
+    });
+
+    let dashboard = DashboardTemplate::from_state(&state, DashboardPaginationParameters::default());
+    let rendered = dashboard.render().unwrap();
+
+    assert!(
+        rendered.contains("id=\"form-deposit-address\""),
+        "should contain deposit address form"
+    );
+    assert!(
+        rendered.contains("deriveDepositAddress"),
+        "should contain deriveDepositAddress JS function"
     );
 }
 
