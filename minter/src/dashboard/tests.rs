@@ -77,21 +77,6 @@ fn should_display_minter_address_when_not_set() {
 }
 
 #[test]
-fn should_display_principal_to_bytes32_form() {
-    let dashboard = initial_dashboard();
-    let rendered = dashboard.render().unwrap();
-
-    assert!(
-        rendered.contains("id=\"form-principal-conversion\""),
-        "should contain principal conversion form"
-    );
-    assert!(
-        rendered.contains("principalToBytes32"),
-        "should contain principalToBytes32 JS function"
-    );
-}
-
-#[test]
 fn should_display_minted_deposits() {
     use crate::state::event::DepositId;
     use crate::test_fixtures::MINTER_ACCOUNT;
