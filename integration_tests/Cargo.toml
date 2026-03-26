@@ -39,6 +39,7 @@ tokio = { workspace = true }
 [dev-dependencies]
 assert2 = { workspace = true }
 assert_matches = { workspace = true }
+solana-clock = { workspace = true }
 futures = { workspace = true }
 icrc-ledger-types = { workspace = true }
 minicbor = { workspace = true }

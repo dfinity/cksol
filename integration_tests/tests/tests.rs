@@ -23,7 +23,7 @@ use cksol_types_internal::{
 use ic_pocket_canister_runtime::{JsonRpcResponse, MockHttpOutcalls, MockHttpOutcallsBuilder};
 use icrc_ledger_types::icrc1::account::Subaccount;
 use serde_json::json;
-use sol_rpc_types::{CommitmentLevel, ConsensusStrategy, GetTransactionEncoding, RpcConfig};
+use sol_rpc_types::{CommitmentLevel, ConsensusStrategy, GetTransactionEncoding, RpcConfig, Slot};
 use std::time::Duration;
 use tokio::join;
 
@@ -214,6 +214,7 @@ mod withdraw_sol_tests {
     use super::*;
 
     const WITHDRAWAL_PROCESSING_DELAY: Duration = Duration::from_mins(1);
+    const MAX_BLOCKHASH_AGE: Slot = solana_clock::MAX_PROCESSING_AGE as Slot;
 
     #[tokio::test]
     async fn should_validate_solana_address() {
@@ -622,13 +623,15 @@ mod withdraw_sol_tests {
             other => panic!("Expected TxSent, got: {other:?}"),
         };
 
-        // Advance time to trigger resubmission. The mocked slot
-        // (INITIAL_SLOT + 200) exceeds INITIAL_SLOT + 150 (MAX_BLOCKHASH_AGE),
-        // so the original transaction is now considered expired.
+        // Advance time to trigger resubmission. The mocked slot exceeds
+        // INITIAL_SLOT + MAX_PROCESSING_AGE, so the original transaction
+        // is now considered expired.
         const MONITOR_DELAY: Duration = Duration::from_secs(60);
         setup.advance_time(MONITOR_DELAY).await;
         setup
-            .execute_http_mocks(resubmit_withdrawal_http_mocks(INITIAL_SLOT + 200))
+            .execute_http_mocks(resubmit_withdrawal_http_mocks(
+                INITIAL_SLOT + MAX_BLOCKHASH_AGE + 50,
+            ))
             .await;
 
         // Withdrawal status should now have a different signature
