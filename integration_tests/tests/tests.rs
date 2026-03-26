@@ -214,7 +214,7 @@ mod withdraw_sol_tests {
     use super::*;
 
     const WITHDRAWAL_PROCESSING_DELAY: Duration = Duration::from_mins(1);
-    const MAX_BLOCKHASH_AGE: Slot = solana_clock::MAX_PROCESSING_AGE as Slot;
+    const MAX_BLOCKHASH_AGE: Slot = 150;
 
     #[tokio::test]
     async fn should_validate_solana_address() {
