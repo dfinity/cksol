@@ -24,7 +24,7 @@ EOF
 function help() {
     cat << EOF
 
-This will create (and override) "./wasms/cksol-minter.wasm.gz".
+This will create (and override) "./cksol-minter.wasm.gz".
 EOF
 }
 
@@ -33,8 +33,11 @@ EOF
 function build() {
     local canister="$1"
 
+    # image name and build args, made global because they're used in
+    # check_feature()
     image_name="cksol-docker-build"
     docker_build_args=( --target "scratch_$canister" )
+
     docker_build_args+=(--tag "$image_name" .)
 
     echo "The following image name will be used: $image_name"
@@ -48,7 +51,6 @@ function build() {
     set +x
 
     echo "Copying build output from $tmp_outdir to $PWD/wasms"
-    mkdir -p wasms
     cp "$tmp_outdir/$canister.wasm.gz" ./wasms/
 
     echo "Removing $tmp_outdir"
@@ -57,6 +59,7 @@ function build() {
 
 # ARGUMENT PARSING
 
+CANISTERS=()
 while [[ $# -gt 0 ]]
 do
     case $1 in
@@ -76,4 +79,11 @@ do
     esac
 done
 
-build "cksol-minter"
+if [ ${#CANISTERS[@]} -eq 0 ]; then
+    CANISTERS=("cksol-minter")
+fi
+
+for canister in "${CANISTERS[@]}"
+do
+    build "$canister"
+done

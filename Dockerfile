@@ -12,7 +12,7 @@ ENV TZ=UTC
 RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone && \
     apt -yq update && \
     apt -yqq install --no-install-recommends curl ca-certificates \
-        build-essential pkg-config libssl-dev llvm-dev liblmdb-dev clang cmake
+        build-essential pkg-config libssl-dev llvm-dev liblmdb-dev clang cmake jq
 
 # Install Rust and Cargo in /opt
 ENV RUSTUP_HOME=/opt/rustup \
@@ -21,48 +21,37 @@ ENV RUSTUP_HOME=/opt/rustup \
 
 WORKDIR /cksol
 
+RUN mkdir -p ./scripts
+COPY ./scripts/bootstrap ./scripts/bootstrap
 COPY ./rust-toolchain.toml ./rust-toolchain.toml
 
-RUN curl --fail https://sh.rustup.rs -sSf \
-        | sh -s -- -y --default-toolchain "none" --no-modify-path && \
-    rustup show && \
-    cargo install ic-wasm --version 0.9.0
+RUN ./scripts/bootstrap
 
 # Pre-build all cargo dependencies. Because cargo doesn't have a build option
-# to build only the dependencies, we pretend that our project is a simple, empty
+# to build only the dependecies, we pretend that our project is a simple, empty
 # `lib.rs`. When we COPY the actual files we make sure to `touch` lib.rs so
 # that cargo knows to rebuild it with the new content.
 COPY Cargo.lock .
 COPY Cargo.toml .
-COPY libs/types/Cargo.toml libs/types/Cargo.toml
-COPY libs/types-internal/Cargo.toml libs/types-internal/Cargo.toml
-COPY minter/Cargo.toml minter/Cargo.toml
-COPY integration_tests/Cargo.toml integration_tests/Cargo.toml
+COPY ./scripts/build ./scripts/build
 RUN mkdir -p libs/types/src && touch libs/types/src/lib.rs \
     && mkdir -p libs/types-internal/src && touch libs/types-internal/src/lib.rs \
     && mkdir -p minter/src && echo "fn main() {}" > minter/src/main.rs && touch minter/src/lib.rs \
     && mkdir -p integration_tests/src && touch integration_tests/src/lib.rs \
     && mkdir -p integration_tests/tests && touch integration_tests/tests/tests.rs \
-    && cargo build --locked --target wasm32-unknown-unknown --release --package cksol-minter \
-    || true \
-    && rm -rf libs minter integration_tests
+    && ./scripts/build --only-dependencies \
+    && rm -rf libs minter integration_tests \
+    && rm Cargo.toml \
+    && rm Cargo.lock
 
 FROM deps AS build
 
 COPY . .
 
-RUN touch minter/src/main.rs minter/src/lib.rs \
-    libs/types/src/lib.rs libs/types-internal/src/lib.rs
+RUN touch minter/src/main.rs
 
-RUN cargo build --locked --target wasm32-unknown-unknown --release --package cksol-minter
+RUN ./scripts/build --cksol-minter
+RUN sha256sum cksol-minter.wasm.gz
 
-RUN ic-wasm target/wasm32-unknown-unknown/release/cksol-minter.wasm \
-        -o cksol-minter.wasm \
-        metadata candid:service -f minter/cksol-minter.did -v public \
-        --keep-name-section \
-    && ic-wasm cksol-minter.wasm -o cksol-minter.wasm shrink --keep-name-section \
-    && gzip -fckn9 cksol-minter.wasm > cksol-minter.wasm.gz \
-    && sha256sum cksol-minter.wasm.gz
-
-FROM scratch AS scratch_cksol_minter
+FROM scratch AS scratch_cksol-minter
 COPY --from=build /cksol/cksol-minter.wasm.gz /
