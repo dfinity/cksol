@@ -61,7 +61,7 @@ mod state_from_init_args {
     fn should_fail_when_any_canister_id_is_anonymous() {
         assert_matches!(
             State::try_from(InitArgs {
-                sol_rpc_canister_id: Principal::anonymous(),
+                sol_rpc_canister_id: Some(Principal::anonymous()),
                 ..valid_init_args()
             }),
             Err(InvalidStateError::InvalidCanisterId(_))
@@ -69,7 +69,7 @@ mod state_from_init_args {
 
         assert_matches!(
             State::try_from(InitArgs {
-                ledger_canister_id: Principal::anonymous(),
+                ledger_canister_id: Some(Principal::anonymous()),
                 ..valid_init_args()
             }),
             Err(InvalidStateError::InvalidCanisterId(_))
@@ -77,8 +77,8 @@ mod state_from_init_args {
 
         assert_matches!(
             State::try_from(InitArgs {
-                sol_rpc_canister_id: Principal::anonymous(),
-                ledger_canister_id: Principal::anonymous(),
+                sol_rpc_canister_id: Some(Principal::anonymous()),
+                ledger_canister_id: Some(Principal::anonymous()),
                 ..valid_init_args()
             }),
             Err(InvalidStateError::InvalidCanisterId(_))
@@ -89,8 +89,8 @@ mod state_from_init_args {
     fn should_fail_when_canister_ids_are_identical() {
         let same_id = sol_rpc_canister_id();
         let args = InitArgs {
-            sol_rpc_canister_id: same_id,
-            ledger_canister_id: same_id,
+            sol_rpc_canister_id: Some(same_id),
+            ledger_canister_id: Some(same_id),
             ..valid_init_args()
         };
 

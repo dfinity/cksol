@@ -46,8 +46,8 @@ pub fn ledger_canister_id() -> Principal {
 
 pub fn valid_init_args() -> InitArgs {
     InitArgs {
-        sol_rpc_canister_id: sol_rpc_canister_id(),
-        ledger_canister_id: ledger_canister_id(),
+        sol_rpc_canister_id: Some(sol_rpc_canister_id()),
+        ledger_canister_id: Some(ledger_canister_id()),
         deposit_fee: DEPOSIT_FEE,
         master_key_name: Ed25519KeyName::default(),
         minimum_withdrawal_amount: MINIMUM_WITHDRAWAL_AMOUNT,
@@ -182,8 +182,8 @@ pub mod arb {
                     update_balance_required_cycles,
                 )| {
                     InitArgs {
-                        sol_rpc_canister_id,
-                        ledger_canister_id,
+                        sol_rpc_canister_id: Some(sol_rpc_canister_id),
+                        ledger_canister_id: Some(ledger_canister_id),
                         deposit_fee,
                         master_key_name,
                         minimum_withdrawal_amount,

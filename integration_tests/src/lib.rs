@@ -638,8 +638,8 @@ fn cksol_minter_init_args(
 ) -> MinterArg {
     use cksol_types_internal::{Ed25519KeyName, InitArgs, MinterArg};
     MinterArg::Init(InitArgs {
-        sol_rpc_canister_id,
-        ledger_canister_id,
+        sol_rpc_canister_id: Some(sol_rpc_canister_id),
+        ledger_canister_id: Some(ledger_canister_id),
         deposit_fee: Setup::DEFAULT_DEPOSIT_FEE,
         master_key_name: Ed25519KeyName::MainnetProdKey1,
         minimum_withdrawal_amount: Setup::DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT,

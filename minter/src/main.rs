@@ -19,7 +19,15 @@ use std::{str::FromStr, time::Duration};
 #[ic_cdk::init]
 fn init(args: MinterArg) {
     match args {
-        MinterArg::Init(init) => {
+        MinterArg::Init(mut init) => {
+            init.sol_rpc_canister_id = Some(resolve_canister_id(
+                init.sol_rpc_canister_id,
+                "PUBLIC_CANISTER_ID:sol_rpc",
+            ));
+            init.ledger_canister_id = Some(resolve_canister_id(
+                init.ledger_canister_id,
+                "PUBLIC_CANISTER_ID:cksol_ledger",
+            ));
             cksol_minter::lifecycle::init(init, IcCanisterRuntime::new());
         }
         MinterArg::Upgrade(_) => {
@@ -27,6 +35,21 @@ fn init(args: MinterArg) {
         }
     }
     setup_timers();
+}
+
+/// Resolve a canister ID from an explicit value or an environment variable.
+fn resolve_canister_id(explicit: Option<Principal>, env_var: &str) -> Principal {
+    if let Some(id) = explicit {
+        return id;
+    }
+    if ic_cdk::api::env_var_name_exists(env_var) {
+        let value = ic_cdk::api::env_var_value(env_var);
+        return Principal::from_str(&value)
+            .unwrap_or_else(|e| ic_cdk::trap(format!("invalid principal in {env_var}: {e}")));
+    }
+    ic_cdk::trap(format!(
+        "canister ID not provided in init args and {env_var} environment variable not set"
+    ));
 }
 
 #[ic_cdk::post_upgrade]

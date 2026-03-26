@@ -119,8 +119,8 @@ type UpdateBalanceResult = variant { Ok : DepositStatus; Err : UpdateBalanceErro
 
 // The installation args for the ckSOL minter canister.
 type InitArgs = record {
-    sol_rpc_canister_id : principal;
-    ledger_canister_id : principal;
+    sol_rpc_canister_id : opt principal;
+    ledger_canister_id : opt principal;
     master_key_name : Ed25519KeyName;
     deposit_fee : Lamport;
     minimum_withdrawal_amount : Lamport;

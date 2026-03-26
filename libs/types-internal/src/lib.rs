@@ -31,11 +31,13 @@ pub enum MinterArg {
 #[cfg_attr(feature = "event", derive(minicbor::Encode, minicbor::Decode))]
 pub struct InitArgs {
     /// The canister ID of the SOL RPC canister.
-    #[cfg_attr(feature = "event", n(0), cbor(with = "icrc_cbor::principal"))]
-    pub sol_rpc_canister_id: Principal,
+    /// If not set, falls back to the `PUBLIC_CANISTER_ID:sol_rpc` environment variable.
+    #[cfg_attr(feature = "event", n(0), cbor(with = "icrc_cbor::principal::option"))]
+    pub sol_rpc_canister_id: Option<Principal>,
     /// The canister ID of the ckSOL ledger canister.
-    #[cfg_attr(feature = "event", n(1), cbor(with = "icrc_cbor::principal"))]
-    pub ledger_canister_id: Principal,
+    /// If not set, falls back to the `PUBLIC_CANISTER_ID:cksol_ledger` environment variable.
+    #[cfg_attr(feature = "event", n(1), cbor(with = "icrc_cbor::principal::option"))]
+    pub ledger_canister_id: Option<Principal>,
     /// The deposit fee in lamports.
     #[cfg_attr(feature = "event", n(2))]
     pub deposit_fee: Lamport,

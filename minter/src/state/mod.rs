@@ -541,6 +541,10 @@ impl TryFrom<InitArgs> for State {
             update_balance_required_cycles,
         }: InitArgs,
     ) -> Result<Self, Self::Error> {
+        let sol_rpc_canister_id = sol_rpc_canister_id
+            .expect("BUG: sol_rpc_canister_id should be resolved before constructing State");
+        let ledger_canister_id = ledger_canister_id
+            .expect("BUG: ledger_canister_id should be resolved before constructing State");
         let state = Self {
             minter_public_key: None,
             master_key_name,
