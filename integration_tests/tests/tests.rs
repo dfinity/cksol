@@ -617,23 +617,24 @@ mod withdraw_sol_tests {
     }
 
     fn estimate_blockhash_http_mocks() -> MockHttpOutcalls {
+        const SLOT: u64 = 350_000_000;
+        const BLOCKHASH: &str = "4sGjMW1sUnHzSxGspuhpqLDx6wiyjNtZAMdL4VZHirAn";
+
         let mut builder = MockHttpOutcallsBuilder::new();
         for id in 0..4u64 {
             builder = builder
                 .given(get_slot_request().with_id(id))
-                .respond_with(get_slot_response(1).with_id(id))
+                .respond_with(get_slot_response(SLOT).with_id(id))
         }
         for id in 4..8u64 {
             builder = builder
-                .given(get_block_request(1).with_id(id))
-                .respond_with(
-                    get_block_response("4sGjMW1sUnHzSxGspuhpqLDx6wiyjNtZAMdL4VZHirAn").with_id(id),
-                )
+                .given(get_block_request(SLOT).with_id(id))
+                .respond_with(get_block_response(BLOCKHASH).with_id(id))
         }
         for id in 8..12u64 {
             builder = builder
                 .given(get_slot_request().with_id(id))
-                .respond_with(get_slot_response(1).with_id(id))
+                .respond_with(get_slot_response(SLOT).with_id(id))
         }
         builder.build()
     }
