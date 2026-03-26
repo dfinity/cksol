@@ -2,7 +2,12 @@ use super::{MAX_BLOCKHASH_AGE, monitor_submitted_transactions};
 use crate::{
     address::derive_public_key,
     numeric::LedgerBurnIndex,
-    state::{TaskType, audit::process_event, event::EventType, mutate_state, read_state},
+    state::{
+        TaskType,
+        audit::process_event,
+        event::{EventType, WithdrawSolRequest},
+        mutate_state, read_state,
+    },
     test_fixtures::{
         EventsAssert, MINTER_ACCOUNT, init_schnorr_master_key, init_state,
         runtime::TestCanisterRuntime,
@@ -159,7 +164,7 @@ async fn should_update_withdrawal_status_signature_after_resubmission() {
     mutate_state(|state| {
         process_event(
             state,
-            EventType::AcceptedWithdrawSolRequest(crate::state::event::WithdrawSolRequest {
+            EventType::AcceptedWithdrawSolRequest(WithdrawSolRequest {
                 account: MINTER_ACCOUNT,
                 solana_address: [0xAB; 32],
                 burn_block_index: burn_index,
