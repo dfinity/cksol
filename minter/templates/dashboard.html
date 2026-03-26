@@ -51,6 +51,21 @@
         .numeric {
             text-align: right;
         }
+
+        #output-bytes32-principal-error {
+            color: red;
+            font-style: italic;
+        }
+
+        #output-bytes32-principal-ok {
+            margin-top: 10px;
+            font-family: monospace;
+        }
+
+        #input-principal {
+            width: 63ch;
+            font-family: monospace;
+        }
     </style>
 </head>
 
@@ -92,16 +107,15 @@
                         <th>Minimum withdrawal amount (lamports)</th>
                         <td class="numeric">{{ minimum_withdrawal_amount }}</td>
                     </tr>
-                    <tr id="accepted-deposits-count">
-                        <th>Accepted deposits (pending mint)</th>
-                        <td class="numeric">{{ accepted_deposits_count }}</td>
-                    </tr>
-                    <tr id="quarantined-deposits-count">
-                        <th>Quarantined deposits</th>
-                        <td class="numeric">{{ quarantined_deposits_count }}</td>
-                    </tr>
                 </tbody>
             </table>
+
+            <h3>Principal &rarr; Bytes32 conversion</h3>
+            <form id="form-principal-conversion">
+                Principal: <input id="input-principal" type="text">
+                <span id="output-bytes32-principal-error"></span>
+                <div id="output-bytes32-principal-ok"></div>
+            </form>
 
             {% if !minted_deposits_table.is_empty() %}
             <h3 id="minted-deposits">Minted deposits</h3>
@@ -129,82 +143,39 @@
                 </tbody>
             </table>
             {% endif %}
-
-            {% if !deposits_to_consolidate.is_empty() %}
-            <h3 id="deposits-to-consolidate">Deposits to consolidate</h3>
-            <table>
-                <thead>
-                <tr>
-                    <th>Mint Index</th>
-                    <th>Account</th>
-                    <th>Amount (lamports)</th>
-                </tr>
-                </thead>
-                <tbody>
-                {% for (mint_index, account, amount) in deposits_to_consolidate %}
-                <tr>
-                    <td class="numeric">{{ mint_index }}</td>
-                    <td><code>{{ account }}</code></td>
-                    <td class="numeric">{{ amount }}</td>
-                </tr>
-                {% endfor %}
-                </tbody>
-            </table>
-            {% endif %}
-
-            {% if !pending_withdrawal_requests.is_empty() %}
-            <h3 id="pending-withdrawal-requests">Pending withdrawal requests</h3>
-            <table>
-                <thead>
-                <tr>
-                    <th>Burn Index</th>
-                    <th>From</th>
-                    <th>To</th>
-                    <th>Amount (lamports)</th>
-                    <th>Fee (lamports)</th>
-                </tr>
-                </thead>
-                <tbody>
-                {% for req in pending_withdrawal_requests %}
-                <tr>
-                    <td class="numeric">{{ req.burn_index }}</td>
-                    <td><code>{{ req.from }}</code></td>
-                    <td>{% call solscan_address_link(req.to) %}</td>
-                    <td class="numeric">{{ req.amount }}</td>
-                    <td class="numeric">{{ req.fee }}</td>
-                </tr>
-                {% endfor %}
-                </tbody>
-            </table>
-            {% endif %}
-
-            {% if !withdrawal_transactions_table.is_empty() %}
-            <h3 id="withdrawal-transactions">Withdrawal transactions</h3>
-            <table>
-                <thead>
-                <tr>
-                    <th>Burn Index</th>
-                    <th>To</th>
-                    <th>Amount (lamports)</th>
-                    <th>Txn Signature</th>
-                    <th>Status</th>
-                </tr>
-                </thead>
-                <tbody>
-                {% for tx in withdrawal_transactions_table.current_page %}
-                <tr>
-                    <td class="numeric">{{ tx.burn_index }}</td>
-                    <td>{% if !tx.to.is_empty() %}{% call solscan_address_link(tx.to) %}{% else %}N/A{% endif %}</td>
-                    <td class="numeric">{{ tx.amount }}</td>
-                    <td>{% call solscan_tx_link(tx.signature) %}</td>
-                    <td>{{ tx.status }}</td>
-                </tr>
-                {% endfor %}
-                {% if withdrawal_transactions_table.has_more_than_one_page() %}{{ withdrawal_transactions_table.pagination|safe }}{% endif %}
-                </tbody>
-            </table>
-            {% endif %}
         </div>
     </div>
+
+    <script>
+        {% include "principal_to_bytes.js" %}
+
+        window.addEventListener("load", function () {
+            document.getElementById("form-principal-conversion").addEventListener("keypress", function (event) {
+                if (event.keyCode == 13) {
+                    event.preventDefault();
+                    return false;
+                }
+            });
+
+            function recomputePrincipal(event) {
+                let input = event.target.value.trim();
+                let ok_output = document.getElementById("output-bytes32-principal-ok");
+                let err_output = document.getElementById("output-bytes32-principal-error");
+                try {
+                    let hex = principalToBytes32(input);
+                    ok_output.innerHTML = hex;
+                    err_output.innerHTML = "";
+                } catch (e) {
+                    ok_output.innerHTML = "";
+                    err_output.innerHTML = e.message;
+                }
+            }
+            let inputPrincipal = document.getElementById("input-principal");
+
+            inputPrincipal.addEventListener("change", recomputePrincipal);
+            inputPrincipal.addEventListener("keypress", recomputePrincipal);
+            inputPrincipal.addEventListener("input", recomputePrincipal);
+        });
+    </script>
 </body>
 </html>

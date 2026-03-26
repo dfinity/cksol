@@ -16,7 +16,6 @@ const DEFAULT_PAGE_SIZE: usize = 100;
 #[derive(Default, Clone)]
 pub struct DashboardPaginationParameters {
     pub minted_deposits_start: usize,
-    pub withdrawal_transactions_start: usize,
 }
 
 impl DashboardPaginationParameters {
@@ -31,7 +30,6 @@ impl DashboardPaginationParameters {
 
         Ok(Self {
             minted_deposits_start: parse(req, "minted_deposits_start")?,
-            withdrawal_transactions_start: parse(req, "withdrawal_transactions_start")?,
         })
     }
 }
@@ -132,24 +130,6 @@ pub struct DashboardMintedDeposit {
     pub mint_block_index: String,
 }
 
-#[derive(Clone)]
-pub struct DashboardWithdrawalRequest {
-    pub burn_index: String,
-    pub from: String,
-    pub to: String,
-    pub amount: Lamport,
-    pub fee: Lamport,
-}
-
-#[derive(Clone)]
-pub struct DashboardWithdrawalTransaction {
-    pub burn_index: String,
-    pub to: String,
-    pub amount: Lamport,
-    pub signature: String,
-    pub status: String,
-}
-
 #[derive(Template)]
 #[template(path = "dashboard.html")]
 pub struct DashboardTemplate {
@@ -161,12 +141,7 @@ pub struct DashboardTemplate {
     pub withdrawal_fee: u64,
     pub minimum_deposit_amount: u64,
     pub minimum_withdrawal_amount: u64,
-    pub accepted_deposits_count: usize,
-    pub quarantined_deposits_count: usize,
-    pub deposits_to_consolidate: Vec<(String, String, Lamport)>,
-    pub pending_withdrawal_requests: Vec<DashboardWithdrawalRequest>,
     pub minted_deposits_table: DashboardPaginatedTable<DashboardMintedDeposit>,
-    pub withdrawal_transactions_table: DashboardPaginatedTable<DashboardWithdrawalTransaction>,
 }
 
 impl DashboardTemplate {
@@ -180,14 +155,6 @@ impl DashboardTemplate {
             })
             .map(|addr: solana_address::Address| addr.to_string())
             .unwrap_or_default();
-
-        let deposits_to_consolidate: Vec<_> = state
-            .deposits_to_consolidate()
-            .iter()
-            .map(|(mint_index, (account, amount))| {
-                (mint_index.to_string(), account.to_string(), *amount)
-            })
-            .collect();
 
         let mut minted_deposits: Vec<_> = state
             .minted_deposits()
@@ -211,62 +178,6 @@ impl DashboardTemplate {
             "minted_deposits_start",
         );
 
-        let pending_withdrawal_requests: Vec<_> = state
-            .pending_withdrawal_requests()
-            .iter()
-            .map(|(burn_index, req)| DashboardWithdrawalRequest {
-                burn_index: burn_index.to_string(),
-                from: req.account.to_string(),
-                to: solana_address::Address::from(req.solana_address).to_string(),
-                amount: req.withdrawal_amount,
-                fee: req.withdrawal_fee,
-            })
-            .collect();
-
-        let mut withdrawal_transactions: Vec<_> = state
-            .sent_withdrawal_requests()
-            .iter()
-            .map(|(burn_index, sig)| {
-                let sig_str = sig.to_string();
-                let status = if state.succeeded_transactions().contains(sig) {
-                    "Succeeded"
-                } else if state.failed_transactions().contains_key(sig) {
-                    "Failed"
-                } else if state.submitted_transactions().contains_key(sig) {
-                    "Submitted"
-                } else {
-                    "Unknown"
-                };
-                let to = state
-                    .pending_withdrawal_requests()
-                    .get(burn_index)
-                    .map(|req| solana_address::Address::from(req.solana_address).to_string())
-                    .unwrap_or_default();
-                let amount = state
-                    .pending_withdrawal_requests()
-                    .get(burn_index)
-                    .map(|req| req.withdrawal_amount)
-                    .unwrap_or(0);
-                DashboardWithdrawalTransaction {
-                    burn_index: burn_index.to_string(),
-                    to,
-                    amount,
-                    signature: sig_str,
-                    status: status.to_string(),
-                }
-            })
-            .collect();
-        withdrawal_transactions.sort_unstable_by_key(|tx| Reverse(tx.burn_index.clone()));
-
-        let withdrawal_transactions_table = DashboardPaginatedTable::from_items(
-            &withdrawal_transactions,
-            pagination.withdrawal_transactions_start,
-            DEFAULT_PAGE_SIZE,
-            5,
-            "withdrawal-transactions",
-            "withdrawal_transactions_start",
-        );
-
         DashboardTemplate {
             minter_address,
             ledger_canister_id: state.ledger_canister_id(),
@@ -276,12 +187,7 @@ impl DashboardTemplate {
             withdrawal_fee: state.withdrawal_fee(),
             minimum_deposit_amount: state.minimum_deposit_amount(),
             minimum_withdrawal_amount: state.minimum_withdrawal_amount(),
-            accepted_deposits_count: state.accepted_deposits().len(),
-            quarantined_deposits_count: state.quarantined_deposits().len(),
-            deposits_to_consolidate,
-            pending_withdrawal_requests,
             minted_deposits_table,
-            withdrawal_transactions_table,
         }
     }
 }
