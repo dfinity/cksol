@@ -599,7 +599,6 @@ mod withdraw_sol_tests {
             .expect("withdraw_sol should succeed");
 
         const INITIAL_SLOT: u64 = 350_000_000;
-        const RESUBMIT_SLOT: u64 = INITIAL_SLOT + 200;
 
         setup.advance_time(WITHDRAWAL_PROCESSING_DELAY).await;
         setup
@@ -623,14 +622,13 @@ mod withdraw_sol_tests {
             other => panic!("Expected TxSent, got: {other:?}"),
         };
 
-        // Trigger the monitor to resubmit the expired transaction.
-        // The original transaction was submitted at INITIAL_SLOT, so we need
-        // the current slot to be > INITIAL_SLOT + 150 (MAX_BLOCKHASH_AGE)
-        // for the monitor to consider it expired.
+        // Advance time to trigger resubmission of the expired transaction.
+        // The original transaction was submitted at INITIAL_SLOT, so
+        // the current slot must be > INITIAL_SLOT + 150 (MAX_BLOCKHASH_AGE).
         const MONITOR_DELAY: Duration = Duration::from_secs(60);
         setup.advance_time(MONITOR_DELAY).await;
         setup
-            .execute_http_mocks(resubmit_withdrawal_http_mocks(RESUBMIT_SLOT))
+            .execute_http_mocks(resubmit_withdrawal_http_mocks(INITIAL_SLOT + 200))
             .await;
 
         // Withdrawal status should now have a different signature
@@ -673,7 +671,7 @@ mod withdraw_sol_tests {
         builder.build()
     }
 
-    /// HTTP mocks for the monitor to resubmit an expired withdrawal transaction.
+    /// HTTP mocks for resubmitting an expired withdrawal transaction.
     fn resubmit_withdrawal_http_mocks(current_slot: u64) -> MockHttpOutcalls {
         const NEW_BLOCKHASH: &str = "9ZNTfG4NyQgxy2SWjSiQoUyBPEvXT2xo7fKc5hPYYJ7b";
         const NEW_TX_SIGNATURE: &str = "5VERv8NMvzbJMEkV8xnrLkEaWRtSz9CosKDYjCJjBRnbJLgp8uirBgmQpjKhoR4tjF3ZpRzrFmBV6UjKdiSZkQUW";
