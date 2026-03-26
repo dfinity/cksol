@@ -220,8 +220,6 @@ pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: &R) {
         let signature = signed_tx.signatures[0];
         let message = signed_tx.message;
 
-        // Record events before trying to submit the transaction to ensure we don't
-        // resubmit the same transaction twice in case of a failed submission.
         mutate_state(|state| {
             process_event(
                 state,
