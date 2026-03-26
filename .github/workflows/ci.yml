@@ -39,11 +39,9 @@ jobs:
     steps:
       - name: 'Checkout'
         uses: actions/checkout@v4
-      # TODO DEFI-2641: setup reproducible build with Docker
-      - name: Docker build
-        run: |
-          cargo build --locked --target wasm32-unknown-unknown --release --package cksol-minter
-          gzip -fckn9 target/wasm32-unknown-unknown/release/cksol-minter.wasm >./wasms/cksol-minter.wasm.gz
+
+      - name: 'Docker build'
+        run: ./scripts/docker-build
 
       - name: 'Archive Artifact'
         uses: actions/upload-artifact@v4
@@ -51,6 +49,7 @@ jobs:
           name: cksol-minter.wasm.gz
           path: ./wasms/cksol-minter.wasm.gz
           if-no-files-found: error
+          compression-level: 0
 
       - name: 'Add summary'
         run: |
