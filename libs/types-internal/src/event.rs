@@ -73,7 +73,7 @@ pub enum EventType {
         /// The fee retained by the minter (in lamports).
         withdrawal_fee: Lamport,
     },
-    /// Submitted a Solana transaction
+    /// Submitted a Solana transaction.
     SubmittedTransaction {
         /// The signature of the Solana transaction.
         signature: Signature,
@@ -83,17 +83,8 @@ pub enum EventType {
         signers: Vec<Account>,
         /// The slot of the blockhash used in the transaction.
         slot: Slot,
-    },
-    /// Deposited funds from user deposit accounts have been consolidated
-    /// into the minter's main account.
-    ConsolidatedDeposits {
-        /// The mint indices of the deposits that were consolidated.
-        mint_indices: Vec<u64>,
-    },
-    /// A withdrawal transaction was signed and is ready to be sent to the network.
-    SentWithdrawalTransaction {
-        /// The burn block indices and corresponding transaction signatures.
-        transactions: Vec<(u64, Signature)>,
+        /// The purpose of this transaction.
+        purpose: TransactionPurpose,
     },
     /// A previously submitted transaction was resubmitted with a new signature.
     ResubmittedTransaction {
@@ -113,6 +104,21 @@ pub enum EventType {
     FailedTransaction {
         /// The signature of the failed Solana transaction.
         signature: Signature,
+    },
+}
+
+/// The purpose of a submitted Solana transaction.
+#[derive(Clone, Debug, CandidType, Deserialize)]
+pub enum TransactionPurpose {
+    /// Consolidate deposited funds into the minter's main account.
+    ConsolidateDeposits {
+        /// The mint indices of the deposits being consolidated.
+        mint_indices: Vec<u64>,
+    },
+    /// Send withdrawals to users' Solana addresses.
+    WithdrawSol {
+        /// The burn transaction indices on the ckSOL ledger.
+        burn_indices: Vec<u64>,
     },
 }
 

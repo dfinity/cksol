@@ -209,9 +209,12 @@ fn add_submitted_transaction(signature: Signature, slot: Slot) {
             state,
             EventType::SubmittedTransaction {
                 signature,
-                transaction: message,
+                message,
                 signers: vec![MINTER_ACCOUNT],
                 slot,
+                purpose: crate::state::event::TransactionPurpose::ConsolidateDeposits {
+                    mint_indices: vec![],
+                },
             },
             &TestCanisterRuntime::new().with_increasing_time(),
         )

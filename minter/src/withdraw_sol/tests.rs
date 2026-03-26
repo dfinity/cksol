@@ -4,13 +4,13 @@ use crate::withdraw_sol::MAX_WITHDRAWALS_PER_BATCH;
 use crate::{
     guard::{TimerGuard, withdraw_sol_guard},
     state::TaskType,
+    state::event::{EventType, TransactionPurpose},
     test_fixtures::{
         MINTER_ACCOUNT, WITHDRAWAL_FEE, init_schnorr_master_key, init_state,
         runtime::TestCanisterRuntime,
     },
-    withdraw_sol::{process_pending_withdrawals, withdraw_sol},
+    withdraw_sol::{process_pending_withdrawals, withdraw_sol, withdraw_sol_status},
 };
-use crate::{state::event::EventType, withdraw_sol::withdraw_sol_status};
 use assert_matches::assert_matches;
 use candid::{Nat, Principal};
 use canlog::Log;
@@ -22,6 +22,7 @@ use ic_cdk::call::CallRejected;
 use ic_cdk::management_canister::SignCallError;
 use icrc_ledger_types::{icrc1::account::Account, icrc2::transfer_from::TransferFromError};
 use sol_rpc_types::{ConfirmedBlock, MultiRpcResult, RpcError, Slot};
+use solana_signature::Signature;
 
 const VALID_ADDRESS: &str = "E4MpwNnMWs2XtW5gVrxZvyS7fMq31QD5HvbxmwP45Tz3";
 
@@ -254,6 +255,10 @@ mod process_pending_withdrawals_tests {
     type SendSlotResult = MultiRpcResult<Slot>;
     type SendBlockResult = MultiRpcResult<ConfirmedBlock>;
 
+    fn signature(index: u8) -> Signature {
+        Signature::from([index; 64])
+    }
+
     #[tokio::test]
     async fn should_do_nothing_if_no_pending_withdrawals() {
         init_state();
@@ -316,13 +321,15 @@ mod process_pending_withdrawals_tests {
         init_schnorr_master_key();
 
         let fake_sig = [0x42; 64];
+        let slot = 1;
 
         let runtime = TestCanisterRuntime::new()
             // ledger burn response for withdraw_sol
             .add_stub_response(Ok::<Nat, TransferFromError>(Nat::from(1u64)))
             // responses for recent block hash
-            .add_stub_response(SendSlotResult::Consistent(Ok(1)))
+            .add_stub_response(SendSlotResult::Consistent(Ok(slot)))
             .add_stub_response(SendBlockResult::Consistent(Ok(get_confirmed_block())))
+            .add_stub_response(SendSlotResult::Consistent(Ok(slot)))
             // schnorr signing response
             .add_signature(fake_sig)
             .with_increasing_time();
@@ -339,9 +346,13 @@ mod process_pending_withdrawals_tests {
                 });
             })
             .expect_event(|e| {
-                assert_matches!(e, EventType::SentWithdrawalTransaction { transactions, .. } => {
-                    assert_eq!(transactions.len(), 1);
-                    assert_eq!(transactions[0].1, fake_sig.into());
+                assert_matches!(e, EventType::SubmittedTransaction {
+                    signature,
+                    purpose: TransactionPurpose::WithdrawSol { burn_indices },
+                    ..
+                } => {
+                    assert_eq!(signature, Signature::from(fake_sig));
+                    assert_eq!(*burn_indices, vec![LedgerBurnIndex::from(1u64)]);
                 });
             })
             .assert_no_more_events();
@@ -379,14 +390,13 @@ mod process_pending_withdrawals_tests {
             })
             .assert_no_more_events();
 
-        // An error should be logged
         let mut log: Log<Priority> = Log::default();
-        log.push_logs(Priority::Error);
+        log.push_logs(Priority::Info);
         assert!(
             log.entries
                 .iter()
-                .any(|e| e.message.contains("Failed to estimate recent blockhash")),
-            "Expected error log about blockhash failure, got: {:?}",
+                .any(|e| e.message.contains("Failed to fetch recent blockhash")),
+            "Expected info log about blockhash failure, got: {:?}",
             log.entries
         );
 
@@ -398,13 +408,16 @@ mod process_pending_withdrawals_tests {
         init_state();
         init_schnorr_master_key();
 
+        let slot = 1;
+
         let runtime = TestCanisterRuntime::new()
             // responses for burn blocks
             .add_stub_response(Ok::<Nat, TransferFromError>(Nat::from(1u64)))
             .add_stub_response(Ok::<Nat, TransferFromError>(Nat::from(2u64)))
             // responses for recent block hash
-            .add_stub_response(SendSlotResult::Consistent(Ok(1)))
+            .add_stub_response(SendSlotResult::Consistent(Ok(slot)))
             .add_stub_response(SendBlockResult::Consistent(Ok(get_confirmed_block())))
+            .add_stub_response(SendSlotResult::Consistent(Ok(slot)))
             // one successful signature and one failed
             .add_signature([0x42; 64])
             .add_schnorr_signing_error(SignCallError::CallFailed(
@@ -432,9 +445,11 @@ mod process_pending_withdrawals_tests {
                 });
             })
             .expect_event(|e| {
-                assert_matches!(e, EventType::SentWithdrawalTransaction { transactions, .. } => {
-                    assert_eq!(transactions.len(), 1);
-                    assert_eq!(transactions[0].0, LedgerBurnIndex::from(1u64));
+                assert_matches!(e, EventType::SubmittedTransaction {
+                    purpose: TransactionPurpose::WithdrawSol { burn_indices },
+                    ..
+                } => {
+                    assert_eq!(*burn_indices, vec![LedgerBurnIndex::from(1u64)]);
                 });
             })
             .assert_no_more_events();
@@ -460,6 +475,7 @@ mod process_pending_withdrawals_tests {
         init_schnorr_master_key();
 
         let request_count = MAX_WITHDRAWALS_PER_BATCH as u64 + 1;
+        let slot = 1;
 
         let mut runtime = TestCanisterRuntime::new().with_increasing_time();
         // withdraw ledger burn responses
@@ -468,17 +484,19 @@ mod process_pending_withdrawals_tests {
         }
         // responses for recent block hash
         runtime = runtime
-            .add_stub_response(SendSlotResult::Consistent(Ok(1)))
-            .add_stub_response(SendBlockResult::Consistent(Ok(get_confirmed_block())));
+            .add_stub_response(SendSlotResult::Consistent(Ok(slot)))
+            .add_stub_response(SendBlockResult::Consistent(Ok(get_confirmed_block())))
+            .add_stub_response(SendSlotResult::Consistent(Ok(slot)));
         // signatures for the first batch of withdrawals
-        for _ in 0..MAX_WITHDRAWALS_PER_BATCH {
-            runtime = runtime.add_signature([0x42; 64]);
+        for i in 0..MAX_WITHDRAWALS_PER_BATCH {
+            runtime = runtime.add_signature(signature(i as u8 + 1).into());
         }
         // responses for recent block hash and signature for the second batch
         runtime = runtime
-            .add_stub_response(SendSlotResult::Consistent(Ok(1)))
+            .add_stub_response(SendSlotResult::Consistent(Ok(slot)))
             .add_stub_response(SendBlockResult::Consistent(Ok(get_confirmed_block())))
-            .add_signature([0x42; 64]);
+            .add_stub_response(SendSlotResult::Consistent(Ok(slot)))
+            .add_signature(signature(MAX_WITHDRAWALS_PER_BATCH as u8 + 1).into());
 
         withdraw(&runtime, request_count as u8).await;
 

@@ -43,19 +43,12 @@ fn apply_state_transition(state: &mut State, payload: &EventType) {
         }
         EventType::SubmittedTransaction {
             signature,
-            transaction,
+            message,
             signers,
             slot,
+            purpose,
         } => {
-            state.process_transaction_submitted(signature, transaction, signers, *slot);
-        }
-        EventType::ConsolidatedDeposits { mint_indices } => {
-            state.process_consolidated_deposits(mint_indices);
-        }
-        EventType::SentWithdrawalTransaction { transactions } => {
-            for (burn_block_index, signature) in transactions {
-                state.process_sent_withdrawal_transaction(burn_block_index, signature);
-            }
+            state.process_transaction_submitted(signature, message, signers, *slot, purpose);
         }
         EventType::ResubmittedTransaction {
             old_signature,
