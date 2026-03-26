@@ -29,7 +29,9 @@ jobs:
           cargo clippy --locked --verbose --target wasm32-unknown-unknown -p cksol-minter -- -D clippy::all
 
       - name: 'Install cargo-sort'
-        uses: taiki-e/install-action@cargo-sort
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-sort@1.0.9
 
       - name: 'Check Cargo.toml'
         run: cargo sort --workspace --check
