@@ -240,6 +240,8 @@ async fn submit_withdrawal_transaction<R: CanisterRuntime>(
             runtime,
         )
     });
+
+    // TODO: Send the transaction to the Solana network via RPC.
 }
 
 pub fn withdraw_sol_status(block_index: u64) -> WithdrawSolStatus {
