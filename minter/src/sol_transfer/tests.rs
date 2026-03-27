@@ -2,8 +2,7 @@ use super::*;
 use crate::{
     state::read_state,
     test_fixtures::{
-        init_schnorr_master_key, init_state,
-        runtime::TestCanisterRuntime,
+        init_schnorr_master_key, init_state, runtime::TestCanisterRuntime,
         signer::MockSchnorrSigner,
     },
 };
@@ -434,15 +433,13 @@ mod batch_withdrawal_tests {
         let target = Address::new_from_array([0xAA; 32]);
         let blockhash = Hash::new_from_array([0xBB; 32]);
 
-        let runtime = TestCanisterRuntime::new().add_schnorr_signing_error(
-            SignCallError::CallFailed(
+        let runtime =
+            TestCanisterRuntime::new().add_schnorr_signing_error(SignCallError::CallFailed(
                 CallRejected::with_rejection(4, "signing service unavailable".to_string()).into(),
-            ),
-        );
+            ));
 
         let result =
-            create_signed_batch_withdrawal_transaction(&runtime, &[(target, 100)], blockhash)
-                .await;
+            create_signed_batch_withdrawal_transaction(&runtime, &[(target, 100)], blockhash).await;
 
         assert!(result.is_err());
     }

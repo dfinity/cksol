@@ -532,8 +532,7 @@ mod process_pending_withdrawals_tests {
 
         // Create more withdrawals than one invocation can handle.
         // One call processes at most MAX_WITHDRAWALS_PER_TX * MAX_CONCURRENT_WITHDRAWAL_TXS.
-        let max_per_invocation =
-            (MAX_WITHDRAWALS_PER_TX * MAX_CONCURRENT_WITHDRAWAL_TXS) as u64;
+        let max_per_invocation = (MAX_WITHDRAWALS_PER_TX * MAX_CONCURRENT_WITHDRAWAL_TXS) as u64;
         let request_count = max_per_invocation + 1;
         let slot = 1;
 
