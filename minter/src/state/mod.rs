@@ -5,6 +5,7 @@ use crate::{
 };
 use candid::Principal;
 use cksol_types::{DepositStatus, SolTransaction, WithdrawSolStatus};
+use cksol_types_internal::SolanaNetwork;
 use cksol_types_internal::{Ed25519KeyName, InitArgs, UpgradeArgs};
 use ic_canister_runtime::Runtime;
 use ic_ed25519::PublicKey;
@@ -76,6 +77,7 @@ pub struct State {
     master_key_name: Ed25519KeyName,
     ledger_canister_id: Principal,
     sol_rpc_canister_id: Principal,
+    solana_network: SolanaNetwork,
     deposit_fee: Lamport,
     withdrawal_fee: Lamport,
     minimum_withdrawal_amount: Lamport,
@@ -195,7 +197,9 @@ impl State {
         // https://docs.internetcomputer.org/references/ic-interface-spec#ic-http_request
         const MAX_RESPONSE_BYTES: u64 = 2_000_000;
         SolRpcClient::builder(runtime, self.sol_rpc_canister_id)
-            .with_rpc_sources(RpcSources::Default(SolanaCluster::Mainnet))
+            .with_rpc_sources(RpcSources::Default(SolanaCluster::from(
+                self.solana_network,
+            )))
             .with_response_size_estimate(MAX_RESPONSE_BYTES)
             .with_consensus_strategy(ConsensusStrategy::Threshold {
                 min: 3,
@@ -539,6 +543,7 @@ impl TryFrom<InitArgs> for State {
             minimum_deposit_amount,
             withdrawal_fee,
             update_balance_required_cycles,
+            solana_network,
         }: InitArgs,
     ) -> Result<Self, Self::Error> {
         let state = Self {
@@ -546,6 +551,7 @@ impl TryFrom<InitArgs> for State {
             master_key_name,
             ledger_canister_id,
             sol_rpc_canister_id,
+            solana_network,
             deposit_fee,
             withdrawal_fee,
             minimum_withdrawal_amount,
