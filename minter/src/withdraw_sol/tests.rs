@@ -9,7 +9,10 @@ use crate::{
         MINTER_ACCOUNT, WITHDRAWAL_FEE, init_schnorr_master_key, init_state,
         runtime::TestCanisterRuntime,
     },
-    withdraw_sol::{process_pending_withdrawals, withdraw_sol, withdraw_sol_status},
+    withdraw_sol::{
+        MAX_CONCURRENT_WITHDRAWAL_TXS, process_pending_withdrawals, withdraw_sol,
+        withdraw_sol_status,
+    },
 };
 use assert_matches::assert_matches;
 use candid::{Nat, Principal};
@@ -520,6 +523,70 @@ mod process_pending_withdrawals_tests {
                 });
             })
             .assert_no_more_events();
+    }
+
+    #[tokio::test]
+    async fn should_respect_max_concurrent_transactions() {
+        init_state();
+        init_schnorr_master_key();
+
+        // Create more withdrawals than one invocation can handle.
+        // One call processes at most MAX_WITHDRAWALS_PER_TX * MAX_CONCURRENT_WITHDRAWAL_TXS.
+        let max_per_invocation =
+            (MAX_WITHDRAWALS_PER_TX * MAX_CONCURRENT_WITHDRAWAL_TXS) as u64;
+        let request_count = max_per_invocation + 1;
+        let slot = 1;
+
+        let mut runtime = TestCanisterRuntime::new().with_increasing_time();
+        // withdraw ledger burn responses
+        for i in 0..request_count {
+            runtime = runtime.add_stub_response(Ok::<Nat, TransferFromError>(Nat::from(i)));
+        }
+
+        // First invocation: blockhash + slot, then MAX_CONCURRENT_WITHDRAWAL_TXS signatures
+        runtime = runtime
+            .add_stub_response(SendSlotResult::Consistent(Ok(slot)))
+            .add_stub_response(SendBlockResult::Consistent(Ok(get_confirmed_block())))
+            .add_stub_response(SendSlotResult::Consistent(Ok(slot)));
+        for i in 0..MAX_CONCURRENT_WITHDRAWAL_TXS {
+            runtime = runtime.add_signature(signature(i as u8 + 1).into());
+        }
+
+        // Second invocation: blockhash + slot, then 1 signature for the remaining batch
+        runtime = runtime
+            .add_stub_response(SendSlotResult::Consistent(Ok(slot)))
+            .add_stub_response(SendBlockResult::Consistent(Ok(get_confirmed_block())))
+            .add_stub_response(SendSlotResult::Consistent(Ok(slot)))
+            .add_signature(signature(MAX_CONCURRENT_WITHDRAWAL_TXS as u8 + 1).into());
+
+        withdraw(&runtime, request_count as u8).await;
+
+        // First invocation processes up to the limit
+        process_pending_withdrawals(&runtime).await;
+
+        for i in 0..max_per_invocation {
+            assert_matches!(
+                withdraw_sol_status(i),
+                WithdrawSolStatus::TxSent(_),
+                "withdrawal {i} should be TxSent after first invocation"
+            );
+        }
+        // The last withdrawal should still be pending
+        assert_matches!(
+            withdraw_sol_status(max_per_invocation),
+            WithdrawSolStatus::Pending
+        );
+
+        // Second invocation picks up the remaining withdrawal
+        process_pending_withdrawals(&runtime).await;
+
+        for i in 0..request_count {
+            assert_matches!(
+                withdraw_sol_status(i),
+                WithdrawSolStatus::TxSent(_),
+                "withdrawal {i} should be TxSent after second invocation"
+            );
+        }
     }
 
     fn get_confirmed_block() -> ConfirmedBlock {

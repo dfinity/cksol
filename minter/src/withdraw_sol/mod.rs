@@ -30,7 +30,7 @@ use crate::{
 };
 
 pub const WITHDRAWAL_PROCESSING_DELAY: Duration = Duration::from_mins(1);
-const MAX_CONCURRENT_WITHDRAWAL_TXS: usize = 10;
+pub(crate) const MAX_CONCURRENT_WITHDRAWAL_TXS: usize = 10;
 
 #[cfg(test)]
 mod tests;
@@ -136,10 +136,12 @@ pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: &R) {
         }
     };
 
+    let max_requests = MAX_WITHDRAWALS_PER_TX * MAX_CONCURRENT_WITHDRAWAL_TXS;
     let withdrawal_batches: Vec<Vec<_>> = read_state(|state| {
         state
             .pending_withdrawal_requests()
             .values()
+            .take(max_requests)
             .cloned()
             .collect::<Vec<_>>()
     })
@@ -160,33 +162,27 @@ pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: &R) {
     // here and while consolidating funds.
     // If there are not enough funds for the withdrawal we simply continue.
 
-    for round in &withdrawal_batches
-        .into_iter()
-        .chunks(MAX_CONCURRENT_WITHDRAWAL_TXS)
-    {
-        let recent_blockhash = match get_recent_blockhash(runtime).await {
-            Ok(blockhash) => blockhash,
-            Err(e) => {
-                log!(Priority::Info, "Failed to fetch recent blockhash: {e}");
-                return;
-            }
-        };
-        // TODO DEFI-2670: Update `sol_rpc_client` to return the slot along with the blockhash
-        //  in `estimate_recent_blockhash`, then remove this separate call to `getSlot`.
-        let slot = match get_slot(runtime).await {
-            Ok(slot) => slot,
-            Err(e) => {
-                log!(Priority::Info, "Failed to get slot: {e}");
-                return;
-            }
-        };
+    let recent_blockhash = match get_recent_blockhash(runtime).await {
+        Ok(blockhash) => blockhash,
+        Err(e) => {
+            log!(Priority::Info, "Failed to fetch recent blockhash: {e}");
+            return;
+        }
+    };
+    // TODO DEFI-2670: Update `sol_rpc_client` to return the slot along with the blockhash
+    //  in `estimate_recent_blockhash`, then remove this separate call to `getSlot`.
+    let slot = match get_slot(runtime).await {
+        Ok(slot) => slot,
+        Err(e) => {
+            log!(Priority::Info, "Failed to get slot: {e}");
+            return;
+        }
+    };
 
-        futures::future::join_all(round.map(async |batch| {
-            submit_withdrawal_transaction(runtime, minter_account, batch, slot, recent_blockhash)
-                .await
-        }))
-        .await;
-    }
+    futures::future::join_all(withdrawal_batches.into_iter().map(async |batch| {
+        submit_withdrawal_transaction(runtime, minter_account, batch, slot, recent_blockhash).await
+    }))
+    .await;
 }
 
 async fn submit_withdrawal_transaction<R: CanisterRuntime>(
