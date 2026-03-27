@@ -19,9 +19,10 @@ use crate::{
     state::{
         TaskType,
         audit::process_event,
-        event::{EventType, WithdrawSolRequest},
+        event::{EventType, TransactionPurpose, VersionedMessage, WithdrawSolRequest},
         mutate_state, read_state,
     },
+    transaction::{get_recent_blockhash, get_slot},
 };
 
 pub const WITHDRAWAL_PROCESSING_DELAY: Duration = Duration::from_mins(1);
@@ -149,21 +150,22 @@ pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: &R) {
         return;
     }
 
-    let recent_blockhash =
-        match read_state(|state| state.sol_rpc_client(runtime.inter_canister_call_runtime()))
-            .estimate_recent_blockhash()
-            .send()
-            .await
-        {
-            Ok(blockhash) => blockhash,
-            Err(errors) => {
-                log!(
-                    Priority::Error,
-                    "Failed to estimate recent blockhash: {errors:?}"
-                );
-                return;
-            }
-        };
+    let recent_blockhash = match get_recent_blockhash(runtime).await {
+        Ok(blockhash) => blockhash,
+        Err(e) => {
+            log!(Priority::Info, "Failed to fetch recent blockhash: {e}");
+            return;
+        }
+    };
+    // TODO DEFI-2670: Update `sol_rpc_client` to return the slot along with the blockhash
+    //  in `estimate_recent_blockhash`, then remove this separate call to `getSlot`.
+    let slot = match get_slot(runtime).await {
+        Ok(slot) => slot,
+        Err(e) => {
+            log!(Priority::Info, "Failed to get slot: {e}");
+            return;
+        }
+    };
 
     let minter_account: Account = runtime.canister_self().into();
     let signer = runtime.signer();
@@ -214,13 +216,21 @@ pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: &R) {
             }
         };
 
-        let signature = transaction.0.signatures[0];
+        let (signed_tx, signers) = transaction;
+        let signature = signed_tx.signatures[0];
+        let message = VersionedMessage::Legacy(signed_tx.message);
 
         mutate_state(|state| {
             process_event(
                 state,
-                EventType::SentWithdrawalTransaction {
-                    transactions: vec![(request.burn_block_index, signature)],
+                EventType::SubmittedTransaction {
+                    signature,
+                    message,
+                    signers,
+                    slot,
+                    purpose: TransactionPurpose::WithdrawSol {
+                        burn_indices: vec![request.burn_block_index],
+                    },
                 },
                 runtime,
             )

@@ -9,7 +9,7 @@ use crate::{
 };
 use candid::Principal;
 use cksol_types::DepositStatus;
-use cksol_types_internal::{Ed25519KeyName, InitArgs};
+use cksol_types_internal::{Ed25519KeyName, InitArgs, SolanaNetwork};
 use ic_ed25519::{PocketIcMasterPublicKeyId, PublicKey};
 use icrc_ledger_types::icrc1::account::Account;
 use sol_rpc_types::Lamport;
@@ -54,6 +54,7 @@ pub fn valid_init_args() -> InitArgs {
         minimum_deposit_amount: MINIMUM_DEPOSIT_AMOUNT,
         withdrawal_fee: WITHDRAWAL_FEE,
         update_balance_required_cycles: UPDATE_BALANCE_REQUIRED_CYCLES as u64,
+        solana_network: SolanaNetwork::Mainnet,
     }
 }
 
@@ -77,10 +78,10 @@ pub fn init_schnorr_master_key() {
 pub mod arb {
     use crate::{
         numeric::{LedgerBurnIndex, LedgerMintIndex},
-        state::event::{DepositId, Event, EventType, WithdrawSolRequest},
+        state::event::{DepositId, Event, EventType, TransactionPurpose, WithdrawSolRequest},
     };
     use candid::Principal;
-    use cksol_types_internal::{Ed25519KeyName, InitArgs, UpgradeArgs};
+    use cksol_types_internal::{Ed25519KeyName, InitArgs, SolanaNetwork, UpgradeArgs};
     use icrc_ledger_types::icrc1::account::Account;
     use proptest::prelude::{Just, Strategy, any, prop, prop_oneof};
     use sol_rpc_types::Slot;
@@ -159,6 +160,14 @@ pub mod arb {
         ]
     }
 
+    pub fn arb_solana_network() -> impl Strategy<Value = SolanaNetwork> {
+        prop_oneof![
+            Just(SolanaNetwork::Mainnet),
+            Just(SolanaNetwork::Devnet),
+            Just(SolanaNetwork::Testnet),
+        ]
+    }
+
     pub fn arb_init_args() -> impl Strategy<Value = InitArgs> {
         (
             arb_principal(),
@@ -169,6 +178,7 @@ pub mod arb {
             any::<u64>(),
             any::<u64>(),
             any::<u64>(),
+            arb_solana_network(),
         )
             .prop_map(
                 |(
@@ -180,6 +190,7 @@ pub mod arb {
                     minimum_deposit_amount,
                     withdrawal_fee,
                     update_balance_required_cycles,
+                    solana_network,
                 )| {
                     InitArgs {
                         sol_rpc_canister_id,
@@ -190,6 +201,7 @@ pub mod arb {
                         minimum_deposit_amount,
                         withdrawal_fee,
                         update_balance_required_cycles,
+                        solana_network,
                     }
                 },
             )
@@ -274,19 +286,23 @@ pub mod arb {
                 arb_message(),
                 prop::collection::vec(arb_account(), 1..10),
                 any::<Slot>(),
+                prop_oneof![
+                    prop::collection::vec(arb_ledger_mint_index(), 1..10).prop_map(
+                        |mint_indices| TransactionPurpose::ConsolidateDeposits { mint_indices }
+                    ),
+                    prop::collection::vec(arb_ledger_burn_index(), 1..10)
+                        .prop_map(|burn_indices| TransactionPurpose::WithdrawSol { burn_indices }),
+                ],
             )
-                .prop_map(|(signature, transaction, signers, slot)| {
+                .prop_map(|(signature, message, signers, slot, purpose)| {
                     EventType::SubmittedTransaction {
                         signature,
-                        transaction,
+                        message: message.into(),
                         signers,
                         slot,
+                        purpose,
                     }
                 }),
-            prop::collection::vec(arb_ledger_mint_index(), 1..10)
-                .prop_map(|mint_indices| EventType::ConsolidatedDeposits { mint_indices }),
-            prop::collection::vec((arb_ledger_burn_index(), arb_signature()), 1..10)
-                .prop_map(|transactions| EventType::SentWithdrawalTransaction { transactions },),
             (arb_signature(), arb_signature(), any::<Slot>()).prop_map(
                 |(old_signature, new_signature, new_slot)| {
                     EventType::ResubmittedTransaction {

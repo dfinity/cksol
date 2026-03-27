@@ -1,17 +1,17 @@
 use crate::{
     ledger::client::LedgerClient,
     numeric::{LedgerBurnIndex, LedgerMintIndex},
-    state::event::{DepositId, WithdrawSolRequest},
+    state::event::{DepositId, TransactionPurpose, VersionedMessage, WithdrawSolRequest},
 };
 use candid::Principal;
 use cksol_types::{DepositStatus, SolTransaction, WithdrawSolStatus};
+use cksol_types_internal::SolanaNetwork;
 use cksol_types_internal::{Ed25519KeyName, InitArgs, UpgradeArgs};
 use ic_canister_runtime::Runtime;
 use ic_ed25519::PublicKey;
 use icrc_ledger_types::icrc1::account::Account;
 use sol_rpc_client::SolRpcClient;
 use sol_rpc_types::{ConsensusStrategy, Lamport, RpcSources, Slot, SolanaCluster};
-use solana_message::Message;
 use solana_signature::Signature;
 use std::{
     cell::RefCell,
@@ -76,6 +76,7 @@ pub struct State {
     master_key_name: Ed25519KeyName,
     ledger_canister_id: Principal,
     sol_rpc_canister_id: Principal,
+    solana_network: SolanaNetwork,
     deposit_fee: Lamport,
     withdrawal_fee: Lamport,
     minimum_withdrawal_amount: Lamport,
@@ -195,7 +196,9 @@ impl State {
         // https://docs.internetcomputer.org/references/ic-interface-spec#ic-http_request
         const MAX_RESPONSE_BYTES: u64 = 2_000_000;
         SolRpcClient::builder(runtime, self.sol_rpc_canister_id)
-            .with_rpc_sources(RpcSources::Default(SolanaCluster::Mainnet))
+            .with_rpc_sources(RpcSources::Default(SolanaCluster::from(
+                self.solana_network,
+            )))
             .with_response_size_estimate(MAX_RESPONSE_BYTES)
             .with_consensus_strategy(ConsensusStrategy::Threshold {
                 min: 3,
@@ -391,9 +394,10 @@ impl State {
     fn process_transaction_submitted(
         &mut self,
         signature: &Signature,
-        message: &Message,
+        transaction: &VersionedMessage,
         signers: &[Account],
         slot: Slot,
+        purpose: &TransactionPurpose,
     ) {
         assert!(
             !self.succeeded_transactions.contains(signature),
@@ -403,11 +407,38 @@ impl State {
             !self.failed_transactions.contains_key(signature),
             "Attempted to submit already failed transaction {signature:?}"
         );
+        match purpose {
+            TransactionPurpose::ConsolidateDeposits { mint_indices } => {
+                for mint_index in mint_indices {
+                    self.deposits_to_consolidate
+                        .remove(mint_index)
+                        .unwrap_or_else(|| {
+                            panic!("Attempted to consolidate unknown mint index: {mint_index:?}")
+                        });
+                }
+            }
+            TransactionPurpose::WithdrawSol { burn_indices } => {
+                for burn_index in burn_indices {
+                    assert!(
+                        self.pending_withdrawal_requests
+                            .remove(burn_index)
+                            .is_some(),
+                        "Attempted to send transaction for unknown withdrawal request: {burn_index:?}"
+                    );
+                    assert_eq!(
+                        self.sent_withdrawal_requests
+                            .insert(*burn_index, *signature),
+                        None,
+                        "Attempted to send transaction for already sent withdrawal request: {burn_index:?}"
+                    );
+                }
+            }
+        }
         assert_eq!(
             self.submitted_transactions.insert(
                 *signature,
                 SolanaTransaction {
-                    message: message.clone(),
+                    message: transaction.clone(),
                     signers: signers.to_vec(),
                     slot,
                 }
@@ -415,37 +446,6 @@ impl State {
             None,
             "Attempted to submit transaction with signature {signature:?} twice"
         );
-    }
-
-    fn process_sent_withdrawal_transaction(
-        &mut self,
-        burn_block_index: &LedgerBurnIndex,
-        signature: &Signature,
-    ) {
-        assert!(
-            self.pending_withdrawal_requests
-                .remove(burn_block_index)
-                .is_some(),
-            "Attempted to send transaction for unknown withdrawal request: {:?}",
-            burn_block_index
-        );
-        assert_eq!(
-            self.sent_withdrawal_requests
-                .insert(*burn_block_index, *signature),
-            None,
-            "Attempted to send transaction for already sent withdrawal request: {:?}",
-            burn_block_index
-        );
-    }
-
-    fn process_consolidated_deposits(&mut self, mint_indices: &[LedgerMintIndex]) {
-        for mint_index in mint_indices {
-            self.deposits_to_consolidate
-                .remove(mint_index)
-                .unwrap_or_else(|| {
-                    panic!("Attempted to consolidate funds for unknown mint index: {mint_index:?}")
-                });
-        }
     }
 
     fn process_transaction_resubmitted(
@@ -478,6 +478,11 @@ impl State {
             None,
             "Attempted to resubmit transaction with signature {new_signature:?} that already exists"
         );
+        for signature in self.sent_withdrawal_requests.values_mut() {
+            if signature == old_signature {
+                *signature = *new_signature;
+            }
+        }
     }
 
     fn process_transaction_succeeded(&mut self, signature: &Signature) {
@@ -542,6 +547,7 @@ impl TryFrom<InitArgs> for State {
             minimum_deposit_amount,
             withdrawal_fee,
             update_balance_required_cycles,
+            solana_network,
         }: InitArgs,
     ) -> Result<Self, Self::Error> {
         let state = Self {
@@ -549,6 +555,7 @@ impl TryFrom<InitArgs> for State {
             master_key_name,
             ledger_canister_id,
             sol_rpc_canister_id,
+            solana_network,
             deposit_fee,
             withdrawal_fee,
             minimum_withdrawal_amount,
@@ -600,7 +607,7 @@ pub enum TaskType {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SolanaTransaction {
-    pub message: Message,
+    pub message: VersionedMessage,
     pub signers: Vec<Account>,
     pub slot: Slot,
 }

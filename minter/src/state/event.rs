@@ -1,5 +1,6 @@
 use crate::numeric::{LedgerBurnIndex, LedgerMintIndex};
 use cksol_types_internal::{InitArgs, UpgradeArgs};
+use derive_more::From;
 use ic_stable_structures::{Storable, storable::Bound};
 use icrc_ledger_types::icrc1::account::Account;
 use minicbor::{Decode, Encode};
@@ -7,6 +8,18 @@ use sol_rpc_types::{Lamport, Slot};
 use solana_message::Message;
 use solana_signature::Signature;
 use std::borrow::Cow;
+
+/// A versioned Solana transaction message, allowing the minter to support
+/// both legacy and versioned (v0) transactions in the future.
+#[derive(Clone, Eq, PartialEq, Debug, Decode, Encode, From)]
+pub enum VersionedMessage {
+    #[n(0)]
+    Legacy(
+        #[n(0)]
+        #[cbor(with = "cbor::message")]
+        Message,
+    ),
+}
 
 mod cbor;
 
@@ -60,33 +73,28 @@ pub enum EventType {
     /// The minter burned ckSOL for a withdrawal request.
     #[n(5)]
     AcceptedWithdrawSolRequest(#[n(0)] WithdrawSolRequest),
-    /// Submitted a Solana transaction
+    /// The minter submitted a Solana transaction.
     #[n(6)]
     SubmittedTransaction {
-        /// The transaction signature
+        /// The transaction signature.
         #[cbor(n(0), with = "cbor::signature")]
         signature: Signature,
-        /// The transaction message
-        #[cbor(n(1), with = "cbor::message")]
-        transaction: Message,
-        /// The signing accounts in signature order (fee payer first)
+        /// The versioned transaction message.
+        #[n(1)]
+        message: VersionedMessage,
+        /// The signing accounts in signature order (fee payer first).
         #[n(2)]
         signers: Vec<Account>,
-        /// The slot of the blockhash used in the transaction
+        /// The slot of the blockhash used in the transaction.
         #[n(3)]
         slot: Slot,
-    },
-    /// Deposited funds from user deposit accounts have been consolidated
-    /// into the minter's main account.
-    #[n(7)]
-    ConsolidatedDeposits {
-        /// The mint indices of the deposits that were consolidated.
-        #[cbor(n(0), with = "cbor::mint_indices")]
-        mint_indices: Vec<LedgerMintIndex>,
+        /// The purpose of this transaction.
+        #[n(4)]
+        purpose: TransactionPurpose,
     },
     /// A previously submitted transaction was resubmitted with a new signature.
     /// The transaction message and signers remain the same.
-    #[n(8)]
+    #[n(7)]
     ResubmittedTransaction {
         /// The signature of the old transaction being replaced
         #[cbor(n(0), with = "cbor::signature")]
@@ -99,21 +107,14 @@ pub enum EventType {
         new_slot: Slot,
     },
     /// A previously submitted Solana transaction has been finalized successfully.
-    #[n(9)]
+    #[n(8)]
     SucceededTransaction {
         /// The signature of the succeeded Solana transaction.
         #[cbor(n(0), with = "cbor::signature")]
         signature: Signature,
     },
-    /// A withdrawal transaction was signed and is ready to be sent to the network.
-    #[n(10)]
-    SentWithdrawalTransaction {
-        /// The burn block indices and corresponding transaction signatures.
-        #[cbor(n(0), with = "cbor::burn_index_signature_vec")]
-        transactions: Vec<(LedgerBurnIndex, Signature)>,
-    },
     /// A previously submitted Solana transaction has failed.
-    #[n(11)]
+    #[n(9)]
     FailedTransaction {
         /// The signature of the failed Solana transaction.
         #[cbor(n(0), with = "cbor::signature")]
@@ -139,6 +140,24 @@ pub struct WithdrawSolRequest {
     /// The fee retained by the minter (in lamports).
     #[n(4)]
     pub withdrawal_fee: Lamport,
+}
+
+#[derive(Clone, Eq, PartialEq, Debug, Decode, Encode)]
+pub enum TransactionPurpose {
+    /// Consolidate deposited funds into the minter's main account.
+    #[n(0)]
+    ConsolidateDeposits {
+        /// The ledger mint indices of the deposits being consolidated.
+        #[cbor(n(0), with = "cbor::id_vec")]
+        mint_indices: Vec<LedgerMintIndex>,
+    },
+    /// Withdraw SOL to users' Solana addresses.
+    #[n(1)]
+    WithdrawSol {
+        /// The ledger burn indices of the withdrawal requests included in this transaction.
+        #[cbor(n(0), with = "cbor::id_vec")]
+        burn_indices: Vec<LedgerBurnIndex>,
+    },
 }
 
 #[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd, Debug, Decode, Encode)]

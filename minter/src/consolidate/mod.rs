@@ -5,7 +5,12 @@ use crate::{
     numeric::LedgerMintIndex,
     runtime::CanisterRuntime,
     sol_transfer::{CreateTransferError, MAX_SIGNATURES, create_signed_transfer_transaction},
-    state::{TaskType, audit::process_event, event::EventType, mutate_state, read_state},
+    state::{
+        TaskType,
+        audit::process_event,
+        event::{EventType, TransactionPurpose},
+        mutate_state, read_state,
+    },
     transaction::{SubmitTransactionError, get_recent_blockhash, get_slot, submit_transaction},
 };
 use canlog::log;
@@ -122,28 +127,20 @@ async fn submit_consolidation_transaction<R: CanisterRuntime>(
 
     let signature = transaction.signatures[0];
     let message = transaction.message.clone();
-    let mint_indices: Vec<LedgerMintIndex> = funds_to_consolidate
+    let mint_indices = funds_to_consolidate
         .into_iter()
         .flat_map(|(_, (_, indices))| indices)
         .collect();
 
-    // Record events before trying to submit the transaction to ensure we don't
-    // resubmit the same transaction twice in case of a failed submission.
-    mutate_state(|state| {
-        process_event(
-            state,
-            EventType::ConsolidatedDeposits { mint_indices },
-            runtime,
-        )
-    });
     mutate_state(|state| {
         process_event(
             state,
             EventType::SubmittedTransaction {
                 signature,
-                transaction: message,
+                message: message.into(),
                 signers,
                 slot,
+                purpose: TransactionPurpose::ConsolidateDeposits { mint_indices },
             },
             runtime,
         )

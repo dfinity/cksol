@@ -4,7 +4,12 @@ use crate::{
     guard::TimerGuard,
     runtime::CanisterRuntime,
     signer::sign_bytes,
-    state::{TaskType, audit::process_event, event::EventType, mutate_state, read_state},
+    state::{
+        TaskType,
+        audit::process_event,
+        event::{EventType, VersionedMessage},
+        mutate_state, read_state,
+    },
     transaction::{
         SubmitTransactionError, get_recent_blockhash, get_signature_statuses, get_slot,
         submit_transaction,
@@ -16,7 +21,6 @@ use ic_cdk::management_canister::SignCallError;
 use icrc_ledger_types::icrc1::account::Account;
 use itertools::Itertools;
 use sol_rpc_types::Slot;
-use solana_message::Message;
 use solana_signature::Signature;
 use solana_transaction::Transaction;
 use solana_transaction_status_client_types::TransactionConfirmationStatus;
@@ -187,7 +191,7 @@ async fn check_transaction_statuses<R: CanisterRuntime>(
 
 async fn resubmit_expired_transactions<R: CanisterRuntime>(
     runtime: &R,
-    expired: Vec<(Signature, Message, Vec<Account>)>,
+    expired: Vec<(Signature, VersionedMessage, Vec<Account>)>,
 ) {
     for round in &expired.into_iter().chunks(MAX_CONCURRENT_RPC_CALLS) {
         let new_blockhash = match get_recent_blockhash(runtime).await {
@@ -233,12 +237,12 @@ async fn resubmit_expired_transactions<R: CanisterRuntime>(
 async fn try_resubmit_transaction<R: CanisterRuntime>(
     runtime: &R,
     old_signature: Signature,
-    message: Message,
+    versioned_message: VersionedMessage,
     signers: Vec<Account>,
     new_slot: Slot,
     new_blockhash: solana_hash::Hash,
 ) -> Result<Signature, ResubmitError> {
-    let mut message = message;
+    let VersionedMessage::Legacy(mut message) = versioned_message;
     message.recent_blockhash = new_blockhash;
 
     let mut transaction = Transaction::new_unsigned(message);

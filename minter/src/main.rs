@@ -93,7 +93,7 @@ fn withdraw_sol_status(block_index: u64) -> WithdrawSolStatus {
 fn get_events(
     args: cksol_types_internal::event::GetEventsArgs,
 ) -> cksol_types_internal::event::GetEventsResult {
-    use cksol_minter::state::event::{Event, EventType};
+    use cksol_minter::state::event::{Event, EventType, TransactionPurpose, VersionedMessage};
     use cksol_types_internal::event;
 
     const MAX_EVENTS_PER_RESPONSE: u64 = 2_000;
@@ -142,27 +142,36 @@ fn get_events(
             },
             EventType::SubmittedTransaction {
                 signature,
-                transaction,
+                message,
                 signers,
                 slot,
-            } => event::EventType::SubmittedTransaction {
-                signature: signature.into(),
-                transaction: bincode::serialize(&transaction)
-                    .expect("serializing transaction should succeed"),
-                signers,
-                slot,
-            },
-            EventType::ConsolidatedDeposits { mint_indices } => {
-                event::EventType::ConsolidatedDeposits {
-                    mint_indices: mint_indices.iter().map(|idx| *idx.get()).collect(),
-                }
-            }
-            EventType::SentWithdrawalTransaction { transactions } => {
-                event::EventType::SentWithdrawalTransaction {
-                    transactions: transactions
-                        .iter()
-                        .map(|(idx, sig)| (*idx.get(), sig.into()))
-                        .collect(),
+                purpose,
+            } => {
+                let purpose = match purpose {
+                    TransactionPurpose::ConsolidateDeposits { mint_indices } => {
+                        event::TransactionPurpose::ConsolidateDeposits {
+                            mint_indices: mint_indices.iter().map(|idx| *idx.get()).collect(),
+                        }
+                    }
+                    TransactionPurpose::WithdrawSol { burn_indices } => {
+                        event::TransactionPurpose::WithdrawSol {
+                            burn_indices: burn_indices.iter().map(|idx| *idx.get()).collect(),
+                        }
+                    }
+                };
+                event::EventType::SubmittedTransaction {
+                    signature: signature.into(),
+                    transaction: match message {
+                        VersionedMessage::Legacy(message) => {
+                            event::VersionedTransactionMessage::Legacy(
+                                bincode::serialize(&message)
+                                    .expect("serializing transaction should succeed"),
+                            )
+                        }
+                    },
+                    signers,
+                    slot,
+                    purpose,
                 }
             }
             EventType::ResubmittedTransaction {
