@@ -1,6 +1,7 @@
 use crate::state::State;
 use askama::Template;
 use candid::Principal;
+use cksol_types_internal::SolanaNetwork;
 
 #[cfg(test)]
 mod tests;
@@ -18,10 +19,19 @@ pub fn lamports_to_sol(lamports: u64) -> String {
     }
 }
 
+fn solscan_cluster_suffix(network: SolanaNetwork) -> &'static str {
+    match network {
+        SolanaNetwork::Mainnet => "",
+        SolanaNetwork::Devnet => "?cluster=devnet",
+        SolanaNetwork::Testnet => "?cluster=testnet",
+    }
+}
+
 #[derive(Template)]
 #[template(path = "dashboard.html")]
 pub struct DashboardTemplate {
     pub solana_cluster: String,
+    pub solscan_suffix: &'static str,
     pub minter_address: String,
     pub ledger_canister_id: Principal,
     pub sol_rpc_canister_id: Principal,
@@ -44,8 +54,10 @@ impl DashboardTemplate {
             .map(|addr: solana_address::Address| addr.to_string())
             .unwrap_or_default();
 
+        let network = state.solana_network();
         DashboardTemplate {
-            solana_cluster: format!("{:?}", state.solana_network()),
+            solana_cluster: format!("{:?}", network),
+            solscan_suffix: solscan_cluster_suffix(network),
             minter_address,
             ledger_canister_id: state.ledger_canister_id(),
             sol_rpc_canister_id: state.sol_rpc_canister_id(),

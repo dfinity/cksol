@@ -223,7 +223,7 @@ fn http_request(request: HttpRequest) -> HttpResponse {
         "/dashboard" => {
             use askama::Template;
             use cksol_minter::dashboard::DashboardTemplate;
-            let dashboard = read_state(|state| DashboardTemplate::from_state(state));
+            let dashboard = read_state(DashboardTemplate::from_state);
             HttpResponseBuilder::ok()
                 .header("Content-Type", "text/html; charset=utf-8")
                 .with_body_and_content_length(dashboard.render().unwrap())
