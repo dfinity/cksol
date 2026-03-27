@@ -150,6 +150,10 @@ impl State {
         self.update_balance_required_cycles
     }
 
+    pub fn minted_deposits(&self) -> &BTreeMap<DepositId, MintedDeposit> {
+        &self.minted_deposits
+    }
+
     pub fn deposits_to_consolidate(&self) -> &BTreeMap<LedgerMintIndex, (Account, Lamport)> {
         &self.deposits_to_consolidate
     }
