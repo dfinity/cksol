@@ -676,7 +676,7 @@ mod process_pending_withdrawals_tests {
 
 mod withdrawal_finalization_tests {
     use super::*;
-    use crate::state::{audit::process_event, event::EventType, mutate_state, read_state};
+    use crate::state::{audit::process_event, event::EventType, mutate_state};
     use cksol_types::TxFinalizedStatus;
     use solana_hash::Hash;
     use solana_message::Message;
