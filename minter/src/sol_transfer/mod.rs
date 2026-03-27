@@ -148,6 +148,7 @@ pub async fn create_signed_batch_withdrawal_transaction<R: CanisterRuntime>(
     let mut transaction = Transaction::new_unsigned(message);
     let message_bytes = transaction.message_data();
 
+    // There is only one signature - minter's
     assert!(1 + message_bytes.len() + BYTES_PER_SIGNATURE < MAX_TX_SIZE);
 
     transaction.signatures = sign_bytes(
