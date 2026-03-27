@@ -142,27 +142,31 @@ fn get_events(
             },
             EventType::SubmittedTransaction {
                 signature,
-                transaction,
+                message,
                 signers,
                 slot,
-            } => event::EventType::SubmittedTransaction {
-                signature: signature.into(),
-                transaction: bincode::serialize(&transaction)
-                    .expect("serializing transaction should succeed"),
-                signers,
-                slot,
-            },
-            EventType::ConsolidatedDeposits { mint_indices } => {
-                event::EventType::ConsolidatedDeposits {
-                    mint_indices: mint_indices.iter().map(|idx| *idx.get()).collect(),
-                }
-            }
-            EventType::SentWithdrawalTransaction { transactions } => {
-                event::EventType::SentWithdrawalTransaction {
-                    transactions: transactions
-                        .iter()
-                        .map(|(idx, sig)| (*idx.get(), sig.into()))
-                        .collect(),
+                purpose,
+            } => {
+                use cksol_minter::state::event::TransactionPurpose;
+                let purpose = match purpose {
+                    TransactionPurpose::ConsolidateDeposits { mint_indices } => {
+                        event::TransactionPurpose::ConsolidateDeposits {
+                            mint_indices: mint_indices.iter().map(|idx| *idx.get()).collect(),
+                        }
+                    }
+                    TransactionPurpose::WithdrawSol { burn_indices } => {
+                        event::TransactionPurpose::WithdrawSol {
+                            burn_indices: burn_indices.iter().map(|idx| *idx.get()).collect(),
+                        }
+                    }
+                };
+                event::EventType::SubmittedTransaction {
+                    signature: signature.into(),
+                    transaction: bincode::serialize(&message)
+                        .expect("serializing transaction should succeed"),
+                    signers,
+                    slot,
+                    purpose,
                 }
             }
             EventType::ResubmittedTransaction {

@@ -15,13 +15,15 @@ use cksol_types::{
     DepositStatus, GetDepositAddressArgs, InsufficientCyclesError, Lamport, MinterInfo,
     UpdateBalanceArgs, UpdateBalanceError, WithdrawSolArgs, WithdrawSolError, WithdrawSolStatus,
 };
-use cksol_types_internal::{UpgradeArgs, event::EventType, log::Priority};
-use ic_pocket_canister_runtime::{
-    JsonRpcRequestMatcher, JsonRpcResponse, MockHttpOutcalls, MockHttpOutcallsBuilder,
+use cksol_types_internal::{
+    UpgradeArgs,
+    event::{EventType, TransactionPurpose},
+    log::Priority,
 };
+use ic_pocket_canister_runtime::{JsonRpcResponse, MockHttpOutcalls, MockHttpOutcallsBuilder};
 use icrc_ledger_types::icrc1::account::Subaccount;
 use serde_json::json;
-use sol_rpc_types::{CommitmentLevel, ConsensusStrategy, GetTransactionEncoding, RpcConfig};
+use sol_rpc_types::{CommitmentLevel, ConsensusStrategy, GetTransactionEncoding, RpcConfig, Slot};
 use std::time::Duration;
 use tokio::join;
 
@@ -212,6 +214,7 @@ mod withdraw_sol_tests {
     use super::*;
 
     const WITHDRAWAL_PROCESSING_DELAY: Duration = Duration::from_mins(1);
+    const MAX_BLOCKHASH_AGE: Slot = 150;
 
     #[tokio::test]
     async fn should_validate_solana_address() {
@@ -596,37 +599,116 @@ mod withdraw_sol_tests {
             .await
             .expect("withdraw_sol should succeed");
 
+        const INITIAL_SLOT: u64 = 350_000_000;
+
         setup.advance_time(WITHDRAWAL_PROCESSING_DELAY).await;
         setup
-            .execute_http_mocks(estimate_blockhash_http_mocks())
+            .execute_http_mocks(estimate_blockhash_http_mocks(INITIAL_SLOT))
             .await;
 
         setup.minter().assert_that_events().await.satisfy(|events| {
             check!(events.iter().any(|e| matches!(
                 e,
-                EventType::SentWithdrawalTransaction {
-                    transactions,
+                EventType::SubmittedTransaction {
+                    purpose: TransactionPurpose::WithdrawSol { burn_indices },
                     ..
-                } if transactions.iter().any(|(idx, _)| *idx == block_index)
+                } if burn_indices == &[block_index]
             )));
         });
+
+        // Withdrawal status should be TxSent with some signature
+        let status = setup.minter().withdraw_sol_status(block_index).await;
+        let original_tx_hash = match &status {
+            WithdrawSolStatus::TxSent(tx) => tx.transaction_hash.clone(),
+            other => panic!("Expected TxSent, got: {other:?}"),
+        };
+
+        // Advance time to trigger resubmission. The mocked slot exceeds
+        // INITIAL_SLOT + MAX_PROCESSING_AGE, so the original transaction
+        // is now considered expired.
+        const MONITOR_DELAY: Duration = Duration::from_secs(60);
+        setup.advance_time(MONITOR_DELAY).await;
+        setup
+            .execute_http_mocks(resubmit_withdrawal_http_mocks(
+                INITIAL_SLOT + MAX_BLOCKHASH_AGE + 50,
+            ))
+            .await;
+
+        // Withdrawal status should now have a different signature
+        let status = setup.minter().withdraw_sol_status(block_index).await;
+        match &status {
+            WithdrawSolStatus::TxSent(tx) => {
+                assert_ne!(
+                    tx.transaction_hash, original_tx_hash,
+                    "Expected signature to change after resubmission"
+                );
+            }
+            other => panic!("Expected TxSent after resubmission, got: {other:?}"),
+        }
 
         setup.drop().await;
     }
 
-    fn estimate_blockhash_http_mocks() -> MockHttpOutcalls {
+    fn estimate_blockhash_http_mocks(slot: u64) -> MockHttpOutcalls {
+        const BLOCKHASH: &str = "4sGjMW1sUnHzSxGspuhpqLDx6wiyjNtZAMdL4VZHirAn";
+
         let mut builder = MockHttpOutcallsBuilder::new();
+        // getSlot requests for get_recent_blockhash
         for id in 0..4u64 {
             builder = builder
-                .given(JsonRpcRequestMatcher::with_method("getSlot").with_id(id))
-                .respond_with(get_slot_response(1).with_id(id))
+                .given(get_slot_request().with_id(id))
+                .respond_with(get_slot_response(slot).with_id(id))
         }
+        // getBlock requests for get_recent_blockhash
         for id in 4..8u64 {
             builder = builder
-                .given(JsonRpcRequestMatcher::with_method("getBlock").with_id(id))
-                .respond_with(
-                    get_block_response("4sGjMW1sUnHzSxGspuhpqLDx6wiyjNtZAMdL4VZHirAn").with_id(id),
-                )
+                .given(get_block_request(slot).with_id(id))
+                .respond_with(get_block_response(BLOCKHASH).with_id(id))
+        }
+        // getSlot requests for get_slot
+        for id in 8..12u64 {
+            builder = builder
+                .given(get_slot_request().with_id(id))
+                .respond_with(get_slot_response(slot).with_id(id))
+        }
+        builder.build()
+    }
+
+    /// HTTP mocks for resubmitting an expired withdrawal transaction.
+    fn resubmit_withdrawal_http_mocks(current_slot: u64) -> MockHttpOutcalls {
+        const NEW_BLOCKHASH: &str = "9ZNTfG4NyQgxy2SWjSiQoUyBPEvXT2xo7fKc5hPYYJ7b";
+        const NEW_TX_SIGNATURE: &str = "5VERv8NMvzbJMEkV8xnrLkEaWRtSz9CosKDYjCJjBRnbJLgp8uirBgmQpjKhoR4tjF3ZpRzrFmBV6UjKdiSZkQUW";
+
+        let mut builder = MockHttpOutcallsBuilder::new();
+        // get_slot for current slot check (IDs 12-15)
+        for id in 12..16u64 {
+            builder = builder
+                .given(get_slot_request().with_id(id))
+                .respond_with(get_slot_response(current_slot).with_id(id))
+        }
+        // get_recent_blockhash: getSlot (IDs 16-19)
+        for id in 16..20u64 {
+            builder = builder
+                .given(get_slot_request().with_id(id))
+                .respond_with(get_slot_response(current_slot).with_id(id))
+        }
+        // get_recent_blockhash: getBlock (IDs 20-23)
+        for id in 20..24u64 {
+            builder = builder
+                .given(get_block_request(current_slot).with_id(id))
+                .respond_with(get_block_response(NEW_BLOCKHASH).with_id(id))
+        }
+        // get_slot for new slot (IDs 24-27)
+        for id in 24..28u64 {
+            builder = builder
+                .given(get_slot_request().with_id(id))
+                .respond_with(get_slot_response(current_slot).with_id(id))
+        }
+        // sendTransaction (IDs 28-31)
+        for id in 28..32u64 {
+            builder = builder
+                .given(send_transaction_request().with_id(id))
+                .respond_with(send_transaction_response(NEW_TX_SIGNATURE).with_id(id))
         }
         builder.build()
     }
@@ -918,7 +1000,8 @@ mod consolidation_tests {
             .with_http_mocks(get_transaction_http_mocks(get_deposit_transaction_response))
             .update_balance(default_update_balance_args())
             .await;
-        assert_matches!(result, Ok(DepositStatus::Minted { .. }));
+        let mint_block_index =
+            assert_matches!(result, Ok(DepositStatus::Minted { block_index, .. }) => block_index);
 
         // Advance time past the consolidation delay to trigger the timer
         setup.advance_time(DEPOSIT_CONSOLIDATION_DELAY).await;
@@ -928,27 +1011,13 @@ mod consolidation_tests {
 
         // Verify consolidation events were recorded
         let events_after = setup.minter().get_all_events().await;
-        assert!(
-            events_after
-                .iter()
-                .any(|e| matches!(e.payload, EventType::ConsolidatedDeposits { .. })),
-            "Expected ConsolidatedDeposits event. Events: {events_after:?}"
-        );
-        assert!(
-            events_after
-                .iter()
-                .any(|e| matches!(e.payload, EventType::SubmittedTransaction { .. })),
-            "Expected SubmittedTransaction event. Events: {events_after:?}"
-        );
-
-        for event in &events_after {
-            if let EventType::ConsolidatedDeposits { mint_indices } = &event.payload {
-                assert!(
-                    !mint_indices.is_empty(),
-                    "ConsolidatedDeposits should contain at least one mint index"
-                );
-            }
-        }
+        check!(events_after.iter().any(|e| matches!(
+            &e.payload,
+            EventType::SubmittedTransaction {
+                purpose: TransactionPurpose::ConsolidateDeposits { mint_indices },
+                ..
+            } if mint_indices == &[mint_block_index]
+        )));
 
         setup.drop().await;
     }

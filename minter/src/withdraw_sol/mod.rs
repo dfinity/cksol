@@ -3,9 +3,9 @@ use std::time::Duration;
 
 use candid::Principal;
 use cksol_types::{WithdrawSolError, WithdrawSolOk, WithdrawSolStatus};
-use itertools::Itertools;
 use icrc_ledger_types::icrc1::account::{Account, Subaccount};
 use icrc_ledger_types::icrc2::transfer_from::TransferFromError;
+use itertools::Itertools;
 use num_traits::ToPrimitive;
 use solana_address::Address;
 
@@ -20,9 +20,10 @@ use crate::{
     state::{
         TaskType,
         audit::process_event,
-        event::{EventType, WithdrawSolRequest},
+        event::{EventType, TransactionPurpose, WithdrawSolRequest},
         mutate_state, read_state,
     },
+    transaction::{get_recent_blockhash, get_slot},
 };
 
 pub const WITHDRAWAL_PROCESSING_DELAY: Duration = Duration::from_mins(1);
@@ -147,21 +148,22 @@ pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: &R) {
         return;
     }
 
-    let recent_blockhash =
-        match read_state(|state| state.sol_rpc_client(runtime.inter_canister_call_runtime()))
-            .estimate_recent_blockhash()
-            .send()
-            .await
-        {
-            Ok(blockhash) => blockhash,
-            Err(errors) => {
-                log!(
-                    Priority::Error,
-                    "Failed to estimate recent blockhash: {errors:?}"
-                );
-                return;
-            }
-        };
+    let recent_blockhash = match get_recent_blockhash(runtime).await {
+        Ok(blockhash) => blockhash,
+        Err(e) => {
+            log!(Priority::Info, "Failed to fetch recent blockhash: {e}");
+            return;
+        }
+    };
+    // TODO DEFI-2670: Update `sol_rpc_client` to return the slot along with the blockhash
+    //  in `estimate_recent_blockhash`, then remove this separate call to `getSlot`.
+    let slot = match get_slot(runtime).await {
+        Ok(slot) => slot,
+        Err(e) => {
+            log!(Priority::Info, "Failed to get slot: {e}");
+            return;
+        }
+    };
 
     // TODO: we need to check whether the minter has enough funds in the main account.
     // We probably need to add a state.minter_balance variable and update it
@@ -202,11 +204,10 @@ pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: &R) {
     let results = futures::future::join_all(sign_futures).await;
 
     for (batch, result) in batches.into_iter().zip(results) {
+        let burn_indices: Vec<_> = batch.iter().map(|r| r.burn_block_index).collect();
         let transaction = match result {
             Ok(tx) => tx,
             Err(e) => {
-                let burn_indices: Vec<_> =
-                    batch.iter().map(|r| r.burn_block_index).collect();
                 log!(
                     Priority::Error,
                     "Failed to create withdrawal transaction for burn indices {burn_indices:?}: {e}",
@@ -215,17 +216,20 @@ pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: &R) {
             }
         };
 
-        let signature = transaction.signatures[0];
-
-        let transactions: Vec<_> = batch
-            .iter()
-            .map(|request| (request.burn_block_index, signature))
-            .collect();
+        let (signed_tx, signers) = (transaction, vec![runtime.canister_self().into()]);
+        let signature = signed_tx.signatures[0];
+        let message = signed_tx.message;
 
         mutate_state(|state| {
             process_event(
                 state,
-                EventType::SentWithdrawalTransaction { transactions },
+                EventType::SubmittedTransaction {
+                    signature,
+                    message,
+                    signers,
+                    slot,
+                    purpose: TransactionPurpose::WithdrawSol { burn_indices },
+                },
                 runtime,
             )
         });

@@ -77,7 +77,7 @@ pub fn init_schnorr_master_key() {
 pub mod arb {
     use crate::{
         numeric::{LedgerBurnIndex, LedgerMintIndex},
-        state::event::{DepositId, Event, EventType, WithdrawSolRequest},
+        state::event::{DepositId, Event, EventType, TransactionPurpose, WithdrawSolRequest},
     };
     use candid::Principal;
     use cksol_types_internal::{Ed25519KeyName, InitArgs, UpgradeArgs};
@@ -274,19 +274,23 @@ pub mod arb {
                 arb_message(),
                 prop::collection::vec(arb_account(), 1..10),
                 any::<Slot>(),
+                prop_oneof![
+                    prop::collection::vec(arb_ledger_mint_index(), 1..10).prop_map(
+                        |mint_indices| TransactionPurpose::ConsolidateDeposits { mint_indices }
+                    ),
+                    prop::collection::vec(arb_ledger_burn_index(), 1..10)
+                        .prop_map(|burn_indices| TransactionPurpose::WithdrawSol { burn_indices }),
+                ],
             )
-                .prop_map(|(signature, transaction, signers, slot)| {
+                .prop_map(|(signature, message, signers, slot, purpose)| {
                     EventType::SubmittedTransaction {
                         signature,
-                        transaction,
+                        message,
                         signers,
                         slot,
+                        purpose,
                     }
                 }),
-            prop::collection::vec(arb_ledger_mint_index(), 1..10)
-                .prop_map(|mint_indices| EventType::ConsolidatedDeposits { mint_indices }),
-            prop::collection::vec((arb_ledger_burn_index(), arb_signature()), 1..10)
-                .prop_map(|transactions| EventType::SentWithdrawalTransaction { transactions },),
             (arb_signature(), arb_signature(), any::<Slot>()).prop_map(
                 |(old_signature, new_signature, new_slot)| {
                     EventType::ResubmittedTransaction {

@@ -1,7 +1,7 @@
 use crate::{
     ledger::client::LedgerClient,
     numeric::{LedgerBurnIndex, LedgerMintIndex},
-    state::event::{DepositId, WithdrawSolRequest},
+    state::event::{DepositId, TransactionPurpose, WithdrawSolRequest},
 };
 use candid::Principal;
 use cksol_types::{DepositStatus, SolTransaction, WithdrawSolStatus};
@@ -394,6 +394,7 @@ impl State {
         message: &Message,
         signers: &[Account],
         slot: Slot,
+        purpose: &TransactionPurpose,
     ) {
         assert!(
             !self.succeeded_transactions.contains(signature),
@@ -403,6 +404,33 @@ impl State {
             !self.failed_transactions.contains_key(signature),
             "Attempted to submit already failed transaction {signature:?}"
         );
+        match purpose {
+            TransactionPurpose::ConsolidateDeposits { mint_indices } => {
+                for mint_index in mint_indices {
+                    self.deposits_to_consolidate
+                        .remove(mint_index)
+                        .unwrap_or_else(|| {
+                            panic!("Attempted to consolidate unknown mint index: {mint_index:?}")
+                        });
+                }
+            }
+            TransactionPurpose::WithdrawSol { burn_indices } => {
+                for burn_index in burn_indices {
+                    assert!(
+                        self.pending_withdrawal_requests
+                            .remove(burn_index)
+                            .is_some(),
+                        "Attempted to send transaction for unknown withdrawal request: {burn_index:?}"
+                    );
+                    assert_eq!(
+                        self.sent_withdrawal_requests
+                            .insert(*burn_index, *signature),
+                        None,
+                        "Attempted to send transaction for already sent withdrawal request: {burn_index:?}"
+                    );
+                }
+            }
+        }
         assert_eq!(
             self.submitted_transactions.insert(
                 *signature,
@@ -415,37 +443,6 @@ impl State {
             None,
             "Attempted to submit transaction with signature {signature:?} twice"
         );
-    }
-
-    fn process_sent_withdrawal_transaction(
-        &mut self,
-        burn_block_index: &LedgerBurnIndex,
-        signature: &Signature,
-    ) {
-        assert!(
-            self.pending_withdrawal_requests
-                .remove(burn_block_index)
-                .is_some(),
-            "Attempted to send transaction for unknown withdrawal request: {:?}",
-            burn_block_index
-        );
-        assert_eq!(
-            self.sent_withdrawal_requests
-                .insert(*burn_block_index, *signature),
-            None,
-            "Attempted to send transaction for already sent withdrawal request: {:?}",
-            burn_block_index
-        );
-    }
-
-    fn process_consolidated_deposits(&mut self, mint_indices: &[LedgerMintIndex]) {
-        for mint_index in mint_indices {
-            self.deposits_to_consolidate
-                .remove(mint_index)
-                .unwrap_or_else(|| {
-                    panic!("Attempted to consolidate funds for unknown mint index: {mint_index:?}")
-                });
-        }
     }
 
     fn process_transaction_resubmitted(
@@ -478,6 +475,11 @@ impl State {
             None,
             "Attempted to resubmit transaction with signature {new_signature:?} that already exists"
         );
+        for signature in self.sent_withdrawal_requests.values_mut() {
+            if signature == old_signature {
+                *signature = *new_signature;
+            }
+        }
     }
 
     fn process_transaction_succeeded(&mut self, signature: &Signature) {
