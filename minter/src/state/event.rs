@@ -1,5 +1,6 @@
 use crate::numeric::{LedgerBurnIndex, LedgerMintIndex};
 use cksol_types_internal::{InitArgs, UpgradeArgs};
+use derive_more::From;
 use ic_stable_structures::{Storable, storable::Bound};
 use icrc_ledger_types::icrc1::account::Account;
 use minicbor::{Decode, Encode};
@@ -10,7 +11,7 @@ use std::borrow::Cow;
 
 /// A versioned Solana transaction message, allowing the minter to support
 /// both legacy and versioned (v0) transactions in the future.
-#[derive(Clone, Eq, PartialEq, Debug, Decode, Encode)]
+#[derive(Clone, Eq, PartialEq, Debug, Decode, Encode, From)]
 pub enum VersionedMessage {
     #[n(0)]
     Legacy(

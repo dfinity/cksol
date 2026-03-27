@@ -23,7 +23,7 @@ use cksol_types_internal::{
 use ic_pocket_canister_runtime::{JsonRpcResponse, MockHttpOutcalls, MockHttpOutcallsBuilder};
 use icrc_ledger_types::icrc1::account::Subaccount;
 use serde_json::json;
-use sol_rpc_types::{CommitmentLevel, ConsensusStrategy, GetTransactionEncoding, RpcConfig};
+use sol_rpc_types::{CommitmentLevel, ConsensusStrategy, GetTransactionEncoding, RpcConfig, Slot};
 use std::time::Duration;
 use tokio::join;
 
@@ -214,6 +214,7 @@ mod withdraw_sol_tests {
     use super::*;
 
     const WITHDRAWAL_PROCESSING_DELAY: Duration = Duration::from_mins(1);
+    const MAX_BLOCKHASH_AGE: Slot = 150;
 
     #[tokio::test]
     async fn should_validate_solana_address() {
@@ -598,9 +599,11 @@ mod withdraw_sol_tests {
             .await
             .expect("withdraw_sol should succeed");
 
+        const INITIAL_SLOT: u64 = 350_000_000;
+
         setup.advance_time(WITHDRAWAL_PROCESSING_DELAY).await;
         setup
-            .execute_http_mocks(estimate_blockhash_http_mocks())
+            .execute_http_mocks(estimate_blockhash_http_mocks(INITIAL_SLOT))
             .await;
 
         setup.minter().assert_that_events().await.satisfy(|events| {
@@ -613,28 +616,99 @@ mod withdraw_sol_tests {
             )));
         });
 
+        // Withdrawal status should be TxSent with some signature
+        let status = setup.minter().withdraw_sol_status(block_index).await;
+        let original_tx_hash = match &status {
+            WithdrawSolStatus::TxSent(tx) => tx.transaction_hash.clone(),
+            other => panic!("Expected TxSent, got: {other:?}"),
+        };
+
+        // Advance time to trigger resubmission. The mocked slot exceeds
+        // INITIAL_SLOT + MAX_PROCESSING_AGE, so the original transaction
+        // is now considered expired.
+        const MONITOR_DELAY: Duration = Duration::from_secs(60);
+        setup.advance_time(MONITOR_DELAY).await;
+        setup
+            .execute_http_mocks(resubmit_withdrawal_http_mocks(
+                INITIAL_SLOT + MAX_BLOCKHASH_AGE + 50,
+            ))
+            .await;
+
+        // Withdrawal status should now have a different signature
+        let status = setup.minter().withdraw_sol_status(block_index).await;
+        match &status {
+            WithdrawSolStatus::TxSent(tx) => {
+                assert_ne!(
+                    tx.transaction_hash, original_tx_hash,
+                    "Expected signature to change after resubmission"
+                );
+            }
+            other => panic!("Expected TxSent after resubmission, got: {other:?}"),
+        }
+
         setup.drop().await;
     }
 
-    fn estimate_blockhash_http_mocks() -> MockHttpOutcalls {
-        const SLOT: u64 = 350_000_000;
+    fn estimate_blockhash_http_mocks(slot: u64) -> MockHttpOutcalls {
         const BLOCKHASH: &str = "4sGjMW1sUnHzSxGspuhpqLDx6wiyjNtZAMdL4VZHirAn";
 
         let mut builder = MockHttpOutcallsBuilder::new();
+        // getSlot requests for get_recent_blockhash
         for id in 0..4u64 {
             builder = builder
                 .given(get_slot_request().with_id(id))
-                .respond_with(get_slot_response(SLOT).with_id(id))
+                .respond_with(get_slot_response(slot).with_id(id))
         }
+        // getBlock requests for get_recent_blockhash
         for id in 4..8u64 {
             builder = builder
-                .given(get_block_request(SLOT).with_id(id))
+                .given(get_block_request(slot).with_id(id))
                 .respond_with(get_block_response(BLOCKHASH).with_id(id))
         }
+        // getSlot requests for get_slot
         for id in 8..12u64 {
             builder = builder
                 .given(get_slot_request().with_id(id))
-                .respond_with(get_slot_response(SLOT).with_id(id))
+                .respond_with(get_slot_response(slot).with_id(id))
+        }
+        builder.build()
+    }
+
+    /// HTTP mocks for resubmitting an expired withdrawal transaction.
+    fn resubmit_withdrawal_http_mocks(current_slot: u64) -> MockHttpOutcalls {
+        const NEW_BLOCKHASH: &str = "9ZNTfG4NyQgxy2SWjSiQoUyBPEvXT2xo7fKc5hPYYJ7b";
+        const NEW_TX_SIGNATURE: &str = "5VERv8NMvzbJMEkV8xnrLkEaWRtSz9CosKDYjCJjBRnbJLgp8uirBgmQpjKhoR4tjF3ZpRzrFmBV6UjKdiSZkQUW";
+
+        let mut builder = MockHttpOutcallsBuilder::new();
+        // get_slot for current slot check (IDs 12-15)
+        for id in 12..16u64 {
+            builder = builder
+                .given(get_slot_request().with_id(id))
+                .respond_with(get_slot_response(current_slot).with_id(id))
+        }
+        // get_recent_blockhash: getSlot (IDs 16-19)
+        for id in 16..20u64 {
+            builder = builder
+                .given(get_slot_request().with_id(id))
+                .respond_with(get_slot_response(current_slot).with_id(id))
+        }
+        // get_recent_blockhash: getBlock (IDs 20-23)
+        for id in 20..24u64 {
+            builder = builder
+                .given(get_block_request(current_slot).with_id(id))
+                .respond_with(get_block_response(NEW_BLOCKHASH).with_id(id))
+        }
+        // get_slot for new slot (IDs 24-27)
+        for id in 24..28u64 {
+            builder = builder
+                .given(get_slot_request().with_id(id))
+                .respond_with(get_slot_response(current_slot).with_id(id))
+        }
+        // sendTransaction (IDs 28-31)
+        for id in 28..32u64 {
+            builder = builder
+                .given(send_transaction_request().with_id(id))
+                .respond_with(send_transaction_response(NEW_TX_SIGNATURE).with_id(id))
         }
         builder.build()
     }

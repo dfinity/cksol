@@ -7,7 +7,7 @@ use crate::{
     state::{
         TaskType,
         audit::process_event,
-        event::{EventType, TransactionPurpose, VersionedMessage},
+        event::{EventType, TransactionPurpose},
         mutate_state, read_state,
     },
     transaction::{SubmitTransactionError, get_recent_blockhash, get_slot, submit_transaction},
@@ -136,7 +136,7 @@ async fn submit_consolidation_transaction<R: CanisterRuntime>(
             state,
             EventType::SubmittedTransaction {
                 signature,
-                message: VersionedMessage::Legacy(message),
+                message: message.into(),
                 signers,
                 slot,
                 purpose: TransactionPurpose::ConsolidateDeposits { mint_indices },
