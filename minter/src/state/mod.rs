@@ -475,6 +475,11 @@ impl State {
             None,
             "Attempted to resubmit transaction with signature {new_signature:?} that already exists"
         );
+        for signature in self.sent_withdrawal_requests.values_mut() {
+            if signature == old_signature {
+                *signature = *new_signature;
+            }
+        }
     }
 
     fn process_transaction_succeeded(&mut self, signature: &Signature) {

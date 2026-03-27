@@ -1,13 +1,21 @@
 use super::{MAX_BLOCKHASH_AGE, monitor_submitted_transactions};
 use crate::{
     address::derive_public_key,
-    state::{TaskType, audit::process_event, event::EventType, mutate_state, read_state},
+    numeric::LedgerBurnIndex,
+    state::{
+        TaskType,
+        audit::process_event,
+        event::{EventType, WithdrawSolRequest},
+        mutate_state, read_state,
+    },
     test_fixtures::{
         EventsAssert, MINTER_ACCOUNT, init_schnorr_master_key, init_state,
         runtime::TestCanisterRuntime,
     },
+    withdraw_sol::withdraw_sol_status,
 };
 use assert_matches::assert_matches;
+use cksol_types::WithdrawSolStatus;
 use ic_ed25519::{PocketIcMasterPublicKeyId, PublicKey};
 use sol_rpc_types::{ConfirmedBlock, MultiRpcResult, RpcError, Slot};
 use solana_hash::Hash;
@@ -144,6 +152,64 @@ async fn should_resubmit_single_expired_transaction() {
 }
 
 #[tokio::test]
+async fn should_update_withdrawal_status_signature_after_resubmission() {
+    setup();
+
+    let old_signature = Signature::from([0x01; 64]);
+    let burn_index = LedgerBurnIndex::from(42u64);
+    let original_slot = 10;
+
+    // Set up a sent withdrawal linked to the submitted transaction
+    let setup_runtime = TestCanisterRuntime::new().with_increasing_time();
+    mutate_state(|state| {
+        process_event(
+            state,
+            EventType::AcceptedWithdrawSolRequest(WithdrawSolRequest {
+                account: MINTER_ACCOUNT,
+                solana_address: [0xAB; 32],
+                burn_block_index: burn_index,
+                withdrawal_amount: 1_000_000,
+                withdrawal_fee: 5_000,
+            }),
+            &setup_runtime,
+        );
+    });
+    add_withdrawal_submitted_transaction(old_signature, original_slot, vec![burn_index]);
+
+    // Withdrawal status should reference the old signature
+    assert_matches!(
+        withdraw_sol_status(*burn_index.get()),
+        WithdrawSolStatus::TxSent(tx) => {
+            assert_eq!(tx.transaction_hash, old_signature.to_string());
+        }
+    );
+
+    // Resubmit the transaction
+    let current_slot = original_slot + MAX_BLOCKHASH_AGE + 1;
+    let new_slot = current_slot + 5;
+    let new_signature = Signature::from([0xBB; 64]);
+
+    let runtime = TestCanisterRuntime::new()
+        .with_increasing_time()
+        .add_stub_response(SlotResult::Consistent(Ok(current_slot)))
+        .add_stub_response(SlotResult::Consistent(Ok(new_slot)))
+        .add_stub_response(BlockResult::Consistent(Ok(block())))
+        .add_stub_response(SlotResult::Consistent(Ok(new_slot)))
+        .add_stub_response(SendTransactionResult::Consistent(Ok(new_signature.into())))
+        .add_signature(new_signature.into());
+
+    monitor_submitted_transactions(runtime).await;
+
+    // Withdrawal status should now reference the new signature
+    assert_matches!(
+        withdraw_sol_status(*burn_index.get()),
+        WithdrawSolStatus::TxSent(tx) => {
+            assert_eq!(tx.transaction_hash, new_signature.to_string());
+        }
+    );
+}
+
+#[tokio::test]
 async fn should_record_event_even_if_submission_fails() {
     setup();
 
@@ -200,6 +266,27 @@ fn minter_address() -> solana_address::Address {
     derive_public_key(&master_key, vec![])
         .serialize_raw()
         .into()
+}
+
+fn add_withdrawal_submitted_transaction(
+    signature: Signature,
+    slot: Slot,
+    burn_indices: Vec<LedgerBurnIndex>,
+) {
+    let message = Message::new_with_blockhash(&[], Some(&minter_address()), &Hash::default());
+    mutate_state(|state| {
+        process_event(
+            state,
+            EventType::SubmittedTransaction {
+                signature,
+                message,
+                signers: vec![MINTER_ACCOUNT],
+                slot,
+                purpose: crate::state::event::TransactionPurpose::WithdrawSol { burn_indices },
+            },
+            &TestCanisterRuntime::new().with_increasing_time(),
+        )
+    });
 }
 
 fn add_submitted_transaction(signature: Signature, slot: Slot) {
