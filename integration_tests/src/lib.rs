@@ -636,7 +636,7 @@ fn cksol_minter_init_args(
     sol_rpc_canister_id: Principal,
     ledger_canister_id: Principal,
 ) -> MinterArg {
-    use cksol_types_internal::{Ed25519KeyName, InitArgs, MinterArg};
+    use cksol_types_internal::{Ed25519KeyName, InitArgs, MinterArg, SolanaNetwork};
     MinterArg::Init(InitArgs {
         sol_rpc_canister_id,
         ledger_canister_id,
@@ -646,6 +646,7 @@ fn cksol_minter_init_args(
         minimum_deposit_amount: Setup::DEFAULT_MINIMUM_DEPOSIT_AMOUNT,
         withdrawal_fee: Setup::DEFAULT_WITHDRAWAL_FEE,
         update_balance_required_cycles: Setup::DEFAULT_UPDATE_BALANCE_REQUIRED_CYCLES as u64,
+        solana_network: SolanaNetwork::Mainnet,
     })
 }
 
