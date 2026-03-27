@@ -1,7 +1,10 @@
 use super::*;
 use crate::{
     state::read_state,
-    test_fixtures::{init_schnorr_master_key, init_state, signer::MockSchnorrSigner},
+    test_fixtures::{
+        init_schnorr_master_key, init_state, runtime::TestCanisterRuntime,
+        signer::MockSchnorrSigner,
+    },
 };
 use candid::Principal;
 use ic_cdk::{call::CallRejected, management_canister::SignCallError};
@@ -352,5 +355,105 @@ async fn should_create_signed_transaction_with_fee_payer() {
             .unwrap();
         assert_ne!(tx.signatures[fee_payer_pos], Signature::default());
         assert_ne!(tx.signatures[other_pos], Signature::default());
+    }
+}
+
+mod withdrawal_transaction {
+    use super::*;
+    use crate::test_fixtures::MINTER_ACCOUNT;
+
+    fn minter_address() -> Address {
+        derive_address(&MINTER_ACCOUNT)
+    }
+
+    #[tokio::test]
+    async fn should_create_withdrawal_tx_with_single_destination() {
+        setup();
+        let fake_sig = [0x42u8; 64];
+        let destination = Address::new_from_array([0xAA; 32]);
+        let amount: Lamport = 500_000_000;
+        let blockhash = Hash::new_from_array([0xBB; 32]);
+
+        let runtime = TestCanisterRuntime::new().add_signature(fake_sig);
+
+        let tx =
+            create_signed_withdrawal_transaction(&runtime, &[(destination, amount)], blockhash)
+                .await
+                .expect("transaction creation should succeed");
+
+        // Fee payer is the minter address (position 0)
+        assert_eq!(tx.message.account_keys[0], minter_address());
+        // Destination is in account keys
+        assert!(tx.message.account_keys.contains(&destination));
+        // System program is in account keys
+        assert!(
+            tx.message
+                .account_keys
+                .contains(&Address::new_from_array([0u8; 32]))
+        );
+        // One transfer instruction
+        assert_eq!(tx.message.instructions.len(), 1);
+        // Only one signature (minter)
+        assert_eq!(tx.signatures.len(), 1);
+        assert_eq!(tx.signatures[0], Signature::from(fake_sig));
+        // Recent blockhash is set
+        assert_eq!(tx.message.recent_blockhash, blockhash);
+    }
+
+    #[tokio::test]
+    async fn should_create_withdrawal_tx_with_multiple_destinations() {
+        setup();
+        let fake_sig = [0x42u8; 64];
+        let dest_1 = Address::new_from_array([0xAA; 32]);
+        let dest_2 = Address::new_from_array([0xBB; 32]);
+        let dest_3 = Address::new_from_array([0xCC; 32]);
+        let blockhash = Hash::new_from_array([0xDD; 32]);
+
+        let runtime = TestCanisterRuntime::new().add_signature(fake_sig);
+
+        let tx = create_signed_withdrawal_transaction(
+            &runtime,
+            &[
+                (dest_1, 100_000_000),
+                (dest_2, 200_000_000),
+                (dest_3, 300_000_000),
+            ],
+            blockhash,
+        )
+        .await
+        .expect("transaction creation should succeed");
+
+        // Fee payer is always at position 0
+        assert_eq!(tx.message.account_keys[0], minter_address());
+        // All destinations are in account keys
+        assert!(tx.message.account_keys.contains(&dest_1));
+        assert!(tx.message.account_keys.contains(&dest_2));
+        assert!(tx.message.account_keys.contains(&dest_3));
+        // Three transfer instructions
+        assert_eq!(tx.message.instructions.len(), 3);
+        // Still only one signature (minter is the only signer)
+        assert_eq!(tx.signatures.len(), 1);
+        assert_eq!(tx.signatures[0], Signature::from(fake_sig));
+    }
+
+    #[tokio::test]
+    async fn should_fail_when_signing_fails() {
+        setup();
+        let destination = Address::new_from_array([0xAA; 32]);
+        let blockhash = Hash::new_from_array([0xBB; 32]);
+
+        let runtime =
+            TestCanisterRuntime::new().add_schnorr_signing_error(SignCallError::CallFailed(
+                CallRejected::with_rejection(4, "signing service unavailable".to_string()).into(),
+            ));
+
+        let result = create_signed_withdrawal_transaction(
+            &runtime,
+            &[(destination, 500_000_000)],
+            blockhash,
+        )
+        .await;
+
+        assert!(result.is_err());
     }
 }
