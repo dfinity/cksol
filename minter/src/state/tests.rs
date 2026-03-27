@@ -8,6 +8,7 @@ use crate::{
     },
 };
 use assert_matches::assert_matches;
+use cksol_types_internal::SolanaNetwork;
 use cksol_types_internal::{Ed25519KeyName, InitArgs, UpgradeArgs};
 use ic_stable_structures::Storable;
 use proptest::prelude::*;
@@ -36,6 +37,7 @@ mod state_from_init_args {
                 master_key_name: Ed25519KeyName::MainnetProdKey1,
                 ledger_canister_id: ledger_canister_id(),
                 sol_rpc_canister_id: sol_rpc_canister_id(),
+                solana_network: SolanaNetwork::Mainnet,
                 deposit_fee: DEPOSIT_FEE,
                 withdrawal_fee: WITHDRAWAL_FEE,
                 minimum_withdrawal_amount: MINIMUM_WITHDRAWAL_AMOUNT,

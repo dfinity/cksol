@@ -117,6 +117,13 @@ type DepositStatus = variant {
 // Represents the result of a call to the `update_balance` endpoint.
 type UpdateBalanceResult = variant { Ok : DepositStatus; Err : UpdateBalanceError };
 
+// The Solana network to connect to.
+type SolanaNetwork = variant {
+    Mainnet;
+    Devnet;
+    Testnet;
+};
+
 // The installation args for the ckSOL minter canister.
 type InitArgs = record {
     sol_rpc_canister_id : principal;
@@ -127,6 +134,7 @@ type InitArgs = record {
     minimum_deposit_amount : Lamport;
     withdrawal_fee : Lamport;
     update_balance_required_cycles : nat64;
+    solana_network : SolanaNetwork;
 };
 
 // Information about the ckSOL minter canister.

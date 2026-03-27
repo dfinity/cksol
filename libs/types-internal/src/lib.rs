@@ -11,7 +11,7 @@ pub mod log;
 
 use candid::{CandidType, Principal};
 use serde::{Deserialize, Serialize};
-use sol_rpc_types::Lamport;
+use sol_rpc_types::{Lamport, SolanaCluster};
 use std::fmt;
 
 /// The ckSOL minter service arguments.
@@ -54,6 +54,9 @@ pub struct InitArgs {
     /// Minimum cycles the caller must attach when calling `update_balance`.
     #[cfg_attr(feature = "event", n(7))]
     pub update_balance_required_cycles: u64,
+    /// The Solana network to use.
+    #[cfg_attr(feature = "event", n(8))]
+    pub solana_network: SolanaNetwork,
 }
 
 /// The upgrade args for the ckSOL minter canister.
@@ -78,6 +81,32 @@ pub struct UpgradeArgs {
     /// New minimum cycles the caller must attach when calling `update_balance`.
     #[cfg_attr(feature = "event", n(5))]
     pub update_balance_required_cycles: Option<u64>,
+}
+
+/// The Solana network to connect to via the SOL RPC canister.
+#[derive(Clone, Copy, Eq, PartialEq, Debug, Default, CandidType, Deserialize, Serialize)]
+#[cfg_attr(feature = "event", derive(minicbor::Encode, minicbor::Decode))]
+pub enum SolanaNetwork {
+    /// Mainnet: live production environment.
+    #[default]
+    #[cfg_attr(feature = "event", n(0))]
+    Mainnet,
+    /// Devnet: testing with public accessibility.
+    #[cfg_attr(feature = "event", n(1))]
+    Devnet,
+    /// Testnet: stress-testing for network upgrades.
+    #[cfg_attr(feature = "event", n(2))]
+    Testnet,
+}
+
+impl From<SolanaNetwork> for SolanaCluster {
+    fn from(network: SolanaNetwork) -> Self {
+        match network {
+            SolanaNetwork::Mainnet => SolanaCluster::Mainnet,
+            SolanaNetwork::Devnet => SolanaCluster::Devnet,
+            SolanaNetwork::Testnet => SolanaCluster::Testnet,
+        }
+    }
 }
 
 /// The ID of one of the ICP root keys.
