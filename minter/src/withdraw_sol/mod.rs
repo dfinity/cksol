@@ -19,7 +19,7 @@ use crate::{
     state::{
         TaskType,
         audit::process_event,
-        event::{EventType, TransactionPurpose, WithdrawSolRequest},
+        event::{EventType, TransactionPurpose, VersionedMessage, WithdrawSolRequest},
         mutate_state, read_state,
     },
     transaction::{get_recent_blockhash, get_slot},
@@ -218,7 +218,7 @@ pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: &R) {
 
         let (signed_tx, signers) = transaction;
         let signature = signed_tx.signatures[0];
-        let message = signed_tx.message;
+        let message = VersionedMessage::Legacy(signed_tx.message);
 
         mutate_state(|state| {
             process_event(

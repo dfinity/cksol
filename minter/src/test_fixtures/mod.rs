@@ -297,7 +297,7 @@ pub mod arb {
                 .prop_map(|(signature, message, signers, slot, purpose)| {
                     EventType::SubmittedTransaction {
                         signature,
-                        message,
+                        message: message.into(),
                         signers,
                         slot,
                         purpose,
