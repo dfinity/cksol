@@ -77,8 +77,8 @@ pub enum EventType {
     SubmittedTransaction {
         /// The signature of the Solana transaction.
         signature: Signature,
-        /// The serialized (unsigned) transaction message.
-        transaction: Vec<u8>,
+        /// The versioned transaction message.
+        transaction: VersionedTransactionMessage,
         /// The signing accounts in signature order (fee payer first).
         signers: Vec<Account>,
         /// The slot of the blockhash used in the transaction.
@@ -120,6 +120,13 @@ pub enum TransactionPurpose {
         /// The burn transaction indices on the ckSOL ledger.
         burn_indices: Vec<u64>,
     },
+}
+
+/// A versioned Solana transaction message.
+#[derive(Clone, Debug, CandidType, Deserialize)]
+pub enum VersionedTransactionMessage {
+    /// A legacy Solana transaction message, serialized with bincode.
+    Legacy(Vec<u8>),
 }
 
 /// Arguments for the `get_events` endpoint.

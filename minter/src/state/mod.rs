@@ -1,7 +1,7 @@
 use crate::{
     ledger::client::LedgerClient,
     numeric::{LedgerBurnIndex, LedgerMintIndex},
-    state::event::{DepositId, TransactionPurpose, WithdrawSolRequest},
+    state::event::{DepositId, TransactionPurpose, VersionedMessage, WithdrawSolRequest},
 };
 use candid::Principal;
 use cksol_types::{DepositStatus, SolTransaction, WithdrawSolStatus};
@@ -12,7 +12,6 @@ use ic_ed25519::PublicKey;
 use icrc_ledger_types::icrc1::account::Account;
 use sol_rpc_client::SolRpcClient;
 use sol_rpc_types::{ConsensusStrategy, Lamport, RpcSources, Slot, SolanaCluster};
-use solana_message::Message;
 use solana_signature::Signature;
 use std::{
     cell::RefCell,
@@ -395,7 +394,7 @@ impl State {
     fn process_transaction_submitted(
         &mut self,
         signature: &Signature,
-        message: &Message,
+        transaction: &VersionedMessage,
         signers: &[Account],
         slot: Slot,
         purpose: &TransactionPurpose,
@@ -439,7 +438,7 @@ impl State {
             self.submitted_transactions.insert(
                 *signature,
                 SolanaTransaction {
-                    message: message.clone(),
+                    message: transaction.clone(),
                     signers: signers.to_vec(),
                     slot,
                 }
@@ -608,7 +607,7 @@ pub enum TaskType {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SolanaTransaction {
-    pub message: Message,
+    pub message: VersionedMessage,
     pub signers: Vec<Account>,
     pub slot: Slot,
 }

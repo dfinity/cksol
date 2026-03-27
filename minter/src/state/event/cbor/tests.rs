@@ -1,5 +1,5 @@
 use crate::{
-    state::event::cbor,
+    state::event::{VersionedMessage, cbor},
     test_fixtures::arb::{arb_message, arb_signature},
 };
 use proptest::{prop_assert_eq, proptest};
@@ -51,5 +51,29 @@ mod message_tests {
     fn decode_message(bytes: &[u8]) -> solana_message::Message {
         let mut decoder = minicbor::Decoder::new(bytes);
         cbor::message::decode(&mut decoder, &mut ()).unwrap()
+    }
+}
+
+mod versioned_message_tests {
+    use super::*;
+
+    proptest! {
+        #[test]
+        fn versioned_message_minicbor_roundtrip(message in arb_message()) {
+            let versioned = VersionedMessage::Legacy(message);
+            let encoded = encode_versioned_message(&versioned);
+            let decoded = decode_versioned_message(&encoded);
+            prop_assert_eq!(versioned, decoded);
+        }
+    }
+
+    fn encode_versioned_message(message: &VersionedMessage) -> Vec<u8> {
+        let mut buf = Vec::new();
+        minicbor::encode(message, &mut buf).unwrap();
+        buf
+    }
+
+    fn decode_versioned_message(bytes: &[u8]) -> VersionedMessage {
+        minicbor::decode(bytes).unwrap()
     }
 }

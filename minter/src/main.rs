@@ -93,7 +93,7 @@ fn withdraw_sol_status(block_index: u64) -> WithdrawSolStatus {
 fn get_events(
     args: cksol_types_internal::event::GetEventsArgs,
 ) -> cksol_types_internal::event::GetEventsResult {
-    use cksol_minter::state::event::{Event, EventType};
+    use cksol_minter::state::event::{Event, EventType, TransactionPurpose, VersionedMessage};
     use cksol_types_internal::event;
 
     const MAX_EVENTS_PER_RESPONSE: u64 = 2_000;
@@ -147,7 +147,6 @@ fn get_events(
                 slot,
                 purpose,
             } => {
-                use cksol_minter::state::event::TransactionPurpose;
                 let purpose = match purpose {
                     TransactionPurpose::ConsolidateDeposits { mint_indices } => {
                         event::TransactionPurpose::ConsolidateDeposits {
@@ -162,8 +161,14 @@ fn get_events(
                 };
                 event::EventType::SubmittedTransaction {
                     signature: signature.into(),
-                    transaction: bincode::serialize(&message)
-                        .expect("serializing transaction should succeed"),
+                    transaction: match message {
+                        VersionedMessage::Legacy(message) => {
+                            event::VersionedTransactionMessage::Legacy(
+                                bincode::serialize(&message)
+                                    .expect("serializing transaction should succeed"),
+                            )
+                        }
+                    },
                     signers,
                     slot,
                     purpose,

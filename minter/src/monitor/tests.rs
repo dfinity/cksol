@@ -279,7 +279,7 @@ fn add_withdrawal_submitted_transaction(
             state,
             EventType::SubmittedTransaction {
                 signature,
-                message,
+                message: message.into(),
                 signers: vec![MINTER_ACCOUNT],
                 slot,
                 purpose: crate::state::event::TransactionPurpose::WithdrawSol { burn_indices },
@@ -296,7 +296,7 @@ fn add_submitted_transaction(signature: Signature, slot: Slot) {
             state,
             EventType::SubmittedTransaction {
                 signature,
-                message,
+                message: message.into(),
                 signers: vec![MINTER_ACCOUNT],
                 slot,
                 purpose: crate::state::event::TransactionPurpose::ConsolidateDeposits {
