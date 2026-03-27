@@ -472,4 +472,27 @@ mod batch_withdrawal_tests {
         assert_eq!(tx.signatures.len(), 1);
         assert_eq!(tx.message.instructions.len(), MAX_WITHDRAWALS_PER_TX);
     }
+
+    #[tokio::test]
+    #[should_panic]
+    async fn should_panic_when_exceeding_tx_size_limit() {
+        setup();
+        let blockhash = Hash::new_from_array([0xDD; 32]);
+        let fake_sig = [0x42u8; 64];
+
+        // Each additional target adds ~49 bytes (32-byte key + 17-byte instruction).
+        // With a base of ~166 bytes and MAX_TX_SIZE = 1232, the limit is around 21-22.
+        // Use 25 targets to reliably exceed the limit.
+        let num_targets = 25;
+        let targets: Vec<(Address, Lamport)> = (0..num_targets)
+            .map(|i| {
+                let mut addr = [0u8; 32];
+                addr[0] = i as u8;
+                (Address::new_from_array(addr), 1_000_000)
+            })
+            .collect();
+
+        let runtime = TestCanisterRuntime::new().add_signature(fake_sig);
+        let _ = create_signed_batch_withdrawal_transaction(&runtime, &targets, blockhash).await;
+    }
 }

@@ -148,15 +148,7 @@ pub async fn create_signed_batch_withdrawal_transaction<R: CanisterRuntime>(
     let mut transaction = Transaction::new_unsigned(message);
     let message_bytes = transaction.message_data();
 
-    let num_signatures = transaction.message.signer_keys().len();
-    if num_signatures as u64 > MAX_SIGNATURES {
-        return Err(CreateTransferError::TooManySignatures {
-            max: MAX_SIGNATURES,
-            got: num_signatures as u64,
-        });
-    }
-
-    assert!(1 + message_bytes.len() + num_signatures * BYTES_PER_SIGNATURE < MAX_TX_SIZE);
+    assert!(1 + message_bytes.len() + BYTES_PER_SIGNATURE < MAX_TX_SIZE);
 
     transaction.signatures = sign_bytes(
         vec![fee_payer_derivation_path],
