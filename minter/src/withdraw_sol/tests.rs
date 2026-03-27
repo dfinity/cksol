@@ -1,6 +1,6 @@
 use crate::numeric::LedgerBurnIndex;
+use crate::sol_transfer::MAX_WITHDRAWALS_PER_TX;
 use crate::test_fixtures::EventsAssert;
-use crate::withdraw_sol::MAX_WITHDRAWALS_PER_BATCH;
 use crate::{
     guard::{TimerGuard, withdraw_sol_guard},
     state::TaskType,
@@ -404,7 +404,7 @@ mod process_pending_withdrawals_tests {
     }
 
     #[tokio::test]
-    async fn should_not_process_pending_withdrawal_sig_error() {
+    async fn should_not_process_batch_on_sig_error() {
         init_state();
         init_schnorr_master_key();
 
@@ -418,8 +418,7 @@ mod process_pending_withdrawals_tests {
             .add_stub_response(SendSlotResult::Consistent(Ok(slot)))
             .add_stub_response(SendBlockResult::Consistent(Ok(get_confirmed_block())))
             .add_stub_response(SendSlotResult::Consistent(Ok(slot)))
-            // one successful signature and one failed
-            .add_signature([0x42; 64])
+            // signing fails for the batch
             .add_schnorr_signing_error(SignCallError::CallFailed(
                 CallRejected::with_rejection(4, "signing service unavailable".to_string()).into(),
             ))
@@ -444,37 +443,30 @@ mod process_pending_withdrawals_tests {
                     assert_eq!(req.account, Principal::from_slice(&[1, 2]).into());
                 });
             })
-            .expect_event(|e| {
-                assert_matches!(e, EventType::SubmittedTransaction {
-                    purpose: TransactionPurpose::WithdrawSol { burn_indices },
-                    ..
-                } => {
-                    assert_eq!(*burn_indices, vec![LedgerBurnIndex::from(1u64)]);
-                });
-            })
             .assert_no_more_events();
 
-        // An error should be logged
+        // An error should be logged for the whole batch
         let mut log: Log<Priority> = Log::default();
         log.push_logs(Priority::Error);
         assert!(
             log.entries.iter().any(|e| e
                 .message
-                .contains("Failed to create withdrawal transaction for burn index 2")),
-            "Expected error log about sig failure, got: {:?}",
+                .contains("Failed to create batch withdrawal transaction for burn indices")),
+            "Expected error log about batch sig failure, got: {:?}",
             log.entries
         );
 
-        assert_matches!(withdraw_sol_status(1), WithdrawSolStatus::TxSent(_));
+        // Both withdrawals remain pending since they were in the same batch
+        assert_matches!(withdraw_sol_status(1), WithdrawSolStatus::Pending);
         assert_matches!(withdraw_sol_status(2), WithdrawSolStatus::Pending);
     }
 
     #[tokio::test]
-    async fn should_process_up_to_max() {
+    async fn should_batch_withdrawals_into_transactions() {
         init_state();
         init_schnorr_master_key();
 
-        let request_count = MAX_WITHDRAWALS_PER_BATCH as u64 + 1;
+        let request_count = MAX_WITHDRAWALS_PER_TX as u64 + 1;
         let slot = 1;
 
         let mut runtime = TestCanisterRuntime::new().with_increasing_time();
@@ -482,41 +474,52 @@ mod process_pending_withdrawals_tests {
         for i in 0..request_count {
             runtime = runtime.add_stub_response(Ok::<Nat, TransferFromError>(Nat::from(i)));
         }
-        // responses for recent block hash
+        // responses for recent block hash (one round)
         runtime = runtime
             .add_stub_response(SendSlotResult::Consistent(Ok(slot)))
             .add_stub_response(SendBlockResult::Consistent(Ok(get_confirmed_block())))
             .add_stub_response(SendSlotResult::Consistent(Ok(slot)));
-        // signatures for the first batch of withdrawals
-        for i in 0..MAX_WITHDRAWALS_PER_BATCH {
-            runtime = runtime.add_signature(signature(i as u8 + 1).into());
-        }
-        // responses for recent block hash and signature for the second batch
+        // one signature per batch: batch 1 (MAX_WITHDRAWALS_PER_TX) + batch 2 (1)
         runtime = runtime
-            .add_stub_response(SendSlotResult::Consistent(Ok(slot)))
-            .add_stub_response(SendBlockResult::Consistent(Ok(get_confirmed_block())))
-            .add_stub_response(SendSlotResult::Consistent(Ok(slot)))
-            .add_signature(signature(MAX_WITHDRAWALS_PER_BATCH as u8 + 1).into());
+            .add_signature(signature(1).into())
+            .add_signature(signature(2).into());
 
         withdraw(&runtime, request_count as u8).await;
 
         process_pending_withdrawals(&runtime).await;
 
-        for i in 0..MAX_WITHDRAWALS_PER_BATCH {
-            assert_matches!(withdraw_sol_status(i as u64), WithdrawSolStatus::TxSent(_));
-        }
-        // last withdrawal was not yet processed
-        assert_matches!(
-            withdraw_sol_status(MAX_WITHDRAWALS_PER_BATCH as u64),
-            WithdrawSolStatus::Pending
-        );
-
-        process_pending_withdrawals(&runtime).await;
-
-        // all withdrawals are now processed
+        // All withdrawals should be processed in a single invocation
+        // (2 batches in 1 round, both within MAX_CONCURRENT_WITHDRAWAL_TXS)
         for i in 0..request_count {
             assert_matches!(withdraw_sol_status(i), WithdrawSolStatus::TxSent(_));
         }
+
+        // Verify events: request_count AcceptedWithdrawSolRequest events,
+        // then 2 SubmittedTransaction events (one per batch).
+        let mut events = EventsAssert::from_recorded();
+        for _ in 0..request_count {
+            events = events.expect_event(|e| {
+                assert_matches!(e, EventType::AcceptedWithdrawSolRequest(_));
+            });
+        }
+        events
+            .expect_event(|e| {
+                assert_matches!(e, EventType::SubmittedTransaction {
+                    purpose: TransactionPurpose::WithdrawSol { burn_indices },
+                    ..
+                } => {
+                    assert_eq!(burn_indices.len(), MAX_WITHDRAWALS_PER_TX);
+                });
+            })
+            .expect_event(|e| {
+                assert_matches!(e, EventType::SubmittedTransaction {
+                    purpose: TransactionPurpose::WithdrawSol { burn_indices },
+                    ..
+                } => {
+                    assert_eq!(burn_indices.len(), 1);
+                });
+            })
+            .assert_no_more_events();
     }
 
     fn get_confirmed_block() -> ConfirmedBlock {
