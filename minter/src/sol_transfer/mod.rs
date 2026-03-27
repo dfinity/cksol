@@ -1,5 +1,6 @@
 use crate::{
     address::{DerivationPath, derivation_path, derive_public_key, lazy_get_schnorr_master_key},
+    runtime::CanisterRuntime,
     signer::{SchnorrSigner, sign_bytes},
 };
 use derive_more::From;
@@ -125,12 +126,12 @@ pub async fn create_signed_transfer_transaction(
 ///
 /// Panics if the serialized transaction exceeds [`MAX_TX_SIZE`], or if the IC
 /// returns a signature that is not exactly 64 bytes.
-pub async fn create_signed_batch_withdrawal_transaction(
-    fee_payer_account: Account,
+pub async fn create_signed_batch_withdrawal_transaction<R: CanisterRuntime>(
+    runtime: &R,
     targets: &[(Address, Lamport)],
     recent_blockhash: Hash,
-    signer: &impl SchnorrSigner,
 ) -> Result<(Transaction, Vec<Account>), CreateTransferError> {
+    let fee_payer_account = Account::from(runtime.canister_self());
     let master_public_key = lazy_get_schnorr_master_key().await;
     let fee_payer_derivation_path = derivation_path(&fee_payer_account);
     let fee_payer_address = Address::from(
@@ -157,8 +158,12 @@ pub async fn create_signed_batch_withdrawal_transaction(
 
     assert!(1 + message_bytes.len() + num_signatures * BYTES_PER_SIGNATURE < MAX_TX_SIZE);
 
-    transaction.signatures =
-        sign_bytes(vec![fee_payer_derivation_path], signer, message_bytes).await?;
+    transaction.signatures = sign_bytes(
+        vec![fee_payer_derivation_path],
+        &runtime.signer(),
+        message_bytes,
+    )
+    .await?;
 
     Ok((transaction, vec![fee_payer_account]))
 }

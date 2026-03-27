@@ -155,8 +155,6 @@ pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: &R) {
         return;
     }
 
-    let minter_account: Account = runtime.canister_self().into();
-
     // TODO: we need to check whether the minter has enough funds in the main account.
     // We probably need to add a state.minter_balance variable and update it
     // here and while consolidating funds.
@@ -180,14 +178,13 @@ pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: &R) {
     };
 
     futures::future::join_all(withdrawal_batches.into_iter().map(async |batch| {
-        submit_withdrawal_transaction(runtime, minter_account, batch, slot, recent_blockhash).await
+        submit_withdrawal_transaction(runtime, batch, slot, recent_blockhash).await
     }))
     .await;
 }
 
 async fn submit_withdrawal_transaction<R: CanisterRuntime>(
     runtime: &R,
-    minter_account: Account,
     requests: Vec<WithdrawSolRequest>,
     slot: Slot,
     recent_blockhash: Hash,
@@ -205,10 +202,9 @@ async fn submit_withdrawal_transaction<R: CanisterRuntime>(
         .collect();
 
     let (signed_tx, signers) = match create_signed_batch_withdrawal_transaction(
-        minter_account,
+        runtime,
         &targets,
         recent_blockhash,
-        &runtime.signer(),
     )
     .await
     {
