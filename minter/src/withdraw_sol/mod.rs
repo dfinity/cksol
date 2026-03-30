@@ -15,6 +15,7 @@ use itertools::Itertools;
 use sol_rpc_types::Slot;
 use solana_hash::Hash;
 
+use crate::constants::MAX_CONCURRENT_RPC_CALLS;
 use crate::{
     guard::{TimerGuard, withdraw_sol_guard},
     ledger::burn,
@@ -30,7 +31,6 @@ use crate::{
 };
 
 pub const WITHDRAWAL_PROCESSING_DELAY: Duration = Duration::from_mins(1);
-pub(crate) const MAX_CONCURRENT_WITHDRAWAL_TXS: usize = 10;
 pub(crate) const MAX_WITHDRAWAL_ROUNDS: usize = 5;
 
 #[cfg(test)]
@@ -155,7 +155,7 @@ pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: &R) {
     .map(Iterator::collect)
     .collect::<Vec<Vec<_>>>()
     .into_iter()
-    .chunks(MAX_CONCURRENT_WITHDRAWAL_TXS)
+    .chunks(MAX_CONCURRENT_RPC_CALLS)
     .into_iter()
     .take(MAX_WITHDRAWAL_ROUNDS)
     .map(Iterator::collect)
