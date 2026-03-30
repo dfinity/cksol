@@ -33,6 +33,8 @@ mod tests;
 
 pub const MONITOR_SUBMITTED_TRANSACTIONS_DELAY: Duration = Duration::from_secs(60);
 const MAX_BLOCKHASH_AGE: Slot = 150;
+/// Maximum number of signatures per `getSignatureStatuses` RPC call.
+/// See https://solana.com/docs/rpc/http/getsignaturestatuses
 const MAX_SIGNATURES_PER_STATUS_CHECK: usize = 256;
 
 pub async fn monitor_submitted_transactions<R: CanisterRuntime>(runtime: R) {
