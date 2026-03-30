@@ -54,3 +54,15 @@ where
 {
     EVENTS.with(|events| f(Box::new(events.borrow().iter())))
 }
+
+#[cfg(test)]
+pub fn reset_events() {
+    MEMORY_MANAGER.with(|m| {
+        EVENTS.with(|events| {
+            *events.borrow_mut() = StableLog::new(
+                m.borrow().get(EVENT_LOG_INDEX_MEMORY_ID),
+                m.borrow().get(EVENT_LOG_DATA_MEMORY_ID),
+            );
+        });
+    });
+}

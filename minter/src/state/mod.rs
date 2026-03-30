@@ -45,6 +45,13 @@ pub fn init_once_state(state: State) {
     });
 }
 
+#[cfg(test)]
+pub fn reset_state() {
+    STATE.with(|s| {
+        *s.borrow_mut() = None;
+    });
+}
+
 pub fn mutate_state<F, R>(f: F) -> R
 where
     F: FnOnce(&mut State) -> R,
