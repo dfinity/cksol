@@ -12,7 +12,7 @@ use cksol_int_tests::{
     },
 };
 use cksol_types::{
-    DepositStatus, GetDepositAddressArgs, InsufficientCyclesError, Lamport, MinterInfo,
+    DepositId, DepositStatus, GetDepositAddressArgs, InsufficientCyclesError, Lamport, MinterInfo,
     UpdateBalanceArgs, UpdateBalanceError, WithdrawSolArgs, WithdrawSolError, WithdrawSolStatus,
 };
 use cksol_types_internal::{
@@ -818,16 +818,16 @@ mod update_balance_tests {
             .with_http_mocks(get_transaction_http_mocks(get_deposit_transaction_response))
             .update_balance(default_update_balance_args())
             .await;
-        assert_matches!(
-            &first_result,
+        assert_eq!(
+            first_result,
             Ok(DepositStatus::Processing {
-                deposit_amount,
-                amount_to_mint,
-                deposit_id,
-            }) if *deposit_amount == DEPOSIT_AMOUNT
-              && *amount_to_mint == EXPECTED_MINT_AMOUNT
-              && deposit_id.signature == deposit_signature
-              && deposit_id.account == DEFAULT_CALLER_ACCOUNT
+                deposit_amount: DEPOSIT_AMOUNT,
+                amount_to_mint: EXPECTED_MINT_AMOUNT,
+                deposit_id: DepositId {
+                    signature: deposit_signature.clone(),
+                    account: DEFAULT_CALLER_ACCOUNT,
+                },
+            })
         );
 
         // Second call to `update_balance` while the ledger is stopped should still return
