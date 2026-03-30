@@ -35,13 +35,13 @@ async fn should_create_signed_transaction_with_single_source() {
     };
     let amount: Lamport = 500_000_000;
     let blockhash = Hash::new_from_array([0xBB; 32]);
-    let fake_signature = [0x42u8; 64];
+    let signature = [0x42u8; 64];
 
     let source_address = derive_address(&source_account);
     let target_address = derive_address(&target_account);
 
     // Fee payer is the source, so only one signature needed
-    let signer = MockSchnorrSigner::with_signatures(vec![fake_signature]);
+    let signer = MockSchnorrSigner::with_signatures(vec![signature]);
     let (tx, signers) = create_signed_batch_consolidation_transaction(
         source_account,
         &[(source_account, amount)],
@@ -70,7 +70,7 @@ async fn should_create_signed_transaction_with_single_source() {
     assert_eq!(tx.message.instructions.len(), 1);
 
     // Signature is placed for the source address (position 0 = fee payer)
-    assert_eq!(tx.signatures[0], Signature::from(fake_signature));
+    assert_eq!(tx.signatures[0], Signature::from(signature));
 
     // Recent blockhash is set
     assert_eq!(tx.message.recent_blockhash, blockhash);
@@ -93,14 +93,14 @@ async fn should_create_signed_transaction_with_multiple_sources() {
     };
     let amount: Lamport = 100_000_000;
     let blockhash = Hash::new_from_array([0xDD; 32]);
-    let fake_sig_1 = [0x11u8; 64];
-    let fake_sig_2 = [0x22u8; 64];
+    let sig_1 = [0x11u8; 64];
+    let sig_2 = [0x22u8; 64];
 
     let source_1 = derive_address(&account_1);
     let source_2 = derive_address(&account_2);
 
     // Fee payer (account_1) signature first, then account_2
-    let signer = MockSchnorrSigner::with_signatures(vec![fake_sig_1, fake_sig_2]);
+    let signer = MockSchnorrSigner::with_signatures(vec![sig_1, sig_2]);
     let (tx, signers) = create_signed_batch_consolidation_transaction(
         account_1,
         &[(account_1, amount), (account_2, amount)],
@@ -135,8 +135,8 @@ async fn should_create_signed_transaction_with_multiple_sources() {
         .iter()
         .position(|k| *k == source_2)
         .unwrap();
-    assert_eq!(tx.signatures[pos_1], Signature::from(fake_sig_1));
-    assert_eq!(tx.signatures[pos_2], Signature::from(fake_sig_2));
+    assert_eq!(tx.signatures[pos_1], Signature::from(sig_1));
+    assert_eq!(tx.signatures[pos_2], Signature::from(sig_2));
 }
 
 #[tokio::test]
@@ -420,9 +420,9 @@ mod batch_withdrawal_tests {
         let target = Address::new_from_array([0xAA; 32]);
         let amount: Lamport = 500_000_000;
         let blockhash = Hash::new_from_array([0xBB; 32]);
-        let fake_sig = [0x42u8; 64];
+        let sig = [0x42u8; 64];
 
-        let runtime = TestCanisterRuntime::new().add_signature(fake_sig);
+        let runtime = TestCanisterRuntime::new().add_signature(sig);
         let (tx, signers) =
             create_signed_batch_withdrawal_transaction(&runtime, &[(target, amount)], blockhash)
                 .await
@@ -430,7 +430,7 @@ mod batch_withdrawal_tests {
 
         assert_eq!(signers, vec![minter_account()]);
         assert_eq!(tx.signatures.len(), 1);
-        assert_eq!(tx.signatures[0], Signature::from(fake_sig));
+        assert_eq!(tx.signatures[0], Signature::from(sig));
         assert_eq!(tx.message.account_keys[0], minter_address());
         assert!(tx.message.account_keys.contains(&target));
         assert_eq!(tx.message.instructions.len(), 1);
@@ -444,9 +444,9 @@ mod batch_withdrawal_tests {
         let target_2 = Address::new_from_array([0xBB; 32]);
         let target_3 = Address::new_from_array([0xCC; 32]);
         let blockhash = Hash::new_from_array([0xDD; 32]);
-        let fake_sig = [0x11u8; 64];
+        let sig = [0x11u8; 64];
 
-        let runtime = TestCanisterRuntime::new().add_signature(fake_sig);
+        let runtime = TestCanisterRuntime::new().add_signature(sig);
         let (tx, signers) = create_signed_batch_withdrawal_transaction(
             &runtime,
             &[(target_1, 100), (target_2, 200), (target_3, 300)],
@@ -492,7 +492,7 @@ mod batch_withdrawal_tests {
     async fn should_create_batch_withdrawal_at_max_capacity() {
         setup();
         let blockhash = Hash::new_from_array([0xDD; 32]);
-        let fake_sig = [0x42u8; 64];
+        let sig = [0x42u8; 64];
 
         let targets: Vec<(Address, Lamport)> = (0..MAX_WITHDRAWALS_PER_TX)
             .map(|i| {
@@ -503,7 +503,7 @@ mod batch_withdrawal_tests {
             })
             .collect();
 
-        let runtime = TestCanisterRuntime::new().add_signature(fake_sig);
+        let runtime = TestCanisterRuntime::new().add_signature(sig);
         let (tx, signers) =
             create_signed_batch_withdrawal_transaction(&runtime, &targets, blockhash)
                 .await
