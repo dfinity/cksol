@@ -1,4 +1,5 @@
 use super::*;
+use assert_matches::assert_matches;
 use crate::{
     state::read_state,
     test_fixtures::{
@@ -471,11 +472,9 @@ mod batch_withdrawal_tests {
     }
 
     #[tokio::test]
-    #[should_panic]
-    async fn should_panic_when_exceeding_tx_size_limit() {
+    async fn should_return_error_when_exceeding_tx_size_limit() {
         setup();
         let blockhash = Hash::new_from_array([0xDD; 32]);
-        let fake_sig = [0x42u8; 64];
 
         // Each additional target adds ~49 bytes (32-byte key + 17-byte instruction).
         // With a base of ~166 bytes and MAX_TX_SIZE = 1232, the limit is around 21-22.
@@ -489,7 +488,13 @@ mod batch_withdrawal_tests {
             })
             .collect();
 
-        let runtime = TestCanisterRuntime::new().add_signature(fake_sig);
-        let _ = create_signed_batch_withdrawal_transaction(&runtime, &targets, blockhash).await;
+        let runtime = TestCanisterRuntime::new();
+        let result =
+            create_signed_batch_withdrawal_transaction(&runtime, &targets, blockhash).await;
+
+        assert_matches!(
+            result,
+            Err(CreateTransferError::TransactionTooLarge { max: MAX_TX_SIZE, .. })
+        );
     }
 }

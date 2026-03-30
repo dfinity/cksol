@@ -34,6 +34,8 @@ pub const MAX_WITHDRAWALS_PER_TX: usize = 20;
 pub enum CreateTransferError {
     #[error("too many signatures: got {got}, max is {max}")]
     TooManySignatures { max: u64, got: u64 },
+    #[error("transaction size {got} exceeds maximum of {max} bytes")]
+    TransactionTooLarge { max: usize, got: usize },
     #[error("signing failed: {0}")]
     SigningFailed(SignCallError),
 }
@@ -88,8 +90,13 @@ pub async fn create_signed_transfer_transaction(
         });
     }
 
-    // Check serialized transaction size does not exceed maximum Solana transaction size:
-    assert!(1 + message_bytes.len() + num_signatures * BYTES_PER_SIGNATURE < MAX_TX_SIZE);
+    let tx_size = 1 + message_bytes.len() + num_signatures * BYTES_PER_SIGNATURE;
+    if tx_size >= MAX_TX_SIZE {
+        return Err(CreateTransferError::TransactionTooLarge {
+            max: MAX_TX_SIZE,
+            got: tx_size,
+        });
+    }
 
     // Build a map with all signer addresses and re-order entries to match the
     // order of the message account keys
@@ -124,8 +131,7 @@ pub async fn create_signed_transfer_transaction(
 ///
 /// # Panics
 ///
-/// Panics if the serialized transaction exceeds [`MAX_TX_SIZE`], or if the IC
-/// returns a signature that is not exactly 64 bytes.
+/// Panics if the IC returns a signature that is not exactly 64 bytes.
 pub async fn create_signed_batch_withdrawal_transaction<R: CanisterRuntime>(
     runtime: &R,
     targets: &[(Address, Lamport)],
@@ -148,8 +154,13 @@ pub async fn create_signed_batch_withdrawal_transaction<R: CanisterRuntime>(
     let mut transaction = Transaction::new_unsigned(message);
     let message_bytes = transaction.message_data();
 
-    // There is only one signature - minter's
-    assert!(1 + message_bytes.len() + BYTES_PER_SIGNATURE < MAX_TX_SIZE);
+    let tx_size = 1 + message_bytes.len() + BYTES_PER_SIGNATURE;
+    if tx_size >= MAX_TX_SIZE {
+        return Err(CreateTransferError::TransactionTooLarge {
+            max: MAX_TX_SIZE,
+            got: tx_size,
+        });
+    }
 
     transaction.signatures = sign_bytes(
         vec![fee_payer_derivation_path],
