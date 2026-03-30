@@ -1,5 +1,4 @@
 use super::*;
-use assert_matches::assert_matches;
 use crate::{
     state::read_state,
     test_fixtures::{
@@ -7,6 +6,7 @@ use crate::{
         signer::MockSchnorrSigner,
     },
 };
+use assert_matches::assert_matches;
 use candid::Principal;
 use ic_cdk::{call::CallRejected, management_canister::SignCallError};
 use solana_address::Address;
@@ -292,6 +292,44 @@ async fn should_not_fail_for_max_signatures() {
 }
 
 #[tokio::test]
+async fn should_fail_when_transaction_too_large() {
+    setup();
+    let source_account = Account {
+        owner: Principal::from_slice(&[1]),
+        subaccount: None,
+    };
+    let target_account = Account {
+        owner: Principal::from_slice(&[2]),
+        subaccount: None,
+    };
+    let blockhash = Hash::new_from_array([0xBB; 32]);
+    let signer = MockSchnorrSigner::with_signatures(vec![]);
+
+    // Use the same source account repeated many times. This produces only
+    // 2 unique signers (fee payer = source, so just 1) but one instruction
+    // per entry (~17 bytes each). 60 instructions are enough to exceed
+    // MAX_TX_SIZE while staying well under MAX_SIGNATURES.
+    let sources: Vec<(Account, Lamport)> = vec![(source_account, 1_000); 65];
+
+    let result = create_signed_transfer_transaction(
+        source_account,
+        &sources,
+        derive_address(&target_account),
+        blockhash,
+        &signer,
+    )
+    .await;
+
+    assert_matches!(
+        result,
+        Err(CreateTransferError::TransactionTooLarge {
+            max: MAX_TX_SIZE,
+            ..
+        })
+    );
+}
+
+#[tokio::test]
 async fn should_create_signed_transaction_with_fee_payer() {
     setup();
     let fee_payer_account = Account {
@@ -494,7 +532,10 @@ mod batch_withdrawal_tests {
 
         assert_matches!(
             result,
-            Err(CreateTransferError::TransactionTooLarge { max: MAX_TX_SIZE, .. })
+            Err(CreateTransferError::TransactionTooLarge {
+                max: MAX_TX_SIZE,
+                ..
+            })
         );
     }
 }
