@@ -334,23 +334,30 @@ pub mod deposit {
         subaccount: None,
     };
 
+    pub fn public_deposit_id() -> cksol_types::DepositId {
+        cksol_types::DepositId {
+            signature: deposit_transaction_signature().into(),
+            account: DEPOSITOR_ACCOUNT,
+        }
+    }
+
     pub fn deposit_status_processing() -> DepositStatus {
         DepositStatus::Processing {
             deposit_amount: DEPOSIT_AMOUNT,
             amount_to_mint: DEPOSIT_AMOUNT - DEPOSIT_FEE,
-            signature: deposit_transaction_signature().into(),
+            deposit_id: public_deposit_id(),
         }
     }
 
     pub fn deposit_status_quarantined() -> DepositStatus {
-        DepositStatus::Quarantined(deposit_transaction_signature().into())
+        DepositStatus::Quarantined(public_deposit_id())
     }
 
     pub fn deposit_status_minted() -> DepositStatus {
         DepositStatus::Minted {
             block_index: BLOCK_INDEX,
             minted_amount: DEPOSIT_AMOUNT - DEPOSIT_FEE,
-            signature: deposit_transaction_signature().into(),
+            deposit_id: public_deposit_id(),
         }
     }
 

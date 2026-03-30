@@ -163,8 +163,12 @@ impl State {
     }
 
     pub fn deposit_status(&self, deposit_id: &DepositId) -> Option<DepositStatus> {
+        let public_deposit_id = cksol_types::DepositId {
+            signature: deposit_id.signature.into(),
+            account: deposit_id.account,
+        };
         if self.quarantined_deposits.contains_key(deposit_id) {
-            return Some(DepositStatus::Quarantined(deposit_id.signature.into()));
+            return Some(DepositStatus::Quarantined(public_deposit_id));
         }
         if let Some(Deposit {
             deposit_amount,
@@ -174,7 +178,7 @@ impl State {
             return Some(DepositStatus::Processing {
                 deposit_amount: *deposit_amount,
                 amount_to_mint: *amount_to_mint,
-                signature: deposit_id.signature.into(),
+                deposit_id: public_deposit_id,
             });
         }
         if let Some(MintedDeposit {
@@ -185,7 +189,7 @@ impl State {
             return Some(DepositStatus::Minted {
                 block_index: *block_index.get(),
                 minted_amount: *amount_to_mint,
-                signature: deposit_id.signature.into(),
+                deposit_id: public_deposit_id,
             });
         }
         None

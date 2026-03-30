@@ -818,13 +818,15 @@ mod update_balance_tests {
             .with_http_mocks(get_transaction_http_mocks(get_deposit_transaction_response))
             .update_balance(default_update_balance_args())
             .await;
-        assert_eq!(
+        assert_matches!(
             first_result,
             Ok(DepositStatus::Processing {
-                deposit_amount: DEPOSIT_AMOUNT,
-                amount_to_mint: EXPECTED_MINT_AMOUNT,
-                signature: deposit_signature.clone(),
-            })
+                deposit_amount,
+                amount_to_mint,
+                deposit_id,
+            }) if deposit_amount == DEPOSIT_AMOUNT
+              && amount_to_mint == EXPECTED_MINT_AMOUNT
+              && deposit_id.signature == deposit_signature
         );
 
         // Second call to `update_balance` while the ledger is stopped should still return
@@ -848,9 +850,9 @@ mod update_balance_tests {
             .await;
         assert_matches!(&result, Ok(DepositStatus::Minted {
             minted_amount,
-            signature,
+            deposit_id,
             block_index: _,
-        }) if minted_amount == &EXPECTED_MINT_AMOUNT && signature == &deposit_signature);
+        }) if minted_amount == &EXPECTED_MINT_AMOUNT && deposit_id.signature == deposit_signature);
 
         let balance_after = setup.ledger().balance_of(DEFAULT_CALLER_ACCOUNT).await;
         assert_eq!(balance_after, EXPECTED_MINT_AMOUNT);

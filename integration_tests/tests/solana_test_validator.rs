@@ -113,9 +113,9 @@ async fn deposit_to_account(setup: &Setup, account: Account, amount: Lamport) ->
         .await;
     assert_matches!(result, Ok(DepositStatus::Minted {
         minted_amount,
-        signature,
+        deposit_id,
         block_index: _,
-    }) if minted_amount == expected_mint_amount && signature == deposit_signature.into());
+    }) if minted_amount == expected_mint_amount && deposit_id.signature == deposit_signature.into());
 
     let balance_after = setup.ledger().balance_of(account).await;
     assert_eq!(balance_after, expected_mint_amount);
