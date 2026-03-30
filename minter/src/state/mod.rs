@@ -150,6 +150,22 @@ impl State {
         self.update_balance_required_cycles
     }
 
+    pub fn accepted_deposits(&self) -> &BTreeMap<DepositId, Deposit> {
+        &self.accepted_deposits
+    }
+
+    pub fn quarantined_deposits(&self) -> &BTreeMap<DepositId, Deposit> {
+        &self.quarantined_deposits
+    }
+
+    pub fn minted_deposits(&self) -> &BTreeMap<DepositId, MintedDeposit> {
+        &self.minted_deposits
+    }
+
+    pub fn sent_withdrawal_requests(&self) -> &BTreeMap<LedgerBurnIndex, Signature> {
+        &self.sent_withdrawal_requests
+    }
+
     pub fn deposits_to_consolidate(&self) -> &BTreeMap<LedgerMintIndex, (Account, Lamport)> {
         &self.deposits_to_consolidate
     }

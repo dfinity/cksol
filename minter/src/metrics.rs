@@ -1,3 +1,4 @@
+use crate::state::read_state;
 use crate::storage;
 use ic_metrics_encoder::MetricsEncoder;
 
@@ -30,6 +31,60 @@ pub fn encode_metrics(w: &mut MetricsEncoder<Vec<u8>>) -> std::io::Result<()> {
         "Total number of events in the event log.",
     )?;
 
+    read_state(|s| encode_state_metrics(w, s))?;
+
+    Ok(())
+}
+
+fn encode_state_metrics(
+    w: &mut MetricsEncoder<Vec<u8>>,
+    s: &crate::state::State,
+) -> std::io::Result<()> {
+    w.encode_gauge(
+        "cksol_minter_accepted_deposits",
+        s.accepted_deposits().len().metric_value(),
+        "Number of accepted deposits pending minting.",
+    )?;
+    w.encode_gauge(
+        "cksol_minter_quarantined_deposits",
+        s.quarantined_deposits().len().metric_value(),
+        "Number of quarantined deposits.",
+    )?;
+    w.encode_gauge(
+        "cksol_minter_minted_deposits",
+        s.minted_deposits().len().metric_value(),
+        "Number of minted deposits.",
+    )?;
+    w.encode_gauge(
+        "cksol_minter_deposits_to_consolidate",
+        s.deposits_to_consolidate().len().metric_value(),
+        "Number of deposits pending consolidation.",
+    )?;
+    w.encode_gauge(
+        "cksol_minter_pending_withdrawal_requests",
+        s.pending_withdrawal_requests().len().metric_value(),
+        "Number of pending withdrawal requests.",
+    )?;
+    w.encode_gauge(
+        "cksol_minter_sent_withdrawal_requests",
+        s.sent_withdrawal_requests().len().metric_value(),
+        "Number of sent withdrawal requests.",
+    )?;
+    w.encode_gauge(
+        "cksol_minter_submitted_transactions",
+        s.submitted_transactions().len().metric_value(),
+        "Number of submitted Solana transactions.",
+    )?;
+    w.encode_gauge(
+        "cksol_minter_succeeded_transactions",
+        s.succeeded_transactions().len().metric_value(),
+        "Number of succeeded Solana transactions.",
+    )?;
+    w.encode_gauge(
+        "cksol_minter_failed_transactions",
+        s.failed_transactions().len().metric_value(),
+        "Number of failed Solana transactions.",
+    )?;
     Ok(())
 }
 
