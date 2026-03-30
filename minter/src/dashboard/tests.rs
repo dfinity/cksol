@@ -184,6 +184,75 @@ fn should_not_display_pagination_for_small_tables() {
     );
 }
 
+#[test]
+fn should_paginate_minted_deposits_across_multiple_pages() {
+    use crate::state::event::DepositId;
+    use crate::test_fixtures::MINTER_ACCOUNT;
+
+    let mut state = initial_state();
+    let runtime = runtime();
+
+    // Create 250 minted deposits (> 2 pages at DEFAULT_PAGE_SIZE=100)
+    for i in 0..250u64 {
+        let mut sig_bytes = [0u8; 64];
+        sig_bytes[..8].copy_from_slice(&i.to_le_bytes());
+        let deposit_id = DepositId {
+            signature: Signature::from(sig_bytes),
+            account: MINTER_ACCOUNT,
+        };
+        process_event(
+            &mut state,
+            EventType::AcceptedDeposit {
+                deposit_id,
+                deposit_amount: 1_000_000,
+                amount_to_mint: 990_000,
+            },
+            &runtime,
+        );
+        process_event(
+            &mut state,
+            EventType::Minted {
+                deposit_id,
+                mint_block_index: i.into(),
+            },
+            &runtime,
+        );
+    }
+
+    // Page 1 (default): should show 100 rows and pagination controls
+    let page1 = DashboardTemplate::from_state(&state, DashboardPaginationParameters::default());
+    assert_eq!(page1.minted_deposits_table.current_page.len(), 100);
+    assert!(page1.minted_deposits_table.has_more_than_one_page());
+    assert_eq!(page1.minted_deposits_table.pagination.pages.len(), 3);
+    assert_eq!(page1.minted_deposits_table.pagination.current_page_index, 1);
+
+    let rendered = page1.render().unwrap();
+    assert!(
+        rendered.contains("Pages:"),
+        "should show pagination controls"
+    );
+
+    // Page 2: offset 100
+    let page2 = DashboardTemplate::from_state(
+        &state,
+        DashboardPaginationParameters {
+            minted_deposits_start: 100,
+        },
+    );
+    assert_eq!(page2.minted_deposits_table.current_page.len(), 100);
+    assert_eq!(page2.minted_deposits_table.pagination.current_page_index, 2);
+
+    // Page 3: offset 200, should have remaining 50 items
+    let page3 = DashboardTemplate::from_state(
+        &state,
+        DashboardPaginationParameters {
+            minted_deposits_start: 200,
+        },
+    );
+    assert_eq!(page3.minted_deposits_table.current_page.len(), 50);
+    assert_eq!(page3.minted_deposits_table.pagination.current_page_index, 3);
+}
+
 // --- Assertion helpers ---
 
 struct DashboardAssert {
