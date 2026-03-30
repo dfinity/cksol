@@ -73,16 +73,6 @@ pub async fn create_signed_transfer_transaction(
     let message =
         Message::new_with_blockhash(&instructions, Some(&fee_payer_address), &recent_blockhash);
     let mut transaction = Transaction::new_unsigned(message);
-    let message_bytes = transaction.message_data();
-
-    let num_signatures = transaction.message.signer_keys().len();
-    let tx_size = 1 + message_bytes.len() + num_signatures * BYTES_PER_SIGNATURE;
-    if tx_size >= MAX_TX_SIZE {
-        return Err(CreateTransferError::TransactionTooLarge {
-            max: MAX_TX_SIZE,
-            got: tx_size,
-        });
-    }
 
     // Build a map with all signer addresses and re-order entries to match the
     // order of the message account keys
@@ -104,7 +94,7 @@ pub async fn create_signed_transfer_transaction(
         })
         .unzip();
 
-    transaction.signatures = sign_bytes(signer_derivation_paths, signer, message_bytes).await?;
+    sign_transaction(&mut transaction, signer_derivation_paths, signer).await?;
 
     Ok((transaction, signer_accounts))
 }
@@ -143,9 +133,28 @@ pub async fn create_signed_batch_withdrawal_transaction<R: CanisterRuntime>(
     let message =
         Message::new_with_blockhash(&instructions, Some(&fee_payer_address), &recent_blockhash);
     let mut transaction = Transaction::new_unsigned(message);
-    let message_bytes = transaction.message_data();
 
-    let tx_size = 1 + message_bytes.len() + BYTES_PER_SIGNATURE;
+    sign_transaction(
+        &mut transaction,
+        vec![fee_payer_derivation_path],
+        &runtime.signer(),
+    )
+    .await?;
+
+    Ok((transaction, vec![fee_payer_account]))
+}
+
+// Sign transaction, return error if it exceeds the maximum transaction size.
+async fn sign_transaction(
+    transaction: &mut Transaction,
+    signer_derivation_paths: impl IntoIterator<Item = DerivationPath>,
+    signer: &impl SchnorrSigner,
+) -> Result<(), CreateTransferError> {
+    let message_bytes = transaction.message_data();
+    let message_len = message_bytes.len();
+    transaction.signatures = sign_bytes(signer_derivation_paths, signer, message_bytes).await?;
+
+    let tx_size = 1 + message_len + transaction.signatures.len() * BYTES_PER_SIGNATURE;
     if tx_size >= MAX_TX_SIZE {
         return Err(CreateTransferError::TransactionTooLarge {
             max: MAX_TX_SIZE,
@@ -153,12 +162,5 @@ pub async fn create_signed_batch_withdrawal_transaction<R: CanisterRuntime>(
         });
     }
 
-    transaction.signatures = sign_bytes(
-        vec![fee_payer_derivation_path],
-        &runtime.signer(),
-        message_bytes,
-    )
-    .await?;
-
-    Ok((transaction, vec![fee_payer_account]))
+    Ok(())
 }

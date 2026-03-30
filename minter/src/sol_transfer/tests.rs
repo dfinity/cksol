@@ -212,7 +212,7 @@ async fn should_fail_when_too_many_signatures() {
         subaccount: None,
     };
     let blockhash = Hash::new_from_array([0xBB; 32]);
-    let signer = MockSchnorrSigner::with_signatures(vec![]);
+    let signer = MockSchnorrSigner::with_signatures([[0xAA; 64]; MAX_SIGNATURES as usize + 1]);
 
     // Create MAX_SIGNATURES sources with a SEPARATE fee payer, resulting in MAX_SIGNATURES + 1
     // signatures which causes the transaction to exceed MAX_TX_SIZE.
@@ -307,13 +307,14 @@ async fn should_fail_when_transaction_too_large() {
         subaccount: None,
     };
     let blockhash = Hash::new_from_array([0xBB; 32]);
-    let signer = MockSchnorrSigner::with_signatures(vec![]);
+    const NUM_SIGS: usize = 65;
+    let signer = MockSchnorrSigner::with_signatures([[0xAA; 64]; NUM_SIGS]);
 
     // Use the same source account repeated many times. This produces only
     // 2 unique signers (fee payer = source, so just 1) but one instruction
     // per entry (~17 bytes each). 60 instructions are enough to exceed
     // MAX_TX_SIZE while staying well under MAX_SIGNATURES.
-    let sources: Vec<(Account, Lamport)> = vec![(source_account, 1_000); 65];
+    let sources: Vec<(Account, Lamport)> = vec![(source_account, 1_000); NUM_SIGS];
 
     let result = create_signed_transfer_transaction(
         source_account,
@@ -530,7 +531,11 @@ mod batch_withdrawal_tests {
             })
             .collect();
 
-        let runtime = TestCanisterRuntime::new();
+        let mut runtime = TestCanisterRuntime::new();
+        for _ in 0..num_targets {
+            runtime = runtime.add_signature([0xAA; 64]);
+        }
+
         let result =
             create_signed_batch_withdrawal_transaction(&runtime, &targets, blockhash).await;
 
