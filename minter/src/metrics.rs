@@ -38,47 +38,47 @@ fn encode_state_metrics(
         "Total number of events in the event log.",
     )?;
     w.encode_gauge(
-        "minter_accepted_deposits",
+        "accepted_deposits",
         s.accepted_deposits().len().metric_value(),
         "Number of accepted deposits pending minting.",
     )?;
     w.encode_gauge(
-        "minter_quarantined_deposits",
+        "quarantined_deposits",
         s.quarantined_deposits().len().metric_value(),
         "Number of quarantined deposits.",
     )?;
     w.encode_gauge(
-        "minter_minted_deposits",
+        "minted_deposits",
         s.minted_deposits().len().metric_value(),
         "Number of minted deposits.",
     )?;
     w.encode_gauge(
-        "minter_deposits_to_consolidate",
+        "deposits_to_consolidate",
         s.deposits_to_consolidate().len().metric_value(),
         "Number of deposits pending consolidation.",
     )?;
     w.encode_gauge(
-        "minter_pending_withdrawal_requests",
+        "pending_withdrawal_requests",
         s.pending_withdrawal_requests().len().metric_value(),
         "Number of pending withdrawal requests.",
     )?;
     w.encode_gauge(
-        "minter_sent_withdrawal_requests",
+        "sent_withdrawal_requests",
         s.sent_withdrawal_requests().len().metric_value(),
         "Number of sent withdrawal requests.",
     )?;
     w.encode_gauge(
-        "minter_submitted_transactions",
+        "submitted_transactions",
         s.submitted_transactions().len().metric_value(),
         "Number of submitted Solana transactions.",
     )?;
     w.encode_gauge(
-        "minter_succeeded_transactions",
+        "succeeded_transactions",
         s.succeeded_transactions().len().metric_value(),
         "Number of succeeded Solana transactions.",
     )?;
     w.encode_gauge(
-        "minter_failed_transactions",
+        "failed_transactions",
         s.failed_transactions().len().metric_value(),
         "Number of failed Solana transactions.",
     )?;
