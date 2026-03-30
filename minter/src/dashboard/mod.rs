@@ -59,6 +59,7 @@ impl DashboardPaginationParameters {
 pub struct DashboardPaginatedTable<T> {
     pub current_page: Vec<T>,
     pub pagination: DashboardTablePagination,
+    total_items: usize,
 }
 
 impl<T: Clone> DashboardPaginatedTable<T> {
@@ -70,26 +71,33 @@ impl<T: Clone> DashboardPaginatedTable<T> {
         table_reference: &str,
         page_offset_query_param: &str,
     ) -> Self {
+        let total_items = items.len();
+
+        // Align offset to page boundary and clamp to the last valid page.
+        let offset = if page_size == 0 || total_items == 0 {
+            0
+        } else {
+            let aligned = (current_page_offset / page_size) * page_size;
+            let max_start = ((total_items - 1) / page_size) * page_size;
+            aligned.min(max_start)
+        };
+
         Self {
-            current_page: items
-                .iter()
-                .skip(current_page_offset)
-                .take(page_size)
-                .cloned()
-                .collect(),
+            current_page: items.iter().skip(offset).take(page_size).cloned().collect(),
             pagination: DashboardTablePagination::new(
-                items.len(),
-                current_page_offset,
+                total_items,
+                offset,
                 page_size,
                 num_cols,
                 table_reference,
                 page_offset_query_param,
             ),
+            total_items,
         }
     }
 
     pub fn is_empty(&self) -> bool {
-        self.current_page.is_empty()
+        self.total_items == 0
     }
 
     pub fn has_more_than_one_page(&self) -> bool {
@@ -182,15 +190,21 @@ impl DashboardTemplate {
         let mut minted_deposits: Vec<_> = state
             .minted_deposits()
             .iter()
-            .map(|(deposit_id, minted)| DashboardMintedDeposit {
-                signature: deposit_id.signature.to_string(),
-                account: deposit_id.account.to_string(),
-                deposit_amount: lamports_to_sol(minted.deposit.deposit_amount),
-                minted_amount: lamports_to_sol(minted.deposit.amount_to_mint),
-                mint_block_index: minted.block_index.to_string(),
+            .map(|(deposit_id, minted)| {
+                (
+                    *minted.block_index.get(),
+                    DashboardMintedDeposit {
+                        signature: deposit_id.signature.to_string(),
+                        account: deposit_id.account.to_string(),
+                        deposit_amount: lamports_to_sol(minted.deposit.deposit_amount),
+                        minted_amount: lamports_to_sol(minted.deposit.amount_to_mint),
+                        mint_block_index: minted.block_index.to_string(),
+                    },
+                )
             })
             .collect();
-        minted_deposits.sort_unstable_by_key(|d| Reverse(d.mint_block_index.clone()));
+        minted_deposits.sort_unstable_by_key(|(block_index, _)| Reverse(*block_index));
+        let minted_deposits: Vec<_> = minted_deposits.into_iter().map(|(_, d)| d).collect();
 
         let minted_deposits_table = DashboardPaginatedTable::from_items(
             &minted_deposits,
