@@ -245,7 +245,10 @@ async fn should_fail_when_too_many_signatures() {
 
     assert_matches!(
         result,
-        Err(CreateTransferError::TransactionTooLarge { max: MAX_TX_SIZE, .. })
+        Err(CreateTransferError::TransactionTooLarge {
+            max: MAX_TX_SIZE,
+            ..
+        })
     );
 }
 
