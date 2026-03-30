@@ -31,6 +31,7 @@ use crate::{
 
 pub const WITHDRAWAL_PROCESSING_DELAY: Duration = Duration::from_mins(1);
 pub(crate) const MAX_CONCURRENT_WITHDRAWAL_TXS: usize = 10;
+pub(crate) const MAX_WITHDRAWAL_ROUNDS: usize = 5;
 
 #[cfg(test)]
 mod tests;
@@ -136,12 +137,15 @@ pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: &R) {
         }
     };
 
-    let max_requests = MAX_WITHDRAWALS_PER_TX * MAX_CONCURRENT_WITHDRAWAL_TXS;
-    let withdrawal_batches: Vec<Vec<_>> = read_state(|state| {
+    // TODO: we need to check whether the minter has enough funds in the main account.
+    // We probably need to add a state.minter_balance variable and update it
+    // here and while consolidating funds.
+    // If there are not enough funds for the withdrawal we simply continue.
+
+    let rounds: Vec<Vec<Vec<_>>> = read_state(|state| {
         state
             .pending_withdrawal_requests()
             .values()
-            .take(max_requests)
             .cloned()
             .collect::<Vec<_>>()
     })
@@ -149,38 +153,41 @@ pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: &R) {
     .chunks(MAX_WITHDRAWALS_PER_TX)
     .into_iter()
     .map(Iterator::collect)
+    .collect::<Vec<Vec<_>>>()
+    .into_iter()
+    .chunks(MAX_CONCURRENT_WITHDRAWAL_TXS)
+    .into_iter()
+    .take(MAX_WITHDRAWAL_ROUNDS)
+    .map(Iterator::collect)
     .collect();
 
-    if withdrawal_batches.is_empty() {
-        return;
+    for round in rounds {
+        if round.is_empty() {
+            return;
+        }
+
+        let recent_blockhash = match get_recent_blockhash(runtime).await {
+            Ok(blockhash) => blockhash,
+            Err(e) => {
+                log!(Priority::Info, "Failed to fetch recent blockhash: {e}");
+                return;
+            }
+        };
+        // TODO DEFI-2670: Update `sol_rpc_client` to return the slot along with the blockhash
+        //  in `estimate_recent_blockhash`, then remove this separate call to `getSlot`.
+        let slot = match get_slot(runtime).await {
+            Ok(slot) => slot,
+            Err(e) => {
+                log!(Priority::Info, "Failed to get slot: {e}");
+                return;
+            }
+        };
+
+        futures::future::join_all(round.into_iter().map(async |batch| {
+            submit_withdrawal_transaction(runtime, batch, slot, recent_blockhash).await
+        }))
+        .await;
     }
-
-    // TODO: we need to check whether the minter has enough funds in the main account.
-    // We probably need to add a state.minter_balance variable and update it
-    // here and while consolidating funds.
-    // If there are not enough funds for the withdrawal we simply continue.
-
-    let recent_blockhash = match get_recent_blockhash(runtime).await {
-        Ok(blockhash) => blockhash,
-        Err(e) => {
-            log!(Priority::Info, "Failed to fetch recent blockhash: {e}");
-            return;
-        }
-    };
-    // TODO DEFI-2670: Update `sol_rpc_client` to return the slot along with the blockhash
-    //  in `estimate_recent_blockhash`, then remove this separate call to `getSlot`.
-    let slot = match get_slot(runtime).await {
-        Ok(slot) => slot,
-        Err(e) => {
-            log!(Priority::Info, "Failed to get slot: {e}");
-            return;
-        }
-    };
-
-    futures::future::join_all(withdrawal_batches.into_iter().map(async |batch| {
-        submit_withdrawal_transaction(runtime, batch, slot, recent_blockhash).await
-    }))
-    .await;
 }
 
 async fn submit_withdrawal_transaction<R: CanisterRuntime>(
