@@ -527,8 +527,8 @@ mod batch_withdrawal_tests {
         // Each additional target adds ~49 bytes (32-byte key + 17-byte instruction).
         // With a base of ~166 bytes and MAX_TX_SIZE = 1232, the limit is around 21-22.
         // Use 25 targets to reliably exceed the limit.
-        let num_targets = 25;
-        let targets: Vec<(Address, Lamport)> = (0..num_targets)
+        const NUM_TARGETS: usize = 25;
+        let targets: Vec<(Address, Lamport)> = (0..NUM_TARGETS)
             .map(|i| {
                 let mut addr = [0u8; 32];
                 addr[0] = i as u8;
@@ -537,7 +537,7 @@ mod batch_withdrawal_tests {
             .collect();
 
         let mut runtime = TestCanisterRuntime::new();
-        for _ in 0..num_targets {
+        for _ in 0..NUM_TARGETS {
             runtime = runtime.add_signature([0xAA; 64]);
         }
 
