@@ -162,10 +162,6 @@ pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: &R) {
     .collect();
 
     for round in rounds {
-        if round.is_empty() {
-            return;
-        }
-
         let recent_blockhash = match get_recent_blockhash(runtime).await {
             Ok(blockhash) => blockhash,
             Err(e) => {

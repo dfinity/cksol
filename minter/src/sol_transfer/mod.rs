@@ -113,11 +113,6 @@ pub async fn create_signed_batch_withdrawal_transaction<R: CanisterRuntime>(
     targets: &[(Address, Lamport)],
     recent_blockhash: Hash,
 ) -> Result<(Transaction, Vec<Account>), CreateTransferError> {
-    assert!(
-        !targets.is_empty(),
-        "trying to sign a withdrawal transaction with no target account"
-    );
-
     let fee_payer_account = Account::from(runtime.canister_self());
     let master_public_key = lazy_get_schnorr_master_key().await;
     let fee_payer_derivation_path = derivation_path(&fee_payer_account);

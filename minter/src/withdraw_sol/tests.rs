@@ -10,8 +10,7 @@ use crate::{
         runtime::TestCanisterRuntime,
     },
     withdraw_sol::{
-        MAX_CONCURRENT_WITHDRAWAL_TXS, MAX_WITHDRAWAL_ROUNDS, process_pending_withdrawals,
-        withdraw_sol, withdraw_sol_status,
+        MAX_WITHDRAWAL_ROUNDS, process_pending_withdrawals, withdraw_sol, withdraw_sol_status,
     },
 };
 use assert_matches::assert_matches;
@@ -253,6 +252,8 @@ async fn should_return_error_if_already_processing() {
 }
 
 mod process_pending_withdrawals_tests {
+    use crate::constants::MAX_CONCURRENT_RPC_CALLS;
+
     use super::*;
 
     type SendSlotResult = MultiRpcResult<Slot>;
@@ -492,7 +493,7 @@ mod process_pending_withdrawals_tests {
         process_pending_withdrawals(&runtime).await;
 
         // All withdrawals should be processed in a single invocation
-        // (2 batches in 1 round, both within MAX_CONCURRENT_WITHDRAWAL_TXS)
+        // (2 batches in 1 round, both within MAX_CONCURRENT_RPC_CALLS)
         for i in 0..request_count {
             assert_matches!(withdraw_sol_status(i), WithdrawSolStatus::TxSent(_));
         }
@@ -531,10 +532,10 @@ mod process_pending_withdrawals_tests {
         init_schnorr_master_key();
 
         // Create more withdrawals than fit in one round
-        // (MAX_WITHDRAWALS_PER_TX * MAX_CONCURRENT_WITHDRAWAL_TXS) but fewer than
+        // (MAX_WITHDRAWALS_PER_TX * MAX_CONCURRENT_RPC_CALLS) but fewer than
         // the per-invocation limit (rounds * concurrent * per_tx).
         // This requires 2 rounds within a single invocation.
-        let max_per_round = (MAX_WITHDRAWALS_PER_TX * MAX_CONCURRENT_WITHDRAWAL_TXS) as u64;
+        let max_per_round = (MAX_WITHDRAWALS_PER_TX * MAX_CONCURRENT_RPC_CALLS) as u64;
         let request_count = max_per_round + 1;
         let slot = 1;
 
@@ -543,12 +544,12 @@ mod process_pending_withdrawals_tests {
             runtime = runtime.add_stub_response(Ok::<Nat, TransferFromError>(Nat::from(i)));
         }
 
-        // Round 1: blockhash + slot, then MAX_CONCURRENT_WITHDRAWAL_TXS signatures
+        // Round 1: blockhash + slot, then MAX_CONCURRENT_RPC_CALLS signatures
         runtime = runtime
             .add_stub_response(SendSlotResult::Consistent(Ok(slot)))
             .add_stub_response(SendBlockResult::Consistent(Ok(get_confirmed_block())))
             .add_stub_response(SendSlotResult::Consistent(Ok(slot)));
-        for i in 0..MAX_CONCURRENT_WITHDRAWAL_TXS {
+        for i in 0..MAX_CONCURRENT_RPC_CALLS {
             runtime = runtime.add_signature(signature(i as u8 + 1).into());
         }
 
@@ -557,7 +558,7 @@ mod process_pending_withdrawals_tests {
             .add_stub_response(SendSlotResult::Consistent(Ok(slot)))
             .add_stub_response(SendBlockResult::Consistent(Ok(get_confirmed_block())))
             .add_stub_response(SendSlotResult::Consistent(Ok(slot)))
-            .add_signature(signature(MAX_CONCURRENT_WITHDRAWAL_TXS as u8 + 1).into());
+            .add_signature(signature(MAX_CONCURRENT_RPC_CALLS as u8 + 1).into());
 
         withdraw(&runtime, request_count as u8).await;
 
@@ -584,7 +585,7 @@ mod process_pending_withdrawals_tests {
         init_schnorr_master_key();
 
         let slot = 1;
-        let max_per_round = MAX_WITHDRAWALS_PER_TX * MAX_CONCURRENT_WITHDRAWAL_TXS;
+        let max_per_round = MAX_WITHDRAWALS_PER_TX * MAX_CONCURRENT_RPC_CALLS;
         // Create enough requests to fill MAX_WITHDRAWAL_ROUNDS + 1 rounds.
         let request_count = max_per_round * MAX_WITHDRAWAL_ROUNDS + 1;
 
@@ -618,7 +619,7 @@ mod process_pending_withdrawals_tests {
                 .add_stub_response(SendSlotResult::Consistent(Ok(slot)))
                 .add_stub_response(SendBlockResult::Consistent(Ok(get_confirmed_block())))
                 .add_stub_response(SendSlotResult::Consistent(Ok(slot)));
-            for _ in 0..MAX_CONCURRENT_WITHDRAWAL_TXS {
+            for _ in 0..MAX_CONCURRENT_RPC_CALLS {
                 sig_counter = sig_counter.wrapping_add(1);
                 runtime = runtime.add_signature(signature(sig_counter).into());
             }
