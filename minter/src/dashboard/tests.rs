@@ -5,7 +5,7 @@ use crate::test_fixtures::{
     ledger_canister_id, sol_rpc_canister_id, valid_init_args,
 };
 use askama::Template;
-use cksol_types_internal::{InitArgs, SolanaNetwork};
+use cksol_types_internal::SolanaNetwork;
 use ic_ed25519::{PocketIcMasterPublicKeyId, PublicKey};
 
 fn initial_state() -> State {
