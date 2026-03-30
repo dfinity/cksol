@@ -43,7 +43,7 @@ pub enum CreateTransferError {
 /// # Panics
 ///
 /// Panics if the IC returns a signature that is not exactly 64 bytes.
-pub async fn create_signed_transfer_transaction(
+pub async fn create_signed_batch_consolidation_transaction(
     fee_payer_account: Account,
     sources: &[(Account, Lamport)],
     target_address: Address,

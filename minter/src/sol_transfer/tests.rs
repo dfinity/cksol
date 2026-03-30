@@ -42,7 +42,7 @@ async fn should_create_signed_transaction_with_single_source() {
 
     // Fee payer is the source, so only one signature needed
     let signer = MockSchnorrSigner::with_signatures(vec![fake_signature]);
-    let (tx, signers) = create_signed_transfer_transaction(
+    let (tx, signers) = create_signed_batch_consolidation_transaction(
         source_account,
         &[(source_account, amount)],
         target_address,
@@ -101,7 +101,7 @@ async fn should_create_signed_transaction_with_multiple_sources() {
 
     // Fee payer (account_1) signature first, then account_2
     let signer = MockSchnorrSigner::with_signatures(vec![fake_sig_1, fake_sig_2]);
-    let (tx, signers) = create_signed_transfer_transaction(
+    let (tx, signers) = create_signed_batch_consolidation_transaction(
         account_1,
         &[(account_1, amount), (account_2, amount)],
         derive_address(&target_account),
@@ -156,7 +156,7 @@ async fn should_fail_when_signing_is_rejected() {
         CallRejected::with_rejection(4, "signing service unavailable".to_string()).into(),
     ))]);
 
-    let result = create_signed_transfer_transaction(
+    let result = create_signed_batch_consolidation_transaction(
         source_account,
         &[(source_account, 500_000_000)],
         derive_address(&target_account),
@@ -192,7 +192,7 @@ async fn should_fail_when_second_signing_fails() {
         )),
     ]);
 
-    let result = create_signed_transfer_transaction(
+    let result = create_signed_batch_consolidation_transaction(
         account_1,
         &[(account_1, 100_000_000), (account_2, 100_000_000)],
         derive_address(&target_account),
@@ -234,7 +234,7 @@ async fn should_fail_when_too_many_signatures() {
         subaccount: None,
     };
 
-    let result = create_signed_transfer_transaction(
+    let result = create_signed_batch_consolidation_transaction(
         fee_payer,
         &sources,
         derive_address(&target_account),
@@ -283,7 +283,7 @@ async fn should_not_fail_for_max_signatures() {
 
     let signer = MockSchnorrSigner::with_signatures(vec![[0x11u8; 64]; MAX_SIGNATURES as usize]);
 
-    let result = create_signed_transfer_transaction(
+    let result = create_signed_batch_consolidation_transaction(
         fee_payer,
         &sources,
         derive_address(&target_account),
@@ -316,7 +316,7 @@ async fn should_fail_when_transaction_too_large() {
     // MAX_TX_SIZE while staying well under MAX_SIGNATURES.
     let sources: Vec<(Account, Lamport)> = vec![(source_account, 1_000); NUM_SIGS];
 
-    let result = create_signed_transfer_transaction(
+    let result = create_signed_batch_consolidation_transaction(
         source_account,
         &sources,
         derive_address(&target_account),
@@ -363,7 +363,7 @@ async fn should_create_signed_transaction_with_fee_payer() {
     ] {
         // Two signatures needed in both cases (fee payer + other source)
         let signer = MockSchnorrSigner::with_signatures(vec![[0x11u8; 64], [0x22u8; 64]]);
-        let (tx, signers) = create_signed_transfer_transaction(
+        let (tx, signers) = create_signed_batch_consolidation_transaction(
             fee_payer_account,
             &sources,
             derive_address(&target_account),
