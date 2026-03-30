@@ -232,7 +232,7 @@ fn http_request(request: HttpRequest) -> HttpResponse {
         "/metrics" => {
             let mut writer = MetricsEncoder::new(vec![], ic_cdk::api::time() as i64 / 1_000_000);
 
-            match cksol_minter::metrics::encode_metrics(&mut writer) {
+            match read_state(|s| cksol_minter::metrics::encode_metrics(&mut writer, s)) {
                 Ok(()) => HttpResponseBuilder::ok()
                     .header("Content-Type", "text/plain; version=0.0.4")
                     .header("Cache-Control", "no-store")
