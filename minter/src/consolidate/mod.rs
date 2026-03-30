@@ -4,7 +4,9 @@ use crate::{
     guard::TimerGuard,
     numeric::LedgerMintIndex,
     runtime::CanisterRuntime,
-    sol_transfer::{CreateTransferError, MAX_SIGNATURES, create_signed_transfer_transaction},
+    sol_transfer::{
+        CreateTransferError, MAX_SIGNATURES, create_signed_batch_consolidation_transaction,
+    },
     state::{
         TaskType,
         audit::process_event,
@@ -116,7 +118,7 @@ async fn submit_consolidation_transaction<R: CanisterRuntime>(
         .iter()
         .map(|(account, (lamport, _))| (*account, *lamport))
         .collect();
-    let (transaction, signers) = create_signed_transfer_transaction(
+    let (transaction, signers) = create_signed_batch_consolidation_transaction(
         minter_account,
         &sources,
         minter_address,

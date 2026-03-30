@@ -1,6 +1,6 @@
 use crate::numeric::LedgerBurnIndex;
+use crate::sol_transfer::MAX_WITHDRAWALS_PER_TX;
 use crate::test_fixtures::EventsAssert;
-use crate::withdraw_sol::MAX_WITHDRAWALS_PER_BATCH;
 use crate::{
     guard::{TimerGuard, withdraw_sol_guard},
     state::TaskType,
@@ -9,7 +9,9 @@ use crate::{
         MINTER_ACCOUNT, WITHDRAWAL_FEE, init_schnorr_master_key, init_state,
         runtime::TestCanisterRuntime,
     },
-    withdraw_sol::{process_pending_withdrawals, withdraw_sol, withdraw_sol_status},
+    withdraw_sol::{
+        MAX_WITHDRAWAL_ROUNDS, process_pending_withdrawals, withdraw_sol, withdraw_sol_status,
+    },
 };
 use assert_matches::assert_matches;
 use candid::{Nat, Principal};
@@ -250,6 +252,8 @@ async fn should_return_error_if_already_processing() {
 }
 
 mod process_pending_withdrawals_tests {
+    use crate::constants::MAX_CONCURRENT_RPC_CALLS;
+
     use super::*;
 
     type SendSlotResult = MultiRpcResult<Slot>;
@@ -404,7 +408,7 @@ mod process_pending_withdrawals_tests {
     }
 
     #[tokio::test]
-    async fn should_not_process_pending_withdrawal_sig_error() {
+    async fn should_not_process_batch_on_sig_error() {
         init_state();
         init_schnorr_master_key();
 
@@ -418,8 +422,7 @@ mod process_pending_withdrawals_tests {
             .add_stub_response(SendSlotResult::Consistent(Ok(slot)))
             .add_stub_response(SendBlockResult::Consistent(Ok(get_confirmed_block())))
             .add_stub_response(SendSlotResult::Consistent(Ok(slot)))
-            // one successful signature and one failed
-            .add_signature([0x42; 64])
+            // signing fails for the batch
             .add_schnorr_signing_error(SignCallError::CallFailed(
                 CallRejected::with_rejection(4, "signing service unavailable".to_string()).into(),
             ))
@@ -444,37 +447,30 @@ mod process_pending_withdrawals_tests {
                     assert_eq!(req.account, Principal::from_slice(&[1, 2]).into());
                 });
             })
-            .expect_event(|e| {
-                assert_matches!(e, EventType::SubmittedTransaction {
-                    purpose: TransactionPurpose::WithdrawSol { burn_indices },
-                    ..
-                } => {
-                    assert_eq!(*burn_indices, vec![LedgerBurnIndex::from(1u64)]);
-                });
-            })
             .assert_no_more_events();
 
-        // An error should be logged
+        // An error should be logged for the whole batch
         let mut log: Log<Priority> = Log::default();
         log.push_logs(Priority::Error);
         assert!(
             log.entries.iter().any(|e| e
                 .message
-                .contains("Failed to create withdrawal transaction for burn index 2")),
-            "Expected error log about sig failure, got: {:?}",
+                .contains("Failed to create batch withdrawal transaction for burn indices")),
+            "Expected error log about batch sig failure, got: {:?}",
             log.entries
         );
 
-        assert_matches!(withdraw_sol_status(1), WithdrawSolStatus::TxSent(_));
+        // Both withdrawals remain pending since they were in the same batch
+        assert_matches!(withdraw_sol_status(1), WithdrawSolStatus::Pending);
         assert_matches!(withdraw_sol_status(2), WithdrawSolStatus::Pending);
     }
 
     #[tokio::test]
-    async fn should_process_up_to_max() {
+    async fn should_batch_withdrawals_into_transactions() {
         init_state();
         init_schnorr_master_key();
 
-        let request_count = MAX_WITHDRAWALS_PER_BATCH as u64 + 1;
+        let request_count = MAX_WITHDRAWALS_PER_TX as u64 + 1;
         let slot = 1;
 
         let mut runtime = TestCanisterRuntime::new().with_increasing_time();
@@ -482,41 +478,169 @@ mod process_pending_withdrawals_tests {
         for i in 0..request_count {
             runtime = runtime.add_stub_response(Ok::<Nat, TransferFromError>(Nat::from(i)));
         }
-        // responses for recent block hash
+        // responses for recent block hash (one round)
         runtime = runtime
             .add_stub_response(SendSlotResult::Consistent(Ok(slot)))
             .add_stub_response(SendBlockResult::Consistent(Ok(get_confirmed_block())))
             .add_stub_response(SendSlotResult::Consistent(Ok(slot)));
-        // signatures for the first batch of withdrawals
-        for i in 0..MAX_WITHDRAWALS_PER_BATCH {
-            runtime = runtime.add_signature(signature(i as u8 + 1).into());
-        }
-        // responses for recent block hash and signature for the second batch
+        // one signature per batch: batch 1 (MAX_WITHDRAWALS_PER_TX) + batch 2 (1)
         runtime = runtime
-            .add_stub_response(SendSlotResult::Consistent(Ok(slot)))
-            .add_stub_response(SendBlockResult::Consistent(Ok(get_confirmed_block())))
-            .add_stub_response(SendSlotResult::Consistent(Ok(slot)))
-            .add_signature(signature(MAX_WITHDRAWALS_PER_BATCH as u8 + 1).into());
+            .add_signature(signature(1).into())
+            .add_signature(signature(2).into());
 
         withdraw(&runtime, request_count as u8).await;
 
         process_pending_withdrawals(&runtime).await;
 
-        for i in 0..MAX_WITHDRAWALS_PER_BATCH {
-            assert_matches!(withdraw_sol_status(i as u64), WithdrawSolStatus::TxSent(_));
-        }
-        // last withdrawal was not yet processed
-        assert_matches!(
-            withdraw_sol_status(MAX_WITHDRAWALS_PER_BATCH as u64),
-            WithdrawSolStatus::Pending
-        );
-
-        process_pending_withdrawals(&runtime).await;
-
-        // all withdrawals are now processed
+        // All withdrawals should be processed in a single invocation
+        // (2 batches in 1 round, both within MAX_CONCURRENT_RPC_CALLS)
         for i in 0..request_count {
             assert_matches!(withdraw_sol_status(i), WithdrawSolStatus::TxSent(_));
         }
+
+        // Verify events: request_count AcceptedWithdrawSolRequest events,
+        // then 2 SubmittedTransaction events (one per batch).
+        let mut events = EventsAssert::from_recorded();
+        for _ in 0..request_count {
+            events = events.expect_event(|e| {
+                assert_matches!(e, EventType::AcceptedWithdrawSolRequest(_));
+            });
+        }
+        events
+            .expect_event(|e| {
+                assert_matches!(e, EventType::SubmittedTransaction {
+                    purpose: TransactionPurpose::WithdrawSol { burn_indices },
+                    ..
+                } => {
+                    assert_eq!(burn_indices.len(), MAX_WITHDRAWALS_PER_TX);
+                });
+            })
+            .expect_event(|e| {
+                assert_matches!(e, EventType::SubmittedTransaction {
+                    purpose: TransactionPurpose::WithdrawSol { burn_indices },
+                    ..
+                } => {
+                    assert_eq!(burn_indices.len(), 1);
+                });
+            })
+            .assert_no_more_events();
+    }
+
+    #[tokio::test]
+    async fn should_process_multiple_rounds_per_invocation() {
+        init_state();
+        init_schnorr_master_key();
+
+        // Create more withdrawals than fit in one round
+        // (MAX_WITHDRAWALS_PER_TX * MAX_CONCURRENT_RPC_CALLS) but fewer than
+        // the per-invocation limit (rounds * concurrent * per_tx).
+        // This requires 2 rounds within a single invocation.
+        let max_per_round = (MAX_WITHDRAWALS_PER_TX * MAX_CONCURRENT_RPC_CALLS) as u64;
+        let request_count = max_per_round + 1;
+        let slot = 1;
+
+        let mut runtime = TestCanisterRuntime::new().with_increasing_time();
+        for i in 0..request_count {
+            runtime = runtime.add_stub_response(Ok::<Nat, TransferFromError>(Nat::from(i)));
+        }
+
+        // Round 1: blockhash + slot, then MAX_CONCURRENT_RPC_CALLS signatures
+        runtime = runtime
+            .add_stub_response(SendSlotResult::Consistent(Ok(slot)))
+            .add_stub_response(SendBlockResult::Consistent(Ok(get_confirmed_block())))
+            .add_stub_response(SendSlotResult::Consistent(Ok(slot)));
+        for i in 0..MAX_CONCURRENT_RPC_CALLS {
+            runtime = runtime.add_signature(signature(i as u8 + 1).into());
+        }
+
+        // Round 2: fresh blockhash + slot, then 1 signature for the remaining batch
+        runtime = runtime
+            .add_stub_response(SendSlotResult::Consistent(Ok(slot)))
+            .add_stub_response(SendBlockResult::Consistent(Ok(get_confirmed_block())))
+            .add_stub_response(SendSlotResult::Consistent(Ok(slot)))
+            .add_signature(signature(MAX_CONCURRENT_RPC_CALLS as u8 + 1).into());
+
+        withdraw(&runtime, request_count as u8).await;
+
+        // All withdrawals should be processed in a single invocation (2 rounds)
+        process_pending_withdrawals(&runtime).await;
+
+        for i in 0..request_count {
+            assert_matches!(
+                withdraw_sol_status(i),
+                WithdrawSolStatus::TxSent(_),
+                "withdrawal {i} should be TxSent"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn should_respect_max_withdrawal_rounds() {
+        use crate::state::audit::process_event;
+        use crate::state::event::{EventType, WithdrawSolRequest};
+        use crate::state::mutate_state;
+
+        init_state();
+        init_schnorr_master_key();
+
+        let slot = 1;
+        let max_per_round = MAX_WITHDRAWALS_PER_TX * MAX_CONCURRENT_RPC_CALLS;
+        // Create enough requests to fill MAX_WITHDRAWAL_ROUNDS + 1 rounds.
+        let request_count = max_per_round * MAX_WITHDRAWAL_ROUNDS + 1;
+
+        let runtime = TestCanisterRuntime::new().with_increasing_time();
+
+        // Insert pending withdrawal requests directly into state.
+        for i in 0..request_count {
+            let mut addr = [0u8; 32];
+            addr[0] = i as u8;
+            addr[1] = (i >> 8) as u8;
+            mutate_state(|state| {
+                process_event(
+                    state,
+                    EventType::AcceptedWithdrawSolRequest(WithdrawSolRequest {
+                        account: Account::from(Principal::from_slice(&[1, addr[0], addr[1]])),
+                        solana_address: addr,
+                        burn_block_index: LedgerBurnIndex::from(i as u64),
+                        withdrawal_amount: WITHDRAWAL_FEE + 1,
+                        withdrawal_fee: WITHDRAWAL_FEE,
+                    }),
+                    &runtime,
+                );
+            });
+        }
+
+        // Set up RPC responses for MAX_WITHDRAWAL_ROUNDS rounds.
+        let mut runtime = runtime;
+        let mut sig_counter: u8 = 0;
+        for _round in 0..MAX_WITHDRAWAL_ROUNDS {
+            runtime = runtime
+                .add_stub_response(SendSlotResult::Consistent(Ok(slot)))
+                .add_stub_response(SendBlockResult::Consistent(Ok(get_confirmed_block())))
+                .add_stub_response(SendSlotResult::Consistent(Ok(slot)));
+            for _ in 0..MAX_CONCURRENT_RPC_CALLS {
+                sig_counter = sig_counter.wrapping_add(1);
+                runtime = runtime.add_signature(signature(sig_counter).into());
+            }
+        }
+
+        process_pending_withdrawals(&runtime).await;
+
+        let processed = max_per_round * MAX_WITHDRAWAL_ROUNDS;
+        // All requests within MAX_WITHDRAWAL_ROUNDS rounds should be processed
+        for i in 0..processed {
+            assert_matches!(
+                withdraw_sol_status(i as u64),
+                WithdrawSolStatus::TxSent(_),
+                "withdrawal {i} should be TxSent"
+            );
+        }
+        // The extra request beyond MAX_WITHDRAWAL_ROUNDS rounds should remain pending
+        assert_matches!(
+            withdraw_sol_status(processed as u64),
+            WithdrawSolStatus::Pending,
+            "withdrawal beyond max rounds should still be Pending"
+        );
     }
 
     fn get_confirmed_block() -> ConfirmedBlock {
