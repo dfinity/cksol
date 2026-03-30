@@ -335,10 +335,7 @@ pub mod deposit {
     };
 
     pub fn public_deposit_id() -> cksol_types::DepositId {
-        cksol_types::DepositId {
-            signature: deposit_transaction_signature().into(),
-            account: DEPOSITOR_ACCOUNT,
-        }
+        deposit_id().into()
     }
 
     pub fn deposit_status_processing() -> DepositStatus {

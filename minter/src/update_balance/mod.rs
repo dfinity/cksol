@@ -59,10 +59,7 @@ pub async fn update_balance<R: CanisterRuntime>(
             Ok(DepositStatus::Processing {
                 deposit_amount,
                 amount_to_mint,
-                deposit_id: cksol_types::DepositId {
-                    signature: signature.into(),
-                    account,
-                },
+                deposit_id: deposit_id.into(),
             })
         }
     }

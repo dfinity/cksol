@@ -827,6 +827,7 @@ mod update_balance_tests {
             }) if *deposit_amount == DEPOSIT_AMOUNT
               && *amount_to_mint == EXPECTED_MINT_AMOUNT
               && deposit_id.signature == deposit_signature
+              && deposit_id.account == DEFAULT_CALLER_ACCOUNT
         );
 
         // Second call to `update_balance` while the ledger is stopped should still return
@@ -852,7 +853,9 @@ mod update_balance_tests {
             minted_amount,
             deposit_id,
             block_index: _,
-        }) if minted_amount == &EXPECTED_MINT_AMOUNT && deposit_id.signature == deposit_signature);
+        }) if minted_amount == &EXPECTED_MINT_AMOUNT
+            && deposit_id.signature == deposit_signature
+            && deposit_id.account == DEFAULT_CALLER_ACCOUNT);
 
         let balance_after = setup.ledger().balance_of(DEFAULT_CALLER_ACCOUNT).await;
         assert_eq!(balance_after, EXPECTED_MINT_AMOUNT);
@@ -879,7 +882,9 @@ mod update_balance_tests {
             minted_amount,
             deposit_id,
             block_index: _,
-        }) if minted_amount == &EXPECTED_MINT_AMOUNT && deposit_id.signature == deposit_signature);
+        }) if minted_amount == &EXPECTED_MINT_AMOUNT
+            && deposit_id.signature == deposit_signature
+            && deposit_id.account == DEFAULT_CALLER_ACCOUNT);
 
         let balance_after = setup.ledger().balance_of(DEFAULT_CALLER_ACCOUNT).await;
         assert_eq!(balance_after, EXPECTED_MINT_AMOUNT);
