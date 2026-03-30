@@ -1,0 +1,94 @@
+{% macro solscan_address_link(address) -%}
+<a href="https://solscan.io/account/{{address}}{{solscan_suffix}}"><code>{{address}}</code></a>
+{%- endmacro %}
+
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <title>ckSOL Minter Dashboard</title>
+    <style>
+        body {
+            font-family: monospace;
+        }
+
+        table {
+            border: solid;
+            text-align: left;
+            width: 100%;
+            border-width: thin;
+        }
+
+        h3 {
+            font-variant: small-caps;
+            margin-top: 30px;
+            margin-bottom: 5px;
+        }
+
+        .background {
+            margin: 0;
+            padding: 0;
+        }
+
+        .content {
+            max-width: 100vw;
+            margin: 0 auto;
+            padding: 5px;
+        }
+
+        tbody tr:nth-child(odd) {
+            background-color: #eeeeee;
+        }
+
+    </style>
+</head>
+
+<body>
+    <div class="background">
+        <div class="content">
+            <h3 id="metadata">Metadata</h3>
+            <table>
+                <tbody>
+                    <tr id="solana-cluster">
+                        <th>Solana cluster</th>
+                        <td><a href="https://solscan.io/{{solscan_suffix}}"><code>{{ solana_cluster }}</code></a></td>
+                    </tr>
+                    <tr id="minter-address">
+                        <th>Minter address</th>
+                        <td>{% if !minter_address.is_empty() %}{% call solscan_address_link(minter_address) %}{% else %}N/A{% endif %}</td>
+                    </tr>
+                    <tr id="ledger-canister-id">
+                        <th>ckSOL ledger canister ID</th>
+                        <td><a href="https://dashboard.internetcomputer.org/canister/{{ ledger_canister_id }}"><code>{{ ledger_canister_id }}</code></a></td>
+                    </tr>
+                    <tr id="sol-rpc-canister-id">
+                        <th>SOL RPC canister ID</th>
+                        <td><a href="https://dashboard.internetcomputer.org/canister/{{ sol_rpc_canister_id }}"><code>{{ sol_rpc_canister_id }}</code></a></td>
+                    </tr>
+                    <tr id="key-name">
+                        <th>tEd25519 key name</th>
+                        <td><code>{{ master_key_name }}</code></td>
+                    </tr>
+                    <tr id="deposit-fee">
+                        <th>Deposit fee (SOL)</th>
+                        <td>{{ deposit_fee }}</td>
+                    </tr>
+                    <tr id="withdrawal-fee">
+                        <th>Withdrawal fee (SOL)</th>
+                        <td>{{ withdrawal_fee }}</td>
+                    </tr>
+                    <tr id="minimum-deposit-amount">
+                        <th>Minimum deposit amount (SOL)</th>
+                        <td>{{ minimum_deposit_amount }}</td>
+                    </tr>
+                    <tr id="minimum-withdrawal-amount">
+                        <th>Minimum withdrawal amount (SOL)</th>
+                        <td>{{ minimum_withdrawal_amount }}</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+</body>
+</html>

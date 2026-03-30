@@ -142,6 +142,10 @@ impl State {
         self.minimum_deposit_amount
     }
 
+    pub fn solana_network(&self) -> SolanaNetwork {
+        self.solana_network
+    }
+
     pub fn update_balance_required_cycles(&self) -> u128 {
         self.update_balance_required_cycles
     }

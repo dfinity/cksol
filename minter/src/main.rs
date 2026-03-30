@@ -220,6 +220,15 @@ fn get_minter_info() -> MinterInfo {
 #[ic_cdk::query(hidden = true)]
 fn http_request(request: HttpRequest) -> HttpResponse {
     match request.path() {
+        "/dashboard" => {
+            use askama::Template;
+            use cksol_minter::dashboard::DashboardTemplate;
+            let dashboard = read_state(DashboardTemplate::from_state);
+            HttpResponseBuilder::ok()
+                .header("Content-Type", "text/html; charset=utf-8")
+                .with_body_and_content_length(dashboard.render().unwrap())
+                .build()
+        }
         "/metrics" => {
             let mut writer = MetricsEncoder::new(vec![], ic_cdk::api::time() as i64 / 1_000_000);
 
