@@ -819,13 +819,13 @@ mod update_balance_tests {
             .update_balance(default_update_balance_args())
             .await;
         assert_matches!(
-            first_result,
+            &first_result,
             Ok(DepositStatus::Processing {
                 deposit_amount,
                 amount_to_mint,
                 deposit_id,
-            }) if deposit_amount == DEPOSIT_AMOUNT
-              && amount_to_mint == EXPECTED_MINT_AMOUNT
+            }) if *deposit_amount == DEPOSIT_AMOUNT
+              && *amount_to_mint == EXPECTED_MINT_AMOUNT
               && deposit_id.signature == deposit_signature
         );
 
@@ -877,9 +877,9 @@ mod update_balance_tests {
             .await;
         assert_matches!(&first_result, Ok(DepositStatus::Minted {
             minted_amount,
-            signature,
+            deposit_id,
             block_index: _,
-        }) if minted_amount == &EXPECTED_MINT_AMOUNT && signature == &deposit_signature);
+        }) if minted_amount == &EXPECTED_MINT_AMOUNT && deposit_id.signature == deposit_signature);
 
         let balance_after = setup.ledger().balance_of(DEFAULT_CALLER_ACCOUNT).await;
         assert_eq!(balance_after, EXPECTED_MINT_AMOUNT);
