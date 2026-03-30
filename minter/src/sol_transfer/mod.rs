@@ -150,7 +150,7 @@ async fn sign_transaction(
     transaction.signatures = sign_bytes(signer_derivation_paths, signer, message_bytes).await?;
 
     let tx_size = 1 + message_len + transaction.signatures.len() * BYTES_PER_SIGNATURE;
-    if tx_size >= MAX_TX_SIZE {
+    if tx_size > MAX_TX_SIZE {
         return Err(CreateTransferError::TransactionTooLarge {
             max: MAX_TX_SIZE,
             got: tx_size,
