@@ -142,10 +142,14 @@ pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: &R) {
     // here and while consolidating funds.
     // If there are not enough funds for the withdrawal we simply continue.
 
+    let max_per_invocation =
+        MAX_WITHDRAWAL_ROUNDS * MAX_CONCURRENT_RPC_CALLS * MAX_WITHDRAWALS_PER_TX;
+
     let rounds: Vec<Vec<Vec<_>>> = read_state(|state| {
         state
             .pending_withdrawal_requests()
             .values()
+            .take(max_per_invocation)
             .cloned()
             .collect::<Vec<_>>()
     })
