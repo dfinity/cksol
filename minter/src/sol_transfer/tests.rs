@@ -215,7 +215,7 @@ async fn should_fail_when_too_many_signatures() {
     let signer = MockSchnorrSigner::with_signatures(vec![]);
 
     // Create MAX_SIGNATURES sources with a SEPARATE fee payer, resulting in MAX_SIGNATURES + 1
-    // signatures
+    // signatures which causes the transaction to exceed MAX_TX_SIZE.
     let sources: Vec<(Account, Lamport)> = (0..MAX_SIGNATURES)
         .map(|i| {
             (
@@ -243,8 +243,9 @@ async fn should_fail_when_too_many_signatures() {
     )
     .await;
 
-    assert!(
-        matches!(result, Err(CreateTransferError::TooManySignatures { max: MAX_SIGNATURES, got }) if got == MAX_SIGNATURES + 1)
+    assert_matches!(
+        result,
+        Err(CreateTransferError::TransactionTooLarge { max: MAX_TX_SIZE, .. })
     );
 }
 

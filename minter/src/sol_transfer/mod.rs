@@ -27,8 +27,6 @@ pub const MAX_WITHDRAWALS_PER_TX: usize = 20;
 
 #[derive(Debug, Error, From)]
 pub enum CreateTransferError {
-    #[error("too many signatures: got {got}, max is {max}")]
-    TooManySignatures { max: u64, got: u64 },
     #[error("transaction size {got} exceeds maximum of {max} bytes")]
     TransactionTooLarge { max: usize, got: usize },
     #[error("signing failed: {0}")]
@@ -78,13 +76,6 @@ pub async fn create_signed_transfer_transaction(
     let message_bytes = transaction.message_data();
 
     let num_signatures = transaction.message.signer_keys().len();
-    if num_signatures as u64 > MAX_SIGNATURES {
-        return Err(CreateTransferError::TooManySignatures {
-            max: MAX_SIGNATURES,
-            got: num_signatures as u64,
-        });
-    }
-
     let tx_size = 1 + message_bytes.len() + num_signatures * BYTES_PER_SIGNATURE;
     if tx_size >= MAX_TX_SIZE {
         return Err(CreateTransferError::TransactionTooLarge {
