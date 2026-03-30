@@ -23,11 +23,6 @@ const BYTES_PER_SIGNATURE: usize = 64;
 
 /// Upper bound on the number of withdrawal transfers that fit in a single
 /// Solana transaction when the fee-payer is the only signer.
-///
-/// Each additional transfer adds one 32-byte destination key and one ~17-byte
-/// compiled instruction ≈ 49 bytes.  With a base transaction size of ~166
-/// bytes and `MAX_TX_SIZE = 1_232`, we can fit at most ≈ 21 transfers.
-/// We use a conservative limit to leave room for encoding overhead.
 pub const MAX_WITHDRAWALS_PER_TX: usize = 20;
 
 #[derive(Debug, Error, From)]
