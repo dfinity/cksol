@@ -27,7 +27,6 @@ pub async fn try_get_transaction<R: CanisterRuntime>(
         .with_cycles(cycles_to_attach)
         .try_send()
         .await;
-    // TODO DEFI-2643: Accept (cost of call to SOL RPC canister) cycles from caller
     match result? {
         MultiRpcResult::Consistent(Ok(maybe_transaction)) => Ok(maybe_transaction),
         MultiRpcResult::Consistent(Err(e)) => Err(GetTransactionError::RpcError(e)),
