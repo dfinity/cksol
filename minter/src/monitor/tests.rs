@@ -363,7 +363,7 @@ mod resubmission {
 
         setup();
 
-        let num_transactions = MAX_CONCURRENT_RPC_CALLS + 2; // 12 → 2 rounds
+        let num_transactions = MAX_CONCURRENT_RPC_CALLS + 2; // 10+2 = 12 transactions require 2 rounds
         for i in 0..num_transactions {
             add_submitted_transaction(Signature::from([i as u8; 64]), EXPIRED_SLOT);
         }
