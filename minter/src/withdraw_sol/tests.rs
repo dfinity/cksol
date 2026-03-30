@@ -576,7 +576,6 @@ mod process_pending_withdrawals_tests {
 
     #[tokio::test]
     async fn should_respect_max_withdrawal_rounds() {
-        use crate::numeric::LedgerBurnIndex;
         use crate::state::audit::process_event;
         use crate::state::event::{EventType, WithdrawSolRequest};
         use crate::state::mutate_state;
