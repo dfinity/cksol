@@ -13,6 +13,7 @@ name = "cksol-minter"
 path = "src/main.rs"
 
 [dependencies]
+askama = { workspace = true }
 assert_matches = { workspace = true }
 bincode = { workspace = true }
 candid = { workspace = true }
@@ -52,4 +53,5 @@ thiserror = { workspace = true }
 [dev-dependencies]
 candid_parser = { workspace = true }
 proptest = { workspace = true }
+scraper = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
