@@ -9,11 +9,11 @@ use crate::{
         event::{EventType, VersionedMessage},
         mutate_state, read_state,
     },
-    transaction::{SubmitTransactionError, get_recent_blockhash, get_slot, submit_transaction},
+    transaction::{SubmitTransactionError, get_recent_blockhash, submit_transaction},
 };
 use canlog::log;
 use cksol_types_internal::log::Priority;
-use ic_cdk::management_canister::SignCallError;
+use ic_cdk_management_canister::SignCallError;
 use icrc_ledger_types::icrc1::account::Account;
 use sol_rpc_types::Slot;
 use solana_signature::Signature;
@@ -38,8 +38,8 @@ pub async fn monitor_submitted_transactions<R: CanisterRuntime>(runtime: R) {
         return;
     }
 
-    let current_slot = match get_slot(&runtime).await {
-        Ok(slot) => slot,
+    let (current_slot, _) = match get_recent_blockhash(&runtime).await {
+        Ok((slot, blockhash)) => (slot, blockhash),
         Err(e) => {
             log!(Priority::Info, "Failed to get current slot: {e}");
             return;
@@ -55,19 +55,10 @@ pub async fn monitor_submitted_transactions<R: CanisterRuntime>(runtime: R) {
     });
 
     while !expired_transactions.is_empty() {
-        // TODO DEFI-2670: Combine these two calls once `sol_rpc_client::SolRpcClient`
-        //  `get_recent_block` method is released.
-        let new_blockhash = match get_recent_blockhash(&runtime).await {
-            Ok(blockhash) => blockhash,
+        let (new_slot, new_blockhash) = match get_recent_blockhash(&runtime).await {
+            Ok((slot, blockhash)) => (slot, blockhash),
             Err(e) => {
                 log!(Priority::Info, "Failed to get recent blockhash: {e}");
-                return;
-            }
-        };
-        let new_slot = match get_slot(&runtime).await {
-            Ok(slot) => slot,
-            Err(e) => {
-                log!(Priority::Info, "Failed to get slot: {e}");
                 return;
             }
         };

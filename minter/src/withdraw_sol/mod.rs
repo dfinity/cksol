@@ -22,7 +22,7 @@ use crate::{
         event::{EventType, TransactionPurpose, VersionedMessage, WithdrawSolRequest},
         mutate_state, read_state,
     },
-    transaction::{get_recent_blockhash, get_slot},
+    transaction::get_recent_blockhash,
 };
 
 pub const WITHDRAWAL_PROCESSING_DELAY: Duration = Duration::from_mins(1);
@@ -150,19 +150,10 @@ pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: &R) {
         return;
     }
 
-    let recent_blockhash = match get_recent_blockhash(runtime).await {
-        Ok(blockhash) => blockhash,
+    let (slot, recent_blockhash) = match get_recent_blockhash(runtime).await {
+        Ok((slot, blockhash)) => (slot, blockhash),
         Err(e) => {
             log!(Priority::Info, "Failed to fetch recent blockhash: {e}");
-            return;
-        }
-    };
-    // TODO DEFI-2670: Update `sol_rpc_client` to return the slot along with the blockhash
-    //  in `estimate_recent_blockhash`, then remove this separate call to `getSlot`.
-    let slot = match get_slot(runtime).await {
-        Ok(slot) => slot,
-        Err(e) => {
-            log!(Priority::Info, "Failed to get slot: {e}");
             return;
         }
     };

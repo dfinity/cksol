@@ -3,7 +3,7 @@ use crate::{
     signer::{SchnorrSigner, sign_bytes},
 };
 use derive_more::From;
-use ic_cdk::management_canister::SignCallError;
+use ic_cdk_management_canister::SignCallError;
 use icrc_ledger_types::icrc1::account::Account;
 use sol_rpc_types::Lamport;
 use solana_address::Address;

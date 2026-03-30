@@ -19,7 +19,7 @@ use cksol_types::{WithdrawSolError, WithdrawSolOk};
 use cksol_types_internal::log::Priority;
 use ic_canister_runtime::IcError;
 use ic_cdk::call::CallRejected;
-use ic_cdk::management_canister::SignCallError;
+use ic_cdk_management_canister::SignCallError;
 use icrc_ledger_types::{icrc1::account::Account, icrc2::transfer_from::TransferFromError};
 use sol_rpc_types::{ConfirmedBlock, MultiRpcResult, RpcError, Slot};
 use solana_signature::Signature;
@@ -253,7 +253,7 @@ mod process_pending_withdrawals_tests {
     use super::*;
 
     type SendSlotResult = MultiRpcResult<Slot>;
-    type SendBlockResult = MultiRpcResult<ConfirmedBlock>;
+    type SendBlockResult = MultiRpcResult<Option<ConfirmedBlock>>;
 
     fn signature(index: u8) -> Signature {
         Signature::from([index; 64])
@@ -326,10 +326,9 @@ mod process_pending_withdrawals_tests {
         let runtime = TestCanisterRuntime::new()
             // ledger burn response for withdraw_sol
             .add_stub_response(Ok::<Nat, TransferFromError>(Nat::from(1u64)))
-            // responses for recent block hash
+            // get_recent_blockhash calls
             .add_stub_response(SendSlotResult::Consistent(Ok(slot)))
-            .add_stub_response(SendBlockResult::Consistent(Ok(get_confirmed_block())))
-            .add_stub_response(SendSlotResult::Consistent(Ok(slot)))
+            .add_stub_response(SendBlockResult::Consistent(Ok(Some(get_confirmed_block()))))
             // schnorr signing response
             .add_signature(fake_sig)
             .with_increasing_time();
@@ -367,7 +366,7 @@ mod process_pending_withdrawals_tests {
         let runtime = TestCanisterRuntime::new()
             // ledger burn response for withdraw_sol
             .add_stub_response(Ok::<Nat, TransferFromError>(Nat::from(1u64)))
-            // estimate_recent_blockhash retries getSlot 3 times before giving up
+            // get_recent_block retries getSlot 3 times before giving up
             .add_stub_response(SendSlotResult::Consistent(Err(RpcError::ValidationError(
                 "slot unavailable".to_string(),
             ))))
@@ -414,10 +413,9 @@ mod process_pending_withdrawals_tests {
             // responses for burn blocks
             .add_stub_response(Ok::<Nat, TransferFromError>(Nat::from(1u64)))
             .add_stub_response(Ok::<Nat, TransferFromError>(Nat::from(2u64)))
-            // responses for recent block hash
+            // get_recent_blockhash calls
             .add_stub_response(SendSlotResult::Consistent(Ok(slot)))
-            .add_stub_response(SendBlockResult::Consistent(Ok(get_confirmed_block())))
-            .add_stub_response(SendSlotResult::Consistent(Ok(slot)))
+            .add_stub_response(SendBlockResult::Consistent(Ok(Some(get_confirmed_block()))))
             // one successful signature and one failed
             .add_signature([0x42; 64])
             .add_schnorr_signing_error(SignCallError::CallFailed(
@@ -482,20 +480,18 @@ mod process_pending_withdrawals_tests {
         for i in 0..request_count {
             runtime = runtime.add_stub_response(Ok::<Nat, TransferFromError>(Nat::from(i)));
         }
-        // responses for recent block hash
+        // get_recent_blockhash calls for first batch
         runtime = runtime
             .add_stub_response(SendSlotResult::Consistent(Ok(slot)))
-            .add_stub_response(SendBlockResult::Consistent(Ok(get_confirmed_block())))
-            .add_stub_response(SendSlotResult::Consistent(Ok(slot)));
+            .add_stub_response(SendBlockResult::Consistent(Ok(Some(get_confirmed_block()))));
         // signatures for the first batch of withdrawals
         for i in 0..MAX_WITHDRAWALS_PER_BATCH {
             runtime = runtime.add_signature(signature(i as u8 + 1).into());
         }
-        // responses for recent block hash and signature for the second batch
+        // get_recent_blockhash calls and signature for the second batch
         runtime = runtime
             .add_stub_response(SendSlotResult::Consistent(Ok(slot)))
-            .add_stub_response(SendBlockResult::Consistent(Ok(get_confirmed_block())))
-            .add_stub_response(SendSlotResult::Consistent(Ok(slot)))
+            .add_stub_response(SendBlockResult::Consistent(Ok(Some(get_confirmed_block()))))
             .add_signature(signature(MAX_WITHDRAWALS_PER_BATCH as u8 + 1).into());
 
         withdraw(&runtime, request_count as u8).await;

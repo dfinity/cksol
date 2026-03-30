@@ -4,7 +4,8 @@ use crate::{
     test_fixtures::{init_schnorr_master_key, init_state, signer::MockSchnorrSigner},
 };
 use candid::Principal;
-use ic_cdk::{call::CallRejected, management_canister::SignCallError};
+use ic_cdk::call::CallRejected;
+use ic_cdk_management_canister::SignCallError;
 use solana_address::Address;
 use solana_signature::Signature;
 

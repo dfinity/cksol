@@ -1,6 +1,6 @@
 use super::stubs::Stubs;
 use crate::{address::DerivationPath, signer::SchnorrSigner};
-use ic_cdk::management_canister::SignCallError;
+use ic_cdk_management_canister::SignCallError;
 
 #[derive(Clone, Default)]
 pub struct MockSchnorrSigner {

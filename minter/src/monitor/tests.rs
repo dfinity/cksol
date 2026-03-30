@@ -23,7 +23,7 @@ use solana_message::Message;
 use solana_signature::Signature;
 
 type SlotResult = MultiRpcResult<Slot>;
-type BlockResult = MultiRpcResult<ConfirmedBlock>;
+type BlockResult = MultiRpcResult<Option<ConfirmedBlock>>;
 type SendTransactionResult = MultiRpcResult<sol_rpc_types::Signature>;
 
 #[tokio::test]
@@ -85,7 +85,9 @@ async fn should_not_resubmit_if_transaction_not_expired() {
     let current_slot = original_slot + MAX_BLOCKHASH_AGE - 1;
     let runtime = TestCanisterRuntime::new()
         .with_increasing_time()
-        .add_stub_response(SlotResult::Consistent(Ok(current_slot)));
+        // get_recent_blockhash for current slot check
+        .add_stub_response(SlotResult::Consistent(Ok(current_slot)))
+        .add_stub_response(BlockResult::Consistent(Ok(Some(block()))));
 
     monitor_submitted_transactions(runtime).await;
 
@@ -115,13 +117,12 @@ async fn should_resubmit_single_expired_transaction() {
 
     let runtime = TestCanisterRuntime::new()
         .with_increasing_time()
-        // get_slot for current slot check
+        // get_recent_blockhash for current slot check
         .add_stub_response(SlotResult::Consistent(Ok(current_slot)))
-        // get_recent_blockhash calls
+        .add_stub_response(BlockResult::Consistent(Ok(Some(block()))))
+        // get_recent_blockhash for resubmission
         .add_stub_response(SlotResult::Consistent(Ok(new_slot)))
-        .add_stub_response(BlockResult::Consistent(Ok(block())))
-        // get_slot for new slot
-        .add_stub_response(SlotResult::Consistent(Ok(new_slot)))
+        .add_stub_response(BlockResult::Consistent(Ok(Some(block()))))
         // submit_transaction
         .add_stub_response(SendTransactionResult::Consistent(Ok(new_signature.into())))
         // Signature for re-signing (only fee payer since message has no other signers)
@@ -191,10 +192,12 @@ async fn should_update_withdrawal_status_signature_after_resubmission() {
 
     let runtime = TestCanisterRuntime::new()
         .with_increasing_time()
+        // get_recent_blockhash for current slot check
         .add_stub_response(SlotResult::Consistent(Ok(current_slot)))
+        .add_stub_response(BlockResult::Consistent(Ok(Some(block()))))
+        // get_recent_blockhash for resubmission
         .add_stub_response(SlotResult::Consistent(Ok(new_slot)))
-        .add_stub_response(BlockResult::Consistent(Ok(block())))
-        .add_stub_response(SlotResult::Consistent(Ok(new_slot)))
+        .add_stub_response(BlockResult::Consistent(Ok(Some(block()))))
         .add_stub_response(SendTransactionResult::Consistent(Ok(new_signature.into())))
         .add_signature(new_signature.into());
 
@@ -223,13 +226,12 @@ async fn should_record_event_even_if_submission_fails() {
 
     let runtime = TestCanisterRuntime::new()
         .with_increasing_time()
-        // get_slot for current slot check
+        // get_recent_blockhash for current slot check
         .add_stub_response(SlotResult::Consistent(Ok(current_slot)))
-        // get_recent_blockhash calls
+        .add_stub_response(BlockResult::Consistent(Ok(Some(block()))))
+        // get_recent_blockhash for resubmission
         .add_stub_response(SlotResult::Consistent(Ok(new_slot)))
-        .add_stub_response(BlockResult::Consistent(Ok(block())))
-        // get_slot for new slot
-        .add_stub_response(SlotResult::Consistent(Ok(new_slot)))
+        .add_stub_response(BlockResult::Consistent(Ok(Some(block()))))
         // submit_transaction fails
         .add_stub_response(SendTransactionResult::Inconsistent(vec![]))
         .add_signature(new_signature.into());
