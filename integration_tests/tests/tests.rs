@@ -7,7 +7,8 @@ use cksol_int_tests::{
         DEFAULT_CALLER_ACCOUNT, DEFAULT_CALLER_DEPOSIT_ADDRESS, DEPOSIT_AMOUNT,
         EXPECTED_MINT_AMOUNT, SharedMockHttpOutcalls, default_update_balance_args,
         deposit_transaction_signature, get_block_request, get_block_response,
-        get_deposit_transaction_response, get_slot_request, get_slot_response,
+        get_deposit_transaction_response, get_signature_statuses_not_found_response,
+        get_signature_statuses_request, get_slot_request, get_slot_response,
         get_transaction_http_mocks, send_transaction_request, send_transaction_response,
     },
 };
@@ -674,32 +675,38 @@ mod withdraw_sol_tests {
         const NEW_TX_SIGNATURE: &str = "5VERv8NMvzbJMEkV8xnrLkEaWRtSz9CosKDYjCJjBRnbJLgp8uirBgmQpjKhoR4tjF3ZpRzrFmBV6UjKdiSZkQUW";
 
         let mut builder = MockHttpOutcallsBuilder::new();
-        // get_recent_blockhash for current slot check (IDs 8-11)
-        for id in 8..12u64 {
-            builder = builder
-                .given(get_slot_request().with_id(id))
-                .respond_with(get_slot_response(current_slot).with_id(id))
-        }
-        // get_recent_blockhash for current slot check: getBlock (IDs 12-15)
+        // getSignatureStatuses (IDs 12-15): return not-found so the monitor proceeds to resubmit
         for id in 12..16u64 {
             builder = builder
-                .given(get_block_request(current_slot).with_id(id))
-                .respond_with(get_block_response(NEW_BLOCKHASH).with_id(id))
+                .given(get_signature_statuses_request().with_id(id))
+                .respond_with(get_signature_statuses_not_found_response(1).with_id(id))
         }
-        // get_recent_blockhash for resubmission: getSlot (IDs 16-19)
+        // get_recent_blockhash for current slot check: getSlot (IDs 16-19)
         for id in 16..20u64 {
             builder = builder
                 .given(get_slot_request().with_id(id))
                 .respond_with(get_slot_response(current_slot).with_id(id))
         }
-        // get_recent_blockhash for resubmission: getBlock (IDs 20-23)
+        // get_recent_blockhash for current slot check: getBlock (IDs 20-23)
         for id in 20..24u64 {
             builder = builder
                 .given(get_block_request(current_slot).with_id(id))
                 .respond_with(get_block_response(NEW_BLOCKHASH).with_id(id))
         }
-        // sendTransaction (IDs 24-27)
+        // get_recent_blockhash for resubmission: getSlot (IDs 24-27)
         for id in 24..28u64 {
+            builder = builder
+                .given(get_slot_request().with_id(id))
+                .respond_with(get_slot_response(current_slot).with_id(id))
+        }
+        // get_recent_blockhash for resubmission: getBlock (IDs 28-31)
+        for id in 28..32u64 {
+            builder = builder
+                .given(get_block_request(current_slot).with_id(id))
+                .respond_with(get_block_response(NEW_BLOCKHASH).with_id(id))
+        }
+        // sendTransaction (IDs 32-35)
+        for id in 32..36u64 {
             builder = builder
                 .given(send_transaction_request().with_id(id))
                 .respond_with(send_transaction_response(NEW_TX_SIGNATURE).with_id(id))

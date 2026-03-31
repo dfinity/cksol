@@ -101,6 +101,35 @@ pub enum GetRecentBlockhashError {
     Failed(Vec<String>),
 }
 
+pub async fn get_signature_statuses<R: CanisterRuntime>(
+    runtime: &R,
+    signatures: &[Signature],
+) -> Result<
+    Vec<Option<solana_transaction_status_client_types::TransactionStatus>>,
+    GetSignatureStatusesError,
+> {
+    let client = read_state(|state| state.sol_rpc_client(runtime.inter_canister_call_runtime()));
+    let result = client
+        .get_signature_statuses(signatures)
+        .map_err(GetSignatureStatusesError::RpcError)?
+        .try_send()
+        .await;
+    match result? {
+        MultiRpcResult::Consistent(Ok(statuses)) => Ok(statuses),
+        MultiRpcResult::Consistent(Err(e)) => Err(GetSignatureStatusesError::RpcError(e)),
+        MultiRpcResult::Inconsistent(_) => Err(GetSignatureStatusesError::InconsistentRpcResults),
+    }
+}
+
+#[derive(Debug, PartialEq, Error)]
+pub enum GetSignatureStatusesError {
+    #[error("Error while calling SOL RPC canister: {0}")]
+    IcError(#[from] IcError),
+    #[error("RPC error while fetching signature statuses: {0}")]
+    RpcError(RpcError),
+    #[error("Inconsistent RPC results for getSignatureStatuses")]
+    InconsistentRpcResults,
+}
 pub fn get_deposit_amount_to_address(
     transaction: EncodedConfirmedTransactionWithStatusMeta,
     deposit_address: Address,
