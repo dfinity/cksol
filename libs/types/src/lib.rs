@@ -12,9 +12,10 @@ use thiserror::Error;
 
 mod memo;
 
-/// Uniquely identifies a deposit: the combination of a Solana transaction
-/// signature and the account it targets. A single transaction can deposit
-/// to multiple accounts, so the signature alone is not sufficient.
+/// A single transaction can deposit to multiple accounts, so the signature alone is not sufficient.
+/// The combination of a Solana transaction signature and the account it targets together
+/// uniquely identify a deposit. If a transaction contains multiple transfers to the same account,
+/// they are aggregated into a single deposit.
 #[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize, Serialize)]
 pub struct DepositId {
     /// The Solana transaction signature.

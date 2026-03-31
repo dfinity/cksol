@@ -339,7 +339,11 @@ type EventType = variant {
     };
 };
 
-// Represents a Solana transaction depositing funds to a ckSOL account.
+// A single transaction can deposit to multiple accounts, so the signature alone
+// is not sufficient. The combination of the Solana transaction signature and the
+// account it targets together uniquely identify a deposit. If a transaction
+// contains multiple transfers to the same account, they are aggregated into a
+// single deposit.
 type DepositId = record {
     // The signature of the Solana deposit transaction.
     signature: Signature;
