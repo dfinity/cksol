@@ -539,13 +539,12 @@ impl State {
             self.succeeded_transactions.insert(*signature),
             "Attempted to mark transaction {signature:?} as succeeded twice"
         );
-        for (burn_index, _) in self
-            .sent_withdrawal_requests
+        self.sent_withdrawal_requests
             .extract_if(.., |_, sig| sig == signature)
-        {
-            self.successful_withdrawal_requests
-                .insert(burn_index, *signature);
-        }
+            .for_each(|(burn_index, _)| {
+                self.successful_withdrawal_requests
+                    .insert(burn_index, *signature);
+            });
     }
 
     fn process_transaction_failed(&mut self, signature: &Signature) {
@@ -564,13 +563,12 @@ impl State {
             None,
             "Attempted to fail transaction {signature:?} twice"
         );
-        for (burn_index, _) in self
-            .sent_withdrawal_requests
+        self.sent_withdrawal_requests
             .extract_if(.., |_, sig| sig == signature)
-        {
-            self.failed_withdrawal_requests
-                .insert(burn_index, *signature);
-        }
+            .for_each(|(burn_index, _)| {
+                self.failed_withdrawal_requests
+                    .insert(burn_index, *signature);
+            });
     }
 }
 
