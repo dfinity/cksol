@@ -73,14 +73,21 @@ pub enum SubmitTransactionError {
     InconsistentRpcResults,
 }
 
-// TODO DEFI-2670: Update `sol_rpc_client` to return the slot along with the blockhash
-//  in `estimate_recent_blockhash`, and refactor this method to return `(Hash, Slot)`.
-pub async fn get_recent_blockhash<R: CanisterRuntime>(
+pub async fn get_recent_slot_and_blockhash<R: CanisterRuntime>(
     runtime: &R,
-) -> Result<Hash, GetRecentBlockhashError> {
+) -> Result<(Slot, Hash), GetRecentBlockhashError> {
     let client = read_state(|state| state.sol_rpc_client(runtime.inter_canister_call_runtime()));
-    match client.estimate_recent_blockhash().send().await {
-        Ok(blockhash) => Ok(blockhash),
+    match client.get_recent_block().try_send().await {
+        Ok((slot, block)) => {
+            let blockhash: Hash =
+                block
+                    .blockhash
+                    .parse()
+                    .map_err(|e: solana_hash::ParseHashError| {
+                        GetRecentBlockhashError::Failed(vec![e.to_string()])
+                    })?;
+            Ok((slot, blockhash))
+        }
         Err(errors) => Err(GetRecentBlockhashError::Failed(
             errors.into_iter().map(|e| e.to_string()).collect(),
         )),
@@ -89,29 +96,8 @@ pub async fn get_recent_blockhash<R: CanisterRuntime>(
 
 #[derive(Debug, PartialEq, Error)]
 pub enum GetRecentBlockhashError {
-    #[error("Failed to estimate recent blockhash: {0:?}")]
+    #[error("Failed to get recent block: {0:?}")]
     Failed(Vec<String>),
-}
-
-pub async fn get_slot<R: CanisterRuntime>(runtime: &R) -> Result<Slot, GetSlotError> {
-    const MAX_RETRIES: u8 = 3;
-    let client = read_state(|state| state.sol_rpc_client(runtime.inter_canister_call_runtime()));
-    for _ in 0..MAX_RETRIES {
-        match client.get_slot().send().await {
-            MultiRpcResult::Consistent(Ok(slot)) => return Ok(slot),
-            MultiRpcResult::Consistent(Err(e)) => return Err(GetSlotError::RpcError(e)),
-            MultiRpcResult::Inconsistent(_) => continue,
-        }
-    }
-    Err(GetSlotError::InconsistentRpcResults)
-}
-
-#[derive(Debug, PartialEq, Error, From)]
-pub enum GetSlotError {
-    #[error("RPC error while fetching slot: {0}")]
-    RpcError(RpcError),
-    #[error("Inconsistent RPC results for slot")]
-    InconsistentRpcResults,
 }
 
 pub async fn get_signature_statuses<R: CanisterRuntime>(
@@ -143,7 +129,6 @@ pub enum GetSignatureStatusesError {
     #[error("Inconsistent RPC results for getSignatureStatuses")]
     InconsistentRpcResults,
 }
-
 pub fn get_deposit_amount_to_address(
     transaction: EncodedConfirmedTransactionWithStatusMeta,
     deposit_address: Address,

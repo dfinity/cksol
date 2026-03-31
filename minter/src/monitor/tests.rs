@@ -136,7 +136,10 @@ mod finalization {
             ])));
 
         if status.is_none() {
-            runtime = runtime.add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)));
+            // get_recent_slot_and_blockhash for current slot check (getSlot + getBlock)
+            runtime = runtime
+                .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
+                .add_stub_response(BlockResult::Consistent(Ok(block())));
         }
 
         monitor_submitted_transactions(runtime).await;
@@ -205,8 +208,9 @@ mod finalization {
                 None,
                 Some(finalized_status(RECENT_SLOT)),
             ])))
-            // getSlot for the one not_found transaction
-            .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)));
+            // get_recent_slot_and_blockhash for the one not_found transaction (getSlot + getBlock)
+            .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
+            .add_stub_response(BlockResult::Consistent(Ok(block())));
 
         monitor_submitted_transactions(runtime).await;
 
@@ -268,13 +272,12 @@ mod resubmission {
             .with_increasing_time()
             // getSignatureStatuses: not found
             .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![None])))
-            // getSlot for expiry check
+            // get_recent_slot_and_blockhash for expiry check (getSlot + getBlock)
             .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
-            // get_recent_blockhash (getSlot + getBlock)
+            .add_stub_response(BlockResult::Consistent(Ok(block())))
+            // get_recent_slot_and_blockhash for resubmission (getSlot + getBlock)
             .add_stub_response(SlotResult::Consistent(Ok(RESUBMISSION_SLOT)))
             .add_stub_response(BlockResult::Consistent(Ok(block())))
-            // get_slot for new slot
-            .add_stub_response(SlotResult::Consistent(Ok(RESUBMISSION_SLOT)))
             .add_stub_response(SendTransactionResult::Consistent(Ok(new_signature.into())))
             .add_signature(new_signature.into());
 
@@ -333,10 +336,12 @@ mod resubmission {
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
             .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![None])))
+            // get_recent_slot_and_blockhash for expiry check (getSlot + getBlock)
             .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
+            .add_stub_response(BlockResult::Consistent(Ok(block())))
+            // get_recent_slot_and_blockhash for resubmission (getSlot + getBlock)
             .add_stub_response(SlotResult::Consistent(Ok(RESUBMISSION_SLOT)))
             .add_stub_response(BlockResult::Consistent(Ok(block())))
-            .add_stub_response(SlotResult::Consistent(Ok(RESUBMISSION_SLOT)))
             .add_stub_response(SendTransactionResult::Inconsistent(vec![]))
             .add_signature(new_signature.into());
 
@@ -374,12 +379,12 @@ mod resubmission {
             .add_stub_response(SignatureStatusesResult::Consistent(Ok(
                 vec![None; num_transactions],
             )))
-            // getSlot for expiry check
+            // get_recent_slot_and_blockhash for expiry check (getSlot + getBlock)
             .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
-            // Round 1: get_recent_blockhash + get_slot
-            .add_stub_response(SlotResult::Consistent(Ok(RESUBMISSION_SLOT)))
             .add_stub_response(BlockResult::Consistent(Ok(block())))
-            .add_stub_response(SlotResult::Consistent(Ok(RESUBMISSION_SLOT)));
+            // Round 1: get_recent_slot_and_blockhash for resubmission (getSlot + getBlock)
+            .add_stub_response(SlotResult::Consistent(Ok(RESUBMISSION_SLOT)))
+            .add_stub_response(BlockResult::Consistent(Ok(block())));
 
         for i in 0..MAX_CONCURRENT_RPC_CALLS {
             runtime = runtime
@@ -390,11 +395,10 @@ mod resubmission {
                 .add_signature([0xA0 + i as u8; 64]);
         }
 
-        // Round 2: get_recent_blockhash + get_slot
+        // Round 2: get_recent_slot_and_blockhash for resubmission (getSlot + getBlock)
         runtime = runtime
             .add_stub_response(SlotResult::Consistent(Ok(RESUBMISSION_SLOT)))
-            .add_stub_response(BlockResult::Consistent(Ok(block())))
-            .add_stub_response(SlotResult::Consistent(Ok(RESUBMISSION_SLOT)));
+            .add_stub_response(BlockResult::Consistent(Ok(block())));
 
         for i in 0..2_usize {
             runtime = runtime

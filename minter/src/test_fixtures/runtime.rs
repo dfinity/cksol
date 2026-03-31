@@ -2,7 +2,7 @@ use super::{signer::MockSchnorrSigner, stubs::Stubs};
 use crate::{runtime::CanisterRuntime, signer::SchnorrSigner};
 use candid::{CandidType, Principal};
 use ic_canister_runtime::{IcError, Runtime, StubRuntime};
-use ic_cdk::management_canister::SignCallError;
+use ic_cdk_management_canister::SignCallError;
 use std::time::Duration;
 
 pub const TEST_CANISTER_ID: Principal = Principal::from_slice(&[0xCA; 10]);

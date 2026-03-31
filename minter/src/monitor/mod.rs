@@ -11,13 +11,13 @@ use crate::{
         mutate_state, read_state,
     },
     transaction::{
-        SubmitTransactionError, get_recent_blockhash, get_signature_statuses, get_slot,
+        SubmitTransactionError, get_recent_slot_and_blockhash, get_signature_statuses,
         submit_transaction,
     },
 };
 use canlog::log;
 use cksol_types_internal::log::Priority;
-use ic_cdk::management_canister::SignCallError;
+use ic_cdk_management_canister::SignCallError;
 use icrc_ledger_types::icrc1::account::Account;
 use itertools::Itertools;
 use sol_rpc_types::Slot;
@@ -89,8 +89,8 @@ pub async fn monitor_submitted_transactions<R: CanisterRuntime>(runtime: R) {
         return;
     }
 
-    let current_slot = match get_slot(&runtime).await {
-        Ok(slot) => slot,
+    let (current_slot, _) = match get_recent_slot_and_blockhash(&runtime).await {
+        Ok(result) => result,
         Err(e) => {
             log!(Priority::Info, "Failed to get current slot: {e}");
             return;
@@ -196,17 +196,10 @@ async fn resubmit_expired_transactions<R: CanisterRuntime>(
     expired: Vec<(Signature, VersionedMessage, Vec<Account>)>,
 ) {
     for round in &expired.into_iter().chunks(MAX_CONCURRENT_RPC_CALLS) {
-        let new_blockhash = match get_recent_blockhash(runtime).await {
-            Ok(blockhash) => blockhash,
+        let (new_slot, new_blockhash) = match get_recent_slot_and_blockhash(runtime).await {
+            Ok(result) => result,
             Err(e) => {
                 log!(Priority::Info, "Failed to get recent blockhash: {e}");
-                return;
-            }
-        };
-        let new_slot = match get_slot(runtime).await {
-            Ok(slot) => slot,
-            Err(e) => {
-                log!(Priority::Info, "Failed to get slot: {e}");
                 return;
             }
         };

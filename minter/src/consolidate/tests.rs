@@ -19,7 +19,7 @@ use sol_rpc_types::{ConfirmedBlock, MultiRpcResult, RpcError, Slot};
 use solana_signature::Signature;
 
 type SlotResult = MultiRpcResult<Slot>;
-type BlockResult = MultiRpcResult<ConfirmedBlock>;
+type BlockResult = MultiRpcResult<Option<ConfirmedBlock>>;
 type SendTransactionResult = MultiRpcResult<sol_rpc_types::Signature>;
 
 #[tokio::test]
@@ -80,11 +80,9 @@ async fn should_submit_single_consolidation_request() {
     let slot = 100;
     let runtime = TestCanisterRuntime::new()
         .with_increasing_time()
-        // get_recent_blockhash calls
+        // get_recent_slot_and_blockhash calls (get_recent_block internally calls getSlot then getBlock)
         .add_stub_response(SlotResult::Consistent(Ok(slot)))
-        .add_stub_response(BlockResult::Consistent(Ok(block())))
-        // get_slot call
-        .add_stub_response(SlotResult::Consistent(Ok(slot)))
+        .add_stub_response(BlockResult::Consistent(Ok(Some(block()))))
         .add_stub_response(SendTransactionResult::Consistent(Ok(
             fee_payer_signature.into()
         )))
@@ -120,11 +118,9 @@ async fn should_record_events_even_if_transaction_submission_fails() {
     let slot = 100;
     let runtime = TestCanisterRuntime::new()
         .with_increasing_time()
-        // get_recent_blockhash calls
+        // get_recent_slot_and_blockhash calls
         .add_stub_response(SlotResult::Consistent(Ok(slot)))
-        .add_stub_response(BlockResult::Consistent(Ok(block())))
-        // get_slot call
-        .add_stub_response(SlotResult::Consistent(Ok(slot)))
+        .add_stub_response(BlockResult::Consistent(Ok(Some(block()))))
         // Transaction submission fails
         .add_stub_response(SendTransactionResult::Inconsistent(vec![]))
         .add_signature(fee_payer_signature.into())
@@ -163,11 +159,9 @@ async fn should_submit_multiple_consolidation_batches() {
 
     let mut runtime = TestCanisterRuntime::new()
         .with_increasing_time()
-        // get_recent_blockhash calls
+        // get_recent_slot_and_blockhash calls
         .add_stub_response(SlotResult::Consistent(Ok(slot)))
-        .add_stub_response(BlockResult::Consistent(Ok(block())))
-        // get_slot call
-        .add_stub_response(SlotResult::Consistent(Ok(slot)))
+        .add_stub_response(BlockResult::Consistent(Ok(Some(block()))))
         .add_stub_response(SendTransactionResult::Consistent(Ok(
             fee_payer_signature_1.into()
         )))
@@ -233,8 +227,7 @@ async fn should_consolidate_multiple_deposits_to_same_account_in_single_transfer
     let runtime = TestCanisterRuntime::new()
         .with_increasing_time()
         .add_stub_response(SlotResult::Consistent(Ok(slot)))
-        .add_stub_response(BlockResult::Consistent(Ok(block())))
-        .add_stub_response(SlotResult::Consistent(Ok(slot)))
+        .add_stub_response(BlockResult::Consistent(Ok(Some(block()))))
         .add_stub_response(SendTransactionResult::Consistent(Ok(
             fee_payer_signature.into()
         )))

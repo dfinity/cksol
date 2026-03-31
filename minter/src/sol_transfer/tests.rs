@@ -8,7 +8,8 @@ use crate::{
 };
 use assert_matches::assert_matches;
 use candid::Principal;
-use ic_cdk::{call::CallRejected, management_canister::SignCallError};
+use ic_cdk::call::CallRejected;
+use ic_cdk_management_canister::SignCallError;
 use solana_address::Address;
 use solana_signature::Signature;
 
