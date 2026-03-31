@@ -627,7 +627,7 @@ impl Canister<'_> {
 fn cksol_minter_wasm() -> Vec<u8> {
     ic_test_utilities_load_wasm::load_wasm(
         PathBuf::from(var("CARGO_MANIFEST_DIR").unwrap()).join("../minter"),
-        "cksol-minter",
+        "cksol_minter",
         &[],
     )
 }

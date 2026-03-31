@@ -855,7 +855,36 @@ dependencies = [
 ]
 
 [[package]]
-name = "cksol-minter"
+name = "cksol-types"
+version = "0.1.0"
+dependencies = [
+ "candid",
+ "derive_more 2.1.1",
+ "icrc-ledger-types",
+ "minicbor",
+ "proptest",
+ "serde",
+ "sol_rpc_types",
+ "solana-address 2.3.0",
+ "solana-signature",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "cksol-types-internal"
+version = "0.1.0"
+dependencies = [
+ "candid",
+ "canlog",
+ "icrc-cbor",
+ "icrc-ledger-types",
+ "minicbor",
+ "serde",
+ "sol_rpc_types",
+]
+
+[[package]]
+name = "cksol_minter"
 version = "0.1.0"
 dependencies = [
  "askama",
@@ -899,35 +928,6 @@ dependencies = [
  "solana-transaction-status-client-types",
  "thiserror 2.0.18",
  "tokio",
-]
-
-[[package]]
-name = "cksol-types"
-version = "0.1.0"
-dependencies = [
- "candid",
- "derive_more 2.1.1",
- "icrc-ledger-types",
- "minicbor",
- "proptest",
- "serde",
- "sol_rpc_types",
- "solana-address 2.3.0",
- "solana-signature",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "cksol-types-internal"
-version = "0.1.0"
-dependencies = [
- "candid",
- "canlog",
- "icrc-cbor",
- "icrc-ledger-types",
- "minicbor",
- "serde",
- "sol_rpc_types",
 ]
 
 [[package]]
