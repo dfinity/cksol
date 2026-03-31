@@ -221,14 +221,10 @@ impl State {
     }
 
     pub fn sol_rpc_client<R: Runtime>(&self, runtime: R) -> SolRpcClient<R> {
-        // The maximum size of an HTTPs outcall response is 2MB:
-        // https://docs.internetcomputer.org/references/ic-interface-spec#ic-http_request
-        const MAX_RESPONSE_BYTES: u64 = 2_000_000;
         SolRpcClient::builder(runtime, self.sol_rpc_canister_id)
             .with_rpc_sources(RpcSources::Default(SolanaCluster::from(
                 self.solana_network,
             )))
-            .with_response_size_estimate(MAX_RESPONSE_BYTES)
             .with_consensus_strategy(ConsensusStrategy::Threshold {
                 min: 3,
                 total: Some(4),
