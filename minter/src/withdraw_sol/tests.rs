@@ -3,11 +3,15 @@ use crate::sol_transfer::MAX_WITHDRAWALS_PER_TX;
 use crate::test_fixtures::EventsAssert;
 use crate::{
     guard::{TimerGuard, withdraw_sol_guard},
-    state::TaskType,
-    state::event::{EventType, TransactionPurpose},
+    state::{
+        TaskType,
+        audit::process_event,
+        event::{EventType, TransactionPurpose},
+        mutate_state,
+    },
     test_fixtures::{
-        MINTER_ACCOUNT, WITHDRAWAL_FEE, init_schnorr_master_key, init_state,
-        runtime::TestCanisterRuntime,
+        MINIMUM_WITHDRAWAL_AMOUNT, MINTER_ACCOUNT, WITHDRAWAL_FEE, init_schnorr_master_key,
+        init_state, runtime::TestCanisterRuntime,
     },
     withdraw_sol::{
         MAX_WITHDRAWAL_ROUNDS, process_pending_withdrawals, withdraw_sol, withdraw_sol_status,
@@ -16,6 +20,7 @@ use crate::{
 use assert_matches::assert_matches;
 use candid::{Nat, Principal};
 use canlog::Log;
+use cksol_types::TxFinalizedStatus;
 use cksol_types::WithdrawSolStatus;
 use cksol_types::{WithdrawSolError, WithdrawSolOk};
 use cksol_types_internal::log::Priority;
@@ -24,6 +29,8 @@ use ic_cdk::call::CallRejected;
 use ic_cdk_management_canister::SignCallError;
 use icrc_ledger_types::{icrc1::account::Account, icrc2::transfer_from::TransferFromError};
 use sol_rpc_types::{ConfirmedBlock, MultiRpcResult, RpcError, Slot};
+use solana_hash::Hash;
+use solana_message::Message;
 use solana_signature::Signature;
 
 const VALID_ADDRESS: &str = "E4MpwNnMWs2XtW5gVrxZvyS7fMq31QD5HvbxmwP45Tz3";
@@ -676,16 +683,6 @@ mod process_pending_withdrawals_tests {
 
 mod withdrawal_finalization_tests {
     use super::*;
-    use crate::numeric::LedgerBurnIndex;
-    use crate::state::{
-        audit::process_event,
-        event::{EventType, TransactionPurpose},
-        mutate_state,
-    };
-    use cksol_types::TxFinalizedStatus;
-    use solana_hash::Hash;
-    use solana_message::Message;
-    use solana_signature::Signature;
 
     fn setup_sent_withdrawal(burn_block_index: u64) -> Signature {
         let signature = Signature::from([burn_block_index as u8 + 1; 64]);
@@ -699,7 +696,7 @@ mod withdrawal_finalization_tests {
                     account: MINTER_ACCOUNT,
                     solana_address: [0u8; 32],
                     burn_block_index: burn_block_index.into(),
-                    withdrawal_amount: WITHDRAWAL_FEE + 1,
+                    withdrawal_amount: MINIMUM_WITHDRAWAL_AMOUNT,
                     withdrawal_fee: WITHDRAWAL_FEE,
                 }),
                 &runtime,
