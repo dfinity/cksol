@@ -48,6 +48,7 @@ mod state_from_init_args {
                 accepted_deposits: BTreeMap::new(),
                 quarantined_deposits: BTreeMap::new(),
                 minted_deposits: BTreeMap::new(),
+                all_withdrawal_requests: BTreeMap::new(),
                 pending_withdrawal_requests: BTreeMap::new(),
                 sent_withdrawal_requests: BTreeMap::new(),
                 successful_withdrawal_requests: BTreeMap::new(),

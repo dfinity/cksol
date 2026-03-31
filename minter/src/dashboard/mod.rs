@@ -235,7 +235,17 @@ impl DashboardTemplate {
         );
 
         let mut withdrawals: Vec<_> = Vec::new();
-        for (burn_index, req) in state.pending_withdrawal_requests() {
+        for (burn_index, req) in state.all_withdrawal_requests() {
+            let (status, transaction) =
+                if let Some(sig) = state.successful_withdrawal_requests().get(burn_index) {
+                    ("Succeeded", Some(sig.to_string()))
+                } else if let Some(sig) = state.failed_withdrawal_requests().get(burn_index) {
+                    ("Failed", Some(sig.to_string()))
+                } else if let Some(sig) = state.sent_withdrawal_requests().get(burn_index) {
+                    ("Sent", Some(sig.to_string()))
+                } else {
+                    ("Pending", None)
+                };
             withdrawals.push((
                 *burn_index.get(),
                 DashboardWithdrawal {
@@ -243,47 +253,8 @@ impl DashboardTemplate {
                     account: req.account.to_string(),
                     destination: solana_address::Address::from(req.solana_address).to_string(),
                     amount: lamports_to_sol(req.withdrawal_amount),
-                    status: "Pending",
-                    transaction: None,
-                },
-            ));
-        }
-        for (burn_index, signature) in state.sent_withdrawal_requests() {
-            withdrawals.push((
-                *burn_index.get(),
-                DashboardWithdrawal {
-                    burn_index: burn_index.to_string(),
-                    account: String::new(),
-                    destination: String::new(),
-                    amount: String::new(),
-                    status: "Sent",
-                    transaction: Some(signature.to_string()),
-                },
-            ));
-        }
-        for (burn_index, signature) in state.successful_withdrawal_requests() {
-            withdrawals.push((
-                *burn_index.get(),
-                DashboardWithdrawal {
-                    burn_index: burn_index.to_string(),
-                    account: String::new(),
-                    destination: String::new(),
-                    amount: String::new(),
-                    status: "Succeeded",
-                    transaction: Some(signature.to_string()),
-                },
-            ));
-        }
-        for (burn_index, signature) in state.failed_withdrawal_requests() {
-            withdrawals.push((
-                *burn_index.get(),
-                DashboardWithdrawal {
-                    burn_index: burn_index.to_string(),
-                    account: String::new(),
-                    destination: String::new(),
-                    amount: String::new(),
-                    status: "Failed",
-                    transaction: Some(signature.to_string()),
+                    status,
+                    transaction,
                 },
             ));
         }

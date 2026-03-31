@@ -94,6 +94,8 @@ pub struct State {
     accepted_deposits: BTreeMap<DepositId, Deposit>,
     quarantined_deposits: BTreeMap<DepositId, Deposit>,
     minted_deposits: BTreeMap<DepositId, MintedDeposit>,
+    /// All accepted withdrawal requests, indexed by burn index. Never removed.
+    all_withdrawal_requests: BTreeMap<LedgerBurnIndex, WithdrawSolRequest>,
     pending_withdrawal_requests: BTreeMap<LedgerBurnIndex, WithdrawSolRequest>,
     sent_withdrawal_requests: BTreeMap<LedgerBurnIndex, Signature>,
     successful_withdrawal_requests: BTreeMap<LedgerBurnIndex, Signature>,
@@ -389,11 +391,17 @@ impl State {
         WithdrawSolStatus::NotFound
     }
 
+    pub fn all_withdrawal_requests(&self) -> &BTreeMap<LedgerBurnIndex, WithdrawSolRequest> {
+        &self.all_withdrawal_requests
+    }
+
     pub fn pending_withdrawal_requests(&self) -> &BTreeMap<LedgerBurnIndex, WithdrawSolRequest> {
         &self.pending_withdrawal_requests
     }
 
     fn process_accepted_withdrawal(&mut self, request: &WithdrawSolRequest) {
+        self.all_withdrawal_requests
+            .insert(request.burn_block_index, request.clone());
         assert_eq!(
             self.pending_withdrawal_requests
                 .insert(request.burn_block_index, request.clone()),
@@ -622,6 +630,7 @@ impl TryFrom<InitArgs> for State {
             accepted_deposits: BTreeMap::new(),
             quarantined_deposits: BTreeMap::new(),
             minted_deposits: BTreeMap::new(),
+            all_withdrawal_requests: BTreeMap::new(),
             pending_withdrawal_requests: BTreeMap::new(),
             sent_withdrawal_requests: BTreeMap::new(),
             successful_withdrawal_requests: BTreeMap::new(),
