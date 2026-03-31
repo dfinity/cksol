@@ -13,7 +13,7 @@ use cksol_int_tests::{
     },
 };
 use cksol_types::{
-    DepositStatus, GetDepositAddressArgs, InsufficientCyclesError, Lamport, MinterInfo,
+    DepositId, DepositStatus, GetDepositAddressArgs, InsufficientCyclesError, Lamport, MinterInfo,
     UpdateBalanceArgs, UpdateBalanceError, WithdrawSolArgs, WithdrawSolError, WithdrawSolStatus,
 };
 use cksol_types_internal::{
@@ -830,7 +830,10 @@ mod update_balance_tests {
             Ok(DepositStatus::Processing {
                 deposit_amount: DEPOSIT_AMOUNT,
                 amount_to_mint: EXPECTED_MINT_AMOUNT,
-                signature: deposit_signature.clone(),
+                deposit_id: DepositId {
+                    signature: deposit_signature.clone(),
+                    account: DEFAULT_CALLER_ACCOUNT,
+                },
             })
         );
 
@@ -855,9 +858,11 @@ mod update_balance_tests {
             .await;
         assert_matches!(&result, Ok(DepositStatus::Minted {
             minted_amount,
-            signature,
+            deposit_id,
             block_index: _,
-        }) if minted_amount == &EXPECTED_MINT_AMOUNT && signature == &deposit_signature);
+        }) if minted_amount == &EXPECTED_MINT_AMOUNT
+            && deposit_id.signature == deposit_signature
+            && deposit_id.account == DEFAULT_CALLER_ACCOUNT);
 
         let balance_after = setup.ledger().balance_of(DEFAULT_CALLER_ACCOUNT).await;
         assert_eq!(balance_after, EXPECTED_MINT_AMOUNT);
@@ -882,9 +887,11 @@ mod update_balance_tests {
             .await;
         assert_matches!(&first_result, Ok(DepositStatus::Minted {
             minted_amount,
-            signature,
+            deposit_id,
             block_index: _,
-        }) if minted_amount == &EXPECTED_MINT_AMOUNT && signature == &deposit_signature);
+        }) if minted_amount == &EXPECTED_MINT_AMOUNT
+            && deposit_id.signature == deposit_signature
+            && deposit_id.account == DEFAULT_CALLER_ACCOUNT);
 
         let balance_after = setup.ledger().balance_of(DEFAULT_CALLER_ACCOUNT).await;
         assert_eq!(balance_after, EXPECTED_MINT_AMOUNT);

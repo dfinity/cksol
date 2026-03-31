@@ -12,7 +12,18 @@ use thiserror::Error;
 
 mod memo;
 
-// TODO DEFI-2643: Use `DepositId` instead of `Signature`
+/// A single transaction can deposit to multiple accounts, so the signature alone is not sufficient.
+/// The combination of a Solana transaction signature and the account it targets together
+/// uniquely identify a deposit. If a transaction contains multiple transfers to the same account,
+/// they are aggregated into a single deposit.
+#[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize, Serialize)]
+pub struct DepositId {
+    /// The Solana transaction signature.
+    pub signature: Signature,
+    /// The account to which the deposit is attributed.
+    pub account: Account,
+}
+
 /// The outcome of processing a Solana deposit transaction.
 #[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize, Serialize)]
 pub enum DepositStatus {
@@ -23,8 +34,8 @@ pub enum DepositStatus {
         deposit_amount: Lamport,
         /// The amount to mint (deposit amount minus fees).
         amount_to_mint: Lamport,
-        /// The Solana transaction that caused the balance update.
-        signature: Signature,
+        /// The deposit identifier.
+        deposit_id: DepositId,
     },
     /// The transaction is a valid deposit, but it is unknown whether the
     /// corresponding ckSOL tokens have been minted, most likely because there
@@ -32,15 +43,15 @@ pub enum DepositStatus {
     ///
     /// The deposit is quarantined to avoid any double minting and will not
     /// be further processed without manual intervention.
-    Quarantined(Signature),
+    Quarantined(DepositId),
     /// The minter accepted the deposit and minted ckSOL tokens on the ledger.
     Minted {
         /// The mint transaction index on the ledger.
         block_index: u64,
         /// The minted amount (deposit amount minus fees).
         minted_amount: Lamport,
-        /// The Solana transaction that caused the balance update.
-        signature: Signature,
+        /// The deposit identifier.
+        deposit_id: DepositId,
     },
 }
 

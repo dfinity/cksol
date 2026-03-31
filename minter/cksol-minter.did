@@ -93,8 +93,8 @@ type DepositStatus = variant {
         deposit_amount: Lamport;
         // The amount to mint (deposit amount minus fees).
         amount_to_mint: Lamport;
-        // The Solana transaction that caused the balance update.
-        signature: Signature;
+        // The deposit identifier.
+        deposit_id: DepositId;
     };
     // The transaction is a valid deposit, but it is unknown whether the
     // corresponding ckSOL tokens have been minted, most likely because there
@@ -102,15 +102,15 @@ type DepositStatus = variant {
     //
     // The deposit is quarantined to avoid any double minting and will not
     // be further processed without manual intervention.
-    Quarantined : Signature;
+    Quarantined : DepositId;
     // The minter accepted the deposit and minted ckSOL tokens on the ledger.
     Minted : record {
         // The mint transaction index on the ledger.
         block_index: nat64;
         // The minted amount (deposit amount minus fees).
         minted_amount: Lamport;
-        // The Solana transaction that caused the balance update.
-        signature: Signature;
+        // The deposit identifier.
+        deposit_id: DepositId;
     };
 };
 
@@ -339,7 +339,11 @@ type EventType = variant {
     };
 };
 
-// Represents a Solana transaction depositing funds to a ckSOL account.
+// A single transaction can deposit to multiple accounts, so the signature alone
+// is not sufficient. The combination of the Solana transaction signature and the
+// account it targets together uniquely identify a deposit. If a transaction
+// contains multiple transfers to the same account, they are aggregated into a
+// single deposit.
 type DepositId = record {
     // The signature of the Solana deposit transaction.
     signature: Signature;
