@@ -175,6 +175,14 @@ impl State {
         &self.sent_withdrawal_requests
     }
 
+    pub fn successful_withdrawal_requests(&self) -> &BTreeMap<LedgerBurnIndex, Signature> {
+        &self.successful_withdrawal_requests
+    }
+
+    pub fn failed_withdrawal_requests(&self) -> &BTreeMap<LedgerBurnIndex, Signature> {
+        &self.failed_withdrawal_requests
+    }
+
     pub fn deposits_to_consolidate(&self) -> &BTreeMap<LedgerMintIndex, (Account, Lamport)> {
         &self.deposits_to_consolidate
     }

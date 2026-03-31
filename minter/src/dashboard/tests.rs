@@ -243,6 +243,7 @@ fn should_paginate_minted_deposits_across_multiple_pages() {
         &state,
         DashboardPaginationParameters {
             minted_deposits_start: DEFAULT_PAGE_SIZE,
+            ..Default::default()
         },
     );
     assert_eq!(
@@ -256,6 +257,7 @@ fn should_paginate_minted_deposits_across_multiple_pages() {
         &state,
         DashboardPaginationParameters {
             minted_deposits_start: DEFAULT_PAGE_SIZE * 2,
+            ..Default::default()
         },
     );
     assert_eq!(page3.minted_deposits_table.current_page.len(), remainder);

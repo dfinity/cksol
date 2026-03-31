@@ -37,6 +37,7 @@ pub(crate) const DEFAULT_PAGE_SIZE: usize = 100;
 #[derive(Default, Clone)]
 pub struct DashboardPaginationParameters {
     pub minted_deposits_start: usize,
+    pub withdrawals_start: usize,
 }
 
 impl DashboardPaginationParameters {
@@ -51,6 +52,7 @@ impl DashboardPaginationParameters {
 
         Ok(Self {
             minted_deposits_start: parse(req, "minted_deposits_start")?,
+            withdrawals_start: parse(req, "withdrawals_start")?,
         })
     }
 }
@@ -70,6 +72,7 @@ impl<T: Clone> DashboardPaginatedTable<T> {
         num_cols: usize,
         table_reference: &str,
         page_offset_query_param: &str,
+        other_query_params: String,
     ) -> Self {
         let total_items = items.len();
 
@@ -91,6 +94,7 @@ impl<T: Clone> DashboardPaginatedTable<T> {
                 num_cols,
                 table_reference,
                 page_offset_query_param,
+                other_query_params,
             ),
             total_items,
         }
@@ -117,6 +121,7 @@ pub struct DashboardTablePagination {
     pub table_id: String,
     pub table_width: usize,
     pub page_offset_query_param: String,
+    pub other_query_params: String,
     pub current_page_index: usize,
     pub pages: Vec<DashboardTablePage>,
 }
@@ -129,6 +134,7 @@ impl DashboardTablePagination {
         table_width: usize,
         table_reference: &str,
         page_offset_query_param: &str,
+        other_query_params: String,
     ) -> Self {
         let pages = (0..num_items)
             .step_by(page_size)
@@ -141,6 +147,7 @@ impl DashboardTablePagination {
         Self {
             table_id: String::from(table_reference),
             page_offset_query_param: String::from(page_offset_query_param),
+            other_query_params,
             table_width,
             current_page_index: current_offset / page_size + 1,
             pages,
@@ -149,6 +156,16 @@ impl DashboardTablePagination {
 }
 
 // --- Dashboard data ---
+
+#[derive(Clone)]
+pub struct DashboardWithdrawal {
+    pub burn_index: String,
+    pub account: String,
+    pub destination: String,
+    pub amount: String,
+    pub status: &'static str,
+    pub transaction: Option<String>,
+}
 
 #[derive(Clone)]
 pub struct DashboardMintedDeposit {
@@ -173,6 +190,7 @@ pub struct DashboardTemplate {
     pub minimum_deposit_amount: String,
     pub minimum_withdrawal_amount: String,
     pub minted_deposits_table: DashboardPaginatedTable<DashboardMintedDeposit>,
+    pub withdrawals_table: DashboardPaginatedTable<DashboardWithdrawal>,
 }
 
 impl DashboardTemplate {
@@ -213,6 +231,76 @@ impl DashboardTemplate {
             5,
             "minted-deposits",
             "minted_deposits_start",
+            format!("&withdrawals_start={}", pagination.withdrawals_start),
+        );
+
+        let mut withdrawals: Vec<_> = Vec::new();
+        for (burn_index, req) in state.pending_withdrawal_requests() {
+            withdrawals.push((
+                *burn_index.get(),
+                DashboardWithdrawal {
+                    burn_index: burn_index.to_string(),
+                    account: req.account.to_string(),
+                    destination: solana_address::Address::from(req.solana_address).to_string(),
+                    amount: lamports_to_sol(req.withdrawal_amount),
+                    status: "Pending",
+                    transaction: None,
+                },
+            ));
+        }
+        for (burn_index, signature) in state.sent_withdrawal_requests() {
+            withdrawals.push((
+                *burn_index.get(),
+                DashboardWithdrawal {
+                    burn_index: burn_index.to_string(),
+                    account: String::new(),
+                    destination: String::new(),
+                    amount: String::new(),
+                    status: "Sent",
+                    transaction: Some(signature.to_string()),
+                },
+            ));
+        }
+        for (burn_index, signature) in state.successful_withdrawal_requests() {
+            withdrawals.push((
+                *burn_index.get(),
+                DashboardWithdrawal {
+                    burn_index: burn_index.to_string(),
+                    account: String::new(),
+                    destination: String::new(),
+                    amount: String::new(),
+                    status: "Succeeded",
+                    transaction: Some(signature.to_string()),
+                },
+            ));
+        }
+        for (burn_index, signature) in state.failed_withdrawal_requests() {
+            withdrawals.push((
+                *burn_index.get(),
+                DashboardWithdrawal {
+                    burn_index: burn_index.to_string(),
+                    account: String::new(),
+                    destination: String::new(),
+                    amount: String::new(),
+                    status: "Failed",
+                    transaction: Some(signature.to_string()),
+                },
+            ));
+        }
+        withdrawals.sort_unstable_by_key(|(burn_index, _)| Reverse(*burn_index));
+        let withdrawals: Vec<_> = withdrawals.into_iter().map(|(_, w)| w).collect();
+
+        let withdrawals_table = DashboardPaginatedTable::from_items(
+            &withdrawals,
+            pagination.withdrawals_start,
+            DEFAULT_PAGE_SIZE,
+            6,
+            "withdrawals",
+            "withdrawals_start",
+            format!(
+                "&minted_deposits_start={}",
+                pagination.minted_deposits_start
+            ),
         );
 
         let network = state.solana_network();
@@ -228,6 +316,7 @@ impl DashboardTemplate {
             minimum_deposit_amount: lamports_to_sol(state.minimum_deposit_amount()),
             minimum_withdrawal_amount: lamports_to_sol(state.minimum_withdrawal_amount()),
             minted_deposits_table,
+            withdrawals_table,
         }
     }
 }
