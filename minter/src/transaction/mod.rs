@@ -1,4 +1,8 @@
-use crate::{constants::MAX_RESPONSE_BYTES, runtime::CanisterRuntime, state::read_state};
+use crate::{
+    constants::{GET_SIGNATURE_STATUSES_CYCLES, MAX_HTTP_OUTCALL_RESPONSE_BYTES},
+    runtime::CanisterRuntime,
+    state::read_state,
+};
 use cksol_types::UpdateBalanceError;
 use derive_more::From;
 use ic_canister_runtime::IcError;
@@ -24,7 +28,7 @@ pub async fn try_get_transaction<R: CanisterRuntime>(
         .get_transaction(signature)
         .with_encoding(GetTransactionEncoding::Base64)
         .with_commitment(CommitmentLevel::Finalized)
-        .with_response_size_estimate(MAX_RESPONSE_BYTES)
+        .with_response_size_estimate(MAX_HTTP_OUTCALL_RESPONSE_BYTES)
         .with_cycles(cycles_to_attach)
         .try_send()
         .await;
@@ -112,7 +116,8 @@ pub async fn get_signature_statuses<R: CanisterRuntime>(
     let result = client
         .get_signature_statuses(signatures)
         .map_err(GetSignatureStatusesError::RpcError)?
-        .with_response_size_estimate(MAX_RESPONSE_BYTES)
+        .with_response_size_estimate(MAX_HTTP_OUTCALL_RESPONSE_BYTES)
+        .with_cycles(GET_SIGNATURE_STATUSES_CYCLES)
         .try_send()
         .await;
     match result? {
