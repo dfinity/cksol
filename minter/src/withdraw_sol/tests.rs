@@ -6,7 +6,7 @@ use crate::{
     state::{
         TaskType,
         audit::process_event,
-        event::{EventType, TransactionPurpose},
+        event::{EventType, TransactionPurpose, WithdrawSolRequest},
         mutate_state,
     },
     test_fixtures::{
@@ -692,7 +692,7 @@ mod withdrawal_finalization_tests {
         mutate_state(|state| {
             process_event(
                 state,
-                EventType::AcceptedWithdrawSolRequest(crate::state::event::WithdrawSolRequest {
+                EventType::AcceptedWithdrawSolRequest(WithdrawSolRequest {
                     account: MINTER_ACCOUNT,
                     solana_address: [0u8; 32],
                     burn_block_index: burn_block_index.into(),

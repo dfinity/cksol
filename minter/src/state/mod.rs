@@ -539,7 +539,10 @@ impl State {
             self.succeeded_transactions.insert(*signature),
             "Attempted to mark transaction {signature:?} as succeeded twice"
         );
-        for burn_index in self.take_withdrawal_requests_by_signature(signature) {
+        for (burn_index, _) in self
+            .sent_withdrawal_requests
+            .extract_if(.., |_, sig| sig == signature)
+        {
             self.successful_withdrawal_requests
                 .insert(burn_index, *signature);
         }
@@ -561,26 +564,13 @@ impl State {
             None,
             "Attempted to fail transaction {signature:?} twice"
         );
-        for burn_index in self.take_withdrawal_requests_by_signature(signature) {
+        for (burn_index, _) in self
+            .sent_withdrawal_requests
+            .extract_if(.., |_, sig| sig == signature)
+        {
             self.failed_withdrawal_requests
                 .insert(burn_index, *signature);
         }
-    }
-
-    fn take_withdrawal_requests_by_signature(
-        &mut self,
-        signature: &Signature,
-    ) -> Vec<LedgerBurnIndex> {
-        let burn_indices: Vec<_> = self
-            .sent_withdrawal_requests
-            .iter()
-            .filter(|(_, sig)| *sig == signature)
-            .map(|(idx, _)| *idx)
-            .collect();
-        for idx in &burn_indices {
-            self.sent_withdrawal_requests.remove(idx);
-        }
-        burn_indices
     }
 }
 
