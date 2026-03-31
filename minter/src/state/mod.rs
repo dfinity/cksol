@@ -96,7 +96,7 @@ pub struct State {
     minted_deposits: BTreeMap<DepositId, MintedDeposit>,
     pending_withdrawal_requests: BTreeMap<LedgerBurnIndex, WithdrawSolRequest>,
     sent_withdrawal_requests: BTreeMap<LedgerBurnIndex, Signature>,
-    finalized_withdrawal_requests: BTreeMap<LedgerBurnIndex, Signature>,
+    successful_withdrawal_requests: BTreeMap<LedgerBurnIndex, Signature>,
     failed_withdrawal_requests: BTreeMap<LedgerBurnIndex, Signature>,
     deposits_to_consolidate: BTreeMap<LedgerMintIndex, (Account, Lamport)>,
     submitted_transactions: BTreeMap<Signature, SolanaTransaction>,
@@ -355,7 +355,7 @@ impl State {
                 transaction_hash: signature.to_string(),
             });
         }
-        if let Some(signature) = self.finalized_withdrawal_requests.get(&burn_index) {
+        if let Some(signature) = self.successful_withdrawal_requests.get(&burn_index) {
             return WithdrawSolStatus::TxFinalized(TxFinalizedStatus::Success {
                 transaction_hash: signature.to_string(),
                 effective_transaction_fee: None,
@@ -524,7 +524,7 @@ impl State {
             "Attempted to mark transaction {signature:?} as succeeded twice"
         );
         for burn_index in self.take_withdrawal_requests_by_signature(signature) {
-            self.finalized_withdrawal_requests
+            self.successful_withdrawal_requests
                 .insert(burn_index, *signature);
         }
     }
@@ -616,7 +616,7 @@ impl TryFrom<InitArgs> for State {
             minted_deposits: BTreeMap::new(),
             pending_withdrawal_requests: BTreeMap::new(),
             sent_withdrawal_requests: BTreeMap::new(),
-            finalized_withdrawal_requests: BTreeMap::new(),
+            successful_withdrawal_requests: BTreeMap::new(),
             failed_withdrawal_requests: BTreeMap::new(),
             deposits_to_consolidate: BTreeMap::new(),
             submitted_transactions: BTreeMap::new(),
