@@ -7,12 +7,13 @@ use cksol_int_tests::{
         DEFAULT_CALLER_ACCOUNT, DEFAULT_CALLER_DEPOSIT_ADDRESS, DEPOSIT_AMOUNT,
         EXPECTED_MINT_AMOUNT, SharedMockHttpOutcalls, default_update_balance_args,
         deposit_transaction_signature, get_block_request, get_block_response,
-        get_deposit_transaction_response, get_slot_request, get_slot_response,
+        get_deposit_transaction_response, get_signature_statuses_not_found_response,
+        get_signature_statuses_request, get_slot_request, get_slot_response,
         get_transaction_http_mocks, send_transaction_request, send_transaction_response,
     },
 };
 use cksol_types::{
-    DepositStatus, GetDepositAddressArgs, InsufficientCyclesError, Lamport, MinterInfo,
+    DepositId, DepositStatus, GetDepositAddressArgs, InsufficientCyclesError, Lamport, MinterInfo,
     UpdateBalanceArgs, UpdateBalanceError, WithdrawSolArgs, WithdrawSolError, WithdrawSolStatus,
 };
 use cksol_types_internal::{
@@ -651,25 +652,26 @@ mod withdraw_sol_tests {
 
     fn estimate_blockhash_http_mocks(slot: u64) -> MockHttpOutcalls {
         const BLOCKHASH: &str = "4sGjMW1sUnHzSxGspuhpqLDx6wiyjNtZAMdL4VZHirAn";
+        const TX_SIGNATURE: &str = "drWLXM6bHretgz7KuwvGZvPBeQ8KEbS3AKB2WJPy4TbBDaqdqAiNcj3cTAS7UnyJKM7eEZoUf4DvhY1TKkus9Bp";
 
         let mut builder = MockHttpOutcallsBuilder::new();
-        // getSlot requests for get_recent_blockhash
+        // getSlot requests for get_recent_slot_and_blockhash
         for id in 0..4u64 {
             builder = builder
                 .given(get_slot_request().with_id(id))
                 .respond_with(get_slot_response(slot).with_id(id))
         }
-        // getBlock requests for get_recent_blockhash
+        // getBlock requests for get_recent_slot_and_blockhash
         for id in 4..8u64 {
             builder = builder
                 .given(get_block_request(slot).with_id(id))
                 .respond_with(get_block_response(BLOCKHASH).with_id(id))
         }
-        // getSlot requests for get_slot
+        // sendTransaction (IDs 8-11)
         for id in 8..12u64 {
             builder = builder
-                .given(get_slot_request().with_id(id))
-                .respond_with(get_slot_response(slot).with_id(id))
+                .given(send_transaction_request().with_id(id))
+                .respond_with(send_transaction_response(TX_SIGNATURE).with_id(id))
         }
         builder.build()
     }
@@ -680,32 +682,38 @@ mod withdraw_sol_tests {
         const NEW_TX_SIGNATURE: &str = "5VERv8NMvzbJMEkV8xnrLkEaWRtSz9CosKDYjCJjBRnbJLgp8uirBgmQpjKhoR4tjF3ZpRzrFmBV6UjKdiSZkQUW";
 
         let mut builder = MockHttpOutcallsBuilder::new();
-        // get_slot for current slot check (IDs 12-15)
+        // getSignatureStatuses (IDs 12-15)
         for id in 12..16u64 {
             builder = builder
-                .given(get_slot_request().with_id(id))
-                .respond_with(get_slot_response(current_slot).with_id(id))
+                .given(get_signature_statuses_request().with_id(id))
+                .respond_with(get_signature_statuses_not_found_response(1).with_id(id))
         }
-        // get_recent_blockhash: getSlot (IDs 16-19)
+        // get_recent_slot_and_blockhash for current slot check: getSlot (IDs 16-19)
         for id in 16..20u64 {
             builder = builder
                 .given(get_slot_request().with_id(id))
                 .respond_with(get_slot_response(current_slot).with_id(id))
         }
-        // get_recent_blockhash: getBlock (IDs 20-23)
+        // get_recent_slot_and_blockhash for current slot check: getBlock (IDs 20-23)
         for id in 20..24u64 {
             builder = builder
                 .given(get_block_request(current_slot).with_id(id))
                 .respond_with(get_block_response(NEW_BLOCKHASH).with_id(id))
         }
-        // get_slot for new slot (IDs 24-27)
+        // get_recent_slot_and_blockhash for resubmission: getSlot (IDs 24-27)
         for id in 24..28u64 {
             builder = builder
                 .given(get_slot_request().with_id(id))
                 .respond_with(get_slot_response(current_slot).with_id(id))
         }
-        // sendTransaction (IDs 28-31)
+        // get_recent_slot_and_blockhash for resubmission: getBlock (IDs 28-31)
         for id in 28..32u64 {
+            builder = builder
+                .given(get_block_request(current_slot).with_id(id))
+                .respond_with(get_block_response(NEW_BLOCKHASH).with_id(id))
+        }
+        // sendTransaction (IDs 32-35)
+        for id in 32..36u64 {
             builder = builder
                 .given(send_transaction_request().with_id(id))
                 .respond_with(send_transaction_response(NEW_TX_SIGNATURE).with_id(id))
@@ -823,7 +831,10 @@ mod update_balance_tests {
             Ok(DepositStatus::Processing {
                 deposit_amount: DEPOSIT_AMOUNT,
                 amount_to_mint: EXPECTED_MINT_AMOUNT,
-                signature: deposit_signature.clone(),
+                deposit_id: DepositId {
+                    signature: deposit_signature.clone(),
+                    account: DEFAULT_CALLER_ACCOUNT,
+                },
             })
         );
 
@@ -848,9 +859,11 @@ mod update_balance_tests {
             .await;
         assert_matches!(&result, Ok(DepositStatus::Minted {
             minted_amount,
-            signature,
+            deposit_id,
             block_index: _,
-        }) if minted_amount == &EXPECTED_MINT_AMOUNT && signature == &deposit_signature);
+        }) if minted_amount == &EXPECTED_MINT_AMOUNT
+            && deposit_id.signature == deposit_signature
+            && deposit_id.account == DEFAULT_CALLER_ACCOUNT);
 
         let balance_after = setup.ledger().balance_of(DEFAULT_CALLER_ACCOUNT).await;
         assert_eq!(balance_after, EXPECTED_MINT_AMOUNT);
@@ -875,9 +888,11 @@ mod update_balance_tests {
             .await;
         assert_matches!(&first_result, Ok(DepositStatus::Minted {
             minted_amount,
-            signature,
+            deposit_id,
             block_index: _,
-        }) if minted_amount == &EXPECTED_MINT_AMOUNT && signature == &deposit_signature);
+        }) if minted_amount == &EXPECTED_MINT_AMOUNT
+            && deposit_id.signature == deposit_signature
+            && deposit_id.account == DEFAULT_CALLER_ACCOUNT);
 
         let balance_after = setup.ledger().balance_of(DEFAULT_CALLER_ACCOUNT).await;
         assert_eq!(balance_after, EXPECTED_MINT_AMOUNT);
@@ -1029,26 +1044,20 @@ mod consolidation_tests {
         const TX_SIGNATURE: &str = "5VERv8NMvzbJMEkV8xnrLkEaWRtSz9CosKDYjCJjBRnbJLgp8uirBgmQpjKhoR4tjF3ZpRzrFmBV6UjKdiSZkQUW";
 
         let mut mocks = MockHttpOutcallsBuilder::new();
-        // getSlot requests for estimate_recent_blockhash (IDs 4-7)
+        // getSlot requests for get_recent_slot_and_blockhash (IDs 4-7)
         for id in 4..8 {
             mocks = mocks
                 .given(get_slot_request().with_id(id))
                 .respond_with(get_slot_response(SLOT).with_id(id));
         }
-        // getBlock requests for estimate_recent_blockhash (IDs 8-11)
+        // getBlock requests for get_recent_slot_and_blockhash (IDs 8-11)
         for id in 8..12 {
             mocks = mocks
                 .given(get_block_request(SLOT).with_id(id))
                 .respond_with(get_block_response(BLOCKHASH).with_id(id));
         }
-        // getSlot requests for get_slot (IDs 12-15)
+        // sendTransaction requests (IDs 12-15)
         for id in 12..16 {
-            mocks = mocks
-                .given(get_slot_request().with_id(id))
-                .respond_with(get_slot_response(SLOT).with_id(id));
-        }
-        // sendTransaction requests (IDs 16-19)
-        for id in 16..20 {
             mocks = mocks
                 .given(send_transaction_request().with_id(id))
                 .respond_with(send_transaction_response(TX_SIGNATURE).with_id(id));

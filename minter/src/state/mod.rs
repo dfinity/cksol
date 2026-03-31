@@ -45,6 +45,13 @@ pub fn init_once_state(state: State) {
     });
 }
 
+#[cfg(test)]
+pub fn reset_state() {
+    STATE.with(|s| {
+        *s.borrow_mut() = None;
+    });
+}
+
 pub fn mutate_state<F, R>(f: F) -> R
 where
     F: FnOnce(&mut State) -> R,
@@ -184,7 +191,7 @@ impl State {
 
     pub fn deposit_status(&self, deposit_id: &DepositId) -> Option<DepositStatus> {
         if self.quarantined_deposits.contains_key(deposit_id) {
-            return Some(DepositStatus::Quarantined(deposit_id.signature.into()));
+            return Some(DepositStatus::Quarantined((*deposit_id).into()));
         }
         if let Some(Deposit {
             deposit_amount,
@@ -194,7 +201,7 @@ impl State {
             return Some(DepositStatus::Processing {
                 deposit_amount: *deposit_amount,
                 amount_to_mint: *amount_to_mint,
-                signature: deposit_id.signature.into(),
+                deposit_id: (*deposit_id).into(),
             });
         }
         if let Some(MintedDeposit {
@@ -205,7 +212,7 @@ impl State {
             return Some(DepositStatus::Minted {
                 block_index: *block_index.get(),
                 minted_amount: *amount_to_mint,
-                signature: deposit_id.signature.into(),
+                deposit_id: (*deposit_id).into(),
             });
         }
         None

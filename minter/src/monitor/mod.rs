@@ -1,5 +1,6 @@
 use crate::{
     address::derivation_path,
+    constants::MAX_CONCURRENT_RPC_CALLS,
     guard::TimerGuard,
     runtime::CanisterRuntime,
     signer::sign_bytes,
@@ -9,15 +10,21 @@ use crate::{
         event::{EventType, VersionedMessage},
         mutate_state, read_state,
     },
-    transaction::{SubmitTransactionError, get_recent_blockhash, get_slot, submit_transaction},
+    transaction::{
+        SubmitTransactionError, get_recent_slot_and_blockhash, get_signature_statuses,
+        submit_transaction,
+    },
 };
 use canlog::log;
 use cksol_types_internal::log::Priority;
-use ic_cdk::management_canister::SignCallError;
+use ic_cdk_management_canister::SignCallError;
 use icrc_ledger_types::icrc1::account::Account;
+use itertools::Itertools;
 use sol_rpc_types::Slot;
 use solana_signature::Signature;
 use solana_transaction::Transaction;
+use solana_transaction_status_client_types::TransactionConfirmationStatus;
+use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 use thiserror::Error;
 
@@ -26,7 +33,9 @@ mod tests;
 
 pub const MONITOR_SUBMITTED_TRANSACTIONS_DELAY: Duration = Duration::from_secs(60);
 const MAX_BLOCKHASH_AGE: Slot = 150;
-const MAX_CONCURRENT_TRANSACTIONS: usize = 10;
+/// Maximum number of signatures per `getSignatureStatuses` RPC call.
+/// See https://solana.com/docs/rpc/http/getsignaturestatuses
+const MAX_SIGNATURES_PER_STATUS_CHECK: usize = 256;
 
 pub async fn monitor_submitted_transactions<R: CanisterRuntime>(runtime: R) {
     let _guard = match TimerGuard::new(TaskType::MonitorSubmittedTransactions) {
@@ -34,48 +43,170 @@ pub async fn monitor_submitted_transactions<R: CanisterRuntime>(runtime: R) {
         Err(_) => return,
     };
 
-    if read_state(|state| state.submitted_transactions().is_empty()) {
+    let all_transactions: Vec<(Signature, Slot)> = read_state(|state| {
+        state
+            .submitted_transactions()
+            .iter()
+            .map(|(sig, tx)| (*sig, tx.slot))
+            .collect()
+    });
+    if all_transactions.is_empty() {
         return;
     }
 
-    let current_slot = match get_slot(&runtime).await {
-        Ok(slot) => slot,
+    let statuses = check_transaction_statuses(&runtime, &all_transactions).await;
+
+    for (signature, error) in &statuses.errored {
+        log!(
+            Priority::Info,
+            "Transaction {signature} finalized with error: {error}"
+        );
+        mutate_state(|state| {
+            process_event(
+                state,
+                EventType::FailedTransaction {
+                    signature: *signature,
+                },
+                &runtime,
+            )
+        });
+    }
+
+    for signature in &statuses.succeeded {
+        log!(Priority::Info, "Transaction {signature} finalized");
+        mutate_state(|state| {
+            process_event(
+                state,
+                EventType::SucceededTransaction {
+                    signature: *signature,
+                },
+                &runtime,
+            )
+        });
+    }
+
+    if statuses.not_found.is_empty() {
+        return;
+    }
+
+    let (current_slot, _) = match get_recent_slot_and_blockhash(&runtime).await {
+        Ok(result) => result,
         Err(e) => {
             log!(Priority::Info, "Failed to get current slot: {e}");
             return;
         }
     };
-    let mut expired_transactions = read_state(|state| {
-        state
-            .submitted_transactions()
+
+    let expired_signatures: BTreeSet<Signature> = all_transactions
+        .into_iter()
+        .filter(|(sig, slot)| {
+            statuses.not_found.contains(sig) && slot + MAX_BLOCKHASH_AGE < current_slot
+        })
+        .map(|(sig, _)| sig)
+        .collect();
+
+    if expired_signatures.is_empty() {
+        return;
+    }
+
+    let to_resubmit: Vec<_> = read_state(|state| {
+        expired_signatures
             .iter()
-            .filter(|(_, tx)| tx.slot + MAX_BLOCKHASH_AGE < current_slot)
-            .map(|(sig, tx)| (*sig, tx.message.clone(), tx.signers.clone()))
-            .collect::<Vec<_>>()
+            .filter_map(|sig| {
+                state
+                    .submitted_transactions()
+                    .get(sig)
+                    .map(|tx| (*sig, tx.message.clone(), tx.signers.clone()))
+            })
+            .collect()
     });
 
-    while !expired_transactions.is_empty() {
-        // TODO DEFI-2670: Combine these two calls once `sol_rpc_client::SolRpcClient`
-        //  `get_recent_block` method is released.
-        let new_blockhash = match get_recent_blockhash(&runtime).await {
-            Ok(blockhash) => blockhash,
+    resubmit_expired_transactions(&runtime, to_resubmit).await;
+}
+
+/// Result of checking transaction statuses.
+struct TransactionStatuses {
+    /// Transactions confirmed as finalized on-chain without errors.
+    succeeded: BTreeSet<Signature>,
+    /// Transactions that finalized with an on-chain error.
+    errored: BTreeMap<Signature, String>,
+    /// Transactions with no on-chain status (safe to resubmit if expired).
+    not_found: BTreeSet<Signature>,
+    // Transactions that are in-flight (Processed/Confirmed) or whose status
+    // check failed are implicitly excluded — they appear in neither set.
+}
+
+async fn check_transaction_statuses<R: CanisterRuntime>(
+    runtime: &R,
+    transactions: &[(Signature, Slot)],
+) -> TransactionStatuses {
+    let signatures: Vec<Signature> = transactions.iter().map(|(sig, _)| *sig).collect();
+    let batches: Vec<Vec<Signature>> = signatures
+        .into_iter()
+        .chunks(MAX_SIGNATURES_PER_STATUS_CHECK)
+        .into_iter()
+        .map(Iterator::collect)
+        .collect();
+
+    let mut result = TransactionStatuses {
+        succeeded: BTreeSet::new(),
+        errored: BTreeMap::new(),
+        not_found: BTreeSet::new(),
+    };
+
+    for round in &batches.into_iter().chunks(MAX_CONCURRENT_RPC_CALLS) {
+        let batch_results: Vec<_> = futures::future::join_all(round.map(async |batch| {
+            match get_signature_statuses(runtime, &batch).await {
+                Ok(statuses) => Some((batch, statuses)),
+                Err(e) => {
+                    log!(Priority::Info, "Failed to check transaction statuses: {e}");
+                    None
+                }
+            }
+        }))
+        .await;
+
+        for (sigs, statuses) in batch_results.into_iter().flatten() {
+            for (signature, status) in sigs.iter().zip(statuses) {
+                match status {
+                    Some(s)
+                        if s.confirmation_status
+                            == Some(TransactionConfirmationStatus::Finalized) =>
+                    {
+                        if let Some(err) = s.err {
+                            result.errored.insert(*signature, format!("{err:?}"));
+                        } else {
+                            result.succeeded.insert(*signature);
+                        }
+                    }
+                    Some(_) => {} // in-flight (Processed/Confirmed)
+                    None => {
+                        result.not_found.insert(*signature);
+                    }
+                }
+            }
+        }
+    }
+
+    result
+}
+
+async fn resubmit_expired_transactions<R: CanisterRuntime>(
+    runtime: &R,
+    expired: Vec<(Signature, VersionedMessage, Vec<Account>)>,
+) {
+    for round in &expired.into_iter().chunks(MAX_CONCURRENT_RPC_CALLS) {
+        let (new_slot, new_blockhash) = match get_recent_slot_and_blockhash(runtime).await {
+            Ok(result) => result,
             Err(e) => {
                 log!(Priority::Info, "Failed to get recent blockhash: {e}");
                 return;
             }
         };
-        let new_slot = match get_slot(&runtime).await {
-            Ok(slot) => slot,
-            Err(e) => {
-                log!(Priority::Info, "Failed to get slot: {e}");
-                return;
-            }
-        };
 
-        let batch_size = MAX_CONCURRENT_TRANSACTIONS.min(expired_transactions.len());
-        let futures = expired_transactions.drain(..batch_size).map(
-            async |(old_signature, message, signers)| match resubmit_transaction_with_new_blockhash(
-                &runtime,
+        futures::future::join_all(round.map(async |(old_signature, message, signers)| {
+            match try_resubmit_transaction(
+                runtime,
                 old_signature,
                 message,
                 signers,
@@ -84,21 +215,21 @@ pub async fn monitor_submitted_transactions<R: CanisterRuntime>(runtime: R) {
             )
             .await
             {
-                Ok(new_signature) => log!(
+                Ok(new_sig) => log!(
                     Priority::Info,
-                    "Resubmitted transaction {old_signature} with new signature {new_signature}"
+                    "Resubmitted transaction {old_signature} as {new_sig}"
                 ),
                 Err(e) => log!(
                     Priority::Info,
                     "Failed to resubmit transaction {old_signature}: {e}"
                 ),
-            },
-        );
-        futures::future::join_all(futures).await;
+            }
+        }))
+        .await;
     }
 }
 
-async fn resubmit_transaction_with_new_blockhash<R: CanisterRuntime>(
+async fn try_resubmit_transaction<R: CanisterRuntime>(
     runtime: &R,
     old_signature: Signature,
     versioned_message: VersionedMessage,
@@ -119,8 +250,6 @@ async fn resubmit_transaction_with_new_blockhash<R: CanisterRuntime>(
 
     let new_signature = transaction.signatures[0];
 
-    // Record the resubmission event before submitting the transaction to ensure we don't
-    // resubmit the same transaction twice in case of a panic during submission.
     mutate_state(|state| {
         process_event(
             state,

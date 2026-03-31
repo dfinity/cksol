@@ -1,16 +1,19 @@
 use crate::{
     address::{derivation_path, derive_public_key, lazy_get_schnorr_master_key},
+    constants::MAX_CONCURRENT_RPC_CALLS,
     guard::TimerGuard,
     numeric::LedgerMintIndex,
     runtime::CanisterRuntime,
-    sol_transfer::{CreateTransferError, MAX_SIGNATURES, create_signed_transfer_transaction},
+    sol_transfer::{
+        CreateTransferError, MAX_SIGNATURES, create_signed_batch_consolidation_transaction,
+    },
     state::{
         TaskType,
         audit::process_event,
         event::{EventType, TransactionPurpose},
         mutate_state, read_state,
     },
-    transaction::{SubmitTransactionError, get_recent_blockhash, get_slot, submit_transaction},
+    transaction::{SubmitTransactionError, get_recent_slot_and_blockhash, submit_transaction},
 };
 use canlog::log;
 use cksol_types_internal::log::Priority;
@@ -28,7 +31,7 @@ use thiserror::Error;
 mod tests;
 
 pub const DEPOSIT_CONSOLIDATION_DELAY: Duration = Duration::from_mins(10);
-const MAX_CONCURRENT_TRANSACTIONS: usize = 10;
+
 pub(crate) const MAX_TRANSFERS_PER_CONSOLIDATION: usize = MAX_SIGNATURES as usize - 1;
 
 pub async fn consolidate_deposits<R: CanisterRuntime>(runtime: R) {
@@ -47,21 +50,12 @@ pub async fn consolidate_deposits<R: CanisterRuntime>(runtime: R) {
 
     for round in &consolidation_rounds
         .into_iter()
-        .chunks(MAX_CONCURRENT_TRANSACTIONS)
+        .chunks(MAX_CONCURRENT_RPC_CALLS)
     {
-        let recent_blockhash = match get_recent_blockhash(&runtime).await {
-            Ok(blockhash) => blockhash,
+        let (slot, recent_blockhash) = match get_recent_slot_and_blockhash(&runtime).await {
+            Ok((slot, blockhash)) => (slot, blockhash),
             Err(e) => {
                 log!(Priority::Info, "Failed to fetch recent blockhash: {e}");
-                return;
-            }
-        };
-        // TODO DEFI-2670: Update `sol_rpc_client` to return the slot along with the blockhash
-        //  in `estimate_recent_blockhash`, then remove this separate call to `getSlot`.
-        let slot = match get_slot(&runtime).await {
-            Ok(slot) => slot,
-            Err(e) => {
-                log!(Priority::Info, "Failed to fetch slot: {e}");
                 return;
             }
         };
@@ -115,7 +109,7 @@ async fn submit_consolidation_transaction<R: CanisterRuntime>(
         .iter()
         .map(|(account, (lamport, _))| (*account, *lamport))
         .collect();
-    let (transaction, signers) = create_signed_transfer_transaction(
+    let (transaction, signers) = create_signed_batch_consolidation_transaction(
         minter_account,
         &sources,
         minter_address,

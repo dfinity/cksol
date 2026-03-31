@@ -1,0 +1,25 @@
+canisters:
+  - name: cksol_minter
+    recipe:
+      type: "@dfinity/rust@latest"
+      configuration:
+        package: cksol_minter
+        candid: minter/cksol-minter.did
+        shrink: true
+        compress: true
+
+  - name: cksol_ledger
+    build:
+      steps:
+        - type: script
+          commands:
+            - "curl -fsSL -o ${ICP_WASM_OUTPUT_PATH} https://github.com/dfinity/ic/releases/download/ledger-suite-icrc-2026-02-02/ic-icrc1-ledger.wasm.gz"
+
+environments:
+  - name: staging
+    network: ic
+    canisters: [cksol_minter, cksol_ledger]
+
+  - name: prod
+    network: ic
+    canisters: [cksol_minter, cksol_ledger]

@@ -222,8 +222,16 @@ fn http_request(request: HttpRequest) -> HttpResponse {
     match request.path() {
         "/dashboard" => {
             use askama::Template;
-            use cksol_minter::dashboard::DashboardTemplate;
-            let dashboard = read_state(DashboardTemplate::from_state);
+            use cksol_minter::dashboard::{DashboardPaginationParameters, DashboardTemplate};
+            let pagination = match DashboardPaginationParameters::from_query_params(&request) {
+                Ok(p) => p,
+                Err(e) => {
+                    return HttpResponseBuilder::bad_request()
+                        .with_body_and_content_length(e)
+                        .build();
+                }
+            };
+            let dashboard = read_state(|state| DashboardTemplate::from_state(state, pagination));
             HttpResponseBuilder::ok()
                 .header("Content-Type", "text/html; charset=utf-8")
                 .with_body_and_content_length(dashboard.render().unwrap())

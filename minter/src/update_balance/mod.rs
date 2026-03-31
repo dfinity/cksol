@@ -38,7 +38,7 @@ pub async fn update_balance<R: CanisterRuntime>(
         Some(DepositStatus::Processing {
             deposit_amount,
             amount_to_mint,
-            signature: _,
+            deposit_id: _,
         }) => Deposit {
             deposit_amount,
             amount_to_mint,
@@ -59,7 +59,7 @@ pub async fn update_balance<R: CanisterRuntime>(
             Ok(DepositStatus::Processing {
                 deposit_amount,
                 amount_to_mint,
-                signature: signature.into(),
+                deposit_id: deposit_id.into(),
             })
         }
     }

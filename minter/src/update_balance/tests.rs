@@ -316,7 +316,10 @@ async fn should_allow_deposits_to_multiple_accounts_with_single_transaction() {
             Ok(DepositStatus::Minted {
                 block_index: BLOCK_INDEXES[i],
                 minted_amount: DEPOSIT_AMOUNTS[i] - DEPOSIT_FEE,
-                signature: deposit_transaction_to_multiple_accounts_signature().into(),
+                deposit_id: cksol_types::DepositId {
+                    signature: deposit_transaction_to_multiple_accounts_signature().into(),
+                    account: ACCOUNTS[i],
+                },
             })
         );
     }

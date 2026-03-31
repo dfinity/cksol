@@ -1,5 +1,5 @@
 [package]
-name = "cksol-minter"
+name = "cksol_minter"
 version = "0.1.0"
 description = "Chain-key SOL minter for the Internet Computer."
 authors.workspace = true
@@ -9,7 +9,7 @@ homepage.workspace = true
 license.workspace = true
 
 [[bin]]
-name = "cksol-minter"
+name = "cksol_minter"
 path = "src/main.rs"
 
 [dependencies]
@@ -25,6 +25,7 @@ futures = { workspace = true }
 hex = { workspace = true }
 ic-canister-runtime = { workspace = true }
 ic-cdk = { workspace = true }
+ic-cdk-management-canister = { workspace = true }
 ic-cdk-timers = { workspace = true }
 ic-dummy-getrandom-for-wasm = { workspace = true }
 ic-ed25519 = { workspace = true }

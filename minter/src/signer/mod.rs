@@ -1,5 +1,5 @@
 use crate::{address::DerivationPath, state::read_state};
-use ic_cdk::management_canister::{
+use ic_cdk_management_canister::{
     SchnorrAlgorithm, SchnorrKeyId, SignCallError, SignWithSchnorrArgs, sign_with_schnorr,
 };
 use solana_signature::Signature;
