@@ -230,6 +230,29 @@ pub fn get_signature_statuses_not_found_response(count: usize) -> JsonRpcRespons
     }))
 }
 
+/// JSON-RPC response for `getSignatureStatuses` where all signatures are finalized.
+pub fn get_signature_statuses_finalized_response(count: usize) -> JsonRpcResponse {
+    let statuses: Vec<_> = (0..count)
+        .map(|_| {
+            json!({
+                "slot": 350_000_000_u64,
+                "confirmations": null,
+                "status": { "Ok": null },
+                "err": null,
+                "confirmationStatus": "finalized"
+            })
+        })
+        .collect();
+    JsonRpcResponse::from(json!({
+        "jsonrpc": "2.0",
+        "result": {
+            "context": { "slot": 0 },
+            "value": statuses
+        },
+        "id": 1
+    }))
+}
+
 /// JSON-RPC request matcher for `sendTransaction`.
 pub fn send_transaction_request() -> JsonRpcRequestMatcher {
     JsonRpcRequestMatcher::with_method("sendTransaction")
