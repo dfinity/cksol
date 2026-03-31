@@ -57,7 +57,7 @@ do
             RUN_CARGO_TEST=1
             shift
             ;;
-        --cksol-minter)
+        --cksol_minter)
             CANISTERS+=("cksol_minter")
             shift
             ;;
@@ -116,14 +116,22 @@ function build_canister() {
 
     if [ "$ONLY_DEPS" != "1" ]
     then
-        local output="${canister//_/-}"
         ic-wasm \
             "./target/$TARGET/release/$canister.wasm" \
-            -o "./$output.wasm" \
+            -o "./$canister.wasm" \
             shrink
-        ic-wasm "$output.wasm" -o "$output.wasm" metadata candid:service -f "minter/cksol-minter.did" -v public
+        ic-wasm "$canister.wasm" -o "$canister.wasm" metadata candid:service -f "minter/$canister.did" -v public
+        ic-wasm "$canister.wasm" -o "$canister.wasm" metadata candid:args -d "(MinterArg)" -v public
 
-        gzip --no-name --force "$output.wasm"
+        # Write metadata for dfx
+        wasm_url="https://github.com/dfinity/cksol/releases/latest/download/$canister.wasm.gz"
+        # TODO: add init_guide once documentation is available
+        metadata_json=$(echo '{}' | jq -cMr \
+            --arg wasm_url "$wasm_url" \
+            '. | .pullable = { wasm_url: $wasm_url, dependencies: []} ')
+        ic-wasm "$canister.wasm" -o "$canister.wasm" metadata dfx -d "$metadata_json" -v public
+
+        gzip --no-name --force "$canister.wasm"
     fi
 }
 

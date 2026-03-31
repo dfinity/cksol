@@ -1,6 +1,6 @@
 # Use this with
 #
-#  docker build -t cksol-minter .
+#  docker build -t cksol_minter .
 #  or use ./scripts/docker-build
 #
 # The docker image. To update, run `docker pull ubuntu` locally, and update the
@@ -50,8 +50,8 @@ COPY . .
 
 RUN touch minter/src/main.rs
 
-RUN ./scripts/build --cksol-minter
-RUN sha256sum cksol-minter.wasm.gz
+RUN ./scripts/build --cksol_minter
+RUN sha256sum cksol_minter.wasm.gz
 
-FROM scratch AS scratch_cksol-minter
-COPY --from=build /cksol/cksol-minter.wasm.gz /
+FROM scratch AS scratch_cksol_minter
+COPY --from=build /cksol/cksol_minter.wasm.gz /
