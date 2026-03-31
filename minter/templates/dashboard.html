@@ -2,6 +2,10 @@
 <a href="https://solscan.io/account/{{address}}{{solscan_suffix}}"><code>{{address}}</code></a>
 {%- endmacro %}
 
+{% macro solscan_tx_link(signature) -%}
+<a href="https://solscan.io/tx/{{signature}}{{solscan_suffix}}"><code>{{signature}}</code></a>
+{%- endmacro %}
+
 <!DOCTYPE html>
 <html lang="en">
 
@@ -23,6 +27,10 @@
             font-variant: small-caps;
             margin-top: 30px;
             margin-bottom: 5px;
+        }
+
+        table table {
+            font-size: small;
         }
 
         .background {
@@ -87,6 +95,33 @@
                     </tr>
                 </tbody>
             </table>
+
+            {% if !minted_deposits_table.is_empty() %}
+            <h3 id="minted-deposits">Minted deposits</h3>
+            <table>
+                <thead>
+                <tr>
+                    <th>Deposit Txn</th>
+                    <th>Account</th>
+                    <th>Deposit Amount (SOL)</th>
+                    <th>Minted Amount (SOL)</th>
+                    <th>Mint Block Index</th>
+                </tr>
+                </thead>
+                <tbody>
+                {% for deposit in minted_deposits_table.current_page %}
+                <tr>
+                    <td>{% call solscan_tx_link(deposit.signature) %}</td>
+                    <td><code>{{ deposit.account }}</code></td>
+                    <td>{{ deposit.deposit_amount }}</td>
+                    <td>{{ deposit.minted_amount }}</td>
+                    <td>{{ deposit.mint_block_index }}</td>
+                </tr>
+                {% endfor %}
+                {% if minted_deposits_table.has_more_than_one_page() %}{{ minted_deposits_table.pagination|safe }}{% endif %}
+                </tbody>
+            </table>
+            {% endif %}
         </div>
     </div>
 
