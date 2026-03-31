@@ -41,22 +41,21 @@ jobs:
     steps:
       - name: 'Checkout'
         uses: actions/checkout@v4
-      # TODO DEFI-2641: setup reproducible build with Docker
-      - name: Docker build
-        run: |
-          cargo build --locked --target wasm32-unknown-unknown --release --package cksol_minter
-          gzip -fckn9 target/wasm32-unknown-unknown/release/cksol_minter.wasm >./wasms/cksol-minter.wasm.gz
+
+      - name: 'Docker build'
+        run: ./scripts/docker-build
 
       - name: 'Archive Artifact'
         uses: actions/upload-artifact@v4
         with:
-          name: cksol-minter.wasm.gz
-          path: ./wasms/cksol-minter.wasm.gz
+          name: cksol_minter.wasm.gz
+          path: ./wasms/cksol_minter.wasm.gz
           if-no-files-found: error
+          compression-level: 0
 
       - name: 'Add summary'
         run: |
-          hash=`sha256sum ./wasms/cksol-minter.wasm.gz`
+          hash=`sha256sum ./wasms/cksol_minter.wasm.gz`
           echo "SHA-256 :hash: ${hash}" >> $GITHUB_STEP_SUMMARY
 
   unit-tests:
@@ -77,11 +76,11 @@ jobs:
       - name: 'Download Artifacts'
         uses: actions/download-artifact@v4
         with:
-          name: cksol-minter.wasm.gz
+          name: cksol_minter.wasm.gz
 
       - name: 'Set CKSOL_MINTER_WASM_PATH for load_wasm'
         run: |
-          echo "CKSOL_MINTER_WASM_PATH=$GITHUB_WORKSPACE/cksol-minter.wasm.gz" >> "$GITHUB_ENV"
+          echo "CKSOL_MINTER_WASM_PATH=$GITHUB_WORKSPACE/cksol_minter.wasm.gz" >> "$GITHUB_ENV"
 
       - name: 'Install PocketIC server'
         uses: dfinity/pocketic@main

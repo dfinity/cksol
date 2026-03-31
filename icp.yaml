@@ -4,7 +4,7 @@ canisters:
       type: "@dfinity/rust@latest"
       configuration:
         package: cksol_minter
-        candid: minter/cksol-minter.did
+        candid: minter/cksol_minter.did
         shrink: true
         compress: true
 
