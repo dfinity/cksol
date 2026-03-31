@@ -235,17 +235,14 @@ impl DashboardTemplate {
         );
 
         let mut withdrawals: Vec<_> = Vec::new();
-        for (burn_index, req) in state.all_withdrawal_requests() {
-            let (status, transaction) =
-                if let Some(sig) = state.successful_withdrawal_requests().get(burn_index) {
-                    ("Succeeded", Some(sig.to_string()))
-                } else if let Some(sig) = state.failed_withdrawal_requests().get(burn_index) {
-                    ("Failed", Some(sig.to_string()))
-                } else if let Some(sig) = state.sent_withdrawal_requests().get(burn_index) {
-                    ("Sent", Some(sig.to_string()))
-                } else {
-                    ("Pending", None)
-                };
+
+        fn push_withdrawal(
+            withdrawals: &mut Vec<(u64, DashboardWithdrawal)>,
+            burn_index: &crate::numeric::LedgerBurnIndex,
+            req: &crate::state::event::WithdrawSolRequest,
+            status: &'static str,
+            transaction: Option<String>,
+        ) {
             withdrawals.push((
                 *burn_index.get(),
                 DashboardWithdrawal {
@@ -257,6 +254,37 @@ impl DashboardTemplate {
                     transaction,
                 },
             ));
+        }
+
+        for (burn_index, req) in state.pending_withdrawal_requests() {
+            push_withdrawal(&mut withdrawals, burn_index, req, "Pending", None);
+        }
+        for (burn_index, sent) in state.sent_withdrawal_requests() {
+            push_withdrawal(
+                &mut withdrawals,
+                burn_index,
+                &sent.request,
+                "Sent",
+                Some(sent.signature.to_string()),
+            );
+        }
+        for (burn_index, sent) in state.successful_withdrawal_requests() {
+            push_withdrawal(
+                &mut withdrawals,
+                burn_index,
+                &sent.request,
+                "Succeeded",
+                Some(sent.signature.to_string()),
+            );
+        }
+        for (burn_index, sent) in state.failed_withdrawal_requests() {
+            push_withdrawal(
+                &mut withdrawals,
+                burn_index,
+                &sent.request,
+                "Failed",
+                Some(sent.signature.to_string()),
+            );
         }
         withdrawals.sort_unstable_by_key(|(burn_index, _)| Reverse(*burn_index));
         let withdrawals: Vec<_> = withdrawals.into_iter().map(|(_, w)| w).collect();

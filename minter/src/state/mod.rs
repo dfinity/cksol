@@ -94,12 +94,10 @@ pub struct State {
     accepted_deposits: BTreeMap<DepositId, Deposit>,
     quarantined_deposits: BTreeMap<DepositId, Deposit>,
     minted_deposits: BTreeMap<DepositId, MintedDeposit>,
-    /// All accepted withdrawal requests, indexed by burn index. Never removed.
-    all_withdrawal_requests: BTreeMap<LedgerBurnIndex, WithdrawSolRequest>,
     pending_withdrawal_requests: BTreeMap<LedgerBurnIndex, WithdrawSolRequest>,
-    sent_withdrawal_requests: BTreeMap<LedgerBurnIndex, Signature>,
-    successful_withdrawal_requests: BTreeMap<LedgerBurnIndex, Signature>,
-    failed_withdrawal_requests: BTreeMap<LedgerBurnIndex, Signature>,
+    sent_withdrawal_requests: BTreeMap<LedgerBurnIndex, SentWithdrawalRequest>,
+    successful_withdrawal_requests: BTreeMap<LedgerBurnIndex, SentWithdrawalRequest>,
+    failed_withdrawal_requests: BTreeMap<LedgerBurnIndex, SentWithdrawalRequest>,
     deposits_to_consolidate: BTreeMap<LedgerMintIndex, (Account, Lamport)>,
     submitted_transactions: BTreeMap<Signature, SolanaTransaction>,
     succeeded_transactions: BTreeSet<Signature>,
@@ -173,15 +171,17 @@ impl State {
         &self.minted_deposits
     }
 
-    pub fn sent_withdrawal_requests(&self) -> &BTreeMap<LedgerBurnIndex, Signature> {
+    pub fn sent_withdrawal_requests(&self) -> &BTreeMap<LedgerBurnIndex, SentWithdrawalRequest> {
         &self.sent_withdrawal_requests
     }
 
-    pub fn successful_withdrawal_requests(&self) -> &BTreeMap<LedgerBurnIndex, Signature> {
+    pub fn successful_withdrawal_requests(
+        &self,
+    ) -> &BTreeMap<LedgerBurnIndex, SentWithdrawalRequest> {
         &self.successful_withdrawal_requests
     }
 
-    pub fn failed_withdrawal_requests(&self) -> &BTreeMap<LedgerBurnIndex, Signature> {
+    pub fn failed_withdrawal_requests(&self) -> &BTreeMap<LedgerBurnIndex, SentWithdrawalRequest> {
         &self.failed_withdrawal_requests
     }
 
@@ -372,27 +372,23 @@ impl State {
         if self.pending_withdrawal_requests.contains_key(&burn_index) {
             return WithdrawSolStatus::Pending;
         }
-        if let Some(signature) = self.sent_withdrawal_requests.get(&burn_index) {
+        if let Some(sent) = self.sent_withdrawal_requests.get(&burn_index) {
             return WithdrawSolStatus::TxSent(SolTransaction {
-                transaction_hash: signature.to_string(),
+                transaction_hash: sent.signature.to_string(),
             });
         }
-        if let Some(signature) = self.successful_withdrawal_requests.get(&burn_index) {
+        if let Some(sent) = self.successful_withdrawal_requests.get(&burn_index) {
             return WithdrawSolStatus::TxFinalized(TxFinalizedStatus::Success {
-                transaction_hash: signature.to_string(),
+                transaction_hash: sent.signature.to_string(),
                 effective_transaction_fee: None,
             });
         }
-        if let Some(signature) = self.failed_withdrawal_requests.get(&burn_index) {
+        if let Some(sent) = self.failed_withdrawal_requests.get(&burn_index) {
             return WithdrawSolStatus::TxFinalized(TxFinalizedStatus::Failure {
-                transaction_hash: signature.to_string(),
+                transaction_hash: sent.signature.to_string(),
             });
         }
         WithdrawSolStatus::NotFound
-    }
-
-    pub fn all_withdrawal_requests(&self) -> &BTreeMap<LedgerBurnIndex, WithdrawSolRequest> {
-        &self.all_withdrawal_requests
     }
 
     pub fn pending_withdrawal_requests(&self) -> &BTreeMap<LedgerBurnIndex, WithdrawSolRequest> {
@@ -400,8 +396,6 @@ impl State {
     }
 
     fn process_accepted_withdrawal(&mut self, request: &WithdrawSolRequest) {
-        self.all_withdrawal_requests
-            .insert(request.burn_block_index, request.clone());
         assert_eq!(
             self.pending_withdrawal_requests
                 .insert(request.burn_block_index, request.clone()),
@@ -471,15 +465,20 @@ impl State {
             }
             TransactionPurpose::WithdrawSol { burn_indices } => {
                 for burn_index in burn_indices {
-                    assert!(
-                        self.pending_withdrawal_requests
-                            .remove(burn_index)
-                            .is_some(),
-                        "Attempted to send transaction for unknown withdrawal request: {burn_index:?}"
-                    );
+                    let request = self
+                        .pending_withdrawal_requests
+                        .remove(burn_index)
+                        .unwrap_or_else(|| {
+                            panic!("Attempted to send transaction for unknown withdrawal request: {burn_index:?}")
+                        });
                     assert_eq!(
-                        self.sent_withdrawal_requests
-                            .insert(*burn_index, *signature),
+                        self.sent_withdrawal_requests.insert(
+                            *burn_index,
+                            SentWithdrawalRequest {
+                                request,
+                                signature: *signature,
+                            },
+                        ),
                         None,
                         "Attempted to send transaction for already sent withdrawal request: {burn_index:?}"
                     );
@@ -530,9 +529,9 @@ impl State {
             None,
             "Attempted to resubmit transaction with signature {new_signature:?} that already exists"
         );
-        for signature in self.sent_withdrawal_requests.values_mut() {
-            if signature == old_signature {
-                *signature = *new_signature;
+        for sent in self.sent_withdrawal_requests.values_mut() {
+            if &sent.signature == old_signature {
+                sent.signature = *new_signature;
             }
         }
     }
@@ -552,10 +551,9 @@ impl State {
             "Attempted to mark transaction {signature:?} as succeeded twice"
         );
         self.sent_withdrawal_requests
-            .extract_if(.., |_, sig| sig == signature)
-            .for_each(|(burn_index, _)| {
-                self.successful_withdrawal_requests
-                    .insert(burn_index, *signature);
+            .extract_if(.., |_, sent| &sent.signature == signature)
+            .for_each(|(burn_index, sent)| {
+                self.successful_withdrawal_requests.insert(burn_index, sent);
             });
     }
 
@@ -576,10 +574,9 @@ impl State {
             "Attempted to fail transaction {signature:?} twice"
         );
         self.sent_withdrawal_requests
-            .extract_if(.., |_, sig| sig == signature)
-            .for_each(|(burn_index, _)| {
-                self.failed_withdrawal_requests
-                    .insert(burn_index, *signature);
+            .extract_if(.., |_, sent| &sent.signature == signature)
+            .for_each(|(burn_index, sent)| {
+                self.failed_withdrawal_requests.insert(burn_index, sent);
             });
     }
 }
@@ -630,7 +627,6 @@ impl TryFrom<InitArgs> for State {
             accepted_deposits: BTreeMap::new(),
             quarantined_deposits: BTreeMap::new(),
             minted_deposits: BTreeMap::new(),
-            all_withdrawal_requests: BTreeMap::new(),
             pending_withdrawal_requests: BTreeMap::new(),
             sent_withdrawal_requests: BTreeMap::new(),
             successful_withdrawal_requests: BTreeMap::new(),
@@ -644,6 +640,13 @@ impl TryFrom<InitArgs> for State {
         state.validate()?;
         Ok(state)
     }
+}
+
+/// A withdrawal request that has been submitted in a Solana transaction.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SentWithdrawalRequest {
+    pub request: WithdrawSolRequest,
+    pub signature: Signature,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
