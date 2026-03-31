@@ -4605,8 +4605,7 @@ dependencies = [
 [[package]]
 name = "sol_rpc_client"
 version = "6.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "445b6d559df7d036c4153693df9fcb1431a24f563a56f90bfdaf5616a706b13b"
+source = "git+https://github.com/dfinity/sol-rpc-canister.git?branch=feat%2Fscale-default-cycles-by-provider-count#15128895c23c42376443faa8e4654da68c5b4c4c"
 dependencies = [
  "bincode",
  "candid",
@@ -4634,8 +4633,7 @@ dependencies = [
 [[package]]
 name = "sol_rpc_types"
 version = "3.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2cd926f8ab58e08842d6d67133ef4b5401f1c5c5de6d073d68bba2c2b3502dbb"
+source = "git+https://github.com/dfinity/sol-rpc-canister.git?branch=feat%2Fscale-default-cycles-by-provider-count#15128895c23c42376443faa8e4654da68c5b4c4c"
 dependencies = [
  "base64 0.22.1",
  "bincode",
@@ -6412,6 +6410,7 @@ dependencies = [
  "cfg-if",
  "libc",
  "psm",
+ "windows-sys 0.52.0",
  "windows-sys 0.59.0",
 ]
 
