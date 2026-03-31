@@ -676,7 +676,12 @@ mod process_pending_withdrawals_tests {
 
 mod withdrawal_finalization_tests {
     use super::*;
-    use crate::state::{audit::process_event, event::EventType, mutate_state};
+    use crate::numeric::LedgerBurnIndex;
+    use crate::state::{
+        audit::process_event,
+        event::{EventType, TransactionPurpose},
+        mutate_state,
+    };
     use cksol_types::TxFinalizedStatus;
     use solana_hash::Hash;
     use solana_message::Message;
@@ -685,6 +690,7 @@ mod withdrawal_finalization_tests {
     fn setup_sent_withdrawal(burn_block_index: u64) -> Signature {
         let signature = Signature::from([burn_block_index as u8 + 1; 64]);
         let runtime = TestCanisterRuntime::new().with_increasing_time();
+        let payer = solana_address::Address::from([0x42; 32]);
 
         mutate_state(|state| {
             process_event(
@@ -702,20 +708,15 @@ mod withdrawal_finalization_tests {
         mutate_state(|state| {
             process_event(
                 state,
-                EventType::SentWithdrawalTransaction {
-                    transactions: vec![(burn_block_index.into(), signature)],
-                },
-                &runtime,
-            )
-        });
-        mutate_state(|state| {
-            process_event(
-                state,
                 EventType::SubmittedTransaction {
                     signature,
-                    transaction: Message::new_with_blockhash(&[], None, &Hash::default()),
+                    message: Message::new_with_blockhash(&[], Some(&payer), &Hash::default())
+                        .into(),
                     signers: vec![MINTER_ACCOUNT],
                     slot: 1,
+                    purpose: TransactionPurpose::WithdrawSol {
+                        burn_indices: vec![LedgerBurnIndex::from(burn_block_index)],
+                    },
                 },
                 &runtime,
             )
@@ -771,15 +772,20 @@ mod withdrawal_finalization_tests {
         init_state();
         let signature = Signature::from([0x42; 64]);
         let runtime = TestCanisterRuntime::new().with_increasing_time();
+        let payer = solana_address::Address::from([0x42; 32]);
 
         mutate_state(|state| {
             process_event(
                 state,
                 EventType::SubmittedTransaction {
                     signature,
-                    transaction: Message::new_with_blockhash(&[], None, &Hash::default()),
+                    message: Message::new_with_blockhash(&[], Some(&payer), &Hash::default())
+                        .into(),
                     signers: vec![MINTER_ACCOUNT],
                     slot: 1,
+                    purpose: TransactionPurpose::ConsolidateDeposits {
+                        mint_indices: vec![],
+                    },
                 },
                 &runtime,
             )
