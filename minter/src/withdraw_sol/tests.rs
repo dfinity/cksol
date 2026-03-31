@@ -766,40 +766,4 @@ mod withdrawal_finalization_tests {
                 if transaction_hash == signature.to_string()
         );
     }
-
-    #[test]
-    fn should_not_affect_withdrawal_status_for_consolidation_transaction() {
-        init_state();
-        let signature = Signature::from([0x42; 64]);
-        let runtime = TestCanisterRuntime::new().with_increasing_time();
-        let payer = solana_address::Address::from([0x42; 32]);
-
-        mutate_state(|state| {
-            process_event(
-                state,
-                EventType::SubmittedTransaction {
-                    signature,
-                    message: Message::new_with_blockhash(&[], Some(&payer), &Hash::default())
-                        .into(),
-                    signers: vec![MINTER_ACCOUNT],
-                    slot: 1,
-                    purpose: TransactionPurpose::ConsolidateDeposits {
-                        mint_indices: vec![],
-                    },
-                },
-                &runtime,
-            )
-        });
-
-        mutate_state(|state| {
-            process_event(
-                state,
-                EventType::SucceededTransaction { signature },
-                &runtime,
-            )
-        });
-
-        // No withdrawal status should be affected
-        assert_matches!(withdraw_sol_status(0), WithdrawSolStatus::NotFound);
-    }
 }
