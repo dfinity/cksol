@@ -222,8 +222,16 @@ fn http_request(request: HttpRequest) -> HttpResponse {
     match request.path() {
         "/dashboard" => {
             use askama::Template;
-            use cksol_minter::dashboard::DashboardTemplate;
-            let dashboard = read_state(DashboardTemplate::from_state);
+            use cksol_minter::dashboard::{DashboardPaginationParameters, DashboardTemplate};
+            let pagination = match DashboardPaginationParameters::from_query_params(&request) {
+                Ok(p) => p,
+                Err(e) => {
+                    return HttpResponseBuilder::bad_request()
+                        .with_body_and_content_length(e)
+                        .build();
+                }
+            };
+            let dashboard = read_state(|state| DashboardTemplate::from_state(state, pagination));
             HttpResponseBuilder::ok()
                 .header("Content-Type", "text/html; charset=utf-8")
                 .with_body_and_content_length(dashboard.render().unwrap())
@@ -232,7 +240,7 @@ fn http_request(request: HttpRequest) -> HttpResponse {
         "/metrics" => {
             let mut writer = MetricsEncoder::new(vec![], ic_cdk::api::time() as i64 / 1_000_000);
 
-            match cksol_minter::metrics::encode_metrics(&mut writer) {
+            match read_state(|s| cksol_minter::metrics::encode_metrics(&mut writer, s)) {
                 Ok(()) => HttpResponseBuilder::ok()
                     .header("Content-Type", "text/plain; version=0.0.4")
                     .header("Cache-Control", "no-store")
@@ -344,7 +352,7 @@ fn check_candid_interface_compatibility() {
 
     // check the public interface against the actual one
     let old_interface = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
-        .join("cksol-minter.did");
+        .join("cksol_minter.did");
 
     service_equal(
         CandidSource::Text(dbg!(&new_interface)),
