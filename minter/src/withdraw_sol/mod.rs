@@ -27,7 +27,7 @@ use crate::{
         event::{EventType, TransactionPurpose, VersionedMessage, WithdrawSolRequest},
         mutate_state, read_state,
     },
-    transaction::get_recent_slot_and_blockhash,
+    transaction::{get_recent_slot_and_blockhash, submit_transaction},
 };
 
 pub const WITHDRAWAL_PROCESSING_DELAY: Duration = Duration::from_mins(1);
@@ -218,7 +218,7 @@ async fn submit_withdrawal_transaction<R: CanisterRuntime>(
     };
 
     let signature = signed_tx.signatures[0];
-    let message = VersionedMessage::Legacy(signed_tx.message);
+    let message = VersionedMessage::Legacy(signed_tx.message.clone());
     let burn_indices = requests.iter().map(|r| r.burn_block_index).collect();
 
     mutate_state(|state| {
@@ -235,7 +235,7 @@ async fn submit_withdrawal_transaction<R: CanisterRuntime>(
         )
     });
 
-    // TODO: Send the transaction to the Solana network via RPC.
+    let _ = submit_transaction(runtime, signed_tx).await;
 }
 
 pub fn withdraw_sol_status(block_index: u64) -> WithdrawSolStatus {

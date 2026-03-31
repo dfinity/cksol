@@ -258,6 +258,7 @@ mod process_pending_withdrawals_tests {
 
     type SendSlotResult = MultiRpcResult<Slot>;
     type SendBlockResult = MultiRpcResult<Option<ConfirmedBlock>>;
+    type SendTransactionResult = MultiRpcResult<sol_rpc_types::Signature>;
 
     fn signature(index: u8) -> Signature {
         Signature::from([index; 64])
@@ -335,6 +336,11 @@ mod process_pending_withdrawals_tests {
             .add_stub_response(SendBlockResult::Consistent(Ok(Some(get_confirmed_block()))))
             // schnorr signing response
             .add_signature(fake_sig)
+            // sendTransaction response
+            .add_stub_response(SendTransactionResult::Consistent(Ok(Signature::from(
+                fake_sig,
+            )
+            .into())))
             .with_increasing_time();
 
         withdraw(&runtime, 1).await;
@@ -480,10 +486,12 @@ mod process_pending_withdrawals_tests {
         runtime = runtime
             .add_stub_response(SendSlotResult::Consistent(Ok(slot)))
             .add_stub_response(SendBlockResult::Consistent(Ok(Some(get_confirmed_block()))));
-        // one signature per batch: batch 1 (MAX_WITHDRAWALS_PER_TX) + batch 2 (1)
+        // one signature per batch + sendTransaction: batch 1 (MAX_WITHDRAWALS_PER_TX) + batch 2 (1)
         runtime = runtime
             .add_signature(signature(1).into())
-            .add_signature(signature(2).into());
+            .add_stub_response(SendTransactionResult::Consistent(Ok(signature(1).into())))
+            .add_signature(signature(2).into())
+            .add_stub_response(SendTransactionResult::Consistent(Ok(signature(2).into())));
 
         withdraw(&runtime, request_count as u8).await;
 
@@ -541,19 +549,28 @@ mod process_pending_withdrawals_tests {
             runtime = runtime.add_stub_response(Ok::<Nat, TransferFromError>(Nat::from(i)));
         }
 
-        // Round 1: get_recent_slot_and_blockhash (getSlot + getBlock), then MAX_CONCURRENT_RPC_CALLS signatures
+        // Round 1: get_recent_slot_and_blockhash, then signatures + sendTransaction
         runtime = runtime
             .add_stub_response(SendSlotResult::Consistent(Ok(slot)))
             .add_stub_response(SendBlockResult::Consistent(Ok(Some(get_confirmed_block()))));
         for i in 0..MAX_CONCURRENT_RPC_CALLS {
-            runtime = runtime.add_signature(signature(i as u8 + 1).into());
+            runtime = runtime
+                .add_signature(signature(i as u8 + 1).into())
+                .add_stub_response(SendTransactionResult::Consistent(Ok(signature(
+                    i as u8 + 1,
+                )
+                .into())));
         }
 
-        // Round 2: fresh get_recent_slot_and_blockhash (getSlot + getBlock), then 1 signature
+        // Round 2: fresh get_recent_slot_and_blockhash, then 1 signature + sendTransaction
         runtime = runtime
             .add_stub_response(SendSlotResult::Consistent(Ok(slot)))
             .add_stub_response(SendBlockResult::Consistent(Ok(Some(get_confirmed_block()))))
-            .add_signature(signature(MAX_CONCURRENT_RPC_CALLS as u8 + 1).into());
+            .add_signature(signature(MAX_CONCURRENT_RPC_CALLS as u8 + 1).into())
+            .add_stub_response(SendTransactionResult::Consistent(Ok(signature(
+                MAX_CONCURRENT_RPC_CALLS as u8 + 1,
+            )
+            .into())));
 
         withdraw(&runtime, request_count as u8).await;
 
@@ -614,7 +631,12 @@ mod process_pending_withdrawals_tests {
                 .add_stub_response(SendBlockResult::Consistent(Ok(Some(get_confirmed_block()))));
             for _ in 0..MAX_CONCURRENT_RPC_CALLS {
                 sig_counter = sig_counter.wrapping_add(1);
-                runtime = runtime.add_signature(signature(sig_counter).into());
+                runtime = runtime
+                    .add_signature(signature(sig_counter).into())
+                    .add_stub_response(SendTransactionResult::Consistent(Ok(signature(
+                        sig_counter,
+                    )
+                    .into())));
             }
         }
 
