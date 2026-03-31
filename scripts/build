@@ -58,7 +58,7 @@ do
             shift
             ;;
         --cksol-minter)
-            CANISTERS+=("cksol-minter")
+            CANISTERS+=("cksol_minter")
             shift
             ;;
         *)
@@ -116,13 +116,14 @@ function build_canister() {
 
     if [ "$ONLY_DEPS" != "1" ]
     then
+        local output="${canister//_/-}"
         ic-wasm \
             "./target/$TARGET/release/$canister.wasm" \
-            -o "./$canister.wasm" \
+            -o "./$output.wasm" \
             shrink
-        ic-wasm "$canister.wasm" -o "$canister.wasm" metadata candid:service -f "minter/cksol-minter.did" -v public
+        ic-wasm "$output.wasm" -o "$output.wasm" metadata candid:service -f "minter/cksol-minter.did" -v public
 
-        gzip --no-name --force "$canister.wasm"
+        gzip --no-name --force "$output.wasm"
     fi
 }
 
