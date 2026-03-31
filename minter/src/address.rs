@@ -1,5 +1,5 @@
 use crate::state::{SchnorrPublicKey, mutate_state, read_state};
-use ic_cdk::management_canister::{
+use ic_cdk_management_canister::{
     SchnorrAlgorithm, SchnorrKeyId, SchnorrPublicKeyArgs, schnorr_public_key,
 };
 use ic_ed25519::{DerivationIndex, DerivationPath as IcDerivationPath, PublicKey};

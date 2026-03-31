@@ -220,6 +220,23 @@ fn get_minter_info() -> MinterInfo {
 #[ic_cdk::query(hidden = true)]
 fn http_request(request: HttpRequest) -> HttpResponse {
     match request.path() {
+        "/dashboard" => {
+            use askama::Template;
+            use cksol_minter::dashboard::{DashboardPaginationParameters, DashboardTemplate};
+            let pagination = match DashboardPaginationParameters::from_query_params(&request) {
+                Ok(p) => p,
+                Err(e) => {
+                    return HttpResponseBuilder::bad_request()
+                        .with_body_and_content_length(e)
+                        .build();
+                }
+            };
+            let dashboard = read_state(|state| DashboardTemplate::from_state(state, pagination));
+            HttpResponseBuilder::ok()
+                .header("Content-Type", "text/html; charset=utf-8")
+                .with_body_and_content_length(dashboard.render().unwrap())
+                .build()
+        }
         "/metrics" => {
             let mut writer = MetricsEncoder::new(vec![], ic_cdk::api::time() as i64 / 1_000_000);
 

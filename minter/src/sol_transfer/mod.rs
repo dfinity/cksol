@@ -1,9 +1,10 @@
 use crate::{
     address::{DerivationPath, derivation_path, derive_public_key, lazy_get_schnorr_master_key},
+    runtime::CanisterRuntime,
     signer::{SchnorrSigner, sign_bytes},
 };
 use derive_more::From;
-use ic_cdk::management_canister::SignCallError;
+use ic_cdk_management_canister::SignCallError;
 use icrc_ledger_types::icrc1::account::Account;
 use sol_rpc_types::Lamport;
 use solana_address::Address;
@@ -20,10 +21,14 @@ pub const MAX_SIGNATURES: u64 = 10;
 pub const MAX_TX_SIZE: usize = 1_232;
 const BYTES_PER_SIGNATURE: usize = 64;
 
+/// Upper bound on the number of withdrawal transfers that fit in a single
+/// Solana transaction when the fee-payer is the only signer.
+pub const MAX_WITHDRAWALS_PER_TX: usize = 20;
+
 #[derive(Debug, Error, From)]
 pub enum CreateTransferError {
-    #[error("too many signatures: got {got}, max is {max}")]
-    TooManySignatures { max: u64, got: u64 },
+    #[error("transaction size {got} exceeds maximum of {max} bytes")]
+    TransactionTooLarge { max: usize, got: usize },
     #[error("signing failed: {0}")]
     SigningFailed(SignCallError),
 }
@@ -38,7 +43,7 @@ pub enum CreateTransferError {
 /// # Panics
 ///
 /// Panics if the IC returns a signature that is not exactly 64 bytes.
-pub async fn create_signed_transfer_transaction(
+pub async fn create_signed_batch_consolidation_transaction(
     fee_payer_account: Account,
     sources: &[(Account, Lamport)],
     target_address: Address,
@@ -68,18 +73,6 @@ pub async fn create_signed_transfer_transaction(
     let message =
         Message::new_with_blockhash(&instructions, Some(&fee_payer_address), &recent_blockhash);
     let mut transaction = Transaction::new_unsigned(message);
-    let message_bytes = transaction.message_data();
-
-    let num_signatures = transaction.message.signer_keys().len();
-    if num_signatures as u64 > MAX_SIGNATURES {
-        return Err(CreateTransferError::TooManySignatures {
-            max: MAX_SIGNATURES,
-            got: num_signatures as u64,
-        });
-    }
-
-    // Check serialized transaction size does not exceed maximum Solana transaction size:
-    assert!(1 + message_bytes.len() + num_signatures * BYTES_PER_SIGNATURE < MAX_TX_SIZE);
 
     // Build a map with all signer addresses and re-order entries to match the
     // order of the message account keys
@@ -101,7 +94,68 @@ pub async fn create_signed_transfer_transaction(
         })
         .unzip();
 
-    transaction.signatures = sign_bytes(signer_derivation_paths, signer, message_bytes).await?;
+    sign_transaction(&mut transaction, signer_derivation_paths, signer).await?;
 
     Ok((transaction, signer_accounts))
+}
+
+/// Creates a signed Solana transaction that transfers lamports from a single
+/// minter-controlled address (the fee payer) to multiple target addresses.
+///
+/// Returns the signed transaction and the list of signer accounts
+/// (only the fee payer).
+///
+/// # Panics
+///
+/// Panics if the IC returns a signature that is not exactly 64 bytes.
+pub async fn create_signed_batch_withdrawal_transaction<R: CanisterRuntime>(
+    runtime: &R,
+    targets: &[(Address, Lamport)],
+    recent_blockhash: Hash,
+) -> Result<(Transaction, Vec<Account>), CreateTransferError> {
+    let fee_payer_account = Account::from(runtime.canister_self());
+    let master_public_key = lazy_get_schnorr_master_key().await;
+    let fee_payer_derivation_path = derivation_path(&fee_payer_account);
+    let fee_payer_address = Address::from(
+        derive_public_key(&master_public_key, fee_payer_derivation_path.to_vec()).serialize_raw(),
+    );
+
+    let instructions: Vec<Instruction> = targets
+        .iter()
+        .map(|(target, amount)| instruction::transfer(&fee_payer_address, target, *amount))
+        .collect();
+
+    let message =
+        Message::new_with_blockhash(&instructions, Some(&fee_payer_address), &recent_blockhash);
+    let mut transaction = Transaction::new_unsigned(message);
+
+    sign_transaction(
+        &mut transaction,
+        vec![fee_payer_derivation_path],
+        &runtime.signer(),
+    )
+    .await?;
+
+    Ok((transaction, vec![fee_payer_account]))
+}
+
+// Sign transaction, return error if it exceeds the maximum transaction size.
+async fn sign_transaction(
+    transaction: &mut Transaction,
+    signer_derivation_paths: impl IntoIterator<Item = DerivationPath>,
+    signer: &impl SchnorrSigner,
+) -> Result<(), CreateTransferError> {
+    let message_bytes = transaction.message_data();
+    let message_len = message_bytes.len();
+    transaction.signatures = sign_bytes(signer_derivation_paths, signer, message_bytes).await?;
+
+    let tx_size = 1 + message_len + transaction.signatures.len() * BYTES_PER_SIGNATURE;
+    if tx_size > MAX_TX_SIZE {
+        return Err(CreateTransferError::TransactionTooLarge {
+            max: MAX_TX_SIZE,
+            got: tx_size,
+        });
+    }
+
+    Ok(())
 }

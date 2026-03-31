@@ -213,6 +213,23 @@ pub fn get_block_response(blockhash: &str) -> JsonRpcResponse {
     }))
 }
 
+/// JSON-RPC request matcher for `getSignatureStatuses`.
+pub fn get_signature_statuses_request() -> JsonRpcRequestMatcher {
+    JsonRpcRequestMatcher::with_method("getSignatureStatuses")
+}
+
+/// JSON-RPC response for `getSignatureStatuses` where all signatures are not found.
+pub fn get_signature_statuses_not_found_response(count: usize) -> JsonRpcResponse {
+    JsonRpcResponse::from(json!({
+        "jsonrpc": "2.0",
+        "result": {
+            "context": { "slot": 0 },
+            "value": vec![serde_json::Value::Null; count]
+        },
+        "id": 1
+    }))
+}
+
 /// JSON-RPC request matcher for `sendTransaction`.
 pub fn send_transaction_request() -> JsonRpcRequestMatcher {
     JsonRpcRequestMatcher::with_method("sendTransaction")

@@ -78,7 +78,7 @@ pub async fn mint<R: CanisterRuntime>(
     Ok(DepositStatus::Minted {
         block_index: *block_index.get(),
         minted_amount: amount_to_mint,
-        signature: signature.into(),
+        deposit_id: deposit_id.into(),
     })
 }
 

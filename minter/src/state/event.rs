@@ -168,6 +168,15 @@ pub struct DepositId {
     pub account: Account,
 }
 
+impl From<DepositId> for cksol_types::DepositId {
+    fn from(id: DepositId) -> Self {
+        Self {
+            signature: id.signature.into(),
+            account: id.account,
+        }
+    }
+}
+
 impl Storable for Event {
     fn to_bytes(&self) -> Cow<'_, [u8]> {
         let mut buf = vec![];

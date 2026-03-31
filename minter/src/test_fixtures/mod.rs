@@ -338,19 +338,19 @@ pub mod deposit {
         DepositStatus::Processing {
             deposit_amount: DEPOSIT_AMOUNT,
             amount_to_mint: DEPOSIT_AMOUNT - DEPOSIT_FEE,
-            signature: deposit_transaction_signature().into(),
+            deposit_id: deposit_id().into(),
         }
     }
 
     pub fn deposit_status_quarantined() -> DepositStatus {
-        DepositStatus::Quarantined(deposit_transaction_signature().into())
+        DepositStatus::Quarantined(deposit_id().into())
     }
 
     pub fn deposit_status_minted() -> DepositStatus {
         DepositStatus::Minted {
             block_index: BLOCK_INDEX,
             minted_amount: DEPOSIT_AMOUNT - DEPOSIT_FEE,
-            signature: deposit_transaction_signature().into(),
+            deposit_id: deposit_id().into(),
         }
     }
 
