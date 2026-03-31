@@ -301,7 +301,7 @@ impl Setup {
     }
 
     pub async fn execute_http_mocks(&self, mut mocks: impl ExecuteHttpOutcallMocks) {
-        const MAX_ITERATIONS: usize = 20;
+        const MAX_ITERATIONS: usize = 30;
         let env = self.env.as_ref().unwrap();
 
         for _ in 0..MAX_ITERATIONS {

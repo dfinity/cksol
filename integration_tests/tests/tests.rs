@@ -7,14 +7,16 @@ use cksol_int_tests::{
         DEFAULT_CALLER_ACCOUNT, DEFAULT_CALLER_DEPOSIT_ADDRESS, DEPOSIT_AMOUNT,
         EXPECTED_MINT_AMOUNT, SharedMockHttpOutcalls, default_update_balance_args,
         deposit_transaction_signature, get_block_request, get_block_response,
-        get_deposit_transaction_response, get_signature_statuses_not_found_response,
-        get_signature_statuses_request, get_slot_request, get_slot_response,
-        get_transaction_http_mocks, send_transaction_request, send_transaction_response,
+        get_deposit_transaction_response, get_signature_statuses_finalized_response,
+        get_signature_statuses_not_found_response, get_signature_statuses_request,
+        get_slot_request, get_slot_response, get_transaction_http_mocks, send_transaction_request,
+        send_transaction_response,
     },
 };
 use cksol_types::{
     DepositId, DepositStatus, GetDepositAddressArgs, InsufficientCyclesError, Lamport, MinterInfo,
-    UpdateBalanceArgs, UpdateBalanceError, WithdrawSolArgs, WithdrawSolError, WithdrawSolStatus,
+    TxFinalizedStatus, UpdateBalanceArgs, UpdateBalanceError, WithdrawSolArgs, WithdrawSolError,
+    WithdrawSolStatus,
 };
 use cksol_types_internal::{
     UpgradeArgs,
@@ -637,14 +639,36 @@ mod withdraw_sol_tests {
 
         // Withdrawal status should now have a different signature
         let status = setup.minter().withdraw_sol_status(block_index).await;
-        match &status {
+        let resubmitted_tx_hash = match &status {
             WithdrawSolStatus::TxSent(tx) => {
                 assert_ne!(
                     tx.transaction_hash, original_tx_hash,
                     "Expected signature to change after resubmission"
                 );
+                tx.transaction_hash.clone()
             }
             other => panic!("Expected TxSent after resubmission, got: {other:?}"),
+        };
+
+        // Advance time to trigger finalization. The monitor checks signature statuses
+        // and this time the transaction is reported as finalized.
+        setup.advance_time(MONITOR_DELAY).await;
+        setup
+            .execute_http_mocks(finalize_withdrawal_http_mocks())
+            .await;
+
+        // Withdrawal status should now be TxFinalized with Success
+        let status = setup.minter().withdraw_sol_status(block_index).await;
+        match &status {
+            WithdrawSolStatus::TxFinalized(TxFinalizedStatus::Success {
+                transaction_hash, ..
+            }) => {
+                assert_eq!(
+                    *transaction_hash, resubmitted_tx_hash,
+                    "Expected finalized tx hash to match resubmitted tx hash"
+                );
+            }
+            other => panic!("Expected TxFinalized(Success), got: {other:?}"),
         }
 
         setup.drop().await;
@@ -717,6 +741,18 @@ mod withdraw_sol_tests {
             builder = builder
                 .given(send_transaction_request().with_id(id))
                 .respond_with(send_transaction_response(NEW_TX_SIGNATURE).with_id(id))
+        }
+        builder.build()
+    }
+
+    /// HTTP mocks for finalizing a withdrawal transaction.
+    fn finalize_withdrawal_http_mocks() -> MockHttpOutcalls {
+        let mut builder = MockHttpOutcallsBuilder::new();
+        // getSignatureStatuses (IDs 36-39): return finalized
+        for id in 36..40u64 {
+            builder = builder
+                .given(get_signature_statuses_request().with_id(id))
+                .respond_with(get_signature_statuses_finalized_response(1).with_id(id))
         }
         builder.build()
     }
