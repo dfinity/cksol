@@ -30,7 +30,7 @@ fn solscan_cluster_suffix(network: SolanaNetwork) -> &'static str {
 #[cfg(test)]
 mod tests;
 
-const DEFAULT_PAGE_SIZE: usize = 100;
+pub(crate) const DEFAULT_PAGE_SIZE: usize = 100;
 
 // --- Pagination ---
 
