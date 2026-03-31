@@ -10,7 +10,7 @@ use crate::{
     },
     transaction::{
         GetDepositAmountError, GetRecentBlockhashError, GetTransactionError,
-        SubmitTransactionError, get_deposit_amount_to_address, get_recent_blockhash,
+        SubmitTransactionError, get_deposit_amount_to_address, get_recent_slot_and_blockhash,
         submit_transaction, try_get_transaction,
     },
 };
@@ -277,7 +277,7 @@ mod submit_transaction_tests {
     }
 }
 
-mod get_recent_blockhash_tests {
+mod get_recent_slot_and_blockhash_tests {
     use super::*;
 
     type SendSlotResult = sol_rpc_types::MultiRpcResult<sol_rpc_types::Slot>;
@@ -292,7 +292,7 @@ mod get_recent_blockhash_tests {
             .add_stub_response(SendSlotResult::Consistent(Ok(slot)))
             .add_stub_response(SendBlockResult::Consistent(Ok(Some(block()))));
 
-        let result = get_recent_blockhash(&runtime).await;
+        let result = get_recent_slot_and_blockhash(&runtime).await;
 
         assert_eq!(result, Ok((slot, blockhash().into())));
     }
@@ -311,7 +311,7 @@ mod get_recent_blockhash_tests {
                 "Error 3".to_string(),
             ))));
 
-        let result = get_recent_blockhash(&runtime).await;
+        let result = get_recent_slot_and_blockhash(&runtime).await;
 
         assert_matches!(result, Err(GetRecentBlockhashError::Failed(_)));
     }

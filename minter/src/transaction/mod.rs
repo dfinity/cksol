@@ -73,7 +73,7 @@ pub enum SubmitTransactionError {
     InconsistentRpcResults,
 }
 
-pub async fn get_recent_blockhash<R: CanisterRuntime>(
+pub async fn get_recent_slot_and_blockhash<R: CanisterRuntime>(
     runtime: &R,
 ) -> Result<(Slot, Hash), GetRecentBlockhashError> {
     let client = read_state(|state| state.sol_rpc_client(runtime.inter_canister_call_runtime()));

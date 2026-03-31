@@ -654,13 +654,13 @@ mod withdraw_sol_tests {
         const BLOCKHASH: &str = "4sGjMW1sUnHzSxGspuhpqLDx6wiyjNtZAMdL4VZHirAn";
 
         let mut builder = MockHttpOutcallsBuilder::new();
-        // getSlot requests for get_recent_blockhash
+        // getSlot requests for get_recent_slot_and_blockhash
         for id in 0..4u64 {
             builder = builder
                 .given(get_slot_request().with_id(id))
                 .respond_with(get_slot_response(slot).with_id(id))
         }
-        // getBlock requests for get_recent_blockhash
+        // getBlock requests for get_recent_slot_and_blockhash
         for id in 4..8u64 {
             builder = builder
                 .given(get_block_request(slot).with_id(id))
@@ -681,25 +681,25 @@ mod withdraw_sol_tests {
                 .given(get_signature_statuses_request().with_id(id))
                 .respond_with(get_signature_statuses_not_found_response(1).with_id(id))
         }
-        // get_recent_blockhash for current slot check: getSlot (IDs 16-19)
+        // get_recent_slot_and_blockhash for current slot check: getSlot (IDs 16-19)
         for id in 16..20u64 {
             builder = builder
                 .given(get_slot_request().with_id(id))
                 .respond_with(get_slot_response(current_slot).with_id(id))
         }
-        // get_recent_blockhash for current slot check: getBlock (IDs 20-23)
+        // get_recent_slot_and_blockhash for current slot check: getBlock (IDs 20-23)
         for id in 20..24u64 {
             builder = builder
                 .given(get_block_request(current_slot).with_id(id))
                 .respond_with(get_block_response(NEW_BLOCKHASH).with_id(id))
         }
-        // get_recent_blockhash for resubmission: getSlot (IDs 24-27)
+        // get_recent_slot_and_blockhash for resubmission: getSlot (IDs 24-27)
         for id in 24..28u64 {
             builder = builder
                 .given(get_slot_request().with_id(id))
                 .respond_with(get_slot_response(current_slot).with_id(id))
         }
-        // get_recent_blockhash for resubmission: getBlock (IDs 28-31)
+        // get_recent_slot_and_blockhash for resubmission: getBlock (IDs 28-31)
         for id in 28..32u64 {
             builder = builder
                 .given(get_block_request(current_slot).with_id(id))
@@ -1030,13 +1030,13 @@ mod consolidation_tests {
         const TX_SIGNATURE: &str = "5VERv8NMvzbJMEkV8xnrLkEaWRtSz9CosKDYjCJjBRnbJLgp8uirBgmQpjKhoR4tjF3ZpRzrFmBV6UjKdiSZkQUW";
 
         let mut mocks = MockHttpOutcallsBuilder::new();
-        // getSlot requests for get_recent_blockhash (IDs 4-7)
+        // getSlot requests for get_recent_slot_and_blockhash (IDs 4-7)
         for id in 4..8 {
             mocks = mocks
                 .given(get_slot_request().with_id(id))
                 .respond_with(get_slot_response(SLOT).with_id(id));
         }
-        // getBlock requests for get_recent_blockhash (IDs 8-11)
+        // getBlock requests for get_recent_slot_and_blockhash (IDs 8-11)
         for id in 8..12 {
             mocks = mocks
                 .given(get_block_request(SLOT).with_id(id))

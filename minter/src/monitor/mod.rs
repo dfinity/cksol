@@ -11,7 +11,8 @@ use crate::{
         mutate_state, read_state,
     },
     transaction::{
-        SubmitTransactionError, get_recent_blockhash, get_signature_statuses, submit_transaction,
+        SubmitTransactionError, get_recent_slot_and_blockhash, get_signature_statuses,
+        submit_transaction,
     },
 };
 use canlog::log;
@@ -88,7 +89,7 @@ pub async fn monitor_submitted_transactions<R: CanisterRuntime>(runtime: R) {
         return;
     }
 
-    let (current_slot, _) = match get_recent_blockhash(&runtime).await {
+    let (current_slot, _) = match get_recent_slot_and_blockhash(&runtime).await {
         Ok(result) => result,
         Err(e) => {
             log!(Priority::Info, "Failed to get current slot: {e}");
@@ -195,7 +196,7 @@ async fn resubmit_expired_transactions<R: CanisterRuntime>(
     expired: Vec<(Signature, VersionedMessage, Vec<Account>)>,
 ) {
     for round in &expired.into_iter().chunks(MAX_CONCURRENT_RPC_CALLS) {
-        let (new_slot, new_blockhash) = match get_recent_blockhash(runtime).await {
+        let (new_slot, new_blockhash) = match get_recent_slot_and_blockhash(runtime).await {
             Ok(result) => result,
             Err(e) => {
                 log!(Priority::Info, "Failed to get recent blockhash: {e}");

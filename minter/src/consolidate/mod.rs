@@ -13,7 +13,7 @@ use crate::{
         event::{EventType, TransactionPurpose},
         mutate_state, read_state,
     },
-    transaction::{SubmitTransactionError, get_recent_blockhash, submit_transaction},
+    transaction::{SubmitTransactionError, get_recent_slot_and_blockhash, submit_transaction},
 };
 use canlog::log;
 use cksol_types_internal::log::Priority;
@@ -52,7 +52,7 @@ pub async fn consolidate_deposits<R: CanisterRuntime>(runtime: R) {
         .into_iter()
         .chunks(MAX_CONCURRENT_RPC_CALLS)
     {
-        let (slot, recent_blockhash) = match get_recent_blockhash(&runtime).await {
+        let (slot, recent_blockhash) = match get_recent_slot_and_blockhash(&runtime).await {
             Ok((slot, blockhash)) => (slot, blockhash),
             Err(e) => {
                 log!(Priority::Info, "Failed to fetch recent blockhash: {e}");

@@ -27,7 +27,7 @@ use crate::{
         event::{EventType, TransactionPurpose, VersionedMessage, WithdrawSolRequest},
         mutate_state, read_state,
     },
-    transaction::get_recent_blockhash,
+    transaction::get_recent_slot_and_blockhash,
 };
 
 pub const WITHDRAWAL_PROCESSING_DELAY: Duration = Duration::from_mins(1);
@@ -166,7 +166,7 @@ pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: &R) {
     .collect();
 
     for round in rounds {
-        let (slot, recent_blockhash) = match get_recent_blockhash(runtime).await {
+        let (slot, recent_blockhash) = match get_recent_slot_and_blockhash(runtime).await {
             Ok((slot, blockhash)) => (slot, blockhash),
             Err(e) => {
                 log!(Priority::Info, "Failed to fetch recent blockhash: {e}");

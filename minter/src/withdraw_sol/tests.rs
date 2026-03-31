@@ -330,7 +330,7 @@ mod process_pending_withdrawals_tests {
         let runtime = TestCanisterRuntime::new()
             // ledger burn response for withdraw_sol
             .add_stub_response(Ok::<Nat, TransferFromError>(Nat::from(1u64)))
-            // get_recent_blockhash calls
+            // get_recent_slot_and_blockhash calls
             .add_stub_response(SendSlotResult::Consistent(Ok(slot)))
             .add_stub_response(SendBlockResult::Consistent(Ok(Some(get_confirmed_block()))))
             // schnorr signing response
@@ -417,7 +417,7 @@ mod process_pending_withdrawals_tests {
             // responses for burn blocks
             .add_stub_response(Ok::<Nat, TransferFromError>(Nat::from(1u64)))
             .add_stub_response(Ok::<Nat, TransferFromError>(Nat::from(2u64)))
-            // get_recent_blockhash calls
+            // get_recent_slot_and_blockhash calls
             .add_stub_response(SendSlotResult::Consistent(Ok(slot)))
             .add_stub_response(SendBlockResult::Consistent(Ok(Some(get_confirmed_block()))))
             // signing fails for the batch
@@ -476,7 +476,7 @@ mod process_pending_withdrawals_tests {
         for i in 0..request_count {
             runtime = runtime.add_stub_response(Ok::<Nat, TransferFromError>(Nat::from(i)));
         }
-        // get_recent_blockhash (one round: getSlot + getBlock)
+        // get_recent_slot_and_blockhash (one round: getSlot + getBlock)
         runtime = runtime
             .add_stub_response(SendSlotResult::Consistent(Ok(slot)))
             .add_stub_response(SendBlockResult::Consistent(Ok(Some(get_confirmed_block()))));
@@ -541,7 +541,7 @@ mod process_pending_withdrawals_tests {
             runtime = runtime.add_stub_response(Ok::<Nat, TransferFromError>(Nat::from(i)));
         }
 
-        // Round 1: get_recent_blockhash (getSlot + getBlock), then MAX_CONCURRENT_RPC_CALLS signatures
+        // Round 1: get_recent_slot_and_blockhash (getSlot + getBlock), then MAX_CONCURRENT_RPC_CALLS signatures
         runtime = runtime
             .add_stub_response(SendSlotResult::Consistent(Ok(slot)))
             .add_stub_response(SendBlockResult::Consistent(Ok(Some(get_confirmed_block()))));
@@ -549,7 +549,7 @@ mod process_pending_withdrawals_tests {
             runtime = runtime.add_signature(signature(i as u8 + 1).into());
         }
 
-        // Round 2: fresh get_recent_blockhash (getSlot + getBlock), then 1 signature
+        // Round 2: fresh get_recent_slot_and_blockhash (getSlot + getBlock), then 1 signature
         runtime = runtime
             .add_stub_response(SendSlotResult::Consistent(Ok(slot)))
             .add_stub_response(SendBlockResult::Consistent(Ok(Some(get_confirmed_block()))))
