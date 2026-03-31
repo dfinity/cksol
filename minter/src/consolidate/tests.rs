@@ -3,23 +3,22 @@ use crate::{
     numeric::LedgerMintIndex,
     state::{
         TaskType,
-        audit::process_event,
         event::{DepositId, EventType, TransactionPurpose},
         mutate_state,
     },
     test_fixtures::{
-        DEPOSIT_FEE, EventsAssert, init_schnorr_master_key, init_state,
+        EventsAssert, account, confirmed_block, deposit_id,
+        events::{accept_deposit, mint_deposit},
+        init_schnorr_master_key, init_state,
         runtime::TestCanisterRuntime,
+        signature,
     },
 };
 use assert_matches::assert_matches;
-use candid::Principal;
-use icrc_ledger_types::icrc1::account::Account;
-use sol_rpc_types::{ConfirmedBlock, MultiRpcResult, RpcError, Slot};
-use solana_signature::Signature;
+use sol_rpc_types::{MultiRpcResult, RpcError, Slot};
 
 type SlotResult = MultiRpcResult<Slot>;
-type BlockResult = MultiRpcResult<Option<ConfirmedBlock>>;
+type BlockResult = MultiRpcResult<sol_rpc_types::ConfirmedBlock>;
 type SendTransactionResult = MultiRpcResult<sol_rpc_types::Signature>;
 
 #[tokio::test]
@@ -35,7 +34,7 @@ async fn should_return_early_if_no_deposits_to_consolidate() {
 async fn should_return_early_if_task_already_active() {
     setup();
 
-    add_funds_to_consolidate(vec![(account(0), 1_000_000_000)]);
+    add_funds_to_consolidate(&[(deposit_id(0), 1_000_000_000)]);
     mutate_state(|s| {
         s.active_tasks_mut().insert(TaskType::DepositConsolidation);
     });
@@ -53,7 +52,7 @@ async fn should_return_early_if_task_already_active() {
 async fn should_return_early_if_fetching_blockhash_fails() {
     setup();
 
-    add_funds_to_consolidate(vec![(account(0), 1_000_000_000)]);
+    add_funds_to_consolidate(&[(deposit_id(0), 1_000_000_000)]);
 
     let error = SlotResult::Consistent(Err(RpcError::ValidationError("Error".to_string())));
     let runtime = TestCanisterRuntime::new()
@@ -74,15 +73,15 @@ async fn should_return_early_if_fetching_blockhash_fails() {
 async fn should_submit_single_consolidation_request() {
     setup();
 
-    add_funds_to_consolidate(vec![(account(0), 1_000_000_000)]);
+    add_funds_to_consolidate(&[(deposit_id(0), 1_000_000_000)]);
 
-    let fee_payer_signature = Signature::from([0x11; 64]);
+    let fee_payer_signature = signature(0x11);
     let slot = 100;
     let runtime = TestCanisterRuntime::new()
         .with_increasing_time()
         // get_recent_slot_and_blockhash calls (get_recent_block internally calls getSlot then getBlock)
         .add_stub_response(SlotResult::Consistent(Ok(slot)))
-        .add_stub_response(BlockResult::Consistent(Ok(Some(block()))))
+        .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())))
         .add_stub_response(SendTransactionResult::Consistent(Ok(
             fee_payer_signature.into()
         )))
@@ -112,15 +111,15 @@ async fn should_submit_single_consolidation_request() {
 async fn should_record_events_even_if_transaction_submission_fails() {
     setup();
 
-    add_funds_to_consolidate(vec![(account(0), 1_000_000_000)]);
+    add_funds_to_consolidate(&[(deposit_id(0), 1_000_000_000)]);
 
-    let fee_payer_signature = Signature::from([0x11; 64]);
+    let fee_payer_signature = signature(0x11);
     let slot = 100;
     let runtime = TestCanisterRuntime::new()
         .with_increasing_time()
         // get_recent_slot_and_blockhash calls
         .add_stub_response(SlotResult::Consistent(Ok(slot)))
-        .add_stub_response(BlockResult::Consistent(Ok(Some(block()))))
+        .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())))
         // Transaction submission fails
         .add_stub_response(SendTransactionResult::Inconsistent(vec![]))
         .add_signature(fee_payer_signature.into())
@@ -147,21 +146,21 @@ async fn should_submit_multiple_consolidation_batches() {
     setup();
 
     let funds: Vec<_> = (0..NUM_DEPOSITS)
-        .map(|i| (account(i as u8), (i as u64 + 1) * 1_000_000_000))
+        .map(|i| (deposit_id(i as u8), (i as u64 + 1) * 1_000_000_000))
         .collect();
-    add_funds_to_consolidate(funds.clone());
+    add_funds_to_consolidate(&funds);
 
     const BATCH_1_SIZE: usize = MAX_TRANSFERS_PER_CONSOLIDATION;
 
-    let fee_payer_signature_1 = Signature::from([0; 64]);
-    let fee_payer_signature_2 = Signature::from([(BATCH_1_SIZE + 1) as u8; 64]);
+    let fee_payer_signature_1 = signature(0);
+    let fee_payer_signature_2 = signature((BATCH_1_SIZE + 1) as u8);
     let slot = 100;
 
     let mut runtime = TestCanisterRuntime::new()
         .with_increasing_time()
         // get_recent_slot_and_blockhash calls
         .add_stub_response(SlotResult::Consistent(Ok(slot)))
-        .add_stub_response(BlockResult::Consistent(Ok(Some(block()))))
+        .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())))
         .add_stub_response(SendTransactionResult::Consistent(Ok(
             fee_payer_signature_1.into()
         )))
@@ -215,19 +214,24 @@ async fn should_submit_multiple_consolidation_batches() {
 async fn should_consolidate_multiple_deposits_to_same_account_in_single_transfer() {
     setup();
 
-    let deposit_account = account(0);
-    // Two deposits to the same account
-    add_funds_to_consolidate(vec![
-        (deposit_account, 500_000_000),
-        (deposit_account, 300_000_000),
-    ]);
+    // Two deposits to the same account (different signatures)
+    let same_account = account(0);
+    let deposit_a = DepositId {
+        account: same_account,
+        signature: signature(0),
+    };
+    let deposit_b = DepositId {
+        account: same_account,
+        signature: signature(1),
+    };
+    add_funds_to_consolidate(&[(deposit_a, 500_000_000), (deposit_b, 300_000_000)]);
 
-    let fee_payer_signature = Signature::from([0x11; 64]);
+    let fee_payer_signature = signature(0x11);
     let slot = 100;
     let runtime = TestCanisterRuntime::new()
         .with_increasing_time()
         .add_stub_response(SlotResult::Consistent(Ok(slot)))
-        .add_stub_response(BlockResult::Consistent(Ok(Some(block()))))
+        .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())))
         .add_stub_response(SendTransactionResult::Consistent(Ok(
             fee_payer_signature.into()
         )))
@@ -259,55 +263,9 @@ fn setup() {
     init_schnorr_master_key();
 }
 
-fn account(i: u8) -> Account {
-    Account {
-        owner: Principal::from_slice(&[i; 29]),
-        subaccount: None,
-    }
-}
-
-fn add_funds_to_consolidate(funds: Vec<(Account, u64)>) {
-    for (i, (account, amount)) in funds.into_iter().enumerate() {
-        let deposit_id = DepositId {
-            account,
-            signature: Signature::from([i as u8; 64]),
-        };
-        let mint_block_index = LedgerMintIndex::from(i as u64);
-        let runtime = TestCanisterRuntime::new().with_increasing_time();
-        mutate_state(|state| {
-            process_event(
-                state,
-                EventType::AcceptedDeposit {
-                    deposit_id,
-                    deposit_amount: amount,
-                    amount_to_mint: amount - DEPOSIT_FEE,
-                },
-                &runtime,
-            )
-        });
-        mutate_state(|state| {
-            process_event(
-                state,
-                EventType::Minted {
-                    deposit_id,
-                    mint_block_index,
-                },
-                &runtime,
-            )
-        });
-    }
-}
-
-fn block() -> ConfirmedBlock {
-    ConfirmedBlock {
-        previous_blockhash: Default::default(),
-        blockhash: solana_hash::Hash::from([0x42; 32]).into(),
-        parent_slot: 0,
-        block_time: None,
-        block_height: None,
-        signatures: None,
-        rewards: None,
-        num_reward_partitions: None,
-        transactions: None,
+fn add_funds_to_consolidate(deposits: &[(DepositId, u64)]) {
+    for (i, &(deposit_id, amount)) in deposits.iter().enumerate() {
+        accept_deposit(deposit_id, amount);
+        mint_deposit(deposit_id, i as u64);
     }
 }
