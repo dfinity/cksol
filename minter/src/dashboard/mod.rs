@@ -1,4 +1,4 @@
-use crate::state::State;
+use crate::{address::minter_address, runtime::CanisterRuntime, state::State};
 use askama::Template;
 use candid::Principal;
 use cksol_types_internal::SolanaNetwork;
@@ -176,15 +176,14 @@ pub struct DashboardTemplate {
 }
 
 impl DashboardTemplate {
-    pub fn from_state(state: &State, pagination: DashboardPaginationParameters) -> Self {
+    pub fn from_state<R: CanisterRuntime>(
+        state: &State,
+        runtime: &R,
+        pagination: DashboardPaginationParameters,
+    ) -> Self {
         let minter_address = state
             .minter_public_key()
-            .map(|key| {
-                crate::address::derive_public_key(key, vec![])
-                    .serialize_raw()
-                    .into()
-            })
-            .map(|addr: solana_address::Address| addr.to_string())
+            .map(|key| minter_address(key, runtime).to_string())
             .unwrap_or_default();
 
         let mut minted_deposits: Vec<_> = state

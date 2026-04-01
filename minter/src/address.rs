@@ -1,4 +1,7 @@
-use crate::state::{SchnorrPublicKey, mutate_state, read_state};
+use crate::{
+    runtime::CanisterRuntime,
+    state::{SchnorrPublicKey, mutate_state, read_state},
+};
 use ic_cdk_management_canister::{
     SchnorrAlgorithm, SchnorrKeyId, SchnorrPublicKeyArgs, schnorr_public_key,
 };
@@ -10,6 +13,19 @@ use solana_address::Address;
 mod tests;
 
 pub(crate) type DerivationPath = Vec<Vec<u8>>;
+
+pub fn minter_account<R: CanisterRuntime>(runtime: &R) -> Account {
+    Account {
+        owner: runtime.canister_self(),
+        subaccount: None,
+    }
+}
+
+pub fn minter_address<R: CanisterRuntime>(master_key: &SchnorrPublicKey, runtime: &R) -> Address {
+    Address::from(
+        derive_public_key(master_key, derivation_path(&minter_account(runtime))).serialize_raw(),
+    )
+}
 
 pub async fn get_deposit_address(account: Account) -> Address {
     let master_public_key = lazy_get_schnorr_master_key().await;
