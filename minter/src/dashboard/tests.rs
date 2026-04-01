@@ -31,7 +31,11 @@ fn state_with_minter_key(network: SolanaNetwork) -> State {
 }
 
 fn initial_dashboard() -> DashboardTemplate {
-    DashboardTemplate::from_state(&initial_state(), DashboardPaginationParameters::default())
+    DashboardTemplate::from_state(
+        &initial_state(),
+        &TestCanisterRuntime::new(),
+        DashboardPaginationParameters::default(),
+    )
 }
 
 fn runtime() -> TestCanisterRuntime {
@@ -96,7 +100,11 @@ fn should_display_minter_address_when_not_set() {
 #[test]
 fn should_display_minter_address_with_mainnet_solscan_link() {
     let state = state_with_minter_key(SolanaNetwork::Mainnet);
-    let dashboard = DashboardTemplate::from_state(&state, DashboardPaginationParameters::default());
+    let dashboard = DashboardTemplate::from_state(
+        &state,
+        &TestCanisterRuntime::new(),
+        DashboardPaginationParameters::default(),
+    );
 
     let assert = DashboardAssert::assert_that(dashboard);
     let address = assert.text_value("#minter-address > td");
@@ -110,7 +118,11 @@ fn should_display_minter_address_with_mainnet_solscan_link() {
 #[test]
 fn should_display_minter_address_with_devnet_solscan_link() {
     let state = state_with_minter_key(SolanaNetwork::Devnet);
-    let dashboard = DashboardTemplate::from_state(&state, DashboardPaginationParameters::default());
+    let dashboard = DashboardTemplate::from_state(
+        &state,
+        &TestCanisterRuntime::new(),
+        DashboardPaginationParameters::default(),
+    );
 
     let assert = DashboardAssert::assert_that(dashboard);
     let address = assert.text_value("#minter-address > td");
@@ -153,7 +165,11 @@ fn should_display_minted_deposits() {
         &runtime,
     );
 
-    let dashboard = DashboardTemplate::from_state(&state, DashboardPaginationParameters::default());
+    let dashboard = DashboardTemplate::from_state(
+        &state,
+        &TestCanisterRuntime::new(),
+        DashboardPaginationParameters::default(),
+    );
 
     DashboardAssert::assert_that(dashboard)
         .has_table_row_value(
@@ -223,7 +239,11 @@ fn should_paginate_minted_deposits_across_multiple_pages() {
     }
 
     // Page 1 (default): should show DEFAULT_PAGE_SIZE rows and pagination controls
-    let page1 = DashboardTemplate::from_state(&state, DashboardPaginationParameters::default());
+    let page1 = DashboardTemplate::from_state(
+        &state,
+        &TestCanisterRuntime::new(),
+        DashboardPaginationParameters::default(),
+    );
     assert_eq!(
         page1.minted_deposits_table.current_page.len(),
         DEFAULT_PAGE_SIZE
@@ -241,6 +261,7 @@ fn should_paginate_minted_deposits_across_multiple_pages() {
     // Page 2
     let page2 = DashboardTemplate::from_state(
         &state,
+        &TestCanisterRuntime::new(),
         DashboardPaginationParameters {
             minted_deposits_start: DEFAULT_PAGE_SIZE,
         },
@@ -254,6 +275,7 @@ fn should_paginate_minted_deposits_across_multiple_pages() {
     // Page 3: should have the remaining items
     let page3 = DashboardTemplate::from_state(
         &state,
+        &TestCanisterRuntime::new(),
         DashboardPaginationParameters {
             minted_deposits_start: DEFAULT_PAGE_SIZE * 2,
         },

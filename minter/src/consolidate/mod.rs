@@ -1,5 +1,5 @@
 use crate::{
-    address::{derivation_path, derive_public_key, lazy_get_schnorr_master_key},
+    address::{lazy_get_schnorr_master_key, minter_account, minter_address},
     constants::MAX_CONCURRENT_RPC_CALLS,
     guard::TimerGuard,
     numeric::LedgerMintIndex,
@@ -20,7 +20,6 @@ use cksol_types_internal::log::Priority;
 use icrc_ledger_types::icrc1::account::Account;
 use itertools::Itertools;
 use sol_rpc_types::{Lamport, Slot};
-use solana_address::Address;
 use solana_hash::Hash;
 use solana_signature::Signature;
 use std::collections::BTreeMap;
@@ -96,23 +95,15 @@ async fn submit_consolidation_transaction<R: CanisterRuntime>(
     slot: Slot,
     recent_blockhash: Hash,
 ) -> Result<Signature, ConsolidationError> {
-    let minter_account = Account {
-        owner: runtime.canister_self(),
-        subaccount: None,
-    };
     let master_key = lazy_get_schnorr_master_key().await;
-    let minter_address = Address::from(
-        derive_public_key(&master_key, derivation_path(&minter_account)).serialize_raw(),
-    );
-
     let sources: Vec<(Account, Lamport)> = funds_to_consolidate
         .iter()
         .map(|(account, (lamport, _))| (*account, *lamport))
         .collect();
     let (transaction, signers) = create_signed_batch_consolidation_transaction(
-        minter_account,
+        minter_account(runtime),
         &sources,
-        minter_address,
+        minter_address(&master_key, runtime),
         recent_blockhash,
         &runtime.signer(),
     )

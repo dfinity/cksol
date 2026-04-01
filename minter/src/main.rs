@@ -231,7 +231,9 @@ fn http_request(request: HttpRequest) -> HttpResponse {
                         .build();
                 }
             };
-            let dashboard = read_state(|state| DashboardTemplate::from_state(state, pagination));
+            let runtime = IcCanisterRuntime::new();
+            let dashboard =
+                read_state(|state| DashboardTemplate::from_state(state, &runtime, pagination));
             HttpResponseBuilder::ok()
                 .header("Content-Type", "text/html; charset=utf-8")
                 .with_body_and_content_length(dashboard.render().unwrap())
