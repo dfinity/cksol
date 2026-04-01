@@ -277,14 +277,12 @@ async fn should_deposit_and_withdraw_funds() {
     tokio::time::sleep(Duration::from_secs(5)).await;
 
     // Step 4: Verify the withdrawal was sent
-    let status = setup.minter().withdraw_sol_status(burn_index).await;
-    assert_matches!(status, WithdrawSolStatus::TxSent(_));
-
-    // Step 5: Wait for the transaction to be confirmed on Solana
     let tx_hash = match setup.minter().withdraw_sol_status(burn_index).await {
         WithdrawSolStatus::TxSent(tx) => tx.transaction_hash,
         other => panic!("Expected TxSent, got: {other:?}"),
     };
+
+    // Step 5: Wait for the transaction to be confirmed on Solana
     let tx_signature: Signature = tx_hash.parse().expect("valid signature");
     confirm_transaction(&rpc_client(), &tx_signature, CommitmentConfig::confirmed()).await;
 
