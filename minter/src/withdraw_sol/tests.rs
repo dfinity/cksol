@@ -593,7 +593,7 @@ mod process_pending_withdrawals_tests {
 
         // Insert pending withdrawal requests directly into state.
         for i in 0..request_count {
-            events::accept_withdrawal(account(i as u8), i as u64, WITHDRAWAL_FEE + 1);
+            events::accept_withdrawal(account(i as u8), i as u64, MINIMUM_WITHDRAWAL_AMOUNT);
         }
 
         // Set up RPC responses for MAX_WITHDRAWAL_ROUNDS rounds.

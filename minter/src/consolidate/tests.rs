@@ -15,11 +15,11 @@ use crate::{
     },
 };
 use assert_matches::assert_matches;
-use sol_rpc_types::{MultiRpcResult, RpcError, Slot};
+use sol_rpc_types::{ConfirmedBlock, MultiRpcResult, RpcError, Signature, Slot};
 
 type SlotResult = MultiRpcResult<Slot>;
-type BlockResult = MultiRpcResult<sol_rpc_types::ConfirmedBlock>;
-type SendTransactionResult = MultiRpcResult<sol_rpc_types::Signature>;
+type BlockResult = MultiRpcResult<ConfirmedBlock>;
+type SendTransactionResult = MultiRpcResult<Signature>;
 
 #[tokio::test]
 async fn should_return_early_if_no_deposits_to_consolidate() {

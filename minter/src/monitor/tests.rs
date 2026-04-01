@@ -9,14 +9,13 @@ use crate::{
 };
 use assert_matches::assert_matches;
 use sol_rpc_types::{
-    MultiRpcResult, RpcError, Slot, TransactionConfirmationStatus, TransactionError,
-    TransactionStatus,
+    ConfirmedBlock, MultiRpcResult, RpcError, Signature, Slot, TransactionConfirmationStatus,
+    TransactionError, TransactionStatus,
 };
-use solana_signature::Signature;
 
 type SlotResult = MultiRpcResult<Slot>;
-type BlockResult = MultiRpcResult<sol_rpc_types::ConfirmedBlock>;
-type SendTransactionResult = MultiRpcResult<sol_rpc_types::Signature>;
+type BlockResult = MultiRpcResult<ConfirmedBlock>;
+type SendTransactionResult = MultiRpcResult<Signature>;
 type SignatureStatusesResult = MultiRpcResult<Vec<Option<TransactionStatus>>>;
 
 const CURRENT_SLOT: Slot = 408_807_102;
@@ -382,8 +381,8 @@ mod resubmission {
 
         for i in 0..MAX_CONCURRENT_RPC_CALLS {
             runtime = runtime
-                .add_stub_response(SendTransactionResult::Consistent(Ok(Signature::from(
-                    [0xA0 + i as u8; 64],
+                .add_stub_response(SendTransactionResult::Consistent(Ok(signature(
+                    0xA0 + i as u8,
                 )
                 .into())))
                 .add_signature([0xA0 + i as u8; 64]);
@@ -396,8 +395,8 @@ mod resubmission {
 
         for i in 0..2_usize {
             runtime = runtime
-                .add_stub_response(SendTransactionResult::Consistent(Ok(Signature::from(
-                    [0xB0 + i as u8; 64],
+                .add_stub_response(SendTransactionResult::Consistent(Ok(signature(
+                    0xB0 + i as u8,
                 )
                 .into())))
                 .add_signature([0xB0 + i as u8; 64]);
@@ -414,6 +413,6 @@ fn setup() {
     init_schnorr_master_key();
 }
 
-fn add_submitted_transaction(signature: Signature, slot: Slot) {
+fn add_submitted_transaction(signature: solana_signature::Signature, slot: Slot) {
     events::submit_consolidation(signature, MINTER_ACCOUNT, slot, vec![]);
 }
