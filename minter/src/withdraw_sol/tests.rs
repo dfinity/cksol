@@ -5,13 +5,11 @@ use crate::{
     guard::{TimerGuard, withdraw_sol_guard},
     state::{
         TaskType,
-        audit::process_event,
-        event::{EventType, TransactionPurpose, WithdrawSolRequest},
-        mutate_state,
+        event::{EventType, TransactionPurpose},
     },
     test_fixtures::{
-        MINIMUM_WITHDRAWAL_AMOUNT, MINTER_ACCOUNT, WITHDRAWAL_FEE, init_schnorr_master_key,
-        init_state, runtime::TestCanisterRuntime,
+        MINIMUM_WITHDRAWAL_AMOUNT, MINTER_ACCOUNT, WITHDRAWAL_FEE, account, confirmed_block,
+        events, init_schnorr_master_key, init_state, runtime::TestCanisterRuntime, signature,
     },
     withdraw_sol::{
         MAX_WITHDRAWAL_ROUNDS, process_pending_withdrawals, withdraw_sol, withdraw_sol_status,
@@ -28,11 +26,8 @@ use ic_canister_runtime::IcError;
 use ic_cdk::call::CallRejected;
 use ic_cdk_management_canister::SignCallError;
 use icrc_ledger_types::{icrc1::account::Account, icrc2::transfer_from::TransferFromError};
-use sol_rpc_types::{ConfirmedBlock, MultiRpcResult, RpcError, Slot};
-use solana_hash::Hash;
-use solana_message::Message;
+use sol_rpc_types::{MultiRpcResult, RpcError, Slot};
 use solana_signature::Signature;
-
 const VALID_ADDRESS: &str = "E4MpwNnMWs2XtW5gVrxZvyS7fMq31QD5HvbxmwP45Tz3";
 
 fn test_caller() -> Principal {
@@ -263,13 +258,9 @@ mod process_pending_withdrawals_tests {
 
     use super::*;
 
-    type SendSlotResult = MultiRpcResult<Slot>;
-    type SendBlockResult = MultiRpcResult<Option<ConfirmedBlock>>;
+    type GetSlotResult = MultiRpcResult<Slot>;
+    type GetBlockResult = MultiRpcResult<sol_rpc_types::ConfirmedBlock>;
     type SendTransactionResult = MultiRpcResult<sol_rpc_types::Signature>;
-
-    fn signature(index: u8) -> Signature {
-        Signature::from([index; 64])
-    }
 
     #[tokio::test]
     async fn should_do_nothing_if_no_pending_withdrawals() {
@@ -332,22 +323,19 @@ mod process_pending_withdrawals_tests {
         init_state();
         init_schnorr_master_key();
 
-        let fake_sig = [0x42; 64];
+        let tx_signature = signature(0x42);
         let slot = 1;
 
         let runtime = TestCanisterRuntime::new()
             // ledger burn response for withdraw_sol
             .add_stub_response(Ok::<Nat, TransferFromError>(Nat::from(1u64)))
             // get_recent_slot_and_blockhash calls
-            .add_stub_response(SendSlotResult::Consistent(Ok(slot)))
-            .add_stub_response(SendBlockResult::Consistent(Ok(Some(get_confirmed_block()))))
+            .add_stub_response(GetSlotResult::Consistent(Ok(slot)))
+            .add_stub_response(GetBlockResult::Consistent(Ok(confirmed_block())))
             // schnorr signing response
-            .add_signature(fake_sig)
+            .add_signature(tx_signature.into())
             // sendTransaction response
-            .add_stub_response(SendTransactionResult::Consistent(Ok(Signature::from(
-                fake_sig,
-            )
-            .into())))
+            .add_stub_response(SendTransactionResult::Consistent(Ok(tx_signature.into())))
             .with_increasing_time();
 
         withdraw(&runtime, 1).await;
@@ -367,7 +355,7 @@ mod process_pending_withdrawals_tests {
                     purpose: TransactionPurpose::WithdrawSol { burn_indices },
                     ..
                 } => {
-                    assert_eq!(signature, Signature::from(fake_sig));
+                    assert_eq!(signature, tx_signature);
                     assert_eq!(*burn_indices, vec![LedgerBurnIndex::from(1u64)]);
                 });
             })
@@ -384,13 +372,13 @@ mod process_pending_withdrawals_tests {
             // ledger burn response for withdraw_sol
             .add_stub_response(Ok::<Nat, TransferFromError>(Nat::from(1u64)))
             // get_recent_block retries getSlot 3 times before giving up
-            .add_stub_response(SendSlotResult::Consistent(Err(RpcError::ValidationError(
+            .add_stub_response(GetSlotResult::Consistent(Err(RpcError::ValidationError(
                 "slot unavailable".to_string(),
             ))))
-            .add_stub_response(SendSlotResult::Consistent(Err(RpcError::ValidationError(
+            .add_stub_response(GetSlotResult::Consistent(Err(RpcError::ValidationError(
                 "slot unavailable".to_string(),
             ))))
-            .add_stub_response(SendSlotResult::Consistent(Err(RpcError::ValidationError(
+            .add_stub_response(GetSlotResult::Consistent(Err(RpcError::ValidationError(
                 "slot unavailable".to_string(),
             ))))
             .with_increasing_time();
@@ -431,8 +419,8 @@ mod process_pending_withdrawals_tests {
             .add_stub_response(Ok::<Nat, TransferFromError>(Nat::from(1u64)))
             .add_stub_response(Ok::<Nat, TransferFromError>(Nat::from(2u64)))
             // get_recent_slot_and_blockhash calls
-            .add_stub_response(SendSlotResult::Consistent(Ok(slot)))
-            .add_stub_response(SendBlockResult::Consistent(Ok(Some(get_confirmed_block()))))
+            .add_stub_response(GetSlotResult::Consistent(Ok(slot)))
+            .add_stub_response(GetBlockResult::Consistent(Ok(confirmed_block())))
             // signing fails for the batch
             .add_schnorr_signing_error(SignCallError::CallFailed(
                 CallRejected::with_rejection(4, "signing service unavailable".to_string()).into(),
@@ -491,8 +479,8 @@ mod process_pending_withdrawals_tests {
         }
         // get_recent_slot_and_blockhash (one round: getSlot + getBlock)
         runtime = runtime
-            .add_stub_response(SendSlotResult::Consistent(Ok(slot)))
-            .add_stub_response(SendBlockResult::Consistent(Ok(Some(get_confirmed_block()))));
+            .add_stub_response(GetSlotResult::Consistent(Ok(slot)))
+            .add_stub_response(GetBlockResult::Consistent(Ok(confirmed_block())));
         // one signature per batch + sendTransaction: batch 1 (MAX_WITHDRAWALS_PER_TX) + batch 2 (1)
         runtime = runtime
             .add_signature(signature(1).into())
@@ -558,8 +546,8 @@ mod process_pending_withdrawals_tests {
 
         // Round 1: get_recent_slot_and_blockhash, then signatures + sendTransaction
         runtime = runtime
-            .add_stub_response(SendSlotResult::Consistent(Ok(slot)))
-            .add_stub_response(SendBlockResult::Consistent(Ok(Some(get_confirmed_block()))));
+            .add_stub_response(GetSlotResult::Consistent(Ok(slot)))
+            .add_stub_response(GetBlockResult::Consistent(Ok(confirmed_block())));
         for i in 0..MAX_CONCURRENT_RPC_CALLS {
             runtime = runtime
                 .add_signature(signature(i as u8 + 1).into())
@@ -571,8 +559,8 @@ mod process_pending_withdrawals_tests {
 
         // Round 2: fresh get_recent_slot_and_blockhash, then 1 signature + sendTransaction
         runtime = runtime
-            .add_stub_response(SendSlotResult::Consistent(Ok(slot)))
-            .add_stub_response(SendBlockResult::Consistent(Ok(Some(get_confirmed_block()))))
+            .add_stub_response(GetSlotResult::Consistent(Ok(slot)))
+            .add_stub_response(GetBlockResult::Consistent(Ok(confirmed_block())))
             .add_signature(signature(MAX_CONCURRENT_RPC_CALLS as u8 + 1).into())
             .add_stub_response(SendTransactionResult::Consistent(Ok(signature(
                 MAX_CONCURRENT_RPC_CALLS as u8 + 1,
@@ -595,10 +583,6 @@ mod process_pending_withdrawals_tests {
 
     #[tokio::test]
     async fn should_respect_max_withdrawal_rounds() {
-        use crate::state::audit::process_event;
-        use crate::state::event::{EventType, WithdrawSolRequest};
-        use crate::state::mutate_state;
-
         init_state();
         init_schnorr_master_key();
 
@@ -607,35 +591,18 @@ mod process_pending_withdrawals_tests {
         // Create enough requests to fill MAX_WITHDRAWAL_ROUNDS + 1 rounds.
         let request_count = max_per_round * MAX_WITHDRAWAL_ROUNDS + 1;
 
-        let runtime = TestCanisterRuntime::new().with_increasing_time();
-
         // Insert pending withdrawal requests directly into state.
         for i in 0..request_count {
-            let mut addr = [0u8; 32];
-            addr[0] = i as u8;
-            addr[1] = (i >> 8) as u8;
-            mutate_state(|state| {
-                process_event(
-                    state,
-                    EventType::AcceptedWithdrawSolRequest(WithdrawSolRequest {
-                        account: Account::from(Principal::from_slice(&[1, addr[0], addr[1]])),
-                        solana_address: addr,
-                        burn_block_index: LedgerBurnIndex::from(i as u64),
-                        withdrawal_amount: WITHDRAWAL_FEE + 1,
-                        withdrawal_fee: WITHDRAWAL_FEE,
-                    }),
-                    &runtime,
-                );
-            });
+            events::accept_withdrawal(account(i as u8), i as u64, MINIMUM_WITHDRAWAL_AMOUNT);
         }
 
         // Set up RPC responses for MAX_WITHDRAWAL_ROUNDS rounds.
-        let mut runtime = runtime;
+        let mut runtime = TestCanisterRuntime::new().with_increasing_time();
         let mut sig_counter: u8 = 0;
         for _round in 0..MAX_WITHDRAWAL_ROUNDS {
             runtime = runtime
-                .add_stub_response(SendSlotResult::Consistent(Ok(slot)))
-                .add_stub_response(SendBlockResult::Consistent(Ok(Some(get_confirmed_block()))));
+                .add_stub_response(GetSlotResult::Consistent(Ok(slot)))
+                .add_stub_response(GetBlockResult::Consistent(Ok(confirmed_block())));
             for _ in 0..MAX_CONCURRENT_RPC_CALLS {
                 sig_counter = sig_counter.wrapping_add(1);
                 runtime = runtime
@@ -665,102 +632,47 @@ mod process_pending_withdrawals_tests {
             "withdrawal beyond max rounds should still be Pending"
         );
     }
-
-    fn get_confirmed_block() -> ConfirmedBlock {
-        ConfirmedBlock {
-            previous_blockhash: Default::default(),
-            blockhash: solana_hash::Hash::new_from_array([0x42; 32]).into(),
-            parent_slot: 0,
-            block_time: None,
-            block_height: None,
-            signatures: None,
-            rewards: None,
-            num_reward_partitions: None,
-            transactions: None,
-        }
-    }
 }
 
 mod withdrawal_finalization_tests {
     use super::*;
 
     fn setup_sent_withdrawal(burn_block_index: u64) -> Signature {
-        let signature = Signature::from([burn_block_index as u8 + 1; 64]);
-        let runtime = TestCanisterRuntime::new().with_increasing_time();
-        let payer = solana_address::Address::from([0x42; 32]);
-
-        mutate_state(|state| {
-            process_event(
-                state,
-                EventType::AcceptedWithdrawSolRequest(WithdrawSolRequest {
-                    account: MINTER_ACCOUNT,
-                    solana_address: [0u8; 32],
-                    burn_block_index: burn_block_index.into(),
-                    withdrawal_amount: MINIMUM_WITHDRAWAL_AMOUNT,
-                    withdrawal_fee: WITHDRAWAL_FEE,
-                }),
-                &runtime,
-            )
-        });
-        mutate_state(|state| {
-            process_event(
-                state,
-                EventType::SubmittedTransaction {
-                    signature,
-                    message: Message::new_with_blockhash(&[], Some(&payer), &Hash::default())
-                        .into(),
-                    signers: vec![MINTER_ACCOUNT],
-                    slot: 1,
-                    purpose: TransactionPurpose::WithdrawSol {
-                        burn_indices: vec![LedgerBurnIndex::from(burn_block_index)],
-                    },
-                },
-                &runtime,
-            )
-        });
-
-        signature
+        let tx_signature = signature(burn_block_index as u8 + 1);
+        events::accept_withdrawal(MINTER_ACCOUNT, burn_block_index, MINIMUM_WITHDRAWAL_AMOUNT);
+        events::submit_withdrawal(tx_signature, MINTER_ACCOUNT, 1, vec![burn_block_index]);
+        tx_signature
     }
 
     #[test]
     fn should_report_tx_finalized_after_succeeded_transaction() {
         init_state();
-        let signature = setup_sent_withdrawal(1);
-        let runtime = TestCanisterRuntime::new().with_increasing_time();
+        let tx_signature = setup_sent_withdrawal(1);
 
         assert_matches!(withdraw_sol_status(1), WithdrawSolStatus::TxSent(_));
 
-        mutate_state(|state| {
-            process_event(
-                state,
-                EventType::SucceededTransaction { signature },
-                &runtime,
-            )
-        });
+        events::succeed_transaction(tx_signature);
 
         assert_matches!(
             withdraw_sol_status(1),
             WithdrawSolStatus::TxFinalized(TxFinalizedStatus::Success { transaction_hash, .. })
-                if transaction_hash == signature.to_string()
+                if transaction_hash == tx_signature.to_string()
         );
     }
 
     #[test]
     fn should_report_tx_failed_after_failed_transaction() {
         init_state();
-        let signature = setup_sent_withdrawal(1);
-        let runtime = TestCanisterRuntime::new().with_increasing_time();
+        let tx_signature = setup_sent_withdrawal(1);
 
         assert_matches!(withdraw_sol_status(1), WithdrawSolStatus::TxSent(_));
 
-        mutate_state(|state| {
-            process_event(state, EventType::FailedTransaction { signature }, &runtime)
-        });
+        events::fail_transaction(tx_signature);
 
         assert_matches!(
             withdraw_sol_status(1),
             WithdrawSolStatus::TxFinalized(TxFinalizedStatus::Failure { transaction_hash })
-                if transaction_hash == signature.to_string()
+                if transaction_hash == tx_signature.to_string()
         );
     }
 }
