@@ -4,8 +4,8 @@ use crate::test_fixtures::{
     DEPOSIT_FEE, MINIMUM_DEPOSIT_AMOUNT, MINIMUM_WITHDRAWAL_AMOUNT, WITHDRAWAL_FEE, account,
     deposit_id,
     events::{
-        accept_deposit, accept_withdrawal, fail_transaction, mint_deposit, submit_withdrawal,
-        succeed_transaction,
+        accept_deposit, accept_withdrawal, fail_transaction, mint_deposit, quarantine_deposit,
+        submit_consolidation, submit_withdrawal, succeed_transaction,
     },
     init_schnorr_master_key, init_state, init_state_with_args, ledger_canister_id,
     runtime::TestCanisterRuntime,
@@ -78,7 +78,7 @@ fn should_display_empty_state() {
     init_state();
 
     DashboardAssert::assert_that(dashboard())
-        .has_no_elements_matching("#minted-deposits + table")
+        .has_no_elements_matching("#deposits + table")
         .has_no_elements_matching("#withdrawals + table");
 }
 
@@ -134,20 +134,56 @@ fn should_display_minted_deposits() {
 
     DashboardAssert::assert_that(dashboard())
         .has_table_row_value(
-            "#minted-deposits + table > tbody > tr:nth-child(1)",
+            "#deposits + table > tbody > tr:nth-child(1)",
             &[
                 &deposit.signature.to_string(),
                 &deposit.account.to_string(),
                 &lamports_to_sol(deposit_amount),
                 &lamports_to_sol(deposit_amount - DEPOSIT_FEE),
                 "42",
+                "Minted",
             ],
-            "minted deposits",
+            "deposits",
         )
         .has_links_satisfying(
             |href| href.contains("solscan.io/tx/"),
             |href| href.contains(&deposit.signature.to_string()),
         );
+}
+
+#[test]
+fn should_display_all_deposit_statuses() {
+    init_state();
+
+    // Accepted
+    accept_deposit(deposit_id(1), 100_000_000);
+
+    // Minted (pending consolidation)
+    accept_deposit(deposit_id(2), 200_000_000);
+    mint_deposit(deposit_id(2), 10);
+
+    // Quarantined
+    accept_deposit(deposit_id(3), 50_000_000);
+    quarantine_deposit(deposit_id(3));
+
+    // Consolidated (minted + consolidation submitted)
+    accept_deposit(deposit_id(4), 300_000_000);
+    mint_deposit(deposit_id(4), 20);
+    submit_consolidation(signature(0xAA), account(0), 1, vec![20]);
+
+    let rendered_dashboard = dashboard();
+    assert_eq!(rendered_dashboard.deposits_table.current_page.len(), 4);
+
+    let statuses: Vec<&str> = rendered_dashboard
+        .deposits_table
+        .current_page
+        .iter()
+        .map(|deposit| deposit.status)
+        .collect();
+    assert!(statuses.contains(&"Accepted"));
+    assert!(statuses.contains(&"Quarantined"));
+    assert!(statuses.contains(&"Minted"));
+    assert!(statuses.contains(&"Consolidated"));
 }
 
 #[test]
@@ -176,13 +212,10 @@ fn should_paginate_minted_deposits_across_multiple_pages() {
     }
 
     let page1 = dashboard();
-    assert_eq!(
-        page1.minted_deposits_table.current_page.len(),
-        DEFAULT_PAGE_SIZE
-    );
-    assert!(page1.minted_deposits_table.has_more_than_one_page());
-    assert_eq!(page1.minted_deposits_table.pagination.pages.len(), 3);
-    assert_eq!(page1.minted_deposits_table.pagination.current_page_index, 1);
+    assert_eq!(page1.deposits_table.current_page.len(), DEFAULT_PAGE_SIZE);
+    assert!(page1.deposits_table.has_more_than_one_page());
+    assert_eq!(page1.deposits_table.pagination.pages.len(), 3);
+    assert_eq!(page1.deposits_table.pagination.current_page_index, 1);
 
     let rendered = page1.render().unwrap();
     assert!(
@@ -194,18 +227,15 @@ fn should_paginate_minted_deposits_across_multiple_pages() {
         minted_deposits_start: DEFAULT_PAGE_SIZE,
         ..Default::default()
     });
-    assert_eq!(
-        page2.minted_deposits_table.current_page.len(),
-        DEFAULT_PAGE_SIZE
-    );
-    assert_eq!(page2.minted_deposits_table.pagination.current_page_index, 2);
+    assert_eq!(page2.deposits_table.current_page.len(), DEFAULT_PAGE_SIZE);
+    assert_eq!(page2.deposits_table.pagination.current_page_index, 2);
 
     let page3 = dashboard_with_pagination(DashboardPaginationParameters {
         minted_deposits_start: DEFAULT_PAGE_SIZE * 2,
         ..Default::default()
     });
-    assert_eq!(page3.minted_deposits_table.current_page.len(), remainder);
-    assert_eq!(page3.minted_deposits_table.pagination.current_page_index, 3);
+    assert_eq!(page3.deposits_table.current_page.len(), remainder);
+    assert_eq!(page3.deposits_table.pagination.current_page_index, 3);
 }
 
 // --- Withdrawal table tests ---
