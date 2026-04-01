@@ -1,4 +1,8 @@
-use crate::{events::MinterEventAssert, ledger_init_args::ledger_init_args};
+use crate::{
+    events::MinterEventAssert,
+    fixtures::{get_balance_request, get_balance_response},
+    ledger_init_args::ledger_init_args,
+};
 use candid::{CandidType, Decode, Encode, Nat, Principal, utils::ArgumentEncoder};
 use canlog::{Log, LogEntry};
 use cksol_types::{
@@ -13,7 +17,9 @@ use cksol_types_internal::{
 use ic_canister_runtime::Runtime;
 use ic_http_types::{HttpRequest, HttpResponse};
 use ic_management_canister_types::{CanisterId, CanisterSettings};
-use ic_pocket_canister_runtime::{ExecuteHttpOutcallMocks, PocketIcRuntime};
+use ic_pocket_canister_runtime::{
+    ExecuteHttpOutcallMocks, MockHttpOutcallsBuilder, PocketIcRuntime,
+};
 use icrc_ledger_types::{
     icrc1::account::Account,
     icrc2::approve::{ApproveArgs, ApproveError},
@@ -298,6 +304,18 @@ impl Setup {
 
     pub async fn advance_time(&self, duration: Duration) -> () {
         self.env.as_ref().unwrap().advance_time(duration).await
+    }
+
+    /// Mock the `getBalance` HTTP outcall made by the init timer to sync the minter's balance.
+    /// Call this after setup and before any test-specific HTTP operations.
+    pub async fn mock_initial_get_balance(&self) {
+        let mut builder = MockHttpOutcallsBuilder::new();
+        for id in 0..4u64 {
+            builder = builder
+                .given(get_balance_request().with_id(id))
+                .respond_with(get_balance_response(0).with_id(id));
+        }
+        self.execute_http_mocks(builder.build()).await;
     }
 
     pub async fn execute_http_mocks(&self, mut mocks: impl ExecuteHttpOutcallMocks) {

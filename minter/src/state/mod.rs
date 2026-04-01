@@ -22,6 +22,7 @@ use std::{
 mod tests;
 
 pub mod audit;
+pub mod balance;
 pub mod event;
 
 /// The minimum balance required for a Solana account to be rent-exempt.
@@ -103,6 +104,7 @@ pub struct State {
     succeeded_transactions: BTreeSet<Signature>,
     failed_transactions: BTreeMap<Signature, SolanaTransaction>,
     active_tasks: BTreeSet<TaskType>,
+    consolidated_balance: Option<Lamport>,
 }
 
 impl State {
@@ -121,6 +123,22 @@ impl State {
             panic!("BUG: minter public key is already set")
         }
         self.minter_public_key = Some(public_key);
+    }
+
+    pub fn consolidated_balance(&self) -> Option<Lamport> {
+        self.consolidated_balance
+    }
+
+    pub(crate) fn process_synced_account_balance(&mut self, account: &Account, balance: Lamport) {
+        let minter_account = Account {
+            owner: ic_cdk::api::canister_self(),
+            subaccount: None,
+        };
+        assert_eq!(
+            *account, minter_account,
+            "BUG: expected minter account, got {account}"
+        );
+        self.consolidated_balance = Some(balance);
     }
 
     pub fn sol_rpc_canister_id(&self) -> Principal {
@@ -623,6 +641,7 @@ impl TryFrom<InitArgs> for State {
             succeeded_transactions: BTreeSet::new(),
             failed_transactions: BTreeMap::new(),
             active_tasks: BTreeSet::new(),
+            consolidated_balance: None,
         };
         state.validate()?;
         Ok(state)

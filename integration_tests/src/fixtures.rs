@@ -187,6 +187,19 @@ pub fn get_deposit_transaction_response() -> JsonRpcResponse {
     }))
 }
 
+/// JSON-RPC request matcher for `getBalance`.
+pub fn get_balance_request() -> JsonRpcRequestMatcher {
+    JsonRpcRequestMatcher::with_method("getBalance")
+}
+
+/// JSON-RPC response for `getBalance`.
+pub fn get_balance_response(balance: u64) -> JsonRpcResponse {
+    JsonRpcResponse::from(json!({
+        "jsonrpc": "2.0",
+        "result": { "context": { "slot": 1 }, "value": balance },
+        "id": 1
+    }))
+}
 /// JSON-RPC request matcher for `getSlot`.
 pub fn get_slot_request() -> JsonRpcRequestMatcher {
     JsonRpcRequestMatcher::with_method("getSlot")
@@ -283,8 +296,9 @@ pub fn send_transaction_response(signature: &str) -> JsonRpcResponse {
 }
 
 /// Creates HTTP mocks for `getTransaction` RPC calls.
+/// IDs 0-3 are consumed by the `getBalance` call during init.
 pub fn get_transaction_http_mocks(response: JsonRpcResponse) -> MockHttpOutcalls {
     MockHttpOutcallsBuilder::new()
-        .expect(0..4, get_deposit_transaction_request(), response)
+        .expect(4..8, get_deposit_transaction_request(), response)
         .build()
 }

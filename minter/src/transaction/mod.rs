@@ -105,6 +105,26 @@ pub enum GetRecentBlockhashError {
     Failed(Vec<String>),
 }
 
+pub async fn get_balance<R: CanisterRuntime>(
+    runtime: &R,
+    address: Address,
+) -> Result<Lamport, GetBalanceError> {
+    let client = read_state(|state| state.sol_rpc_client(runtime.inter_canister_call_runtime()));
+    match client.get_balance(address).send().await {
+        MultiRpcResult::Consistent(Ok(balance)) => Ok(balance),
+        MultiRpcResult::Consistent(Err(e)) => Err(GetBalanceError::RpcError(e)),
+        MultiRpcResult::Inconsistent(_) => Err(GetBalanceError::InconsistentRpcResults),
+    }
+}
+
+#[derive(Debug, PartialEq, Error, From)]
+pub enum GetBalanceError {
+    #[error("RPC error while fetching balance: {0}")]
+    RpcError(RpcError),
+    #[error("Inconsistent RPC results for getBalance")]
+    InconsistentRpcResults,
+}
+
 pub async fn get_signature_statuses<R: CanisterRuntime>(
     runtime: &R,
     signatures: &[Signature],

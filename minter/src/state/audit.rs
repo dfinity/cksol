@@ -63,6 +63,9 @@ fn apply_state_transition(state: &mut State, payload: &EventType) {
         EventType::FailedTransaction { signature } => {
             state.process_transaction_failed(signature);
         }
+        EventType::SyncedAccountBalance { account, balance } => {
+            state.process_synced_account_balance(account, *balance);
+        }
     }
 }
 

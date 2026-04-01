@@ -341,6 +341,13 @@ type EventType = variant {
         // The signature of the failed Solana transaction.
         signature: Signature;
     };
+    // The minter synced an account's balance from Solana via `getBalance`.
+    SyncedAccountBalance : record {
+        // The account whose balance was synced.
+        account: Account;
+        // The balance in lamports.
+        balance: Lamport;
+    };
 };
 
 // A single transaction can deposit to multiple accounts, so the signature alone

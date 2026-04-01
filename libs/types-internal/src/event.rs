@@ -105,6 +105,13 @@ pub enum EventType {
         /// The signature of the failed Solana transaction.
         signature: Signature,
     },
+    /// The minter synced an account's balance from Solana via `getBalance`.
+    SyncedAccountBalance {
+        /// The account whose balance was synced.
+        account: Account,
+        /// The balance in lamports.
+        balance: Lamport,
+    },
 }
 
 /// The purpose of a submitted Solana transaction.

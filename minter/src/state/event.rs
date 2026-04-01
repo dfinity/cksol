@@ -120,6 +120,16 @@ pub enum EventType {
         #[cbor(n(0), with = "cbor::signature")]
         signature: Signature,
     },
+    /// The minter synced an account's balance from Solana via `getBalance`.
+    #[n(10)]
+    SyncedAccountBalance {
+        /// The account whose balance was synced.
+        #[n(0)]
+        account: Account,
+        /// The balance in lamports.
+        #[n(1)]
+        balance: Lamport,
+    },
 }
 
 /// Payload of the `AcceptedWithdrawSolRequest` event.

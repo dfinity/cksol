@@ -57,6 +57,7 @@ mod state_from_init_args {
                 succeeded_transactions: BTreeSet::new(),
                 failed_transactions: BTreeMap::new(),
                 active_tasks: BTreeSet::new(),
+                consolidated_balance: None,
             }
         );
     }

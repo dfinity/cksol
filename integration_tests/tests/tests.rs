@@ -185,6 +185,7 @@ mod lifecycle {
     #[tokio::test]
     async fn should_get_events() {
         let setup = SetupBuilder::new().build().await;
+        setup.mock_initial_get_balance().await;
         let minter = setup.minter();
 
         minter.assert_that_events().await.satisfy(|events| {
@@ -579,6 +580,7 @@ mod withdraw_sol_tests {
             )])
             .build()
             .await;
+        setup.mock_initial_get_balance().await;
 
         setup
             .ledger()
@@ -678,11 +680,12 @@ mod withdraw_sol_tests {
         const BLOCKHASH: &str = "4sGjMW1sUnHzSxGspuhpqLDx6wiyjNtZAMdL4VZHirAn";
         const TX_SIGNATURE: &str = "drWLXM6bHretgz7KuwvGZvPBeQ8KEbS3AKB2WJPy4TbBDaqdqAiNcj3cTAS7UnyJKM7eEZoUf4DvhY1TKkus9Bp";
 
+        // IDs 0-3: getBalance (init)
         MockHttpOutcallsBuilder::new()
-            .expect(0..4, get_slot_request(), get_slot_response(slot))
-            .expect(4..8, get_block_request(slot), get_block_response(BLOCKHASH))
+            .expect(4..8, get_slot_request(), get_slot_response(slot))
+            .expect(8..12, get_block_request(slot), get_block_response(BLOCKHASH))
             .expect(
-                8..12,
+                12..16,
                 send_transaction_request(),
                 send_transaction_response(TX_SIGNATURE),
             )
@@ -696,24 +699,24 @@ mod withdraw_sol_tests {
 
         MockHttpOutcallsBuilder::new()
             .expect(
-                12..16,
+                16..20,
                 get_signature_statuses_request(),
                 get_signature_statuses_not_found_response(1),
             )
-            .expect(16..20, get_slot_request(), get_slot_response(current_slot))
+            .expect(20..24, get_slot_request(), get_slot_response(current_slot))
             .expect(
-                20..24,
+                24..28,
                 get_block_request(current_slot),
                 get_block_response(NEW_BLOCKHASH),
             )
-            .expect(24..28, get_slot_request(), get_slot_response(current_slot))
-            .expect(
-                28..32,
-                get_block_request(current_slot),
-                get_block_response(NEW_BLOCKHASH),
-            )
+            .expect(28..32, get_slot_request(), get_slot_response(current_slot))
             .expect(
                 32..36,
+                get_block_request(current_slot),
+                get_block_response(NEW_BLOCKHASH),
+            )
+            .expect(
+                36..40,
                 send_transaction_request(),
                 send_transaction_response(NEW_TX_SIGNATURE),
             )
@@ -724,7 +727,7 @@ mod withdraw_sol_tests {
     fn finalize_withdrawal_http_mocks() -> MockHttpOutcalls {
         MockHttpOutcallsBuilder::new()
             .expect(
-                36..40,
+                40..44,
                 get_signature_statuses_request(),
                 get_signature_statuses_finalized_response(1),
             )
@@ -767,6 +770,7 @@ mod update_balance_tests {
         }
 
         let setup = SetupBuilder::new().with_proxy_canister().build().await;
+        setup.mock_initial_get_balance().await;
 
         let result = setup
             .minter()
@@ -782,6 +786,7 @@ mod update_balance_tests {
     #[tokio::test]
     async fn should_fail_for_concurrent_access() {
         let setup = SetupBuilder::new().with_proxy_canister().build().await;
+        setup.mock_initial_get_balance().await;
 
         // Both minters use the same mocks, whichever gets the guard first will consume them
         let mocks = SharedMockHttpOutcalls::new(get_transaction_http_mocks(
@@ -825,6 +830,7 @@ mod update_balance_tests {
     #[tokio::test]
     async fn should_return_processing_if_minting_fails_and_mint_on_retry() {
         let setup = SetupBuilder::new().with_proxy_canister().build().await;
+        setup.mock_initial_get_balance().await;
 
         setup.ledger().stop().await;
 
@@ -886,6 +892,7 @@ mod update_balance_tests {
     #[tokio::test]
     async fn should_update_balance_only_once_with_same_deposit() {
         let setup = SetupBuilder::new().with_proxy_canister().build().await;
+        setup.mock_initial_get_balance().await;
 
         let balance_before = setup.ledger().balance_of(DEFAULT_CALLER_ACCOUNT).await;
         assert_eq!(balance_before, 0);
@@ -927,6 +934,7 @@ mod update_balance_tests {
     #[tokio::test]
     async fn should_refund_extra_cycles() {
         let setup = SetupBuilder::new().with_proxy_canister().build().await;
+        setup.mock_initial_get_balance().await;
 
         let get_transaction_cycles_cost = get_transaction_cycles_cost(&setup).await;
 
@@ -1025,6 +1033,7 @@ mod consolidation_tests {
     #[tokio::test]
     async fn should_consolidate_deposits_after_timer() {
         let setup = SetupBuilder::new().with_proxy_canister().build().await;
+        setup.mock_initial_get_balance().await;
 
         let result = setup
             .minter()
@@ -1061,15 +1070,16 @@ mod consolidation_tests {
         const BLOCKHASH: &str = "4sGjMW1sUnHzSxGspuhpqLDx6wiyjNtZAMdL4VZHirAn";
         const TX_SIGNATURE: &str = "5VERv8NMvzbJMEkV8xnrLkEaWRtSz9CosKDYjCJjBRnbJLgp8uirBgmQpjKhoR4tjF3ZpRzrFmBV6UjKdiSZkQUW";
 
+        // IDs 0-3: getBalance (init), 4-7: getTransaction (update_balance)
         MockHttpOutcallsBuilder::new()
-            .expect(4..8, get_slot_request(), get_slot_response(SLOT))
+            .expect(8..12, get_slot_request(), get_slot_response(SLOT))
             .expect(
-                8..12,
+                12..16,
                 get_block_request(SLOT),
                 get_block_response(BLOCKHASH),
             )
             .expect(
-                12..16,
+                16..20,
                 send_transaction_request(),
                 send_transaction_response(TX_SIGNATURE),
             )
@@ -1083,6 +1093,7 @@ mod metrics_tests {
     #[tokio::test]
     async fn should_serve_metrics() {
         let setup = SetupBuilder::new().build().await;
+        setup.mock_initial_get_balance().await;
 
         setup
             .check_metrics()
