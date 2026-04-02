@@ -1,10 +1,8 @@
 use super::*;
 use crate::{
+    constants::SOLANA_LAMPORTS_PER_SIGNATURE,
     state::read_state,
-    test_fixtures::{
-        init_schnorr_master_key, init_state, runtime::TestCanisterRuntime,
-        signer::MockSchnorrSigner,
-    },
+    test_fixtures::{init_schnorr_master_key, init_state, runtime::TestCanisterRuntime},
 };
 use assert_matches::assert_matches;
 use candid::Principal;
@@ -23,7 +21,24 @@ fn derive_address(account: &Account) -> Address {
     Address::from(derive_public_key(&master_key, derivation_path(account)).serialize_raw())
 }
 
-mod batch_consolidation_tests {
+fn minter_account() -> Account {
+    use crate::test_fixtures::runtime::TEST_CANISTER_ID;
+    Account::from(TEST_CANISTER_ID)
+}
+
+fn minter_sol_address() -> Address {
+    derive_address(&minter_account())
+}
+
+/// Extracts the transfer amount (in lamports) from a compiled system program
+/// transfer instruction. The data layout is:
+///   [u32 LE instruction index = 2, u64 LE amount]
+fn transfer_amount_from_instruction(instruction: &solana_transaction::CompiledInstruction) -> u64 {
+    assert_eq!(instruction.data.len(), 12);
+    u64::from_le_bytes(instruction.data[4..12].try_into().unwrap())
+}
+
+mod consolidation_tests {
     use super::*;
 
     #[tokio::test]
@@ -33,23 +48,17 @@ mod batch_consolidation_tests {
             owner: Principal::from_slice(&[1, 2, 3]),
             subaccount: None,
         };
-        let target_account = Account {
-            owner: Principal::from_slice(&[4, 5, 6]),
-            subaccount: None,
-        };
         let amount: Lamport = 500_000_000;
         let blockhash = Hash::new_from_array([0xBB; 32]);
         let signature = [0x42u8; 64];
 
         let source_address = derive_address(&source_account);
-        let target_address = derive_address(&target_account);
 
-        let signer = MockSchnorrSigner::with_signatures(vec![signature]);
+        let runtime = TestCanisterRuntime::new().add_signature(signature);
         let (tx, signers) = create_signed_consolidation_transaction(
+            &runtime,
             vec![(source_account, amount)],
-            target_address,
             blockhash,
-            &signer,
         )
         .await
         .expect("transaction creation should succeed");
@@ -59,8 +68,8 @@ mod batch_consolidation_tests {
 
         // Fee payer is the source address
         assert_eq!(tx.message.account_keys[0], source_address);
-        // Target and system program are also in account keys
-        assert!(tx.message.account_keys.contains(&target_address));
+        // Target is the minter address
+        assert!(tx.message.account_keys.contains(&minter_sol_address()));
         // Should contain system program id
         assert!(
             tx.message
@@ -70,6 +79,13 @@ mod batch_consolidation_tests {
 
         // One transfer instruction
         assert_eq!(tx.message.instructions.len(), 1);
+
+        // Transfer amount should be reduced by the transaction fee
+        let expected_fee = SOLANA_LAMPORTS_PER_SIGNATURE * 1;
+        assert_eq!(
+            transfer_amount_from_instruction(&tx.message.instructions[0]),
+            amount - expected_fee
+        );
 
         // Signature is placed for the source address (position 0 = fee payer)
         assert_eq!(tx.signatures[0], Signature::from(signature));
@@ -89,11 +105,8 @@ mod batch_consolidation_tests {
             owner: Principal::from_slice(&[2]),
             subaccount: None,
         };
-        let target_account = Account {
-            owner: Principal::from_slice(&[3]),
-            subaccount: None,
-        };
-        let amount: Lamport = 100_000_000;
+        let amount_1: Lamport = 100_000_000;
+        let amount_2: Lamport = 200_000_000;
         let blockhash = Hash::new_from_array([0xDD; 32]);
         let sig_1 = [0x11u8; 64];
         let sig_2 = [0x22u8; 64];
@@ -101,13 +114,13 @@ mod batch_consolidation_tests {
         let source_1 = derive_address(&account_1);
         let source_2 = derive_address(&account_2);
 
-        // Fee payer (account_1) signature first, then account_2
-        let signer = MockSchnorrSigner::with_signatures(vec![sig_1, sig_2]);
+        let runtime = TestCanisterRuntime::new()
+            .add_signature(sig_1)
+            .add_signature(sig_2);
         let (tx, signers) = create_signed_consolidation_transaction(
-            vec![(account_1, amount), (account_2, amount)],
-            derive_address(&target_account),
+            &runtime,
+            vec![(account_1, amount_1), (account_2, amount_2)],
             blockhash,
-            &signer,
         )
         .await
         .expect("transaction creation should succeed");
@@ -122,6 +135,31 @@ mod batch_consolidation_tests {
 
         // Two transfer instructions
         assert_eq!(tx.message.instructions.len(), 2);
+
+        // Fee payer's transfer is reduced by the transaction fee
+        let expected_fee = SOLANA_LAMPORTS_PER_SIGNATURE * 2;
+        let fee_payer_instruction = tx
+            .message
+            .instructions
+            .iter()
+            .find(|ix| tx.message.account_keys[ix.accounts[0] as usize] == source_1)
+            .expect("fee payer instruction not found");
+        assert_eq!(
+            transfer_amount_from_instruction(fee_payer_instruction),
+            amount_1 - expected_fee
+        );
+
+        // Other source's transfer is not reduced
+        let other_instruction = tx
+            .message
+            .instructions
+            .iter()
+            .find(|ix| tx.message.account_keys[ix.accounts[0] as usize] == source_2)
+            .expect("other source instruction not found");
+        assert_eq!(
+            transfer_amount_from_instruction(other_instruction),
+            amount_2
+        );
 
         // Verify signatures are at correct positions
         let pos_1 = tx
@@ -147,21 +185,17 @@ mod batch_consolidation_tests {
             owner: Principal::from_slice(&[1]),
             subaccount: None,
         };
-        let target_account = Account {
-            owner: Principal::from_slice(&[2]),
-            subaccount: None,
-        };
         let blockhash = Hash::new_from_array([0xBB; 32]);
 
-        let signer = MockSchnorrSigner::with_responses(vec![Err(SignCallError::CallFailed(
-            CallRejected::with_rejection(4, "signing service unavailable".to_string()).into(),
-        ))]);
+        let runtime =
+            TestCanisterRuntime::new().add_schnorr_signing_error(SignCallError::CallFailed(
+                CallRejected::with_rejection(4, "signing service unavailable".to_string()).into(),
+            ));
 
         let result = create_signed_consolidation_transaction(
+            &runtime,
             vec![(source_account, 500_000_000)],
-            derive_address(&target_account),
             blockhash,
-            &signer,
         )
         .await;
 
@@ -179,24 +213,18 @@ mod batch_consolidation_tests {
             owner: Principal::from_slice(&[2]),
             subaccount: None,
         };
-        let target_account = Account {
-            owner: Principal::from_slice(&[3]),
-            subaccount: None,
-        };
         let blockhash = Hash::new_from_array([0xDD; 32]);
 
-        let signer = MockSchnorrSigner::with_responses(vec![
-            Ok(vec![0x11; 64]),
-            Err(SignCallError::CallFailed(
+        let runtime = TestCanisterRuntime::new()
+            .add_signature([0x11; 64])
+            .add_schnorr_signing_error(SignCallError::CallFailed(
                 CallRejected::with_rejection(5, "canister trapped".to_string()).into(),
-            )),
-        ]);
+            ));
 
         let result = create_signed_consolidation_transaction(
+            &runtime,
             vec![(account_1, 100_000_000), (account_2, 100_000_000)],
-            derive_address(&target_account),
             blockhash,
-            &signer,
         )
         .await;
 
@@ -206,12 +234,7 @@ mod batch_consolidation_tests {
     #[tokio::test]
     async fn should_fail_when_too_many_signatures() {
         setup();
-        let target_account = Account {
-            owner: Principal::from_slice(&[0xFF]),
-            subaccount: None,
-        };
         let blockhash = Hash::new_from_array([0xBB; 32]);
-        let signer = MockSchnorrSigner::with_signatures([[0xAA; 64]; MAX_SIGNATURES as usize + 1]);
 
         // Create MAX_SIGNATURES + 1 unique sources, exceeding the limit
         let sources: Vec<(Account, Lamport)> = (0..=MAX_SIGNATURES)
@@ -226,13 +249,12 @@ mod batch_consolidation_tests {
             })
             .collect();
 
-        let result = create_signed_consolidation_transaction(
-            sources,
-            derive_address(&target_account),
-            blockhash,
-            &signer,
-        )
-        .await;
+        let mut runtime = TestCanisterRuntime::new();
+        for _ in 0..=MAX_SIGNATURES {
+            runtime = runtime.add_signature([0xAA; 64]);
+        }
+
+        let result = create_signed_consolidation_transaction(&runtime, sources, blockhash).await;
 
         assert_matches!(
             result,
@@ -246,10 +268,6 @@ mod batch_consolidation_tests {
     #[tokio::test]
     async fn should_not_fail_for_max_signatures() {
         setup();
-        let target_account = Account {
-            owner: Principal::from_slice(&[0xFF]),
-            subaccount: None,
-        };
         let blockhash = Hash::new_from_array([0xBB; 32]);
 
         // Create exactly MAX_SIGNATURES unique sources
@@ -265,16 +283,12 @@ mod batch_consolidation_tests {
             })
             .collect();
 
-        let signer =
-            MockSchnorrSigner::with_signatures(vec![[0x11u8; 64]; MAX_SIGNATURES as usize]);
+        let mut runtime = TestCanisterRuntime::new();
+        for _ in 0..MAX_SIGNATURES {
+            runtime = runtime.add_signature([0x11; 64]);
+        }
 
-        let result = create_signed_consolidation_transaction(
-            sources,
-            derive_address(&target_account),
-            blockhash,
-            &signer,
-        )
-        .await;
+        let result = create_signed_consolidation_transaction(&runtime, sources, blockhash).await;
 
         assert!(result.is_ok());
     }
@@ -282,14 +296,9 @@ mod batch_consolidation_tests {
     #[tokio::test]
     async fn should_fail_when_transaction_too_large() {
         setup();
-        let target_account = Account {
-            owner: Principal::from_slice(&[0xFF]),
-            subaccount: None,
-        };
         let blockhash = Hash::new_from_array([0xBB; 32]);
         // MAX_SIGNATURES + 1 unique sources to exceed MAX_TX_SIZE
         const NUM_SOURCES: usize = MAX_SIGNATURES as usize + 1;
-        let signer = MockSchnorrSigner::with_signatures([[0xAA; 64]; NUM_SOURCES]);
 
         let sources: Vec<(Account, Lamport)> = (0..NUM_SOURCES)
             .map(|i| {
@@ -303,13 +312,12 @@ mod batch_consolidation_tests {
             })
             .collect();
 
-        let result = create_signed_consolidation_transaction(
-            sources,
-            derive_address(&target_account),
-            blockhash,
-            &signer,
-        )
-        .await;
+        let mut runtime = TestCanisterRuntime::new();
+        for _ in 0..NUM_SOURCES {
+            runtime = runtime.add_signature([0xAA; 64]);
+        }
+
+        let result = create_signed_consolidation_transaction(&runtime, sources, blockhash).await;
 
         assert_matches!(
             result,
@@ -331,23 +339,19 @@ mod batch_consolidation_tests {
             owner: Principal::from_slice(&[2]),
             subaccount: None,
         };
-        let target_account = Account {
-            owner: Principal::from_slice(&[3]),
-            subaccount: None,
-        };
         let blockhash = Hash::new_from_array([0xAA; 32]);
 
-        // Two entries for account_1 should be reduced to one transfer
-        let signer = MockSchnorrSigner::with_signatures(vec![[0x11u8; 64], [0x22u8; 64]]);
+        let runtime = TestCanisterRuntime::new()
+            .add_signature([0x11; 64])
+            .add_signature([0x22; 64]);
         let (tx, signers) = create_signed_consolidation_transaction(
+            &runtime,
             vec![
                 (account_1, 100_000_000),
                 (account_2, 200_000_000),
                 (account_1, 300_000_000),
             ],
-            derive_address(&target_account),
             blockhash,
-            &signer,
         )
         .await
         .expect("transaction creation should succeed");
@@ -370,20 +374,17 @@ mod batch_consolidation_tests {
             owner: Principal::from_slice(&[2]),
             subaccount: None,
         };
-        let target_account = Account {
-            owner: Principal::from_slice(&[3]),
-            subaccount: None,
-        };
         let blockhash = Hash::new_from_array([0xAA; 32]);
 
         let account_1_address = derive_address(&account_1);
 
-        let signer = MockSchnorrSigner::with_signatures(vec![[0x11u8; 64], [0x22u8; 64]]);
+        let runtime = TestCanisterRuntime::new()
+            .add_signature([0x11; 64])
+            .add_signature([0x22; 64]);
         let (tx, _signers) = create_signed_consolidation_transaction(
+            &runtime,
             vec![(account_1, 100_000_000), (account_2, 200_000_000)],
-            derive_address(&target_account),
             blockhash,
-            &signer,
         )
         .await
         .expect("transaction creation should succeed");
@@ -391,19 +392,32 @@ mod batch_consolidation_tests {
         // First source (account_1) is the fee payer (position 0)
         assert_eq!(tx.message.account_keys[0], account_1_address);
     }
+
+    #[tokio::test]
+    async fn should_transfer_to_minter_address() {
+        setup();
+        let source_account = Account {
+            owner: Principal::from_slice(&[1]),
+            subaccount: None,
+        };
+        let blockhash = Hash::new_from_array([0xBB; 32]);
+
+        let runtime = TestCanisterRuntime::new().add_signature([0x42; 64]);
+        let (tx, _signers) = create_signed_consolidation_transaction(
+            &runtime,
+            vec![(source_account, 500_000_000)],
+            blockhash,
+        )
+        .await
+        .expect("transaction creation should succeed");
+
+        // Target address is the minter's consolidated address
+        assert!(tx.message.account_keys.contains(&minter_sol_address()));
+    }
 }
 
 mod batch_withdrawal_tests {
     use super::*;
-    use crate::test_fixtures::runtime::TEST_CANISTER_ID;
-
-    fn minter_account() -> Account {
-        Account::from(TEST_CANISTER_ID)
-    }
-
-    fn minter_address() -> Address {
-        derive_address(&minter_account())
-    }
 
     #[tokio::test]
     async fn should_create_batch_withdrawal_with_single_target() {
@@ -422,7 +436,7 @@ mod batch_withdrawal_tests {
         assert_eq!(signers, vec![minter_account()]);
         assert_eq!(tx.signatures.len(), 1);
         assert_eq!(tx.signatures[0], Signature::from(sig));
-        assert_eq!(tx.message.account_keys[0], minter_address());
+        assert_eq!(tx.message.account_keys[0], minter_sol_address());
         assert!(tx.message.account_keys.contains(&target));
         assert_eq!(tx.message.instructions.len(), 1);
         assert_eq!(tx.message.recent_blockhash, blockhash);
@@ -451,7 +465,7 @@ mod batch_withdrawal_tests {
         assert_eq!(tx.signatures.len(), 1);
 
         // Fee payer is at position 0
-        assert_eq!(tx.message.account_keys[0], minter_address());
+        assert_eq!(tx.message.account_keys[0], minter_sol_address());
 
         // All targets are in account keys
         assert!(tx.message.account_keys.contains(&target_1));

@@ -1,5 +1,4 @@
 use crate::{
-    address::{lazy_get_schnorr_master_key, minter_address},
     constants::MAX_CONCURRENT_RPC_CALLS,
     guard::TimerGuard,
     numeric::LedgerMintIndex,
@@ -93,18 +92,12 @@ async fn submit_consolidation_transaction<R: CanisterRuntime>(
     slot: Slot,
     recent_blockhash: Hash,
 ) -> Result<Signature, ConsolidationError> {
-    let master_key = lazy_get_schnorr_master_key().await;
     let (sources, mint_indices): (Vec<_>, Vec<_>) = funds_to_consolidate
         .into_iter()
         .map(|(account, (lamport, indices))| ((account, lamport), indices))
         .unzip();
-    let (transaction, signers) = create_signed_consolidation_transaction(
-        sources,
-        minter_address(&master_key, runtime),
-        recent_blockhash,
-        &runtime.signer(),
-    )
-    .await?;
+    let (transaction, signers) =
+        create_signed_consolidation_transaction(runtime, sources, recent_blockhash).await?;
 
     let signature = transaction.signatures[0];
     let message = transaction.message.clone();

@@ -1,5 +1,9 @@
 use crate::{
-    address::{DerivationPath, derivation_path, derive_public_key, lazy_get_schnorr_master_key},
+    address::{
+        DerivationPath, derivation_path, derive_public_key, lazy_get_schnorr_master_key,
+        minter_address,
+    },
+    constants::SOLANA_LAMPORTS_PER_SIGNATURE,
     runtime::CanisterRuntime,
     signer::{SchnorrSigner, sign_bytes},
 };
@@ -20,7 +24,6 @@ mod tests;
 pub const MAX_SIGNATURES: u64 = 10;
 pub const MAX_TX_SIZE: usize = 1_232;
 const BYTES_PER_SIGNATURE: usize = 64;
-const LAMPORTS_PER_SIGNATURE: u64 = 5_000;
 
 /// Upper bound on the number of withdrawal transfers that fit in a single
 /// Solana transaction when the fee-payer is the only signer.
@@ -35,7 +38,7 @@ pub enum CreateTransferError {
 }
 
 /// Creates a signed Solana transaction that transfers lamports from
-/// each minter-controlled source address to `target_address`.
+/// each minter-controlled source address to the minter's consolidated address.
 ///
 /// The first source account is used as the fee payer.
 /// Sources are reduced by account (duplicate accounts have their amounts summed).
@@ -46,11 +49,10 @@ pub enum CreateTransferError {
 ///
 /// * Panics if `sources` is empty.
 /// * Panics if the IC returns a signature that is not exactly 64 bytes.
-pub async fn create_signed_consolidation_transaction(
+pub async fn create_signed_consolidation_transaction<R: CanisterRuntime>(
+    runtime: &R,
     sources: Vec<(Account, Lamport)>,
-    target_address: Address,
     recent_blockhash: Hash,
-    signer: &impl SchnorrSigner,
 ) -> Result<(Transaction, Vec<Account>), CreateTransferError> {
     let sources: Vec<(Account, Lamport)> = sources
         .into_iter()
@@ -66,6 +68,7 @@ pub async fn create_signed_consolidation_transaction(
     assert!(!sources.is_empty(), "BUG: sources must not be empty");
 
     let master_public_key = lazy_get_schnorr_master_key().await;
+    let target_address = minter_address(&master_public_key, runtime);
     let (derivation_paths, addresses): (Vec<_>, Vec<_>) = sources
         .iter()
         .map(|(account, _)| {
@@ -76,7 +79,7 @@ pub async fn create_signed_consolidation_transaction(
         .unzip();
 
     let fee_payer_address = &addresses[0];
-    let transaction_fee = LAMPORTS_PER_SIGNATURE * sources.len() as u64;
+    let transaction_fee = SOLANA_LAMPORTS_PER_SIGNATURE * sources.len() as u64;
 
     let instructions: Vec<Instruction> = addresses
         .iter()
@@ -119,7 +122,7 @@ pub async fn create_signed_consolidation_transaction(
         })
         .unzip();
 
-    sign_transaction(&mut transaction, signer_derivation_paths, signer).await?;
+    sign_transaction(&mut transaction, signer_derivation_paths, &runtime.signer()).await?;
 
     Ok((transaction, signer_accounts))
 }
