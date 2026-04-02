@@ -1,5 +1,6 @@
 use super::*;
 use crate::{
+    address::{minter_account as address_minter_account, minter_address as address_minter_address},
     constants::SOLANA_LAMPORTS_PER_SIGNATURE,
     state::read_state,
     test_fixtures::{init_schnorr_master_key, init_state, runtime::TestCanisterRuntime},
@@ -22,12 +23,12 @@ fn derive_address(account: &Account) -> Address {
 }
 
 fn minter_account() -> Account {
-    use crate::test_fixtures::runtime::TEST_CANISTER_ID;
-    Account::from(TEST_CANISTER_ID)
+    address_minter_account(&TestCanisterRuntime::new())
 }
 
 fn minter_address() -> Address {
-    derive_address(&minter_account())
+    let master_key = read_state(|s| s.minter_public_key().cloned().unwrap());
+    address_minter_address(&master_key, &TestCanisterRuntime::new())
 }
 
 /// Extracts the transfer amount (in lamports) from a compiled system program
