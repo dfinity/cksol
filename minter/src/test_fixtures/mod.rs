@@ -75,6 +75,189 @@ pub fn init_schnorr_master_key() {
     });
 }
 
+/// Returns a [`Signature`] filled with byte `i`, e.g. `signature(1)` → `[0x01; 64]`.
+pub fn signature(i: u8) -> solana_signature::Signature {
+    solana_signature::Signature::from([i; 64])
+}
+
+/// Returns a [`ConfirmedBlock`] with a deterministic blockhash for use in RPC mock stubs.
+pub fn confirmed_block() -> sol_rpc_types::ConfirmedBlock {
+    sol_rpc_types::ConfirmedBlock {
+        previous_blockhash: Default::default(),
+        blockhash: solana_hash::Hash::from([0x42; 32]).into(),
+        parent_slot: 0,
+        block_time: None,
+        block_height: None,
+        signatures: None,
+        rewards: None,
+        num_reward_partitions: None,
+        transactions: None,
+    }
+}
+
+/// Returns a [`DepositId`] with deterministic signature and account derived from `i`.
+pub fn deposit_id(i: u8) -> crate::state::event::DepositId {
+    crate::state::event::DepositId {
+        signature: solana_signature::Signature::from([i; 64]),
+        account: account(i),
+    }
+}
+
+/// Returns an [`Account`] with a deterministic principal derived from `i`.
+pub fn account(i: u8) -> Account {
+    Account {
+        owner: Principal::from_slice(&[i; 29]),
+        subaccount: None,
+    }
+}
+
+/// Helpers for constructing state transitions via [`process_event`] in tests.
+///
+/// All helpers operate on the global thread-local state via [`mutate_state`].
+pub mod events {
+    use super::{DEPOSIT_FEE, WITHDRAWAL_FEE, runtime::TestCanisterRuntime};
+    use crate::{
+        numeric::{LedgerBurnIndex, LedgerMintIndex},
+        state::{
+            audit::process_event,
+            event::{DepositId, EventType, TransactionPurpose, WithdrawSolRequest},
+            mutate_state,
+        },
+    };
+    use icrc_ledger_types::icrc1::account::Account;
+    use sol_rpc_types::{Lamport, Slot};
+    use solana_signature::Signature;
+
+    fn message() -> solana_message::Message {
+        let payer = solana_address::Address::from([0x42; 32]);
+        solana_message::Message::new_with_blockhash(
+            &[],
+            Some(&payer),
+            &solana_message::Hash::default(),
+        )
+    }
+
+    /// The runtime is only used by [`process_event`] to record the event timestamp.
+    fn runtime() -> TestCanisterRuntime {
+        TestCanisterRuntime::new().with_time(0)
+    }
+
+    pub fn accept_deposit(deposit_id: DepositId, amount: Lamport) {
+        mutate_state(|state| {
+            process_event(
+                state,
+                EventType::AcceptedDeposit {
+                    deposit_id,
+                    deposit_amount: amount,
+                    amount_to_mint: amount - DEPOSIT_FEE,
+                },
+                &runtime(),
+            )
+        });
+    }
+
+    pub fn mint_deposit(deposit_id: DepositId, mint_index: u64) {
+        mutate_state(|state| {
+            process_event(
+                state,
+                EventType::Minted {
+                    deposit_id,
+                    mint_block_index: LedgerMintIndex::from(mint_index),
+                },
+                &runtime(),
+            )
+        });
+    }
+
+    pub fn submit_consolidation(
+        signature: Signature,
+        fee_payer: Account,
+        slot: Slot,
+        mint_indices: Vec<u64>,
+    ) {
+        mutate_state(|state| {
+            process_event(
+                state,
+                EventType::SubmittedTransaction {
+                    signature,
+                    message: message().into(),
+                    signers: vec![fee_payer],
+                    slot,
+                    purpose: TransactionPurpose::ConsolidateDeposits {
+                        mint_indices: mint_indices
+                            .into_iter()
+                            .map(LedgerMintIndex::from)
+                            .collect(),
+                    },
+                },
+                &runtime(),
+            )
+        });
+    }
+
+    pub fn accept_withdrawal(account: Account, burn_index: u64, amount: Lamport) {
+        mutate_state(|state| {
+            process_event(
+                state,
+                EventType::AcceptedWithdrawSolRequest(WithdrawSolRequest {
+                    account,
+                    solana_address: [0u8; 32],
+                    burn_block_index: LedgerBurnIndex::from(burn_index),
+                    withdrawal_amount: amount,
+                    withdrawal_fee: WITHDRAWAL_FEE,
+                }),
+                &runtime(),
+            )
+        });
+    }
+
+    pub fn submit_withdrawal(
+        signature: Signature,
+        fee_payer: Account,
+        slot: Slot,
+        burn_indices: Vec<u64>,
+    ) {
+        mutate_state(|state| {
+            process_event(
+                state,
+                EventType::SubmittedTransaction {
+                    signature,
+                    message: message().into(),
+                    signers: vec![fee_payer],
+                    slot,
+                    purpose: TransactionPurpose::WithdrawSol {
+                        burn_indices: burn_indices
+                            .into_iter()
+                            .map(LedgerBurnIndex::from)
+                            .collect(),
+                    },
+                },
+                &runtime(),
+            )
+        });
+    }
+
+    pub fn succeed_transaction(signature: Signature) {
+        mutate_state(|state| {
+            process_event(
+                state,
+                EventType::SucceededTransaction { signature },
+                &runtime(),
+            )
+        });
+    }
+
+    pub fn fail_transaction(signature: Signature) {
+        mutate_state(|state| {
+            process_event(
+                state,
+                EventType::FailedTransaction { signature },
+                &runtime(),
+            )
+        });
+    }
+}
+
 pub mod arb {
     use crate::{
         numeric::{LedgerBurnIndex, LedgerMintIndex},

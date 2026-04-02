@@ -34,6 +34,11 @@ impl TestCanisterRuntime {
         self
     }
 
+    pub fn with_time(mut self, timestamp: u64) -> Self {
+        self.times = self.times.add(timestamp);
+        self
+    }
+
     pub fn with_increasing_time(mut self) -> Self {
         self.times = (0..).into();
         self
