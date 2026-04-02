@@ -128,23 +128,23 @@
             <table>
                 <thead>
                 <tr>
-                    <th>Burn Index</th>
-                    <th>From</th>
-                    <th>Destination</th>
-                    <th>Amount (SOL)</th>
+                    <th>Withdrawal Txn</th>
+                    <th>Account</th>
+                    <th>Withdrawal Amount (SOL)</th>
+                    <th>Burnt Amount (SOL)</th>
+                    <th>Burn Block Index</th>
                     <th>Status</th>
-                    <th>Transaction</th>
                 </tr>
                 </thead>
                 <tbody>
                 {% for w in withdrawals_table.current_page %}
                 <tr>
-                    <td>{{ w.burn_index }}</td>
-                    <td>{% if !w.account.is_empty() %}<code>{{ w.account }}</code>{% endif %}</td>
-                    <td>{% if !w.destination.is_empty() %}{% call solscan_address_link(w.destination) %}{% endif %}</td>
-                    <td>{% if !w.amount.is_empty() %}{{ w.amount }}{% endif %}</td>
-                    <td>{{ w.status }}</td>
                     <td>{% if let Some(sig) = w.transaction %}{% call solscan_tx_link(sig) %}{% endif %}</td>
+                    <td><code>{{ w.account }}</code></td>
+                    <td>{{ w.withdrawal_amount }}</td>
+                    <td>{{ w.burnt_amount }}</td>
+                    <td>{{ w.burn_block_index }}</td>
+                    <td>{{ w.status }}</td>
                 </tr>
                 {% endfor %}
                 {% if withdrawals_table.has_more_than_one_page() %}{{ withdrawals_table.pagination|safe }}{% endif %}

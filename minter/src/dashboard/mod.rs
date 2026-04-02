@@ -159,12 +159,12 @@ impl DashboardTablePagination {
 
 #[derive(Clone)]
 pub struct DashboardWithdrawal {
-    pub burn_index: String,
-    pub account: String,
-    pub destination: String,
-    pub amount: String,
-    pub status: &'static str,
     pub transaction: Option<String>,
+    pub account: String,
+    pub withdrawal_amount: String,
+    pub burnt_amount: String,
+    pub burn_block_index: String,
+    pub status: &'static str,
 }
 
 #[derive(Clone)]
@@ -242,15 +242,16 @@ impl DashboardTemplate {
             status: &'static str,
             transaction: Option<String>,
         ) {
+            let transfer_amount = req.withdrawal_amount.saturating_sub(req.withdrawal_fee);
             withdrawals.push((
                 *burn_index.get(),
                 DashboardWithdrawal {
-                    burn_index: burn_index.to_string(),
-                    account: req.account.to_string(),
-                    destination: solana_address::Address::from(req.solana_address).to_string(),
-                    amount: lamports_to_sol(req.withdrawal_amount),
-                    status,
                     transaction,
+                    account: req.account.to_string(),
+                    withdrawal_amount: lamports_to_sol(transfer_amount),
+                    burnt_amount: lamports_to_sol(req.withdrawal_amount),
+                    burn_block_index: burn_index.to_string(),
+                    status,
                 },
             ));
         }
