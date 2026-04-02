@@ -78,18 +78,10 @@ async fn should_deposit_and_consolidate_funds() {
     assert_eq!(
         minter_balance_after_consolidation,
         minter_balance_before_consolidation + deposit_amounts.iter().sum::<Lamport>()
-            - consolidation_transaction_fees(NUM_DEPOSITS as u64)
+            - NUM_DEPOSITS as u64 * FEE_PER_SIGNATURE
     );
 
     setup.drop().await;
-}
-
-fn consolidation_transaction_fees(num_deposits: u64) -> Lamport {
-    // Maximum number of transfer instructions per consolidation transaction
-    const MAX_ACCOUNTS_PER_CONSOLIDATION_TRANSACTION: u64 = 9;
-    let num_transactions = num_deposits.div_ceil(MAX_ACCOUNTS_PER_CONSOLIDATION_TRANSACTION);
-    // Total signatures = num_transactions (fee payers) + num_deposits (sources)
-    (num_transactions + num_deposits) * FEE_PER_SIGNATURE
 }
 
 async fn deposit_to_account(setup: &Setup, account: Account, amount: Lamport) -> Address {
