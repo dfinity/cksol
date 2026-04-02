@@ -1,10 +1,18 @@
 use super::{event::*, *};
 use crate::{
-    state::{SOLANA_RENT_EXEMPTION_THRESHOLD, audit::process_event},
+    constants::SOLANA_LAMPORTS_PER_SIGNATURE,
+    state::{SOLANA_RENT_EXEMPTION_THRESHOLD, audit::process_event, read_state},
     test_fixtures::{
         DEPOSIT_FEE, MINIMUM_DEPOSIT_AMOUNT, MINIMUM_WITHDRAWAL_AMOUNT,
-        UPDATE_BALANCE_REQUIRED_CYCLES, WITHDRAWAL_FEE, arb::arb_event, ledger_canister_id,
-        runtime::TestCanisterRuntime, sol_rpc_canister_id, valid_init_args,
+        UPDATE_BALANCE_REQUIRED_CYCLES, WITHDRAWAL_FEE, account,
+        arb::arb_event,
+        deposit_id,
+        events::{
+            accept_deposit, accept_withdrawal, fail_transaction, mint_deposit, succeed_transaction,
+        },
+        init_state, ledger_canister_id,
+        runtime::TestCanisterRuntime,
+        signature, sol_rpc_canister_id, valid_init_args,
     },
 };
 use assert_matches::assert_matches;
@@ -387,4 +395,104 @@ mod state_upgrade {
             &TestCanisterRuntime::new(),
         );
     }
+}
+
+#[test]
+fn should_track_balance_through_deposits_withdrawals_and_failures() {
+    const DEPOSIT_1: u64 = 500_000_000;
+    const DEPOSIT_2: u64 = 300_000_000;
+    const DEPOSIT_3: u64 = 200_000_000;
+    const WITHDRAWAL_1: u64 = 50_000_000;
+    const WITHDRAWAL_2: u64 = 80_000_000;
+    const TRANSFER_1: u64 = WITHDRAWAL_1 - WITHDRAWAL_FEE;
+    const TRANSFER_2: u64 = WITHDRAWAL_2 - WITHDRAWAL_FEE;
+
+    /// Creates a Solana message with the given number of required signatures.
+    fn message_with_signers(num_signers: u8) -> solana_message::Message {
+        solana_message::Message {
+            header: solana_message::MessageHeader {
+                num_required_signatures: num_signers,
+                num_readonly_signed_accounts: 0,
+                num_readonly_unsigned_accounts: 0,
+            },
+            account_keys: vec![],
+            recent_blockhash: Default::default(),
+            instructions: vec![],
+        }
+    }
+
+    fn submit_transaction(sig: Signature, num_signers: u8, purpose: TransactionPurpose) {
+        let signers: Vec<_> = (0..num_signers).map(|i| account(100 + i)).collect();
+        mutate_state(|state| {
+            process_event(
+                state,
+                EventType::SubmittedTransaction {
+                    signature: sig,
+                    message: message_with_signers(num_signers).into(),
+                    signers,
+                    slot: 0,
+                    purpose,
+                },
+                &TestCanisterRuntime::new().with_time(0),
+            )
+        });
+    }
+
+    init_state();
+    assert_eq!(read_state(|s| s.balance()), 0);
+
+    // Accepting and minting deposits does not change the balance
+    accept_deposit(deposit_id(1), DEPOSIT_1);
+    accept_deposit(deposit_id(2), DEPOSIT_2);
+    mint_deposit(deposit_id(1), 0);
+    mint_deposit(deposit_id(2), 1);
+    assert_eq!(read_state(|s| s.balance()), 0);
+
+    // Submitting a consolidation (2 signers) does not change the balance
+    submit_transaction(
+        signature(0xAA),
+        2,
+        TransactionPurpose::ConsolidateDeposits {
+            mint_indices: vec![0.into(), 1.into()],
+        },
+    );
+    assert_eq!(read_state(|s| s.balance()), 0);
+
+    // Finalized consolidation: balance += total_deposits - tx_fee(2 signers)
+    succeed_transaction(signature(0xAA));
+    let expected = DEPOSIT_1 + DEPOSIT_2 - 2 * SOLANA_LAMPORTS_PER_SIGNATURE;
+    assert_eq!(read_state(|s| s.balance()), expected);
+
+    // Accepting withdrawals does not change the balance
+    accept_withdrawal(account(3), 0, WITHDRAWAL_1);
+    accept_withdrawal(account(4), 1, WITHDRAWAL_2);
+    assert_eq!(read_state(|s| s.balance()), expected);
+
+    // Submitting a withdrawal (1 signer): balance -= total_transfers + tx_fee
+    submit_transaction(
+        signature(0xBB),
+        1,
+        TransactionPurpose::WithdrawSol {
+            burn_indices: vec![0.into(), 1.into()],
+        },
+    );
+    let expected = expected - TRANSFER_1 - TRANSFER_2 - SOLANA_LAMPORTS_PER_SIGNATURE;
+    assert_eq!(read_state(|s| s.balance()), expected);
+
+    // Finalizing a withdrawal does not change the balance
+    succeed_transaction(signature(0xBB));
+    assert_eq!(read_state(|s| s.balance()), expected);
+
+    // Failed consolidation does not credit the balance
+    accept_deposit(deposit_id(3), DEPOSIT_3);
+    mint_deposit(deposit_id(3), 2);
+    submit_transaction(
+        signature(0xCC),
+        1,
+        TransactionPurpose::ConsolidateDeposits {
+            mint_indices: vec![2.into()],
+        },
+    );
+    fail_transaction(signature(0xCC));
+    assert_eq!(read_state(|s| s.balance()), expected);
 }
