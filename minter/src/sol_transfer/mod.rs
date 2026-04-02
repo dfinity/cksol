@@ -3,7 +3,7 @@ use crate::{
         DerivationPath, derivation_path, derive_public_key, lazy_get_schnorr_master_key,
         minter_address,
     },
-    constants::SOLANA_LAMPORTS_PER_SIGNATURE,
+    constants::FEE_PER_SIGNATURE,
     runtime::CanisterRuntime,
     signer::{SchnorrSigner, sign_bytes},
 };
@@ -69,7 +69,7 @@ pub async fn create_signed_consolidation_transaction<R: CanisterRuntime>(
         .unzip();
 
     let fee_payer_address = &addresses[0];
-    let transaction_fee = SOLANA_LAMPORTS_PER_SIGNATURE * sources.len() as u64;
+    let transaction_fee = FEE_PER_SIGNATURE * sources.len() as u64;
 
     let instructions: Vec<Instruction> = addresses
         .iter()

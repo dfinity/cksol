@@ -1,6 +1,6 @@
 use super::*;
 use crate::{
-    constants::SOLANA_LAMPORTS_PER_SIGNATURE,
+    constants::FEE_PER_SIGNATURE,
     state::read_state,
     test_fixtures::{
         MINTER_ACCOUNT, MINTER_ADDRESS, init_schnorr_master_key, init_state,
@@ -75,10 +75,9 @@ mod consolidation_tests {
         assert_eq!(tx.message.instructions.len(), 1);
 
         // Transfer amount should be reduced by the transaction fee
-        let expected_fee = SOLANA_LAMPORTS_PER_SIGNATURE;
         assert_eq!(
             transfer_amount_from_instruction(&tx.message.instructions[0]),
-            amount - expected_fee
+            amount - FEE_PER_SIGNATURE
         );
 
         // Signature is placed for the source address (position 0 = fee payer)
@@ -131,7 +130,7 @@ mod consolidation_tests {
         assert_eq!(tx.message.instructions.len(), 2);
 
         // Fee payer's transfer is reduced by the transaction fee
-        let expected_fee = SOLANA_LAMPORTS_PER_SIGNATURE * 2;
+        let expected_fee = FEE_PER_SIGNATURE * 2;
         let fee_payer_instruction = tx
             .message
             .instructions

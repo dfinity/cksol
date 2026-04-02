@@ -12,4 +12,4 @@ pub const GET_SIGNATURE_STATUSES_CYCLES: u128 = 1_000_000_000_000;
 /// Cost in lamports per signature included in a Solana transaction.
 ///
 /// See <https://solana.com/docs/core/fees#base-fee>.
-pub const SOLANA_LAMPORTS_PER_SIGNATURE: u64 = 5_000;
+pub const FEE_PER_SIGNATURE: u64 = 5_000;
