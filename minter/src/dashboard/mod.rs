@@ -257,6 +257,19 @@ impl DashboardTemplate {
             );
         }
 
+        // Sort deposits by block index (most recently minted first).
+        // Non-minted deposits (empty block index) appear at the end.
+        deposits.sort_by(|a, b| {
+            let a_idx = a.mint_block_index.parse::<u64>().ok();
+            let b_idx = b.mint_block_index.parse::<u64>().ok();
+            match (b_idx, a_idx) {
+                (Some(b), Some(a)) => b.cmp(&a),
+                (Some(_), None) => std::cmp::Ordering::Less,
+                (None, Some(_)) => std::cmp::Ordering::Greater,
+                (None, None) => std::cmp::Ordering::Equal,
+            }
+        });
+
         let deposits_table = DashboardPaginatedTable::from_items(
             &deposits,
             pagination.minted_deposits_start,
