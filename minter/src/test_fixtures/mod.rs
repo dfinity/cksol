@@ -156,12 +156,6 @@ pub mod events {
         });
     }
 
-    pub fn quarantine_deposit(deposit_id: DepositId) {
-        mutate_state(|state| {
-            process_event(state, EventType::QuarantinedDeposit(deposit_id), &runtime())
-        });
-    }
-
     pub fn mint_deposit(deposit_id: DepositId, mint_index: u64) {
         mutate_state(|state| {
             process_event(
