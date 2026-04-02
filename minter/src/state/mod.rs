@@ -1,5 +1,4 @@
 use crate::{
-    constants::SOLANA_LAMPORTS_PER_SIGNATURE,
     ledger::client::LedgerClient,
     numeric::{LedgerBurnIndex, LedgerMintIndex},
     state::event::{DepositId, TransactionPurpose, VersionedMessage, WithdrawSolRequest},
@@ -266,7 +265,7 @@ impl State {
 
     fn transaction_fee(&self, message: &VersionedMessage) -> Lamport {
         let VersionedMessage::Legacy(msg) = message;
-        SOLANA_LAMPORTS_PER_SIGNATURE * msg.header.num_required_signatures as u64
+        FEE_PER_SIGNATURE * msg.header.num_required_signatures as u64
     }
 
     fn validate(&self) -> Result<(), InvalidStateError> {

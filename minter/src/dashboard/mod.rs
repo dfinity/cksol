@@ -3,8 +3,7 @@ use askama::Template;
 use candid::Principal;
 use cksol_types_internal::SolanaNetwork;
 use ic_http_types::HttpRequest;
-use std::cmp::Reverse;
-use std::str::FromStr;
+use std::{cmp::Reverse, str::FromStr};
 
 const LAMPORTS_PER_SOL: u64 = 1_000_000_000;
 
@@ -168,12 +167,13 @@ pub struct DashboardWithdrawal {
 }
 
 #[derive(Clone)]
-pub struct DashboardMintedDeposit {
+pub struct DashboardDeposit {
     pub signature: String,
     pub account: String,
     pub deposit_amount: String,
     pub minted_amount: String,
     pub mint_block_index: String,
+    pub status: &'static str,
 }
 
 #[derive(Template)]
@@ -190,7 +190,7 @@ pub struct DashboardTemplate {
     pub minimum_deposit_amount: String,
     pub minimum_withdrawal_amount: String,
     pub balance: String,
-    pub minted_deposits_table: DashboardPaginatedTable<DashboardMintedDeposit>,
+    pub deposits_table: DashboardPaginatedTable<DashboardDeposit>,
     pub withdrawals_table: DashboardPaginatedTable<DashboardWithdrawal>,
 }
 
@@ -205,31 +205,77 @@ impl DashboardTemplate {
             .map(|key| minter_address(key, runtime).to_string())
             .unwrap_or_default();
 
-        let mut minted_deposits: Vec<_> = state
-            .minted_deposits()
-            .iter()
-            .map(|(deposit_id, minted)| {
-                (
-                    *minted.block_index.get(),
-                    DashboardMintedDeposit {
-                        signature: deposit_id.signature.to_string(),
-                        account: deposit_id.account.to_string(),
-                        deposit_amount: lamports_to_sol(minted.deposit.deposit_amount),
-                        minted_amount: lamports_to_sol(minted.deposit.amount_to_mint),
-                        mint_block_index: minted.block_index.to_string(),
-                    },
-                )
-            })
-            .collect();
-        minted_deposits.sort_unstable_by_key(|(block_index, _)| Reverse(*block_index));
-        let minted_deposits: Vec<_> = minted_deposits.into_iter().map(|(_, d)| d).collect();
+        let deposits_to_consolidate = state.deposits_to_consolidate();
+        let mut deposits: Vec<DashboardDeposit> = Vec::new();
 
-        let minted_deposits_table = DashboardPaginatedTable::from_items(
-            &minted_deposits,
+        fn push_deposit(
+            deposits: &mut Vec<DashboardDeposit>,
+            deposit_id: &crate::state::event::DepositId,
+            deposit: &crate::state::Deposit,
+            mint_block_index: String,
+            status: &'static str,
+        ) {
+            deposits.push(DashboardDeposit {
+                signature: deposit_id.signature.to_string(),
+                account: deposit_id.account.to_string(),
+                deposit_amount: lamports_to_sol(deposit.deposit_amount),
+                minted_amount: lamports_to_sol(deposit.amount_to_mint),
+                mint_block_index,
+                status,
+            });
+        }
+
+        for (deposit_id, deposit) in state.accepted_deposits() {
+            push_deposit(
+                &mut deposits,
+                deposit_id,
+                deposit,
+                String::new(),
+                "Accepted",
+            );
+        }
+        for (deposit_id, deposit) in state.quarantined_deposits() {
+            push_deposit(
+                &mut deposits,
+                deposit_id,
+                deposit,
+                String::new(),
+                "Quarantined",
+            );
+        }
+        for (deposit_id, minted) in state.minted_deposits() {
+            let pending_consolidation = deposits_to_consolidate.contains_key(&minted.block_index);
+            push_deposit(
+                &mut deposits,
+                deposit_id,
+                &minted.deposit,
+                minted.block_index.to_string(),
+                if pending_consolidation {
+                    "Minted"
+                } else {
+                    "Consolidated"
+                },
+            );
+        }
+
+        // Sort deposits: non-minted (most recent) first, then minted by block index descending.
+        deposits.sort_by(|a, b| {
+            let a_idx = a.mint_block_index.parse::<u64>().ok();
+            let b_idx = b.mint_block_index.parse::<u64>().ok();
+            match (a_idx, b_idx) {
+                (None, Some(_)) => std::cmp::Ordering::Less,
+                (Some(_), None) => std::cmp::Ordering::Greater,
+                (Some(a), Some(b)) => b.cmp(&a),
+                (None, None) => std::cmp::Ordering::Equal,
+            }
+        });
+
+        let deposits_table = DashboardPaginatedTable::from_items(
+            &deposits,
             pagination.minted_deposits_start,
             DEFAULT_PAGE_SIZE,
-            5,
-            "minted-deposits",
+            6,
+            "deposits",
             "minted_deposits_start",
             format!("&withdrawals_start={}", pagination.withdrawals_start),
         );
@@ -316,7 +362,7 @@ impl DashboardTemplate {
             minimum_deposit_amount: lamports_to_sol(state.minimum_deposit_amount()),
             minimum_withdrawal_amount: lamports_to_sol(state.minimum_withdrawal_amount()),
             balance: lamports_to_sol(state.balance()),
-            minted_deposits_table,
+            deposits_table,
             withdrawals_table,
         }
     }

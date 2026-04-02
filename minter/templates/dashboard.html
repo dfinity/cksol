@@ -100,8 +100,8 @@
                 </tbody>
             </table>
 
-            {% if !minted_deposits_table.is_empty() %}
-            <h3 id="minted-deposits">Minted deposits</h3>
+            {% if !deposits_table.is_empty() %}
+            <h3 id="deposits">Deposits</h3>
             <table>
                 <thead>
                 <tr>
@@ -110,19 +110,21 @@
                     <th>Deposit Amount (SOL)</th>
                     <th>Minted Amount (SOL)</th>
                     <th>Mint Block Index</th>
+                    <th>Status</th>
                 </tr>
                 </thead>
                 <tbody>
-                {% for deposit in minted_deposits_table.current_page %}
+                {% for deposit in deposits_table.current_page %}
                 <tr>
                     <td>{% call solscan_tx_link(deposit.signature) %}</td>
                     <td><code>{{ deposit.account }}</code></td>
                     <td>{{ deposit.deposit_amount }}</td>
                     <td>{{ deposit.minted_amount }}</td>
                     <td>{{ deposit.mint_block_index }}</td>
+                    <td>{{ deposit.status }}</td>
                 </tr>
                 {% endfor %}
-                {% if minted_deposits_table.has_more_than_one_page() %}{{ minted_deposits_table.pagination|safe }}{% endif %}
+                {% if deposits_table.has_more_than_one_page() %}{{ deposits_table.pagination|safe }}{% endif %}
                 </tbody>
             </table>
             {% endif %}
