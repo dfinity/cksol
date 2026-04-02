@@ -1,12 +1,10 @@
 use crate::{
-    address::{lazy_get_schnorr_master_key, minter_account, minter_address},
+    address::{lazy_get_schnorr_master_key, minter_address},
     constants::MAX_CONCURRENT_RPC_CALLS,
     guard::TimerGuard,
     numeric::LedgerMintIndex,
     runtime::CanisterRuntime,
-    sol_transfer::{
-        CreateTransferError, MAX_SIGNATURES, create_signed_batch_consolidation_transaction,
-    },
+    sol_transfer::{CreateTransferError, MAX_SIGNATURES, create_signed_consolidation_transaction},
     state::{
         TaskType,
         audit::process_event,
@@ -31,7 +29,7 @@ mod tests;
 
 pub const DEPOSIT_CONSOLIDATION_DELAY: Duration = Duration::from_mins(10);
 
-pub(crate) const MAX_TRANSFERS_PER_CONSOLIDATION: usize = MAX_SIGNATURES as usize - 1;
+pub(crate) const MAX_TRANSFERS_PER_CONSOLIDATION: usize = MAX_SIGNATURES as usize;
 
 pub async fn consolidate_deposits<R: CanisterRuntime>(runtime: R) {
     let _guard = match TimerGuard::new(TaskType::DepositConsolidation) {
@@ -96,13 +94,12 @@ async fn submit_consolidation_transaction<R: CanisterRuntime>(
     recent_blockhash: Hash,
 ) -> Result<Signature, ConsolidationError> {
     let master_key = lazy_get_schnorr_master_key().await;
-    let sources: Vec<(Account, Lamport)> = funds_to_consolidate
-        .iter()
-        .map(|(account, (lamport, _))| (*account, *lamport))
-        .collect();
-    let (transaction, signers) = create_signed_batch_consolidation_transaction(
-        minter_account(runtime),
-        &sources,
+    let (sources, mint_indices): (Vec<_>, Vec<_>) = funds_to_consolidate
+        .into_iter()
+        .map(|(account, (lamport, indices))| ((account, lamport), indices))
+        .unzip();
+    let (transaction, signers) = create_signed_consolidation_transaction(
+        sources,
         minter_address(&master_key, runtime),
         recent_blockhash,
         &runtime.signer(),
@@ -111,10 +108,6 @@ async fn submit_consolidation_transaction<R: CanisterRuntime>(
 
     let signature = transaction.signatures[0];
     let message = transaction.message.clone();
-    let mint_indices = funds_to_consolidate
-        .into_iter()
-        .flat_map(|(_, (_, indices))| indices)
-        .collect();
 
     mutate_state(|state| {
         process_event(
@@ -124,7 +117,9 @@ async fn submit_consolidation_transaction<R: CanisterRuntime>(
                 message: message.into(),
                 signers,
                 slot,
-                purpose: TransactionPurpose::ConsolidateDeposits { mint_indices },
+                purpose: TransactionPurpose::ConsolidateDeposits {
+                    mint_indices: mint_indices.into_iter().flatten().collect(),
+                },
             },
             runtime,
         )

@@ -44,11 +44,9 @@ mod batch_consolidation_tests {
         let source_address = derive_address(&source_account);
         let target_address = derive_address(&target_account);
 
-        // Fee payer is the source, so only one signature needed
         let signer = MockSchnorrSigner::with_signatures(vec![signature]);
-        let (tx, signers) = create_signed_batch_consolidation_transaction(
-            source_account,
-            &[(source_account, amount)],
+        let (tx, signers) = create_signed_consolidation_transaction(
+            vec![(source_account, amount)],
             target_address,
             blockhash,
             &signer,
@@ -105,9 +103,8 @@ mod batch_consolidation_tests {
 
         // Fee payer (account_1) signature first, then account_2
         let signer = MockSchnorrSigner::with_signatures(vec![sig_1, sig_2]);
-        let (tx, signers) = create_signed_batch_consolidation_transaction(
-            account_1,
-            &[(account_1, amount), (account_2, amount)],
+        let (tx, signers) = create_signed_consolidation_transaction(
+            vec![(account_1, amount), (account_2, amount)],
             derive_address(&target_account),
             blockhash,
             &signer,
@@ -160,9 +157,8 @@ mod batch_consolidation_tests {
             CallRejected::with_rejection(4, "signing service unavailable".to_string()).into(),
         ))]);
 
-        let result = create_signed_batch_consolidation_transaction(
-            source_account,
-            &[(source_account, 500_000_000)],
+        let result = create_signed_consolidation_transaction(
+            vec![(source_account, 500_000_000)],
             derive_address(&target_account),
             blockhash,
             &signer,
@@ -196,9 +192,8 @@ mod batch_consolidation_tests {
             )),
         ]);
 
-        let result = create_signed_batch_consolidation_transaction(
-            account_1,
-            &[(account_1, 100_000_000), (account_2, 100_000_000)],
+        let result = create_signed_consolidation_transaction(
+            vec![(account_1, 100_000_000), (account_2, 100_000_000)],
             derive_address(&target_account),
             blockhash,
             &signer,
@@ -218,9 +213,8 @@ mod batch_consolidation_tests {
         let blockhash = Hash::new_from_array([0xBB; 32]);
         let signer = MockSchnorrSigner::with_signatures([[0xAA; 64]; MAX_SIGNATURES as usize + 1]);
 
-        // Create MAX_SIGNATURES sources with a SEPARATE fee payer, resulting in MAX_SIGNATURES + 1
-        // signatures which causes the transaction to exceed MAX_TX_SIZE.
-        let sources: Vec<(Account, Lamport)> = (0..MAX_SIGNATURES)
+        // Create MAX_SIGNATURES + 1 unique sources, exceeding the limit
+        let sources: Vec<(Account, Lamport)> = (0..=MAX_SIGNATURES)
             .map(|i| {
                 (
                     Account {
@@ -232,15 +226,8 @@ mod batch_consolidation_tests {
             })
             .collect();
 
-        // Fee payer is NOT in sources, so total signatures = sources + 1 = MAX_SIGNATURES + 1
-        let fee_payer = Account {
-            owner: Principal::from_slice(&[0xFE]),
-            subaccount: None,
-        };
-
-        let result = create_signed_batch_consolidation_transaction(
-            fee_payer,
-            &sources,
+        let result = create_signed_consolidation_transaction(
+            sources,
             derive_address(&target_account),
             blockhash,
             &signer,
@@ -265,9 +252,8 @@ mod batch_consolidation_tests {
         };
         let blockhash = Hash::new_from_array([0xBB; 32]);
 
-        // Create MAX_SIGNATURES - 1 sources with a SEPARATE fee payer, resulting in exactly
-        // MAX_SIGNATURES signatures
-        let sources: Vec<(Account, Lamport)> = (0..MAX_SIGNATURES - 1)
+        // Create exactly MAX_SIGNATURES unique sources
+        let sources: Vec<(Account, Lamport)> = (0..MAX_SIGNATURES)
             .map(|i| {
                 (
                     Account {
@@ -279,18 +265,11 @@ mod batch_consolidation_tests {
             })
             .collect();
 
-        // Fee payer is NOT in sources, so total signatures = sources + 1 = MAX_SIGNATURES
-        let fee_payer = Account {
-            owner: Principal::from_slice(&[0xFE]),
-            subaccount: None,
-        };
-
         let signer =
             MockSchnorrSigner::with_signatures(vec![[0x11u8; 64]; MAX_SIGNATURES as usize]);
 
-        let result = create_signed_batch_consolidation_transaction(
-            fee_payer,
-            &sources,
+        let result = create_signed_consolidation_transaction(
+            sources,
             derive_address(&target_account),
             blockhash,
             &signer,
@@ -303,27 +282,29 @@ mod batch_consolidation_tests {
     #[tokio::test]
     async fn should_fail_when_transaction_too_large() {
         setup();
-        let source_account = Account {
-            owner: Principal::from_slice(&[1]),
-            subaccount: None,
-        };
         let target_account = Account {
-            owner: Principal::from_slice(&[2]),
+            owner: Principal::from_slice(&[0xFF]),
             subaccount: None,
         };
         let blockhash = Hash::new_from_array([0xBB; 32]);
-        const NUM_SIGS: usize = 65;
-        let signer = MockSchnorrSigner::with_signatures([[0xAA; 64]; NUM_SIGS]);
+        // MAX_SIGNATURES + 1 unique sources to exceed MAX_TX_SIZE
+        const NUM_SOURCES: usize = MAX_SIGNATURES as usize + 1;
+        let signer = MockSchnorrSigner::with_signatures([[0xAA; 64]; NUM_SOURCES]);
 
-        // Use the same source account repeated many times. This produces only
-        // 2 unique signers (fee payer = source, so just 1) but one instruction
-        // per entry (~17 bytes each). 60 instructions are enough to exceed
-        // MAX_TX_SIZE while staying well under MAX_SIGNATURES.
-        let sources: Vec<(Account, Lamport)> = vec![(source_account, 1_000); NUM_SIGS];
+        let sources: Vec<(Account, Lamport)> = (0..NUM_SOURCES)
+            .map(|i| {
+                (
+                    Account {
+                        owner: Principal::from_slice(&[i as u8]),
+                        subaccount: None,
+                    },
+                    100_000_000,
+                )
+            })
+            .collect();
 
-        let result = create_signed_batch_consolidation_transaction(
-            source_account,
-            &sources,
+        let result = create_signed_consolidation_transaction(
+            sources,
             derive_address(&target_account),
             blockhash,
             &signer,
@@ -340,13 +321,13 @@ mod batch_consolidation_tests {
     }
 
     #[tokio::test]
-    async fn should_create_signed_transaction_with_fee_payer() {
+    async fn should_reduce_duplicate_accounts() {
         setup();
-        let fee_payer_account = Account {
+        let account_1 = Account {
             owner: Principal::from_slice(&[1]),
             subaccount: None,
         };
-        let other_source = Account {
+        let account_2 = Account {
             owner: Principal::from_slice(&[2]),
             subaccount: None,
         };
@@ -354,57 +335,61 @@ mod batch_consolidation_tests {
             owner: Principal::from_slice(&[3]),
             subaccount: None,
         };
-        let amount: Lamport = 100_000_000;
         let blockhash = Hash::new_from_array([0xAA; 32]);
 
-        let fee_payer_address = derive_address(&fee_payer_account);
-        let other_address = derive_address(&other_source);
+        // Two entries for account_1 should be reduced to one transfer
+        let signer = MockSchnorrSigner::with_signatures(vec![[0x11u8; 64], [0x22u8; 64]]);
+        let (tx, signers) = create_signed_consolidation_transaction(
+            vec![
+                (account_1, 100_000_000),
+                (account_2, 200_000_000),
+                (account_1, 300_000_000),
+            ],
+            derive_address(&target_account),
+            blockhash,
+            &signer,
+        )
+        .await
+        .expect("transaction creation should succeed");
 
-        for sources in [
-            // Fee payer *not* in sources
-            vec![(other_source, amount)],
-            // Fee payer in sources
-            vec![(fee_payer_account, amount), (other_source, amount)],
-        ] {
-            // Two signatures needed in both cases (fee payer + other source)
-            let signer = MockSchnorrSigner::with_signatures(vec![[0x11u8; 64], [0x22u8; 64]]);
-            let (tx, signers) = create_signed_batch_consolidation_transaction(
-                fee_payer_account,
-                &sources,
-                derive_address(&target_account),
-                blockhash,
-                &signer,
-            )
-            .await
-            .expect("transaction creation should succeed");
+        // Two unique signers
+        assert_eq!(signers, vec![account_1, account_2]);
+        assert_eq!(tx.signatures.len(), 2);
+        // Two transfer instructions (one per unique account)
+        assert_eq!(tx.message.instructions.len(), 2);
+    }
 
-            // Verify signers list (fee payer first, deduplicated)
-            assert_eq!(signers, vec![fee_payer_account, other_source]);
+    #[tokio::test]
+    async fn should_use_first_source_as_fee_payer() {
+        setup();
+        let account_1 = Account {
+            owner: Principal::from_slice(&[1]),
+            subaccount: None,
+        };
+        let account_2 = Account {
+            owner: Principal::from_slice(&[2]),
+            subaccount: None,
+        };
+        let target_account = Account {
+            owner: Principal::from_slice(&[3]),
+            subaccount: None,
+        };
+        let blockhash = Hash::new_from_array([0xAA; 32]);
 
-            // Fee payer is always at position 0
-            assert_eq!(tx.message.account_keys[0], fee_payer_address);
+        let account_1_address = derive_address(&account_1);
 
-            // Two unique signers => two signatures
-            assert_eq!(tx.signatures.len(), 2);
+        let signer = MockSchnorrSigner::with_signatures(vec![[0x11u8; 64], [0x22u8; 64]]);
+        let (tx, _signers) = create_signed_consolidation_transaction(
+            vec![(account_1, 100_000_000), (account_2, 200_000_000)],
+            derive_address(&target_account),
+            blockhash,
+            &signer,
+        )
+        .await
+        .expect("transaction creation should succeed");
 
-            assert_eq!(tx.message.instructions.len(), sources.len());
-
-            // Verify all signers have non-default signatures
-            let fee_payer_pos = tx
-                .message
-                .account_keys
-                .iter()
-                .position(|k| *k == fee_payer_address)
-                .unwrap();
-            let other_pos = tx
-                .message
-                .account_keys
-                .iter()
-                .position(|k| *k == other_address)
-                .unwrap();
-            assert_ne!(tx.signatures[fee_payer_pos], Signature::default());
-            assert_ne!(tx.signatures[other_pos], Signature::default());
-        }
+        // First source (account_1) is the fee payer (position 0)
+        assert_eq!(tx.message.account_keys[0], account_1_address);
     }
 }
 
