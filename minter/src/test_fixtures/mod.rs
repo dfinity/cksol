@@ -33,6 +33,8 @@ pub const MINTER_ACCOUNT: Account = Account {
     owner: runtime::TEST_CANISTER_ID,
     subaccount: None,
 };
+/// Solana address derived from [`MINTER_ACCOUNT`] using the test master key.
+pub const MINTER_ADDRESS: Address = address!("38ZYiAPZp4S9MqhU6AL5Ydm8wB7WfayCWLs1EGRi7Dou");
 pub const MINIMUM_DEPOSIT_AMOUNT: Lamport = 10_000_000; // 0.01 SOL
 pub const UPDATE_BALANCE_REQUIRED_CYCLES: u128 = 1_000_000_000_000;
 
