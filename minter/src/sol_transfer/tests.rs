@@ -26,7 +26,7 @@ fn minter_account() -> Account {
     Account::from(TEST_CANISTER_ID)
 }
 
-fn minter_sol_address() -> Address {
+fn minter_address() -> Address {
     derive_address(&minter_account())
 }
 
@@ -69,7 +69,7 @@ mod consolidation_tests {
         // Fee payer is the source address
         assert_eq!(tx.message.account_keys[0], source_address);
         // Target is the minter address
-        assert!(tx.message.account_keys.contains(&minter_sol_address()));
+        assert!(tx.message.account_keys.contains(&minter_address()));
         // Should contain system program id
         assert!(
             tx.message
@@ -396,7 +396,7 @@ mod consolidation_tests {
         .expect("transaction creation should succeed");
 
         // Target address is the minter's consolidated address
-        assert!(tx.message.account_keys.contains(&minter_sol_address()));
+        assert!(tx.message.account_keys.contains(&minter_address()));
     }
 }
 
@@ -420,7 +420,7 @@ mod batch_withdrawal_tests {
         assert_eq!(signers, vec![minter_account()]);
         assert_eq!(tx.signatures.len(), 1);
         assert_eq!(tx.signatures[0], Signature::from(sig));
-        assert_eq!(tx.message.account_keys[0], minter_sol_address());
+        assert_eq!(tx.message.account_keys[0], minter_address());
         assert!(tx.message.account_keys.contains(&target));
         assert_eq!(tx.message.instructions.len(), 1);
         assert_eq!(tx.message.recent_blockhash, blockhash);
@@ -449,7 +449,7 @@ mod batch_withdrawal_tests {
         assert_eq!(tx.signatures.len(), 1);
 
         // Fee payer is at position 0
-        assert_eq!(tx.message.account_keys[0], minter_sol_address());
+        assert_eq!(tx.message.account_keys[0], minter_address());
 
         // All targets are in account keys
         assert!(tx.message.account_keys.contains(&target_1));
