@@ -257,15 +257,14 @@ impl DashboardTemplate {
             );
         }
 
-        // Sort deposits by block index (most recently minted first).
-        // Non-minted deposits (empty block index) appear at the end.
+        // Sort deposits: non-minted (most recent) first, then minted by block index descending.
         deposits.sort_by(|a, b| {
             let a_idx = a.mint_block_index.parse::<u64>().ok();
             let b_idx = b.mint_block_index.parse::<u64>().ok();
-            match (b_idx, a_idx) {
-                (Some(b), Some(a)) => b.cmp(&a),
-                (Some(_), None) => std::cmp::Ordering::Less,
-                (None, Some(_)) => std::cmp::Ordering::Greater,
+            match (a_idx, b_idx) {
+                (None, Some(_)) => std::cmp::Ordering::Less,
+                (Some(_), None) => std::cmp::Ordering::Greater,
+                (Some(a), Some(b)) => b.cmp(&a),
                 (None, None) => std::cmp::Ordering::Equal,
             }
         });
