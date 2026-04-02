@@ -214,6 +214,7 @@ fn get_minter_info() -> MinterInfo {
         minimum_deposit_amount: s.minimum_deposit_amount(),
         withdrawal_fee: s.withdrawal_fee(),
         update_balance_required_cycles: s.update_balance_required_cycles(),
+        balance: s.balance(),
     })
 }
 

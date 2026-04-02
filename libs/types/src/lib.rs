@@ -243,4 +243,6 @@ pub struct MinterInfo {
     pub withdrawal_fee: Lamport,
     /// Minimum cycles the caller must attach when calling `update_balance`.
     pub update_balance_required_cycles: u128,
+    /// The minter's tracked SOL balance in lamports.
+    pub balance: Lamport,
 }

@@ -189,6 +189,7 @@ pub struct DashboardTemplate {
     pub withdrawal_fee: String,
     pub minimum_deposit_amount: String,
     pub minimum_withdrawal_amount: String,
+    pub balance: String,
     pub minted_deposits_table: DashboardPaginatedTable<DashboardMintedDeposit>,
     pub withdrawals_table: DashboardPaginatedTable<DashboardWithdrawal>,
 }
@@ -314,6 +315,7 @@ impl DashboardTemplate {
             withdrawal_fee: lamports_to_sol(state.withdrawal_fee()),
             minimum_deposit_amount: lamports_to_sol(state.minimum_deposit_amount()),
             minimum_withdrawal_amount: lamports_to_sol(state.minimum_withdrawal_amount()),
+            balance: lamports_to_sol(state.balance()),
             minted_deposits_table,
             withdrawals_table,
         }
