@@ -111,6 +111,7 @@ impl Setup {
     pub const DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT: Lamport = 2_000_000; // 0.002 SOL
     pub const DEFAULT_MINIMUM_DEPOSIT_AMOUNT: Lamport = 10_000_000; // 0.01 SOL
     pub const DEFAULT_UPDATE_BALANCE_REQUIRED_CYCLES: u128 = 1_000_000_000_000;
+    pub const INITIAL_MINTER_BALANCE: Lamport = 10_000_000_000; // 10 SOL
 
     pub async fn new(
         make_live: PocketIcMode,
@@ -313,7 +314,7 @@ impl Setup {
         for id in 0..4u64 {
             builder = builder
                 .given(get_balance_request().with_id(id))
-                .respond_with(get_balance_response(0).with_id(id));
+                .respond_with(get_balance_response(Self::INITIAL_MINTER_BALANCE).with_id(id));
         }
         self.execute_http_mocks(builder.build()).await;
     }

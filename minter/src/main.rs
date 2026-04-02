@@ -333,6 +333,8 @@ fn assert_non_anonymous_account(
 }
 
 fn setup_timers() {
+    // Run one-time initialization tasks (e.g., load the minter's Schnorr master key
+    // and initialize the consolidated balance) as soon as the canister starts.
     ic_cdk_timers::set_timer(Duration::from_secs(0), async {
         let _ = lazy_get_schnorr_master_key().await;
         init_consolidated_balance(IcCanisterRuntime::new()).await;

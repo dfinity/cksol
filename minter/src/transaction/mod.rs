@@ -110,7 +110,7 @@ pub async fn get_balance<R: CanisterRuntime>(
     address: Address,
 ) -> Result<Lamport, GetBalanceError> {
     let client = read_state(|state| state.sol_rpc_client(runtime.inter_canister_call_runtime()));
-    match client.get_balance(address).send().await {
+    match client.get_balance(address).try_send().await? {
         MultiRpcResult::Consistent(Ok(balance)) => Ok(balance),
         MultiRpcResult::Consistent(Err(e)) => Err(GetBalanceError::RpcError(e)),
         MultiRpcResult::Inconsistent(_) => Err(GetBalanceError::InconsistentRpcResults),
@@ -119,6 +119,8 @@ pub async fn get_balance<R: CanisterRuntime>(
 
 #[derive(Debug, PartialEq, Error, From)]
 pub enum GetBalanceError {
+    #[error("Error while calling SOL RPC canister: {0}")]
+    IcError(IcError),
     #[error("RPC error while fetching balance: {0}")]
     RpcError(RpcError),
     #[error("Inconsistent RPC results for getBalance")]

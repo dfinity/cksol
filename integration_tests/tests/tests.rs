@@ -187,7 +187,6 @@ mod lifecycle {
     #[tokio::test]
     async fn should_get_events() {
         let setup = SetupBuilder::new().build().await;
-        setup.mock_initial_get_balance().await;
         let minter = setup.minter();
 
         minter.assert_that_events().await.satisfy(|events| {
@@ -202,6 +201,24 @@ mod lifecycle {
         minter.assert_that_events().await.satisfy(|events| {
             check!(events.len() == 2 && matches!(events[1], EventType::Upgrade(_)));
         });
+
+        setup.drop().await;
+    }
+
+    #[tokio::test]
+    async fn should_update_minter_balance() {
+        let setup = SetupBuilder::new().build().await;
+
+        let minter_info = setup.minter().get_minter_info().await;
+        assert_eq!(minter_info.consolidated_balance, 0);
+
+        setup.mock_initial_get_balance().await;
+
+        let minter_info = setup.minter().get_minter_info().await;
+        assert_eq!(
+            minter_info.consolidated_balance,
+            Setup::INITIAL_MINTER_BALANCE
+        );
 
         setup.drop().await;
     }
@@ -685,7 +702,11 @@ mod withdraw_sol_tests {
         // IDs 0-3: getBalance (init)
         MockHttpOutcallsBuilder::new()
             .expect(4..8, get_slot_request(), get_slot_response(slot))
-            .expect(8..12, get_block_request(slot), get_block_response(BLOCKHASH))
+            .expect(
+                8..12,
+                get_block_request(slot),
+                get_block_response(BLOCKHASH),
+            )
             .expect(
                 12..16,
                 send_transaction_request(),
@@ -1103,8 +1124,8 @@ mod metrics_tests {
             .assert_contains_metric_matching(r#"stable_memory_bytes \d+ \d+"#)
             .assert_contains_metric_matching(r#"heap_memory_bytes \d+ \d+"#)
             .assert_contains_metric_matching(r#"cycle_balance\{canister="cksol-minter"\} \d+ \d+"#)
-            // Only the canister init event should have been recorded
-            .assert_contains_metric_matching(r#"total_event_count 1 \d+"#)
+            // Init + SyncedAccountBalance events should have been recorded
+            .assert_contains_metric_matching(r#"total_event_count 2 \d+"#)
             .into()
             .drop()
             .await;
