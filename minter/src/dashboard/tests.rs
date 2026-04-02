@@ -1,52 +1,42 @@
 use crate::dashboard::{DashboardPaginationParameters, DashboardTemplate, lamports_to_sol};
-use crate::state::audit::process_event;
-use crate::state::event::EventType;
-use crate::state::{SchnorrPublicKey, State};
+use crate::state::read_state;
 use crate::test_fixtures::{
-    DEPOSIT_FEE, MINIMUM_DEPOSIT_AMOUNT, MINIMUM_WITHDRAWAL_AMOUNT, WITHDRAWAL_FEE,
-    ledger_canister_id, runtime::TestCanisterRuntime, sol_rpc_canister_id, valid_init_args,
+    DEPOSIT_FEE, MINIMUM_DEPOSIT_AMOUNT, MINIMUM_WITHDRAWAL_AMOUNT, WITHDRAWAL_FEE, deposit_id,
+    events::{accept_deposit, mint_deposit},
+    init_schnorr_master_key, init_state, init_state_with_args, ledger_canister_id,
+    runtime::TestCanisterRuntime,
+    sol_rpc_canister_id, valid_init_args,
 };
 use askama::Template;
 use cksol_types_internal::SolanaNetwork;
-use ic_ed25519::{PocketIcMasterPublicKeyId, PublicKey};
-use solana_signature::Signature;
 
-fn initial_state() -> State {
-    State::try_from(valid_init_args()).expect("valid init args")
+fn dashboard() -> DashboardTemplate {
+    read_state(|state| {
+        DashboardTemplate::from_state(
+            state,
+            &TestCanisterRuntime::new(),
+            DashboardPaginationParameters::default(),
+        )
+    })
 }
 
-fn state_with_network(network: SolanaNetwork) -> State {
+fn dashboard_with_pagination(pagination: DashboardPaginationParameters) -> DashboardTemplate {
+    read_state(|state| {
+        DashboardTemplate::from_state(state, &TestCanisterRuntime::new(), pagination)
+    })
+}
+
+fn init_state_with_network(network: SolanaNetwork) {
     let mut args = valid_init_args();
     args.solana_network = network;
-    State::try_from(args).expect("valid init args")
-}
-
-fn state_with_minter_key(network: SolanaNetwork) -> State {
-    let mut state = state_with_network(network);
-    state.set_once_minter_public_key(SchnorrPublicKey {
-        public_key: PublicKey::pocketic_key(PocketIcMasterPublicKeyId::Key1),
-        chain_code: [1; 32],
-    });
-    state
-}
-
-fn initial_dashboard() -> DashboardTemplate {
-    DashboardTemplate::from_state(
-        &initial_state(),
-        &TestCanisterRuntime::new(),
-        DashboardPaginationParameters::default(),
-    )
-}
-
-fn runtime() -> TestCanisterRuntime {
-    TestCanisterRuntime::new().with_increasing_time()
+    init_state_with_args(args);
 }
 
 #[test]
 fn should_display_metadata() {
-    let dashboard = initial_dashboard();
+    init_state();
 
-    DashboardAssert::assert_that(dashboard)
+    DashboardAssert::assert_that(dashboard())
         .has_string_value(
             "#ledger-canister-id > td",
             &ledger_canister_id().to_string(),
@@ -81,16 +71,16 @@ fn should_display_metadata() {
 
 #[test]
 fn should_display_empty_state() {
-    let dashboard = initial_dashboard();
+    init_state();
 
-    DashboardAssert::assert_that(dashboard).has_no_elements_matching("#minted-deposits + table");
+    DashboardAssert::assert_that(dashboard()).has_no_elements_matching("#minted-deposits + table");
 }
 
 #[test]
 fn should_display_minter_address_when_not_set() {
-    let dashboard = initial_dashboard();
+    init_state();
 
-    DashboardAssert::assert_that(dashboard).has_string_value(
+    DashboardAssert::assert_that(dashboard()).has_string_value(
         "#minter-address > td",
         "N/A",
         "expected N/A when minter address not set",
@@ -99,14 +89,10 @@ fn should_display_minter_address_when_not_set() {
 
 #[test]
 fn should_display_minter_address_with_mainnet_solscan_link() {
-    let state = state_with_minter_key(SolanaNetwork::Mainnet);
-    let dashboard = DashboardTemplate::from_state(
-        &state,
-        &TestCanisterRuntime::new(),
-        DashboardPaginationParameters::default(),
-    );
+    init_state_with_network(SolanaNetwork::Mainnet);
+    init_schnorr_master_key();
 
-    let assert = DashboardAssert::assert_that(dashboard);
+    let assert = DashboardAssert::assert_that(dashboard());
     let address = assert.text_value("#minter-address > td");
     assert
         .has_link_matching("#minter-address a", |href| {
@@ -117,14 +103,10 @@ fn should_display_minter_address_with_mainnet_solscan_link() {
 
 #[test]
 fn should_display_minter_address_with_devnet_solscan_link() {
-    let state = state_with_minter_key(SolanaNetwork::Devnet);
-    let dashboard = DashboardTemplate::from_state(
-        &state,
-        &TestCanisterRuntime::new(),
-        DashboardPaginationParameters::default(),
-    );
+    init_state_with_network(SolanaNetwork::Devnet);
+    init_schnorr_master_key();
 
-    let assert = DashboardAssert::assert_that(dashboard);
+    let assert = DashboardAssert::assert_that(dashboard());
     let address = assert.text_value("#minter-address > td");
     assert
         .has_link_matching("#minter-address a", |href| {
@@ -137,63 +119,36 @@ fn should_display_minter_address_with_devnet_solscan_link() {
 
 #[test]
 fn should_display_minted_deposits() {
-    use crate::state::event::DepositId;
-    use crate::test_fixtures::MINTER_ACCOUNT;
+    init_state();
 
-    let mut state = initial_state();
-    let runtime = runtime();
-    let deposit_id = DepositId {
-        signature: Signature::from([0x01; 64]),
-        account: MINTER_ACCOUNT,
-    };
+    let deposit = deposit_id(1);
+    let deposit_amount = 500_000_000;
+    accept_deposit(deposit, deposit_amount);
+    mint_deposit(deposit, 42);
 
-    process_event(
-        &mut state,
-        EventType::AcceptedDeposit {
-            deposit_id,
-            deposit_amount: 1_000_000,
-            amount_to_mint: 990_000,
-        },
-        &runtime,
-    );
-    process_event(
-        &mut state,
-        EventType::Minted {
-            deposit_id,
-            mint_block_index: 42_u64.into(),
-        },
-        &runtime,
-    );
-
-    let dashboard = DashboardTemplate::from_state(
-        &state,
-        &TestCanisterRuntime::new(),
-        DashboardPaginationParameters::default(),
-    );
-
-    DashboardAssert::assert_that(dashboard)
+    DashboardAssert::assert_that(dashboard())
         .has_table_row_value(
             "#minted-deposits + table > tbody > tr:nth-child(1)",
             &[
-                &deposit_id.signature.to_string(),
-                &MINTER_ACCOUNT.to_string(),
-                &lamports_to_sol(1_000_000),
-                &lamports_to_sol(990_000),
+                &deposit.signature.to_string(),
+                &deposit.account.to_string(),
+                &lamports_to_sol(deposit_amount),
+                &lamports_to_sol(deposit_amount - DEPOSIT_FEE),
                 "42",
             ],
             "minted deposits",
         )
         .has_links_satisfying(
             |href| href.contains("solscan.io/tx/"),
-            |href| href.contains(&deposit_id.signature.to_string()),
+            |href| href.contains(&deposit.signature.to_string()),
         );
 }
 
 #[test]
 fn should_not_display_pagination_for_small_tables() {
-    let dashboard = initial_dashboard();
+    init_state();
 
-    let rendered = dashboard.render().unwrap();
+    let rendered = dashboard().render().unwrap();
     assert!(
         !rendered.contains("Pages:"),
         "should not show pagination when tables are empty"
@@ -203,47 +158,18 @@ fn should_not_display_pagination_for_small_tables() {
 #[test]
 fn should_paginate_minted_deposits_across_multiple_pages() {
     use crate::dashboard::DEFAULT_PAGE_SIZE;
-    use crate::state::event::DepositId;
-    use crate::test_fixtures::MINTER_ACCOUNT;
 
-    let mut state = initial_state();
-    let runtime = runtime();
+    init_state();
 
     let total_deposits = DEFAULT_PAGE_SIZE * 2 + 1;
     let remainder = total_deposits - DEFAULT_PAGE_SIZE * 2;
 
-    for i in 0..total_deposits as u64 {
-        let mut sig_bytes = [0u8; 64];
-        sig_bytes[..8].copy_from_slice(&i.to_le_bytes());
-        let deposit_id = DepositId {
-            signature: Signature::from(sig_bytes),
-            account: MINTER_ACCOUNT,
-        };
-        process_event(
-            &mut state,
-            EventType::AcceptedDeposit {
-                deposit_id,
-                deposit_amount: 1_000_000,
-                amount_to_mint: 990_000,
-            },
-            &runtime,
-        );
-        process_event(
-            &mut state,
-            EventType::Minted {
-                deposit_id,
-                mint_block_index: i.into(),
-            },
-            &runtime,
-        );
+    for i in 0..total_deposits {
+        accept_deposit(deposit_id(i as u8), 500_000_000);
+        mint_deposit(deposit_id(i as u8), i as u64);
     }
 
-    // Page 1 (default): should show DEFAULT_PAGE_SIZE rows and pagination controls
-    let page1 = DashboardTemplate::from_state(
-        &state,
-        &TestCanisterRuntime::new(),
-        DashboardPaginationParameters::default(),
-    );
+    let page1 = dashboard();
     assert_eq!(
         page1.minted_deposits_table.current_page.len(),
         DEFAULT_PAGE_SIZE
@@ -258,28 +184,18 @@ fn should_paginate_minted_deposits_across_multiple_pages() {
         "should show pagination controls"
     );
 
-    // Page 2
-    let page2 = DashboardTemplate::from_state(
-        &state,
-        &TestCanisterRuntime::new(),
-        DashboardPaginationParameters {
-            minted_deposits_start: DEFAULT_PAGE_SIZE,
-        },
-    );
+    let page2 = dashboard_with_pagination(DashboardPaginationParameters {
+        minted_deposits_start: DEFAULT_PAGE_SIZE,
+    });
     assert_eq!(
         page2.minted_deposits_table.current_page.len(),
         DEFAULT_PAGE_SIZE
     );
     assert_eq!(page2.minted_deposits_table.pagination.current_page_index, 2);
 
-    // Page 3: should have the remaining items
-    let page3 = DashboardTemplate::from_state(
-        &state,
-        &TestCanisterRuntime::new(),
-        DashboardPaginationParameters {
-            minted_deposits_start: DEFAULT_PAGE_SIZE * 2,
-        },
-    );
+    let page3 = dashboard_with_pagination(DashboardPaginationParameters {
+        minted_deposits_start: DEFAULT_PAGE_SIZE * 2,
+    });
     assert_eq!(page3.minted_deposits_table.current_page.len(), remainder);
     assert_eq!(page3.minted_deposits_table.pagination.current_page_index, 3);
 }
