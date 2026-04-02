@@ -1,9 +1,11 @@
 use super::*;
 use crate::{
-    address::{minter_account as address_minter_account, minter_address as address_minter_address},
     constants::SOLANA_LAMPORTS_PER_SIGNATURE,
     state::read_state,
-    test_fixtures::{init_schnorr_master_key, init_state, runtime::TestCanisterRuntime},
+    test_fixtures::{
+        MINTER_ACCOUNT, MINTER_ADDRESS, init_schnorr_master_key, init_state,
+        runtime::TestCanisterRuntime,
+    },
 };
 use assert_matches::assert_matches;
 use candid::Principal;
@@ -20,15 +22,6 @@ fn setup() {
 fn derive_address(account: &Account) -> Address {
     let master_key = read_state(|s| s.minter_public_key().cloned().unwrap());
     Address::from(derive_public_key(&master_key, derivation_path(account)).serialize_raw())
-}
-
-fn minter_account() -> Account {
-    address_minter_account(&TestCanisterRuntime::new())
-}
-
-fn minter_address() -> Address {
-    let master_key = read_state(|s| s.minter_public_key().cloned().unwrap());
-    address_minter_address(&master_key, &TestCanisterRuntime::new())
 }
 
 /// Extracts the transfer amount (in lamports) from a compiled system program
@@ -70,7 +63,7 @@ mod consolidation_tests {
         // Fee payer is the source address
         assert_eq!(tx.message.account_keys[0], source_address);
         // Target is the minter address
-        assert!(tx.message.account_keys.contains(&minter_address()));
+        assert!(tx.message.account_keys.contains(&MINTER_ADDRESS));
         // Should contain system program id
         assert!(
             tx.message
@@ -397,7 +390,7 @@ mod consolidation_tests {
         .expect("transaction creation should succeed");
 
         // Target address is the minter's consolidated address
-        assert!(tx.message.account_keys.contains(&minter_address()));
+        assert!(tx.message.account_keys.contains(&MINTER_ADDRESS));
     }
 }
 
@@ -418,10 +411,10 @@ mod batch_withdrawal_tests {
                 .await
                 .expect("transaction creation should succeed");
 
-        assert_eq!(signers, vec![minter_account()]);
+        assert_eq!(signers, vec![MINTER_ACCOUNT]);
         assert_eq!(tx.signatures.len(), 1);
         assert_eq!(tx.signatures[0], Signature::from(sig));
-        assert_eq!(tx.message.account_keys[0], minter_address());
+        assert_eq!(tx.message.account_keys[0], MINTER_ADDRESS);
         assert!(tx.message.account_keys.contains(&target));
         assert_eq!(tx.message.instructions.len(), 1);
         assert_eq!(tx.message.recent_blockhash, blockhash);
@@ -446,11 +439,11 @@ mod batch_withdrawal_tests {
         .expect("transaction creation should succeed");
 
         // Only the minter signs
-        assert_eq!(signers, vec![minter_account()]);
+        assert_eq!(signers, vec![MINTER_ACCOUNT]);
         assert_eq!(tx.signatures.len(), 1);
 
         // Fee payer is at position 0
-        assert_eq!(tx.message.account_keys[0], minter_address());
+        assert_eq!(tx.message.account_keys[0], MINTER_ADDRESS);
 
         // All targets are in account keys
         assert!(tx.message.account_keys.contains(&target_1));
@@ -499,7 +492,7 @@ mod batch_withdrawal_tests {
                 .await
                 .expect("transaction creation should succeed at max capacity");
 
-        assert_eq!(signers, vec![minter_account()]);
+        assert_eq!(signers, vec![MINTER_ACCOUNT]);
         assert_eq!(tx.signatures.len(), 1);
         assert_eq!(tx.message.instructions.len(), MAX_WITHDRAWALS_PER_TX);
     }
