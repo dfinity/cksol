@@ -1,28 +1,21 @@
 use super::{MAX_BLOCKHASH_AGE, monitor_submitted_transactions};
 use crate::{
-    address::derive_public_key,
-    state::{
-        TaskType, audit::process_event, event::EventType, mutate_state, read_state, reset_state,
-    },
+    state::{TaskType, event::EventType, mutate_state, read_state, reset_state},
     storage::reset_events,
     test_fixtures::{
-        EventsAssert, MINTER_ACCOUNT, init_schnorr_master_key, init_state,
-        runtime::TestCanisterRuntime,
+        EventsAssert, MINTER_ACCOUNT, confirmed_block, events, init_schnorr_master_key, init_state,
+        runtime::TestCanisterRuntime, signature,
     },
 };
 use assert_matches::assert_matches;
-use ic_ed25519::{PocketIcMasterPublicKeyId, PublicKey};
 use sol_rpc_types::{
-    ConfirmedBlock, MultiRpcResult, RpcError, Slot, TransactionConfirmationStatus,
+    ConfirmedBlock, MultiRpcResult, RpcError, Signature, Slot, TransactionConfirmationStatus,
     TransactionError, TransactionStatus,
 };
-use solana_hash::Hash;
-use solana_message::Message;
-use solana_signature::Signature;
 
 type SlotResult = MultiRpcResult<Slot>;
 type BlockResult = MultiRpcResult<ConfirmedBlock>;
-type SendTransactionResult = MultiRpcResult<sol_rpc_types::Signature>;
+type SendTransactionResult = MultiRpcResult<Signature>;
 type SignatureStatusesResult = MultiRpcResult<Vec<Option<TransactionStatus>>>;
 
 const CURRENT_SLOT: Slot = 408_807_102;
@@ -42,7 +35,7 @@ async fn should_return_early_if_no_submitted_transactions() {
 #[tokio::test]
 async fn should_return_early_if_task_already_active() {
     setup();
-    add_submitted_transaction(Signature::from([0x01; 64]), EXPIRED_SLOT);
+    add_submitted_transaction(signature(0x01), EXPIRED_SLOT);
 
     mutate_state(|s| {
         s.active_tasks_mut()
@@ -59,7 +52,7 @@ async fn should_return_early_if_task_already_active() {
 #[tokio::test]
 async fn should_return_early_if_fetching_current_slot_fails() {
     setup();
-    add_submitted_transaction(Signature::from([0x01; 64]), EXPIRED_SLOT);
+    add_submitted_transaction(signature(0x01), EXPIRED_SLOT);
 
     let error = SlotResult::Consistent(Err(RpcError::ValidationError("Error".to_string())));
     let runtime = TestCanisterRuntime::new()
@@ -81,7 +74,7 @@ mod finalization {
     async fn should_finalize_transaction_with_finalized_status() {
         setup();
 
-        let signature = Signature::from([0x01; 64]);
+        let signature = signature(0x01);
         add_submitted_transaction(signature, RECENT_SLOT);
 
         let runtime = TestCanisterRuntime::new()
@@ -127,7 +120,7 @@ mod finalization {
         reset_events();
         setup();
 
-        add_submitted_transaction(Signature::from([0x01; 64]), slot);
+        add_submitted_transaction(signature(0x01), slot);
 
         let mut runtime = TestCanisterRuntime::new()
             .with_increasing_time()
@@ -139,7 +132,7 @@ mod finalization {
             // get_recent_slot_and_blockhash for current slot check (getSlot + getBlock)
             runtime = runtime
                 .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
-                .add_stub_response(BlockResult::Consistent(Ok(block())));
+                .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())));
         }
 
         monitor_submitted_transactions(runtime).await;
@@ -155,7 +148,7 @@ mod finalization {
     async fn should_record_failed_transaction_event_on_error() {
         setup();
 
-        let signature = Signature::from([0x01; 64]);
+        let signature = signature(0x01);
         add_submitted_transaction(signature, RECENT_SLOT);
 
         let runtime = TestCanisterRuntime::new()
@@ -194,9 +187,9 @@ mod finalization {
     async fn should_finalize_multiple_transactions_in_one_batch() {
         setup();
 
-        let sig_a = Signature::from([0x01; 64]);
-        let sig_b = Signature::from([0x02; 64]);
-        let sig_c = Signature::from([0x03; 64]);
+        let sig_a = signature(0x01);
+        let sig_b = signature(0x02);
+        let sig_c = signature(0x03);
         add_submitted_transaction(sig_a, RECENT_SLOT);
         add_submitted_transaction(sig_b, RECENT_SLOT);
         add_submitted_transaction(sig_c, RECENT_SLOT);
@@ -210,7 +203,7 @@ mod finalization {
             ])))
             // get_recent_slot_and_blockhash for the one not_found transaction (getSlot + getBlock)
             .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
-            .add_stub_response(BlockResult::Consistent(Ok(block())));
+            .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())));
 
         monitor_submitted_transactions(runtime).await;
 
@@ -263,10 +256,10 @@ mod resubmission {
     async fn should_resubmit_expired_transaction_with_no_status() {
         setup();
 
-        let old_signature = Signature::from([0x01; 64]);
+        let old_signature = signature(0x01);
         add_submitted_transaction(old_signature, EXPIRED_SLOT);
 
-        let new_signature = Signature::from([0xAA; 64]);
+        let new_signature = signature(0xAA);
 
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
@@ -274,10 +267,10 @@ mod resubmission {
             .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![None])))
             // get_recent_slot_and_blockhash for expiry check (getSlot + getBlock)
             .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
-            .add_stub_response(BlockResult::Consistent(Ok(block())))
+            .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())))
             // get_recent_slot_and_blockhash for resubmission (getSlot + getBlock)
             .add_stub_response(SlotResult::Consistent(Ok(RESUBMISSION_SLOT)))
-            .add_stub_response(BlockResult::Consistent(Ok(block())))
+            .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())))
             .add_stub_response(SendTransactionResult::Consistent(Ok(new_signature.into())))
             .add_signature(new_signature.into());
 
@@ -307,7 +300,7 @@ mod resubmission {
     async fn should_not_resubmit_expired_transaction_if_status_check_fails() {
         setup();
 
-        add_submitted_transaction(Signature::from([0x01; 64]), EXPIRED_SLOT);
+        add_submitted_transaction(signature(0x01), EXPIRED_SLOT);
 
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
@@ -328,20 +321,20 @@ mod resubmission {
     async fn should_record_resubmission_event_even_if_submission_fails() {
         setup();
 
-        let old_signature = Signature::from([0x01; 64]);
+        let old_signature = signature(0x01);
         add_submitted_transaction(old_signature, EXPIRED_SLOT);
 
-        let new_signature = Signature::from([0xAA; 64]);
+        let new_signature = signature(0xAA);
 
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
             .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![None])))
             // get_recent_slot_and_blockhash for expiry check (getSlot + getBlock)
             .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
-            .add_stub_response(BlockResult::Consistent(Ok(block())))
+            .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())))
             // get_recent_slot_and_blockhash for resubmission (getSlot + getBlock)
             .add_stub_response(SlotResult::Consistent(Ok(RESUBMISSION_SLOT)))
-            .add_stub_response(BlockResult::Consistent(Ok(block())))
+            .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())))
             .add_stub_response(SendTransactionResult::Inconsistent(vec![]))
             .add_signature(new_signature.into());
 
@@ -370,7 +363,7 @@ mod resubmission {
 
         let num_transactions = MAX_CONCURRENT_RPC_CALLS + 2; // 10+2 = 12 transactions require 2 rounds
         for i in 0..num_transactions {
-            add_submitted_transaction(Signature::from([i as u8; 64]), EXPIRED_SLOT);
+            add_submitted_transaction(signature(i as u8), EXPIRED_SLOT);
         }
 
         let mut runtime = TestCanisterRuntime::new()
@@ -381,15 +374,15 @@ mod resubmission {
             )))
             // get_recent_slot_and_blockhash for expiry check (getSlot + getBlock)
             .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
-            .add_stub_response(BlockResult::Consistent(Ok(block())))
+            .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())))
             // Round 1: get_recent_slot_and_blockhash for resubmission (getSlot + getBlock)
             .add_stub_response(SlotResult::Consistent(Ok(RESUBMISSION_SLOT)))
-            .add_stub_response(BlockResult::Consistent(Ok(block())));
+            .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())));
 
         for i in 0..MAX_CONCURRENT_RPC_CALLS {
             runtime = runtime
-                .add_stub_response(SendTransactionResult::Consistent(Ok(Signature::from(
-                    [0xA0 + i as u8; 64],
+                .add_stub_response(SendTransactionResult::Consistent(Ok(signature(
+                    0xA0 + i as u8,
                 )
                 .into())))
                 .add_signature([0xA0 + i as u8; 64]);
@@ -398,12 +391,12 @@ mod resubmission {
         // Round 2: get_recent_slot_and_blockhash for resubmission (getSlot + getBlock)
         runtime = runtime
             .add_stub_response(SlotResult::Consistent(Ok(RESUBMISSION_SLOT)))
-            .add_stub_response(BlockResult::Consistent(Ok(block())));
+            .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())));
 
         for i in 0..2_usize {
             runtime = runtime
-                .add_stub_response(SendTransactionResult::Consistent(Ok(Signature::from(
-                    [0xB0 + i as u8; 64],
+                .add_stub_response(SendTransactionResult::Consistent(Ok(signature(
+                    0xB0 + i as u8,
                 )
                 .into())))
                 .add_signature([0xB0 + i as u8; 64]);
@@ -420,46 +413,6 @@ fn setup() {
     init_schnorr_master_key();
 }
 
-fn minter_address() -> solana_address::Address {
-    use crate::state::SchnorrPublicKey;
-    let master_key = SchnorrPublicKey {
-        public_key: PublicKey::pocketic_key(PocketIcMasterPublicKeyId::Key1),
-        chain_code: [1; 32],
-    };
-    derive_public_key(&master_key, vec![])
-        .serialize_raw()
-        .into()
-}
-
-fn add_submitted_transaction(signature: Signature, slot: Slot) {
-    let message = Message::new_with_blockhash(&[], Some(&minter_address()), &Hash::default());
-    mutate_state(|state| {
-        process_event(
-            state,
-            EventType::SubmittedTransaction {
-                signature,
-                message: message.into(),
-                signers: vec![MINTER_ACCOUNT],
-                slot,
-                purpose: crate::state::event::TransactionPurpose::ConsolidateDeposits {
-                    mint_indices: vec![],
-                },
-            },
-            &TestCanisterRuntime::new().with_increasing_time(),
-        )
-    });
-}
-
-fn block() -> ConfirmedBlock {
-    ConfirmedBlock {
-        previous_blockhash: Default::default(),
-        blockhash: Hash::from([0x42; 32]).into(),
-        parent_slot: 0,
-        block_time: None,
-        block_height: None,
-        signatures: None,
-        rewards: None,
-        num_reward_partitions: None,
-        transactions: None,
-    }
+fn add_submitted_transaction(signature: solana_signature::Signature, slot: Slot) {
+    events::submit_consolidation(signature, MINTER_ACCOUNT, slot, vec![]);
 }

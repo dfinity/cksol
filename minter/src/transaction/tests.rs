@@ -1,6 +1,6 @@
 use crate::{
     test_fixtures::{
-        UPDATE_BALANCE_REQUIRED_CYCLES,
+        UPDATE_BALANCE_REQUIRED_CYCLES, confirmed_block,
         deposit::{
             DEPOSIT_ADDRESS, DEPOSIT_AMOUNT, deposit_transaction, deposit_transaction_signature,
             deposit_transaction_to_wrong_address,
@@ -280,8 +280,8 @@ mod submit_transaction_tests {
 mod get_recent_slot_and_blockhash_tests {
     use super::*;
 
-    type SendSlotResult = sol_rpc_types::MultiRpcResult<sol_rpc_types::Slot>;
-    type SendBlockResult = sol_rpc_types::MultiRpcResult<Option<sol_rpc_types::ConfirmedBlock>>;
+    type GetSlotResult = sol_rpc_types::MultiRpcResult<sol_rpc_types::Slot>;
+    type GetBlockResult = sol_rpc_types::MultiRpcResult<Option<sol_rpc_types::ConfirmedBlock>>;
 
     #[tokio::test]
     async fn should_return_blockhash_and_slot_on_success() {
@@ -289,8 +289,8 @@ mod get_recent_slot_and_blockhash_tests {
 
         let slot = 978458723;
         let runtime = TestCanisterRuntime::new()
-            .add_stub_response(SendSlotResult::Consistent(Ok(slot)))
-            .add_stub_response(SendBlockResult::Consistent(Ok(Some(block()))));
+            .add_stub_response(GetSlotResult::Consistent(Ok(slot)))
+            .add_stub_response(GetBlockResult::Consistent(Ok(Some(confirmed_block()))));
 
         let result = get_recent_slot_and_blockhash(&runtime).await;
 
@@ -301,13 +301,13 @@ mod get_recent_slot_and_blockhash_tests {
     async fn should_fail_after_retrying() {
         init_state();
         let runtime = TestCanisterRuntime::new()
-            .add_stub_response(SendSlotResult::Consistent(Err(RpcError::ValidationError(
+            .add_stub_response(GetSlotResult::Consistent(Err(RpcError::ValidationError(
                 "Error 1".to_string(),
             ))))
-            .add_stub_response(SendSlotResult::Consistent(Err(RpcError::ValidationError(
+            .add_stub_response(GetSlotResult::Consistent(Err(RpcError::ValidationError(
                 "Error 2".to_string(),
             ))))
-            .add_stub_response(SendSlotResult::Consistent(Err(RpcError::ValidationError(
+            .add_stub_response(GetSlotResult::Consistent(Err(RpcError::ValidationError(
                 "Error 3".to_string(),
             ))));
 
@@ -318,19 +318,5 @@ mod get_recent_slot_and_blockhash_tests {
 
     fn blockhash() -> sol_rpc_types::Hash {
         solana_hash::Hash::from([0x42; 32]).into()
-    }
-
-    fn block() -> sol_rpc_types::ConfirmedBlock {
-        sol_rpc_types::ConfirmedBlock {
-            previous_blockhash: Default::default(),
-            blockhash: blockhash(),
-            parent_slot: 0,
-            block_time: None,
-            block_height: None,
-            signatures: None,
-            rewards: None,
-            num_reward_partitions: None,
-            transactions: None,
-        }
     }
 }
