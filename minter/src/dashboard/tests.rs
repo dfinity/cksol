@@ -1,11 +1,15 @@
 use crate::dashboard::{DashboardPaginationParameters, DashboardTemplate, lamports_to_sol};
 use crate::state::read_state;
 use crate::test_fixtures::{
-    DEPOSIT_FEE, MINIMUM_DEPOSIT_AMOUNT, MINIMUM_WITHDRAWAL_AMOUNT, WITHDRAWAL_FEE, deposit_id,
-    events::{accept_deposit, mint_deposit},
+    DEPOSIT_FEE, MINIMUM_DEPOSIT_AMOUNT, MINIMUM_WITHDRAWAL_AMOUNT, WITHDRAWAL_FEE, account,
+    deposit_id,
+    events::{
+        accept_deposit, accept_withdrawal, fail_transaction, mint_deposit, submit_withdrawal,
+        succeed_transaction,
+    },
     init_schnorr_master_key, init_state, init_state_with_args, ledger_canister_id,
     runtime::TestCanisterRuntime,
-    sol_rpc_canister_id, valid_init_args,
+    signature, sol_rpc_canister_id, valid_init_args,
 };
 use askama::Template;
 use cksol_types_internal::SolanaNetwork;
@@ -73,7 +77,9 @@ fn should_display_metadata() {
 fn should_display_empty_state() {
     init_state();
 
-    DashboardAssert::assert_that(dashboard()).has_no_elements_matching("#minted-deposits + table");
+    DashboardAssert::assert_that(dashboard())
+        .has_no_elements_matching("#minted-deposits + table")
+        .has_no_elements_matching("#withdrawals + table");
 }
 
 #[test]
@@ -186,6 +192,7 @@ fn should_paginate_minted_deposits_across_multiple_pages() {
 
     let page2 = dashboard_with_pagination(DashboardPaginationParameters {
         minted_deposits_start: DEFAULT_PAGE_SIZE,
+        ..Default::default()
     });
     assert_eq!(
         page2.minted_deposits_table.current_page.len(),
@@ -195,9 +202,48 @@ fn should_paginate_minted_deposits_across_multiple_pages() {
 
     let page3 = dashboard_with_pagination(DashboardPaginationParameters {
         minted_deposits_start: DEFAULT_PAGE_SIZE * 2,
+        ..Default::default()
     });
     assert_eq!(page3.minted_deposits_table.current_page.len(), remainder);
     assert_eq!(page3.minted_deposits_table.pagination.current_page_index, 3);
+}
+
+// --- Withdrawal table tests ---
+
+#[test]
+fn should_display_all_withdrawal_statuses() {
+    init_state();
+
+    // Pending
+    accept_withdrawal(account(1), 0, 100_000_000);
+
+    // Sent
+    accept_withdrawal(account(2), 1, 200_000_000);
+    submit_withdrawal(signature(0xCC), account(0), 1, vec![1]);
+
+    // Succeeded
+    accept_withdrawal(account(3), 2, 300_000_000);
+    submit_withdrawal(signature(0xDD), account(0), 2, vec![2]);
+    succeed_transaction(signature(0xDD));
+
+    // Failed
+    accept_withdrawal(account(4), 3, 400_000_000);
+    submit_withdrawal(signature(0xEE), account(0), 3, vec![3]);
+    fail_transaction(signature(0xEE));
+
+    let rendered_dashboard = dashboard();
+    assert_eq!(rendered_dashboard.withdrawals_table.current_page.len(), 4);
+
+    let statuses: Vec<&str> = rendered_dashboard
+        .withdrawals_table
+        .current_page
+        .iter()
+        .map(|withdrawal| withdrawal.status)
+        .collect();
+    assert!(statuses.contains(&"Pending"));
+    assert!(statuses.contains(&"Sent"));
+    assert!(statuses.contains(&"Succeeded"));
+    assert!(statuses.contains(&"Failed"));
 }
 
 // --- Assertion helpers ---

@@ -122,6 +122,35 @@
                 </tbody>
             </table>
             {% endif %}
+
+            {% if !withdrawals_table.is_empty() %}
+            <h3 id="withdrawals">Withdrawals</h3>
+            <table>
+                <thead>
+                <tr>
+                    <th>Withdrawal Txn</th>
+                    <th>Account</th>
+                    <th>Withdrawal Amount (SOL)</th>
+                    <th>Burnt Amount (SOL)</th>
+                    <th>Burn Block Index</th>
+                    <th>Status</th>
+                </tr>
+                </thead>
+                <tbody>
+                {% for w in withdrawals_table.current_page %}
+                <tr>
+                    <td>{% if let Some(sig) = w.transaction %}{% call solscan_tx_link(sig) %}{% endif %}</td>
+                    <td><code>{{ w.account }}</code></td>
+                    <td>{{ w.withdrawal_amount }}</td>
+                    <td>{{ w.burnt_amount }}</td>
+                    <td>{{ w.burn_block_index }}</td>
+                    <td>{{ w.status }}</td>
+                </tr>
+                {% endfor %}
+                {% if withdrawals_table.has_more_than_one_page() %}{{ withdrawals_table.pagination|safe }}{% endif %}
+                </tbody>
+            </table>
+            {% endif %}
         </div>
     </div>
 
