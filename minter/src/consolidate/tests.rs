@@ -85,7 +85,6 @@ async fn should_submit_single_consolidation_request() {
         .add_stub_response(SendTransactionResult::Consistent(Ok(
             fee_payer_signature.into()
         )))
-        // Only one signature needed: the source account is the fee payer
         .add_signature(fee_payer_signature.into());
 
     consolidate_deposits(runtime).await;
@@ -122,7 +121,6 @@ async fn should_record_events_even_if_transaction_submission_fails() {
         .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())))
         // Transaction submission fails
         .add_stub_response(SendTransactionResult::Inconsistent(vec![]))
-        // Only one signature needed: the source account is the fee payer
         .add_signature(fee_payer_signature.into());
 
     consolidate_deposits(runtime).await;
@@ -235,7 +233,6 @@ async fn should_consolidate_multiple_deposits_to_same_account_in_single_transfer
         .add_stub_response(SendTransactionResult::Consistent(Ok(
             fee_payer_signature.into()
         )))
-        // Only one signature: the single source account is the fee payer
         .add_signature(fee_payer_signature.into());
 
     consolidate_deposits(runtime).await;
