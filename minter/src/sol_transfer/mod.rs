@@ -40,31 +40,21 @@ pub enum CreateTransferError {
 /// Creates a signed Solana transaction that transfers lamports from
 /// each minter-controlled source address to the minter's consolidated address.
 ///
-/// The first source account is used as the fee payer.
-/// Sources are reduced by account (duplicate accounts have their amounts summed).
+/// The first source account is used as the fee payer. Its transfer amount
+/// is reduced by the transaction fee.
 ///
 /// Returns the signed transaction and the list of signer accounts.
 ///
 /// # Panics
 ///
 /// * Panics if `sources` is empty.
+/// * Panics if source accounts are not unique.
 /// * Panics if the IC returns a signature that is not exactly 64 bytes.
 pub async fn create_signed_consolidation_transaction<R: CanisterRuntime>(
     runtime: &R,
     sources: Vec<(Account, Lamport)>,
     recent_blockhash: Hash,
 ) -> Result<(Transaction, Vec<Account>), CreateTransferError> {
-    let sources: Vec<(Account, Lamport)> = sources
-        .into_iter()
-        .fold(
-            BTreeMap::<Account, Lamport>::new(),
-            |mut map, (account, amount)| {
-                *map.entry(account).or_default() += &amount;
-                map
-            },
-        )
-        .into_iter()
-        .collect();
     assert!(!sources.is_empty(), "BUG: sources must not be empty");
 
     let master_public_key = lazy_get_schnorr_master_key().await;
@@ -100,6 +90,12 @@ pub async fn create_signed_consolidation_transaction<R: CanisterRuntime>(
     let message =
         Message::new_with_blockhash(&instructions, Some(fee_payer_address), &recent_blockhash);
     let mut transaction = Transaction::new_unsigned(message);
+
+    assert_eq!(
+        transaction.message.signer_keys().len(),
+        sources.len(),
+        "BUG: source accounts must be unique"
+    );
 
     // Re-order signers to match the order of the message account keys
     let mut signer_map: BTreeMap<Address, (Account, DerivationPath)> = addresses

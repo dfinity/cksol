@@ -329,38 +329,22 @@ mod consolidation_tests {
     }
 
     #[tokio::test]
-    async fn should_reduce_duplicate_accounts() {
+    #[should_panic(expected = "source accounts must be unique")]
+    async fn should_panic_on_duplicate_accounts() {
         setup();
         let account_1 = Account {
             owner: Principal::from_slice(&[1]),
             subaccount: None,
         };
-        let account_2 = Account {
-            owner: Principal::from_slice(&[2]),
-            subaccount: None,
-        };
         let blockhash = Hash::new_from_array([0xAA; 32]);
 
-        let runtime = TestCanisterRuntime::new()
-            .add_signature([0x11; 64])
-            .add_signature([0x22; 64]);
-        let (tx, signers) = create_signed_consolidation_transaction(
+        let runtime = TestCanisterRuntime::new().add_signature([0x11; 64]);
+        let _ = create_signed_consolidation_transaction(
             &runtime,
-            vec![
-                (account_1, 100_000_000),
-                (account_2, 200_000_000),
-                (account_1, 300_000_000),
-            ],
+            vec![(account_1, 100_000_000), (account_1, 300_000_000)],
             blockhash,
         )
-        .await
-        .expect("transaction creation should succeed");
-
-        // Two unique signers
-        assert_eq!(signers, vec![account_1, account_2]);
-        assert_eq!(tx.signatures.len(), 2);
-        // Two transfer instructions (one per unique account)
-        assert_eq!(tx.message.instructions.len(), 2);
+        .await;
     }
 
     #[tokio::test]
