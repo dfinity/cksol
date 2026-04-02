@@ -81,7 +81,7 @@ mod consolidation_tests {
         assert_eq!(tx.message.instructions.len(), 1);
 
         // Transfer amount should be reduced by the transaction fee
-        let expected_fee = SOLANA_LAMPORTS_PER_SIGNATURE * 1;
+        let expected_fee = SOLANA_LAMPORTS_PER_SIGNATURE;
         assert_eq!(
             transfer_amount_from_instruction(&tx.message.instructions[0]),
             amount - expected_fee
