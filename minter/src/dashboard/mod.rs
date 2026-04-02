@@ -227,10 +227,7 @@ impl DashboardTemplate {
             withdrawal_fee: lamports_to_sol(state.withdrawal_fee()),
             minimum_deposit_amount: lamports_to_sol(state.minimum_deposit_amount()),
             minimum_withdrawal_amount: lamports_to_sol(state.minimum_withdrawal_amount()),
-            consolidated_balance: state
-                .consolidated_balance()
-                .map(lamports_to_sol)
-                .unwrap_or_else(|| "N/A".to_string()),
+            consolidated_balance: lamports_to_sol(state.consolidated_balance()),
             minted_deposits_table,
         }
     }

@@ -1,18 +1,14 @@
 use crate::{
     address::{lazy_get_schnorr_master_key, minter_account, minter_address},
     runtime::CanisterRuntime,
-    state::{audit::process_event, event::EventType, mutate_state, read_state},
+    state::{audit::process_event, event::EventType, mutate_state},
     transaction::get_balance,
 };
 use canlog::log;
 use cksol_types_internal::log::Priority;
 use std::time::Duration;
 
-pub async fn lazy_init_consolidated_balance<R: CanisterRuntime + 'static>(runtime: R) {
-    if read_state(|s| s.consolidated_balance().is_some()) {
-        return;
-    }
-
+pub async fn init_consolidated_balance<R: CanisterRuntime + 'static>(runtime: R) {
     let master_key = lazy_get_schnorr_master_key().await;
     let address = minter_address(&master_key, &runtime);
     let account = minter_account(&runtime);
@@ -33,7 +29,7 @@ pub async fn lazy_init_consolidated_balance<R: CanisterRuntime + 'static>(runtim
                 "Failed to fetch initial minter balance: {e}"
             );
             ic_cdk_timers::set_timer(Duration::from_secs(60), async {
-                lazy_init_consolidated_balance(runtime).await;
+                init_consolidated_balance(runtime).await;
             });
         }
     }

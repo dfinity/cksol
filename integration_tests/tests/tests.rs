@@ -139,7 +139,8 @@ mod lifecycle {
                 minimum_withdrawal_amount: Setup::DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT,
                 minimum_deposit_amount: Setup::DEFAULT_MINIMUM_DEPOSIT_AMOUNT,
                 withdrawal_fee: Setup::DEFAULT_WITHDRAWAL_FEE,
-                update_balance_required_cycles: Setup::DEFAULT_UPDATE_BALANCE_REQUIRED_CYCLES
+                update_balance_required_cycles: Setup::DEFAULT_UPDATE_BALANCE_REQUIRED_CYCLES,
+                consolidated_balance: 0,
             }
         );
 
@@ -176,6 +177,7 @@ mod lifecycle {
                 minimum_deposit_amount: NEW_MINIMUM_DEPOSIT_AMOUNT,
                 withdrawal_fee: NEW_WITHDRAWAL_FEE,
                 update_balance_required_cycles: NEW_UPDATE_BALANCE_REQUIRED_CYCLES,
+                consolidated_balance: 0,
             }
         );
 

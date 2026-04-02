@@ -6,7 +6,7 @@ use cksol_minter::withdraw_sol::{WITHDRAWAL_PROCESSING_DELAY, process_pending_wi
 use cksol_minter::{
     address::lazy_get_schnorr_master_key,
     runtime::IcCanisterRuntime,
-    state::{balance::lazy_init_consolidated_balance, read_state},
+    state::{balance::init_consolidated_balance, read_state},
 };
 use cksol_types::{
     Address, DepositStatus, GetDepositAddressArgs, MinterInfo, UpdateBalanceArgs,
@@ -219,6 +219,7 @@ fn get_minter_info() -> MinterInfo {
         minimum_deposit_amount: s.minimum_deposit_amount(),
         withdrawal_fee: s.withdrawal_fee(),
         update_balance_required_cycles: s.update_balance_required_cycles(),
+        consolidated_balance: s.consolidated_balance(),
     })
 }
 
@@ -334,7 +335,7 @@ fn assert_non_anonymous_account(
 fn setup_timers() {
     ic_cdk_timers::set_timer(Duration::from_secs(0), async {
         let _ = lazy_get_schnorr_master_key().await;
-        lazy_init_consolidated_balance(IcCanisterRuntime::new()).await;
+        init_consolidated_balance(IcCanisterRuntime::new()).await;
     });
     ic_cdk_timers::set_timer_interval(DEPOSIT_CONSOLIDATION_DELAY, async || {
         consolidate_deposits(IcCanisterRuntime::new()).await;

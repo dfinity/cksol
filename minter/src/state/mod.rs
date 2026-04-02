@@ -104,7 +104,7 @@ pub struct State {
     succeeded_transactions: BTreeSet<Signature>,
     failed_transactions: BTreeMap<Signature, SolanaTransaction>,
     active_tasks: BTreeSet<TaskType>,
-    consolidated_balance: Option<Lamport>,
+    consolidated_balance: Lamport,
 }
 
 impl State {
@@ -125,10 +125,12 @@ impl State {
         self.minter_public_key = Some(public_key);
     }
 
-    pub fn consolidated_balance(&self) -> Option<Lamport> {
+    pub fn consolidated_balance(&self) -> Lamport {
         self.consolidated_balance
     }
 
+    // TODO: The consolidated balance should be a lower bound on the actual minter balance.
+    // Alert if the getBalance result is lower than the current state's balance.
     pub(crate) fn process_synced_account_balance(&mut self, account: &Account, balance: Lamport) {
         let minter_account = Account {
             owner: ic_cdk::api::canister_self(),
@@ -138,7 +140,7 @@ impl State {
             *account, minter_account,
             "BUG: expected minter account, got {account}"
         );
-        self.consolidated_balance = Some(balance);
+        self.consolidated_balance = balance;
     }
 
     pub fn sol_rpc_canister_id(&self) -> Principal {
@@ -641,7 +643,7 @@ impl TryFrom<InitArgs> for State {
             succeeded_transactions: BTreeSet::new(),
             failed_transactions: BTreeMap::new(),
             active_tasks: BTreeSet::new(),
-            consolidated_balance: None,
+            consolidated_balance: 0,
         };
         state.validate()?;
         Ok(state)
