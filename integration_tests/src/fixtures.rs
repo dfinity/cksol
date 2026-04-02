@@ -54,6 +54,70 @@ pub fn default_update_balance_args() -> UpdateBalanceArgs {
     }
 }
 
+pub fn get_memo(block: ICRC3Value) -> Vec<u8> {
+    let block: Value = block.into();
+    let block_map = block.as_map().expect("should be a map");
+    let tx = block_map.get("tx").expect("should have a tx");
+    let tx_map = tx.clone().as_map().expect("should be a map");
+    let memo = tx_map.get("memo").expect("should have a memo");
+    let memo_blob = memo.clone().as_blob().expect("memo should be a blob");
+    memo_blob.into_vec()
+}
+
+/// Extension trait for [`MockHttpOutcallsBuilder`] to reduce boilerplate when mocking
+/// the same request/response pair across multiple JSON-RPC request IDs.
+pub trait MockHttpOutcallsBuilderExt {
+    /// For each ID in `ids`, adds a mock that matches `request` with that ID
+    /// and responds with `response` with the same ID. The request and response
+    /// are cloned for each ID.
+    fn expect(
+        self,
+        ids: impl IntoIterator<Item = u64>,
+        request: JsonRpcRequestMatcher,
+        response: JsonRpcResponse,
+    ) -> Self;
+}
+
+impl MockHttpOutcallsBuilderExt for MockHttpOutcallsBuilder {
+    fn expect(
+        self,
+        ids: impl IntoIterator<Item = u64>,
+        request: JsonRpcRequestMatcher,
+        response: JsonRpcResponse,
+    ) -> Self {
+        ids.into_iter().fold(self, |builder, id| {
+            builder
+                .given(request.clone().with_id(id))
+                .respond_with(response.clone().with_id(id))
+        })
+    }
+}
+
+/// This wrapper around [`MockHttpOutcalls`] allows different instances of [`PocketIcRuntime`]
+/// to share the same mocks. This is useful in tests where several requests are made concurrently,
+/// but only one of them results in HTTP outcalls being executed.
+///
+/// [`PocketIcRuntime`]: ic_pocket_canister_runtime::PocketIcRuntime
+#[derive(Clone)]
+pub struct SharedMockHttpOutcalls(Arc<Mutex<MockHttpOutcalls>>);
+
+impl SharedMockHttpOutcalls {
+    pub fn new(mocks: MockHttpOutcalls) -> Self {
+        Self(Arc::new(Mutex::new(mocks)))
+    }
+}
+
+#[async_trait]
+impl ExecuteHttpOutcallMocks for SharedMockHttpOutcalls {
+    async fn execute_http_outcall_mocks(&mut self, runtime: &PocketIc) -> () {
+        self.0
+            .lock()
+            .await
+            .execute_http_outcall_mocks(runtime)
+            .await
+    }
+}
+
 /// [`getTransaction`] request for [`DEPOSIT_TRANSACTION_SIGNATURE`].
 pub fn get_deposit_transaction_request() -> JsonRpcRequestMatcher {
     JsonRpcRequestMatcher::with_method("getTransaction").with_params(json!([
@@ -121,55 +185,6 @@ pub fn get_deposit_transaction_response() -> JsonRpcResponse {
         },
         "id": 1
     }))
-}
-
-/// This wrapper around [`MockHttpOutcalls`] allows different instances of [`PocketIcRuntime`]
-/// to share the same mocks. This is useful in tests where several requests are made concurrently,
-/// but only one of them results in HTTP outcalls being executed.
-///
-/// [`PocketIcRuntime`]: ic_pocket_canister_runtime::PocketIcRuntime
-#[derive(Clone)]
-pub struct SharedMockHttpOutcalls(Arc<Mutex<MockHttpOutcalls>>);
-
-impl SharedMockHttpOutcalls {
-    pub fn new(mocks: MockHttpOutcalls) -> Self {
-        Self(Arc::new(Mutex::new(mocks)))
-    }
-}
-
-#[async_trait]
-impl ExecuteHttpOutcallMocks for SharedMockHttpOutcalls {
-    async fn execute_http_outcall_mocks(&mut self, runtime: &PocketIc) -> () {
-        self.0
-            .lock()
-            .await
-            .execute_http_outcall_mocks(runtime)
-            .await
-    }
-}
-
-pub fn get_memo(block: ICRC3Value) -> Vec<u8> {
-    let block: Value = block.into();
-    let block_map = block.as_map().expect("should be a map");
-    let tx = block_map.get("tx").expect("should have a tx");
-    let tx_map = tx.clone().as_map().expect("should be a map");
-    let memo = tx_map.get("memo").expect("should have a memo");
-    let memo_blob = memo.clone().as_blob().expect("memo should be a blob");
-    memo_blob.into_vec()
-}
-
-/// Creates HTTP mocks for `getTransaction` RPC calls.
-pub fn get_transaction_http_mocks(response: impl Fn() -> JsonRpcResponse) -> MockHttpOutcalls {
-    MockHttpOutcallsBuilder::new()
-        .given(get_deposit_transaction_request().with_id(0))
-        .respond_with(response().with_id(0))
-        .given(get_deposit_transaction_request().with_id(1))
-        .respond_with(response().with_id(1))
-        .given(get_deposit_transaction_request().with_id(2))
-        .respond_with(response().with_id(2))
-        .given(get_deposit_transaction_request().with_id(3))
-        .respond_with(response().with_id(3))
-        .build()
 }
 
 /// JSON-RPC request matcher for `getSlot`.
@@ -265,4 +280,11 @@ pub fn send_transaction_response(signature: &str) -> JsonRpcResponse {
         "result": signature,
         "id": 1
     }))
+}
+
+/// Creates HTTP mocks for `getTransaction` RPC calls.
+pub fn get_transaction_http_mocks(response: JsonRpcResponse) -> MockHttpOutcalls {
+    MockHttpOutcallsBuilder::new()
+        .expect(0..4, get_deposit_transaction_request(), response)
+        .build()
 }
