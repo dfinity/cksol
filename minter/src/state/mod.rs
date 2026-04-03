@@ -1,4 +1,5 @@
 use crate::{
+    constants::FEE_PER_SIGNATURE,
     ledger::client::LedgerClient,
     numeric::{LedgerBurnIndex, LedgerMintIndex},
     state::event::{DepositId, TransactionPurpose, VersionedMessage, WithdrawSolRequest},
