@@ -1,6 +1,6 @@
 use super::{event::*, *};
 use crate::{
-    constants::SOLANA_LAMPORTS_PER_SIGNATURE,
+    constants::FEE_PER_SIGNATURE as SOLANA_LAMPORTS_PER_SIGNATURE,
     state::{SOLANA_RENT_EXEMPTION_THRESHOLD, audit::process_event, read_state},
     test_fixtures::{
         DEPOSIT_FEE, MINIMUM_DEPOSIT_AMOUNT, MINIMUM_WITHDRAWAL_AMOUNT,
