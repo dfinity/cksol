@@ -1,7 +1,8 @@
 use crate::{
     state::event::{DepositId, EventType},
     test_fixtures::{
-        BLOCK_INDEX, CONSOLIDATION_FEE, DEPOSIT_FEE, EventsAssert, UPDATE_BALANCE_REQUIRED_CYCLES,
+        BLOCK_INDEX, DEPOSIT_CONSOLIDATION_FEE, DEPOSIT_FEE, EventsAssert,
+        UPDATE_BALANCE_REQUIRED_CYCLES,
         deposit::{
             DEPOSIT_AMOUNT, DEPOSITOR_ACCOUNT, DEPOSITOR_PRINCIPAL, accepted_deposit_event,
             deposit_status_minted, deposit_status_processing, deposit_status_quarantined,
@@ -31,12 +32,14 @@ use std::panic;
 
 type GetTransactionResult = MultiRpcResult<Option<EncodedConfirmedTransactionWithStatusMeta>>;
 
+/// Total cycles required per `update_balance` call (RPC call + consolidation fee).
+const TOTAL_REQUIRED_CYCLES: u128 = UPDATE_BALANCE_REQUIRED_CYCLES + DEPOSIT_CONSOLIDATION_FEE;
+
 #[tokio::test]
 async fn should_fail_if_insufficient_cycles_attached() {
     init_state();
 
-    let runtime =
-        TestCanisterRuntime::new().add_msg_cycles_available(UPDATE_BALANCE_REQUIRED_CYCLES - 1);
+    let runtime = TestCanisterRuntime::new().add_msg_cycles_available(TOTAL_REQUIRED_CYCLES - 1);
 
     let result = update_balance(runtime, DEPOSITOR_ACCOUNT, deposit_transaction_signature()).await;
 
@@ -44,8 +47,8 @@ async fn should_fail_if_insufficient_cycles_attached() {
         result,
         Err(UpdateBalanceError::InsufficientCycles(
             InsufficientCyclesError {
-                expected: UPDATE_BALANCE_REQUIRED_CYCLES,
-                received: UPDATE_BALANCE_REQUIRED_CYCLES - 1,
+                expected: TOTAL_REQUIRED_CYCLES,
+                received: TOTAL_REQUIRED_CYCLES - 1,
             }
         ))
     );
@@ -315,7 +318,7 @@ async fn should_allow_deposits_to_multiple_accounts_with_single_transaction() {
             result,
             Ok(DepositStatus::Minted {
                 block_index: BLOCK_INDEXES[i],
-                minted_amount: DEPOSIT_AMOUNTS[i] - DEPOSIT_FEE - CONSOLIDATION_FEE,
+                minted_amount: DEPOSIT_AMOUNTS[i] - DEPOSIT_FEE,
                 deposit_id: cksol_types::DepositId {
                     signature: deposit_transaction_to_multiple_accounts_signature().into(),
                     account: ACCOUNTS[i],
@@ -334,7 +337,7 @@ async fn should_allow_deposits_to_multiple_accounts_with_single_transaction() {
             .expect_event_eq(EventType::AcceptedDeposit {
                 deposit_id,
                 deposit_amount: DEPOSIT_AMOUNTS[i],
-                amount_to_mint: DEPOSIT_AMOUNTS[i] - DEPOSIT_FEE - CONSOLIDATION_FEE,
+                amount_to_mint: DEPOSIT_AMOUNTS[i] - DEPOSIT_FEE,
             })
             .expect_event_eq(EventType::Minted {
                 deposit_id,
@@ -346,9 +349,10 @@ async fn should_allow_deposits_to_multiple_accounts_with_single_transaction() {
 
 fn runtime_with_time_and_cycles() -> TestCanisterRuntime {
     const REFUNDED_CYCLES: u128 = 900_000_000_000;
+    let rpc_cost = UPDATE_BALANCE_REQUIRED_CYCLES - REFUNDED_CYCLES;
     TestCanisterRuntime::new()
         .with_increasing_time()
-        .add_msg_cycles_available(UPDATE_BALANCE_REQUIRED_CYCLES)
-        .add_msg_cycles_accept(UPDATE_BALANCE_REQUIRED_CYCLES - REFUNDED_CYCLES)
+        .add_msg_cycles_available(TOTAL_REQUIRED_CYCLES)
+        .add_msg_cycles_accept(rpc_cost + DEPOSIT_CONSOLIDATION_FEE)
         .add_msg_cycles_refunded(REFUNDED_CYCLES)
 }

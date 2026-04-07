@@ -27,7 +27,7 @@ mod stubs;
 
 pub const BLOCK_INDEX: u64 = 98763_u64;
 pub const DEPOSIT_FEE: Lamport = 10_000_000; // 0.01 SOL
-pub const CONSOLIDATION_FEE: Lamport = 5_000; // 0.000005 SOL (covers ~1 signature)
+pub const DEPOSIT_CONSOLIDATION_FEE: u128 = 500_000_000; // 0.5B cycles
 pub const WITHDRAWAL_FEE: Lamport = 5_000_000; // 0.005 SOL
 pub const MINIMUM_WITHDRAWAL_AMOUNT: Lamport = 10_000_000; // 0.01 SOL
 pub const MINTER_ACCOUNT: Account = Account {
@@ -36,7 +36,7 @@ pub const MINTER_ACCOUNT: Account = Account {
 };
 /// Solana address derived from [`MINTER_ACCOUNT`] using the test master key.
 pub const MINTER_ADDRESS: Address = address!("38ZYiAPZp4S9MqhU6AL5Ydm8wB7WfayCWLs1EGRi7Dou");
-pub const MINIMUM_DEPOSIT_AMOUNT: Lamport = 10_005_000; // Must be >= DEPOSIT_FEE + CONSOLIDATION_FEE
+pub const MINIMUM_DEPOSIT_AMOUNT: Lamport = 10_000_000; // 0.01 SOL
 pub const UPDATE_BALANCE_REQUIRED_CYCLES: u128 = 1_000_000_000_000;
 
 pub fn sol_rpc_canister_id() -> Principal {
@@ -58,7 +58,7 @@ pub fn valid_init_args() -> InitArgs {
         withdrawal_fee: WITHDRAWAL_FEE,
         update_balance_required_cycles: UPDATE_BALANCE_REQUIRED_CYCLES as u64,
         solana_network: SolanaNetwork::Mainnet,
-        consolidation_fee: CONSOLIDATION_FEE,
+        deposit_consolidation_fee: DEPOSIT_CONSOLIDATION_FEE as u64,
     }
 }
 
@@ -119,7 +119,7 @@ pub fn account(i: u8) -> Account {
 ///
 /// All helpers operate on the global thread-local state via [`mutate_state`].
 pub mod events {
-    use super::{CONSOLIDATION_FEE, DEPOSIT_FEE, WITHDRAWAL_FEE, runtime::TestCanisterRuntime};
+    use super::{DEPOSIT_FEE, WITHDRAWAL_FEE, runtime::TestCanisterRuntime};
     use crate::{
         numeric::{LedgerBurnIndex, LedgerMintIndex},
         state::{
@@ -153,7 +153,7 @@ pub mod events {
                 EventType::AcceptedDeposit {
                     deposit_id,
                     deposit_amount: amount,
-                    amount_to_mint: amount - DEPOSIT_FEE - CONSOLIDATION_FEE,
+                    amount_to_mint: amount - DEPOSIT_FEE,
                 },
                 &runtime(),
             )
@@ -385,7 +385,7 @@ pub mod arb {
                     withdrawal_fee,
                     update_balance_required_cycles,
                     solana_network,
-                    consolidation_fee,
+                    deposit_consolidation_fee,
                 )| {
                     InitArgs {
                         sol_rpc_canister_id,
@@ -397,7 +397,7 @@ pub mod arb {
                         withdrawal_fee,
                         update_balance_required_cycles,
                         solana_network,
-                        consolidation_fee,
+                        deposit_consolidation_fee,
                     }
                 },
             )
@@ -421,7 +421,7 @@ pub mod arb {
                     minimum_deposit_amount,
                     withdrawal_fee,
                     update_balance_required_cycles,
-                    consolidation_fee,
+                    deposit_consolidation_fee,
                 )| UpgradeArgs {
                     sol_rpc_canister_id,
                     deposit_fee,
@@ -429,7 +429,7 @@ pub mod arb {
                     minimum_deposit_amount,
                     withdrawal_fee,
                     update_balance_required_cycles,
-                    consolidation_fee,
+                    deposit_consolidation_fee,
                 },
             )
     }
@@ -536,7 +536,7 @@ pub mod deposit {
     pub fn deposit_status_processing() -> DepositStatus {
         DepositStatus::Processing {
             deposit_amount: DEPOSIT_AMOUNT,
-            amount_to_mint: DEPOSIT_AMOUNT - DEPOSIT_FEE - CONSOLIDATION_FEE,
+            amount_to_mint: DEPOSIT_AMOUNT - DEPOSIT_FEE,
             deposit_id: deposit_id().into(),
         }
     }
@@ -548,7 +548,7 @@ pub mod deposit {
     pub fn deposit_status_minted() -> DepositStatus {
         DepositStatus::Minted {
             block_index: BLOCK_INDEX,
-            minted_amount: DEPOSIT_AMOUNT - DEPOSIT_FEE - CONSOLIDATION_FEE,
+            minted_amount: DEPOSIT_AMOUNT - DEPOSIT_FEE,
             deposit_id: deposit_id().into(),
         }
     }
@@ -557,7 +557,7 @@ pub mod deposit {
         EventType::AcceptedDeposit {
             deposit_id: deposit_id(),
             deposit_amount: DEPOSIT_AMOUNT,
-            amount_to_mint: DEPOSIT_AMOUNT - DEPOSIT_FEE - CONSOLIDATION_FEE,
+            amount_to_mint: DEPOSIT_AMOUNT - DEPOSIT_FEE,
         }
     }
 

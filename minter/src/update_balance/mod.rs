@@ -71,8 +71,13 @@ async fn try_accept_deposit<R: CanisterRuntime>(
     signature: Signature,
     deposit_id: DepositId,
 ) -> Result<Deposit, UpdateBalanceError> {
-    let cycles_to_attach = read_state(|state| state.update_balance_required_cycles());
-    check_caller_available_cycles(runtime, cycles_to_attach)?;
+    let (cycles_to_attach, deposit_consolidation_fee) = read_state(|state| {
+        (
+            state.update_balance_required_cycles(),
+            state.deposit_consolidation_fee(),
+        )
+    });
+    check_caller_available_cycles(runtime, cycles_to_attach + deposit_consolidation_fee)?;
 
     let maybe_transaction = try_get_transaction(runtime, signature, cycles_to_attach)
         .await
@@ -84,11 +89,9 @@ async fn try_accept_deposit<R: CanisterRuntime>(
             UpdateBalanceError::from(e)
         })?;
 
-    // Charge only the cost of making the `getTransaction` call to the SOL RPC canister
-    charge_caller_cycles(
-        runtime,
-        cycles_to_attach.saturating_sub(runtime.msg_cycles_refunded()),
-    );
+    // Charge the cost of the `getTransaction` RPC call plus a fixed fee to offset consolidation costs
+    let rpc_cost = cycles_to_attach.saturating_sub(runtime.msg_cycles_refunded());
+    charge_caller_cycles(runtime, rpc_cost + deposit_consolidation_fee);
 
     let transaction = match maybe_transaction {
         Some(transaction) => Ok(transaction),
@@ -111,10 +114,9 @@ async fn try_accept_deposit<R: CanisterRuntime>(
             deposit_amount,
         });
     }
-    let total_fee = read_state(|state| state.deposit_fee() + state.consolidation_fee());
     let amount_to_mint = deposit_amount
-        .checked_sub(total_fee)
-        .expect("BUG: deposit amount is less than total fees");
+        .checked_sub(read_state(|state| state.deposit_fee()))
+        .expect("BUG: deposit amount is less than deposit fee");
 
     mutate_state(|state| {
         process_event(

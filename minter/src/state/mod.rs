@@ -86,11 +86,11 @@ pub struct State {
     sol_rpc_canister_id: Principal,
     solana_network: SolanaNetwork,
     deposit_fee: Lamport,
-    consolidation_fee: Lamport,
     withdrawal_fee: Lamport,
     minimum_withdrawal_amount: Lamport,
     minimum_deposit_amount: Lamport,
     update_balance_required_cycles: u128,
+    deposit_consolidation_fee: u128,
     pending_update_balance_requests: BTreeSet<Account>,
     pending_withdraw_sol_requests: BTreeSet<Account>,
     accepted_deposits: BTreeMap<DepositId, Deposit>,
@@ -142,8 +142,8 @@ impl State {
         self.deposit_fee
     }
 
-    pub fn consolidation_fee(&self) -> u64 {
-        self.consolidation_fee
+    pub fn deposit_consolidation_fee(&self) -> u128 {
+        self.deposit_consolidation_fee
     }
 
     pub fn withdrawal_fee(&self) -> u64 {
@@ -288,11 +288,10 @@ impl State {
                 "ERROR: provided canister IDs are not distinct!".to_string(),
             ));
         }
-        let total_deposit_fee = self.deposit_fee + self.consolidation_fee;
-        if self.minimum_deposit_amount < total_deposit_fee {
+        if self.minimum_deposit_amount < self.deposit_fee {
             return Err(InvalidStateError::InvalidMinimumDepositAmount {
                 minimum_deposit_amount: self.minimum_deposit_amount,
-                deposit_fee: total_deposit_fee,
+                deposit_fee: self.deposit_fee,
             });
         }
         let minimum_required = self.withdrawal_fee + SOLANA_RENT_EXEMPTION_THRESHOLD;
@@ -315,7 +314,7 @@ impl State {
             minimum_deposit_amount,
             withdrawal_fee,
             update_balance_required_cycles,
-            consolidation_fee,
+            deposit_consolidation_fee,
         }: UpgradeArgs,
     ) -> Result<(), InvalidStateError> {
         if let Some(sol_rpc_canister_id) = sol_rpc_canister_id {
@@ -336,8 +335,8 @@ impl State {
         if let Some(update_balance_required_cycles) = update_balance_required_cycles {
             self.update_balance_required_cycles = update_balance_required_cycles as u128;
         }
-        if let Some(consolidation_fee) = consolidation_fee {
-            self.consolidation_fee = consolidation_fee;
+        if let Some(deposit_consolidation_fee) = deposit_consolidation_fee {
+            self.deposit_consolidation_fee = deposit_consolidation_fee as u128;
         }
         self.validate()
     }
@@ -649,7 +648,7 @@ impl TryFrom<InitArgs> for State {
             withdrawal_fee,
             update_balance_required_cycles,
             solana_network,
-            consolidation_fee,
+            deposit_consolidation_fee,
         }: InitArgs,
     ) -> Result<Self, Self::Error> {
         let state = Self {
@@ -659,11 +658,11 @@ impl TryFrom<InitArgs> for State {
             sol_rpc_canister_id,
             solana_network,
             deposit_fee,
-            consolidation_fee,
             withdrawal_fee,
             minimum_withdrawal_amount,
             minimum_deposit_amount,
             update_balance_required_cycles: update_balance_required_cycles as u128,
+            deposit_consolidation_fee: deposit_consolidation_fee as u128,
             pending_update_balance_requests: BTreeSet::new(),
             pending_withdraw_sol_requests: BTreeSet::new(),
             accepted_deposits: BTreeMap::new(),
