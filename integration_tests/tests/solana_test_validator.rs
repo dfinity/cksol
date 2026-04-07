@@ -18,9 +18,6 @@ const DEPOSITOR_PRINCIPAL: Principal = Principal::from_slice(&[0x9d, 0xf7, 0x99]
 //  - a transaction with multiple transfer instructions to same target address: single mint with the summed up amount
 //  - a transaction with multiple instructions, not all to the same target address: only relevant amounts are considered.
 
-// Solana fee per transaction signature
-const FEE_PER_SIGNATURE: Lamport = 5_000;
-
 fn solana_test_setup() -> SetupBuilder {
     SetupBuilder::new()
         .with_proxy_canister()
