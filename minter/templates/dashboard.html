@@ -129,6 +129,35 @@
             </table>
             {% endif %}
 
+            {% if !consolidations_table.is_empty() %}
+            <h3 id="consolidations">Consolidation Transactions</h3>
+            <table>
+                <thead>
+                <tr>
+                    <th>Transaction</th>
+                    <th>Status</th>
+                    <th>Mint Index</th>
+                    <th>Deposit Amount (SOL)</th>
+                </tr>
+                </thead>
+                <tbody>
+                {% for c in consolidations_table.current_page %}
+                {% for d in c.deposits %}
+                <tr>
+                    {% if loop.index0 == 0 %}
+                    <td rowspan="{{ c.deposits.len() }}">{% call solscan_tx_link(c.transaction) %}</td>
+                    <td rowspan="{{ c.deposits.len() }}">{{ c.status }}</td>
+                    {% endif %}
+                    <td>{{ d.mint_index }}</td>
+                    <td>{{ d.deposit_amount }}</td>
+                </tr>
+                {% endfor %}
+                {% endfor %}
+                </tbody>
+                {% if consolidations_table.has_more_than_one_page() %}{{ consolidations_table.pagination|safe }}{% endif %}
+            </table>
+            {% endif %}
+
             {% if !withdrawals_table.is_empty() %}
             <h3 id="withdrawals">Withdrawals</h3>
             <table>
