@@ -74,15 +74,12 @@ async fn should_deposit_and_consolidate_single_deposit() {
         "Minter SOL balance decreased: {minter_sol_before} -> {minter_sol_after}"
     );
 
-    // The cycles charged during update_balance should offset the execution
-    // and signature costs so the minter's cycles balance does not decrease.
+    // The cycles charged during update_balance (deposit_consolidation_fee)
+    // should more than offset the execution and signature costs of
+    // consolidation, so the net balance does not drop below the initial one.
     assert!(
-        minter_cycles_after >= minter_cycles_after_deposit,
-        "Minter cycles balance decreased after consolidation: {minter_cycles_after_deposit} -> {minter_cycles_after}"
-    );
-    assert!(
-        minter_cycles_after_deposit >= minter_cycles_before,
-        "Minter cycles balance decreased after deposit: {minter_cycles_before} -> {minter_cycles_after_deposit}"
+        minter_cycles_after >= minter_cycles_before,
+        "Minter cycles balance decreased overall: {minter_cycles_before} -> {minter_cycles_after}"
     );
 
     setup.drop().await;
@@ -114,8 +111,6 @@ async fn should_deposit_and_consolidate_funds() {
         .into_iter()
         .unzip();
 
-    let minter_cycles_after_deposits = setup.minter().cycle_balance().await;
-
     // Check deposit consolidation
     let deposit_account_balances_before_consolidation = get_balances(&deposit_addresses).await;
 
@@ -142,15 +137,12 @@ async fn should_deposit_and_consolidate_funds() {
         "Minter SOL balance decreased: {minter_sol_before} -> {minter_sol_after}"
     );
 
-    // The cycles charged during update_balance should offset execution and
-    // signature costs so the minter's cycles balance does not decrease.
+    // The cycles charged during update_balance (deposit_consolidation_fee per
+    // deposit) should more than offset execution and signature costs of
+    // consolidation, so the net balance does not drop below the initial one.
     assert!(
-        minter_cycles_after >= minter_cycles_after_deposits,
-        "Minter cycles balance decreased after consolidation: {minter_cycles_after_deposits} -> {minter_cycles_after}"
-    );
-    assert!(
-        minter_cycles_after_deposits >= minter_cycles_before,
-        "Minter cycles balance decreased after deposits: {minter_cycles_before} -> {minter_cycles_after_deposits}"
+        minter_cycles_after >= minter_cycles_before,
+        "Minter cycles balance decreased overall: {minter_cycles_before} -> {minter_cycles_after}"
     );
 
     setup.drop().await;
