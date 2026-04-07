@@ -1,4 +1,5 @@
 use crate::{
+    constants::FEE_PER_SIGNATURE,
     ledger::client::LedgerClient,
     numeric::{LedgerBurnIndex, LedgerMintIndex},
     state::event::{DepositId, TransactionPurpose, VersionedMessage, WithdrawSolRequest},
@@ -103,6 +104,7 @@ pub struct State {
     succeeded_transactions: BTreeSet<Signature>,
     failed_transactions: BTreeMap<Signature, SolanaTransaction>,
     active_tasks: BTreeSet<TaskType>,
+    balance: Lamport,
 }
 
 impl State {
@@ -201,6 +203,10 @@ impl State {
         &self.failed_transactions
     }
 
+    pub fn balance(&self) -> Lamport {
+        self.balance
+    }
+
     pub fn deposit_status(&self, deposit_id: &DepositId) -> Option<DepositStatus> {
         if self.quarantined_deposits.contains_key(deposit_id) {
             return Some(DepositStatus::Quarantined((*deposit_id).into()));
@@ -256,6 +262,11 @@ impl State {
 
     pub fn active_tasks_mut(&mut self) -> &mut BTreeSet<TaskType> {
         &mut self.active_tasks
+    }
+
+    fn transaction_fee(&self, message: &VersionedMessage) -> Lamport {
+        let VersionedMessage::Legacy(msg) = message;
+        FEE_PER_SIGNATURE * msg.header.num_required_signatures as u64
     }
 
     fn validate(&self) -> Result<(), InvalidStateError> {
@@ -453,17 +464,22 @@ impl State {
             !self.failed_transactions.contains_key(signature),
             "Attempted to submit already failed transaction {signature:?}"
         );
-        match purpose {
+        let amount = match purpose {
             TransactionPurpose::ConsolidateDeposits { mint_indices } => {
+                let mut total: Lamport = 0;
                 for mint_index in mint_indices {
-                    self.deposits_to_consolidate
+                    let (_, deposit_amount) = self
+                        .deposits_to_consolidate
                         .remove(mint_index)
                         .unwrap_or_else(|| {
                             panic!("Attempted to consolidate unknown mint index: {mint_index:?}")
                         });
+                    total += deposit_amount;
                 }
+                total
             }
             TransactionPurpose::WithdrawSol { burn_indices } => {
+                let mut total: Lamport = 0;
                 for burn_index in burn_indices {
                     let request = self
                         .pending_withdrawal_requests
@@ -471,6 +487,7 @@ impl State {
                         .unwrap_or_else(|| {
                             panic!("Attempted to send transaction for unknown withdrawal request: {burn_index:?}")
                         });
+                    total += request.withdrawal_amount - request.withdrawal_fee;
                     assert_eq!(
                         self.sent_withdrawal_requests.insert(
                             *burn_index,
@@ -483,8 +500,11 @@ impl State {
                         "Attempted to send transaction for already sent withdrawal request: {burn_index:?}"
                     );
                 }
+                let tx_fee = self.transaction_fee(transaction);
+                self.balance = self.balance.saturating_sub(total + tx_fee);
+                total
             }
-        }
+        };
         assert_eq!(
             self.submitted_transactions.insert(
                 *signature,
@@ -492,6 +512,8 @@ impl State {
                     message: transaction.clone(),
                     signers: signers.to_vec(),
                     slot,
+                    purpose: purpose.clone(),
+                    amount,
                 }
             ),
             None,
@@ -541,11 +563,19 @@ impl State {
             !self.failed_transactions.contains_key(signature),
             "Attempted to mark already failed transaction {signature:?} as succeeded"
         );
-        self.submitted_transactions
+        let transaction = self
+            .submitted_transactions
             .remove(signature)
             .unwrap_or_else(|| {
                 panic!("Attempted to mark unknown transaction {signature:?} as succeeded")
             });
+        if matches!(
+            transaction.purpose,
+            TransactionPurpose::ConsolidateDeposits { .. }
+        ) {
+            let tx_fee = self.transaction_fee(&transaction.message);
+            self.balance += transaction.amount.saturating_sub(tx_fee);
+        }
         assert!(
             self.succeeded_transactions.insert(*signature),
             "Attempted to mark transaction {signature:?} as succeeded twice"
@@ -636,6 +666,7 @@ impl TryFrom<InitArgs> for State {
             succeeded_transactions: BTreeSet::new(),
             failed_transactions: BTreeMap::new(),
             active_tasks: BTreeSet::new(),
+            balance: 0,
         };
         state.validate()?;
         Ok(state)
@@ -680,4 +711,7 @@ pub struct SolanaTransaction {
     pub message: VersionedMessage,
     pub signers: Vec<Account>,
     pub slot: Slot,
+    pub purpose: TransactionPurpose,
+    /// Total transfer amount in lamports (excluding fees).
+    pub amount: Lamport,
 }
