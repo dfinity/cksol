@@ -276,6 +276,48 @@ fn should_display_all_withdrawal_statuses() {
     assert!(statuses.contains(&"Failed"));
 }
 
+// --- Consolidation table tests ---
+
+#[test]
+fn should_display_consolidation_transactions() {
+    init_state();
+
+    // Create deposits and mint them
+    let deposit_amount = 500_000_000;
+    accept_deposit(deposit_id(1), deposit_amount);
+    mint_deposit(deposit_id(1), 10);
+    accept_deposit(deposit_id(2), deposit_amount);
+    mint_deposit(deposit_id(2), 20);
+
+    // Submit consolidation transaction for both deposits
+    submit_consolidation(signature(0xBB), account(0), 1, vec![10, 20]);
+
+    let rendered_dashboard = dashboard();
+    assert_eq!(
+        rendered_dashboard.consolidations_table.current_page.len(),
+        2
+    );
+    assert!(
+        rendered_dashboard
+            .consolidations_table
+            .current_page
+            .iter()
+            .all(|c| c.status == "Submitted")
+    );
+
+    // Mark as succeeded
+    succeed_transaction(signature(0xBB));
+
+    let rendered_dashboard = dashboard();
+    assert!(
+        rendered_dashboard
+            .consolidations_table
+            .current_page
+            .iter()
+            .all(|c| c.status == "Succeeded")
+    );
+}
+
 // --- Assertion helpers ---
 
 struct DashboardAssert {

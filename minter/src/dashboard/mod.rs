@@ -37,6 +37,7 @@ pub(crate) const DEFAULT_PAGE_SIZE: usize = 100;
 pub struct DashboardPaginationParameters {
     pub minted_deposits_start: usize,
     pub withdrawals_start: usize,
+    pub consolidations_start: usize,
 }
 
 impl DashboardPaginationParameters {
@@ -52,7 +53,21 @@ impl DashboardPaginationParameters {
         Ok(Self {
             minted_deposits_start: parse(req, "minted_deposits_start")?,
             withdrawals_start: parse(req, "withdrawals_start")?,
+            consolidations_start: parse(req, "consolidations_start")?,
         })
+    }
+
+    /// Returns a query string fragment with all pagination params except `exclude`.
+    fn other_params(&self, exclude: &str) -> String {
+        [
+            ("minted_deposits_start", self.minted_deposits_start),
+            ("withdrawals_start", self.withdrawals_start),
+            ("consolidations_start", self.consolidations_start),
+        ]
+        .into_iter()
+        .filter(|(name, _)| *name != exclude)
+        .map(|(name, value)| format!("&{name}={value}"))
+        .collect()
     }
 }
 
@@ -157,6 +172,14 @@ impl DashboardTablePagination {
 // --- Dashboard data ---
 
 #[derive(Clone)]
+pub struct DashboardConsolidation {
+    pub transaction: String,
+    pub mint_index: String,
+    pub deposit_amount: String,
+    pub status: &'static str,
+}
+
+#[derive(Clone)]
 pub struct DashboardWithdrawal {
     pub transaction: Option<String>,
     pub account: String,
@@ -191,6 +214,7 @@ pub struct DashboardTemplate {
     pub minimum_withdrawal_amount: String,
     pub balance: String,
     pub deposits_table: DashboardPaginatedTable<DashboardDeposit>,
+    pub consolidations_table: DashboardPaginatedTable<DashboardConsolidation>,
     pub withdrawals_table: DashboardPaginatedTable<DashboardWithdrawal>,
 }
 
@@ -277,7 +301,55 @@ impl DashboardTemplate {
             6,
             "deposits",
             "minted_deposits_start",
-            format!("&withdrawals_start={}", pagination.withdrawals_start),
+            pagination.other_params("minted_deposits_start"),
+        );
+
+        let consolidated_deposits = state.consolidated_deposits();
+        let mut consolidations: Vec<DashboardConsolidation> = Vec::new();
+        for signature in state.submitted_transactions().keys() {
+            if let Some(info) = consolidated_deposits.get(signature) {
+                for (mint_index, amount) in &info.deposits {
+                    consolidations.push(DashboardConsolidation {
+                        transaction: signature.to_string(),
+                        mint_index: mint_index.to_string(),
+                        deposit_amount: lamports_to_sol(*amount),
+                        status: "Submitted",
+                    });
+                }
+            }
+        }
+        for signature in state.succeeded_transactions() {
+            if let Some(info) = consolidated_deposits.get(signature) {
+                for (mint_index, amount) in &info.deposits {
+                    consolidations.push(DashboardConsolidation {
+                        transaction: signature.to_string(),
+                        mint_index: mint_index.to_string(),
+                        deposit_amount: lamports_to_sol(*amount),
+                        status: "Succeeded",
+                    });
+                }
+            }
+        }
+        for signature in state.failed_transactions().keys() {
+            if let Some(info) = consolidated_deposits.get(signature) {
+                for (mint_index, amount) in &info.deposits {
+                    consolidations.push(DashboardConsolidation {
+                        transaction: signature.to_string(),
+                        mint_index: mint_index.to_string(),
+                        deposit_amount: lamports_to_sol(*amount),
+                        status: "Failed",
+                    });
+                }
+            }
+        }
+        let consolidations_table = DashboardPaginatedTable::from_items(
+            &consolidations,
+            pagination.consolidations_start,
+            DEFAULT_PAGE_SIZE,
+            4,
+            "consolidations",
+            "consolidations_start",
+            pagination.other_params("consolidations_start"),
         );
 
         let mut withdrawals: Vec<_> = Vec::new();
@@ -343,10 +415,7 @@ impl DashboardTemplate {
             6,
             "withdrawals",
             "withdrawals_start",
-            format!(
-                "&minted_deposits_start={}",
-                pagination.minted_deposits_start
-            ),
+            pagination.other_params("withdrawals_start"),
         );
 
         let network = state.solana_network();
@@ -363,6 +432,7 @@ impl DashboardTemplate {
             minimum_withdrawal_amount: lamports_to_sol(state.minimum_withdrawal_amount()),
             balance: lamports_to_sol(state.balance()),
             deposits_table,
+            consolidations_table,
             withdrawals_table,
         }
     }

@@ -103,6 +103,7 @@ pub struct State {
     submitted_transactions: BTreeMap<Signature, SolanaTransaction>,
     succeeded_transactions: BTreeSet<Signature>,
     failed_transactions: BTreeMap<Signature, SolanaTransaction>,
+    consolidated_deposits: BTreeMap<Signature, ConsolidationInfo>,
     active_tasks: BTreeSet<TaskType>,
     balance: Lamport,
 }
@@ -205,6 +206,10 @@ impl State {
 
     pub fn balance(&self) -> Lamport {
         self.balance
+    }
+
+    pub fn consolidated_deposits(&self) -> &BTreeMap<Signature, ConsolidationInfo> {
+        &self.consolidated_deposits
     }
 
     pub fn deposit_status(&self, deposit_id: &DepositId) -> Option<DepositStatus> {
@@ -467,15 +472,19 @@ impl State {
         let amount = match purpose {
             TransactionPurpose::ConsolidateDeposits { mint_indices } => {
                 let mut total: Lamport = 0;
+                let mut deposits = Vec::with_capacity(mint_indices.len());
                 for mint_index in mint_indices {
-                    let (_, deposit_amount) = self
+                    let (_account, deposit_amount) = self
                         .deposits_to_consolidate
                         .remove(mint_index)
                         .unwrap_or_else(|| {
                             panic!("Attempted to consolidate unknown mint index: {mint_index:?}")
                         });
                     total += deposit_amount;
+                    deposits.push((*mint_index, deposit_amount));
                 }
+                self.consolidated_deposits
+                    .insert(*signature, ConsolidationInfo { deposits });
                 total
             }
             TransactionPurpose::WithdrawSol { burn_indices } => {
@@ -551,6 +560,9 @@ impl State {
             None,
             "Attempted to resubmit transaction with signature {new_signature:?} that already exists"
         );
+        if let Some(info) = self.consolidated_deposits.remove(old_signature) {
+            self.consolidated_deposits.insert(*new_signature, info);
+        }
         for sent in self.sent_withdrawal_requests.values_mut() {
             if &sent.signature == old_signature {
                 sent.signature = *new_signature;
@@ -665,6 +677,7 @@ impl TryFrom<InitArgs> for State {
             submitted_transactions: BTreeMap::new(),
             succeeded_transactions: BTreeSet::new(),
             failed_transactions: BTreeMap::new(),
+            consolidated_deposits: BTreeMap::new(),
             active_tasks: BTreeSet::new(),
             balance: 0,
         };
@@ -704,6 +717,19 @@ pub enum TaskType {
     Mint,
     MonitorSubmittedTransactions,
     WithdrawalProcessing,
+}
+
+/// Details about a consolidation transaction, capturing the individual
+/// deposits (by mint index and amount) being consolidated.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ConsolidationInfo {
+    pub deposits: Vec<(LedgerMintIndex, Lamport)>,
+}
+
+impl ConsolidationInfo {
+    pub fn total_amount(&self) -> Lamport {
+        self.deposits.iter().map(|(_, amount)| amount).sum()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
