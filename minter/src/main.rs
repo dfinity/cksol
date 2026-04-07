@@ -2,13 +2,13 @@ use candid::Principal;
 use canlog::{Log, Sort};
 use cksol_minter::consolidate::{DEPOSIT_CONSOLIDATION_DELAY, consolidate_deposits};
 use cksol_minter::monitor::{MONITOR_SUBMITTED_TRANSACTIONS_DELAY, monitor_submitted_transactions};
-use cksol_minter::withdraw_sol::{WITHDRAWAL_PROCESSING_DELAY, process_pending_withdrawals};
+use cksol_minter::withdraw::{WITHDRAWAL_PROCESSING_DELAY, process_pending_withdrawals};
 use cksol_minter::{
     address::lazy_get_schnorr_master_key, runtime::IcCanisterRuntime, state::read_state,
 };
 use cksol_types::{
     Address, DepositStatus, GetDepositAddressArgs, MinterInfo, UpdateBalanceArgs,
-    UpdateBalanceError, WithdrawSolArgs, WithdrawSolError, WithdrawSolOk, WithdrawSolStatus,
+    UpdateBalanceError, WithdrawalArgs, WithdrawalError, WithdrawalOk, WithdrawalStatus,
 };
 use cksol_types_internal::{MinterArg, log::Priority};
 use ic_http_types::{HttpRequest, HttpResponse, HttpResponseBuilder};
@@ -65,15 +65,15 @@ async fn update_balance(args: UpdateBalanceArgs) -> Result<DepositStatus, Update
 }
 
 #[ic_cdk::update]
-async fn withdraw_sol(args: WithdrawSolArgs) -> Result<WithdrawSolOk, WithdrawSolError> {
+async fn withdraw(args: WithdrawalArgs) -> Result<WithdrawalOk, WithdrawalError> {
     let minimum_withdrawal_amount = read_state(|s| s.minimum_withdrawal_amount());
     if args.amount < minimum_withdrawal_amount {
-        return Err(WithdrawSolError::AmountTooLow(minimum_withdrawal_amount));
+        return Err(WithdrawalError::AmountTooLow(minimum_withdrawal_amount));
     }
 
     let minter_account: Account = ic_cdk::api::canister_self().into();
 
-    cksol_minter::withdraw_sol::withdraw_sol(
+    cksol_minter::withdraw::withdraw(
         &IcCanisterRuntime::new(),
         minter_account,
         ic_cdk::api::msg_caller(),
@@ -85,8 +85,8 @@ async fn withdraw_sol(args: WithdrawSolArgs) -> Result<WithdrawSolOk, WithdrawSo
 }
 
 #[ic_cdk::update]
-fn withdraw_sol_status(block_index: u64) -> WithdrawSolStatus {
-    cksol_minter::withdraw_sol::withdraw_sol_status(block_index)
+fn withdrawal_status(block_index: u64) -> WithdrawalStatus {
+    cksol_minter::withdraw::withdrawal_status(block_index)
 }
 
 #[ic_cdk::query]
@@ -109,8 +109,8 @@ fn get_events(
         match event_type {
             EventType::Init(args) => event::EventType::Init(args),
             EventType::Upgrade(args) => event::EventType::Upgrade(args),
-            EventType::AcceptedWithdrawSolRequest(request) => {
-                event::EventType::AcceptedWithdrawSolRequest {
+            EventType::AcceptedWithdrawalRequest(request) => {
+                event::EventType::AcceptedWithdrawalRequest {
                     account: request.account,
                     solana_address: request.solana_address,
                     burn_block_index: *request.burn_block_index.get(),

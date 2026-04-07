@@ -1,5 +1,5 @@
 use crate::state::{State, TaskType, mutate_state};
-use cksol_types::{UpdateBalanceError, WithdrawSolError};
+use cksol_types::{UpdateBalanceError, WithdrawalError};
 use icrc_ledger_types::icrc1::account::Account;
 use std::{collections::BTreeSet, marker::PhantomData};
 
@@ -25,7 +25,7 @@ impl From<GuardError> for UpdateBalanceError {
     }
 }
 
-impl From<GuardError> for WithdrawSolError {
+impl From<GuardError> for WithdrawalError {
     fn from(e: GuardError) -> Self {
         match e {
             GuardError::AlreadyProcessing => Self::AlreadyProcessing,
@@ -84,11 +84,11 @@ impl<R: PendingRequests> Drop for Guard<R> {
     }
 }
 
-pub struct PendingWithdrawSolRequests;
+pub struct PendingWithdrawalRequests;
 
-impl PendingRequests for PendingWithdrawSolRequests {
+impl PendingRequests for PendingWithdrawalRequests {
     fn pending_requests(state: &mut State) -> &mut BTreeSet<Account> {
-        state.pending_withdraw_sol_requests_mut()
+        state.pending_withdrawal_request_guards_mut()
     }
 }
 
@@ -98,9 +98,7 @@ pub fn update_balance_guard(
     Guard::new(account)
 }
 
-pub fn withdraw_sol_guard(
-    account: Account,
-) -> Result<Guard<PendingWithdrawSolRequests>, GuardError> {
+pub fn withdrawal_guard(account: Account) -> Result<Guard<PendingWithdrawalRequests>, GuardError> {
     Guard::new(account)
 }
 
