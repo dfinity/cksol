@@ -32,14 +32,12 @@ use std::panic;
 
 type GetTransactionResult = MultiRpcResult<Option<EncodedConfirmedTransactionWithStatusMeta>>;
 
-/// Total cycles required per `update_balance` call (RPC call + consolidation fee).
-const TOTAL_REQUIRED_CYCLES: u128 = UPDATE_BALANCE_REQUIRED_CYCLES + DEPOSIT_CONSOLIDATION_FEE;
-
 #[tokio::test]
 async fn should_fail_if_insufficient_cycles_attached() {
     init_state();
 
-    let runtime = TestCanisterRuntime::new().add_msg_cycles_available(TOTAL_REQUIRED_CYCLES - 1);
+    let runtime =
+        TestCanisterRuntime::new().add_msg_cycles_available(UPDATE_BALANCE_REQUIRED_CYCLES - 1);
 
     let result = update_balance(runtime, DEPOSITOR_ACCOUNT, deposit_transaction_signature()).await;
 
@@ -47,8 +45,8 @@ async fn should_fail_if_insufficient_cycles_attached() {
         result,
         Err(UpdateBalanceError::InsufficientCycles(
             InsufficientCyclesError {
-                expected: TOTAL_REQUIRED_CYCLES,
-                received: TOTAL_REQUIRED_CYCLES - 1,
+                expected: UPDATE_BALANCE_REQUIRED_CYCLES,
+                received: UPDATE_BALANCE_REQUIRED_CYCLES - 1,
             }
         ))
     );
@@ -348,11 +346,14 @@ async fn should_allow_deposits_to_multiple_accounts_with_single_transaction() {
 }
 
 fn runtime_with_time_and_cycles() -> TestCanisterRuntime {
-    const REFUNDED_CYCLES: u128 = 900_000_000_000;
-    let rpc_cost = UPDATE_BALANCE_REQUIRED_CYCLES - REFUNDED_CYCLES;
+    // Cycles forwarded to the RPC call = total - consolidation fee
+    let cycles_for_rpc = UPDATE_BALANCE_REQUIRED_CYCLES - DEPOSIT_CONSOLIDATION_FEE;
+    // Simulate the RPC canister refunding most of the forwarded cycles
+    let refunded: u128 = cycles_for_rpc - 100_000_000_000;
+    let rpc_cost = cycles_for_rpc - refunded;
     TestCanisterRuntime::new()
         .with_increasing_time()
-        .add_msg_cycles_available(TOTAL_REQUIRED_CYCLES)
+        .add_msg_cycles_available(UPDATE_BALANCE_REQUIRED_CYCLES)
         .add_msg_cycles_accept(rpc_cost + DEPOSIT_CONSOLIDATION_FEE)
-        .add_msg_cycles_refunded(REFUNDED_CYCLES)
+        .add_msg_cycles_refunded(refunded)
 }

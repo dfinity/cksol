@@ -77,9 +77,11 @@ async fn try_accept_deposit<R: CanisterRuntime>(
             state.deposit_consolidation_fee(),
         )
     });
-    check_caller_available_cycles(runtime, cycles_to_attach + deposit_consolidation_fee)?;
+    check_caller_available_cycles(runtime, cycles_to_attach)?;
 
-    let maybe_transaction = try_get_transaction(runtime, signature, cycles_to_attach)
+    // Reserve the consolidation fee and forward the rest to the HTTP outcall
+    let cycles_for_rpc = cycles_to_attach.saturating_sub(deposit_consolidation_fee);
+    let maybe_transaction = try_get_transaction(runtime, signature, cycles_for_rpc)
         .await
         .map_err(|e| {
             log!(
@@ -89,8 +91,8 @@ async fn try_accept_deposit<R: CanisterRuntime>(
             UpdateBalanceError::from(e)
         })?;
 
-    // Charge the cost of the `getTransaction` RPC call plus a fixed fee to offset consolidation costs
-    let rpc_cost = cycles_to_attach.saturating_sub(runtime.msg_cycles_refunded());
+    // Charge the actual RPC cost plus the consolidation fee
+    let rpc_cost = cycles_for_rpc.saturating_sub(runtime.msg_cycles_refunded());
     charge_caller_cycles(runtime, rpc_cost + deposit_consolidation_fee);
 
     let transaction = match maybe_transaction {
