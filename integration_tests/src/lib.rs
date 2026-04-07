@@ -96,8 +96,8 @@ pub struct Setup {
 }
 
 impl Setup {
-    pub const DEFAULT_DEPOSIT_FEE: Lamport = 10_000; // covers consolidation tx fees with buffer
-    pub const DEFAULT_DEPOSIT_CONSOLIDATION_FEE: u128 = 500_000_000_000; // 0.5T cycles
+    pub const DEFAULT_DEPOSIT_FEE: Lamport = 10_000;
+    pub const DEFAULT_DEPOSIT_CONSOLIDATION_FEE: u128 = 10_000_000_000; // 0.01T cycles
     pub const DEFAULT_WITHDRAWAL_FEE: Lamport = 1_000_000; // 0.001 SOL
     pub const DEFAULT_CONTROLLER: Principal = Principal::from_slice(&[0x9d, 0xf7, 0x01]);
     pub const DEFAULT_CALLER: Principal =

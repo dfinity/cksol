@@ -836,6 +836,7 @@ dependencies = [
  "ic-pocket-canister-runtime",
  "ic-test-utilities-load-wasm",
  "icrc-ledger-types",
+ "itertools 0.14.0",
  "minicbor",
  "num-traits",
  "pocket-ic",
