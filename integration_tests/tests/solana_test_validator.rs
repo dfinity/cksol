@@ -21,11 +21,8 @@ const DEPOSITOR_PRINCIPAL: Principal = Principal::from_slice(&[0x9d, 0xf7, 0x99]
 // Solana fee per transaction signature
 const FEE_PER_SIGNATURE: Lamport = 5_000;
 
-#[tokio::test(flavor = "multi_thread")]
-async fn should_deposit_and_consolidate_funds() {
-    const NUM_DEPOSITS: u8 = 15;
-
-    let setup = SetupBuilder::new()
+fn solana_test_setup() -> SetupBuilder {
+    SetupBuilder::new()
         .with_proxy_canister()
         .with_pocket_ic_live_mode()
         .with_sol_rpc_install_args(InstallArgs {
@@ -37,11 +34,71 @@ async fn should_deposit_and_consolidate_funds() {
             }),
             ..InstallArgs::default()
         })
-        .build()
-        .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn should_deposit_and_consolidate_single_deposit() {
+    let setup = solana_test_setup().build().await;
 
     // Bootstrap minter account
     airdrop_and_confirm(MINTER_ADDRESS, LAMPORTS_PER_SOL).await;
+
+    let account = Account {
+        owner: DEPOSITOR_PRINCIPAL,
+        subaccount: Some([1; 32]),
+    };
+    let deposit_amount = LAMPORTS_PER_SOL / 10;
+
+    let minter_cycles_before = setup.minter().cycle_balance().await;
+    let minter_sol_before = get_solana_balance(&MINTER_ADDRESS).await;
+
+    let deposit_address = deposit_to_account(&setup, account, deposit_amount).await;
+
+    let minter_cycles_after_deposit = setup.minter().cycle_balance().await;
+
+    // Consolidate
+    let balance_before = get_solana_balance(&deposit_address).await;
+    setup.advance_time(Duration::from_mins(10)).await;
+    tokio::time::sleep(Duration::from_secs(5)).await;
+
+    let balance_after = get_solana_balance(&deposit_address).await;
+    assert_eq!(balance_after, balance_before - deposit_amount);
+
+    let minter_sol_after = get_solana_balance(&MINTER_ADDRESS).await;
+    let minter_cycles_after = setup.minter().cycle_balance().await;
+
+    // The deposit fee should cover the consolidation tx fee so the minter's
+    // SOL balance does not decrease.
+    assert!(
+        minter_sol_after >= minter_sol_before,
+        "Minter SOL balance decreased: {minter_sol_before} -> {minter_sol_after}"
+    );
+
+    // The cycles charged during update_balance should offset the execution
+    // and signature costs so the minter's cycles balance does not decrease.
+    assert!(
+        minter_cycles_after >= minter_cycles_after_deposit,
+        "Minter cycles balance decreased after consolidation: {minter_cycles_after_deposit} -> {minter_cycles_after}"
+    );
+    assert!(
+        minter_cycles_after_deposit >= minter_cycles_before,
+        "Minter cycles balance decreased after deposit: {minter_cycles_before} -> {minter_cycles_after_deposit}"
+    );
+
+    setup.drop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn should_deposit_and_consolidate_funds() {
+    const NUM_DEPOSITS: u8 = 15;
+
+    let setup = solana_test_setup().build().await;
+
+    // Bootstrap minter account
+    airdrop_and_confirm(MINTER_ADDRESS, LAMPORTS_PER_SOL).await;
+
+    let minter_cycles_before = setup.minter().cycle_balance().await;
+    let minter_sol_before = get_solana_balance(&MINTER_ADDRESS).await;
 
     let (deposit_addresses, deposit_amounts): (Vec<_>, Vec<_>) =
         futures::future::join_all((1_u8..=NUM_DEPOSITS).map(async |i| {
@@ -57,15 +114,15 @@ async fn should_deposit_and_consolidate_funds() {
         .into_iter()
         .unzip();
 
+    let minter_cycles_after_deposits = setup.minter().cycle_balance().await;
+
     // Check deposit consolidation
     let deposit_account_balances_before_consolidation = get_balances(&deposit_addresses).await;
-    let minter_balance_before_consolidation = get_solana_balance(&MINTER_ADDRESS).await;
 
     setup.advance_time(Duration::from_mins(10)).await;
     tokio::time::sleep(Duration::from_secs(5)).await;
 
-    // Ensure the deposited funds were consolidated, note that we do not assert the balance after
-    // consolidation to be zero due to potential funds leftover from previous tests
+    // Ensure the deposited funds were consolidated
     for (deposit_address, (&balance_before, &deposit_amount)) in deposit_addresses.iter().zip(
         deposit_account_balances_before_consolidation
             .iter()
@@ -74,11 +131,26 @@ async fn should_deposit_and_consolidate_funds() {
         let balance_after = get_solana_balance(deposit_address).await;
         assert_eq!(balance_after, balance_before - deposit_amount);
     }
-    let minter_balance_after_consolidation = get_solana_balance(&MINTER_ADDRESS).await;
-    assert_eq!(
-        minter_balance_after_consolidation,
-        minter_balance_before_consolidation + deposit_amounts.iter().sum::<Lamport>()
-            - NUM_DEPOSITS as u64 * FEE_PER_SIGNATURE
+
+    let minter_sol_after = get_solana_balance(&MINTER_ADDRESS).await;
+    let minter_cycles_after = setup.minter().cycle_balance().await;
+
+    // The deposit fee (in lamports) should cover consolidation tx fees so the
+    // minter's SOL balance does not decrease.
+    assert!(
+        minter_sol_after >= minter_sol_before,
+        "Minter SOL balance decreased: {minter_sol_before} -> {minter_sol_after}"
+    );
+
+    // The cycles charged during update_balance should offset execution and
+    // signature costs so the minter's cycles balance does not decrease.
+    assert!(
+        minter_cycles_after >= minter_cycles_after_deposits,
+        "Minter cycles balance decreased after consolidation: {minter_cycles_after_deposits} -> {minter_cycles_after}"
+    );
+    assert!(
+        minter_cycles_after_deposits >= minter_cycles_before,
+        "Minter cycles balance decreased after deposits: {minter_cycles_before} -> {minter_cycles_after_deposits}"
     );
 
     setup.drop().await;

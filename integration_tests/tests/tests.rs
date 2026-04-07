@@ -136,6 +136,7 @@ mod lifecycle {
             initial_minter_info,
             MinterInfo {
                 deposit_fee: Setup::DEFAULT_DEPOSIT_FEE,
+                deposit_consolidation_fee: Setup::DEFAULT_DEPOSIT_CONSOLIDATION_FEE,
                 minimum_withdrawal_amount: Setup::DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT,
                 minimum_deposit_amount: Setup::DEFAULT_MINIMUM_DEPOSIT_AMOUNT,
                 withdrawal_fee: Setup::DEFAULT_WITHDRAWAL_FEE,
@@ -164,6 +165,7 @@ mod lifecycle {
                 minimum_deposit_amount: Some(NEW_MINIMUM_DEPOSIT_AMOUNT),
                 withdrawal_fee: Some(NEW_WITHDRAWAL_FEE),
                 update_balance_required_cycles: Some(NEW_UPDATE_BALANCE_REQUIRED_CYCLES as u64),
+                deposit_consolidation_fee: None,
             })
             .await
             .expect("upgrade failed");
@@ -173,6 +175,7 @@ mod lifecycle {
             minter_info,
             MinterInfo {
                 deposit_fee: NEW_DEPOSIT_FEE,
+                deposit_consolidation_fee: Setup::DEFAULT_DEPOSIT_CONSOLIDATION_FEE,
                 minimum_withdrawal_amount: NEW_MINIMUM_WITHDRAWAL_AMOUNT,
                 minimum_deposit_amount: NEW_MINIMUM_DEPOSIT_AMOUNT,
                 withdrawal_fee: NEW_WITHDRAWAL_FEE,
