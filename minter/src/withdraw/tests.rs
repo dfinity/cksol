@@ -2,7 +2,7 @@ use crate::numeric::LedgerBurnIndex;
 use crate::sol_transfer::MAX_WITHDRAWALS_PER_TX;
 use crate::test_fixtures::EventsAssert;
 use crate::{
-    guard::{TimerGuard, withdraw_sol_guard},
+    guard::{TimerGuard, withdrawal_guard},
     state::{
         TaskType,
         event::{EventType, TransactionPurpose},
@@ -11,16 +11,14 @@ use crate::{
         MINIMUM_WITHDRAWAL_AMOUNT, MINTER_ACCOUNT, WITHDRAWAL_FEE, account, confirmed_block,
         events, init_schnorr_master_key, init_state, runtime::TestCanisterRuntime, signature,
     },
-    withdraw_sol::{
-        MAX_WITHDRAWAL_ROUNDS, process_pending_withdrawals, withdraw_sol, withdraw_sol_status,
-    },
+    withdraw::{MAX_WITHDRAWAL_ROUNDS, process_pending_withdrawals, withdraw, withdrawal_status},
 };
 use assert_matches::assert_matches;
 use candid::{Nat, Principal};
 use canlog::Log;
 use cksol_types::TxFinalizedStatus;
-use cksol_types::WithdrawSolStatus;
-use cksol_types::{WithdrawSolError, WithdrawSolOk};
+use cksol_types::WithdrawalStatus;
+use cksol_types::{WithdrawalError, WithdrawalOk};
 use cksol_types_internal::log::Priority;
 use ic_canister_runtime::IcError;
 use ic_cdk::call::CallRejected;
@@ -40,7 +38,7 @@ async fn should_return_error_if_calling_ledger_fails() {
 
     let runtime = TestCanisterRuntime::new().add_stub_error(IcError::CallPerformFailed);
 
-    let result = withdraw_sol(
+    let result = withdraw(
         &runtime,
         MINTER_ACCOUNT,
         test_caller(),
@@ -52,7 +50,7 @@ async fn should_return_error_if_calling_ledger_fails() {
 
     assert_matches!(
         result,
-        Err(WithdrawSolError::TemporarilyUnavailable(e)) => assert!(e.contains("Failed to burn tokens"))
+        Err(WithdrawalError::TemporarilyUnavailable(e)) => assert!(e.contains("Failed to burn tokens"))
     );
 }
 
@@ -64,7 +62,7 @@ async fn should_return_error_if_ledger_unavailable() {
         TransferFromError::TemporarilyUnavailable,
     ));
 
-    let result = withdraw_sol(
+    let result = withdraw(
         &runtime,
         MINTER_ACCOUNT,
         test_caller(),
@@ -76,7 +74,7 @@ async fn should_return_error_if_ledger_unavailable() {
 
     assert_eq!(
         result,
-        Err(WithdrawSolError::TemporarilyUnavailable(
+        Err(WithdrawalError::TemporarilyUnavailable(
             "Ledger is temporarily unavailable".to_string(),
         ))
     );
@@ -92,7 +90,7 @@ async fn should_return_error_if_insufficient_allowance() {
         },
     ));
 
-    let result = withdraw_sol(
+    let result = withdraw(
         &runtime,
         MINTER_ACCOUNT,
         test_caller(),
@@ -104,7 +102,7 @@ async fn should_return_error_if_insufficient_allowance() {
 
     assert_eq!(
         result,
-        Err(WithdrawSolError::InsufficientAllowance { allowance: 123u64 })
+        Err(WithdrawalError::InsufficientAllowance { allowance: 123u64 })
     );
 }
 
@@ -118,7 +116,7 @@ async fn should_return_error_if_insufficient_funds() {
         },
     ));
 
-    let result = withdraw_sol(
+    let result = withdraw(
         &runtime,
         MINTER_ACCOUNT,
         test_caller(),
@@ -130,7 +128,7 @@ async fn should_return_error_if_insufficient_funds() {
 
     assert_eq!(
         result,
-        Err(WithdrawSolError::InsufficientFunds { balance: 123u64 })
+        Err(WithdrawalError::InsufficientFunds { balance: 123u64 })
     );
 }
 
@@ -145,7 +143,7 @@ async fn should_return_generic_error() {
         },
     ));
 
-    let result = withdraw_sol(
+    let result = withdraw(
         &runtime,
         MINTER_ACCOUNT,
         test_caller(),
@@ -157,7 +155,7 @@ async fn should_return_generic_error() {
 
     assert_eq!(
         result,
-        Err(WithdrawSolError::GenericError {
+        Err(WithdrawalError::GenericError {
             error_message: "msg".to_string(),
             error_code: 123u64
         })
@@ -172,7 +170,7 @@ async fn should_return_ok_if_burn_succeeds() {
         .add_stub_response(Ok::<Nat, TransferFromError>(Nat::from(123u64)))
         .with_increasing_time();
 
-    let result = withdraw_sol(
+    let result = withdraw(
         &runtime,
         MINTER_ACCOUNT,
         test_caller(),
@@ -184,7 +182,7 @@ async fn should_return_ok_if_burn_succeeds() {
 
     assert_eq!(
         result,
-        Ok(WithdrawSolOk {
+        Ok(WithdrawalOk {
             block_index: 123u64
         })
     );
@@ -196,7 +194,7 @@ async fn should_return_error_if_address_malformed() {
 
     let runtime = TestCanisterRuntime::new();
 
-    let result = withdraw_sol(
+    let result = withdraw(
         &runtime,
         MINTER_ACCOUNT,
         test_caller(),
@@ -206,7 +204,7 @@ async fn should_return_error_if_address_malformed() {
     )
     .await;
 
-    assert_matches!(result, Err(WithdrawSolError::MalformedAddress(_)));
+    assert_matches!(result, Err(WithdrawalError::MalformedAddress(_)));
 }
 
 #[tokio::test]
@@ -216,7 +214,7 @@ async fn should_panic_if_caller_is_anonymous() {
 
     let runtime = TestCanisterRuntime::new();
 
-    let _ = withdraw_sol(
+    let _ = withdraw(
         &runtime,
         MINTER_ACCOUNT,
         Principal::anonymous(),
@@ -236,11 +234,11 @@ async fn should_return_error_if_already_processing() {
         owner: caller,
         subaccount: None,
     };
-    let _guard = withdraw_sol_guard(from).unwrap();
+    let _guard = withdrawal_guard(from).unwrap();
 
     let runtime = TestCanisterRuntime::new();
 
-    let result = withdraw_sol(
+    let result = withdraw(
         &runtime,
         MINTER_ACCOUNT,
         caller,
@@ -250,7 +248,7 @@ async fn should_return_error_if_already_processing() {
     )
     .await;
 
-    assert_eq!(result, Err(WithdrawSolError::AlreadyProcessing));
+    assert_eq!(result, Err(WithdrawalError::AlreadyProcessing));
 }
 
 mod process_pending_withdrawals_tests {
@@ -303,9 +301,9 @@ mod process_pending_withdrawals_tests {
         let _guard = TimerGuard::new(TaskType::WithdrawalProcessing).unwrap();
     }
 
-    async fn withdraw(runtime: &TestCanisterRuntime, count: u8) {
+    async fn submit_withdrawals(runtime: &TestCanisterRuntime, count: u8) {
         for i in 1..count + 1 {
-            let _ = withdraw_sol(
+            let _ = withdraw(
                 runtime,
                 MINTER_ACCOUNT,
                 Principal::from_slice(&[1, i]),
@@ -327,7 +325,7 @@ mod process_pending_withdrawals_tests {
         let slot = 1;
 
         let runtime = TestCanisterRuntime::new()
-            // ledger burn response for withdraw_sol
+            // ledger burn response for withdraw
             .add_stub_response(Ok::<Nat, TransferFromError>(Nat::from(1u64)))
             // get_recent_slot_and_blockhash calls
             .add_stub_response(GetSlotResult::Consistent(Ok(slot)))
@@ -338,13 +336,13 @@ mod process_pending_withdrawals_tests {
             .add_stub_response(SendTransactionResult::Consistent(Ok(tx_signature.into())))
             .with_increasing_time();
 
-        withdraw(&runtime, 1).await;
+        submit_withdrawals(&runtime, 1).await;
 
         process_pending_withdrawals(&runtime).await;
 
         EventsAssert::from_recorded()
             .expect_event(|e| {
-                assert_matches!(e, EventType::AcceptedWithdrawSolRequest(req) => {
+                assert_matches!(e, EventType::AcceptedWithdrawalRequest(req) => {
                     assert_eq!(req.withdrawal_amount, WITHDRAWAL_FEE + 1);
                     assert_eq!(req.withdrawal_fee, WITHDRAWAL_FEE);
                 });
@@ -361,7 +359,7 @@ mod process_pending_withdrawals_tests {
             })
             .assert_no_more_events();
 
-        assert_matches!(withdraw_sol_status(1), WithdrawSolStatus::TxSent(_));
+        assert_matches!(withdrawal_status(1), WithdrawalStatus::TxSent(_));
     }
 
     #[tokio::test]
@@ -369,7 +367,7 @@ mod process_pending_withdrawals_tests {
         init_state();
 
         let runtime = TestCanisterRuntime::new()
-            // ledger burn response for withdraw_sol
+            // ledger burn response for withdraw
             .add_stub_response(Ok::<Nat, TransferFromError>(Nat::from(1u64)))
             // get_recent_block retries getSlot 3 times before giving up
             .add_stub_response(GetSlotResult::Consistent(Err(RpcError::ValidationError(
@@ -383,14 +381,14 @@ mod process_pending_withdrawals_tests {
             ))))
             .with_increasing_time();
 
-        withdraw(&runtime, 1).await;
+        submit_withdrawals(&runtime, 1).await;
 
         process_pending_withdrawals(&runtime).await;
 
         // No withdrawal transaction event should be recorded
         EventsAssert::from_recorded()
             .expect_event(|e| {
-                assert_matches!(e, EventType::AcceptedWithdrawSolRequest(_));
+                assert_matches!(e, EventType::AcceptedWithdrawalRequest(_));
             })
             .assert_no_more_events();
 
@@ -404,7 +402,7 @@ mod process_pending_withdrawals_tests {
             log.entries
         );
 
-        assert_eq!(withdraw_sol_status(1), WithdrawSolStatus::Pending);
+        assert_eq!(withdrawal_status(1), WithdrawalStatus::Pending);
     }
 
     #[tokio::test]
@@ -427,20 +425,20 @@ mod process_pending_withdrawals_tests {
             ))
             .with_increasing_time();
 
-        withdraw(&runtime, 2).await;
+        submit_withdrawals(&runtime, 2).await;
 
         process_pending_withdrawals(&runtime).await;
 
         EventsAssert::from_recorded()
             .expect_event(|e| {
-                assert_matches!(e, EventType::AcceptedWithdrawSolRequest(req) => {
+                assert_matches!(e, EventType::AcceptedWithdrawalRequest(req) => {
                     assert_eq!(req.withdrawal_amount, WITHDRAWAL_FEE + 1);
                     assert_eq!(req.withdrawal_fee, WITHDRAWAL_FEE);
                     assert_eq!(req.account, Principal::from_slice(&[1, 1]).into());
                 });
             })
             .expect_event(|e| {
-                assert_matches!(e, EventType::AcceptedWithdrawSolRequest(req) => {
+                assert_matches!(e, EventType::AcceptedWithdrawalRequest(req) => {
                     assert_eq!(req.withdrawal_amount, WITHDRAWAL_FEE + 1);
                     assert_eq!(req.withdrawal_fee, WITHDRAWAL_FEE);
                     assert_eq!(req.account, Principal::from_slice(&[1, 2]).into());
@@ -460,8 +458,8 @@ mod process_pending_withdrawals_tests {
         );
 
         // Both withdrawals remain pending since they were in the same batch
-        assert_matches!(withdraw_sol_status(1), WithdrawSolStatus::Pending);
-        assert_matches!(withdraw_sol_status(2), WithdrawSolStatus::Pending);
+        assert_matches!(withdrawal_status(1), WithdrawalStatus::Pending);
+        assert_matches!(withdrawal_status(2), WithdrawalStatus::Pending);
     }
 
     #[tokio::test]
@@ -488,22 +486,22 @@ mod process_pending_withdrawals_tests {
             .add_signature(signature(2).into())
             .add_stub_response(SendTransactionResult::Consistent(Ok(signature(2).into())));
 
-        withdraw(&runtime, request_count as u8).await;
+        submit_withdrawals(&runtime, request_count as u8).await;
 
         process_pending_withdrawals(&runtime).await;
 
         // All withdrawals should be processed in a single invocation
         // (2 batches in 1 round, both within MAX_CONCURRENT_RPC_CALLS)
         for i in 0..request_count {
-            assert_matches!(withdraw_sol_status(i), WithdrawSolStatus::TxSent(_));
+            assert_matches!(withdrawal_status(i), WithdrawalStatus::TxSent(_));
         }
 
-        // Verify events: request_count AcceptedWithdrawSolRequest events,
+        // Verify events: request_count AcceptedWithdrawalRequest events,
         // then 2 SubmittedTransaction events (one per batch).
         let mut events = EventsAssert::from_recorded();
         for _ in 0..request_count {
             events = events.expect_event(|e| {
-                assert_matches!(e, EventType::AcceptedWithdrawSolRequest(_));
+                assert_matches!(e, EventType::AcceptedWithdrawalRequest(_));
             });
         }
         events
@@ -567,15 +565,15 @@ mod process_pending_withdrawals_tests {
             )
             .into())));
 
-        withdraw(&runtime, request_count as u8).await;
+        submit_withdrawals(&runtime, request_count as u8).await;
 
         // All withdrawals should be processed in a single invocation (2 rounds)
         process_pending_withdrawals(&runtime).await;
 
         for i in 0..request_count {
             assert_matches!(
-                withdraw_sol_status(i),
-                WithdrawSolStatus::TxSent(_),
+                withdrawal_status(i),
+                WithdrawalStatus::TxSent(_),
                 "withdrawal {i} should be TxSent"
             );
         }
@@ -620,15 +618,15 @@ mod process_pending_withdrawals_tests {
         // All requests within MAX_WITHDRAWAL_ROUNDS rounds should be processed
         for i in 0..processed {
             assert_matches!(
-                withdraw_sol_status(i as u64),
-                WithdrawSolStatus::TxSent(_),
+                withdrawal_status(i as u64),
+                WithdrawalStatus::TxSent(_),
                 "withdrawal {i} should be TxSent"
             );
         }
         // The extra request beyond MAX_WITHDRAWAL_ROUNDS rounds should remain pending
         assert_matches!(
-            withdraw_sol_status(processed as u64),
-            WithdrawSolStatus::Pending,
+            withdrawal_status(processed as u64),
+            WithdrawalStatus::Pending,
             "withdrawal beyond max rounds should still be Pending"
         );
     }
@@ -649,13 +647,13 @@ mod withdrawal_finalization_tests {
         init_state();
         let tx_signature = setup_sent_withdrawal(1);
 
-        assert_matches!(withdraw_sol_status(1), WithdrawSolStatus::TxSent(_));
+        assert_matches!(withdrawal_status(1), WithdrawalStatus::TxSent(_));
 
         events::succeed_transaction(tx_signature);
 
         assert_matches!(
-            withdraw_sol_status(1),
-            WithdrawSolStatus::TxFinalized(TxFinalizedStatus::Success { transaction_hash, .. })
+            withdrawal_status(1),
+            WithdrawalStatus::TxFinalized(TxFinalizedStatus::Success { transaction_hash, .. })
                 if transaction_hash == tx_signature.to_string()
         );
     }
@@ -665,13 +663,13 @@ mod withdrawal_finalization_tests {
         init_state();
         let tx_signature = setup_sent_withdrawal(1);
 
-        assert_matches!(withdraw_sol_status(1), WithdrawSolStatus::TxSent(_));
+        assert_matches!(withdrawal_status(1), WithdrawalStatus::TxSent(_));
 
         events::fail_transaction(tx_signature);
 
         assert_matches!(
-            withdraw_sol_status(1),
-            WithdrawSolStatus::TxFinalized(TxFinalizedStatus::Failure { transaction_hash })
+            withdrawal_status(1),
+            WithdrawalStatus::TxFinalized(TxFinalizedStatus::Failure { transaction_hash })
                 if transaction_hash == tx_signature.to_string()
         );
     }

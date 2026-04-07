@@ -24,7 +24,7 @@ fn apply_state_transition(state: &mut State, payload: &EventType) {
                 .upgrade(upgrade_arg.clone())
                 .expect("applying upgrade event should succeed");
         }
-        EventType::AcceptedWithdrawSolRequest(request) => {
+        EventType::AcceptedWithdrawalRequest(request) => {
             state.process_accepted_withdrawal(request);
         }
         EventType::AcceptedDeposit {

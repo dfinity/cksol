@@ -2,7 +2,7 @@ use std::str::FromStr;
 use std::time::Duration;
 
 use candid::Principal;
-use cksol_types::{WithdrawSolError, WithdrawSolOk, WithdrawSolStatus};
+use cksol_types::{WithdrawalError, WithdrawalOk, WithdrawalStatus};
 use icrc_ledger_types::icrc1::account::{Account, Subaccount};
 use icrc_ledger_types::icrc2::transfer_from::TransferFromError;
 use num_traits::ToPrimitive;
@@ -17,14 +17,14 @@ use solana_hash::Hash;
 
 use crate::constants::MAX_CONCURRENT_RPC_CALLS;
 use crate::{
-    guard::{TimerGuard, withdraw_sol_guard},
+    guard::{TimerGuard, withdrawal_guard},
     ledger::burn,
     runtime::CanisterRuntime,
     sol_transfer::{MAX_WITHDRAWALS_PER_TX, create_signed_batch_withdrawal_transaction},
     state::{
         TaskType,
         audit::process_event,
-        event::{EventType, TransactionPurpose, VersionedMessage, WithdrawSolRequest},
+        event::{EventType, TransactionPurpose, VersionedMessage, WithdrawalRequest},
         mutate_state, read_state,
     },
     transaction::{get_recent_slot_and_blockhash, submit_transaction},
@@ -36,14 +36,14 @@ pub(crate) const MAX_WITHDRAWAL_ROUNDS: usize = 5;
 #[cfg(test)]
 mod tests;
 
-pub async fn withdraw_sol<R: CanisterRuntime>(
+pub async fn withdraw<R: CanisterRuntime>(
     runtime: &R,
     minter_account: Account,
     caller: Principal,
     from_subaccount: Option<Subaccount>,
     amount: u64,
     address: String,
-) -> Result<WithdrawSolOk, WithdrawSolError> {
+) -> Result<WithdrawalOk, WithdrawalError> {
     assert_ne!(
         caller,
         Principal::anonymous(),
@@ -53,40 +53,38 @@ pub async fn withdraw_sol<R: CanisterRuntime>(
         owner: caller,
         subaccount: from_subaccount,
     };
-    let _guard = withdraw_sol_guard(from)?;
+    let _guard = withdrawal_guard(from)?;
 
     let solana_address = Address::from_str(&address)
-        .map_err(|e| WithdrawSolError::MalformedAddress(e.to_string()))?;
+        .map_err(|e| WithdrawalError::MalformedAddress(e.to_string()))?;
 
     let block_index = burn(runtime, minter_account, from, amount, solana_address)
         .await
         .map_err(|e| match e {
-            crate::ledger::BurnError::IcError(ic_error) => {
-                WithdrawSolError::TemporarilyUnavailable(format!(
-                    "Failed to burn tokens: {ic_error}"
-                ))
-            }
+            crate::ledger::BurnError::IcError(ic_error) => WithdrawalError::TemporarilyUnavailable(
+                format!("Failed to burn tokens: {ic_error}"),
+            ),
             crate::ledger::BurnError::TransferFromError(transfer_from_error) => {
                 match transfer_from_error {
                     TransferFromError::InsufficientFunds { balance } => {
-                        WithdrawSolError::InsufficientFunds {
+                        WithdrawalError::InsufficientFunds {
                             balance: balance.0.to_u64().expect("balance should fit in u64"),
                         }
                     }
                     TransferFromError::InsufficientAllowance { allowance } => {
-                        WithdrawSolError::InsufficientAllowance {
+                        WithdrawalError::InsufficientAllowance {
                             allowance: allowance.0.to_u64().expect("allowance should fit in u64"),
                         }
                     }
                     TransferFromError::TemporarilyUnavailable => {
-                        WithdrawSolError::TemporarilyUnavailable(
+                        WithdrawalError::TemporarilyUnavailable(
                             "Ledger is temporarily unavailable".to_string(),
                         )
                     }
                     TransferFromError::GenericError {
                         error_code,
                         message,
-                    } => WithdrawSolError::GenericError {
+                    } => WithdrawalError::GenericError {
                         error_message: message,
                         error_code: error_code.0.to_u64().expect("error code should fit in u64"),
                     },
@@ -111,7 +109,7 @@ pub async fn withdraw_sol<R: CanisterRuntime>(
     mutate_state(|s| {
         process_event(
             s,
-            EventType::AcceptedWithdrawSolRequest(WithdrawSolRequest {
+            EventType::AcceptedWithdrawalRequest(WithdrawalRequest {
                 account: from,
                 solana_address: solana_address.to_bytes(),
                 burn_block_index: block_index.into(),
@@ -122,7 +120,7 @@ pub async fn withdraw_sol<R: CanisterRuntime>(
         )
     });
 
-    Ok(WithdrawSolOk { block_index })
+    Ok(WithdrawalOk { block_index })
 }
 
 pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: &R) {
@@ -183,7 +181,7 @@ pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: &R) {
 
 async fn submit_withdrawal_transaction<R: CanisterRuntime>(
     runtime: &R,
-    requests: Vec<WithdrawSolRequest>,
+    requests: Vec<WithdrawalRequest>,
     slot: Slot,
     recent_blockhash: Hash,
 ) {
@@ -238,6 +236,6 @@ async fn submit_withdrawal_transaction<R: CanisterRuntime>(
     let _ = submit_transaction(runtime, signed_tx).await;
 }
 
-pub fn withdraw_sol_status(block_index: u64) -> WithdrawSolStatus {
+pub fn withdrawal_status(block_index: u64) -> WithdrawalStatus {
     read_state(|s| s.withdrawal_status(block_index))
 }
