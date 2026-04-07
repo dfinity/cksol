@@ -75,6 +75,16 @@ pub fn encode_metrics(w: &mut MetricsEncoder<Vec<u8>>, s: &State) -> std::io::Re
         s.failed_transactions().len().metric_value(),
         "Number of failed Solana transactions.",
     )?;
+    w.encode_gauge(
+        "successful_withdrawal_requests",
+        s.successful_withdrawal_requests().len().metric_value(),
+        "Number of successful withdrawal requests.",
+    )?;
+    w.encode_gauge(
+        "failed_withdrawal_requests",
+        s.failed_withdrawal_requests().len().metric_value(),
+        "Number of failed withdrawal requests.",
+    )?;
     Ok(())
 }
 
