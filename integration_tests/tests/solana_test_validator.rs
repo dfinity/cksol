@@ -3,7 +3,7 @@ use candid::Principal;
 use cksol_int_tests::{
     Setup, SetupBuilder, fixtures::MINTER_ADDRESS, ledger_init_args::LEDGER_TRANSFER_FEE,
 };
-use cksol_types::{DepositStatus, UpdateBalanceArgs, WithdrawSolArgs, WithdrawSolStatus};
+use cksol_types::{DepositStatus, UpdateBalanceArgs, WithdrawalArgs, WithdrawalStatus};
 use icrc_ledger_types::icrc1::account::Account;
 use itertools::Itertools;
 use serial_test::serial;
@@ -274,13 +274,13 @@ async fn should_deposit_and_withdraw_funds() {
     // Initiate withdrawal
     let withdraw_result = setup
         .minter()
-        .withdraw_sol(WithdrawSolArgs {
+        .withdraw(WithdrawalArgs {
             from_subaccount: depositor.subaccount,
             amount: withdrawal_amount,
             address: withdrawal_address.to_string(),
         })
         .await
-        .expect("withdraw_sol should succeed");
+        .expect("withdraw should succeed");
 
     let burn_index = withdraw_result.block_index;
 
@@ -296,8 +296,8 @@ async fn should_deposit_and_withdraw_funds() {
     tokio::time::sleep(Duration::from_secs(5)).await;
 
     // Step 4: Verify the withdrawal was sent
-    let tx_hash = match setup.minter().withdraw_sol_status(burn_index).await {
-        WithdrawSolStatus::TxSent(tx) => tx.transaction_hash,
+    let tx_hash = match setup.minter().withdrawal_status(burn_index).await {
+        WithdrawalStatus::TxSent(tx) => tx.transaction_hash,
         other => panic!("Expected TxSent, got: {other:?}"),
     };
 

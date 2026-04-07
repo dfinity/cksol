@@ -2,10 +2,10 @@ use crate::{
     constants::FEE_PER_SIGNATURE,
     ledger::client::LedgerClient,
     numeric::{LedgerBurnIndex, LedgerMintIndex},
-    state::event::{DepositId, TransactionPurpose, VersionedMessage, WithdrawSolRequest},
+    state::event::{DepositId, TransactionPurpose, VersionedMessage, WithdrawalRequest},
 };
 use candid::Principal;
-use cksol_types::{DepositStatus, SolTransaction, TxFinalizedStatus, WithdrawSolStatus};
+use cksol_types::{DepositStatus, SolTransaction, TxFinalizedStatus, WithdrawalStatus};
 use cksol_types_internal::SolanaNetwork;
 use cksol_types_internal::{Ed25519KeyName, InitArgs, UpgradeArgs};
 use ic_canister_runtime::Runtime;
@@ -92,11 +92,11 @@ pub struct State {
     update_balance_required_cycles: u128,
     deposit_consolidation_fee: u128,
     pending_update_balance_requests: BTreeSet<Account>,
-    pending_withdraw_sol_requests: BTreeSet<Account>,
+    pending_withdrawal_request_guards: BTreeSet<Account>,
     accepted_deposits: BTreeMap<DepositId, Deposit>,
     quarantined_deposits: BTreeMap<DepositId, Deposit>,
     minted_deposits: BTreeMap<DepositId, MintedDeposit>,
-    pending_withdrawal_requests: BTreeMap<LedgerBurnIndex, WithdrawSolRequest>,
+    pending_withdrawal_requests: BTreeMap<LedgerBurnIndex, WithdrawalRequest>,
     sent_withdrawal_requests: BTreeMap<LedgerBurnIndex, SentWithdrawalRequest>,
     successful_withdrawal_requests: BTreeMap<LedgerBurnIndex, SentWithdrawalRequest>,
     failed_withdrawal_requests: BTreeMap<LedgerBurnIndex, SentWithdrawalRequest>,
@@ -266,8 +266,8 @@ impl State {
         &mut self.pending_update_balance_requests
     }
 
-    pub fn pending_withdraw_sol_requests_mut(&mut self) -> &mut BTreeSet<Account> {
-        &mut self.pending_withdraw_sol_requests
+    pub fn pending_withdrawal_request_guards_mut(&mut self) -> &mut BTreeSet<Account> {
+        &mut self.pending_withdrawal_request_guards
     }
 
     pub fn active_tasks_mut(&mut self) -> &mut BTreeSet<TaskType> {
@@ -392,35 +392,35 @@ impl State {
         );
     }
 
-    pub fn withdrawal_status(&self, block_index: u64) -> WithdrawSolStatus {
+    pub fn withdrawal_status(&self, block_index: u64) -> WithdrawalStatus {
         let burn_index = LedgerBurnIndex::from(block_index);
         if self.pending_withdrawal_requests.contains_key(&burn_index) {
-            return WithdrawSolStatus::Pending;
+            return WithdrawalStatus::Pending;
         }
         if let Some(sent) = self.sent_withdrawal_requests.get(&burn_index) {
-            return WithdrawSolStatus::TxSent(SolTransaction {
+            return WithdrawalStatus::TxSent(SolTransaction {
                 transaction_hash: sent.signature.to_string(),
             });
         }
         if let Some(sent) = self.successful_withdrawal_requests.get(&burn_index) {
-            return WithdrawSolStatus::TxFinalized(TxFinalizedStatus::Success {
+            return WithdrawalStatus::TxFinalized(TxFinalizedStatus::Success {
                 transaction_hash: sent.signature.to_string(),
                 effective_transaction_fee: None,
             });
         }
         if let Some(sent) = self.failed_withdrawal_requests.get(&burn_index) {
-            return WithdrawSolStatus::TxFinalized(TxFinalizedStatus::Failure {
+            return WithdrawalStatus::TxFinalized(TxFinalizedStatus::Failure {
                 transaction_hash: sent.signature.to_string(),
             });
         }
-        WithdrawSolStatus::NotFound
+        WithdrawalStatus::NotFound
     }
 
-    pub fn pending_withdrawal_requests(&self) -> &BTreeMap<LedgerBurnIndex, WithdrawSolRequest> {
+    pub fn pending_withdrawal_requests(&self) -> &BTreeMap<LedgerBurnIndex, WithdrawalRequest> {
         &self.pending_withdrawal_requests
     }
 
-    fn process_accepted_withdrawal(&mut self, request: &WithdrawSolRequest) {
+    fn process_accepted_withdrawal(&mut self, request: &WithdrawalRequest) {
         assert_eq!(
             self.pending_withdrawal_requests
                 .insert(request.burn_block_index, request.clone()),
@@ -676,7 +676,7 @@ impl TryFrom<InitArgs> for State {
             update_balance_required_cycles: update_balance_required_cycles as u128,
             deposit_consolidation_fee: deposit_consolidation_fee as u128,
             pending_update_balance_requests: BTreeSet::new(),
-            pending_withdraw_sol_requests: BTreeSet::new(),
+            pending_withdrawal_request_guards: BTreeSet::new(),
             accepted_deposits: BTreeMap::new(),
             quarantined_deposits: BTreeMap::new(),
             minted_deposits: BTreeMap::new(),
@@ -700,7 +700,7 @@ impl TryFrom<InitArgs> for State {
 /// A withdrawal request that has been submitted in a Solana transaction.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SentWithdrawalRequest {
-    pub request: WithdrawSolRequest,
+    pub request: WithdrawalRequest,
     pub signature: Signature,
 }
 

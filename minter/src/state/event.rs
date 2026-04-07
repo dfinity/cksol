@@ -72,7 +72,7 @@ pub enum EventType {
     },
     /// The minter burned ckSOL for a withdrawal request.
     #[n(5)]
-    AcceptedWithdrawSolRequest(#[n(0)] WithdrawSolRequest),
+    AcceptedWithdrawalRequest(#[n(0)] WithdrawalRequest),
     /// The minter submitted a Solana transaction.
     #[n(6)]
     SubmittedTransaction {
@@ -122,9 +122,9 @@ pub enum EventType {
     },
 }
 
-/// Payload of the `AcceptedWithdrawSolRequest` event.
+/// Payload of the `AcceptedWithdrawalRequest` event.
 #[derive(Clone, Eq, PartialEq, Debug, Decode, Encode)]
-pub struct WithdrawSolRequest {
+pub struct WithdrawalRequest {
     /// The ledger account from which ckSOL was burned.
     #[n(0)]
     pub account: Account,

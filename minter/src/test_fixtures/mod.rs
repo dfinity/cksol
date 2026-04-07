@@ -124,7 +124,7 @@ pub mod events {
         numeric::{LedgerBurnIndex, LedgerMintIndex},
         state::{
             audit::process_event,
-            event::{DepositId, EventType, TransactionPurpose, WithdrawSolRequest},
+            event::{DepositId, EventType, TransactionPurpose, WithdrawalRequest},
             mutate_state,
         },
     };
@@ -209,7 +209,7 @@ pub mod events {
         mutate_state(|state| {
             process_event(
                 state,
-                EventType::AcceptedWithdrawSolRequest(WithdrawSolRequest {
+                EventType::AcceptedWithdrawalRequest(WithdrawalRequest {
                     account,
                     solana_address: [0u8; 32],
                     burn_block_index: LedgerBurnIndex::from(burn_index),
@@ -271,7 +271,7 @@ pub mod events {
 pub mod arb {
     use crate::{
         numeric::{LedgerBurnIndex, LedgerMintIndex},
-        state::event::{DepositId, Event, EventType, TransactionPurpose, WithdrawSolRequest},
+        state::event::{DepositId, Event, EventType, TransactionPurpose, WithdrawalRequest},
     };
     use candid::Principal;
     use cksol_types_internal::{Ed25519KeyName, InitArgs, SolanaNetwork, UpgradeArgs};
@@ -438,7 +438,7 @@ pub mod arb {
         any::<u64>().prop_map(LedgerBurnIndex::from)
     }
 
-    pub fn arb_withdraw_sol_request() -> impl Strategy<Value = WithdrawSolRequest> {
+    pub fn arb_withdrawal_request() -> impl Strategy<Value = WithdrawalRequest> {
         (
             arb_account(),
             any::<[u8; 32]>(),
@@ -448,7 +448,7 @@ pub mod arb {
         )
             .prop_map(
                 |(account, solana_address, burn_block_index, withdrawal_amount, withdrawal_fee)| {
-                    WithdrawSolRequest {
+                    WithdrawalRequest {
                         account,
                         solana_address,
                         burn_block_index,
@@ -463,7 +463,7 @@ pub mod arb {
         prop_oneof![
             arb_init_args().prop_map(EventType::Init),
             arb_upgrade_args().prop_map(EventType::Upgrade),
-            arb_withdraw_sol_request().prop_map(EventType::AcceptedWithdrawSolRequest),
+            arb_withdrawal_request().prop_map(EventType::AcceptedWithdrawalRequest),
             (arb_deposit_id(), any::<u64>(), any::<u64>()).prop_map(
                 |(deposit_id, deposit_amount, amount_to_mint)| {
                     EventType::AcceptedDeposit {

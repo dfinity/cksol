@@ -53,7 +53,7 @@ mod state_from_init_args {
                 minimum_deposit_amount: MINIMUM_DEPOSIT_AMOUNT,
                 update_balance_required_cycles: UPDATE_BALANCE_REQUIRED_CYCLES,
                 pending_update_balance_requests: BTreeSet::new(),
-                pending_withdraw_sol_requests: BTreeSet::new(),
+                pending_withdrawal_request_guards: BTreeSet::new(),
                 accepted_deposits: BTreeMap::new(),
                 quarantined_deposits: BTreeMap::new(),
                 minted_deposits: BTreeMap::new(),

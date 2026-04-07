@@ -134,9 +134,9 @@ pub struct InsufficientCyclesError {
     pub received: u128,
 }
 
-/// Arguments for a request to the `withdraw_sol` ckSOL minter endpoint.
+/// Arguments for a withdrawal request to the ckSOL minter endpoint.
 #[derive(Clone, Eq, PartialEq, Debug, Default, CandidType, Deserialize, Serialize)]
-pub struct WithdrawSolArgs {
+pub struct WithdrawalArgs {
     /// The subaccount to burn ckSOL from.
     pub from_subaccount: Option<Subaccount>,
 
@@ -147,16 +147,16 @@ pub struct WithdrawSolArgs {
     pub address: String,
 }
 
-/// The successful result of calling the `withdraw_sol` endpoint.
+/// The successful result of a withdrawal request.
 #[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize)]
-pub struct WithdrawSolOk {
+pub struct WithdrawalOk {
     /// The index of the burn block on the ckSOL ledger.
     pub block_index: u64,
 }
 
-/// The error result of calling the `withdraw_sol` endpoint.
+/// The error result of a withdrawal request.
 #[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize)]
-pub enum WithdrawSolError {
+pub enum WithdrawalError {
     /// There is another request for this principal.
     AlreadyProcessing,
 
@@ -214,9 +214,9 @@ pub enum TxFinalizedStatus {
     },
 }
 
-/// Retrieve the status of a withdrawal request.
+/// Status of a withdrawal request.
 #[derive(Clone, Eq, PartialEq, Hash, Debug, CandidType, Deserialize)]
-pub enum WithdrawSolStatus {
+pub enum WithdrawalStatus {
     /// Withdrawal request is not found.
     NotFound,
 
