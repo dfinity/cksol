@@ -68,6 +68,29 @@ pub fn init_state_with_args(init_args: InitArgs) {
     init_once_state(State::try_from(init_args).expect("Invalid init args"));
 }
 
+/// Initializes state and builds up the minter's balance by processing
+/// deposit → mint → consolidation submit → consolidation finalize events.
+/// Initializes state and builds up the minter's balance by processing
+/// deposit → mint → consolidation submit → consolidation finalize events.
+pub fn init_state_with_balance(balance: Lamport) {
+    use crate::constants::FEE_PER_SIGNATURE;
+
+    init_state();
+    if balance == 0 {
+        return;
+    }
+    assert!(
+        balance >= DEPOSIT_FEE,
+        "init_state_with_balance requires balance >= DEPOSIT_FEE ({DEPOSIT_FEE}), got {balance}"
+    );
+    let deposit_amount = balance + FEE_PER_SIGNATURE;
+    let dep_id = deposit_id(0xFF);
+    events::accept_deposit(dep_id, deposit_amount);
+    events::mint_deposit(dep_id, 0xFF_FF);
+    events::submit_consolidation(signature(0xFF), account(0xFF), 0, vec![0xFF_FF]);
+    events::succeed_transaction(signature(0xFF));
+}
+
 pub fn init_schnorr_master_key() {
     mutate_state(|s| {
         s.set_once_minter_public_key(SchnorrPublicKey {
@@ -737,6 +760,13 @@ impl EventsAssert {
     pub fn expect_event_eq(mut self, expected: EventType) -> Self {
         let event = self.0.pop_front().expect("No more events!");
         assert_eq!(event.payload, expected);
+        self
+    }
+
+    pub fn skip(mut self, n: usize) -> Self {
+        for _ in 0..n {
+            self.0.pop_front().expect("Not enough events to skip");
+        }
         self
     }
 

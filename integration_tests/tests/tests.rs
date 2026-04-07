@@ -570,18 +570,33 @@ mod withdraw_sol_tests {
     }
 
     #[tokio::test]
-    async fn should_process_pending_withdrawals() {
+    async fn should_deposit_consolidate_and_withdraw() {
         const WITHDRAWAL_AMOUNT: u64 = 100_000_000;
         const WITHDRAWAL_ADDRESS: &str = "E4MpwNnMWs2XtW5gVrxZvyS7fMq31QD5HvbxmwP45Tz3";
+        const SLOT: u64 = 100_000_000;
+        const BLOCKHASH: &str = "4sGjMW1sUnHzSxGspuhpqLDx6wiyjNtZAMdL4VZHirAn";
+        const CONSOLIDATION_TX_SIG: &str = "5VERv8NMvzbJMEkV8xnrLkEaWRtSz9CosKDYjCJjBRnbJLgp8uirBgmQpjKhoR4tjF3ZpRzrFmBV6UjKdiSZkQUW";
 
         let setup = SetupBuilder::new()
             .with_initial_ledger_balances(vec![(
                 DEFAULT_CALLER_ACCOUNT,
                 Nat::from(10 * WITHDRAWAL_AMOUNT),
             )])
+            .with_proxy_canister()
             .build()
             .await;
 
+        // Deposit
+        let deposit_result = setup
+            .minter()
+            .with_http_mocks(get_transaction_http_mocks(
+                get_deposit_transaction_response(),
+            ))
+            .update_balance(default_update_balance_args())
+            .await;
+        assert_matches!(deposit_result, Ok(DepositStatus::Minted { .. }));
+
+        // Request a withdrawal before consolidation — should be deferred
         setup
             .ledger()
             .approve(
@@ -593,7 +608,6 @@ mod withdraw_sol_tests {
                 },
             )
             .await;
-
         let WithdrawSolOk { block_index } = setup
             .minter()
             .withdraw_sol(WithdrawSolArgs {
@@ -604,71 +618,110 @@ mod withdraw_sol_tests {
             .await
             .expect("withdraw_sol should succeed");
 
-        const INITIAL_SLOT: u64 = 350_000_000;
-
+        // Advance past withdrawal delay — triggers consolidation instead of withdrawal
+        // because the minter's balance is 0 (funds are still at the deposit address)
         setup.advance_time(WITHDRAWAL_PROCESSING_DELAY).await;
         setup
-            .execute_http_mocks(estimate_blockhash_http_mocks(INITIAL_SLOT))
+            .execute_http_mocks(
+                MockHttpOutcallsBuilder::new()
+                    .expect(4..8, get_slot_request(), get_slot_response(SLOT))
+                    .expect(
+                        8..12,
+                        get_block_request(SLOT),
+                        get_block_response(BLOCKHASH),
+                    )
+                    .expect(
+                        12..16,
+                        send_transaction_request(),
+                        send_transaction_response(CONSOLIDATION_TX_SIG),
+                    )
+                    .build(),
+            )
             .await;
 
         setup.minter().assert_that_events().await.satisfy(|events| {
-            check!(events.iter().any(|e| matches!(
-                e,
-                EventType::SubmittedTransaction {
-                    purpose: TransactionPurpose::WithdrawSol { burn_indices },
-                    ..
-                } if burn_indices == &[block_index]
-            )));
+            let has_consolidation = events.iter().any(|e| {
+                matches!(
+                    e,
+                    EventType::SubmittedTransaction {
+                        purpose: TransactionPurpose::ConsolidateDeposits { .. },
+                        ..
+                    }
+                )
+            });
+            let has_withdrawal = events.iter().any(|e| {
+                matches!(
+                    e,
+                    EventType::SubmittedTransaction {
+                        purpose: TransactionPurpose::WithdrawSol { .. },
+                        ..
+                    }
+                )
+            });
+            check!(has_consolidation);
+            check!(
+                !has_withdrawal,
+                "withdrawal should be deferred until consolidation finalizes"
+            );
         });
 
-        // Withdrawal status should be TxSent with some signature
+        // Finalize the consolidation — minter balance now has funds
+        setup.advance_time(Duration::from_secs(60)).await;
+        setup
+            .execute_http_mocks(
+                MockHttpOutcallsBuilder::new()
+                    .expect(
+                        16..20,
+                        get_signature_statuses_request(),
+                        get_signature_statuses_finalized_response(1),
+                    )
+                    .build(),
+            )
+            .await;
+
+        // Withdrawal should now be processed
+        const WITHDRAWAL_SLOT: u64 = 350_000_000;
+        setup.advance_time(WITHDRAWAL_PROCESSING_DELAY).await;
+        setup
+            .execute_http_mocks(estimate_blockhash_http_mocks(WITHDRAWAL_SLOT))
+            .await;
+
         let status = setup.minter().withdraw_sol_status(block_index).await;
         let original_tx_hash = match &status {
             WithdrawSolStatus::TxSent(tx) => tx.transaction_hash.clone(),
             other => panic!("Expected TxSent, got: {other:?}"),
         };
 
-        // Advance time to trigger resubmission. The mocked slot exceeds
-        // INITIAL_SLOT + MAX_PROCESSING_AGE, so the original transaction
-        // is now considered expired.
+        // Resubmission after the original tx expires
         const MONITOR_DELAY: Duration = Duration::from_secs(60);
         setup.advance_time(MONITOR_DELAY).await;
         setup
             .execute_http_mocks(resubmit_withdrawal_http_mocks(
-                INITIAL_SLOT + MAX_BLOCKHASH_AGE + 50,
+                WITHDRAWAL_SLOT + MAX_BLOCKHASH_AGE + 50,
             ))
             .await;
 
-        // Withdrawal status should now have a different signature
         let status = setup.minter().withdraw_sol_status(block_index).await;
         let resubmitted_tx_hash = match &status {
             WithdrawSolStatus::TxSent(tx) => {
-                assert_ne!(
-                    tx.transaction_hash, original_tx_hash,
-                    "Expected signature to change after resubmission"
-                );
+                assert_ne!(tx.transaction_hash, original_tx_hash);
                 tx.transaction_hash.clone()
             }
             other => panic!("Expected TxSent after resubmission, got: {other:?}"),
         };
 
-        // Advance time to trigger finalization. The monitor checks signature statuses
-        // and this time the transaction is reported as finalized.
+        // Finalization
         setup.advance_time(MONITOR_DELAY).await;
         setup
             .execute_http_mocks(finalize_withdrawal_http_mocks())
             .await;
 
-        // Withdrawal status should now be TxFinalized with Success
         let status = setup.minter().withdraw_sol_status(block_index).await;
         match &status {
             WithdrawSolStatus::TxFinalized(TxFinalizedStatus::Success {
                 transaction_hash, ..
             }) => {
-                assert_eq!(
-                    *transaction_hash, resubmitted_tx_hash,
-                    "Expected finalized tx hash to match resubmitted tx hash"
-                );
+                assert_eq!(*transaction_hash, resubmitted_tx_hash);
             }
             other => panic!("Expected TxFinalized(Success), got: {other:?}"),
         }
@@ -676,15 +729,20 @@ mod withdraw_sol_tests {
         setup.drop().await;
     }
 
+    // IDs 0-3: getTransaction (deposit), 4-15: consolidation, 16-19: consolidation finalization
     fn estimate_blockhash_http_mocks(slot: u64) -> MockHttpOutcalls {
         const BLOCKHASH: &str = "4sGjMW1sUnHzSxGspuhpqLDx6wiyjNtZAMdL4VZHirAn";
         const TX_SIGNATURE: &str = "drWLXM6bHretgz7KuwvGZvPBeQ8KEbS3AKB2WJPy4TbBDaqdqAiNcj3cTAS7UnyJKM7eEZoUf4DvhY1TKkus9Bp";
 
         MockHttpOutcallsBuilder::new()
-            .expect(0..4, get_slot_request(), get_slot_response(slot))
-            .expect(4..8, get_block_request(slot), get_block_response(BLOCKHASH))
+            .expect(20..24, get_slot_request(), get_slot_response(slot))
             .expect(
-                8..12,
+                24..28,
+                get_block_request(slot),
+                get_block_response(BLOCKHASH),
+            )
+            .expect(
+                28..32,
                 send_transaction_request(),
                 send_transaction_response(TX_SIGNATURE),
             )
@@ -698,24 +756,24 @@ mod withdraw_sol_tests {
 
         MockHttpOutcallsBuilder::new()
             .expect(
-                12..16,
+                32..36,
                 get_signature_statuses_request(),
                 get_signature_statuses_not_found_response(1),
             )
-            .expect(16..20, get_slot_request(), get_slot_response(current_slot))
+            .expect(36..40, get_slot_request(), get_slot_response(current_slot))
             .expect(
-                20..24,
+                40..44,
                 get_block_request(current_slot),
                 get_block_response(NEW_BLOCKHASH),
             )
-            .expect(24..28, get_slot_request(), get_slot_response(current_slot))
+            .expect(44..48, get_slot_request(), get_slot_response(current_slot))
             .expect(
-                28..32,
+                48..52,
                 get_block_request(current_slot),
                 get_block_response(NEW_BLOCKHASH),
             )
             .expect(
-                32..36,
+                52..56,
                 send_transaction_request(),
                 send_transaction_response(NEW_TX_SIGNATURE),
             )
@@ -726,7 +784,7 @@ mod withdraw_sol_tests {
     fn finalize_withdrawal_http_mocks() -> MockHttpOutcalls {
         MockHttpOutcallsBuilder::new()
             .expect(
-                36..40,
+                56..60,
                 get_signature_statuses_request(),
                 get_signature_statuses_finalized_response(1),
             )

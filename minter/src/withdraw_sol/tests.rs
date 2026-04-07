@@ -9,7 +9,8 @@ use crate::{
     },
     test_fixtures::{
         MINIMUM_WITHDRAWAL_AMOUNT, MINTER_ACCOUNT, WITHDRAWAL_FEE, account, confirmed_block,
-        events, init_schnorr_master_key, init_state, runtime::TestCanisterRuntime, signature,
+        events, init_schnorr_master_key, init_state, init_state_with_balance,
+        runtime::TestCanisterRuntime, signature,
     },
     withdraw_sol::{
         MAX_WITHDRAWAL_ROUNDS, process_pending_withdrawals, withdraw_sol, withdraw_sol_status,
@@ -258,6 +259,10 @@ mod process_pending_withdrawals_tests {
 
     use super::*;
 
+    const LARGE_BALANCE: u64 = 1_000_000_000_000;
+    /// Number of events emitted by `init_state_with_balance`.
+    const BALANCE_SETUP_EVENTS: usize = 4;
+
     type GetSlotResult = MultiRpcResult<Slot>;
     type GetBlockResult = MultiRpcResult<sol_rpc_types::ConfirmedBlock>;
     type SendTransactionResult = MultiRpcResult<sol_rpc_types::Signature>;
@@ -320,7 +325,7 @@ mod process_pending_withdrawals_tests {
 
     #[tokio::test]
     async fn should_process_when_pending_withdrawals_exist() {
-        init_state();
+        init_state_with_balance(LARGE_BALANCE);
         init_schnorr_master_key();
 
         let tx_signature = signature(0x42);
@@ -343,6 +348,7 @@ mod process_pending_withdrawals_tests {
         process_pending_withdrawals(&runtime).await;
 
         EventsAssert::from_recorded()
+            .skip(BALANCE_SETUP_EVENTS)
             .expect_event(|e| {
                 assert_matches!(e, EventType::AcceptedWithdrawSolRequest(req) => {
                     assert_eq!(req.withdrawal_amount, WITHDRAWAL_FEE + 1);
@@ -366,7 +372,7 @@ mod process_pending_withdrawals_tests {
 
     #[tokio::test]
     async fn should_log_error_when_blockhash_fetch_fails() {
-        init_state();
+        init_state_with_balance(LARGE_BALANCE);
 
         let runtime = TestCanisterRuntime::new()
             // ledger burn response for withdraw_sol
@@ -389,6 +395,7 @@ mod process_pending_withdrawals_tests {
 
         // No withdrawal transaction event should be recorded
         EventsAssert::from_recorded()
+            .skip(BALANCE_SETUP_EVENTS)
             .expect_event(|e| {
                 assert_matches!(e, EventType::AcceptedWithdrawSolRequest(_));
             })
@@ -409,7 +416,7 @@ mod process_pending_withdrawals_tests {
 
     #[tokio::test]
     async fn should_not_process_batch_on_sig_error() {
-        init_state();
+        init_state_with_balance(LARGE_BALANCE);
         init_schnorr_master_key();
 
         let slot = 1;
@@ -432,6 +439,7 @@ mod process_pending_withdrawals_tests {
         process_pending_withdrawals(&runtime).await;
 
         EventsAssert::from_recorded()
+            .skip(BALANCE_SETUP_EVENTS)
             .expect_event(|e| {
                 assert_matches!(e, EventType::AcceptedWithdrawSolRequest(req) => {
                     assert_eq!(req.withdrawal_amount, WITHDRAWAL_FEE + 1);
@@ -466,7 +474,7 @@ mod process_pending_withdrawals_tests {
 
     #[tokio::test]
     async fn should_batch_withdrawals_into_transactions() {
-        init_state();
+        init_state_with_balance(LARGE_BALANCE);
         init_schnorr_master_key();
 
         let request_count = MAX_WITHDRAWALS_PER_TX as u64 + 1;
@@ -500,7 +508,7 @@ mod process_pending_withdrawals_tests {
 
         // Verify events: request_count AcceptedWithdrawSolRequest events,
         // then 2 SubmittedTransaction events (one per batch).
-        let mut events = EventsAssert::from_recorded();
+        let mut events = EventsAssert::from_recorded().skip(BALANCE_SETUP_EVENTS);
         for _ in 0..request_count {
             events = events.expect_event(|e| {
                 assert_matches!(e, EventType::AcceptedWithdrawSolRequest(_));
@@ -528,7 +536,7 @@ mod process_pending_withdrawals_tests {
 
     #[tokio::test]
     async fn should_process_multiple_rounds_per_invocation() {
-        init_state();
+        init_state_with_balance(LARGE_BALANCE);
         init_schnorr_master_key();
 
         // Create more withdrawals than fit in one round
@@ -583,7 +591,7 @@ mod process_pending_withdrawals_tests {
 
     #[tokio::test]
     async fn should_respect_max_withdrawal_rounds() {
-        init_state();
+        init_state_with_balance(LARGE_BALANCE);
         init_schnorr_master_key();
 
         let slot = 1;
@@ -631,6 +639,60 @@ mod process_pending_withdrawals_tests {
             WithdrawSolStatus::Pending,
             "withdrawal beyond max rounds should still be Pending"
         );
+    }
+
+    #[tokio::test]
+    async fn should_skip_withdrawals_when_balance_insufficient() {
+        init_state_with_balance(0);
+        init_schnorr_master_key();
+
+        // Accept a withdrawal request directly into state
+        events::accept_withdrawal(account(1), 0, MINIMUM_WITHDRAWAL_AMOUNT);
+
+        let runtime = TestCanisterRuntime::new().with_increasing_time();
+        process_pending_withdrawals(&runtime).await;
+
+        // Withdrawal should remain pending (not submitted)
+        assert_eq!(withdraw_sol_status(0), WithdrawSolStatus::Pending);
+
+        // Should log about insufficient balance
+        let mut log: Log<Priority> = Log::default();
+        log.push_logs(Priority::Info);
+        assert!(
+            log.entries
+                .iter()
+                .any(|e| e.message.contains("Insufficient minter balance")),
+            "Expected log about insufficient balance, got: {:?}",
+            log.entries
+        );
+    }
+
+    #[tokio::test]
+    async fn should_process_only_affordable_withdrawals() {
+        // Balance covers exactly one withdrawal's transfer amount
+        let withdrawal_amount = 50_000_000;
+        let transfer_amount = withdrawal_amount - WITHDRAWAL_FEE;
+        init_state_with_balance(transfer_amount);
+        init_schnorr_master_key();
+
+        let tx_signature = signature(0x42);
+        let slot = 1;
+
+        events::accept_withdrawal(account(1), 0, withdrawal_amount);
+        events::accept_withdrawal(account(2), 1, withdrawal_amount);
+
+        let runtime = TestCanisterRuntime::new()
+            .add_stub_response(GetSlotResult::Consistent(Ok(slot)))
+            .add_stub_response(GetBlockResult::Consistent(Ok(confirmed_block())))
+            .add_signature(tx_signature.into())
+            .add_stub_response(SendTransactionResult::Consistent(Ok(tx_signature.into())))
+            .with_increasing_time();
+
+        process_pending_withdrawals(&runtime).await;
+
+        // First withdrawal should be submitted, second should remain pending
+        assert_matches!(withdraw_sol_status(0), WithdrawSolStatus::TxSent(_));
+        assert_eq!(withdraw_sol_status(1), WithdrawSolStatus::Pending);
     }
 }
 

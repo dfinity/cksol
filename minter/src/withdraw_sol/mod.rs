@@ -17,6 +17,7 @@ use solana_hash::Hash;
 
 use crate::constants::MAX_CONCURRENT_RPC_CALLS;
 use crate::{
+    consolidate::consolidate_deposits,
     guard::{TimerGuard, withdraw_sol_guard},
     ledger::burn,
     runtime::CanisterRuntime,
@@ -137,33 +138,61 @@ pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: &R) {
         }
     };
 
-    // TODO: we need to check whether the minter has enough funds in the main account.
-    // We probably need to add a state.minter_balance variable and update it
-    // here and while consolidating funds.
-    // If there are not enough funds for the withdrawal we simply continue.
-
     let max_per_invocation =
         MAX_WITHDRAWAL_ROUNDS * MAX_CONCURRENT_RPC_CALLS * MAX_WITHDRAWALS_PER_TX;
 
-    let rounds: Vec<Vec<Vec<_>>> = read_state(|state| {
-        state
+    let (affordable_requests, has_unaffordable) = read_state(|state| {
+        let mut available = state.balance();
+        let mut affordable = Vec::new();
+        let mut has_unaffordable = false;
+
+        for request in state
             .pending_withdrawal_requests()
             .values()
             .take(max_per_invocation)
-            .cloned()
-            .collect::<Vec<_>>()
-    })
-    .into_iter()
-    .chunks(MAX_WITHDRAWALS_PER_TX)
-    .into_iter()
-    .map(Iterator::collect)
-    .collect::<Vec<Vec<_>>>()
-    .into_iter()
-    .chunks(MAX_CONCURRENT_RPC_CALLS)
-    .into_iter()
-    .take(MAX_WITHDRAWAL_ROUNDS)
-    .map(Iterator::collect)
-    .collect();
+        {
+            let transfer_amount = request
+                .withdrawal_amount
+                .checked_sub(request.withdrawal_fee)
+                .expect("BUG: withdrawal_amount must be >= withdrawal_fee");
+            if available >= transfer_amount {
+                available -= transfer_amount;
+                affordable.push(request.clone());
+            } else {
+                has_unaffordable = true;
+                break;
+            }
+        }
+        (affordable, has_unaffordable)
+    });
+
+    if has_unaffordable {
+        log!(
+            Priority::Info,
+            "Insufficient minter balance for some withdrawal requests, scheduling consolidation"
+        );
+        let runtime_clone = runtime.clone();
+        runtime.set_timer(Duration::ZERO, async move {
+            consolidate_deposits(runtime_clone).await;
+        });
+    }
+
+    if affordable_requests.is_empty() {
+        return;
+    }
+
+    let rounds: Vec<Vec<Vec<_>>> = affordable_requests
+        .into_iter()
+        .chunks(MAX_WITHDRAWALS_PER_TX)
+        .into_iter()
+        .map(Iterator::collect)
+        .collect::<Vec<Vec<_>>>()
+        .into_iter()
+        .chunks(MAX_CONCURRENT_RPC_CALLS)
+        .into_iter()
+        .take(MAX_WITHDRAWAL_ROUNDS)
+        .map(Iterator::collect)
+        .collect();
 
     for round in rounds {
         let (slot, recent_blockhash) = match get_recent_slot_and_blockhash(runtime).await {
