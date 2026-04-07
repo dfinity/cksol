@@ -40,84 +40,65 @@ async fn should_deposit_and_consolidate_funds() {
     // Bootstrap minter account
     airdrop_and_confirm(MINTER_ADDRESS, LAMPORTS_PER_SOL).await;
 
-    // --- Phase 1: Single deposit ---
-    let minter_cycles_before = setup.minter().cycle_balance().await;
-    let minter_sol_before = get_solana_balance(&MINTER_ADDRESS).await;
+    for num_deposits in [1_u8, 15] {
+        println!("--- Testing with {num_deposits} deposit(s) ---");
 
-    let single_account = Account {
-        owner: DEPOSITOR_PRINCIPAL,
-        subaccount: Some([0; 32]),
-    };
-    let single_deposit_amount = LAMPORTS_PER_SOL / 10;
-    let single_deposit_address =
-        deposit_to_account(&setup, single_account, single_deposit_amount).await;
+        let minter_cycles_before = setup.minter().cycle_balance().await;
+        let minter_sol_before = get_solana_balance(&MINTER_ADDRESS).await;
 
-    consolidate_and_verify_balances(&setup, minter_sol_before, minter_cycles_before).await;
+        let (deposit_addresses, deposit_amounts): (Vec<_>, Vec<_>) =
+            futures::future::join_all((1_u8..=num_deposits).map(async |i| {
+                let account = Account {
+                    owner: DEPOSITOR_PRINCIPAL,
+                    subaccount: Some({
+                        let mut sub = [0u8; 32];
+                        sub[0] = num_deposits;
+                        sub[1] = i;
+                        sub
+                    }),
+                };
+                let deposit_amount = (i as u64 * LAMPORTS_PER_SOL) / 10;
+                let deposit_address = deposit_to_account(&setup, account, deposit_amount).await;
+                (deposit_address, deposit_amount)
+            }))
+            .await
+            .into_iter()
+            .unzip();
 
-    // Single deposit address should be fully drained
-    assert_eq!(
-        get_solana_balance(&single_deposit_address).await,
-        0,
-        "Single deposit address should be drained after consolidation"
-    );
+        let balances_before = get_balances(&deposit_addresses).await;
 
-    // --- Phase 2: Multiple deposits (batched consolidation) ---
-    const NUM_DEPOSITS: u8 = 15;
+        // Trigger consolidation
+        setup.advance_time(Duration::from_mins(10)).await;
+        tokio::time::sleep(Duration::from_secs(5)).await;
 
-    let minter_cycles_before = setup.minter().cycle_balance().await;
-    let minter_sol_before = get_solana_balance(&MINTER_ADDRESS).await;
+        // Verify deposit addresses were drained
+        for (deposit_address, (&balance_before, &deposit_amount)) in deposit_addresses
+            .iter()
+            .zip(balances_before.iter().zip(&deposit_amounts))
+        {
+            let balance_after = get_solana_balance(deposit_address).await;
+            assert_eq!(balance_after, balance_before - deposit_amount);
+        }
 
-    let (deposit_addresses, deposit_amounts): (Vec<_>, Vec<_>) =
-        futures::future::join_all((1_u8..=NUM_DEPOSITS).map(async |i| {
-            let account = Account {
-                owner: DEPOSITOR_PRINCIPAL,
-                subaccount: Some([i; 32]),
-            };
-            let deposit_amount = (i as u64 * LAMPORTS_PER_SOL) / 10;
-            let deposit_address = deposit_to_account(&setup, account, deposit_amount).await;
-            (deposit_address, deposit_amount)
-        }))
-        .await
-        .into_iter()
-        .unzip();
+        let minter_sol_after = get_solana_balance(&MINTER_ADDRESS).await;
+        let minter_cycles_after = setup.minter().cycle_balance().await;
 
-    let balances_before_consolidation = get_balances(&deposit_addresses).await;
+        let sol_delta = minter_sol_after as i64 - minter_sol_before as i64;
+        let cycles_delta = minter_cycles_after as i128 - minter_cycles_before as i128;
+        println!("  SOL balance delta: {sol_delta} lamports");
+        println!("  Cycles balance delta: {cycles_delta}");
 
-    consolidate_and_verify_balances(&setup, minter_sol_before, minter_cycles_before).await;
-
-    // Each deposit address should have its deposited amount drained
-    for (deposit_address, (&balance_before, &deposit_amount)) in deposit_addresses
-        .iter()
-        .zip(balances_before_consolidation.iter().zip(&deposit_amounts))
-    {
-        let balance_after = get_solana_balance(deposit_address).await;
-        assert_eq!(balance_after, balance_before - deposit_amount);
+        assert!(
+            minter_sol_after >= minter_sol_before,
+            "Minter SOL balance decreased"
+        );
+        assert!(
+            minter_cycles_after >= minter_cycles_before,
+            "Minter cycles balance decreased"
+        );
     }
 
     setup.drop().await;
-}
-
-/// Trigger consolidation and assert that both the minter's SOL balance and
-/// cycles balance do not decrease compared to the provided snapshots.
-async fn consolidate_and_verify_balances(
-    setup: &Setup,
-    minter_sol_before: Lamport,
-    minter_cycles_before: u128,
-) {
-    setup.advance_time(Duration::from_mins(10)).await;
-    tokio::time::sleep(Duration::from_secs(5)).await;
-
-    let minter_sol_after = get_solana_balance(&MINTER_ADDRESS).await;
-    assert!(
-        minter_sol_after >= minter_sol_before,
-        "Minter SOL balance decreased: {minter_sol_before} -> {minter_sol_after}"
-    );
-
-    let minter_cycles_after = setup.minter().cycle_balance().await;
-    assert!(
-        minter_cycles_after >= minter_cycles_before,
-        "Minter cycles balance decreased: {minter_cycles_before} -> {minter_cycles_after}"
-    );
 }
 
 async fn deposit_to_account(setup: &Setup, account: Account, amount: Lamport) -> Address {
