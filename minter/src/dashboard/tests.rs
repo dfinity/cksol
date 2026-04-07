@@ -1,8 +1,8 @@
 use crate::dashboard::{DashboardPaginationParameters, DashboardTemplate, lamports_to_sol};
 use crate::state::read_state;
 use crate::test_fixtures::{
-    DEPOSIT_FEE, MINIMUM_DEPOSIT_AMOUNT, MINIMUM_WITHDRAWAL_AMOUNT, WITHDRAWAL_FEE, account,
-    deposit_id,
+    CONSOLIDATION_FEE, DEPOSIT_FEE, MINIMUM_DEPOSIT_AMOUNT, MINIMUM_WITHDRAWAL_AMOUNT,
+    WITHDRAWAL_FEE, account, deposit_id,
     events::{
         accept_deposit, accept_withdrawal, fail_transaction, mint_deposit, quarantine_deposit,
         submit_consolidation, submit_withdrawal, succeed_transaction,
@@ -139,7 +139,7 @@ fn should_display_minted_deposits() {
                 &deposit.signature.to_string(),
                 &deposit.account.to_string(),
                 &lamports_to_sol(deposit_amount),
-                &lamports_to_sol(deposit_amount - DEPOSIT_FEE),
+                &lamports_to_sol(deposit_amount - DEPOSIT_FEE - CONSOLIDATION_FEE),
                 "42",
                 "Minted",
             ],

@@ -57,6 +57,9 @@ pub struct InitArgs {
     /// The Solana network to use.
     #[cfg_attr(feature = "event", n(8))]
     pub solana_network: SolanaNetwork,
+    /// Fee in lamports charged per deposit to offset the cost of consolidation transactions.
+    #[cfg_attr(feature = "event", n(9))]
+    pub consolidation_fee: Lamport,
 }
 
 /// The upgrade args for the ckSOL minter canister.
@@ -81,6 +84,9 @@ pub struct UpgradeArgs {
     /// New minimum cycles the caller must attach when calling `update_balance`.
     #[cfg_attr(feature = "event", n(5))]
     pub update_balance_required_cycles: Option<u64>,
+    /// New consolidation fee in lamports.
+    #[cfg_attr(feature = "event", n(6))]
+    pub consolidation_fee: Option<Lamport>,
 }
 
 /// The Solana network to connect to via the SOL RPC canister.

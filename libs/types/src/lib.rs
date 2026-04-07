@@ -235,6 +235,8 @@ pub enum WithdrawSolStatus {
 pub struct MinterInfo {
     /// Fee deducted from each deposit (SOL -> ckSOL).
     pub deposit_fee: Lamport,
+    /// Fee charged per deposit to offset consolidation transaction costs.
+    pub consolidation_fee: Lamport,
     /// Minimum withdrawal amount in lamports.
     pub minimum_withdrawal_amount: Lamport,
     /// Minimum deposit amount in lamports.

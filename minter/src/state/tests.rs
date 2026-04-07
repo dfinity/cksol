@@ -3,7 +3,7 @@ use crate::{
     constants::FEE_PER_SIGNATURE as SOLANA_LAMPORTS_PER_SIGNATURE,
     state::{SOLANA_RENT_EXEMPTION_THRESHOLD, audit::process_event, read_state},
     test_fixtures::{
-        DEPOSIT_FEE, MINIMUM_DEPOSIT_AMOUNT, MINIMUM_WITHDRAWAL_AMOUNT,
+        CONSOLIDATION_FEE, DEPOSIT_FEE, MINIMUM_DEPOSIT_AMOUNT, MINIMUM_WITHDRAWAL_AMOUNT,
         UPDATE_BALANCE_REQUIRED_CYCLES, WITHDRAWAL_FEE, account,
         arb::arb_event,
         deposit_id,
@@ -47,6 +47,7 @@ mod state_from_init_args {
                 sol_rpc_canister_id: sol_rpc_canister_id(),
                 solana_network: SolanaNetwork::Mainnet,
                 deposit_fee: DEPOSIT_FEE,
+                consolidation_fee: CONSOLIDATION_FEE,
                 withdrawal_fee: WITHDRAWAL_FEE,
                 minimum_withdrawal_amount: MINIMUM_WITHDRAWAL_AMOUNT,
                 minimum_deposit_amount: MINIMUM_DEPOSIT_AMOUNT,
@@ -139,13 +140,14 @@ mod state_from_init_args {
             minimum_deposit_amount: insufficient_minimum_deposit_amount,
             ..valid_init_args()
         };
+        let expected_total_fee = DEPOSIT_FEE + CONSOLIDATION_FEE;
 
         assert_matches!(
             State::try_from(args),
             Err(InvalidStateError::InvalidMinimumDepositAmount {
                 minimum_deposit_amount,
                 deposit_fee
-            }) if minimum_deposit_amount == insufficient_minimum_deposit_amount && deposit_fee == DEPOSIT_FEE
+            }) if minimum_deposit_amount == insufficient_minimum_deposit_amount && deposit_fee == expected_total_fee
         );
     }
 
@@ -258,7 +260,7 @@ mod state_upgrade {
             Err(InvalidStateError::InvalidMinimumDepositAmount {
                 minimum_deposit_amount,
                 deposit_fee
-            }) if minimum_deposit_amount == MINIMUM_DEPOSIT_AMOUNT && deposit_fee == new_deposit_fee
+            }) if minimum_deposit_amount == MINIMUM_DEPOSIT_AMOUNT && deposit_fee == new_deposit_fee + CONSOLIDATION_FEE
         );
     }
 
@@ -275,22 +277,23 @@ mod state_upgrade {
             Err(InvalidStateError::InvalidMinimumDepositAmount {
                 minimum_deposit_amount,
                 deposit_fee
-            }) if minimum_deposit_amount == new_minimum_deposit_amount && deposit_fee == DEPOSIT_FEE
+            }) if minimum_deposit_amount == new_minimum_deposit_amount && deposit_fee == DEPOSIT_FEE + CONSOLIDATION_FEE
         );
     }
 
     #[test]
-    fn should_succeed_when_minimum_deposit_amount_equals_deposit_fee() {
+    fn should_succeed_when_minimum_deposit_amount_equals_total_fees() {
         let mut state = initial_state();
+        let total_fee = DEPOSIT_FEE + CONSOLIDATION_FEE;
 
         state
             .upgrade(UpgradeArgs {
-                minimum_deposit_amount: Some(DEPOSIT_FEE),
+                minimum_deposit_amount: Some(total_fee),
                 ..Default::default()
             })
             .unwrap();
 
-        assert_eq!(state.minimum_deposit_amount(), DEPOSIT_FEE);
+        assert_eq!(state.minimum_deposit_amount(), total_fee);
     }
 
     #[test]

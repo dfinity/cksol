@@ -1,7 +1,7 @@
 use crate::{
     state::event::{DepositId, EventType},
     test_fixtures::{
-        BLOCK_INDEX, DEPOSIT_FEE, EventsAssert, UPDATE_BALANCE_REQUIRED_CYCLES,
+        BLOCK_INDEX, CONSOLIDATION_FEE, DEPOSIT_FEE, EventsAssert, UPDATE_BALANCE_REQUIRED_CYCLES,
         deposit::{
             DEPOSIT_AMOUNT, DEPOSITOR_ACCOUNT, DEPOSITOR_PRINCIPAL, accepted_deposit_event,
             deposit_status_minted, deposit_status_processing, deposit_status_quarantined,
@@ -315,7 +315,7 @@ async fn should_allow_deposits_to_multiple_accounts_with_single_transaction() {
             result,
             Ok(DepositStatus::Minted {
                 block_index: BLOCK_INDEXES[i],
-                minted_amount: DEPOSIT_AMOUNTS[i] - DEPOSIT_FEE,
+                minted_amount: DEPOSIT_AMOUNTS[i] - DEPOSIT_FEE - CONSOLIDATION_FEE,
                 deposit_id: cksol_types::DepositId {
                     signature: deposit_transaction_to_multiple_accounts_signature().into(),
                     account: ACCOUNTS[i],
@@ -334,7 +334,7 @@ async fn should_allow_deposits_to_multiple_accounts_with_single_transaction() {
             .expect_event_eq(EventType::AcceptedDeposit {
                 deposit_id,
                 deposit_amount: DEPOSIT_AMOUNTS[i],
-                amount_to_mint: DEPOSIT_AMOUNTS[i] - DEPOSIT_FEE,
+                amount_to_mint: DEPOSIT_AMOUNTS[i] - DEPOSIT_FEE - CONSOLIDATION_FEE,
             })
             .expect_event_eq(EventType::Minted {
                 deposit_id,
