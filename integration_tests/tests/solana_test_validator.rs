@@ -51,8 +51,6 @@ async fn should_deposit_and_consolidate_single_deposit() {
 
     let deposit_address = deposit_to_account(&setup, account, deposit_amount).await;
 
-    let minter_cycles_after_deposit = setup.minter().cycle_balance().await;
-
     // Consolidate
     setup.advance_time(Duration::from_mins(10)).await;
     tokio::time::sleep(Duration::from_secs(5)).await;
