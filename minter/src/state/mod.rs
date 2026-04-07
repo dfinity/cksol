@@ -103,7 +103,7 @@ pub struct State {
     submitted_transactions: BTreeMap<Signature, SolanaTransaction>,
     succeeded_transactions: BTreeSet<Signature>,
     failed_transactions: BTreeMap<Signature, SolanaTransaction>,
-    consolidated_deposits: BTreeMap<Signature, ConsolidationInfo>,
+    consolidation_transactions: BTreeMap<Signature, ConsolidationTransaction>,
     active_tasks: BTreeSet<TaskType>,
     balance: Lamport,
 }
@@ -208,8 +208,8 @@ impl State {
         self.balance
     }
 
-    pub fn consolidated_deposits(&self) -> &BTreeMap<Signature, ConsolidationInfo> {
-        &self.consolidated_deposits
+    pub fn consolidation_transactions(&self) -> &BTreeMap<Signature, ConsolidationTransaction> {
+        &self.consolidation_transactions
     }
 
     pub fn deposit_status(&self, deposit_id: &DepositId) -> Option<DepositStatus> {
@@ -483,8 +483,8 @@ impl State {
                     total += deposit_amount;
                     deposits.push((*mint_index, deposit_amount));
                 }
-                self.consolidated_deposits
-                    .insert(*signature, ConsolidationInfo { deposits });
+                self.consolidation_transactions
+                    .insert(*signature, ConsolidationTransaction { deposits });
                 total
             }
             TransactionPurpose::WithdrawSol { burn_indices } => {
@@ -560,8 +560,8 @@ impl State {
             None,
             "Attempted to resubmit transaction with signature {new_signature:?} that already exists"
         );
-        if let Some(info) = self.consolidated_deposits.remove(old_signature) {
-            self.consolidated_deposits.insert(*new_signature, info);
+        if let Some(info) = self.consolidation_transactions.remove(old_signature) {
+            self.consolidation_transactions.insert(*new_signature, info);
         }
         for sent in self.sent_withdrawal_requests.values_mut() {
             if &sent.signature == old_signature {
@@ -677,7 +677,7 @@ impl TryFrom<InitArgs> for State {
             submitted_transactions: BTreeMap::new(),
             succeeded_transactions: BTreeSet::new(),
             failed_transactions: BTreeMap::new(),
-            consolidated_deposits: BTreeMap::new(),
+            consolidation_transactions: BTreeMap::new(),
             active_tasks: BTreeSet::new(),
             balance: 0,
         };
@@ -722,11 +722,11 @@ pub enum TaskType {
 /// Details about a consolidation transaction, capturing the individual
 /// deposits (by mint index and amount) being consolidated.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ConsolidationInfo {
+pub struct ConsolidationTransaction {
     pub deposits: Vec<(LedgerMintIndex, Lamport)>,
 }
 
-impl ConsolidationInfo {
+impl ConsolidationTransaction {
     pub fn total_amount(&self) -> Lamport {
         self.deposits.iter().map(|(_, amount)| amount).sum()
     }

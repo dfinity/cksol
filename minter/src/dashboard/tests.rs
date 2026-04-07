@@ -295,26 +295,30 @@ fn should_display_consolidation_transactions() {
     let rendered_dashboard = dashboard();
     assert_eq!(
         rendered_dashboard.consolidations_table.current_page.len(),
+        1
+    );
+    assert_eq!(
+        rendered_dashboard.consolidations_table.current_page[0]
+            .deposits
+            .len(),
         2
     );
-    assert!(
-        rendered_dashboard
-            .consolidations_table
-            .current_page
-            .iter()
-            .all(|c| c.status == "Submitted")
+    assert_eq!(
+        rendered_dashboard.consolidations_table.current_page[0].status,
+        "Submitted"
     );
 
     // Mark as succeeded
     succeed_transaction(signature(0xBB));
 
     let rendered_dashboard = dashboard();
-    assert!(
-        rendered_dashboard
-            .consolidations_table
-            .current_page
-            .iter()
-            .all(|c| c.status == "Succeeded")
+    assert_eq!(
+        rendered_dashboard.consolidations_table.current_page.len(),
+        1
+    );
+    assert_eq!(
+        rendered_dashboard.consolidations_table.current_page[0].status,
+        "Succeeded"
     );
 }
 

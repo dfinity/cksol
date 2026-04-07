@@ -135,22 +135,26 @@
                 <thead>
                 <tr>
                     <th>Transaction</th>
+                    <th>Status</th>
                     <th>Mint Index</th>
                     <th>Deposit Amount (SOL)</th>
-                    <th>Status</th>
                 </tr>
                 </thead>
                 <tbody>
                 {% for c in consolidations_table.current_page %}
+                {% for d in c.deposits %}
                 <tr>
-                    <td>{% call solscan_tx_link(c.transaction) %}</td>
-                    <td>{{ c.mint_index }}</td>
-                    <td>{{ c.deposit_amount }}</td>
-                    <td>{{ c.status }}</td>
+                    {% if loop.index0 == 0 %}
+                    <td rowspan="{{ c.deposits.len() }}">{% call solscan_tx_link(c.transaction) %}</td>
+                    <td rowspan="{{ c.deposits.len() }}">{{ c.status }}</td>
+                    {% endif %}
+                    <td>{{ d.mint_index }}</td>
+                    <td>{{ d.deposit_amount }}</td>
                 </tr>
                 {% endfor %}
-                {% if consolidations_table.has_more_than_one_page() %}{{ consolidations_table.pagination|safe }}{% endif %}
+                {% endfor %}
                 </tbody>
+                {% if consolidations_table.has_more_than_one_page() %}{{ consolidations_table.pagination|safe }}{% endif %}
             </table>
             {% endif %}
 

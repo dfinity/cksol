@@ -1,4 +1,8 @@
-use crate::{address::minter_address, runtime::CanisterRuntime, state::State};
+use crate::{
+    address::minter_address,
+    runtime::CanisterRuntime,
+    state::{ConsolidationTransaction, State},
+};
 use askama::Template;
 use candid::Principal;
 use cksol_types_internal::SolanaNetwork;
@@ -174,9 +178,14 @@ impl DashboardTablePagination {
 #[derive(Clone)]
 pub struct DashboardConsolidation {
     pub transaction: String,
+    pub deposits: Vec<DashboardConsolidationDeposit>,
+    pub status: &'static str,
+}
+
+#[derive(Clone)]
+pub struct DashboardConsolidationDeposit {
     pub mint_index: String,
     pub deposit_amount: String,
-    pub status: &'static str,
 }
 
 #[derive(Clone)]
@@ -304,44 +313,46 @@ impl DashboardTemplate {
             pagination.other_params("minted_deposits_start"),
         );
 
-        let consolidated_deposits = state.consolidated_deposits();
-        let mut consolidations: Vec<DashboardConsolidation> = Vec::new();
-        for signature in state.submitted_transactions().keys() {
-            if let Some(info) = consolidated_deposits.get(signature) {
-                for (mint_index, amount) in &info.deposits {
-                    consolidations.push(DashboardConsolidation {
-                        transaction: signature.to_string(),
+        let consolidation_transactions = state.consolidation_transactions();
+
+        fn to_dashboard_consolidation(
+            signature: &solana_signature::Signature,
+            info: &ConsolidationTransaction,
+            status: &'static str,
+        ) -> DashboardConsolidation {
+            DashboardConsolidation {
+                transaction: signature.to_string(),
+                deposits: info
+                    .deposits
+                    .iter()
+                    .map(|(mint_index, amount)| DashboardConsolidationDeposit {
                         mint_index: mint_index.to_string(),
                         deposit_amount: lamports_to_sol(*amount),
-                        status: "Submitted",
-                    });
-                }
+                    })
+                    .collect(),
+                status,
             }
         }
-        for signature in state.succeeded_transactions() {
-            if let Some(info) = consolidated_deposits.get(signature) {
-                for (mint_index, amount) in &info.deposits {
-                    consolidations.push(DashboardConsolidation {
-                        transaction: signature.to_string(),
-                        mint_index: mint_index.to_string(),
-                        deposit_amount: lamports_to_sol(*amount),
-                        status: "Succeeded",
-                    });
-                }
-            }
-        }
-        for signature in state.failed_transactions().keys() {
-            if let Some(info) = consolidated_deposits.get(signature) {
-                for (mint_index, amount) in &info.deposits {
-                    consolidations.push(DashboardConsolidation {
-                        transaction: signature.to_string(),
-                        mint_index: mint_index.to_string(),
-                        deposit_amount: lamports_to_sol(*amount),
-                        status: "Failed",
-                    });
-                }
-            }
-        }
+
+        let consolidations: Vec<DashboardConsolidation> = [
+            (
+                state.submitted_transactions().keys().collect::<Vec<_>>(),
+                "Submitted",
+            ),
+            (state.succeeded_transactions().iter().collect(), "Succeeded"),
+            (state.failed_transactions().keys().collect(), "Failed"),
+        ]
+        .into_iter()
+        .flat_map(|(signatures, status)| {
+            signatures.into_iter().filter_map(move |sig| {
+                consolidation_transactions
+                    .get(sig)
+                    .map(|info| to_dashboard_consolidation(sig, info, status))
+            })
+        })
+        .collect();
+
+        // The num_cols for consolidations uses the max column span (transaction + status + deposit columns)
         let consolidations_table = DashboardPaginatedTable::from_items(
             &consolidations,
             pagination.consolidations_start,
