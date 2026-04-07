@@ -934,6 +934,7 @@ mod update_balance_tests {
         let setup = SetupBuilder::new().with_proxy_canister().build().await;
 
         let get_transaction_cycles_cost = get_transaction_cycles_cost(&setup).await;
+        assert!(get_transaction_cycles_cost > 0);
 
         let caller_cycles_before = setup.proxy().cycle_balance().await;
         let minter_cycles_before = setup.minter().cycle_balance().await;
@@ -953,8 +954,7 @@ mod update_balance_tests {
         // The caller should be charged the actual cost of the RPC call plus the consolidation fee
         let expected_charge =
             get_transaction_cycles_cost + Setup::DEFAULT_DEPOSIT_CONSOLIDATION_FEE;
-        assert!(get_transaction_cycles_cost > 0);
-        assert_eq!(caller_cycles_before - caller_cycles_after, expected_charge,);
+        assert_eq!(caller_cycles_before - caller_cycles_after, expected_charge);
         // The minter receives the consolidation fee
         assert_eq!(
             minter_cycles_after - minter_cycles_before,

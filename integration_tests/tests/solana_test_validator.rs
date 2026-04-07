@@ -9,7 +9,7 @@ use solana_client::{nonblocking::rpc_client::RpcClient, rpc_config::CommitmentCo
 use solana_keypair::{Keypair, Signer};
 use solana_native_token::LAMPORTS_PER_SOL;
 use solana_signature::Signature;
-use std::time::Duration;
+use std::{iter, time::Duration};
 
 const SOLANA_VALIDATOR_URL: &str = "http://localhost:8899";
 const DEPOSITOR_PRINCIPAL: Principal = Principal::from_slice(&[0x9d, 0xf7, 0x99]);
@@ -41,7 +41,7 @@ async fn should_deposit_and_consolidate_funds() {
     airdrop_and_confirm(MINTER_ADDRESS, LAMPORTS_PER_SOL).await;
 
     for num_deposits in [1_u8, 15] {
-        println!("--- Testing with {num_deposits} deposit(s) ---");
+        println!("Testing with {num_deposits} deposit(s)");
 
         let minter_cycles_before = setup.minter().cycle_balance().await;
         let minter_sol_before = get_solana_balance(&MINTER_ADDRESS).await;
@@ -65,17 +65,19 @@ async fn should_deposit_and_consolidate_funds() {
             .into_iter()
             .unzip();
 
-        let balances_before = get_balances(&deposit_addresses).await;
+        let deposit_accounts_balances_before = get_balances(&deposit_addresses).await;
 
         // Trigger consolidation
         setup.advance_time(Duration::from_mins(10)).await;
         tokio::time::sleep(Duration::from_secs(5)).await;
 
         // Verify deposit addresses were drained
-        for (deposit_address, (&balance_before, &deposit_amount)) in deposit_addresses
-            .iter()
-            .zip(balances_before.iter().zip(&deposit_amounts))
-        {
+        for (deposit_address, (&balance_before, &deposit_amount)) in iter::zip(
+            deposit_addresses.iter(),
+            deposit_accounts_balances_before
+                .iter()
+                .zip(&deposit_amounts),
+        ) {
             let balance_after = get_solana_balance(deposit_address).await;
             assert_eq!(balance_after, balance_before - deposit_amount);
         }
@@ -83,10 +85,10 @@ async fn should_deposit_and_consolidate_funds() {
         let minter_sol_after = get_solana_balance(&MINTER_ADDRESS).await;
         let minter_cycles_after = setup.minter().cycle_balance().await;
 
-        let sol_delta = minter_sol_after as i64 - minter_sol_before as i64;
-        let cycles_delta = minter_cycles_after as i128 - minter_cycles_before as i128;
-        println!("  SOL balance delta: {sol_delta} lamports");
-        println!("  Cycles balance delta: {cycles_delta}");
+        let minter_sol_change = minter_sol_after as i64 - minter_sol_before as i64;
+        let minter_cycles_change = minter_cycles_after as i128 - minter_cycles_before as i128;
+        println!("  SOL balance delta: {minter_sol_change} lamports");
+        println!("  Cycles balance delta: {minter_cycles_change}");
 
         assert!(
             minter_sol_after >= minter_sol_before,
