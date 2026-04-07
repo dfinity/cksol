@@ -14,8 +14,10 @@ pub fn process_event<R: CanisterRuntime>(state: &mut State, payload: EventType, 
 }
 
 /// Updates the state to reflect the given state transition.
-fn apply_state_transition(state: &mut State, payload: &EventType) {
+/// Returns `true` if the event was applied, `false` if it was skipped (unknown).
+fn apply_state_transition(state: &mut State, payload: &EventType) -> bool {
     match payload {
+        EventType::Unknown => return false,
         EventType::Init(init_arg) => {
             panic!("BUG: state re-initialization is not allowed: {init_arg:?}");
         }
@@ -64,9 +66,10 @@ fn apply_state_transition(state: &mut State, payload: &EventType) {
             state.process_transaction_failed(signature);
         }
     }
+    true
 }
 
-pub fn replay_events<T: IntoIterator<Item = Event>>(events: T) -> State {
+pub fn replay_events<T: IntoIterator<Item = Event>>(events: T) -> (State, usize) {
     let mut events_iter = events.into_iter();
     let mut state = match events_iter
         .next()
@@ -78,8 +81,11 @@ pub fn replay_events<T: IntoIterator<Item = Event>>(events: T) -> State {
         } => State::try_from(init_arg).expect("BUG: state initialization should succeed"),
         other => panic!("ERROR: the first event must be an Init event, got: {other:?}"),
     };
+    let mut skipped = 0_usize;
     for event in events_iter {
-        apply_state_transition(&mut state, &event.payload);
+        if !apply_state_transition(&mut state, &event.payload) {
+            skipped += 1;
+        }
     }
-    state
+    (state, skipped)
 }

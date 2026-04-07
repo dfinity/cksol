@@ -191,6 +191,9 @@ fn get_events(
             EventType::FailedTransaction { signature } => event::EventType::FailedTransaction {
                 signature: signature.into(),
             },
+            EventType::Unknown => {
+                unreachable!("Unknown events should have been purged during upgrade")
+            }
         }
     }
 

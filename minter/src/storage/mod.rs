@@ -55,6 +55,35 @@ where
     EVENTS.with(|events| f(Box::new(events.borrow().iter())))
 }
 
+/// Purges unknown events from the event log by rewriting it with only known events.
+pub fn purge_unknown_events() -> usize {
+    use crate::state::event::EventType;
+    let valid_events: Vec<Event> = with_event_iter(|iter| {
+        iter.filter(|e| !matches!(e.payload, EventType::Unknown))
+            .collect()
+    });
+    let original_count = total_event_count() as usize;
+    let valid_count = valid_events.len();
+    let purged = original_count - valid_count;
+    if purged > 0 {
+        MEMORY_MANAGER.with(|m| {
+            EVENTS.with(|events| {
+                *events.borrow_mut() = StableLog::new(
+                    m.borrow().get(EVENT_LOG_INDEX_MEMORY_ID),
+                    m.borrow().get(EVENT_LOG_DATA_MEMORY_ID),
+                );
+                for event in valid_events {
+                    events
+                        .borrow()
+                        .append(&event)
+                        .expect("re-recording event should succeed");
+                }
+            });
+        });
+    }
+    purged
+}
+
 #[cfg(test)]
 pub fn reset_events() {
     MEMORY_MANAGER.with(|m| {

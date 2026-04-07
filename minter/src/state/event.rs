@@ -120,6 +120,10 @@ pub enum EventType {
         #[cbor(n(0), with = "cbor::signature")]
         signature: Signature,
     },
+    /// Placeholder for events that could not be decoded (e.g. removed event types).
+    /// These are skipped during replay and purged from stable memory on upgrade.
+    #[n(255)]
+    Unknown,
 }
 
 /// Payload of the `AcceptedWithdrawSolRequest` event.
@@ -189,8 +193,10 @@ impl Storable for Event {
     }
 
     fn from_bytes(bytes: Cow<[u8]>) -> Self {
-        minicbor::decode(bytes.as_ref())
-            .unwrap_or_else(|e| panic!("failed to decode event bytes {}: {e}", hex::encode(bytes)))
+        minicbor::decode(bytes.as_ref()).unwrap_or(Event {
+            timestamp: 0,
+            payload: EventType::Unknown,
+        })
     }
 
     const BOUND: Bound = Bound::Unbounded;

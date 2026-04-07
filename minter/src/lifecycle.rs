@@ -6,7 +6,7 @@ use crate::{
         event::EventType,
         init_once_state, mutate_state,
     },
-    storage::{record_event, total_event_count, with_event_iter},
+    storage::{purge_unknown_events, record_event, total_event_count, with_event_iter},
 };
 use canlog::log;
 use cksol_types_internal::{InitArgs, UpgradeArgs, log::Priority};
@@ -23,7 +23,21 @@ pub fn init<R: CanisterRuntime>(init_args: InitArgs, runtime: R) {
 pub fn post_upgrade<R: CanisterRuntime>(upgrade_args: Option<UpgradeArgs>, runtime: R) {
     let start = runtime.instruction_counter();
 
-    init_once_state(with_event_iter(|events| replay_events(events)));
+    let (state, skipped) = with_event_iter(|events| replay_events(events));
+    init_once_state(state);
+
+    if skipped > 0 {
+        log!(
+            Priority::Info,
+            "[upgrade]: skipped {skipped} unknown events during replay, purging from stable memory"
+        );
+        let purged = purge_unknown_events();
+        log!(
+            Priority::Info,
+            "[upgrade]: purged {purged} unknown events from stable memory"
+        );
+    }
+
     if let Some(args) = upgrade_args {
         log!(
             Priority::Info,
