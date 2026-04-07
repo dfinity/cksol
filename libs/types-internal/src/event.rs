@@ -61,7 +61,7 @@ pub enum EventType {
         mint_block_index: u64,
     },
     /// The minter burned ckSOL for a withdrawal request.
-    AcceptedWithdrawSolRequest {
+    AcceptedWithdrawalRequest {
         /// The ledger account from which ckSOL was burned.
         account: Account,
         /// The destination Solana address.

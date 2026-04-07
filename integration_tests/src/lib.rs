@@ -3,7 +3,7 @@ use candid::{CandidType, Decode, Encode, Nat, Principal, utils::ArgumentEncoder}
 use canlog::{Log, LogEntry};
 use cksol_types::{
     Address, DepositStatus, GetDepositAddressArgs, MinterInfo, UpdateBalanceArgs,
-    UpdateBalanceError, WithdrawSolArgs, WithdrawSolError, WithdrawSolOk, WithdrawSolStatus,
+    UpdateBalanceError, WithdrawalArgs, WithdrawalError, WithdrawalOk, WithdrawalStatus,
 };
 use cksol_types_internal::{
     MinterArg,
@@ -403,15 +403,12 @@ impl CkSolMinter<'_> {
             .await
     }
 
-    pub async fn withdraw_sol(
-        &self,
-        args: WithdrawSolArgs,
-    ) -> Result<WithdrawSolOk, WithdrawSolError> {
-        self.update_call("withdraw_sol", (args,), 0).await
+    pub async fn withdraw(&self, args: WithdrawalArgs) -> Result<WithdrawalOk, WithdrawalError> {
+        self.update_call("withdraw", (args,), 0).await
     }
 
-    pub async fn withdraw_sol_status(&self, block_index: u64) -> WithdrawSolStatus {
-        self.update_call("withdraw_sol_status", (block_index,), 0)
+    pub async fn withdrawal_status(&self, block_index: u64) -> WithdrawalStatus {
+        self.update_call("withdrawal_status", (block_index,), 0)
             .await
     }
 

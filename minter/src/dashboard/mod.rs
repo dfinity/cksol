@@ -285,7 +285,7 @@ impl DashboardTemplate {
         fn push_withdrawal(
             withdrawals: &mut Vec<(u64, DashboardWithdrawal)>,
             burn_index: &crate::numeric::LedgerBurnIndex,
-            req: &crate::state::event::WithdrawSolRequest,
+            req: &crate::state::event::WithdrawalRequest,
             status: &'static str,
             transaction: Option<String>,
         ) {
