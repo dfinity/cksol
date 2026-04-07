@@ -54,12 +54,15 @@ async fn should_deposit_and_consolidate_single_deposit() {
     let minter_cycles_after_deposit = setup.minter().cycle_balance().await;
 
     // Consolidate
-    let balance_before = get_solana_balance(&deposit_address).await;
     setup.advance_time(Duration::from_mins(10)).await;
     tokio::time::sleep(Duration::from_secs(5)).await;
 
+    // Deposit address should be drained after consolidation
     let balance_after = get_solana_balance(&deposit_address).await;
-    assert_eq!(balance_after, balance_before - deposit_amount);
+    assert_eq!(
+        balance_after, 0,
+        "Deposit address should be drained after consolidation"
+    );
 
     let minter_sol_after = get_solana_balance(&MINTER_ADDRESS).await;
     let minter_cycles_after = setup.minter().cycle_balance().await;
