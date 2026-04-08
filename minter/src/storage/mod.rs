@@ -31,12 +31,7 @@ thread_local! {
 /// Appends the event to the event log.
 pub fn record_event(payload: EventType, timestamp: u64) {
     EVENTS
-        .with(|events| {
-            events.borrow().append(&Event {
-                timestamp,
-                payload,
-            })
-        })
+        .with(|events| events.borrow().append(&Event { timestamp, payload }))
         .expect("recording an event should succeed");
 }
 

@@ -414,10 +414,7 @@ impl State {
 
     /// Returns the creation timestamp (in nanoseconds) of the oldest pending withdrawal request.
     pub fn oldest_pending_withdrawal_created_at(&self) -> Option<u64> {
-        self.pending_withdrawal_created_at
-            .values()
-            .next()
-            .copied()
+        self.pending_withdrawal_created_at.values().next().copied()
     }
 
     fn process_accepted_withdrawal(&mut self, request: &WithdrawalRequest, timestamp: u64) {

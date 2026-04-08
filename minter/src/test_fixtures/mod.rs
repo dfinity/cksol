@@ -204,6 +204,15 @@ pub mod events {
     }
 
     pub fn accept_withdrawal(account: Account, burn_index: u64, amount: Lamport) {
+        accept_withdrawal_at(account, burn_index, amount, 0);
+    }
+
+    pub fn accept_withdrawal_at(
+        account: Account,
+        burn_index: u64,
+        amount: Lamport,
+        timestamp: u64,
+    ) {
         mutate_state(|state| {
             process_event(
                 state,
@@ -214,7 +223,7 @@ pub mod events {
                     withdrawal_amount: amount,
                     withdrawal_fee: WITHDRAWAL_FEE,
                 }),
-                &runtime(),
+                &TestCanisterRuntime::new().with_time(timestamp),
             )
         });
     }
