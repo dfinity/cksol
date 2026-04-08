@@ -180,14 +180,6 @@ pub enum WithdrawalError {
 
     /// There are too many concurrent requests, retry later.
     TemporarilyUnavailable(String),
-
-    /// A generic error reserved for future extensions.
-    GenericError {
-        /// Generic error message.
-        error_message: String,
-        /// Generic error code.
-        error_code: u64,
-    },
 }
 
 /// Idetifier for a Solana transaction.
