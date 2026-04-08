@@ -1140,12 +1140,20 @@ mod metrics_tests {
         setup.advance_time(Duration::from_secs(60)).await;
         setup.tick().await;
 
-        setup
-            .check_metrics()
-            .await
-            .assert_contains_metric_matching(r"oldest_pending_withdrawal_age_seconds [1-9]\d*")
-            .into()
-            .drop()
-            .await;
+        let metrics = setup.check_metrics().await;
+        let matches = metrics.find_metrics_matching(r"oldest_pending_withdrawal_age_seconds (\d+)");
+        assert_eq!(matches.len(), 1, "expected exactly one metric match");
+        let age: u64 = matches[0]
+            .split_whitespace()
+            .nth(1)
+            .expect("metric should have a value")
+            .parse()
+            .expect("metric value should be a u64");
+        assert!(
+            (60..=120).contains(&age),
+            "expected oldest pending withdrawal age to be between 60 and 120 seconds, got {age}"
+        );
+
+        metrics.into().drop().await;
     }
 }
