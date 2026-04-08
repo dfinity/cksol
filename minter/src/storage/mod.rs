@@ -1,4 +1,7 @@
-use crate::state::event::{Event, EventType};
+use crate::{
+    runtime::CanisterRuntime,
+    state::event::{Event, EventType},
+};
 use ic_stable_structures::{
     DefaultMemoryImpl, StableLog,
     memory_manager::{MemoryId, MemoryManager, VirtualMemory},
@@ -29,9 +32,14 @@ thread_local! {
 }
 
 /// Appends the event to the event log.
-pub fn record_event(payload: EventType, timestamp: u64) {
+pub fn record_event<R: CanisterRuntime>(payload: EventType, runtime: &R) {
     EVENTS
-        .with(|events| events.borrow().append(&Event { timestamp, payload }))
+        .with(|events| {
+            events.borrow().append(&Event {
+                timestamp: runtime.time(),
+                payload,
+            })
+        })
         .expect("recording an event should succeed");
 }
 
