@@ -26,7 +26,8 @@ pub mod signer;
 mod stubs;
 
 pub const BLOCK_INDEX: u64 = 98763_u64;
-pub const DEPOSIT_FEE: Lamport = 10_000_000; // 0.01 SOL
+pub const DEPOSIT_FEE: Lamport = 10_000;
+pub const DEPOSIT_CONSOLIDATION_FEE: u128 = 10_000_000_000; // 0.01T cycles
 pub const WITHDRAWAL_FEE: Lamport = 5_000_000; // 0.005 SOL
 pub const MINIMUM_WITHDRAWAL_AMOUNT: Lamport = 10_000_000; // 0.01 SOL
 pub const MINTER_ACCOUNT: Account = Account {
@@ -57,6 +58,7 @@ pub fn valid_init_args() -> InitArgs {
         withdrawal_fee: WITHDRAWAL_FEE,
         update_balance_required_cycles: UPDATE_BALANCE_REQUIRED_CYCLES as u64,
         solana_network: SolanaNetwork::Mainnet,
+        deposit_consolidation_fee: DEPOSIT_CONSOLIDATION_FEE as u64,
     }
 }
 
@@ -370,6 +372,7 @@ pub mod arb {
             any::<u64>(),
             any::<u64>(),
             arb_solana_network(),
+            any::<u64>(),
         )
             .prop_map(
                 |(
@@ -382,6 +385,7 @@ pub mod arb {
                     withdrawal_fee,
                     update_balance_required_cycles,
                     solana_network,
+                    deposit_consolidation_fee,
                 )| {
                     InitArgs {
                         sol_rpc_canister_id,
@@ -393,6 +397,7 @@ pub mod arb {
                         withdrawal_fee,
                         update_balance_required_cycles,
                         solana_network,
+                        deposit_consolidation_fee,
                     }
                 },
             )
@@ -406,6 +411,7 @@ pub mod arb {
             prop::option::of(any::<u64>()),
             prop::option::of(any::<u64>()),
             prop::option::of(any::<u64>()),
+            prop::option::of(any::<u64>()),
         )
             .prop_map(
                 |(
@@ -415,6 +421,7 @@ pub mod arb {
                     minimum_deposit_amount,
                     withdrawal_fee,
                     update_balance_required_cycles,
+                    deposit_consolidation_fee,
                 )| UpgradeArgs {
                     sol_rpc_canister_id,
                     deposit_fee,
@@ -422,6 +429,7 @@ pub mod arb {
                     minimum_deposit_amount,
                     withdrawal_fee,
                     update_balance_required_cycles,
+                    deposit_consolidation_fee,
                 },
             )
     }
