@@ -5,6 +5,7 @@ use cksol_int_tests::{
 };
 use cksol_types::{DepositStatus, UpdateBalanceArgs, WithdrawalArgs, WithdrawalStatus};
 use icrc_ledger_types::icrc1::account::Account;
+use itertools::Itertools;
 use serial_test::serial;
 use sol_rpc_types::{InstallArgs, Lamport, OverrideProvider, RegexSubstitution};
 use solana_address::Address;
@@ -20,9 +21,6 @@ const DEPOSITOR_PRINCIPAL: Principal = Principal::from_slice(&[0x9d, 0xf7, 0x99]
 // TODO DEFI-2643: Add tests with more exotic transactions, e.g.:
 //  - a transaction with multiple transfer instructions to same target address: single mint with the summed up amount
 //  - a transaction with multiple instructions, not all to the same target address: only relevant amounts are considered.
-
-// Solana fee per transaction signature
-const FEE_PER_SIGNATURE: Lamport = 5_000;
 
 /// Creates a test setup connected to the local Solana test validator.
 async fn setup_with_solana_validator() -> Setup {
@@ -45,52 +43,81 @@ async fn setup_with_solana_validator() -> Setup {
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn should_deposit_and_consolidate_funds() {
-    const NUM_DEPOSITS: u8 = 15;
-
     let setup = setup_with_solana_validator().await;
 
-    let (deposit_addresses, deposit_amounts): (Vec<_>, Vec<_>) =
-        futures::future::join_all((1_u8..=NUM_DEPOSITS).map(async |i| {
-            let account = Account {
-                owner: DEPOSITOR_PRINCIPAL,
-                subaccount: Some([i; 32]),
-            };
-            let deposit_amount = (i as u64 * LAMPORTS_PER_SOL) / 10;
-            let deposit_address = deposit_to_account(&setup, account, deposit_amount).await;
-            (deposit_address, deposit_amount)
-        }))
-        .await
-        .into_iter()
-        .unzip();
+    for num_deposits in [1_u8, 15] {
+        println!("Testing with {num_deposits} deposit(s)");
 
-    // Check deposit consolidation
-    let deposit_account_balances_before_consolidation = get_balances(&deposit_addresses).await;
-    let minter_balance_before_consolidation = get_solana_balance(&MINTER_ADDRESS).await;
+        let minter_cycles_before = setup.minter().cycle_balance().await;
+        let minter_sol_before = get_solana_balance(&MINTER_ADDRESS).await;
 
-    setup.advance_time(Duration::from_mins(10)).await;
-    tokio::time::sleep(Duration::from_secs(5)).await;
+        let (deposit_addresses, deposit_amounts, minted_amounts): (Vec<_>, Vec<_>, Vec<_>) =
+            futures::future::join_all((1_u8..=num_deposits).map(async |i| {
+                let account = Account {
+                    owner: DEPOSITOR_PRINCIPAL,
+                    subaccount: Some({
+                        let mut sub = [0u8; 32];
+                        sub[0] = num_deposits;
+                        sub[1] = i;
+                        sub
+                    }),
+                };
+                let deposit_amount = (i as u64 * LAMPORTS_PER_SOL) / 10;
+                let (deposit_address, minted_amount) =
+                    deposit_to_account(&setup, account, deposit_amount).await;
+                (deposit_address, deposit_amount, minted_amount)
+            }))
+            .await
+            .into_iter()
+            .multiunzip();
 
-    // Ensure the deposited funds were consolidated, note that we do not assert the balance after
-    // consolidation to be zero due to potential funds leftover from previous tests
-    for (deposit_address, (&balance_before, &deposit_amount)) in deposit_addresses.iter().zip(
-        deposit_account_balances_before_consolidation
-            .iter()
-            .zip(&deposit_amounts),
-    ) {
-        let balance_after = get_solana_balance(deposit_address).await;
-        assert_eq!(balance_after, balance_before - deposit_amount);
+        let deposit_accounts_balances_before = get_balances(&deposit_addresses).await;
+
+        // Trigger consolidation
+        setup.advance_time(Duration::from_mins(10)).await;
+        tokio::time::sleep(Duration::from_secs(5)).await;
+
+        // Verify deposit addresses were drained
+        for (deposit_address, &balance_before, &deposit_amount) in itertools::multizip((
+            &deposit_addresses,
+            &deposit_accounts_balances_before,
+            &deposit_amounts,
+        )) {
+            let balance_after = get_solana_balance(deposit_address).await;
+            assert_eq!(balance_after, balance_before - deposit_amount);
+        }
+
+        let total_minted_amount = minted_amounts.iter().sum::<Lamport>();
+
+        let minter_sol_after = get_solana_balance(&MINTER_ADDRESS).await;
+        let minter_cycles_after = setup.minter().cycle_balance().await;
+
+        let minter_sol_change = minter_sol_after as i64 - minter_sol_before as i64;
+        let minter_cycles_change = minter_cycles_after as i128 - minter_cycles_before as i128;
+        println!(
+            "  SOL balance change minus total minted amount: {} lamports",
+            minter_sol_change - total_minted_amount as i64
+        );
+        println!("  Cycles balance change: {minter_cycles_change}");
+
+        assert!(
+            minter_sol_after >= minter_sol_before + total_minted_amount,
+            "Minter SOL balance increased less than the minted amount"
+        );
+        assert!(
+            minter_cycles_after >= minter_cycles_before,
+            "Minter cycles balance decreased"
+        );
     }
-    let minter_balance_after_consolidation = get_solana_balance(&MINTER_ADDRESS).await;
-    assert_eq!(
-        minter_balance_after_consolidation,
-        minter_balance_before_consolidation + deposit_amounts.iter().sum::<Lamport>()
-            - NUM_DEPOSITS as u64 * FEE_PER_SIGNATURE
-    );
 
     setup.drop().await;
 }
 
-async fn deposit_to_account(setup: &Setup, account: Account, amount: Lamport) -> Address {
+async fn deposit_to_account(
+    setup: &Setup,
+    account: Account,
+    amount: Lamport,
+) -> (Address, Lamport) {
     let expected_mint_amount = amount - Setup::DEFAULT_DEPOSIT_FEE;
     let deposit_address = setup.minter().get_deposit_address(account).await.into();
 
@@ -120,7 +147,7 @@ async fn deposit_to_account(setup: &Setup, account: Account, amount: Lamport) ->
     let balance_after = setup.ledger().balance_of(account).await;
     assert_eq!(balance_after, expected_mint_amount);
 
-    deposit_address
+    (deposit_address, expected_mint_amount)
 }
 
 async fn send_deposit_to_address(deposit_address: Address, deposit_amount: Lamport) -> Signature {

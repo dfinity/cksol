@@ -1,7 +1,8 @@
 use crate::{
     state::event::{DepositId, EventType},
     test_fixtures::{
-        BLOCK_INDEX, DEPOSIT_FEE, EventsAssert, UPDATE_BALANCE_REQUIRED_CYCLES,
+        BLOCK_INDEX, DEPOSIT_CONSOLIDATION_FEE, DEPOSIT_FEE, EventsAssert,
+        UPDATE_BALANCE_REQUIRED_CYCLES,
         deposit::{
             DEPOSIT_AMOUNT, DEPOSITOR_ACCOUNT, DEPOSITOR_PRINCIPAL, accepted_deposit_event,
             deposit_status_minted, deposit_status_processing, deposit_status_quarantined,
@@ -345,10 +346,14 @@ async fn should_allow_deposits_to_multiple_accounts_with_single_transaction() {
 }
 
 fn runtime_with_time_and_cycles() -> TestCanisterRuntime {
-    const REFUNDED_CYCLES: u128 = 900_000_000_000;
+    // Cycles forwarded to the RPC call = total - consolidation fee
+    let cycles_for_rpc = UPDATE_BALANCE_REQUIRED_CYCLES - DEPOSIT_CONSOLIDATION_FEE;
+    // Simulate the RPC canister refunding most of the forwarded cycles
+    let refunded: u128 = cycles_for_rpc - 100_000_000_000;
+    let rpc_cost = cycles_for_rpc - refunded;
     TestCanisterRuntime::new()
         .with_increasing_time()
         .add_msg_cycles_available(UPDATE_BALANCE_REQUIRED_CYCLES)
-        .add_msg_cycles_accept(UPDATE_BALANCE_REQUIRED_CYCLES - REFUNDED_CYCLES)
-        .add_msg_cycles_refunded(REFUNDED_CYCLES)
+        .add_msg_cycles_accept(rpc_cost + DEPOSIT_CONSOLIDATION_FEE)
+        .add_msg_cycles_refunded(refunded)
 }
