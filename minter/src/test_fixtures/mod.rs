@@ -71,11 +71,19 @@ pub fn init_state_with_args(init_args: InitArgs) {
 }
 
 pub fn init_balance() {
+    init_balance_to(u64::MAX / 2);
+}
+
+/// Deposits the given amount into the minter by processing deposit, mint,
+/// consolidation submission, and consolidation success events.
+///
+/// Must be called after [`init_state`].
+pub fn init_balance_to(amount: Lamport) {
     let id = deposit_id(0xFD);
     let mint_index = 0xFE;
     let consolidation_signature = signature(0xFF);
 
-    events::accept_deposit(id, u64::MAX / 2);
+    events::accept_deposit(id, amount);
     events::mint_deposit(id, mint_index);
     events::submit_consolidation(consolidation_signature, MINTER_ACCOUNT, 0, vec![mint_index]);
     events::succeed_transaction(consolidation_signature);
@@ -743,6 +751,14 @@ impl EventsAssert {
 
     pub fn assert_no_events_recorded() {
         Self::from_recorded().assert_no_more_events();
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
     }
 
     pub fn expect_event<F>(mut self, check: F) -> Self

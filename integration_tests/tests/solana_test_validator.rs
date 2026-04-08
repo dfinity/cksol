@@ -124,14 +124,9 @@ async fn should_deposit_and_withdraw_funds() {
     let ck_balance = setup.ledger().balance_of(depositor).await;
     assert_eq!(ck_balance, expected_mint_amount);
 
-    // Step 2: Consolidate the deposit so the minter has on-chain SOL.
-    // Wait for the consolidation to be finalized, because sendTransaction's
-    // preflight simulation defaults to finalized commitment.
-    let minter_sol_before = get_solana_balance(&MINTER_ADDRESS).await;
-    setup.advance_time(Duration::from_mins(10)).await;
-    wait_for_finalized_balance(&MINTER_ADDRESS, minter_sol_before).await;
-
-    // Step 3: Withdraw ckSOL back to a fresh Solana address
+    // Step 2: Request a withdrawal before consolidation.
+    // The minter's on-chain balance is 0 (funds are still at the deposit
+    // address), so the withdrawal should stay Pending.
     let withdrawal_destination = Keypair::new();
     let withdrawal_address = withdrawal_destination.pubkey();
     let withdrawal_amount = expected_mint_amount / 2;
@@ -149,7 +144,7 @@ async fn should_deposit_and_withdraw_funds() {
         )
         .await;
 
-    // Initiate withdrawal
+    // Initiate withdrawal (burns ckSOL on the ledger)
     let withdraw_result = setup
         .minter()
         .withdraw(WithdrawalArgs {
@@ -162,24 +157,40 @@ async fn should_deposit_and_withdraw_funds() {
 
     let burn_index = withdraw_result.block_index;
 
-    // Verify ckSOL was burned (withdrawal amount + ledger transfer fee)
+    // Verify ckSOL was burned
     let ck_balance_after = setup.ledger().balance_of(depositor).await;
     assert_eq!(
         ck_balance_after,
         expected_mint_amount - withdrawal_amount - LEDGER_TRANSFER_FEE
     );
 
-    // Step 4: Advance time to trigger withdrawal processing
+    // Step 3: Trigger withdrawal processing — should stay Pending because
+    // the minter has no consolidated balance yet.
     setup.advance_time(Duration::from_mins(2)).await;
     tokio::time::sleep(Duration::from_secs(5)).await;
 
-    // Step 5: Verify the withdrawal was sent
+    assert_eq!(
+        setup.minter().withdrawal_status(burn_index).await,
+        WithdrawalStatus::Pending,
+        "Withdrawal should stay Pending before consolidation"
+    );
+
+    // Step 4: Consolidate the deposit and wait for finalization.
+    let minter_sol_before = get_solana_balance(&MINTER_ADDRESS).await;
+    setup.advance_time(Duration::from_mins(10)).await;
+    wait_for_finalized_balance(&MINTER_ADDRESS, minter_sol_before).await;
+
+    // Step 5: Trigger withdrawal processing again — now the minter has
+    // enough balance and should submit the withdrawal transaction.
+    setup.advance_time(Duration::from_mins(2)).await;
+    tokio::time::sleep(Duration::from_secs(5)).await;
+
     let tx_hash = match setup.minter().withdrawal_status(burn_index).await {
         WithdrawalStatus::TxSent(tx) => tx.transaction_hash,
-        other => panic!("Expected TxSent, got: {other:?}"),
+        other => panic!("Expected TxSent after consolidation, got: {other:?}"),
     };
 
-    // Step 6: Wait for the transaction to be confirmed on Solana
+    // Step 6: Wait for the withdrawal transaction to be confirmed on Solana
     let tx_signature: Signature = tx_hash.parse().expect("valid signature");
     confirm_transaction(&rpc_client(), &tx_signature, CommitmentConfig::confirmed()).await;
 
