@@ -133,7 +133,7 @@ async fn should_return_error_if_insufficient_funds() {
 }
 
 #[tokio::test]
-async fn should_return_generic_error() {
+async fn should_return_temporarily_unavailable_on_generic_error() {
     init_state();
 
     let runtime = TestCanisterRuntime::new().add_stub_response(Err::<Nat, TransferFromError>(
@@ -155,10 +155,9 @@ async fn should_return_generic_error() {
 
     assert_eq!(
         result,
-        Err(WithdrawalError::GenericError {
-            error_message: "msg".to_string(),
-            error_code: 123u64
-        })
+        Err(WithdrawalError::TemporarilyUnavailable(
+            "Ledger returned a generic error: code 123, message: msg".to_string()
+        ))
     );
 }
 

@@ -4,8 +4,6 @@ use std::time::Duration;
 use candid::Principal;
 use cksol_types::{WithdrawalError, WithdrawalOk, WithdrawalStatus};
 use icrc_ledger_types::icrc1::account::{Account, Subaccount};
-use icrc_ledger_types::icrc2::transfer_from::TransferFromError;
-use num_traits::ToPrimitive;
 use solana_address::Address;
 
 use canlog::log;
@@ -16,6 +14,7 @@ use sol_rpc_types::Slot;
 use solana_hash::Hash;
 
 use crate::constants::MAX_CONCURRENT_RPC_CALLS;
+use crate::ledger::BurnError;
 use crate::{
     guard::{TimerGuard, withdrawal_guard},
     ledger::burn,
@@ -61,47 +60,12 @@ pub async fn withdraw<R: CanisterRuntime>(
     let block_index = burn(runtime, minter_account, from, amount, solana_address)
         .await
         .map_err(|e| match e {
-            crate::ledger::BurnError::IcError(ic_error) => WithdrawalError::TemporarilyUnavailable(
-                format!("Failed to burn tokens: {ic_error}"),
-            ),
-            crate::ledger::BurnError::TransferFromError(transfer_from_error) => {
-                match transfer_from_error {
-                    TransferFromError::InsufficientFunds { balance } => {
-                        WithdrawalError::InsufficientFunds {
-                            balance: balance.0.to_u64().expect("balance should fit in u64"),
-                        }
-                    }
-                    TransferFromError::InsufficientAllowance { allowance } => {
-                        WithdrawalError::InsufficientAllowance {
-                            allowance: allowance.0.to_u64().expect("allowance should fit in u64"),
-                        }
-                    }
-                    TransferFromError::TemporarilyUnavailable => {
-                        WithdrawalError::TemporarilyUnavailable(
-                            "Ledger is temporarily unavailable".to_string(),
-                        )
-                    }
-                    TransferFromError::GenericError {
-                        error_code,
-                        message,
-                    } => WithdrawalError::GenericError {
-                        error_message: message,
-                        error_code: error_code.0.to_u64().expect("error code should fit in u64"),
-                    },
-                    TransferFromError::BadFee { expected_fee } => {
-                        panic!("Unexpected BadFee error, expected_fee: {expected_fee}")
-                    }
-                    TransferFromError::BadBurn { min_burn_amount } => {
-                        panic!("Unexpected BadBurn error, min_burn_amount: {min_burn_amount}")
-                    }
-                    TransferFromError::TooOld => panic!("Unexpected TooOld error"),
-                    TransferFromError::CreatedInFuture { ledger_time } => {
-                        panic!("Unexpected CreatedInFuture error, ledger_time: {ledger_time}")
-                    }
-                    TransferFromError::Duplicate { duplicate_of } => {
-                        panic!("Unexpected Duplicate error, duplicate_of: {duplicate_of}")
-                    }
-                }
+            BurnError::TemporarilyUnavailable(msg) => WithdrawalError::TemporarilyUnavailable(msg),
+            BurnError::InsufficientFunds { balance } => {
+                WithdrawalError::InsufficientFunds { balance }
+            }
+            BurnError::InsufficientAllowance { allowance } => {
+                WithdrawalError::InsufficientAllowance { allowance }
             }
         })?;
 
