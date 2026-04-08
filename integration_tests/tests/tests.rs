@@ -1150,10 +1150,7 @@ mod metrics_tests {
             .expect("metric should have a value")
             .parse()
             .expect("metric value should be a u64");
-        assert!(
-            (60..=120).contains(&age),
-            "expected oldest incomplete withdrawal age to be between 60 and 120 seconds, got {age}"
-        );
+        assert_eq!(age, 60);
 
         metrics.into().drop().await;
     }
