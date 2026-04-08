@@ -1141,7 +1141,8 @@ mod metrics_tests {
         setup.tick().await;
 
         let metrics = setup.check_metrics().await;
-        let matches = metrics.find_metrics_matching(r"oldest_incomplete_withdrawal_age_seconds (\d+)");
+        let matches =
+            metrics.find_metrics_matching(r"oldest_incomplete_withdrawal_age_seconds (\d+)");
         assert_eq!(matches.len(), 1, "expected exactly one metric match");
         let age: u64 = matches[0]
             .split_whitespace()
