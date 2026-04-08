@@ -96,6 +96,7 @@ pub struct State {
     quarantined_deposits: BTreeMap<DepositId, Deposit>,
     minted_deposits: BTreeMap<DepositId, MintedDeposit>,
     pending_withdrawal_requests: BTreeMap<LedgerBurnIndex, WithdrawalRequest>,
+    pending_withdrawal_created_at: BTreeMap<LedgerBurnIndex, u64>,
     sent_withdrawal_requests: BTreeMap<LedgerBurnIndex, SentWithdrawalRequest>,
     successful_withdrawal_requests: BTreeMap<LedgerBurnIndex, SentWithdrawalRequest>,
     failed_withdrawal_requests: BTreeMap<LedgerBurnIndex, SentWithdrawalRequest>,
@@ -411,7 +412,15 @@ impl State {
         &self.pending_withdrawal_requests
     }
 
-    fn process_accepted_withdrawal(&mut self, request: &WithdrawalRequest) {
+    /// Returns the creation timestamp (in nanoseconds) of the oldest pending withdrawal request.
+    pub fn oldest_pending_withdrawal_created_at(&self) -> Option<u64> {
+        self.pending_withdrawal_created_at
+            .values()
+            .next()
+            .copied()
+    }
+
+    fn process_accepted_withdrawal(&mut self, request: &WithdrawalRequest, timestamp: u64) {
         assert_eq!(
             self.pending_withdrawal_requests
                 .insert(request.burn_block_index, request.clone()),
@@ -419,6 +428,8 @@ impl State {
             "Attempted to accept an already accepted withdrawal request: {:?}",
             request.burn_block_index
         );
+        self.pending_withdrawal_created_at
+            .insert(request.burn_block_index, timestamp);
     }
 
     fn process_mint(&mut self, deposit_id: &DepositId, mint_block_index: &LedgerMintIndex) {
@@ -496,6 +507,7 @@ impl State {
                         .unwrap_or_else(|| {
                             panic!("Attempted to send transaction for unknown withdrawal request: {burn_index:?}")
                         });
+                    self.pending_withdrawal_created_at.remove(burn_index);
                     total += request.withdrawal_amount - request.withdrawal_fee;
                     assert_eq!(
                         self.sent_withdrawal_requests.insert(
@@ -670,6 +682,7 @@ impl TryFrom<InitArgs> for State {
             quarantined_deposits: BTreeMap::new(),
             minted_deposits: BTreeMap::new(),
             pending_withdrawal_requests: BTreeMap::new(),
+            pending_withdrawal_created_at: BTreeMap::new(),
             sent_withdrawal_requests: BTreeMap::new(),
             successful_withdrawal_requests: BTreeMap::new(),
             failed_withdrawal_requests: BTreeMap::new(),

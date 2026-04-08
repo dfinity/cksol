@@ -9,12 +9,13 @@ use crate::{
 
 /// Records the given event payload in the event log and updates the state to reflect the change.
 pub fn process_event<R: CanisterRuntime>(state: &mut State, payload: EventType, runtime: &R) {
-    apply_state_transition(state, &payload);
-    storage::record_event(payload, runtime);
+    let timestamp = runtime.time();
+    apply_state_transition(state, &payload, timestamp);
+    storage::record_event(payload, timestamp);
 }
 
 /// Updates the state to reflect the given state transition.
-fn apply_state_transition(state: &mut State, payload: &EventType) {
+fn apply_state_transition(state: &mut State, payload: &EventType, timestamp: u64) {
     match payload {
         EventType::Init(init_arg) => {
             panic!("BUG: state re-initialization is not allowed: {init_arg:?}");
@@ -25,7 +26,7 @@ fn apply_state_transition(state: &mut State, payload: &EventType) {
                 .expect("applying upgrade event should succeed");
         }
         EventType::AcceptedWithdrawalRequest(request) => {
-            state.process_accepted_withdrawal(request);
+            state.process_accepted_withdrawal(request, timestamp);
         }
         EventType::AcceptedDeposit {
             deposit_id,
@@ -79,7 +80,7 @@ pub fn replay_events<T: IntoIterator<Item = Event>>(events: T) -> State {
         other => panic!("ERROR: the first event must be an Init event, got: {other:?}"),
     };
     for event in events_iter {
-        apply_state_transition(&mut state, &event.payload);
+        apply_state_transition(&mut state, &event.payload, event.timestamp);
     }
     state
 }

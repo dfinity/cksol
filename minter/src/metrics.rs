@@ -75,6 +75,15 @@ pub fn encode_metrics(w: &mut MetricsEncoder<Vec<u8>>, s: &State) -> std::io::Re
         s.failed_transactions().len().metric_value(),
         "Number of failed Solana transactions.",
     )?;
+    if let Some(created_at) = s.oldest_pending_withdrawal_created_at() {
+        let now = ic_cdk::api::time();
+        let age_seconds = now.saturating_sub(created_at) / 1_000_000_000;
+        w.encode_gauge(
+            "oldest_pending_withdrawal_age_seconds",
+            age_seconds.metric_value(),
+            "Age of the oldest pending withdrawal request in seconds.",
+        )?;
+    }
     Ok(())
 }
 

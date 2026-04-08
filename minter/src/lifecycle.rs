@@ -17,7 +17,7 @@ pub fn init<R: CanisterRuntime>(init_args: InitArgs, runtime: R) {
         "[init]: initialized minter with arg: {init_args:?}"
     );
     init_once_state(State::try_from(init_args.clone()).expect("ERROR: invalid init args"));
-    record_event(EventType::Init(init_args), &runtime);
+    record_event(EventType::Init(init_args), runtime.time());
 }
 
 pub fn post_upgrade<R: CanisterRuntime>(upgrade_args: Option<UpgradeArgs>, runtime: R) {

@@ -57,6 +57,7 @@ mod state_from_init_args {
                 quarantined_deposits: BTreeMap::new(),
                 minted_deposits: BTreeMap::new(),
                 pending_withdrawal_requests: BTreeMap::new(),
+                pending_withdrawal_created_at: BTreeMap::new(),
                 sent_withdrawal_requests: BTreeMap::new(),
                 successful_withdrawal_requests: BTreeMap::new(),
                 failed_withdrawal_requests: BTreeMap::new(),
@@ -393,7 +394,7 @@ mod state_upgrade {
                 minimum_deposit_amount: Some(new_minimum_deposit_amount),
                 ..Default::default()
             }),
-            &TestCanisterRuntime::new(),
+            &TestCanisterRuntime::new().with_time(0),
         );
     }
 }
