@@ -28,8 +28,8 @@ use sol_rpc_types::{MultiRpcResult, RpcError, Slot};
 use solana_signature::Signature;
 const VALID_ADDRESS: &str = "E4MpwNnMWs2XtW5gVrxZvyS7fMq31QD5HvbxmwP45Tz3";
 
-fn test_caller() -> Principal {
-    Principal::from_slice(&[1_u8; 20])
+fn test_caller() -> Account {
+    Principal::from_slice(&[1_u8; 20]).into()
 }
 
 #[tokio::test]
@@ -40,10 +40,8 @@ async fn should_return_error_if_calling_ledger_fails() {
 
     let result = withdraw(
         &runtime,
-        MINTER_ACCOUNT,
         test_caller(),
-        None,
-        1,
+        MINIMUM_WITHDRAWAL_AMOUNT,
         VALID_ADDRESS.to_string(),
     )
     .await;
@@ -64,10 +62,8 @@ async fn should_return_error_if_ledger_unavailable() {
 
     let result = withdraw(
         &runtime,
-        MINTER_ACCOUNT,
         test_caller(),
-        None,
-        1,
+        MINIMUM_WITHDRAWAL_AMOUNT,
         VALID_ADDRESS.to_string(),
     )
     .await;
@@ -92,10 +88,8 @@ async fn should_return_error_if_insufficient_allowance() {
 
     let result = withdraw(
         &runtime,
-        MINTER_ACCOUNT,
         test_caller(),
-        None,
-        1,
+        MINIMUM_WITHDRAWAL_AMOUNT,
         VALID_ADDRESS.to_string(),
     )
     .await;
@@ -118,10 +112,8 @@ async fn should_return_error_if_insufficient_funds() {
 
     let result = withdraw(
         &runtime,
-        MINTER_ACCOUNT,
         test_caller(),
-        None,
-        1,
+        MINIMUM_WITHDRAWAL_AMOUNT,
         VALID_ADDRESS.to_string(),
     )
     .await;
@@ -145,10 +137,8 @@ async fn should_return_generic_error() {
 
     let result = withdraw(
         &runtime,
-        MINTER_ACCOUNT,
         test_caller(),
-        None,
-        1,
+        MINIMUM_WITHDRAWAL_AMOUNT,
         VALID_ADDRESS.to_string(),
     )
     .await;
@@ -172,10 +162,8 @@ async fn should_return_ok_if_burn_succeeds() {
 
     let result = withdraw(
         &runtime,
-        MINTER_ACCOUNT,
         test_caller(),
-        None,
-        1,
+        MINIMUM_WITHDRAWAL_AMOUNT,
         VALID_ADDRESS.to_string(),
     )
     .await;
@@ -196,10 +184,8 @@ async fn should_return_error_if_address_malformed() {
 
     let result = withdraw(
         &runtime,
-        MINTER_ACCOUNT,
         test_caller(),
-        None,
-        1,
+        MINIMUM_WITHDRAWAL_AMOUNT,
         "not-a-valid-address".to_string(),
     )
     .await;
@@ -208,42 +194,41 @@ async fn should_return_error_if_address_malformed() {
 }
 
 #[tokio::test]
-#[should_panic(expected = "the owner must be non-anonymous")]
-async fn should_panic_if_caller_is_anonymous() {
+async fn should_return_error_if_amount_too_low() {
     init_state();
 
     let runtime = TestCanisterRuntime::new();
 
-    let _ = withdraw(
+    let result = withdraw(
         &runtime,
-        MINTER_ACCOUNT,
-        Principal::anonymous(),
-        None,
-        1,
+        test_caller(),
+        MINIMUM_WITHDRAWAL_AMOUNT - 1,
         VALID_ADDRESS.to_string(),
     )
     .await;
+
+    assert_eq!(
+        result,
+        Err(WithdrawalError::ValueTooSmall {
+            minimum_withdrawal_amount: MINIMUM_WITHDRAWAL_AMOUNT,
+            withdrawal_amount: MINIMUM_WITHDRAWAL_AMOUNT - 1,
+        })
+    );
 }
 
 #[tokio::test]
 async fn should_return_error_if_already_processing() {
     init_state();
 
-    let caller = test_caller();
-    let from = Account {
-        owner: caller,
-        subaccount: None,
-    };
+    let from = test_caller();
     let _guard = withdrawal_guard(from).unwrap();
 
     let runtime = TestCanisterRuntime::new();
 
     let result = withdraw(
         &runtime,
-        MINTER_ACCOUNT,
-        caller,
-        None,
-        1,
+        from,
+        MINIMUM_WITHDRAWAL_AMOUNT,
         VALID_ADDRESS.to_string(),
     )
     .await;
@@ -305,10 +290,8 @@ mod process_pending_withdrawals_tests {
         for i in 1..count + 1 {
             let _ = withdraw(
                 runtime,
-                MINTER_ACCOUNT,
-                Principal::from_slice(&[1, i]),
-                None,
-                WITHDRAWAL_FEE + 1,
+                Principal::from_slice(&[1, i]).into(),
+                MINIMUM_WITHDRAWAL_AMOUNT,
                 VALID_ADDRESS.to_string(),
             )
             .await
@@ -343,8 +326,8 @@ mod process_pending_withdrawals_tests {
         EventsAssert::from_recorded()
             .expect_event(|e| {
                 assert_matches!(e, EventType::AcceptedWithdrawalRequest(req) => {
-                    assert_eq!(req.withdrawal_amount, WITHDRAWAL_FEE + 1);
-                    assert_eq!(req.withdrawal_fee, WITHDRAWAL_FEE);
+                    assert_eq!(req.amount_to_burn, MINIMUM_WITHDRAWAL_AMOUNT);
+                    assert_eq!(req.withdrawal_amount, MINIMUM_WITHDRAWAL_AMOUNT - WITHDRAWAL_FEE);
                 });
             })
             .expect_event(|e| {
@@ -432,15 +415,15 @@ mod process_pending_withdrawals_tests {
         EventsAssert::from_recorded()
             .expect_event(|e| {
                 assert_matches!(e, EventType::AcceptedWithdrawalRequest(req) => {
-                    assert_eq!(req.withdrawal_amount, WITHDRAWAL_FEE + 1);
-                    assert_eq!(req.withdrawal_fee, WITHDRAWAL_FEE);
+                    assert_eq!(req.amount_to_burn, MINIMUM_WITHDRAWAL_AMOUNT);
+                    assert_eq!(req.withdrawal_amount, MINIMUM_WITHDRAWAL_AMOUNT - WITHDRAWAL_FEE);
                     assert_eq!(req.account, Principal::from_slice(&[1, 1]).into());
                 });
             })
             .expect_event(|e| {
                 assert_matches!(e, EventType::AcceptedWithdrawalRequest(req) => {
-                    assert_eq!(req.withdrawal_amount, WITHDRAWAL_FEE + 1);
-                    assert_eq!(req.withdrawal_fee, WITHDRAWAL_FEE);
+                    assert_eq!(req.amount_to_burn, MINIMUM_WITHDRAWAL_AMOUNT);
+                    assert_eq!(req.withdrawal_amount, MINIMUM_WITHDRAWAL_AMOUNT - WITHDRAWAL_FEE);
                     assert_eq!(req.account, Principal::from_slice(&[1, 2]).into());
                 });
             })

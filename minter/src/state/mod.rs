@@ -496,7 +496,7 @@ impl State {
                         .unwrap_or_else(|| {
                             panic!("Attempted to send transaction for unknown withdrawal request: {burn_index:?}")
                         });
-                    total += request.withdrawal_amount - request.withdrawal_fee;
+                    total += request.withdrawal_amount;
                     assert_eq!(
                         self.sent_withdrawal_requests.insert(
                             *burn_index,

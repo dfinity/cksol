@@ -1,9 +1,8 @@
 use std::str::FromStr;
 use std::time::Duration;
 
-use candid::Principal;
 use cksol_types::{WithdrawalError, WithdrawalOk, WithdrawalStatus};
-use icrc_ledger_types::icrc1::account::{Account, Subaccount};
+use icrc_ledger_types::icrc1::account::Account;
 use icrc_ledger_types::icrc2::transfer_from::TransferFromError;
 use num_traits::ToPrimitive;
 use solana_address::Address;
@@ -38,74 +37,81 @@ mod tests;
 
 pub async fn withdraw<R: CanisterRuntime>(
     runtime: &R,
-    minter_account: Account,
-    caller: Principal,
-    from_subaccount: Option<Subaccount>,
-    amount: u64,
+    from: Account,
+    amount_to_burn: u64,
     address: String,
 ) -> Result<WithdrawalOk, WithdrawalError> {
-    assert_ne!(
-        caller,
-        Principal::anonymous(),
-        "the owner must be non-anonymous"
-    );
-    let from = Account {
-        owner: caller,
-        subaccount: from_subaccount,
-    };
+    let minimum_withdrawal_amount = read_state(|s| s.minimum_withdrawal_amount());
+    if amount_to_burn < minimum_withdrawal_amount {
+        return Err(WithdrawalError::ValueTooSmall {
+            minimum_withdrawal_amount,
+            withdrawal_amount: amount_to_burn,
+        });
+    }
+
     let _guard = withdrawal_guard(from)?;
 
     let solana_address = Address::from_str(&address)
         .map_err(|e| WithdrawalError::MalformedAddress(e.to_string()))?;
 
-    let block_index = burn(runtime, minter_account, from, amount, solana_address)
-        .await
-        .map_err(|e| match e {
-            crate::ledger::BurnError::IcError(ic_error) => WithdrawalError::TemporarilyUnavailable(
-                format!("Failed to burn tokens: {ic_error}"),
-            ),
-            crate::ledger::BurnError::TransferFromError(transfer_from_error) => {
-                match transfer_from_error {
-                    TransferFromError::InsufficientFunds { balance } => {
-                        WithdrawalError::InsufficientFunds {
-                            balance: balance.0.to_u64().expect("balance should fit in u64"),
-                        }
-                    }
-                    TransferFromError::InsufficientAllowance { allowance } => {
-                        WithdrawalError::InsufficientAllowance {
-                            allowance: allowance.0.to_u64().expect("allowance should fit in u64"),
-                        }
-                    }
-                    TransferFromError::TemporarilyUnavailable => {
-                        WithdrawalError::TemporarilyUnavailable(
-                            "Ledger is temporarily unavailable".to_string(),
-                        )
-                    }
-                    TransferFromError::GenericError {
-                        error_code,
-                        message,
-                    } => WithdrawalError::GenericError {
-                        error_message: message,
-                        error_code: error_code.0.to_u64().expect("error code should fit in u64"),
-                    },
-                    TransferFromError::BadFee { expected_fee } => {
-                        panic!("Unexpected BadFee error, expected_fee: {expected_fee}")
-                    }
-                    TransferFromError::BadBurn { min_burn_amount } => {
-                        panic!("Unexpected BadBurn error, min_burn_amount: {min_burn_amount}")
-                    }
-                    TransferFromError::TooOld => panic!("Unexpected TooOld error"),
-                    TransferFromError::CreatedInFuture { ledger_time } => {
-                        panic!("Unexpected CreatedInFuture error, ledger_time: {ledger_time}")
-                    }
-                    TransferFromError::Duplicate { duplicate_of } => {
-                        panic!("Unexpected Duplicate error, duplicate_of: {duplicate_of}")
+    let minter_account: Account = runtime.canister_self().into();
+    let block_index = burn(
+        runtime,
+        minter_account,
+        from,
+        amount_to_burn,
+        solana_address,
+    )
+    .await
+    .map_err(|e| match e {
+        crate::ledger::BurnError::IcError(ic_error) => {
+            WithdrawalError::TemporarilyUnavailable(format!("Failed to burn tokens: {ic_error}"))
+        }
+        crate::ledger::BurnError::TransferFromError(transfer_from_error) => {
+            match transfer_from_error {
+                TransferFromError::InsufficientFunds { balance } => {
+                    WithdrawalError::InsufficientFunds {
+                        balance: balance.0.to_u64().expect("balance should fit in u64"),
                     }
                 }
+                TransferFromError::InsufficientAllowance { allowance } => {
+                    WithdrawalError::InsufficientAllowance {
+                        allowance: allowance.0.to_u64().expect("allowance should fit in u64"),
+                    }
+                }
+                TransferFromError::TemporarilyUnavailable => {
+                    WithdrawalError::TemporarilyUnavailable(
+                        "Ledger is temporarily unavailable".to_string(),
+                    )
+                }
+                TransferFromError::GenericError {
+                    error_code,
+                    message,
+                } => WithdrawalError::GenericError {
+                    error_message: message,
+                    error_code: error_code.0.to_u64().expect("error code should fit in u64"),
+                },
+                TransferFromError::BadFee { expected_fee } => {
+                    panic!("Unexpected BadFee error, expected_fee: {expected_fee}")
+                }
+                TransferFromError::BadBurn { min_burn_amount } => {
+                    panic!("Unexpected BadBurn error, min_burn_amount: {min_burn_amount}")
+                }
+                TransferFromError::TooOld => panic!("Unexpected TooOld error"),
+                TransferFromError::CreatedInFuture { ledger_time } => {
+                    panic!("Unexpected CreatedInFuture error, ledger_time: {ledger_time}")
+                }
+                TransferFromError::Duplicate { duplicate_of } => {
+                    panic!("Unexpected Duplicate error, duplicate_of: {duplicate_of}")
+                }
             }
-        })?;
+        }
+    })?;
 
     let withdrawal_fee = read_state(|s| s.withdrawal_fee());
+    let withdrawal_amount = amount_to_burn
+        .checked_sub(withdrawal_fee)
+        .expect("BUG: withdrawal amount must be >= withdrawal fee");
     mutate_state(|s| {
         process_event(
             s,
@@ -113,8 +119,8 @@ pub async fn withdraw<R: CanisterRuntime>(
                 account: from,
                 solana_address: solana_address.to_bytes(),
                 burn_block_index: block_index.into(),
-                withdrawal_amount: amount,
-                withdrawal_fee,
+                withdrawal_amount,
+                amount_to_burn,
             }),
             runtime,
         )
@@ -189,11 +195,7 @@ async fn submit_withdrawal_transaction<R: CanisterRuntime>(
         .iter()
         .map(|request| {
             let destination = Address::from(request.solana_address);
-            let transfer_amount = request
-                .withdrawal_amount
-                .checked_sub(request.withdrawal_fee)
-                .expect("BUG: withdrawal_amount must be >= withdrawal_fee");
-            (destination, transfer_amount)
+            (destination, request.withdrawal_amount)
         })
         .collect();
 
