@@ -417,7 +417,7 @@ impl State {
     pub fn oldest_incomplete_withdrawal_created_at(&self) -> Option<u64> {
         self.incomplete_withdrawal_created_at
             .values()
-            .next()
+            .min()
             .copied()
     }
 
