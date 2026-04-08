@@ -26,7 +26,6 @@ const DEPOSITOR_PRINCIPAL: Principal = Principal::from_slice(&[0x9d, 0xf7, 0x99]
 const FEE_PER_SIGNATURE: Lamport = 5_000;
 
 /// Creates a test setup connected to the local Solana test validator.
-
 async fn setup_with_solana_validator() -> Setup {
     SetupBuilder::new()
         .with_proxy_canister()
