@@ -213,8 +213,8 @@ pub mod events {
                     account,
                     solana_address: [0u8; 32],
                     burn_block_index: LedgerBurnIndex::from(burn_index),
-                    withdrawal_amount: amount,
-                    withdrawal_fee: WITHDRAWAL_FEE,
+                    withdrawal_amount: amount - WITHDRAWAL_FEE,
+                    amount_to_burn: amount,
                 }),
                 &runtime(),
             )
@@ -447,13 +447,13 @@ pub mod arb {
             any::<u64>(),
         )
             .prop_map(
-                |(account, solana_address, burn_block_index, withdrawal_amount, withdrawal_fee)| {
+                |(account, solana_address, burn_block_index, amount_to_burn, withdrawal_amount)| {
                     WithdrawalRequest {
                         account,
                         solana_address,
                         burn_block_index,
+                        amount_to_burn,
                         withdrawal_amount,
-                        withdrawal_fee,
                     }
                 },
             )

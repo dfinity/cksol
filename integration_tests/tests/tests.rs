@@ -279,7 +279,10 @@ mod withdrawal_tests {
         let err = result.unwrap_err();
         assert_eq!(
             err,
-            WithdrawalError::AmountTooLow(new_minimum_withdrawal_amount)
+            WithdrawalError::ValueTooSmall {
+                minimum_withdrawal_amount: new_minimum_withdrawal_amount,
+                withdrawal_amount: Setup::DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT,
+            }
         );
 
         let args = WithdrawalArgs {
@@ -1011,6 +1014,17 @@ mod anonymous_caller_tests {
                 .await;
             assert_matches!(result, Err(s) => s.contains("the owner must be non-anonymous"));
         }
+
+        // `withdraw` endpoint (no `owner` field, only anonymous caller applies)
+        let minter = setup.minter_with_caller(Principal::anonymous());
+        let result = minter
+            .try_withdraw(WithdrawalArgs {
+                from_subaccount: None,
+                amount: Setup::DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT,
+                address: "E4MpwNnMWs2XtW5gVrxZvyS7fMq31QD5HvbxmwP45Tz3".to_string(),
+            })
+            .await;
+        assert_matches!(result, Err(s) => s.contains("the owner must be non-anonymous"));
 
         setup.drop().await;
     }

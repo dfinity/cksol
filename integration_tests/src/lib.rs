@@ -405,7 +405,14 @@ impl CkSolMinter<'_> {
     }
 
     pub async fn withdraw(&self, args: WithdrawalArgs) -> Result<WithdrawalOk, WithdrawalError> {
-        self.update_call("withdraw", (args,), 0).await
+        self.try_withdraw(args).await.expect("withdraw failed")
+    }
+
+    pub async fn try_withdraw(
+        &self,
+        args: WithdrawalArgs,
+    ) -> Result<Result<WithdrawalOk, WithdrawalError>, String> {
+        self.try_update_call("withdraw", (args,), 0).await
     }
 
     pub async fn withdrawal_status(&self, block_index: u64) -> WithdrawalStatus {

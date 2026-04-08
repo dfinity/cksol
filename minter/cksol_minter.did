@@ -186,8 +186,12 @@ type WithdrawalError = variant {
     // principal.
     AlreadyProcessing;
     // The withdrawal amount is too low.
-    // The payload contains the minimal withdrawal amount in Lamports.
-    AmountTooLow : Lamport;
+    ValueTooSmall : record {
+        // The minimum withdrawal amount.
+        minimum_withdrawal_amount : Lamport;
+        // The requested withdrawal amount.
+        withdrawal_amount : Lamport;
+    };
     // The minter failed to parse the destination address.
     MalformedAddress : Address;
     // The ckSOL balance of the withdrawal account is too low.
@@ -237,10 +241,10 @@ type AcceptedWithdrawalRequest = record {
     solana_address : blob;
     // The index of the ledger block that burned the ckSOL tokens.
     burn_block_index : nat64;
-    // The requested withdrawal amount.
+    // The total amount burned from the user.
+    amount_to_burn : Lamport;
+    // The net amount to transfer to the user.
     withdrawal_amount : Lamport;
-    // The fee that will be applied during the withdrawal.
-    withdrawal_fee : Lamport;
 };
 
 // A versioned Solana transaction message.

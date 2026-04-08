@@ -159,25 +159,25 @@ pub struct WithdrawalOk {
 pub enum WithdrawalError {
     /// There is another request for this principal.
     AlreadyProcessing,
-
     /// The withdrawal amount is too low.
-    AmountTooLow(u64),
-
+    ValueTooSmall {
+        /// The minimum withdrawal amount.
+        minimum_withdrawal_amount: Lamport,
+        /// The requested withdrawal amount.
+        withdrawal_amount: Lamport,
+    },
     /// The Solana address is not valid.
     MalformedAddress(String),
-
     /// The withdrawal account does not hold the requested ckSOL amount.
     InsufficientFunds {
         /// The current balance of the withdrawal account.
         balance: u64,
     },
-
     /// The minter is not approved to transfer the requested amount.
     InsufficientAllowance {
         /// The current allowance for the minter.
         allowance: u64,
     },
-
     /// There are too many concurrent requests, retry later.
     TemporarilyUnavailable(String),
 }
