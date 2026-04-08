@@ -238,6 +238,8 @@ type AcceptedWithdrawalRequest = record {
     withdrawal_amount : Lamport;
     // The fee that will be applied during the withdrawal.
     withdrawal_fee : Lamport;
+    // The canister time (in nanoseconds) at which this withdrawal request was created.
+    created_at : nat64;
 };
 
 // A versioned Solana transaction message.

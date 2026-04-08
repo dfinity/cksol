@@ -140,6 +140,9 @@ pub struct WithdrawalRequest {
     /// The fee retained by the minter (in lamports).
     #[n(4)]
     pub withdrawal_fee: Lamport,
+    /// The canister time (in nanoseconds) at which this withdrawal request was created.
+    #[n(5)]
+    pub created_at: u64,
 }
 
 #[derive(Clone, Eq, PartialEq, Debug, Decode, Encode)]

@@ -79,6 +79,7 @@ pub async fn withdraw<R: CanisterRuntime>(
                 burn_block_index: block_index.into(),
                 withdrawal_amount: amount,
                 withdrawal_fee,
+                created_at: runtime.time(),
             }),
             runtime,
         )
