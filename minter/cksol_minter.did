@@ -198,8 +198,6 @@ type WithdrawalError = variant {
     // The minter is overloaded, retry the request.
     // The payload contains a human-readable message explaining what caused the unavailability.
     TemporarilyUnavailable : text;
-    // A generic error reserved for future extensions.
-    GenericError : record { error_message : text; error_code : nat64 };
 };
 
 type SolTransaction = record { transaction_hash : text };
