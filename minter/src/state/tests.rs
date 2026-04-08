@@ -57,7 +57,7 @@ mod state_from_init_args {
                 quarantined_deposits: BTreeMap::new(),
                 minted_deposits: BTreeMap::new(),
                 pending_withdrawal_requests: BTreeMap::new(),
-                pending_withdrawal_created_at: BTreeMap::new(),
+                incomplete_withdrawal_created_at: BTreeMap::new(),
                 sent_withdrawal_requests: BTreeMap::new(),
                 successful_withdrawal_requests: BTreeMap::new(),
                 failed_withdrawal_requests: BTreeMap::new(),
@@ -499,17 +499,19 @@ fn should_track_balance_through_deposits_withdrawals_and_failures() {
     assert_eq!(read_state(|s| s.balance()), expected);
 }
 
-mod oldest_pending_withdrawal_created_at {
+mod oldest_incomplete_withdrawal_created_at {
     use super::*;
-    use crate::test_fixtures::events::{accept_withdrawal_at, submit_withdrawal};
+    use crate::test_fixtures::events::{
+        accept_withdrawal_at, fail_transaction, submit_withdrawal, succeed_transaction,
+    };
 
     const AMOUNT: u64 = 50_000_000;
 
     #[test]
-    fn should_be_none_when_no_pending_withdrawals() {
+    fn should_be_none_when_no_incomplete_withdrawals() {
         init_state();
         assert_eq!(
-            read_state(|s| s.oldest_pending_withdrawal_created_at()),
+            read_state(|s| s.oldest_incomplete_withdrawal_created_at()),
             None
         );
     }
@@ -519,7 +521,7 @@ mod oldest_pending_withdrawal_created_at {
         init_state();
         accept_withdrawal_at(account(1), 0, AMOUNT, 1_000_000_000);
         assert_eq!(
-            read_state(|s| s.oldest_pending_withdrawal_created_at()),
+            read_state(|s| s.oldest_incomplete_withdrawal_created_at()),
             Some(1_000_000_000)
         );
     }
@@ -531,35 +533,69 @@ mod oldest_pending_withdrawal_created_at {
         accept_withdrawal_at(account(2), 1, AMOUNT, 2_000_000_000);
         accept_withdrawal_at(account(3), 2, AMOUNT, 3_000_000_000);
         assert_eq!(
-            read_state(|s| s.oldest_pending_withdrawal_created_at()),
+            read_state(|s| s.oldest_incomplete_withdrawal_created_at()),
             Some(1_000_000_000)
         );
     }
 
     #[test]
-    fn should_update_when_oldest_withdrawal_is_submitted() {
-        init_state();
-        accept_withdrawal_at(account(1), 0, AMOUNT, 1_000_000_000);
-        accept_withdrawal_at(account(2), 1, AMOUNT, 2_000_000_000);
-
-        submit_withdrawal(signature(0xAA), account(100), 0, vec![0]);
-
-        assert_eq!(
-            read_state(|s| s.oldest_pending_withdrawal_created_at()),
-            Some(2_000_000_000)
-        );
-    }
-
-    #[test]
-    fn should_be_none_when_all_withdrawals_are_submitted() {
+    fn should_persist_through_submission() {
         init_state();
         accept_withdrawal_at(account(1), 0, AMOUNT, 1_000_000_000);
         accept_withdrawal_at(account(2), 1, AMOUNT, 2_000_000_000);
 
         submit_withdrawal(signature(0xAA), account(100), 0, vec![0, 1]);
 
+        // Both withdrawals are now sent but still incomplete
         assert_eq!(
-            read_state(|s| s.oldest_pending_withdrawal_created_at()),
+            read_state(|s| s.oldest_incomplete_withdrawal_created_at()),
+            Some(1_000_000_000)
+        );
+    }
+
+    #[test]
+    fn should_update_when_oldest_withdrawal_succeeds() {
+        init_state();
+        accept_withdrawal_at(account(1), 0, AMOUNT, 1_000_000_000);
+        accept_withdrawal_at(account(2), 1, AMOUNT, 2_000_000_000);
+
+        submit_withdrawal(signature(0xAA), account(100), 0, vec![0]);
+        submit_withdrawal(signature(0xBB), account(100), 0, vec![1]);
+        succeed_transaction(signature(0xAA));
+
+        assert_eq!(
+            read_state(|s| s.oldest_incomplete_withdrawal_created_at()),
+            Some(2_000_000_000)
+        );
+    }
+
+    #[test]
+    fn should_update_when_oldest_withdrawal_fails() {
+        init_state();
+        accept_withdrawal_at(account(1), 0, AMOUNT, 1_000_000_000);
+        accept_withdrawal_at(account(2), 1, AMOUNT, 2_000_000_000);
+
+        submit_withdrawal(signature(0xAA), account(100), 0, vec![0]);
+        submit_withdrawal(signature(0xBB), account(100), 0, vec![1]);
+        fail_transaction(signature(0xAA));
+
+        assert_eq!(
+            read_state(|s| s.oldest_incomplete_withdrawal_created_at()),
+            Some(2_000_000_000)
+        );
+    }
+
+    #[test]
+    fn should_be_none_when_all_withdrawals_are_finalized() {
+        init_state();
+        accept_withdrawal_at(account(1), 0, AMOUNT, 1_000_000_000);
+        accept_withdrawal_at(account(2), 1, AMOUNT, 2_000_000_000);
+
+        submit_withdrawal(signature(0xAA), account(100), 0, vec![0, 1]);
+        succeed_transaction(signature(0xAA));
+
+        assert_eq!(
+            read_state(|s| s.oldest_incomplete_withdrawal_created_at()),
             None
         );
     }

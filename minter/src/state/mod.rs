@@ -96,7 +96,7 @@ pub struct State {
     quarantined_deposits: BTreeMap<DepositId, Deposit>,
     minted_deposits: BTreeMap<DepositId, MintedDeposit>,
     pending_withdrawal_requests: BTreeMap<LedgerBurnIndex, WithdrawalRequest>,
-    pending_withdrawal_created_at: BTreeMap<LedgerBurnIndex, u64>,
+    incomplete_withdrawal_created_at: BTreeMap<LedgerBurnIndex, u64>,
     sent_withdrawal_requests: BTreeMap<LedgerBurnIndex, SentWithdrawalRequest>,
     successful_withdrawal_requests: BTreeMap<LedgerBurnIndex, SentWithdrawalRequest>,
     failed_withdrawal_requests: BTreeMap<LedgerBurnIndex, SentWithdrawalRequest>,
@@ -412,9 +412,13 @@ impl State {
         &self.pending_withdrawal_requests
     }
 
-    /// Returns the creation timestamp (in nanoseconds) of the oldest pending withdrawal request.
-    pub fn oldest_pending_withdrawal_created_at(&self) -> Option<u64> {
-        self.pending_withdrawal_created_at.values().next().copied()
+    /// Returns the creation timestamp (in nanoseconds) of the oldest incomplete withdrawal request.
+    /// An incomplete withdrawal is one that has not yet been finalized (succeeded or failed).
+    pub fn oldest_incomplete_withdrawal_created_at(&self) -> Option<u64> {
+        self.incomplete_withdrawal_created_at
+            .values()
+            .next()
+            .copied()
     }
 
     fn process_accepted_withdrawal(&mut self, request: &WithdrawalRequest, timestamp: u64) {
@@ -425,7 +429,7 @@ impl State {
             "Attempted to accept an already accepted withdrawal request: {:?}",
             request.burn_block_index
         );
-        self.pending_withdrawal_created_at
+        self.incomplete_withdrawal_created_at
             .insert(request.burn_block_index, timestamp);
     }
 
@@ -504,7 +508,6 @@ impl State {
                         .unwrap_or_else(|| {
                             panic!("Attempted to send transaction for unknown withdrawal request: {burn_index:?}")
                         });
-                    self.pending_withdrawal_created_at.remove(burn_index);
                     total += request.withdrawal_amount - request.withdrawal_fee;
                     assert_eq!(
                         self.sent_withdrawal_requests.insert(
@@ -604,6 +607,7 @@ impl State {
         self.sent_withdrawal_requests
             .extract_if(.., |_, sent| &sent.signature == signature)
             .for_each(|(burn_index, sent)| {
+                self.incomplete_withdrawal_created_at.remove(&burn_index);
                 self.successful_withdrawal_requests.insert(burn_index, sent);
             });
     }
@@ -627,6 +631,7 @@ impl State {
         self.sent_withdrawal_requests
             .extract_if(.., |_, sent| &sent.signature == signature)
             .for_each(|(burn_index, sent)| {
+                self.incomplete_withdrawal_created_at.remove(&burn_index);
                 self.failed_withdrawal_requests.insert(burn_index, sent);
             });
     }
@@ -679,7 +684,7 @@ impl TryFrom<InitArgs> for State {
             quarantined_deposits: BTreeMap::new(),
             minted_deposits: BTreeMap::new(),
             pending_withdrawal_requests: BTreeMap::new(),
-            pending_withdrawal_created_at: BTreeMap::new(),
+            incomplete_withdrawal_created_at: BTreeMap::new(),
             sent_withdrawal_requests: BTreeMap::new(),
             successful_withdrawal_requests: BTreeMap::new(),
             failed_withdrawal_requests: BTreeMap::new(),

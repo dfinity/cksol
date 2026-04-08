@@ -1091,7 +1091,7 @@ mod metrics_tests {
     }
 
     #[tokio::test]
-    async fn should_report_oldest_pending_withdrawal_age() {
+    async fn should_report_oldest_incomplete_withdrawal_age() {
         use candid::Nat;
         use cksol_int_tests::fixtures::DEFAULT_CALLER_ACCOUNT;
         use icrc_ledger_types::icrc1::account::Account;
@@ -1107,11 +1107,11 @@ mod metrics_tests {
             .build()
             .await;
 
-        // No pending withdrawals: metric should be absent
+        // No incomplete withdrawals: metric should be absent
         let setup = setup
             .check_metrics()
             .await
-            .assert_does_not_contain_metric_matching("oldest_pending_withdrawal_age_seconds")
+            .assert_does_not_contain_metric_matching("oldest_incomplete_withdrawal_age_seconds")
             .into();
 
         setup
@@ -1141,7 +1141,7 @@ mod metrics_tests {
         setup.tick().await;
 
         let metrics = setup.check_metrics().await;
-        let matches = metrics.find_metrics_matching(r"oldest_pending_withdrawal_age_seconds (\d+)");
+        let matches = metrics.find_metrics_matching(r"oldest_incomplete_withdrawal_age_seconds (\d+)");
         assert_eq!(matches.len(), 1, "expected exactly one metric match");
         let age: u64 = matches[0]
             .split_whitespace()
@@ -1151,7 +1151,7 @@ mod metrics_tests {
             .expect("metric value should be a u64");
         assert!(
             (60..=120).contains(&age),
-            "expected oldest pending withdrawal age to be between 60 and 120 seconds, got {age}"
+            "expected oldest incomplete withdrawal age to be between 60 and 120 seconds, got {age}"
         );
 
         metrics.into().drop().await;
