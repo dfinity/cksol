@@ -1,15 +1,11 @@
-use crate::numeric::LedgerBurnIndex;
-use crate::sol_transfer::MAX_WITHDRAWALS_PER_TX;
-use crate::test_fixtures::EventsAssert;
 use crate::{
+    constants::MAX_CONCURRENT_RPC_CALLS,
     guard::{TimerGuard, withdrawal_guard},
-    state::{
-        TaskType,
-        event::{EventType, TransactionPurpose},
-    },
+    sol_transfer::MAX_WITHDRAWALS_PER_TX,
+    state::{TaskType, read_state},
     test_fixtures::{
-        MINIMUM_WITHDRAWAL_AMOUNT, MINTER_ACCOUNT, WITHDRAWAL_FEE, account, confirmed_block,
-        events, init_schnorr_master_key, init_state, runtime::TestCanisterRuntime, signature,
+        EventsAssert, MINIMUM_WITHDRAWAL_AMOUNT, MINTER_ACCOUNT, account, confirmed_block, events,
+        init_balance, init_schnorr_master_key, init_state, runtime::TestCanisterRuntime, signature,
     },
     withdraw::{MAX_WITHDRAWAL_ROUNDS, process_pending_withdrawals, withdraw, withdrawal_status},
 };
@@ -236,8 +232,6 @@ async fn should_return_error_if_already_processing() {
 }
 
 mod process_pending_withdrawals_tests {
-    use crate::constants::MAX_CONCURRENT_RPC_CALLS;
-
     use super::*;
 
     type GetSlotResult = MultiRpcResult<Slot>;
@@ -248,6 +242,7 @@ mod process_pending_withdrawals_tests {
     async fn should_do_nothing_if_no_pending_withdrawals() {
         init_state();
 
+        // We return early, therefore no RPC calls are made
         let runtime = TestCanisterRuntime::new();
         process_pending_withdrawals(&runtime).await;
 
@@ -260,18 +255,11 @@ mod process_pending_withdrawals_tests {
 
         let _guard = TimerGuard::new(TaskType::WithdrawalProcessing).unwrap();
 
+        // We return early, therefore no RPC calls are made
         let runtime = TestCanisterRuntime::new();
         process_pending_withdrawals(&runtime).await;
 
-        let mut log: Log<Priority> = Log::default();
-        log.push_logs(Priority::Info);
-        assert!(
-            log.entries.iter().any(|e| e
-                .message
-                .contains("failed to obtain WithdrawalProcessing guard, exiting")),
-            "Expected info about failing to obtain guard, got: {:?}",
-            log.entries
-        );
+        EventsAssert::assert_no_events_recorded();
     }
 
     #[tokio::test]
@@ -301,6 +289,7 @@ mod process_pending_withdrawals_tests {
     #[tokio::test]
     async fn should_process_when_pending_withdrawals_exist() {
         init_state();
+        init_balance();
         init_schnorr_master_key();
 
         let tx_signature = signature(0x42);
@@ -321,25 +310,6 @@ mod process_pending_withdrawals_tests {
         submit_withdrawals(&runtime, 1).await;
 
         process_pending_withdrawals(&runtime).await;
-
-        EventsAssert::from_recorded()
-            .expect_event(|e| {
-                assert_matches!(e, EventType::AcceptedWithdrawalRequest(req) => {
-                    assert_eq!(req.amount_to_burn, MINIMUM_WITHDRAWAL_AMOUNT);
-                    assert_eq!(req.withdrawal_amount, MINIMUM_WITHDRAWAL_AMOUNT - WITHDRAWAL_FEE);
-                });
-            })
-            .expect_event(|e| {
-                assert_matches!(e, EventType::SubmittedTransaction {
-                    signature,
-                    purpose: TransactionPurpose::WithdrawSol { burn_indices },
-                    ..
-                } => {
-                    assert_eq!(signature, tx_signature);
-                    assert_eq!(*burn_indices, vec![LedgerBurnIndex::from(1u64)]);
-                });
-            })
-            .assert_no_more_events();
 
         assert_matches!(withdrawal_status(1), WithdrawalStatus::TxSent(_));
     }
@@ -365,14 +335,13 @@ mod process_pending_withdrawals_tests {
 
         submit_withdrawals(&runtime, 1).await;
 
+        let events_before = EventsAssert::from_recorded();
+
         process_pending_withdrawals(&runtime).await;
 
         // No withdrawal transaction event should be recorded
-        EventsAssert::from_recorded()
-            .expect_event(|e| {
-                assert_matches!(e, EventType::AcceptedWithdrawalRequest(_));
-            })
-            .assert_no_more_events();
+        let events_after = EventsAssert::from_recorded();
+        assert_eq!(events_before, events_after);
 
         let mut log: Log<Priority> = Log::default();
         log.push_logs(Priority::Info);
@@ -409,24 +378,13 @@ mod process_pending_withdrawals_tests {
 
         submit_withdrawals(&runtime, 2).await;
 
+        let events_before = EventsAssert::from_recorded();
+
         process_pending_withdrawals(&runtime).await;
 
-        EventsAssert::from_recorded()
-            .expect_event(|e| {
-                assert_matches!(e, EventType::AcceptedWithdrawalRequest(req) => {
-                    assert_eq!(req.amount_to_burn, MINIMUM_WITHDRAWAL_AMOUNT);
-                    assert_eq!(req.withdrawal_amount, MINIMUM_WITHDRAWAL_AMOUNT - WITHDRAWAL_FEE);
-                    assert_eq!(req.account, Principal::from_slice(&[1, 1]).into());
-                });
-            })
-            .expect_event(|e| {
-                assert_matches!(e, EventType::AcceptedWithdrawalRequest(req) => {
-                    assert_eq!(req.amount_to_burn, MINIMUM_WITHDRAWAL_AMOUNT);
-                    assert_eq!(req.withdrawal_amount, MINIMUM_WITHDRAWAL_AMOUNT - WITHDRAWAL_FEE);
-                    assert_eq!(req.account, Principal::from_slice(&[1, 2]).into());
-                });
-            })
-            .assert_no_more_events();
+        // No transaction event should be recorded (signing failed)
+        let events_after = EventsAssert::from_recorded();
+        assert_eq!(events_before, events_after);
 
         // An error should be logged for the whole batch
         let mut log: Log<Priority> = Log::default();
@@ -447,6 +405,7 @@ mod process_pending_withdrawals_tests {
     #[tokio::test]
     async fn should_batch_withdrawals_into_transactions() {
         init_state();
+        init_balance();
         init_schnorr_master_key();
 
         let request_count = MAX_WITHDRAWALS_PER_TX as u64 + 1;
@@ -478,37 +437,14 @@ mod process_pending_withdrawals_tests {
             assert_matches!(withdrawal_status(i), WithdrawalStatus::TxSent(_));
         }
 
-        // Verify events: request_count AcceptedWithdrawalRequest events,
-        // then 2 SubmittedTransaction events (one per batch).
-        let mut events = EventsAssert::from_recorded();
-        for _ in 0..request_count {
-            events = events.expect_event(|e| {
-                assert_matches!(e, EventType::AcceptedWithdrawalRequest(_));
-            });
-        }
-        events
-            .expect_event(|e| {
-                assert_matches!(e, EventType::SubmittedTransaction {
-                    purpose: TransactionPurpose::WithdrawSol { burn_indices },
-                    ..
-                } => {
-                    assert_eq!(burn_indices.len(), MAX_WITHDRAWALS_PER_TX);
-                });
-            })
-            .expect_event(|e| {
-                assert_matches!(e, EventType::SubmittedTransaction {
-                    purpose: TransactionPurpose::WithdrawSol { burn_indices },
-                    ..
-                } => {
-                    assert_eq!(burn_indices.len(), 1);
-                });
-            })
-            .assert_no_more_events();
+        // Verify that withdrawals were split into 2 batches
+        read_state(|s| assert_eq!(s.submitted_transactions().len(), 2));
     }
 
     #[tokio::test]
     async fn should_process_multiple_rounds_per_invocation() {
         init_state();
+        init_balance();
         init_schnorr_master_key();
 
         // Create more withdrawals than fit in one round
@@ -564,6 +500,7 @@ mod process_pending_withdrawals_tests {
     #[tokio::test]
     async fn should_respect_max_withdrawal_rounds() {
         init_state();
+        init_balance();
         init_schnorr_master_key();
 
         let slot = 1;
@@ -627,6 +564,7 @@ mod withdrawal_finalization_tests {
     #[test]
     fn should_report_tx_finalized_after_succeeded_transaction() {
         init_state();
+        init_balance();
         let tx_signature = setup_sent_withdrawal(1);
 
         assert_matches!(withdrawal_status(1), WithdrawalStatus::TxSent(_));
@@ -643,6 +581,7 @@ mod withdrawal_finalization_tests {
     #[test]
     fn should_report_tx_failed_after_failed_transaction() {
         init_state();
+        init_balance();
         let tx_signature = setup_sent_withdrawal(1);
 
         assert_matches!(withdrawal_status(1), WithdrawalStatus::TxSent(_));

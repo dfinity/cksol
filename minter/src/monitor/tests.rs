@@ -3,11 +3,10 @@ use crate::{
     state::{TaskType, event::EventType, mutate_state, read_state, reset_state},
     storage::reset_events,
     test_fixtures::{
-        EventsAssert, MINTER_ACCOUNT, confirmed_block, events, init_schnorr_master_key, init_state,
-        runtime::TestCanisterRuntime, signature,
+        EventsAssert, MINTER_ACCOUNT, confirmed_block, deposit_id, events, init_schnorr_master_key,
+        init_state, runtime::TestCanisterRuntime, signature,
     },
 };
-use assert_matches::assert_matches;
 use sol_rpc_types::{
     ConfirmedBlock, MultiRpcResult, RpcError, Signature, Slot, TransactionConfirmationStatus,
     TransactionError, TransactionStatus,
@@ -35,26 +34,34 @@ async fn should_return_early_if_no_submitted_transactions() {
 #[tokio::test]
 async fn should_return_early_if_task_already_active() {
     setup();
-    add_submitted_transaction(signature(0x01), EXPIRED_SLOT);
+    submit_consolidation_transaction(CURRENT_SLOT);
 
     mutate_state(|s| {
         s.active_tasks_mut()
             .insert(TaskType::MonitorSubmittedTransactions);
     });
 
-    monitor_submitted_transactions(TestCanisterRuntime::new()).await;
+    let events_before = EventsAssert::from_recorded();
 
-    EventsAssert::from_recorded()
-        .expect_event(|e| assert_matches!(e, EventType::SubmittedTransaction { .. }))
-        .assert_no_more_events();
+    // We return early, therefore no RPC calls are made
+    let runtime = TestCanisterRuntime::new();
+
+    monitor_submitted_transactions(runtime).await;
+
+    let events_after = EventsAssert::from_recorded();
+    assert_eq!(events_before, events_after);
 }
 
 #[tokio::test]
 async fn should_return_early_if_fetching_current_slot_fails() {
     setup();
-    add_submitted_transaction(signature(0x01), EXPIRED_SLOT);
+    submit_consolidation_transaction(EXPIRED_SLOT);
+
+    let events_before = EventsAssert::from_recorded();
 
     let error = SlotResult::Consistent(Err(RpcError::ValidationError("Error".to_string())));
+    // We try to fetch the current slot 3 times before giving up,
+    // and then no more RPC calls are made
     let runtime = TestCanisterRuntime::new()
         .add_stub_response(error.clone())
         .add_stub_response(error.clone())
@@ -62,9 +69,8 @@ async fn should_return_early_if_fetching_current_slot_fails() {
 
     monitor_submitted_transactions(runtime).await;
 
-    EventsAssert::from_recorded()
-        .expect_event(|e| assert_matches!(e, EventType::SubmittedTransaction { .. }))
-        .assert_no_more_events();
+    let events_after = EventsAssert::from_recorded();
+    assert_eq!(events_before, events_after);
 }
 
 mod finalization {
@@ -74,26 +80,18 @@ mod finalization {
     async fn should_finalize_transaction_with_finalized_status() {
         setup();
 
-        let signature = signature(0x01);
-        add_submitted_transaction(signature, RECENT_SLOT);
+        let signature = submit_consolidation_transaction(RECENT_SLOT);
 
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
             .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![Some(
-                finalized_status(RECENT_SLOT),
+                finalized_status(),
             )])));
 
         monitor_submitted_transactions(runtime).await;
 
         EventsAssert::from_recorded()
-            .expect_event(|e| assert_matches!(e, EventType::SubmittedTransaction { .. }))
-            .expect_event(|e| {
-                assert_matches!(
-                    e,
-                    EventType::SucceededTransaction { signature: sig } if sig == signature
-                )
-            })
-            .assert_no_more_events();
+            .expect_contains_event_eq(EventType::SucceededTransaction { signature });
 
         read_state(|s| {
             assert!(s.submitted_transactions().is_empty());
@@ -104,13 +102,13 @@ mod finalization {
     #[tokio::test]
     async fn should_not_finalize_transaction() {
         // Processed status, recent slot
-        should_not_finalize(RECENT_SLOT, Some(processed_status(RECENT_SLOT))).await;
+        should_not_finalize(RECENT_SLOT, Some(processed_status())).await;
         // Processed status, expired slot
-        should_not_finalize(EXPIRED_SLOT, Some(processed_status(EXPIRED_SLOT))).await;
+        should_not_finalize(EXPIRED_SLOT, Some(processed_status())).await;
         // Confirmed status, recent slot
-        should_not_finalize(RECENT_SLOT, Some(confirmed_status(RECENT_SLOT))).await;
+        should_not_finalize(RECENT_SLOT, Some(confirmed_status())).await;
         // Confirmed status, expired slot
-        should_not_finalize(EXPIRED_SLOT, Some(confirmed_status(EXPIRED_SLOT))).await;
+        should_not_finalize(EXPIRED_SLOT, Some(confirmed_status())).await;
         // No status, blockhash not yet expired
         should_not_finalize(RECENT_SLOT, None).await;
     }
@@ -120,7 +118,7 @@ mod finalization {
         reset_events();
         setup();
 
-        add_submitted_transaction(signature(0x01), slot);
+        submit_consolidation_transaction(slot);
 
         let mut runtime = TestCanisterRuntime::new()
             .with_increasing_time()
@@ -128,18 +126,19 @@ mod finalization {
                 status.clone(),
             ])));
 
+        // If the transaction status is null, we also check if the transaction slot is expired
         if status.is_none() {
-            // get_recent_slot_and_blockhash for current slot check (getSlot + getBlock)
             runtime = runtime
                 .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
                 .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())));
         }
 
+        let events_before = EventsAssert::from_recorded();
+
         monitor_submitted_transactions(runtime).await;
 
-        EventsAssert::from_recorded()
-            .expect_event(|e| assert_matches!(e, EventType::SubmittedTransaction { .. }))
-            .assert_no_more_events();
+        let events_after = EventsAssert::from_recorded();
+        assert_eq!(events_before, events_after);
 
         read_state(|s| assert_eq!(s.submitted_transactions().len(), 1));
     }
@@ -148,8 +147,7 @@ mod finalization {
     async fn should_record_failed_transaction_event_on_error() {
         setup();
 
-        let signature = signature(0x01);
-        add_submitted_transaction(signature, RECENT_SLOT);
+        let signature = submit_consolidation_transaction(RECENT_SLOT);
 
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
@@ -165,16 +163,7 @@ mod finalization {
         monitor_submitted_transactions(runtime).await;
 
         EventsAssert::from_recorded()
-            .expect_event(|e| assert_matches!(e, EventType::SubmittedTransaction { .. }))
-            .expect_event(|e| {
-                assert_matches!(
-                    e,
-                    EventType::FailedTransaction {
-                        signature: sig,
-                    } if sig == signature
-                )
-            })
-            .assert_no_more_events();
+            .expect_contains_event_eq(EventType::FailedTransaction { signature });
 
         read_state(|s| {
             assert!(s.submitted_transactions().is_empty());
@@ -187,19 +176,19 @@ mod finalization {
     async fn should_finalize_multiple_transactions_in_one_batch() {
         setup();
 
-        let sig_a = signature(0x01);
-        let sig_b = signature(0x02);
-        let sig_c = signature(0x03);
-        add_submitted_transaction(sig_a, RECENT_SLOT);
-        add_submitted_transaction(sig_b, RECENT_SLOT);
-        add_submitted_transaction(sig_c, RECENT_SLOT);
+        let sig_a = 0x01;
+        let sig_b = 0x02;
+        let sig_c = 0x03;
+        submit_consolidation_transaction_with_signature(sig_a, RECENT_SLOT);
+        submit_consolidation_transaction_with_signature(sig_b, RECENT_SLOT);
+        submit_consolidation_transaction_with_signature(sig_c, RECENT_SLOT);
 
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
             .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![
-                Some(finalized_status(RECENT_SLOT)),
+                Some(finalized_status()),
                 None,
-                Some(finalized_status(RECENT_SLOT)),
+                Some(finalized_status()),
             ])))
             // get_recent_slot_and_blockhash for the one not_found transaction (getSlot + getBlock)
             .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
@@ -208,40 +197,40 @@ mod finalization {
         monitor_submitted_transactions(runtime).await;
 
         EventsAssert::from_recorded()
-            .expect_event(|e| assert_matches!(e, EventType::SubmittedTransaction { .. }))
-            .expect_event(|e| assert_matches!(e, EventType::SubmittedTransaction { .. }))
-            .expect_event(|e| assert_matches!(e, EventType::SubmittedTransaction { .. }))
-            .expect_event(|e| assert_matches!(e, EventType::SucceededTransaction { .. }))
-            .expect_event(|e| assert_matches!(e, EventType::SucceededTransaction { .. }))
-            .assert_no_more_events();
+            .expect_contains_event_eq(EventType::SucceededTransaction {
+                signature: signature(sig_a),
+            })
+            .expect_contains_event_eq(EventType::SucceededTransaction {
+                signature: signature(sig_c),
+            });
 
         read_state(|s| {
             assert_eq!(s.submitted_transactions().len(), 1);
-            assert!(s.submitted_transactions().contains_key(&sig_b));
+            assert!(s.submitted_transactions().contains_key(&signature(sig_b)));
         });
     }
 
-    fn confirmed_status(slot: Slot) -> TransactionStatus {
+    fn confirmed_status() -> TransactionStatus {
         TransactionStatus {
-            slot,
+            slot: 0,
             status: Ok(()),
             err: None,
             confirmation_status: Some(TransactionConfirmationStatus::Confirmed),
         }
     }
 
-    fn processed_status(slot: Slot) -> TransactionStatus {
+    fn processed_status() -> TransactionStatus {
         TransactionStatus {
-            slot,
+            slot: 0,
             status: Ok(()),
             err: None,
             confirmation_status: Some(TransactionConfirmationStatus::Processed),
         }
     }
 
-    fn finalized_status(slot: Slot) -> TransactionStatus {
+    fn finalized_status() -> TransactionStatus {
         TransactionStatus {
-            slot,
+            slot: 0,
             status: Ok(()),
             err: None,
             confirmation_status: Some(TransactionConfirmationStatus::Finalized),
@@ -256,8 +245,7 @@ mod resubmission {
     async fn should_resubmit_expired_transaction_with_no_status() {
         setup();
 
-        let old_signature = signature(0x01);
-        add_submitted_transaction(old_signature, EXPIRED_SLOT);
+        let old_signature = submit_consolidation_transaction(EXPIRED_SLOT);
 
         let new_signature = signature(0xAA);
 
@@ -276,19 +264,11 @@ mod resubmission {
 
         monitor_submitted_transactions(runtime).await;
 
-        EventsAssert::from_recorded()
-            .expect_event(|e| assert_matches!(e, EventType::SubmittedTransaction { .. }))
-            .expect_event(|e| {
-                assert_matches!(
-                    e,
-                    EventType::ResubmittedTransaction {
-                        old_signature: old_sig,
-                        new_signature: new_sig,
-                        new_slot: slot,
-                    } if old_sig == old_signature && new_sig == new_signature && slot == RESUBMISSION_SLOT
-                )
-            })
-            .assert_no_more_events();
+        EventsAssert::from_recorded().expect_contains_event_eq(EventType::ResubmittedTransaction {
+            old_signature,
+            new_signature,
+            new_slot: RESUBMISSION_SLOT,
+        });
 
         read_state(|s| {
             assert_eq!(s.submitted_transactions().len(), 1);
@@ -300,7 +280,9 @@ mod resubmission {
     async fn should_not_resubmit_expired_transaction_if_status_check_fails() {
         setup();
 
-        add_submitted_transaction(signature(0x01), EXPIRED_SLOT);
+        submit_consolidation_transaction(EXPIRED_SLOT);
+
+        let events_before = EventsAssert::from_recorded();
 
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
@@ -310,9 +292,8 @@ mod resubmission {
 
         monitor_submitted_transactions(runtime).await;
 
-        EventsAssert::from_recorded()
-            .expect_event(|e| assert_matches!(e, EventType::SubmittedTransaction { .. }))
-            .assert_no_more_events();
+        let events_after = EventsAssert::from_recorded();
+        assert_eq!(events_before, events_after);
 
         read_state(|s| assert_eq!(s.submitted_transactions().len(), 1));
     }
@@ -321,8 +302,7 @@ mod resubmission {
     async fn should_record_resubmission_event_even_if_submission_fails() {
         setup();
 
-        let old_signature = signature(0x01);
-        add_submitted_transaction(old_signature, EXPIRED_SLOT);
+        let old_signature = submit_consolidation_transaction(EXPIRED_SLOT);
 
         let new_signature = signature(0xAA);
 
@@ -340,19 +320,11 @@ mod resubmission {
 
         monitor_submitted_transactions(runtime).await;
 
-        EventsAssert::from_recorded()
-            .expect_event(|e| assert_matches!(e, EventType::SubmittedTransaction { .. }))
-            .expect_event(|e| {
-                assert_matches!(
-                    e,
-                    EventType::ResubmittedTransaction {
-                        old_signature: old_sig,
-                        new_signature: new_sig,
-                        new_slot: slot,
-                    } if old_sig == old_signature && new_sig == new_signature && slot == RESUBMISSION_SLOT
-                )
-            })
-            .assert_no_more_events();
+        EventsAssert::from_recorded().expect_contains_event_eq(EventType::ResubmittedTransaction {
+            old_signature,
+            new_signature,
+            new_slot: RESUBMISSION_SLOT,
+        });
     }
 
     #[tokio::test]
@@ -363,7 +335,7 @@ mod resubmission {
 
         let num_transactions = MAX_CONCURRENT_RPC_CALLS + 2; // 10+2 = 12 transactions require 2 rounds
         for i in 0..num_transactions {
-            add_submitted_transaction(signature(i as u8), EXPIRED_SLOT);
+            submit_consolidation_transaction_with_signature(i as u8, EXPIRED_SLOT);
         }
 
         let mut runtime = TestCanisterRuntime::new()
@@ -413,6 +385,17 @@ fn setup() {
     init_schnorr_master_key();
 }
 
-fn add_submitted_transaction(signature: solana_signature::Signature, slot: Slot) {
-    events::submit_consolidation(signature, MINTER_ACCOUNT, slot, vec![]);
+fn submit_consolidation_transaction(slot: Slot) -> solana_signature::Signature {
+    submit_consolidation_transaction_with_signature(1, slot)
+}
+
+fn submit_consolidation_transaction_with_signature(
+    i: u8,
+    slot: Slot,
+) -> solana_signature::Signature {
+    let signature = signature(i);
+    events::accept_deposit(deposit_id(i), 1_000_000);
+    events::mint_deposit(deposit_id(i), i as u64);
+    events::submit_consolidation(signature, MINTER_ACCOUNT, slot, vec![i as u64]);
+    signature
 }

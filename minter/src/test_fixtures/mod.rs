@@ -70,6 +70,17 @@ pub fn init_state_with_args(init_args: InitArgs) {
     init_once_state(State::try_from(init_args).expect("Invalid init args"));
 }
 
+pub fn init_balance() {
+    let id = deposit_id(0xFD);
+    let mint_index = 0xFE;
+    let consolidation_signature = signature(0xFF);
+
+    events::accept_deposit(id, u64::MAX / 2);
+    events::mint_deposit(id, mint_index);
+    events::submit_consolidation(consolidation_signature, MINTER_ACCOUNT, 0, vec![mint_index]);
+    events::succeed_transaction(consolidation_signature);
+}
+
 pub fn init_schnorr_master_key() {
     mutate_state(|s| {
         s.set_once_minter_public_key(SchnorrPublicKey {
@@ -100,8 +111,8 @@ pub fn confirmed_block() -> sol_rpc_types::ConfirmedBlock {
 }
 
 /// Returns a [`DepositId`] with deterministic signature and account derived from `i`.
-pub fn deposit_id(i: u8) -> crate::state::event::DepositId {
-    crate::state::event::DepositId {
+pub fn deposit_id(i: u8) -> DepositId {
+    DepositId {
         signature: solana_signature::Signature::from([i; 64]),
         account: account(i),
     }
@@ -722,6 +733,7 @@ pub mod deposit {
     }
 }
 
+#[derive(Debug, PartialEq)]
 pub struct EventsAssert(VecDeque<Event>);
 
 impl EventsAssert {
@@ -745,6 +757,23 @@ impl EventsAssert {
     pub fn expect_event_eq(mut self, expected: EventType) -> Self {
         let event = self.0.pop_front().expect("No more events!");
         assert_eq!(event.payload, expected);
+        self
+    }
+
+    /// Asserts that `expected` appears exactly once, removes it, and returns the rest.
+    pub fn expect_contains_event_eq(mut self, expected: EventType) -> Self {
+        let pos = self
+            .0
+            .iter()
+            .position(|event| event.payload == expected)
+            .unwrap_or_else(|| {
+                panic!("Expected to find event {expected:?} but it was not recorded")
+            });
+        self.0.remove(pos);
+        assert!(
+            !self.0.iter().any(|event| event.payload == expected),
+            "Expected exactly 1 occurrence of {expected:?}, found more"
+        );
         self
     }
 
