@@ -4,9 +4,9 @@ use crate::{
     sol_transfer::MAX_WITHDRAWALS_PER_TX,
     state::{TaskType, read_state},
     test_fixtures::{
-        EventsAssert, MINIMUM_WITHDRAWAL_AMOUNT, MINTER_ACCOUNT, account, confirmed_block, events,
-        init_balance, init_balance_to, init_schnorr_master_key, init_state,
-        runtime::TestCanisterRuntime, signature,
+        EventsAssert, MINIMUM_WITHDRAWAL_AMOUNT, MINTER_ACCOUNT, WITHDRAWAL_FEE, account,
+        confirmed_block, events, init_balance, init_balance_to, init_schnorr_master_key,
+        init_state, runtime::TestCanisterRuntime, signature,
     },
     withdraw::{MAX_WITHDRAWAL_ROUNDS, process_pending_withdrawals, withdraw, withdrawal_status},
 };
@@ -23,6 +23,7 @@ use ic_cdk_management_canister::SignCallError;
 use icrc_ledger_types::{icrc1::account::Account, icrc2::transfer_from::TransferFromError};
 use sol_rpc_types::{MultiRpcResult, RpcError, Slot};
 use solana_signature::Signature;
+
 const VALID_ADDRESS: &str = "E4MpwNnMWs2XtW5gVrxZvyS7fMq31QD5HvbxmwP45Tz3";
 
 fn test_caller() -> Account {
@@ -298,17 +299,16 @@ mod process_pending_withdrawals_tests {
     #[tokio::test]
     async fn should_process_only_affordable_withdrawals() {
         init_state();
-        // Set up a minter balance that covers exactly one large withdrawal
-        // but not two.
-        let large_amount = 100_000_000; // 0.1 SOL
-        init_balance_to(large_amount);
+        init_balance_to(12_500_000);
         init_schnorr_master_key();
 
         let tx_signature = signature(0x42);
         let slot = 1;
 
-        events::accept_withdrawal(account(1), 0, large_amount);
-        events::accept_withdrawal(account(2), 1, large_amount);
+        // The minter balance is sufficient for the first two withdrawals
+        events::accept_withdrawal(account(1), 0, 5_000_000 + WITHDRAWAL_FEE);
+        events::accept_withdrawal(account(2), 1, 5_000_000 + WITHDRAWAL_FEE);
+        events::accept_withdrawal(account(3), 2, 5_000_000 + WITHDRAWAL_FEE);
 
         let events_before = EventsAssert::from_recorded();
 
@@ -321,11 +321,12 @@ mod process_pending_withdrawals_tests {
 
         process_pending_withdrawals(&runtime).await;
 
-        // First withdrawal should be submitted, second should remain pending
+        // First two withdrawals should be submitted, third should remain pending
         assert_matches!(withdrawal_status(0), WithdrawalStatus::TxSent(_));
-        assert_eq!(withdrawal_status(1), WithdrawalStatus::Pending);
+        assert_matches!(withdrawal_status(1), WithdrawalStatus::TxSent(_));
+        assert_eq!(withdrawal_status(2), WithdrawalStatus::Pending);
 
-        // Exactly one new event (the submitted transaction)
+        // One new event (the submitted transaction batching both withdrawals)
         let events_after = EventsAssert::from_recorded();
         assert_eq!(events_after.len(), events_before.len() + 1);
     }
