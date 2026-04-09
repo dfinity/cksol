@@ -5,12 +5,8 @@ use cksol_int_tests::{
     CkSolMinter, Setup, SetupBuilder,
     fixtures::{
         DEFAULT_CALLER_ACCOUNT, DEFAULT_CALLER_DEPOSIT_ADDRESS, DEPOSIT_AMOUNT,
-        EXPECTED_MINT_AMOUNT, MockHttpOutcallsBuilderExt, SharedMockHttpOutcalls,
-        default_update_balance_args, deposit_transaction_signature, get_block_request,
-        get_block_response, get_deposit_transaction_response,
-        get_signature_statuses_finalized_response, get_signature_statuses_not_found_response,
-        get_signature_statuses_request, get_slot_request, get_slot_response,
-        get_transaction_http_mocks, send_transaction_request, send_transaction_response,
+        EXPECTED_MINT_AMOUNT, MockBuilder, SharedMockHttpOutcalls, default_update_balance_args,
+        deposit_transaction_signature,
     },
 };
 use cksol_types::{
@@ -23,7 +19,7 @@ use cksol_types_internal::{
     event::{EventType, TransactionPurpose},
     log::Priority,
 };
-use ic_pocket_canister_runtime::{JsonRpcResponse, MockHttpOutcalls, MockHttpOutcallsBuilder};
+use ic_pocket_canister_runtime::{JsonRpcResponse, MockHttpOutcalls};
 use icrc_ledger_types::icrc1::account::Subaccount;
 use serde_json::json;
 use sol_rpc_types::{CommitmentLevel, ConsensusStrategy, GetTransactionEncoding, RpcConfig, Slot};
@@ -37,9 +33,7 @@ use tokio::join;
 async fn deposit_and_consolidate_funds(setup: &Setup) {
     let result = setup
         .minter()
-        .with_http_mocks(get_transaction_http_mocks(
-            get_deposit_transaction_response(),
-        ))
+        .with_http_mocks(MockBuilder::new().get_deposit_transaction().build())
         .update_balance(default_update_balance_args())
         .await;
     assert_matches!(result, Ok(DepositStatus::Minted { .. }));
@@ -48,17 +42,11 @@ async fn deposit_and_consolidate_funds(setup: &Setup) {
     setup.advance_time(Duration::from_mins(10)).await;
     setup
         .execute_http_mocks(
-            MockHttpOutcallsBuilder::new()
-                .expect(4..8, get_slot_request(), get_slot_response(100_000_000))
-                .expect(
-                    8..12,
-                    get_block_request(100_000_000),
-                    get_block_response("4sGjMW1sUnHzSxGspuhpqLDx6wiyjNtZAMdL4VZHirAn"),
-                )
-                .expect(
-                    12..16,
-                    send_transaction_request(),
-                    send_transaction_response("5VERv8NMvzbJMEkV8xnrLkEaWRtSz9CosKDYjCJjBRnbJLgp8uirBgmQpjKhoR4tjF3ZpRzrFmBV6UjKdiSZkQUW"),
+            MockBuilder::with_start_id(4)
+                .submit_transaction(
+                    100_000_000,
+                    "4sGjMW1sUnHzSxGspuhpqLDx6wiyjNtZAMdL4VZHirAn",
+                    "5VERv8NMvzbJMEkV8xnrLkEaWRtSz9CosKDYjCJjBRnbJLgp8uirBgmQpjKhoR4tjF3ZpRzrFmBV6UjKdiSZkQUW",
                 )
                 .build(),
         )
@@ -68,12 +56,8 @@ async fn deposit_and_consolidate_funds(setup: &Setup) {
     setup.advance_time(Duration::from_secs(60)).await;
     setup
         .execute_http_mocks(
-            MockHttpOutcallsBuilder::new()
-                .expect(
-                    16..20,
-                    get_signature_statuses_request(),
-                    get_signature_statuses_finalized_response(1),
-                )
+            MockBuilder::with_start_id(16)
+                .check_signature_statuses_finalized(1)
                 .build(),
         )
         .await;
@@ -727,63 +711,30 @@ mod withdrawal_tests {
     }
 
     fn estimate_blockhash_http_mocks(slot: u64) -> MockHttpOutcalls {
-        const BLOCKHASH: &str = "4sGjMW1sUnHzSxGspuhpqLDx6wiyjNtZAMdL4VZHirAn";
-        const TX_SIGNATURE: &str = "drWLXM6bHretgz7KuwvGZvPBeQ8KEbS3AKB2WJPy4TbBDaqdqAiNcj3cTAS7UnyJKM7eEZoUf4DvhY1TKkus9Bp";
-
-        MockHttpOutcallsBuilder::new()
-            .expect(20..24, get_slot_request(), get_slot_response(slot))
-            .expect(
-                24..28,
-                get_block_request(slot),
-                get_block_response(BLOCKHASH),
-            )
-            .expect(
-                28..32,
-                send_transaction_request(),
-                send_transaction_response(TX_SIGNATURE),
+        MockBuilder::with_start_id(20)
+            .submit_transaction(
+                slot,
+                "4sGjMW1sUnHzSxGspuhpqLDx6wiyjNtZAMdL4VZHirAn",
+                "drWLXM6bHretgz7KuwvGZvPBeQ8KEbS3AKB2WJPy4TbBDaqdqAiNcj3cTAS7UnyJKM7eEZoUf4DvhY1TKkus9Bp",
             )
             .build()
     }
 
     /// HTTP mocks for resubmitting an expired withdrawal transaction.
     fn resubmit_withdrawal_http_mocks(current_slot: u64) -> MockHttpOutcalls {
-        const NEW_BLOCKHASH: &str = "9ZNTfG4NyQgxy2SWjSiQoUyBPEvXT2xo7fKc5hPYYJ7b";
-        const NEW_TX_SIGNATURE: &str = "5VERv8NMvzbJMEkV8xnrLkEaWRtSz9CosKDYjCJjBRnbJLgp8uirBgmQpjKhoR4tjF3ZpRzrFmBV6UjKdiSZkQUW";
-
-        MockHttpOutcallsBuilder::new()
-            .expect(
-                32..36,
-                get_signature_statuses_request(),
-                get_signature_statuses_not_found_response(1),
-            )
-            .expect(36..40, get_slot_request(), get_slot_response(current_slot))
-            .expect(
-                40..44,
-                get_block_request(current_slot),
-                get_block_response(NEW_BLOCKHASH),
-            )
-            .expect(44..48, get_slot_request(), get_slot_response(current_slot))
-            .expect(
-                48..52,
-                get_block_request(current_slot),
-                get_block_response(NEW_BLOCKHASH),
-            )
-            .expect(
-                52..56,
-                send_transaction_request(),
-                send_transaction_response(NEW_TX_SIGNATURE),
+        MockBuilder::with_start_id(32)
+            .resubmit_transaction(
+                current_slot,
+                "9ZNTfG4NyQgxy2SWjSiQoUyBPEvXT2xo7fKc5hPYYJ7b",
+                "5VERv8NMvzbJMEkV8xnrLkEaWRtSz9CosKDYjCJjBRnbJLgp8uirBgmQpjKhoR4tjF3ZpRzrFmBV6UjKdiSZkQUW",
             )
             .build()
     }
 
     /// HTTP mocks for finalizing a withdrawal transaction.
     fn finalize_withdrawal_http_mocks() -> MockHttpOutcalls {
-        MockHttpOutcallsBuilder::new()
-            .expect(
-                56..60,
-                get_signature_statuses_request(),
-                get_signature_statuses_finalized_response(1),
-            )
+        MockBuilder::with_start_id(56)
+            .check_signature_statuses_finalized(1)
             .build()
     }
 }
@@ -826,7 +777,11 @@ mod update_balance_tests {
 
         let result = setup
             .minter()
-            .with_http_mocks(get_transaction_http_mocks(transaction_not_found_response()))
+            .with_http_mocks(
+                MockBuilder::new()
+                    .get_transaction(transaction_not_found_response())
+                    .build(),
+            )
             .update_balance(default_update_balance_args())
             .await;
 
@@ -840,9 +795,8 @@ mod update_balance_tests {
         let setup = SetupBuilder::new().with_proxy_canister().build().await;
 
         // Both minters use the same mocks, whichever gets the guard first will consume them
-        let mocks = SharedMockHttpOutcalls::new(get_transaction_http_mocks(
-            get_deposit_transaction_response(),
-        ));
+        let mocks =
+            SharedMockHttpOutcalls::new(MockBuilder::new().get_deposit_transaction().build());
 
         let minter1 = setup.minter().with_http_mocks(mocks.clone());
         let minter2 = setup.minter().with_http_mocks(mocks.clone());
@@ -889,9 +843,7 @@ mod update_balance_tests {
         // First call to `update_balance` fails due to minting error
         let first_result = setup
             .minter()
-            .with_http_mocks(get_transaction_http_mocks(
-                get_deposit_transaction_response(),
-            ))
+            .with_http_mocks(MockBuilder::new().get_deposit_transaction().build())
             .update_balance(default_update_balance_args())
             .await;
         assert_eq!(
@@ -951,9 +903,7 @@ mod update_balance_tests {
         // First call to `update_balance` should result in mint
         let first_result = setup
             .minter()
-            .with_http_mocks(get_transaction_http_mocks(
-                get_deposit_transaction_response(),
-            ))
+            .with_http_mocks(MockBuilder::new().get_deposit_transaction().build())
             .update_balance(default_update_balance_args())
             .await;
         assert_matches!(&first_result, Ok(DepositStatus::Minted {
@@ -992,9 +942,7 @@ mod update_balance_tests {
 
         let result = setup
             .minter()
-            .with_http_mocks(get_transaction_http_mocks(
-                get_deposit_transaction_response(),
-            ))
+            .with_http_mocks(MockBuilder::new().get_deposit_transaction().build())
             .update_balance(default_update_balance_args())
             .await;
         assert_matches!(result, Ok(DepositStatus::Minted { .. }));
@@ -1098,9 +1046,7 @@ mod consolidation_tests {
 
         let result = setup
             .minter()
-            .with_http_mocks(get_transaction_http_mocks(
-                get_deposit_transaction_response(),
-            ))
+            .with_http_mocks(MockBuilder::new().get_deposit_transaction().build())
             .update_balance(default_update_balance_args())
             .await;
         let mint_block_index =
@@ -1127,21 +1073,11 @@ mod consolidation_tests {
 
     // Returns the required HTTP outcall mocks for executing the deposit consolidation task
     fn http_mocks_for_deposit_consolidation() -> MockHttpOutcalls {
-        const SLOT: u64 = 100_000_000;
-        const BLOCKHASH: &str = "4sGjMW1sUnHzSxGspuhpqLDx6wiyjNtZAMdL4VZHirAn";
-        const TX_SIGNATURE: &str = "5VERv8NMvzbJMEkV8xnrLkEaWRtSz9CosKDYjCJjBRnbJLgp8uirBgmQpjKhoR4tjF3ZpRzrFmBV6UjKdiSZkQUW";
-
-        MockHttpOutcallsBuilder::new()
-            .expect(4..8, get_slot_request(), get_slot_response(SLOT))
-            .expect(
-                8..12,
-                get_block_request(SLOT),
-                get_block_response(BLOCKHASH),
-            )
-            .expect(
-                12..16,
-                send_transaction_request(),
-                send_transaction_response(TX_SIGNATURE),
+        MockBuilder::with_start_id(4)
+            .submit_transaction(
+                100_000_000,
+                "4sGjMW1sUnHzSxGspuhpqLDx6wiyjNtZAMdL4VZHirAn",
+                "5VERv8NMvzbJMEkV8xnrLkEaWRtSz9CosKDYjCJjBRnbJLgp8uirBgmQpjKhoR4tjF3ZpRzrFmBV6UjKdiSZkQUW",
             )
             .build()
     }
