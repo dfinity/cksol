@@ -15,7 +15,7 @@ use solana_signature::Signature;
 use std::time::Duration;
 
 const SOLANA_VALIDATOR_URL: &str = "http://localhost:8899";
-const DEPOSITOR_PRINCIPAL: Principal = Principal::from_slice(&[0x9d, 0xf7, 0x99]);
+const DEPOSITOR: Principal = Setup::DEFAULT_CALLER;
 
 // TODO DEFI-2643: Add tests with more exotic transactions, e.g.:
 //  - a transaction with multiple transfer instructions to same target address: single mint with the summed up amount
@@ -33,10 +33,11 @@ async fn should_deposit_consolidate_and_withdraw() {
 
         let minter_cycles_before = setup.minter().cycle_balance().await;
         let minter_sol_before = get_solana_balance(&MINTER_ADDRESS).await;
+        let destination_sol_before = get_solana_balance(&withdrawal_address).await;
 
         let accounts: Vec<_> = (1_u8..=num_deposits)
             .map(|j| Account {
-                owner: DEPOSITOR_PRINCIPAL,
+                owner: DEPOSITOR,
                 // Make sure the accounts are unique across all iterations
                 subaccount: Some([i as u8 + j; 32]),
             })
@@ -91,7 +92,7 @@ async fn should_deposit_consolidate_and_withdraw() {
                     let withdrawal_amount = minted_amount - LEDGER_TRANSFER_FEE;
 
                     setup
-                        .ledger_with_caller(DEPOSITOR_PRINCIPAL)
+                        .ledger()
                         .approve(
                             account.subaccount,
                             withdrawal_amount,
@@ -100,7 +101,7 @@ async fn should_deposit_consolidate_and_withdraw() {
                         .await;
 
                     setup
-                        .minter_without_proxy(DEPOSITOR_PRINCIPAL)
+                        .minter()
                         .withdraw(WithdrawalArgs {
                             from_subaccount: account.subaccount,
                             amount: withdrawal_amount,
@@ -133,11 +134,14 @@ async fn should_deposit_consolidate_and_withdraw() {
             );
         }
 
-        // Verify the destination received the expected SOL
+        // Verify the destination received the expected SOL for this iteration
         let per_withdrawal_fees = LEDGER_TRANSFER_FEE + Setup::DEFAULT_WITHDRAWAL_FEE;
-        let total_expected_sol = total_minted_amount - num_deposits as u64 * per_withdrawal_fees;
-        let destination_balance = get_solana_balance(&withdrawal_address).await;
-        assert_eq!(destination_balance, total_expected_sol);
+        let expected_received = total_minted_amount - num_deposits as u64 * per_withdrawal_fees;
+        let destination_sol_after = get_solana_balance(&withdrawal_address).await;
+        assert_eq!(
+            destination_sol_after - destination_sol_before,
+            expected_received
+        );
 
         // Minter should retain at least its initial SOL balance (withdrawal fees stay with it)
         let minter_sol_final = get_solana_balance(&MINTER_ADDRESS).await;
