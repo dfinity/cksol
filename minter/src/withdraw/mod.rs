@@ -107,28 +107,28 @@ pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: &R) {
     let max_per_invocation =
         MAX_WITHDRAWAL_ROUNDS * MAX_CONCURRENT_RPC_CALLS * MAX_WITHDRAWALS_PER_TX;
 
-    let (affordable_requests, has_unaffordable) = read_state(|state| {
-        let mut available = state.balance();
-        let mut affordable = Vec::new();
-        let mut has_unaffordable = false;
+    let (affordable_requests, num_pending_withdrawals) = read_state(|state| {
+        let mut available_balance = state.balance();
+        let pending = state.pending_withdrawal_requests();
 
-        for request in state
-            .pending_withdrawal_requests()
+        let affordable: Vec<_> = pending
             .values()
             .take(max_per_invocation)
-        {
-            if available >= request.withdrawal_amount {
-                available -= request.withdrawal_amount;
-                affordable.push(request.clone());
-            } else {
-                has_unaffordable = true;
-                break;
-            }
-        }
-        (affordable, has_unaffordable)
+            .take_while(|r| {
+                if available_balance >= r.withdrawal_amount {
+                    available_balance -= r.withdrawal_amount;
+                    true
+                } else {
+                    false
+                }
+            })
+            .cloned()
+            .collect();
+
+        (affordable, pending.len())
     });
 
-    if has_unaffordable {
+    if affordable_requests.len() < num_pending_withdrawals {
         log!(
             Priority::Info,
             "Insufficient minter balance for some withdrawal requests, scheduling consolidation"
