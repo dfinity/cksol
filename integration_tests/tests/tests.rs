@@ -45,7 +45,7 @@ async fn deposit_and_consolidate_funds(setup: &Setup) {
     assert_matches!(result, Ok(DepositStatus::Minted { .. }));
 
     // Consolidate
-    setup.advance_time(Duration::from_secs(600)).await;
+    setup.advance_time(Duration::from_mins(10)).await;
     setup
         .execute_http_mocks(
             MockHttpOutcallsBuilder::new()
@@ -1090,7 +1090,7 @@ mod anonymous_caller_tests {
 mod consolidation_tests {
     use super::*;
 
-    const DEPOSIT_CONSOLIDATION_DELAY: Duration = Duration::from_secs(600);
+    const DEPOSIT_CONSOLIDATION_DELAY: Duration = Duration::from_mins(10);
 
     #[tokio::test]
     async fn should_consolidate_deposits_after_timer() {
