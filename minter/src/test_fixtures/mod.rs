@@ -74,10 +74,6 @@ pub fn init_balance() {
     init_balance_to(u64::MAX / 2);
 }
 
-/// Deposits the given amount into the minter by processing deposit, mint,
-/// consolidation submission, and consolidation success events.
-///
-/// Must be called after [`init_state`].
 pub fn init_balance_to(amount: Lamport) {
     let id = deposit_id(0xFD);
     let mint_index = 0xFE;
