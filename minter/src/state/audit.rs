@@ -9,9 +9,8 @@ use crate::{
 
 /// Records the given event payload in the event log and updates the state to reflect the change.
 pub fn process_event<R: CanisterRuntime>(state: &mut State, payload: EventType, runtime: &R) {
-    let timestamp = runtime.time();
-    apply_state_transition(state, &payload, timestamp);
-    storage::record_event(payload, timestamp);
+    apply_state_transition(state, &payload, runtime.time());
+    storage::record_event(payload, runtime);
 }
 
 /// Updates the state to reflect the given state transition.

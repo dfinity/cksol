@@ -139,9 +139,10 @@ pub mod events {
         )
     }
 
-    /// The runtime is only used by [`process_event`] to record the event timestamp.
+    /// The runtime is only used by [`process_event`] to supply timestamps
+    /// for the state transition and for the event log entry.
     fn runtime() -> TestCanisterRuntime {
-        TestCanisterRuntime::new().with_time(0)
+        TestCanisterRuntime::new().with_time(0).with_time(0)
     }
 
     pub fn accept_deposit(deposit_id: DepositId, amount: Lamport) {
@@ -223,7 +224,7 @@ pub mod events {
                     withdrawal_amount: amount,
                     withdrawal_fee: WITHDRAWAL_FEE,
                 }),
-                &TestCanisterRuntime::new().with_time(timestamp),
+                &TestCanisterRuntime::new().with_time(timestamp).with_time(timestamp),
             )
         });
     }
