@@ -226,7 +226,9 @@ pub mod events {
                     withdrawal_amount: amount - WITHDRAWAL_FEE,
                     amount_to_burn: amount,
                 }),
-                &TestCanisterRuntime::new().with_time(timestamp).with_time(timestamp),
+                &TestCanisterRuntime::new()
+                    .with_time(timestamp)
+                    .with_time(timestamp),
             )
         });
     }
