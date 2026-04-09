@@ -420,23 +420,19 @@ impl State {
             .pending_withdrawal_requests
             .values()
             .map(|r| r.created_at);
-        let sent = self
-            .sent_withdrawal_requests
-            .values()
-            .map(|r| r.created_at);
+        let sent = self.sent_withdrawal_requests.values().map(|r| r.created_at);
         pending.chain(sent).min()
     }
 
     fn process_accepted_withdrawal(&mut self, request: &WithdrawalRequest, created_at: u64) {
         assert_eq!(
-            self.pending_withdrawal_requests
-                .insert(
-                    request.burn_block_index,
-                    TimestampedWithdrawalRequest {
-                        request: request.clone(),
-                        created_at,
-                    }
-                ),
+            self.pending_withdrawal_requests.insert(
+                request.burn_block_index,
+                TimestampedWithdrawalRequest {
+                    request: request.clone(),
+                    created_at,
+                }
+            ),
             None,
             "Attempted to accept an already accepted withdrawal request: {:?}",
             request.burn_block_index
@@ -518,8 +514,8 @@ impl State {
                         .unwrap_or_else(|| {
                             panic!("Attempted to send transaction for unknown withdrawal request: {burn_index:?}")
                         });
-                    total += timestamped.request.withdrawal_amount
-                        - timestamped.request.withdrawal_fee;
+                    total +=
+                        timestamped.request.withdrawal_amount - timestamped.request.withdrawal_fee;
                     assert_eq!(
                         self.sent_withdrawal_requests.insert(
                             *burn_index,
