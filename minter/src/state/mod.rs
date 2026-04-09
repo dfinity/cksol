@@ -716,7 +716,7 @@ impl TryFrom<InitArgs> for State {
     }
 }
 
-/// A withdrawal request with its creation timestamp.
+/// A pending withdrawal request.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TimestampedWithdrawalRequest {
     pub request: WithdrawalRequest,
