@@ -159,25 +159,25 @@ pub struct WithdrawalOk {
 pub enum WithdrawalError {
     /// There is another request for this principal.
     AlreadyProcessing,
-
     /// The withdrawal amount is too low.
-    AmountTooLow(u64),
-
+    ValueTooSmall {
+        /// The minimum withdrawal amount.
+        minimum_withdrawal_amount: Lamport,
+        /// The requested withdrawal amount.
+        withdrawal_amount: Lamport,
+    },
     /// The Solana address is not valid.
     MalformedAddress(String),
-
     /// The withdrawal account does not hold the requested ckSOL amount.
     InsufficientFunds {
         /// The current balance of the withdrawal account.
         balance: u64,
     },
-
     /// The minter is not approved to transfer the requested amount.
     InsufficientAllowance {
         /// The current allowance for the minter.
         allowance: u64,
     },
-
     /// There are too many concurrent requests, retry later.
     TemporarilyUnavailable(String),
 }
@@ -227,6 +227,8 @@ pub enum WithdrawalStatus {
 pub struct MinterInfo {
     /// Fee deducted from each deposit (SOL -> ckSOL).
     pub deposit_fee: Lamport,
+    /// Extra cycles charged per `update_balance` call to offset deposit consolidation costs.
+    pub deposit_consolidation_fee: u128,
     /// Minimum withdrawal amount in lamports.
     pub minimum_withdrawal_amount: Lamport,
     /// Minimum deposit amount in lamports.

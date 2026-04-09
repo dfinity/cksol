@@ -66,18 +66,11 @@ async fn update_balance(args: UpdateBalanceArgs) -> Result<DepositStatus, Update
 
 #[ic_cdk::update]
 async fn withdraw(args: WithdrawalArgs) -> Result<WithdrawalOk, WithdrawalError> {
-    let minimum_withdrawal_amount = read_state(|s| s.minimum_withdrawal_amount());
-    if args.amount < minimum_withdrawal_amount {
-        return Err(WithdrawalError::AmountTooLow(minimum_withdrawal_amount));
-    }
-
-    let minter_account: Account = ic_cdk::api::canister_self().into();
+    let account = assert_non_anonymous_account(None, args.from_subaccount);
 
     cksol_minter::withdraw::withdraw(
         &IcCanisterRuntime::new(),
-        minter_account,
-        ic_cdk::api::msg_caller(),
-        args.from_subaccount,
+        account,
         args.amount,
         args.address,
     )
@@ -114,8 +107,8 @@ fn get_events(
                     account: request.account,
                     solana_address: request.solana_address,
                     burn_block_index: *request.burn_block_index.get(),
+                    amount_to_burn: request.amount_to_burn,
                     withdrawal_amount: request.withdrawal_amount,
-                    withdrawal_fee: request.withdrawal_fee,
                 }
             }
             EventType::AcceptedDeposit {
@@ -210,6 +203,7 @@ fn get_events(
 fn get_minter_info() -> MinterInfo {
     read_state(|s| MinterInfo {
         deposit_fee: s.deposit_fee(),
+        deposit_consolidation_fee: s.deposit_consolidation_fee(),
         minimum_withdrawal_amount: s.minimum_withdrawal_amount(),
         minimum_deposit_amount: s.minimum_deposit_amount(),
         withdrawal_fee: s.withdrawal_fee(),

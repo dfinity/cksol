@@ -69,9 +69,9 @@ pub enum EventType {
         /// The burn transaction index on the ckSOL ledger.
         burn_block_index: u64,
         /// The total amount burned from the user (in lamports).
+        amount_to_burn: Lamport,
+        /// The net amount to transfer to the user (in lamports).
         withdrawal_amount: Lamport,
-        /// The fee retained by the minter (in lamports).
-        withdrawal_fee: Lamport,
     },
     /// Submitted a Solana transaction.
     SubmittedTransaction {

@@ -96,7 +96,8 @@ pub struct Setup {
 }
 
 impl Setup {
-    pub const DEFAULT_DEPOSIT_FEE: Lamport = 10_000_000; // 0.01 SOL
+    pub const DEFAULT_DEPOSIT_FEE: Lamport = 10_000;
+    pub const DEFAULT_DEPOSIT_CONSOLIDATION_FEE: u128 = 10_000_000_000; // 0.01T cycles
     pub const DEFAULT_WITHDRAWAL_FEE: Lamport = 1_000_000; // 0.001 SOL
     pub const DEFAULT_CONTROLLER: Principal = Principal::from_slice(&[0x9d, 0xf7, 0x01]);
     pub const DEFAULT_CALLER: Principal =
@@ -404,7 +405,14 @@ impl CkSolMinter<'_> {
     }
 
     pub async fn withdraw(&self, args: WithdrawalArgs) -> Result<WithdrawalOk, WithdrawalError> {
-        self.update_call("withdraw", (args,), 0).await
+        self.try_withdraw(args).await.expect("withdraw failed")
+    }
+
+    pub async fn try_withdraw(
+        &self,
+        args: WithdrawalArgs,
+    ) -> Result<Result<WithdrawalOk, WithdrawalError>, String> {
+        self.try_update_call("withdraw", (args,), 0).await
     }
 
     pub async fn withdrawal_status(&self, block_index: u64) -> WithdrawalStatus {
@@ -644,6 +652,7 @@ fn cksol_minter_init_args(
         withdrawal_fee: Setup::DEFAULT_WITHDRAWAL_FEE,
         update_balance_required_cycles: Setup::DEFAULT_UPDATE_BALANCE_REQUIRED_CYCLES as u64,
         solana_network: SolanaNetwork::Mainnet,
+        deposit_consolidation_fee: Setup::DEFAULT_DEPOSIT_CONSOLIDATION_FEE as u64,
     })
 }
 

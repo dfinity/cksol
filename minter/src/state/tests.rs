@@ -3,7 +3,7 @@ use crate::{
     constants::FEE_PER_SIGNATURE as SOLANA_LAMPORTS_PER_SIGNATURE,
     state::{SOLANA_RENT_EXEMPTION_THRESHOLD, audit::process_event, read_state},
     test_fixtures::{
-        DEPOSIT_FEE, MINIMUM_DEPOSIT_AMOUNT, MINIMUM_WITHDRAWAL_AMOUNT,
+        DEPOSIT_CONSOLIDATION_FEE, DEPOSIT_FEE, MINIMUM_DEPOSIT_AMOUNT, MINIMUM_WITHDRAWAL_AMOUNT,
         UPDATE_BALANCE_REQUIRED_CYCLES, WITHDRAWAL_FEE, account,
         arb::arb_event,
         deposit_id,
@@ -47,6 +47,7 @@ mod state_from_init_args {
                 sol_rpc_canister_id: sol_rpc_canister_id(),
                 solana_network: SolanaNetwork::Mainnet,
                 deposit_fee: DEPOSIT_FEE,
+                deposit_consolidation_fee: DEPOSIT_CONSOLIDATION_FEE,
                 withdrawal_fee: WITHDRAWAL_FEE,
                 minimum_withdrawal_amount: MINIMUM_WITHDRAWAL_AMOUNT,
                 minimum_deposit_amount: MINIMUM_DEPOSIT_AMOUNT,
@@ -140,7 +141,6 @@ mod state_from_init_args {
             minimum_deposit_amount: insufficient_minimum_deposit_amount,
             ..valid_init_args()
         };
-
         assert_matches!(
             State::try_from(args),
             Err(InvalidStateError::InvalidMinimumDepositAmount {

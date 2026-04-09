@@ -90,6 +90,7 @@ pub struct State {
     minimum_withdrawal_amount: Lamport,
     minimum_deposit_amount: Lamport,
     update_balance_required_cycles: u128,
+    deposit_consolidation_fee: u128,
     pending_update_balance_requests: BTreeSet<Account>,
     pending_withdrawal_request_guards: BTreeSet<Account>,
     accepted_deposits: BTreeMap<DepositId, Deposit>,
@@ -140,6 +141,10 @@ impl State {
 
     pub fn deposit_fee(&self) -> u64 {
         self.deposit_fee
+    }
+
+    pub fn deposit_consolidation_fee(&self) -> u128 {
+        self.deposit_consolidation_fee
     }
 
     pub fn withdrawal_fee(&self) -> u64 {
@@ -314,6 +319,7 @@ impl State {
             minimum_deposit_amount,
             withdrawal_fee,
             update_balance_required_cycles,
+            deposit_consolidation_fee,
         }: UpgradeArgs,
     ) -> Result<(), InvalidStateError> {
         if let Some(sol_rpc_canister_id) = sol_rpc_canister_id {
@@ -333,6 +339,9 @@ impl State {
         }
         if let Some(update_balance_required_cycles) = update_balance_required_cycles {
             self.update_balance_required_cycles = update_balance_required_cycles as u128;
+        }
+        if let Some(deposit_consolidation_fee) = deposit_consolidation_fee {
+            self.deposit_consolidation_fee = deposit_consolidation_fee as u128;
         }
         self.validate()
     }
@@ -514,8 +523,7 @@ impl State {
                         .unwrap_or_else(|| {
                             panic!("Attempted to send transaction for unknown withdrawal request: {burn_index:?}")
                         });
-                    total +=
-                        timestamped.request.withdrawal_amount - timestamped.request.withdrawal_fee;
+                    total += timestamped.request.withdrawal_amount;
                     assert_eq!(
                         self.sent_withdrawal_requests.insert(
                             *burn_index,
@@ -671,6 +679,7 @@ impl TryFrom<InitArgs> for State {
             withdrawal_fee,
             update_balance_required_cycles,
             solana_network,
+            deposit_consolidation_fee,
         }: InitArgs,
     ) -> Result<Self, Self::Error> {
         let state = Self {
@@ -684,6 +693,7 @@ impl TryFrom<InitArgs> for State {
             minimum_withdrawal_amount,
             minimum_deposit_amount,
             update_balance_required_cycles: update_balance_required_cycles as u128,
+            deposit_consolidation_fee: deposit_consolidation_fee as u128,
             pending_update_balance_requests: BTreeSet::new(),
             pending_withdrawal_request_guards: BTreeSet::new(),
             accepted_deposits: BTreeMap::new(),

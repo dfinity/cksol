@@ -136,6 +136,7 @@ mod lifecycle {
             initial_minter_info,
             MinterInfo {
                 deposit_fee: Setup::DEFAULT_DEPOSIT_FEE,
+                deposit_consolidation_fee: Setup::DEFAULT_DEPOSIT_CONSOLIDATION_FEE,
                 minimum_withdrawal_amount: Setup::DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT,
                 minimum_deposit_amount: Setup::DEFAULT_MINIMUM_DEPOSIT_AMOUNT,
                 withdrawal_fee: Setup::DEFAULT_WITHDRAWAL_FEE,
@@ -164,6 +165,7 @@ mod lifecycle {
                 minimum_deposit_amount: Some(NEW_MINIMUM_DEPOSIT_AMOUNT),
                 withdrawal_fee: Some(NEW_WITHDRAWAL_FEE),
                 update_balance_required_cycles: Some(NEW_UPDATE_BALANCE_REQUIRED_CYCLES as u64),
+                deposit_consolidation_fee: None,
             })
             .await
             .expect("upgrade failed");
@@ -173,6 +175,7 @@ mod lifecycle {
             minter_info,
             MinterInfo {
                 deposit_fee: NEW_DEPOSIT_FEE,
+                deposit_consolidation_fee: Setup::DEFAULT_DEPOSIT_CONSOLIDATION_FEE,
                 minimum_withdrawal_amount: NEW_MINIMUM_WITHDRAWAL_AMOUNT,
                 minimum_deposit_amount: NEW_MINIMUM_DEPOSIT_AMOUNT,
                 withdrawal_fee: NEW_WITHDRAWAL_FEE,
@@ -276,7 +279,10 @@ mod withdrawal_tests {
         let err = result.unwrap_err();
         assert_eq!(
             err,
-            WithdrawalError::AmountTooLow(new_minimum_withdrawal_amount)
+            WithdrawalError::ValueTooSmall {
+                minimum_withdrawal_amount: new_minimum_withdrawal_amount,
+                withdrawal_amount: Setup::DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT,
+            }
         );
 
         let args = WithdrawalArgs {
@@ -922,6 +928,7 @@ mod update_balance_tests {
         let setup = SetupBuilder::new().with_proxy_canister().build().await;
 
         let get_transaction_cycles_cost = get_transaction_cycles_cost(&setup).await;
+        assert!(get_transaction_cycles_cost > 0);
 
         let caller_cycles_before = setup.proxy().cycle_balance().await;
         let minter_cycles_before = setup.minter().cycle_balance().await;
@@ -938,13 +945,15 @@ mod update_balance_tests {
         let caller_cycles_after = setup.proxy().cycle_balance().await;
         let minter_cycles_after = setup.minter().cycle_balance().await;
 
-        // The caller should be charged only the actual cost of making the RPC call
-        assert!(get_transaction_cycles_cost > 0);
+        // The caller should be charged the actual cost of the RPC call plus the consolidation fee
+        let expected_charge =
+            get_transaction_cycles_cost + Setup::DEFAULT_DEPOSIT_CONSOLIDATION_FEE;
+        assert_eq!(caller_cycles_before - caller_cycles_after, expected_charge);
+        // The minter receives the consolidation fee
         assert_eq!(
-            caller_cycles_before - caller_cycles_after,
-            get_transaction_cycles_cost,
+            minter_cycles_after - minter_cycles_before,
+            Setup::DEFAULT_DEPOSIT_CONSOLIDATION_FEE,
         );
-        assert_eq!(minter_cycles_after, minter_cycles_before);
 
         setup.drop().await;
     }
@@ -1005,6 +1014,17 @@ mod anonymous_caller_tests {
                 .await;
             assert_matches!(result, Err(s) => s.contains("the owner must be non-anonymous"));
         }
+
+        // `withdraw` endpoint (no `owner` field, only anonymous caller applies)
+        let minter = setup.minter_with_caller(Principal::anonymous());
+        let result = minter
+            .try_withdraw(WithdrawalArgs {
+                from_subaccount: None,
+                amount: Setup::DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT,
+                address: "E4MpwNnMWs2XtW5gVrxZvyS7fMq31QD5HvbxmwP45Tz3".to_string(),
+            })
+            .await;
+        assert_matches!(result, Err(s) => s.contains("the owner must be non-anonymous"));
 
         setup.drop().await;
     }

@@ -372,14 +372,13 @@ impl DashboardTemplate {
             status: &'static str,
             transaction: Option<String>,
         ) {
-            let transfer_amount = req.withdrawal_amount.saturating_sub(req.withdrawal_fee);
             withdrawals.push((
                 *burn_index.get(),
                 DashboardWithdrawal {
                     transaction,
                     account: req.account.to_string(),
-                    withdrawal_amount: lamports_to_sol(transfer_amount),
-                    burnt_amount: lamports_to_sol(req.withdrawal_amount),
+                    withdrawal_amount: lamports_to_sol(req.withdrawal_amount),
+                    burnt_amount: lamports_to_sol(req.amount_to_burn),
                     burn_block_index: burn_index.to_string(),
                     status,
                 },
