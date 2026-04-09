@@ -96,7 +96,7 @@ pub struct State {
     accepted_deposits: BTreeMap<DepositId, Deposit>,
     quarantined_deposits: BTreeMap<DepositId, Deposit>,
     minted_deposits: BTreeMap<DepositId, MintedDeposit>,
-    pending_withdrawal_requests: BTreeMap<LedgerBurnIndex, TimestampedWithdrawalRequest>,
+    pending_withdrawal_requests: BTreeMap<LedgerBurnIndex, PendingWithdrawalRequest>,
     sent_withdrawal_requests: BTreeMap<LedgerBurnIndex, SentWithdrawalRequest>,
     successful_withdrawal_requests: BTreeMap<LedgerBurnIndex, SentWithdrawalRequest>,
     failed_withdrawal_requests: BTreeMap<LedgerBurnIndex, SentWithdrawalRequest>,
@@ -418,7 +418,7 @@ impl State {
 
     pub fn pending_withdrawal_requests(
         &self,
-    ) -> &BTreeMap<LedgerBurnIndex, TimestampedWithdrawalRequest> {
+    ) -> &BTreeMap<LedgerBurnIndex, PendingWithdrawalRequest> {
         &self.pending_withdrawal_requests
     }
 
@@ -437,7 +437,7 @@ impl State {
         assert_eq!(
             self.pending_withdrawal_requests.insert(
                 request.burn_block_index,
-                TimestampedWithdrawalRequest {
+                PendingWithdrawalRequest {
                     request: request.clone(),
                     created_at,
                 }
@@ -523,14 +523,14 @@ impl State {
                         .unwrap_or_else(|| {
                             panic!("Attempted to send transaction for unknown withdrawal request: {burn_index:?}")
                         });
-                    total += timestamped.request.withdrawal_amount;
+                    total += pending.request.withdrawal_amount;
                     assert_eq!(
                         self.sent_withdrawal_requests.insert(
                             *burn_index,
                             SentWithdrawalRequest {
-                                request: timestamped.request,
+                                request: pending.request,
                                 signature: *signature,
-                                created_at: timestamped.created_at,
+                                created_at: pending.created_at,
                             },
                         ),
                         None,
@@ -718,7 +718,7 @@ impl TryFrom<InitArgs> for State {
 
 /// A pending withdrawal request.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct TimestampedWithdrawalRequest {
+pub struct PendingWithdrawalRequest {
     pub request: WithdrawalRequest,
     pub created_at: u64,
 }

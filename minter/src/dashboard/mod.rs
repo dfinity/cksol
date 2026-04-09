@@ -389,7 +389,7 @@ impl DashboardTemplate {
             push_withdrawal(
                 &mut withdrawals,
                 burn_index,
-                &timestamped.request,
+                &pending.request,
                 "Pending",
                 None,
             );
