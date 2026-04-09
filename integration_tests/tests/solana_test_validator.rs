@@ -164,6 +164,11 @@ async fn should_deposit_and_withdraw_funds() {
         expected_mint_amount - withdrawal_amount - LEDGER_TRANSFER_FEE
     );
 
+    // Capture minter balance before any consolidation happens.
+    // The withdrawal handler (step 3) may trigger early consolidation via
+    // `set_timer(Duration::ZERO)`, so we capture the baseline here.
+    let minter_sol_before = get_solana_balance(&MINTER_ADDRESS).await;
+
     // Step 3: Trigger withdrawal processing — should stay Pending because
     // the minter has no consolidated balance yet.
     setup.advance_time(Duration::from_mins(2)).await;
@@ -176,7 +181,9 @@ async fn should_deposit_and_withdraw_funds() {
     );
 
     // Step 4: Consolidate the deposit and wait for finalization.
-    let minter_sol_before = get_solana_balance(&MINTER_ADDRESS).await;
+    // Consolidation may have already been triggered by step 3's withdrawal
+    // handler (which schedules it when it detects insufficient balance).
+    // The periodic consolidation timer also fires at the 10-minute mark.
     setup.advance_time(Duration::from_mins(10)).await;
     wait_for_finalized_balance(&MINTER_ADDRESS, minter_sol_before).await;
 
