@@ -269,10 +269,35 @@ impl Setup {
         self.minter_canister_id
     }
 
+    pub fn minter_account(&self) -> Account {
+        Account {
+            owner: self.minter_canister_id,
+            subaccount: None,
+        }
+    }
+
     pub fn ledger(&self) -> Ledger<'_> {
         Ledger(Canister {
             runtime: self.runtime(Setup::DEFAULT_CALLER),
             id: self.ledger_canister_id,
+        })
+    }
+
+    /// Create a ledger handle with the given caller, bypassing the proxy canister.
+    /// Use this when calling the ledger as a principal that isn't a proxy controller.
+    pub fn ledger_with_caller(&self, caller: Principal) -> Ledger<'_> {
+        Ledger(Canister {
+            runtime: PocketIcRuntime::new(self.env.as_ref().unwrap(), caller),
+            id: self.ledger_canister_id,
+        })
+    }
+
+    /// Create a minter handle with the given caller, bypassing the proxy canister.
+    /// Use this when calling the minter as a principal that isn't a proxy controller.
+    pub fn minter_without_proxy(&self, caller: Principal) -> CkSolMinter<'_> {
+        CkSolMinter(Canister {
+            runtime: PocketIcRuntime::new(self.env.as_ref().unwrap(), caller),
+            id: self.minter_canister_id,
         })
     }
 
