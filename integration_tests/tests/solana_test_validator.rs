@@ -6,7 +6,6 @@ use cksol_int_tests::{
 use cksol_types::{DepositStatus, UpdateBalanceArgs, WithdrawalArgs, WithdrawalStatus};
 use icrc_ledger_types::icrc1::account::Account;
 use itertools::Itertools;
-use serial_test::serial;
 use sol_rpc_types::{InstallArgs, Lamport, OverrideProvider, RegexSubstitution};
 use solana_address::Address;
 use solana_client::{nonblocking::rpc_client::RpcClient, rpc_config::CommitmentConfig};
@@ -16,46 +15,54 @@ use solana_signature::Signature;
 use std::time::Duration;
 
 const SOLANA_VALIDATOR_URL: &str = "http://localhost:8899";
-const DEPOSITOR_PRINCIPAL: Principal = Principal::from_slice(&[0x9d, 0xf7, 0x99]);
+const DEPOSITOR: Principal = Setup::DEFAULT_CALLER;
+// Solana base fee per signature included in a transaction.
+const FEE_PER_SIGNATURE: Lamport = 5_000;
 
 // TODO DEFI-2643: Add tests with more exotic transactions, e.g.:
 //  - a transaction with multiple transfer instructions to same target address: single mint with the summed up amount
 //  - a transaction with multiple instructions, not all to the same target address: only relevant amounts are considered.
 
 #[tokio::test(flavor = "multi_thread")]
-#[serial]
-async fn should_deposit_and_consolidate_funds() {
+async fn should_deposit_consolidate_and_withdraw() {
     let setup = setup_with_solana_validator().await;
 
-    for num_deposits in [1_u8, 15] {
+    let withdrawal_destination = Keypair::new();
+    let withdrawal_address = withdrawal_destination.pubkey();
+
+    for (i, num_deposits) in [1_u8, 15].into_iter().enumerate() {
         println!("Testing with {num_deposits} deposit(s)");
 
         let minter_cycles_before = setup.minter().cycle_balance().await;
         let minter_sol_before = get_solana_balance(&MINTER_ADDRESS).await;
+        let destination_sol_before = get_solana_balance(&withdrawal_address).await;
 
+        let accounts: Vec<_> = (1_u8..=num_deposits)
+            .map(|j| Account {
+                owner: DEPOSITOR,
+                // Make sure the accounts are unique across all iterations
+                subaccount: Some([i as u8 + j; 32]),
+            })
+            .collect();
+
+        // Deposit funds
         let (deposit_addresses, deposit_amounts, minted_amounts): (Vec<_>, Vec<_>, Vec<_>) =
-            futures::future::join_all((1_u8..=num_deposits).map(async |i| {
-                let account = Account {
-                    owner: DEPOSITOR_PRINCIPAL,
-                    subaccount: Some({
-                        let mut sub = [0u8; 32];
-                        sub[0] = num_deposits;
-                        sub[1] = i;
-                        sub
-                    }),
-                };
-                let deposit_amount = (i as u64 * LAMPORTS_PER_SOL) / 10;
+            futures::future::join_all(accounts.iter().enumerate().map(async |(j, account)| {
+                let deposit_amount = ((j as u64 + 1) * LAMPORTS_PER_SOL) / 10;
                 let (deposit_address, minted_amount) =
-                    deposit_to_account(&setup, account, deposit_amount).await;
+                    deposit_to_account(&setup, *account, deposit_amount).await;
                 (deposit_address, deposit_amount, minted_amount)
             }))
             .await
             .into_iter()
             .multiunzip();
 
+        let total_minted_amount = minted_amounts.iter().sum::<Lamport>();
+        let total_deposited_amount = deposit_amounts.iter().sum::<Lamport>();
+
         let deposit_accounts_balances_before = get_balances(&deposit_addresses).await;
 
-        // Trigger consolidation and wait for the transaction to finalize
+        // Trigger consolidation and wait for the minter's Solana balance to increase
         setup.advance_time(Duration::from_mins(10)).await;
         wait_for_finalized_balance(&MINTER_ADDRESS, minter_sol_before).await;
 
@@ -69,124 +76,86 @@ async fn should_deposit_and_consolidate_funds() {
             assert_eq!(balance_after, balance_before - deposit_amount);
         }
 
-        let total_minted_amount = minted_amounts.iter().sum::<Lamport>();
+        let minter_sol_after_consolidation = get_solana_balance(&MINTER_ADDRESS).await;
+        assert_eq!(
+            minter_sol_after_consolidation,
+            // Each deposit address is a signer in its consolidation transaction, so
+            // the total Solana transaction fee is `FEE_PER_SIGNATURE` per deposit.
+            minter_sol_before + total_deposited_amount - num_deposits as u64 * FEE_PER_SIGNATURE
+        );
 
-        let minter_sol_after = get_solana_balance(&MINTER_ADDRESS).await;
         let minter_cycles_after = setup.minter().cycle_balance().await;
-
-        let minter_sol_change = minter_sol_after as i64 - minter_sol_before as i64;
-        let minter_cycles_change = minter_cycles_after as i128 - minter_cycles_before as i128;
-        println!(
-            "  SOL balance change minus total minted amount: {} lamports",
-            minter_sol_change - total_minted_amount as i64
-        );
-        println!("  Cycles balance change: {minter_cycles_change}");
-
-        assert!(
-            minter_sol_after >= minter_sol_before + total_minted_amount,
-            "Minter SOL balance increased less than the minted amount"
-        );
         assert!(
             minter_cycles_after >= minter_cycles_before,
             "Minter cycles balance decreased"
         );
-    }
 
-    setup.drop().await;
-}
+        // Withdraw the full minted amount from each depositor account (in parallel)
+        let burn_indices: Vec<_> =
+            futures::future::join_all(accounts.iter().zip(&minted_amounts).map(
+                async |(account, &minted_amount)| {
+                    // Approve charges LEDGER_TRANSFER_FEE, so we can only withdraw the remainder
+                    let withdrawal_amount = minted_amount - LEDGER_TRANSFER_FEE;
 
-#[tokio::test(flavor = "multi_thread")]
-#[serial]
-async fn should_deposit_and_withdraw_funds() {
-    let setup = setup_with_solana_validator().await;
+                    setup
+                        .ledger()
+                        .approve(
+                            account.subaccount,
+                            withdrawal_amount,
+                            setup.minter_account(),
+                        )
+                        .await;
 
-    let depositor = Account {
-        owner: Setup::DEFAULT_CALLER,
-        subaccount: None,
-    };
-    let deposit_amount = LAMPORTS_PER_SOL;
-    let expected_mint_amount = deposit_amount - Setup::DEFAULT_DEPOSIT_FEE;
+                    setup
+                        .minter()
+                        .withdraw(WithdrawalArgs {
+                            from_subaccount: account.subaccount,
+                            amount: withdrawal_amount,
+                            address: withdrawal_address.to_string(),
+                        })
+                        .await
+                        .expect("withdraw should succeed")
+                        .block_index
+                },
+            ))
+            .await;
 
-    // Step 1: Deposit SOL and mint ckSOL
-    let deposit_address = setup.minter().get_deposit_address(depositor).await.into();
-    let deposit_signature = send_deposit_to_address(deposit_address, deposit_amount).await;
+        // Advance time to trigger withdrawal processing and monitor timers
+        setup.advance_time(Duration::from_mins(10)).await;
 
-    let result = setup
-        .minter()
-        .update_balance(UpdateBalanceArgs {
-            owner: Some(depositor.owner),
-            subaccount: depositor.subaccount,
-            signature: deposit_signature.into(),
-        })
-        .await;
-    assert_matches!(result, Ok(DepositStatus::Minted { .. }));
-
-    let ck_balance = setup.ledger().balance_of(depositor).await;
-    assert_eq!(ck_balance, expected_mint_amount);
-
-    // Step 2: Consolidate the deposit so the minter has on-chain SOL.
-    // Wait for the consolidation to be finalized, because sendTransaction's
-    // preflight simulation defaults to finalized commitment.
-    let minter_sol_before = get_solana_balance(&MINTER_ADDRESS).await;
-    setup.advance_time(Duration::from_mins(10)).await;
-    wait_for_finalized_balance(&MINTER_ADDRESS, minter_sol_before).await;
-
-    // Step 3: Withdraw ckSOL back to a fresh Solana address
-    let withdrawal_destination = Keypair::new();
-    let withdrawal_address = withdrawal_destination.pubkey();
-    let withdrawal_amount = expected_mint_amount / 2;
-
-    // Approve minter to spend ckSOL
-    setup
-        .ledger()
-        .approve(
-            depositor.subaccount,
-            withdrawal_amount,
-            Account {
-                owner: setup.minter_canister_id(),
-                subaccount: None,
-            },
+        // Wait for all withdrawals to be finalized (in parallel)
+        futures::future::join_all(
+            burn_indices
+                .iter()
+                .map(|&idx| wait_for_withdrawal_finalized(&setup, idx)),
         )
         .await;
 
-    // Initiate withdrawal
-    let withdraw_result = setup
-        .minter()
-        .withdraw(WithdrawalArgs {
-            from_subaccount: depositor.subaccount,
-            amount: withdrawal_amount,
-            address: withdrawal_address.to_string(),
-        })
-        .await
-        .expect("withdraw should succeed");
+        // Verify all ICRC accounts are drained
+        for account in &accounts {
+            let balance = setup.ledger().balance_of(*account).await;
+            assert_eq!(
+                balance, 0,
+                "Account {account:?} should have zero ckSOL balance"
+            );
+        }
 
-    let burn_index = withdraw_result.block_index;
+        // Verify the destination received the expected SOL for this iteration
+        let per_withdrawal_fees = LEDGER_TRANSFER_FEE + Setup::DEFAULT_WITHDRAWAL_FEE;
+        let expected_received = total_minted_amount - num_deposits as u64 * per_withdrawal_fees;
+        let destination_sol_after = get_solana_balance(&withdrawal_address).await;
+        assert_eq!(
+            destination_sol_after - destination_sol_before,
+            expected_received
+        );
 
-    // Verify ckSOL was burned (withdrawal amount + ledger transfer fee)
-    let ck_balance_after = setup.ledger().balance_of(depositor).await;
-    assert_eq!(
-        ck_balance_after,
-        expected_mint_amount - withdrawal_amount - LEDGER_TRANSFER_FEE
-    );
-
-    // Step 4: Advance time to trigger withdrawal processing
-    setup.advance_time(Duration::from_mins(2)).await;
-    tokio::time::sleep(Duration::from_secs(5)).await;
-
-    // Step 5: Verify the withdrawal was sent
-    let tx_hash = match setup.minter().withdrawal_status(burn_index).await {
-        WithdrawalStatus::TxSent(tx) => tx.transaction_hash,
-        other => panic!("Expected TxSent, got: {other:?}"),
-    };
-
-    // Step 6: Wait for the transaction to be confirmed on Solana
-    let tx_signature: Signature = tx_hash.parse().expect("valid signature");
-    confirm_transaction(&rpc_client(), &tx_signature, CommitmentConfig::confirmed()).await;
-
-    // Step 7: Verify the destination received the funds
-    let destination_balance = get_solana_balance(&withdrawal_address).await;
-    let expected_received = withdrawal_amount - Setup::DEFAULT_WITHDRAWAL_FEE;
-    assert_eq!(destination_balance, expected_received);
+        // Minter should retain at least its initial SOL balance (withdrawal fees stay with it)
+        let minter_sol_final = get_solana_balance(&MINTER_ADDRESS).await;
+        assert!(
+            minter_sol_final >= minter_sol_before,
+            "Minter SOL balance should not decrease"
+        );
+    }
 
     setup.drop().await;
 }
@@ -314,6 +283,21 @@ async fn wait_for_finalized_balance(address: &Address, previous_balance: Lamport
     panic!(
         "Balance of {address} did not increase beyond {previous_balance} at finalized commitment"
     );
+}
+
+/// Polls the minter until the given withdrawal is finalized.
+/// In live mode, PocketIC auto-advances time and fires timers automatically.
+async fn wait_for_withdrawal_finalized(setup: &Setup, burn_index: u64) {
+    for _ in 0..120 {
+        if matches!(
+            setup.minter().withdrawal_status(burn_index).await,
+            WithdrawalStatus::TxFinalized(_)
+        ) {
+            return;
+        }
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+    panic!("Withdrawal {burn_index} did not finalize within timeout");
 }
 
 async fn get_solana_balance(address: &Address) -> Lamport {

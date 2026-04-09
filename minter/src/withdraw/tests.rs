@@ -4,8 +4,9 @@ use crate::{
     sol_transfer::MAX_WITHDRAWALS_PER_TX,
     state::{TaskType, read_state},
     test_fixtures::{
-        EventsAssert, MINIMUM_WITHDRAWAL_AMOUNT, MINTER_ACCOUNT, account, confirmed_block, events,
-        init_balance, init_schnorr_master_key, init_state, runtime::TestCanisterRuntime, signature,
+        EventsAssert, MINIMUM_WITHDRAWAL_AMOUNT, MINTER_ACCOUNT, WITHDRAWAL_FEE, account,
+        confirmed_block, events, init_balance, init_balance_to, init_schnorr_master_key,
+        init_state, runtime::TestCanisterRuntime, signature,
     },
     withdraw::{MAX_WITHDRAWAL_ROUNDS, process_pending_withdrawals, withdraw, withdrawal_status},
 };
@@ -22,6 +23,7 @@ use ic_cdk_management_canister::SignCallError;
 use icrc_ledger_types::{icrc1::account::Account, icrc2::transfer_from::TransferFromError};
 use sol_rpc_types::{MultiRpcResult, RpcError, Slot};
 use solana_signature::Signature;
+
 const VALID_ADDRESS: &str = "E4MpwNnMWs2XtW5gVrxZvyS7fMq31QD5HvbxmwP45Tz3";
 
 fn test_caller() -> Account {
@@ -273,6 +275,62 @@ mod process_pending_withdrawals_tests {
         let _guard = TimerGuard::new(TaskType::WithdrawalProcessing).unwrap();
     }
 
+    #[tokio::test]
+    async fn should_skip_withdrawals_when_balance_insufficient() {
+        init_state();
+        // No init_balance call, so minter balance is 0
+        init_schnorr_master_key();
+
+        events::accept_withdrawal(account(1), 0, MINIMUM_WITHDRAWAL_AMOUNT);
+
+        let events_before = EventsAssert::from_recorded();
+
+        let runtime = TestCanisterRuntime::new().with_increasing_time();
+        process_pending_withdrawals(&runtime).await;
+
+        // No new events should be recorded
+        let events_after = EventsAssert::from_recorded();
+        assert_eq!(events_before, events_after);
+
+        // Withdrawal should remain pending (not submitted)
+        assert_eq!(withdrawal_status(0), WithdrawalStatus::Pending);
+    }
+
+    #[tokio::test]
+    async fn should_process_only_affordable_withdrawals() {
+        init_state();
+        init_balance_to(12_500_000);
+        init_schnorr_master_key();
+
+        let tx_signature = signature(0x42);
+        let slot = 1;
+
+        // The minter balance is sufficient for the first two withdrawals
+        events::accept_withdrawal(account(1), 0, 5_000_000 + WITHDRAWAL_FEE);
+        events::accept_withdrawal(account(2), 1, 5_000_000 + WITHDRAWAL_FEE);
+        events::accept_withdrawal(account(3), 2, 5_000_000 + WITHDRAWAL_FEE);
+
+        let events_before = EventsAssert::from_recorded();
+
+        let runtime = TestCanisterRuntime::new()
+            .add_stub_response(GetSlotResult::Consistent(Ok(slot)))
+            .add_stub_response(GetBlockResult::Consistent(Ok(confirmed_block())))
+            .add_signature(tx_signature.into())
+            .add_stub_response(SendTransactionResult::Consistent(Ok(tx_signature.into())))
+            .with_increasing_time();
+
+        process_pending_withdrawals(&runtime).await;
+
+        // First two withdrawals should be submitted, third should remain pending
+        assert_matches!(withdrawal_status(0), WithdrawalStatus::TxSent(_));
+        assert_matches!(withdrawal_status(1), WithdrawalStatus::TxSent(_));
+        assert_eq!(withdrawal_status(2), WithdrawalStatus::Pending);
+
+        // One new event (the submitted transaction batching both withdrawals)
+        let events_after = EventsAssert::from_recorded();
+        assert_eq!(events_after.len(), events_before.len() + 1);
+    }
+
     async fn submit_withdrawals(runtime: &TestCanisterRuntime, count: u8) {
         for i in 1..count + 1 {
             let _ = withdraw(
@@ -317,6 +375,7 @@ mod process_pending_withdrawals_tests {
     #[tokio::test]
     async fn should_log_error_when_blockhash_fetch_fails() {
         init_state();
+        init_balance();
 
         let runtime = TestCanisterRuntime::new()
             // ledger burn response for withdraw
@@ -359,6 +418,7 @@ mod process_pending_withdrawals_tests {
     #[tokio::test]
     async fn should_not_process_batch_on_sig_error() {
         init_state();
+        init_balance();
         init_schnorr_master_key();
 
         let slot = 1;

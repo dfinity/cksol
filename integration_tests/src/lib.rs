@@ -269,6 +269,13 @@ impl Setup {
         self.minter_canister_id
     }
 
+    pub fn minter_account(&self) -> Account {
+        Account {
+            owner: self.minter_canister_id,
+            subaccount: None,
+        }
+    }
+
     pub fn ledger(&self) -> Ledger<'_> {
         Ledger(Canister {
             runtime: self.runtime(Setup::DEFAULT_CALLER),
