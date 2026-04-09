@@ -517,7 +517,7 @@ impl State {
             TransactionPurpose::WithdrawSol { burn_indices } => {
                 let mut total: Lamport = 0;
                 for burn_index in burn_indices {
-                    let timestamped = self
+                    let pending = self
                         .pending_withdrawal_requests
                         .remove(burn_index)
                         .unwrap_or_else(|| {
