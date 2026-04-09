@@ -16,6 +16,8 @@ use std::time::Duration;
 
 const SOLANA_VALIDATOR_URL: &str = "http://localhost:8899";
 const DEPOSITOR: Principal = Setup::DEFAULT_CALLER;
+// Solana base fee per signature included in a transaction.
+const FEE_PER_SIGNATURE: Lamport = 5_000;
 
 // TODO DEFI-2643: Add tests with more exotic transactions, e.g.:
 //  - a transaction with multiple transfer instructions to same target address: single mint with the summed up amount
@@ -55,6 +57,9 @@ async fn should_deposit_consolidate_and_withdraw() {
             .into_iter()
             .multiunzip();
 
+        let total_minted_amount = minted_amounts.iter().sum::<Lamport>();
+        let total_deposited_amount = deposit_amounts.iter().sum::<Lamport>();
+
         let deposit_accounts_balances_before = get_balances(&deposit_addresses).await;
 
         // Trigger consolidation and wait for the minter's Solana balance to increase
@@ -71,14 +76,15 @@ async fn should_deposit_consolidate_and_withdraw() {
             assert_eq!(balance_after, balance_before - deposit_amount);
         }
 
-        let total_minted_amount = minted_amounts.iter().sum::<Lamport>();
-        let minter_sol_after = get_solana_balance(&MINTER_ADDRESS).await;
-        let minter_cycles_after = setup.minter().cycle_balance().await;
-
-        assert!(
-            minter_sol_after >= minter_sol_before + total_minted_amount,
-            "Minter SOL balance increased less than the minted amount"
+        let minter_sol_after_consolidation = get_solana_balance(&MINTER_ADDRESS).await;
+        assert_eq!(
+            minter_sol_after_consolidation,
+            // Each deposit address is a signer in its consolidation transaction, so
+            // the total Solana transaction fee is `FEE_PER_SIGNATURE` per deposit.
+            minter_sol_before + total_deposited_amount - num_deposits as u64 * FEE_PER_SIGNATURE
         );
+
+        let minter_cycles_after = setup.minter().cycle_balance().await;
         assert!(
             minter_cycles_after >= minter_cycles_before,
             "Minter cycles balance decreased"
