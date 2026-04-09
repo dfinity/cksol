@@ -7,7 +7,7 @@ use crate::test_fixtures::{
         accept_deposit, accept_withdrawal, fail_transaction, mint_deposit, quarantine_deposit,
         submit_consolidation, submit_withdrawal, succeed_transaction,
     },
-    init_schnorr_master_key, init_state, init_state_with_args, ledger_canister_id,
+    init_balance, init_schnorr_master_key, init_state, init_state_with_args, ledger_canister_id,
     runtime::TestCanisterRuntime,
     signature, sol_rpc_canister_id, valid_init_args,
 };
@@ -243,6 +243,7 @@ fn should_paginate_minted_deposits_across_multiple_pages() {
 #[test]
 fn should_display_all_withdrawal_statuses() {
     init_state();
+    init_balance();
 
     // Pending
     accept_withdrawal(account(1), 0, 100_000_000);

@@ -519,7 +519,10 @@ impl State {
                     );
                 }
                 let tx_fee = self.transaction_fee(transaction);
-                self.balance = self.balance.saturating_sub(total + tx_fee);
+                self.balance = self
+                    .balance
+                    .checked_sub(total + tx_fee)
+                    .expect("BUG: insufficient minter balance for withdrawal");
                 total
             }
         };
@@ -595,7 +598,10 @@ impl State {
             TransactionPurpose::ConsolidateDeposits { .. }
         ) {
             let tx_fee = self.transaction_fee(&transaction.message);
-            self.balance += transaction.amount.saturating_sub(tx_fee);
+            self.balance += transaction
+                .amount
+                .checked_sub(tx_fee)
+                .expect("BUG: consolidation amount is less than transaction fee");
         }
         assert!(
             self.succeeded_transactions.insert(*signature),
