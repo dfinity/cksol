@@ -22,24 +22,6 @@ const DEPOSITOR_PRINCIPAL: Principal = Principal::from_slice(&[0x9d, 0xf7, 0x99]
 //  - a transaction with multiple transfer instructions to same target address: single mint with the summed up amount
 //  - a transaction with multiple instructions, not all to the same target address: only relevant amounts are considered.
 
-/// Creates a test setup connected to the local Solana test validator.
-async fn setup_with_solana_validator() -> Setup {
-    SetupBuilder::new()
-        .with_proxy_canister()
-        .with_pocket_ic_live_mode()
-        .with_sol_rpc_install_args(InstallArgs {
-            override_provider: Some(OverrideProvider {
-                override_url: Some(RegexSubstitution {
-                    pattern: ".*".into(),
-                    replacement: SOLANA_VALIDATOR_URL.to_string(),
-                }),
-            }),
-            ..InstallArgs::default()
-        })
-        .build()
-        .await
-}
-
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn should_deposit_and_consolidate_funds() {
@@ -73,9 +55,9 @@ async fn should_deposit_and_consolidate_funds() {
 
         let deposit_accounts_balances_before = get_balances(&deposit_addresses).await;
 
-        // Trigger consolidation
+        // Trigger consolidation and wait for the transaction to finalize
         setup.advance_time(Duration::from_mins(10)).await;
-        tokio::time::sleep(Duration::from_secs(5)).await;
+        wait_for_finalized_balance(&MINTER_ADDRESS, minter_sol_before).await;
 
         // Verify deposit addresses were drained
         for (deposit_address, &balance_before, &deposit_amount) in itertools::multizip((
@@ -111,6 +93,120 @@ async fn should_deposit_and_consolidate_funds() {
     }
 
     setup.drop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn should_deposit_and_withdraw_funds() {
+    let setup = setup_with_solana_validator().await;
+
+    let depositor = Account {
+        owner: Setup::DEFAULT_CALLER,
+        subaccount: None,
+    };
+    let deposit_amount = LAMPORTS_PER_SOL;
+    let expected_mint_amount = deposit_amount - Setup::DEFAULT_DEPOSIT_FEE;
+
+    // Step 1: Deposit SOL and mint ckSOL
+    let deposit_address = setup.minter().get_deposit_address(depositor).await.into();
+    let deposit_signature = send_deposit_to_address(deposit_address, deposit_amount).await;
+
+    let result = setup
+        .minter()
+        .update_balance(UpdateBalanceArgs {
+            owner: Some(depositor.owner),
+            subaccount: depositor.subaccount,
+            signature: deposit_signature.into(),
+        })
+        .await;
+    assert_matches!(result, Ok(DepositStatus::Minted { .. }));
+
+    let ck_balance = setup.ledger().balance_of(depositor).await;
+    assert_eq!(ck_balance, expected_mint_amount);
+
+    // Step 2: Consolidate the deposit so the minter has on-chain SOL.
+    // Wait for the consolidation to be finalized, because sendTransaction's
+    // preflight simulation defaults to finalized commitment.
+    let minter_sol_before = get_solana_balance(&MINTER_ADDRESS).await;
+    setup.advance_time(Duration::from_mins(10)).await;
+    wait_for_finalized_balance(&MINTER_ADDRESS, minter_sol_before).await;
+
+    // Step 3: Withdraw ckSOL back to a fresh Solana address
+    let withdrawal_destination = Keypair::new();
+    let withdrawal_address = withdrawal_destination.pubkey();
+    let withdrawal_amount = expected_mint_amount / 2;
+
+    // Approve minter to spend ckSOL
+    setup
+        .ledger()
+        .approve(
+            depositor.subaccount,
+            withdrawal_amount,
+            Account {
+                owner: setup.minter_canister_id(),
+                subaccount: None,
+            },
+        )
+        .await;
+
+    // Initiate withdrawal
+    let withdraw_result = setup
+        .minter()
+        .withdraw(WithdrawalArgs {
+            from_subaccount: depositor.subaccount,
+            amount: withdrawal_amount,
+            address: withdrawal_address.to_string(),
+        })
+        .await
+        .expect("withdraw should succeed");
+
+    let burn_index = withdraw_result.block_index;
+
+    // Verify ckSOL was burned (withdrawal amount + ledger transfer fee)
+    let ck_balance_after = setup.ledger().balance_of(depositor).await;
+    assert_eq!(
+        ck_balance_after,
+        expected_mint_amount - withdrawal_amount - LEDGER_TRANSFER_FEE
+    );
+
+    // Step 4: Advance time to trigger withdrawal processing
+    setup.advance_time(Duration::from_mins(2)).await;
+    tokio::time::sleep(Duration::from_secs(5)).await;
+
+    // Step 5: Verify the withdrawal was sent
+    let tx_hash = match setup.minter().withdrawal_status(burn_index).await {
+        WithdrawalStatus::TxSent(tx) => tx.transaction_hash,
+        other => panic!("Expected TxSent, got: {other:?}"),
+    };
+
+    // Step 6: Wait for the transaction to be confirmed on Solana
+    let tx_signature: Signature = tx_hash.parse().expect("valid signature");
+    confirm_transaction(&rpc_client(), &tx_signature, CommitmentConfig::confirmed()).await;
+
+    // Step 7: Verify the destination received the funds
+    let destination_balance = get_solana_balance(&withdrawal_address).await;
+    let expected_received = withdrawal_amount - Setup::DEFAULT_WITHDRAWAL_FEE;
+    assert_eq!(destination_balance, expected_received);
+
+    setup.drop().await;
+}
+
+/// Creates a test setup connected to the local Solana test validator.
+async fn setup_with_solana_validator() -> Setup {
+    SetupBuilder::new()
+        .with_proxy_canister()
+        .with_pocket_ic_live_mode()
+        .with_sol_rpc_install_args(InstallArgs {
+            override_provider: Some(OverrideProvider {
+                override_url: Some(RegexSubstitution {
+                    pattern: ".*".into(),
+                    replacement: SOLANA_VALIDATOR_URL.to_string(),
+                }),
+            }),
+            ..InstallArgs::default()
+        })
+        .build()
+        .await
 }
 
 async fn deposit_to_account(
@@ -201,6 +297,25 @@ async fn confirm_transaction(rpc: &RpcClient, signature: &Signature, commitment:
     panic!("Transaction {signature} not confirmed within timeout");
 }
 
+/// Polls a Solana address at `finalized` commitment until its balance exceeds
+/// `previous_balance`.
+async fn wait_for_finalized_balance(address: &Address, previous_balance: Lamport) {
+    for _ in 0..60 {
+        let balance = rpc_client()
+            .get_balance_with_commitment(address, CommitmentConfig::finalized())
+            .await
+            .map(|response| response.value)
+            .unwrap_or(0);
+        if balance > previous_balance {
+            return;
+        }
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+    panic!(
+        "Balance of {address} did not increase beyond {previous_balance} at finalized commitment"
+    );
+}
+
 async fn get_solana_balance(address: &Address) -> Lamport {
     rpc_client()
         .get_balance(address)
@@ -208,106 +323,13 @@ async fn get_solana_balance(address: &Address) -> Lamport {
         .expect("Failed to get Solana balance")
 }
 
+async fn get_balances(addresses: &[Address]) -> Vec<Lamport> {
+    futures::future::join_all(addresses.iter().map(get_solana_balance)).await
+}
+
 fn rpc_client() -> RpcClient {
     RpcClient::new_with_commitment(
         SOLANA_VALIDATOR_URL.to_string(),
         CommitmentConfig::confirmed(),
     )
-}
-
-async fn get_balances(addresses: &[Address]) -> Vec<Lamport> {
-    futures::future::join_all(addresses.iter().map(get_solana_balance)).await
-}
-
-#[tokio::test(flavor = "multi_thread")]
-#[serial]
-async fn should_deposit_and_withdraw_funds() {
-    let setup = setup_with_solana_validator().await;
-
-    let depositor = Account {
-        owner: Setup::DEFAULT_CALLER,
-        subaccount: None,
-    };
-    let deposit_amount = LAMPORTS_PER_SOL;
-    let expected_mint_amount = deposit_amount - Setup::DEFAULT_DEPOSIT_FEE;
-
-    // Step 1: Deposit SOL and mint ckSOL
-    let deposit_address = setup.minter().get_deposit_address(depositor).await.into();
-    let deposit_signature = send_deposit_to_address(deposit_address, deposit_amount).await;
-
-    let result = setup
-        .minter()
-        .update_balance(UpdateBalanceArgs {
-            owner: Some(depositor.owner),
-            subaccount: depositor.subaccount,
-            signature: deposit_signature.into(),
-        })
-        .await;
-    assert_matches!(result, Ok(DepositStatus::Minted { .. }));
-
-    let ck_balance = setup.ledger().balance_of(depositor).await;
-    assert_eq!(ck_balance, expected_mint_amount);
-
-    // Step 2: Consolidate the deposit so the minter has on-chain SOL
-    setup.advance_time(Duration::from_mins(10)).await;
-    tokio::time::sleep(Duration::from_secs(5)).await;
-
-    // Step 3: Withdraw ckSOL back to a fresh Solana address
-    let withdrawal_destination = Keypair::new();
-    let withdrawal_address = withdrawal_destination.pubkey();
-    let withdrawal_amount = expected_mint_amount / 2;
-
-    // Approve minter to spend ckSOL
-    setup
-        .ledger()
-        .approve(
-            depositor.subaccount,
-            withdrawal_amount,
-            Account {
-                owner: setup.minter_canister_id(),
-                subaccount: None,
-            },
-        )
-        .await;
-
-    // Initiate withdrawal
-    let withdraw_result = setup
-        .minter()
-        .withdraw(WithdrawalArgs {
-            from_subaccount: depositor.subaccount,
-            amount: withdrawal_amount,
-            address: withdrawal_address.to_string(),
-        })
-        .await
-        .expect("withdraw should succeed");
-
-    let burn_index = withdraw_result.block_index;
-
-    // Verify ckSOL was burned (withdrawal amount + ledger transfer fee)
-    let ck_balance_after = setup.ledger().balance_of(depositor).await;
-    assert_eq!(
-        ck_balance_after,
-        expected_mint_amount - withdrawal_amount - LEDGER_TRANSFER_FEE
-    );
-
-    // Step 4: Advance time to trigger withdrawal processing
-    setup.advance_time(Duration::from_mins(2)).await;
-    tokio::time::sleep(Duration::from_secs(5)).await;
-
-    // Step 5: Verify the withdrawal was sent
-    let tx_hash = match setup.minter().withdrawal_status(burn_index).await {
-        WithdrawalStatus::TxSent(tx) => tx.transaction_hash,
-        other => panic!("Expected TxSent, got: {other:?}"),
-    };
-
-    // Step 6: Wait for the transaction to be confirmed on Solana
-    let tx_signature: Signature = tx_hash.parse().expect("valid signature");
-    confirm_transaction(&rpc_client(), &tx_signature, CommitmentConfig::confirmed()).await;
-
-    // Step 7: Verify the destination received the funds
-    let destination_balance = get_solana_balance(&withdrawal_address).await;
-    let expected_received = withdrawal_amount - Setup::DEFAULT_WITHDRAWAL_FEE;
-    assert_eq!(destination_balance, expected_received);
-
-    setup.drop().await;
 }
