@@ -211,7 +211,7 @@ pub mod events {
         account: Account,
         burn_index: u64,
         amount: Lamport,
-        created_at: u64,
+        timestamp: u64,
     ) {
         mutate_state(|state| {
             process_event(
@@ -222,9 +222,8 @@ pub mod events {
                     burn_block_index: LedgerBurnIndex::from(burn_index),
                     withdrawal_amount: amount,
                     withdrawal_fee: WITHDRAWAL_FEE,
-                    created_at,
                 }),
-                &runtime(),
+                &TestCanisterRuntime::new().with_time(timestamp),
             )
         });
     }
@@ -447,24 +446,15 @@ pub mod arb {
             arb_ledger_burn_index(),
             any::<u64>(),
             any::<u64>(),
-            any::<u64>(),
         )
             .prop_map(
-                |(
-                    account,
-                    solana_address,
-                    burn_block_index,
-                    withdrawal_amount,
-                    withdrawal_fee,
-                    created_at,
-                )| {
+                |(account, solana_address, burn_block_index, withdrawal_amount, withdrawal_fee)| {
                     WithdrawalRequest {
                         account,
                         solana_address,
                         burn_block_index,
                         withdrawal_amount,
                         withdrawal_fee,
-                        created_at,
                     }
                 },
             )

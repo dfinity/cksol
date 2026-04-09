@@ -72,8 +72,6 @@ pub enum EventType {
         withdrawal_amount: Lamport,
         /// The fee retained by the minter (in lamports).
         withdrawal_fee: Lamport,
-        /// The canister time (in nanoseconds) at which this withdrawal request was created.
-        created_at: u64,
     },
     /// Submitted a Solana transaction.
     SubmittedTransaction {

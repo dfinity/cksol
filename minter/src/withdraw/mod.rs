@@ -79,7 +79,6 @@ pub async fn withdraw<R: CanisterRuntime>(
                 burn_block_index: block_index.into(),
                 withdrawal_amount: amount,
                 withdrawal_fee,
-                created_at: runtime.time(),
             }),
             runtime,
         )
@@ -113,7 +112,7 @@ pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: &R) {
             .pending_withdrawal_requests()
             .values()
             .take(max_per_invocation)
-            .cloned()
+            .map(|t| t.request.clone())
             .collect::<Vec<_>>()
     })
     .into_iter()

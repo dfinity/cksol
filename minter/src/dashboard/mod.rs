@@ -386,8 +386,8 @@ impl DashboardTemplate {
             ));
         }
 
-        for (burn_index, req) in state.pending_withdrawal_requests() {
-            push_withdrawal(&mut withdrawals, burn_index, req, "Pending", None);
+        for (burn_index, timestamped) in state.pending_withdrawal_requests() {
+            push_withdrawal(&mut withdrawals, burn_index, &timestamped.request, "Pending", None);
         }
         for (burn_index, sent) in state.sent_withdrawal_requests() {
             push_withdrawal(
