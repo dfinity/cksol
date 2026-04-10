@@ -120,6 +120,15 @@ pub enum EventType {
         #[cbor(n(0), with = "cbor::signature")]
         signature: Signature,
     },
+    /// A previously submitted Solana transaction has an expired blockhash
+    /// and a null on-chain status, meaning it will never be executed.
+    /// The transaction has been marked for resubmission.
+    #[n(10)]
+    ExpiredTransaction {
+        /// The signature of the expired Solana transaction.
+        #[cbor(n(0), with = "cbor::signature")]
+        signature: Signature,
+    },
 }
 
 /// Payload of the `AcceptedWithdrawalRequest` event.

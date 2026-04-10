@@ -100,7 +100,7 @@ pub async fn monitor_submitted_transactions<R: CanisterRuntime>(runtime: R) {
         return;
     }
 
-    let expired_signatures: BTreeSet<Signature> = all_transactions
+    let expired_signatures: Vec<Signature> = all_transactions
         .into_iter()
         .filter(|(sig, slot)| {
             statuses.not_found.contains(sig) && slot + MAX_BLOCKHASH_AGE < current_slot
@@ -112,8 +112,18 @@ pub async fn monitor_submitted_transactions<R: CanisterRuntime>(runtime: R) {
         return;
     }
 
+    for signature in expired_signatures {
+        mutate_state(|state| {
+            // Skip if the transaction was finalized concurrently.
+            if state.submitted_transactions().contains_key(&signature) {
+                process_event(state, EventType::ExpiredTransaction { signature }, &runtime);
+            }
+        });
+    }
+
     let to_resubmit: Vec<_> = read_state(|state| {
-        expired_signatures
+        state
+            .transactions_to_resubmit()
             .iter()
             .filter_map(|sig| {
                 state

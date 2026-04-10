@@ -558,6 +558,7 @@ pub mod arb {
             ),
             arb_signature().prop_map(|signature| EventType::SucceededTransaction { signature }),
             arb_signature().prop_map(|signature| EventType::FailedTransaction { signature }),
+            arb_signature().prop_map(|signature| EventType::ExpiredTransaction { signature }),
         ]
     }
 
