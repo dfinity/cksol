@@ -11,7 +11,7 @@ use crate::{
             accept_deposit, accept_withdrawal, accept_withdrawal_at, fail_transaction,
             mint_deposit, submit_withdrawal, succeed_transaction,
         },
-        init_state, ledger_canister_id,
+        init_balance, init_state, ledger_canister_id,
         runtime::TestCanisterRuntime,
         signature, sol_rpc_canister_id, valid_init_args,
     },
@@ -516,6 +516,7 @@ mod oldest_incomplete_withdrawal_created_at {
     #[test]
     fn should_return_timestamp_of_single_pending_withdrawal() {
         init_state();
+        init_balance();
         accept_withdrawal_at(account(1), 0, AMOUNT, 1_000_000_000);
         assert_eq!(
             read_state(|s| s.oldest_incomplete_withdrawal_created_at()),
@@ -526,6 +527,7 @@ mod oldest_incomplete_withdrawal_created_at {
     #[test]
     fn should_return_oldest_timestamp_with_multiple_pending_withdrawals() {
         init_state();
+        init_balance();
         accept_withdrawal_at(account(1), 0, AMOUNT, 1_000_000_000);
         accept_withdrawal_at(account(2), 1, AMOUNT, 2_000_000_000);
         accept_withdrawal_at(account(3), 2, AMOUNT, 3_000_000_000);
@@ -538,6 +540,7 @@ mod oldest_incomplete_withdrawal_created_at {
     #[test]
     fn should_persist_through_submission() {
         init_state();
+        init_balance();
         accept_withdrawal_at(account(1), 0, AMOUNT, 1_000_000_000);
         accept_withdrawal_at(account(2), 1, AMOUNT, 2_000_000_000);
 
@@ -553,6 +556,7 @@ mod oldest_incomplete_withdrawal_created_at {
     #[test]
     fn should_update_when_oldest_withdrawal_succeeds() {
         init_state();
+        init_balance();
         accept_withdrawal_at(account(1), 0, AMOUNT, 1_000_000_000);
         accept_withdrawal_at(account(2), 1, AMOUNT, 2_000_000_000);
 
@@ -569,6 +573,7 @@ mod oldest_incomplete_withdrawal_created_at {
     #[test]
     fn should_update_when_oldest_withdrawal_fails() {
         init_state();
+        init_balance();
         accept_withdrawal_at(account(1), 0, AMOUNT, 1_000_000_000);
         accept_withdrawal_at(account(2), 1, AMOUNT, 2_000_000_000);
 
@@ -585,6 +590,7 @@ mod oldest_incomplete_withdrawal_created_at {
     #[test]
     fn should_be_none_when_all_withdrawals_are_finalized() {
         init_state();
+        init_balance();
         accept_withdrawal_at(account(1), 0, AMOUNT, 1_000_000_000);
         accept_withdrawal_at(account(2), 1, AMOUNT, 2_000_000_000);
 

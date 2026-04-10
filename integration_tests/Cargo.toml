@@ -43,4 +43,3 @@ assert_matches = { workspace = true }
 futures = { workspace = true }
 icrc-ledger-types = { workspace = true }
 minicbor = { workspace = true }
-serial_test = { workspace = true }

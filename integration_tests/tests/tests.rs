@@ -30,6 +30,55 @@ use sol_rpc_types::{CommitmentLevel, ConsensusStrategy, GetTransactionEncoding, 
 use std::time::Duration;
 use tokio::join;
 
+/// Deposits funds into the minter via `update_balance`, consolidates them,
+/// and finalizes the consolidation so the minter's internal balance is credited.
+///
+/// Requires the setup to have been built with `.with_proxy_canister()`.
+async fn deposit_and_consolidate_funds(setup: &Setup) {
+    let result = setup
+        .minter()
+        .with_http_mocks(get_transaction_http_mocks(
+            get_deposit_transaction_response(),
+        ))
+        .update_balance(default_update_balance_args())
+        .await;
+    assert_matches!(result, Ok(DepositStatus::Minted { .. }));
+
+    // Consolidate
+    setup.advance_time(Duration::from_mins(10)).await;
+    setup
+        .execute_http_mocks(
+            MockHttpOutcallsBuilder::new()
+                .expect(4..8, get_slot_request(), get_slot_response(100_000_000))
+                .expect(
+                    8..12,
+                    get_block_request(100_000_000),
+                    get_block_response("4sGjMW1sUnHzSxGspuhpqLDx6wiyjNtZAMdL4VZHirAn"),
+                )
+                .expect(
+                    12..16,
+                    send_transaction_request(),
+                    send_transaction_response("5VERv8NMvzbJMEkV8xnrLkEaWRtSz9CosKDYjCJjBRnbJLgp8uirBgmQpjKhoR4tjF3ZpRzrFmBV6UjKdiSZkQUW"),
+                )
+                .build(),
+        )
+        .await;
+
+    // Finalize
+    setup.advance_time(Duration::from_secs(60)).await;
+    setup
+        .execute_http_mocks(
+            MockHttpOutcallsBuilder::new()
+                .expect(
+                    16..20,
+                    get_signature_statuses_request(),
+                    get_signature_statuses_finalized_response(1),
+                )
+                .build(),
+        )
+        .await;
+}
+
 mod get_deposit_address_tests {
     use super::*;
 
@@ -576,8 +625,12 @@ mod withdrawal_tests {
                 DEFAULT_CALLER_ACCOUNT,
                 Nat::from(10 * WITHDRAWAL_AMOUNT),
             )])
+            .with_proxy_canister()
             .build()
             .await;
+
+        // Deposit and consolidate so the minter has enough balance for withdrawals
+        deposit_and_consolidate_funds(&setup).await;
 
         setup
             .ledger()
@@ -678,10 +731,14 @@ mod withdrawal_tests {
         const TX_SIGNATURE: &str = "drWLXM6bHretgz7KuwvGZvPBeQ8KEbS3AKB2WJPy4TbBDaqdqAiNcj3cTAS7UnyJKM7eEZoUf4DvhY1TKkus9Bp";
 
         MockHttpOutcallsBuilder::new()
-            .expect(0..4, get_slot_request(), get_slot_response(slot))
-            .expect(4..8, get_block_request(slot), get_block_response(BLOCKHASH))
+            .expect(20..24, get_slot_request(), get_slot_response(slot))
             .expect(
-                8..12,
+                24..28,
+                get_block_request(slot),
+                get_block_response(BLOCKHASH),
+            )
+            .expect(
+                28..32,
                 send_transaction_request(),
                 send_transaction_response(TX_SIGNATURE),
             )
@@ -695,24 +752,24 @@ mod withdrawal_tests {
 
         MockHttpOutcallsBuilder::new()
             .expect(
-                12..16,
+                32..36,
                 get_signature_statuses_request(),
                 get_signature_statuses_not_found_response(1),
             )
-            .expect(16..20, get_slot_request(), get_slot_response(current_slot))
+            .expect(36..40, get_slot_request(), get_slot_response(current_slot))
             .expect(
-                20..24,
+                40..44,
                 get_block_request(current_slot),
                 get_block_response(NEW_BLOCKHASH),
             )
-            .expect(24..28, get_slot_request(), get_slot_response(current_slot))
+            .expect(44..48, get_slot_request(), get_slot_response(current_slot))
             .expect(
-                28..32,
+                48..52,
                 get_block_request(current_slot),
                 get_block_response(NEW_BLOCKHASH),
             )
             .expect(
-                32..36,
+                52..56,
                 send_transaction_request(),
                 send_transaction_response(NEW_TX_SIGNATURE),
             )
@@ -723,7 +780,7 @@ mod withdrawal_tests {
     fn finalize_withdrawal_http_mocks() -> MockHttpOutcalls {
         MockHttpOutcallsBuilder::new()
             .expect(
-                36..40,
+                56..60,
                 get_signature_statuses_request(),
                 get_signature_statuses_finalized_response(1),
             )
@@ -1033,7 +1090,7 @@ mod anonymous_caller_tests {
 mod consolidation_tests {
     use super::*;
 
-    const DEPOSIT_CONSOLIDATION_DELAY: Duration = Duration::from_secs(600);
+    const DEPOSIT_CONSOLIDATION_DELAY: Duration = Duration::from_mins(10);
 
     #[tokio::test]
     async fn should_consolidate_deposits_after_timer() {
