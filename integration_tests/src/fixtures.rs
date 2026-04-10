@@ -64,35 +64,6 @@ pub fn get_memo(block: ICRC3Value) -> Vec<u8> {
     memo_blob.into_vec()
 }
 
-/// Extension trait for [`MockHttpOutcallsBuilder`] to reduce boilerplate when mocking
-/// the same request/response pair across multiple JSON-RPC request IDs.
-pub trait MockHttpOutcallsBuilderExt {
-    /// For each ID in `ids`, adds a mock that matches `request` with that ID
-    /// and responds with `response` with the same ID. The request and response
-    /// are cloned for each ID.
-    fn expect(
-        self,
-        ids: impl IntoIterator<Item = u64>,
-        request: JsonRpcRequestMatcher,
-        response: JsonRpcResponse,
-    ) -> Self;
-}
-
-impl MockHttpOutcallsBuilderExt for MockHttpOutcallsBuilder {
-    fn expect(
-        self,
-        ids: impl IntoIterator<Item = u64>,
-        request: JsonRpcRequestMatcher,
-        response: JsonRpcResponse,
-    ) -> Self {
-        ids.into_iter().fold(self, |builder, id| {
-            builder
-                .given(request.clone().with_id(id))
-                .respond_with(response.clone().with_id(id))
-        })
-    }
-}
-
 /// This wrapper around [`MockHttpOutcalls`] allows different instances of [`PocketIcRuntime`]
 /// to share the same mocks. This is useful in tests where several requests are made concurrently,
 /// but only one of them results in HTTP outcalls being executed.
@@ -118,8 +89,110 @@ impl ExecuteHttpOutcallMocks for SharedMockHttpOutcalls {
     }
 }
 
+/// Thin wrapper around [`MockHttpOutcallsBuilder`] that auto-increments JSON-RPC IDs
+/// in steps of [`NUM_RPC_PROVIDERS`] (one ID per redundant RPC provider).
+pub struct MockBuilder {
+    inner: MockHttpOutcallsBuilder,
+    next_id: u64,
+}
+
+/// Number of Solana RPC providers used for redundancy.
+/// Each logical RPC call generates this many HTTP outcalls with consecutive IDs.
+const NUM_RPC_PROVIDERS: u64 = 4;
+
+impl Default for MockBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl MockBuilder {
+    pub fn new() -> Self {
+        Self {
+            inner: MockHttpOutcallsBuilder::new(),
+            next_id: 0,
+        }
+    }
+
+    pub fn with_start_id(id: u64) -> Self {
+        Self {
+            inner: MockHttpOutcallsBuilder::new(),
+            next_id: id,
+        }
+    }
+
+    /// Add a mock for one RPC call ([`NUM_RPC_PROVIDERS`] IDs for redundancy).
+    pub fn expect(mut self, request: JsonRpcRequestMatcher, response: JsonRpcResponse) -> Self {
+        for id in self.next_id..self.next_id + NUM_RPC_PROVIDERS {
+            self.inner = self
+                .inner
+                .given(request.clone().with_id(id))
+                .respond_with(response.clone().with_id(id));
+        }
+        self.next_id += NUM_RPC_PROVIDERS;
+        self
+    }
+
+    pub fn build(self) -> MockHttpOutcalls {
+        self.inner.build()
+    }
+
+    /// Mock for `getTransaction` with the given response.
+    pub fn get_transaction(self, response: JsonRpcResponse) -> Self {
+        self.expect(get_deposit_transaction_request(), response)
+    }
+
+    /// Mock for `getTransaction` returning the default deposit transaction.
+    pub fn get_deposit_transaction(self) -> Self {
+        self.get_transaction(get_deposit_transaction_response())
+    }
+
+    /// Mocks for `getSlot` → `getBlock` → `sendTransaction`.
+    pub fn submit_transaction(self, slot: u64, blockhash: &str, tx_signature: &str) -> Self {
+        self.expect(get_slot_request(), get_slot_response(slot))
+            .expect(get_block_request(slot), get_block_response(blockhash))
+            .expect(
+                send_transaction_request(),
+                send_transaction_response(tx_signature),
+            )
+    }
+
+    /// Mock for `getSignatureStatuses` returning not-found for `count` signatures.
+    pub fn check_signature_statuses_not_found(self, count: usize) -> Self {
+        self.expect(
+            get_signature_statuses_request(),
+            get_signature_statuses_not_found_response(count),
+        )
+    }
+
+    /// Mock for `getSignatureStatuses` returning finalized for `count` signatures.
+    pub fn check_signature_statuses_finalized(self, count: usize) -> Self {
+        self.expect(
+            get_signature_statuses_request(),
+            get_signature_statuses_finalized_response(count),
+        )
+    }
+
+    /// Mocks for resubmitting an expired transaction:
+    /// `getSignatureStatuses`(not found) → `getSlot` → `getBlock` → `getSlot` → `getBlock` → `sendTransaction`.
+    pub fn resubmit_transaction(self, slot: u64, blockhash: &str, tx_signature: &str) -> Self {
+        self.check_signature_statuses_not_found(1)
+            .expect(get_slot_request(), get_slot_response(slot))
+            .expect(get_block_request(slot), get_block_response(blockhash))
+            .expect(get_slot_request(), get_slot_response(slot))
+            .expect(get_block_request(slot), get_block_response(blockhash))
+            .expect(
+                send_transaction_request(),
+                send_transaction_response(tx_signature),
+            )
+    }
+}
+
+// ── JSON-RPC request matchers and response builders ─────────────────────────
+// These are private helpers used by `MockBuilder` methods above.
+
 /// [`getTransaction`] request for [`DEPOSIT_TRANSACTION_SIGNATURE`].
-pub fn get_deposit_transaction_request() -> JsonRpcRequestMatcher {
+fn get_deposit_transaction_request() -> JsonRpcRequestMatcher {
     JsonRpcRequestMatcher::with_method("getTransaction").with_params(json!([
         DEPOSIT_TRANSACTION_SIGNATURE,
         {"encoding": "base64", "commitment": "finalized"}
@@ -141,7 +214,7 @@ pub fn get_deposit_transaction_request() -> JsonRpcRequestMatcher {
 ///     ]
 /// }'
 /// ```
-pub fn get_deposit_transaction_response() -> JsonRpcResponse {
+fn get_deposit_transaction_response() -> JsonRpcResponse {
     JsonRpcResponse::from(json!({
         "jsonrpc": "2.0",
         "result": {
@@ -187,13 +260,11 @@ pub fn get_deposit_transaction_response() -> JsonRpcResponse {
     }))
 }
 
-/// JSON-RPC request matcher for `getSlot`.
-pub fn get_slot_request() -> JsonRpcRequestMatcher {
+fn get_slot_request() -> JsonRpcRequestMatcher {
     JsonRpcRequestMatcher::with_method("getSlot")
 }
 
-/// JSON-RPC response for `getSlot`.
-pub fn get_slot_response(slot: u64) -> JsonRpcResponse {
+fn get_slot_response(slot: u64) -> JsonRpcResponse {
     JsonRpcResponse::from(json!({
         "jsonrpc": "2.0",
         "result": slot,
@@ -201,8 +272,7 @@ pub fn get_slot_response(slot: u64) -> JsonRpcResponse {
     }))
 }
 
-/// JSON-RPC request matcher for `getBlock`.
-pub fn get_block_request(slot: u64) -> JsonRpcRequestMatcher {
+fn get_block_request(slot: u64) -> JsonRpcRequestMatcher {
     JsonRpcRequestMatcher::with_method("getBlock").with_params(json!([
         slot,
         {
@@ -213,8 +283,7 @@ pub fn get_block_request(slot: u64) -> JsonRpcRequestMatcher {
     ]))
 }
 
-/// JSON-RPC response for `getBlock`.
-pub fn get_block_response(blockhash: &str) -> JsonRpcResponse {
+fn get_block_response(blockhash: &str) -> JsonRpcResponse {
     JsonRpcResponse::from(json!({
         "jsonrpc": "2.0",
         "result": {
@@ -228,13 +297,11 @@ pub fn get_block_response(blockhash: &str) -> JsonRpcResponse {
     }))
 }
 
-/// JSON-RPC request matcher for `getSignatureStatuses`.
-pub fn get_signature_statuses_request() -> JsonRpcRequestMatcher {
+fn get_signature_statuses_request() -> JsonRpcRequestMatcher {
     JsonRpcRequestMatcher::with_method("getSignatureStatuses")
 }
 
-/// JSON-RPC response for `getSignatureStatuses` where all signatures are not found.
-pub fn get_signature_statuses_not_found_response(count: usize) -> JsonRpcResponse {
+fn get_signature_statuses_not_found_response(count: usize) -> JsonRpcResponse {
     JsonRpcResponse::from(json!({
         "jsonrpc": "2.0",
         "result": {
@@ -245,8 +312,7 @@ pub fn get_signature_statuses_not_found_response(count: usize) -> JsonRpcRespons
     }))
 }
 
-/// JSON-RPC response for `getSignatureStatuses` where all signatures are finalized.
-pub fn get_signature_statuses_finalized_response(count: usize) -> JsonRpcResponse {
+fn get_signature_statuses_finalized_response(count: usize) -> JsonRpcResponse {
     let statuses: Vec<_> = (0..count)
         .map(|_| {
             json!({
@@ -268,23 +334,14 @@ pub fn get_signature_statuses_finalized_response(count: usize) -> JsonRpcRespons
     }))
 }
 
-/// JSON-RPC request matcher for `sendTransaction`.
-pub fn send_transaction_request() -> JsonRpcRequestMatcher {
+fn send_transaction_request() -> JsonRpcRequestMatcher {
     JsonRpcRequestMatcher::with_method("sendTransaction")
 }
 
-/// JSON-RPC response for `sendTransaction`.
-pub fn send_transaction_response(signature: &str) -> JsonRpcResponse {
+fn send_transaction_response(signature: &str) -> JsonRpcResponse {
     JsonRpcResponse::from(json!({
         "jsonrpc": "2.0",
         "result": signature,
         "id": 1
     }))
-}
-
-/// Creates HTTP mocks for `getTransaction` RPC calls.
-pub fn get_transaction_http_mocks(response: JsonRpcResponse) -> MockHttpOutcalls {
-    MockHttpOutcallsBuilder::new()
-        .expect(0..4, get_deposit_transaction_request(), response)
-        .build()
 }
