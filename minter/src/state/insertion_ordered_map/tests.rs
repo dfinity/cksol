@@ -224,7 +224,7 @@ mod partial_eq {
     use super::*;
 
     #[test]
-    fn should_be_equal_with_same_entries() {
+    fn should_be_equal_with_same_entries_in_same_order() {
         let mut a = InsertionOrderedMap::new();
         a.insert(1u32, "x");
         a.insert(2, "y");
@@ -232,19 +232,6 @@ mod partial_eq {
         let mut b = InsertionOrderedMap::new();
         b.insert(1u32, "x");
         b.insert(2, "y");
-
-        assert_eq!(a, b);
-    }
-
-    #[test]
-    fn should_be_equal_regardless_of_insertion_order() {
-        let mut a = InsertionOrderedMap::new();
-        a.insert(1u32, "x");
-        a.insert(2, "y");
-
-        let mut b = InsertionOrderedMap::new();
-        b.insert(2u32, "y");
-        b.insert(1, "x");
 
         assert_eq!(a, b);
     }
