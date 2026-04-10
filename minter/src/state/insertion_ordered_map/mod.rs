@@ -133,7 +133,7 @@ impl<K: Ord + Clone, V: PartialEq> PartialEq for InsertionOrderedMap<K, V> {
         }
         self.entries
             .iter()
-            .all(|(k, (_, v))| other.entries.get(k).map_or(false, |(_, ov)| v == ov))
+            .all(|(k, (_, v))| other.entries.get(k).is_some_and(|(_, ov)| v == ov))
     }
 }
 
