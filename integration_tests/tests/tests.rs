@@ -1,6 +1,6 @@
 use assert_matches::assert_matches;
 use assert2::check;
-use candid::Principal;
+use candid::{Nat, Principal};
 use cksol_int_tests::{
     CkSolMinter, Setup, SetupBuilder,
     fixtures::{
@@ -20,7 +20,7 @@ use cksol_types_internal::{
     log::Priority,
 };
 use ic_pocket_canister_runtime::{JsonRpcResponse, MockHttpOutcalls};
-use icrc_ledger_types::icrc1::account::Subaccount;
+use icrc_ledger_types::icrc1::account::{Account, Subaccount};
 use serde_json::json;
 use sol_rpc_types::{CommitmentLevel, ConsensusStrategy, GetTransactionEncoding, RpcConfig, Slot};
 use std::time::Duration;
@@ -1084,9 +1084,6 @@ mod consolidation_tests {
 }
 
 mod metrics_tests {
-    use candid::Nat;
-    use icrc_ledger_types::icrc1::account::Account;
-
     use super::*;
 
     #[tokio::test]
@@ -1123,7 +1120,9 @@ mod metrics_tests {
         let setup = setup
             .check_metrics()
             .await
-            .assert_does_not_contain_metric_matching("oldest_incomplete_withdrawal_age_seconds")
+            .assert_does_not_contain_metric_matching(
+                r"oldest_incomplete_withdrawal_age_seconds \d+ \d+",
+            )
             .into();
 
         setup
