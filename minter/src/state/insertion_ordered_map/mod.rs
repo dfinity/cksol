@@ -10,8 +10,6 @@ mod tests;
 /// - `order`: sequence number → key
 ///
 /// Iteration via [`iter`], [`keys`], and [`values`] is in insertion order (oldest first).
-/// [`DoubleEndedIterator`] is supported where needed, so callers can call `.rev()` to get
-/// newest-first.
 ///
 /// [`iter`]: InsertionOrderedMap::iter
 /// [`keys`]: InsertionOrderedMap::keys
@@ -167,14 +165,6 @@ impl<'a, K: Ord, V> Iterator for Iter<'a, K, V> {
     }
 }
 
-impl<'a, K: Ord, V> DoubleEndedIterator for Iter<'a, K, V> {
-    fn next_back(&mut self) -> Option<Self::Item> {
-        let key = self.order_iter.next_back()?;
-        let (_, value) = self.entries.get(key)?;
-        Some((key, value))
-    }
-}
-
 pub struct Keys<'a, K, V>(Iter<'a, K, V>);
 
 impl<'a, K: Ord, V> Iterator for Keys<'a, K, V> {
@@ -182,12 +172,6 @@ impl<'a, K: Ord, V> Iterator for Keys<'a, K, V> {
 
     fn next(&mut self) -> Option<Self::Item> {
         self.0.next().map(|(k, _)| k)
-    }
-}
-
-impl<'a, K: Ord, V> DoubleEndedIterator for Keys<'a, K, V> {
-    fn next_back(&mut self) -> Option<Self::Item> {
-        self.0.next_back().map(|(k, _)| k)
     }
 }
 
@@ -266,11 +250,5 @@ impl<'a, K: Ord> Iterator for SetIter<'a, K> {
 
     fn next(&mut self) -> Option<Self::Item> {
         self.0.next()
-    }
-}
-
-impl<'a, K: Ord> DoubleEndedIterator for SetIter<'a, K> {
-    fn next_back(&mut self) -> Option<Self::Item> {
-        self.0.next_back()
     }
 }

@@ -133,17 +133,6 @@ mod iter {
     }
 
     #[test]
-    fn should_iterate_in_reverse_via_rev() {
-        let mut map = InsertionOrderedMap::new();
-        map.insert(1u32, "a");
-        map.insert(2, "b");
-        map.insert(3, "c");
-
-        let keys: Vec<_> = map.iter().rev().map(|(k, _)| *k).collect();
-        assert_eq!(keys, vec![3, 2, 1]);
-    }
-
-    #[test]
     fn should_work_in_for_loop() {
         let mut map = InsertionOrderedMap::new();
         map.insert(10u32, 100u32);
@@ -169,17 +158,6 @@ mod keys {
 
         let keys: Vec<_> = map.keys().copied().collect();
         assert_eq!(keys, vec![3, 1, 2]);
-    }
-
-    #[test]
-    fn should_support_rev() {
-        let mut map = InsertionOrderedMap::new();
-        map.insert(1u32, ());
-        map.insert(2, ());
-        map.insert(3, ());
-
-        let keys: Vec<_> = map.keys().rev().copied().collect();
-        assert_eq!(keys, vec![3, 2, 1]);
     }
 }
 
@@ -349,16 +327,5 @@ mod set_iter {
 
         let keys: Vec<_> = set.iter().copied().collect();
         assert_eq!(keys, vec![3, 1, 2]);
-    }
-
-    #[test]
-    fn should_support_rev() {
-        let mut set = InsertionOrderedSet::new();
-        set.insert(1u32);
-        set.insert(2);
-        set.insert(3);
-
-        let keys: Vec<_> = set.iter().rev().copied().collect();
-        assert_eq!(keys, vec![3, 2, 1]);
     }
 }
