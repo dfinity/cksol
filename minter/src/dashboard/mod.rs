@@ -336,11 +336,18 @@ impl DashboardTemplate {
 
         let consolidations: Vec<DashboardConsolidation> = [
             (
-                state.submitted_transactions().keys().collect::<Vec<_>>(),
+                state
+                    .submitted_transactions()
+                    .keys()
+                    .rev()
+                    .collect::<Vec<_>>(),
                 "Submitted",
             ),
-            (state.succeeded_transactions().iter().collect(), "Succeeded"),
-            (state.failed_transactions().keys().collect(), "Failed"),
+            (
+                state.succeeded_transactions().iter().rev().collect(),
+                "Succeeded",
+            ),
+            (state.failed_transactions().keys().rev().collect(), "Failed"),
         ]
         .into_iter()
         .flat_map(|(signatures, status)| {

@@ -11,19 +11,18 @@ use cksol_types_internal::{Ed25519KeyName, InitArgs, UpgradeArgs};
 use ic_canister_runtime::Runtime;
 use ic_ed25519::PublicKey;
 use icrc_ledger_types::icrc1::account::Account;
+use insertion_ordered_map::{InsertionOrderedMap, InsertionOrderedSet};
 use sol_rpc_client::SolRpcClient;
 use sol_rpc_types::{ConsensusStrategy, Lamport, RpcSources, Slot, SolanaCluster};
 use solana_signature::Signature;
-use std::{
-    cell::RefCell,
-    collections::{BTreeMap, BTreeSet},
-};
+use std::{cell::RefCell, collections::BTreeSet};
 
 #[cfg(test)]
 mod tests;
 
 pub mod audit;
 pub mod event;
+pub mod insertion_ordered_map;
 
 /// The minimum balance required for a Solana account to be rent-exempt.
 /// This is the rent-exemption threshold for a basic account with 0 data bytes.
@@ -91,20 +90,20 @@ pub struct State {
     minimum_deposit_amount: Lamport,
     update_balance_required_cycles: u128,
     deposit_consolidation_fee: u128,
-    pending_update_balance_requests: BTreeSet<Account>,
-    pending_withdrawal_request_guards: BTreeSet<Account>,
-    accepted_deposits: BTreeMap<DepositId, Deposit>,
-    quarantined_deposits: BTreeMap<DepositId, Deposit>,
-    minted_deposits: BTreeMap<DepositId, MintedDeposit>,
-    pending_withdrawal_requests: BTreeMap<LedgerBurnIndex, PendingWithdrawalRequest>,
-    sent_withdrawal_requests: BTreeMap<LedgerBurnIndex, SentWithdrawalRequest>,
-    successful_withdrawal_requests: BTreeMap<LedgerBurnIndex, SentWithdrawalRequest>,
-    failed_withdrawal_requests: BTreeMap<LedgerBurnIndex, SentWithdrawalRequest>,
-    deposits_to_consolidate: BTreeMap<LedgerMintIndex, (Account, Lamport)>,
-    submitted_transactions: BTreeMap<Signature, SolanaTransaction>,
-    succeeded_transactions: BTreeSet<Signature>,
-    failed_transactions: BTreeMap<Signature, SolanaTransaction>,
-    consolidation_transactions: BTreeMap<Signature, ConsolidationTransaction>,
+    pending_update_balance_requests: InsertionOrderedSet<Account>,
+    pending_withdrawal_request_guards: InsertionOrderedSet<Account>,
+    accepted_deposits: InsertionOrderedMap<DepositId, Deposit>,
+    quarantined_deposits: InsertionOrderedMap<DepositId, Deposit>,
+    minted_deposits: InsertionOrderedMap<DepositId, MintedDeposit>,
+    pending_withdrawal_requests: InsertionOrderedMap<LedgerBurnIndex, PendingWithdrawalRequest>,
+    sent_withdrawal_requests: InsertionOrderedMap<LedgerBurnIndex, SentWithdrawalRequest>,
+    successful_withdrawal_requests: InsertionOrderedMap<LedgerBurnIndex, SentWithdrawalRequest>,
+    failed_withdrawal_requests: InsertionOrderedMap<LedgerBurnIndex, SentWithdrawalRequest>,
+    deposits_to_consolidate: InsertionOrderedMap<LedgerMintIndex, (Account, Lamport)>,
+    submitted_transactions: InsertionOrderedMap<Signature, SolanaTransaction>,
+    succeeded_transactions: InsertionOrderedSet<Signature>,
+    failed_transactions: InsertionOrderedMap<Signature, SolanaTransaction>,
+    consolidation_transactions: InsertionOrderedMap<Signature, ConsolidationTransaction>,
     active_tasks: BTreeSet<TaskType>,
     balance: Lamport,
 }
@@ -167,45 +166,51 @@ impl State {
         self.update_balance_required_cycles
     }
 
-    pub fn accepted_deposits(&self) -> &BTreeMap<DepositId, Deposit> {
+    pub fn accepted_deposits(&self) -> &InsertionOrderedMap<DepositId, Deposit> {
         &self.accepted_deposits
     }
 
-    pub fn quarantined_deposits(&self) -> &BTreeMap<DepositId, Deposit> {
+    pub fn quarantined_deposits(&self) -> &InsertionOrderedMap<DepositId, Deposit> {
         &self.quarantined_deposits
     }
 
-    pub fn minted_deposits(&self) -> &BTreeMap<DepositId, MintedDeposit> {
+    pub fn minted_deposits(&self) -> &InsertionOrderedMap<DepositId, MintedDeposit> {
         &self.minted_deposits
     }
 
-    pub fn sent_withdrawal_requests(&self) -> &BTreeMap<LedgerBurnIndex, SentWithdrawalRequest> {
+    pub fn sent_withdrawal_requests(
+        &self,
+    ) -> &InsertionOrderedMap<LedgerBurnIndex, SentWithdrawalRequest> {
         &self.sent_withdrawal_requests
     }
 
     pub fn successful_withdrawal_requests(
         &self,
-    ) -> &BTreeMap<LedgerBurnIndex, SentWithdrawalRequest> {
+    ) -> &InsertionOrderedMap<LedgerBurnIndex, SentWithdrawalRequest> {
         &self.successful_withdrawal_requests
     }
 
-    pub fn failed_withdrawal_requests(&self) -> &BTreeMap<LedgerBurnIndex, SentWithdrawalRequest> {
+    pub fn failed_withdrawal_requests(
+        &self,
+    ) -> &InsertionOrderedMap<LedgerBurnIndex, SentWithdrawalRequest> {
         &self.failed_withdrawal_requests
     }
 
-    pub fn deposits_to_consolidate(&self) -> &BTreeMap<LedgerMintIndex, (Account, Lamport)> {
+    pub fn deposits_to_consolidate(
+        &self,
+    ) -> &InsertionOrderedMap<LedgerMintIndex, (Account, Lamport)> {
         &self.deposits_to_consolidate
     }
 
-    pub fn submitted_transactions(&self) -> &BTreeMap<Signature, SolanaTransaction> {
+    pub fn submitted_transactions(&self) -> &InsertionOrderedMap<Signature, SolanaTransaction> {
         &self.submitted_transactions
     }
 
-    pub fn succeeded_transactions(&self) -> &BTreeSet<Signature> {
+    pub fn succeeded_transactions(&self) -> &InsertionOrderedSet<Signature> {
         &self.succeeded_transactions
     }
 
-    pub fn failed_transactions(&self) -> &BTreeMap<Signature, SolanaTransaction> {
+    pub fn failed_transactions(&self) -> &InsertionOrderedMap<Signature, SolanaTransaction> {
         &self.failed_transactions
     }
 
@@ -213,7 +218,9 @@ impl State {
         self.balance
     }
 
-    pub fn consolidation_transactions(&self) -> &BTreeMap<Signature, ConsolidationTransaction> {
+    pub fn consolidation_transactions(
+        &self,
+    ) -> &InsertionOrderedMap<Signature, ConsolidationTransaction> {
         &self.consolidation_transactions
     }
 
@@ -262,11 +269,11 @@ impl State {
         LedgerClient::new(runtime, self.ledger_canister_id)
     }
 
-    pub fn pending_update_balance_requests_mut(&mut self) -> &mut BTreeSet<Account> {
+    pub fn pending_update_balance_requests_mut(&mut self) -> &mut InsertionOrderedSet<Account> {
         &mut self.pending_update_balance_requests
     }
 
-    pub fn pending_withdrawal_request_guards_mut(&mut self) -> &mut BTreeSet<Account> {
+    pub fn pending_withdrawal_request_guards_mut(&mut self) -> &mut InsertionOrderedSet<Account> {
         &mut self.pending_withdrawal_request_guards
     }
 
@@ -418,7 +425,7 @@ impl State {
 
     pub fn pending_withdrawal_requests(
         &self,
-    ) -> &BTreeMap<LedgerBurnIndex, PendingWithdrawalRequest> {
+    ) -> &InsertionOrderedMap<LedgerBurnIndex, PendingWithdrawalRequest> {
         &self.pending_withdrawal_requests
     }
 
@@ -627,7 +634,8 @@ impl State {
             "Attempted to mark transaction {signature:?} as succeeded twice"
         );
         self.sent_withdrawal_requests
-            .extract_if(.., |_, sent| &sent.signature == signature)
+            .extract_if(|_, sent| &sent.signature == signature)
+            .into_iter()
             .for_each(|(burn_index, sent)| {
                 self.successful_withdrawal_requests.insert(burn_index, sent);
             });
@@ -650,7 +658,8 @@ impl State {
             "Attempted to fail transaction {signature:?} twice"
         );
         self.sent_withdrawal_requests
-            .extract_if(.., |_, sent| &sent.signature == signature)
+            .extract_if(|_, sent| &sent.signature == signature)
+            .into_iter()
             .for_each(|(burn_index, sent)| {
                 self.failed_withdrawal_requests.insert(burn_index, sent);
             });
@@ -700,20 +709,20 @@ impl TryFrom<InitArgs> for State {
             minimum_deposit_amount,
             update_balance_required_cycles: update_balance_required_cycles as u128,
             deposit_consolidation_fee: deposit_consolidation_fee as u128,
-            pending_update_balance_requests: BTreeSet::new(),
-            pending_withdrawal_request_guards: BTreeSet::new(),
-            accepted_deposits: BTreeMap::new(),
-            quarantined_deposits: BTreeMap::new(),
-            minted_deposits: BTreeMap::new(),
-            pending_withdrawal_requests: BTreeMap::new(),
-            sent_withdrawal_requests: BTreeMap::new(),
-            successful_withdrawal_requests: BTreeMap::new(),
-            failed_withdrawal_requests: BTreeMap::new(),
-            deposits_to_consolidate: BTreeMap::new(),
-            submitted_transactions: BTreeMap::new(),
-            succeeded_transactions: BTreeSet::new(),
-            failed_transactions: BTreeMap::new(),
-            consolidation_transactions: BTreeMap::new(),
+            pending_update_balance_requests: InsertionOrderedSet::new(),
+            pending_withdrawal_request_guards: InsertionOrderedSet::new(),
+            accepted_deposits: InsertionOrderedMap::new(),
+            quarantined_deposits: InsertionOrderedMap::new(),
+            minted_deposits: InsertionOrderedMap::new(),
+            pending_withdrawal_requests: InsertionOrderedMap::new(),
+            sent_withdrawal_requests: InsertionOrderedMap::new(),
+            successful_withdrawal_requests: InsertionOrderedMap::new(),
+            failed_withdrawal_requests: InsertionOrderedMap::new(),
+            deposits_to_consolidate: InsertionOrderedMap::new(),
+            submitted_transactions: InsertionOrderedMap::new(),
+            succeeded_transactions: InsertionOrderedSet::new(),
+            failed_transactions: InsertionOrderedMap::new(),
+            consolidation_transactions: InsertionOrderedMap::new(),
             active_tasks: BTreeSet::new(),
             balance: 0,
         };

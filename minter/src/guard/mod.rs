@@ -1,7 +1,7 @@
-use crate::state::{State, TaskType, mutate_state};
+use crate::state::{State, TaskType, insertion_ordered_map::InsertionOrderedSet, mutate_state};
 use cksol_types::{UpdateBalanceError, WithdrawalError};
 use icrc_ledger_types::icrc1::account::Account;
-use std::{collections::BTreeSet, marker::PhantomData};
+use std::marker::PhantomData;
 
 #[cfg(test)]
 mod tests;
@@ -37,13 +37,13 @@ impl From<GuardError> for WithdrawalError {
 }
 
 pub trait PendingRequests {
-    fn pending_requests(state: &mut State) -> &mut BTreeSet<Account>;
+    fn pending_requests(state: &mut State) -> &mut InsertionOrderedSet<Account>;
 }
 
 pub struct PendingUpdateBalanceRequests;
 
 impl PendingRequests for PendingUpdateBalanceRequests {
-    fn pending_requests(state: &mut State) -> &mut BTreeSet<Account> {
+    fn pending_requests(state: &mut State) -> &mut InsertionOrderedSet<Account> {
         state.pending_update_balance_requests_mut()
     }
 }
@@ -87,7 +87,7 @@ impl<R: PendingRequests> Drop for Guard<R> {
 pub struct PendingWithdrawalRequests;
 
 impl PendingRequests for PendingWithdrawalRequests {
-    fn pending_requests(state: &mut State) -> &mut BTreeSet<Account> {
+    fn pending_requests(state: &mut State) -> &mut InsertionOrderedSet<Account> {
         state.pending_withdrawal_request_guards_mut()
     }
 }

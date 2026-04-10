@@ -8,6 +8,7 @@ use crate::{
         TaskType,
         audit::process_event,
         event::{EventType, TransactionPurpose},
+        insertion_ordered_map::InsertionOrderedMap,
         mutate_state, read_state,
     },
     transaction::{SubmitTransactionError, get_recent_slot_and_blockhash, submit_transaction},
@@ -67,7 +68,7 @@ pub async fn consolidate_deposits<R: CanisterRuntime>(runtime: R) {
 }
 
 fn group_deposits_by_account(
-    deposits: &BTreeMap<LedgerMintIndex, (Account, Lamport)>,
+    deposits: &InsertionOrderedMap<LedgerMintIndex, (Account, Lamport)>,
 ) -> Vec<(Account, (Lamport, Vec<LedgerMintIndex>))> {
     let mut by_account: BTreeMap<Account, (Lamport, Vec<LedgerMintIndex>)> = BTreeMap::new();
     for (mint_index, (account, lamport)) in deposits {
