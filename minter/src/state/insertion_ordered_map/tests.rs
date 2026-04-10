@@ -1,4 +1,4 @@
-use super::{InsertionOrderedMap, InsertionOrderedSet};
+use super::InsertionOrderedMap;
 
 mod insert {
     use super::*;
@@ -258,74 +258,5 @@ mod partial_eq {
         b.insert(1u32, "z");
 
         assert_ne!(a, b);
-    }
-}
-
-// ── InsertionOrderedSet ─────────────────────────────────────────────────────
-
-mod set_insert {
-    use super::*;
-
-    #[test]
-    fn should_return_true_for_new_key() {
-        let mut set = InsertionOrderedSet::new();
-        assert!(set.insert(1u32));
-    }
-
-    #[test]
-    fn should_return_false_for_duplicate_key() {
-        let mut set = InsertionOrderedSet::new();
-        set.insert(1u32);
-        assert!(!set.insert(1));
-    }
-}
-
-mod set_remove {
-    use super::*;
-
-    #[test]
-    fn should_return_true_when_present() {
-        let mut set = InsertionOrderedSet::new();
-        set.insert(1u32);
-        assert!(set.remove(&1));
-        assert!(!set.contains(&1));
-    }
-
-    #[test]
-    fn should_return_false_when_absent() {
-        let mut set: InsertionOrderedSet<u32> = InsertionOrderedSet::new();
-        assert!(!set.remove(&99));
-    }
-}
-
-mod set_contains {
-    use super::*;
-
-    #[test]
-    fn should_return_true_for_inserted_key() {
-        let mut set = InsertionOrderedSet::new();
-        set.insert(42u32);
-        assert!(set.contains(&42));
-    }
-
-    #[test]
-    fn should_return_false_for_absent_key() {
-        let set: InsertionOrderedSet<u32> = InsertionOrderedSet::new();
-        assert!(!set.contains(&1));
-    }
-}
-
-mod set_iter {
-    use super::*;
-
-    #[test]
-    fn should_yield_keys_in_insertion_order() {
-        let mut set = InsertionOrderedSet::new();
-        set.insert(3u32);
-        set.insert(1);
-        set.insert(2);
-
-        let keys: Vec<_> = set.iter().copied().collect();
-        assert_eq!(keys, vec![3, 1, 2]);
     }
 }

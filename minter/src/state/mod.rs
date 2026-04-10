@@ -11,7 +11,7 @@ use cksol_types_internal::{Ed25519KeyName, InitArgs, UpgradeArgs};
 use ic_canister_runtime::Runtime;
 use ic_ed25519::PublicKey;
 use icrc_ledger_types::icrc1::account::Account;
-use insertion_ordered_map::{InsertionOrderedMap, InsertionOrderedSet};
+use insertion_ordered_map::InsertionOrderedMap;
 use sol_rpc_client::SolRpcClient;
 use sol_rpc_types::{ConsensusStrategy, Lamport, RpcSources, Slot, SolanaCluster};
 use solana_signature::Signature;
@@ -90,8 +90,8 @@ pub struct State {
     minimum_deposit_amount: Lamport,
     update_balance_required_cycles: u128,
     deposit_consolidation_fee: u128,
-    pending_update_balance_requests: InsertionOrderedSet<Account>,
-    pending_withdrawal_request_guards: InsertionOrderedSet<Account>,
+    pending_update_balance_requests: BTreeSet<Account>,
+    pending_withdrawal_request_guards: BTreeSet<Account>,
     accepted_deposits: InsertionOrderedMap<DepositId, Deposit>,
     quarantined_deposits: InsertionOrderedMap<DepositId, Deposit>,
     minted_deposits: InsertionOrderedMap<DepositId, MintedDeposit>,
@@ -101,7 +101,7 @@ pub struct State {
     failed_withdrawal_requests: InsertionOrderedMap<LedgerBurnIndex, SentWithdrawalRequest>,
     deposits_to_consolidate: InsertionOrderedMap<LedgerMintIndex, (Account, Lamport)>,
     submitted_transactions: InsertionOrderedMap<Signature, SolanaTransaction>,
-    succeeded_transactions: InsertionOrderedSet<Signature>,
+    succeeded_transactions: BTreeSet<Signature>,
     failed_transactions: InsertionOrderedMap<Signature, SolanaTransaction>,
     consolidation_transactions: InsertionOrderedMap<Signature, ConsolidationTransaction>,
     active_tasks: BTreeSet<TaskType>,
@@ -206,7 +206,7 @@ impl State {
         &self.submitted_transactions
     }
 
-    pub fn succeeded_transactions(&self) -> &InsertionOrderedSet<Signature> {
+    pub fn succeeded_transactions(&self) -> &BTreeSet<Signature> {
         &self.succeeded_transactions
     }
 
@@ -269,11 +269,11 @@ impl State {
         LedgerClient::new(runtime, self.ledger_canister_id)
     }
 
-    pub fn pending_update_balance_requests_mut(&mut self) -> &mut InsertionOrderedSet<Account> {
+    pub fn pending_update_balance_requests_mut(&mut self) -> &mut BTreeSet<Account> {
         &mut self.pending_update_balance_requests
     }
 
-    pub fn pending_withdrawal_request_guards_mut(&mut self) -> &mut InsertionOrderedSet<Account> {
+    pub fn pending_withdrawal_request_guards_mut(&mut self) -> &mut BTreeSet<Account> {
         &mut self.pending_withdrawal_request_guards
     }
 
@@ -709,8 +709,8 @@ impl TryFrom<InitArgs> for State {
             minimum_deposit_amount,
             update_balance_required_cycles: update_balance_required_cycles as u128,
             deposit_consolidation_fee: deposit_consolidation_fee as u128,
-            pending_update_balance_requests: InsertionOrderedSet::new(),
-            pending_withdrawal_request_guards: InsertionOrderedSet::new(),
+            pending_update_balance_requests: BTreeSet::new(),
+            pending_withdrawal_request_guards: BTreeSet::new(),
             accepted_deposits: InsertionOrderedMap::new(),
             quarantined_deposits: InsertionOrderedMap::new(),
             minted_deposits: InsertionOrderedMap::new(),
@@ -720,7 +720,7 @@ impl TryFrom<InitArgs> for State {
             failed_withdrawal_requests: InsertionOrderedMap::new(),
             deposits_to_consolidate: InsertionOrderedMap::new(),
             submitted_transactions: InsertionOrderedMap::new(),
-            succeeded_transactions: InsertionOrderedSet::new(),
+            succeeded_transactions: BTreeSet::new(),
             failed_transactions: InsertionOrderedMap::new(),
             consolidation_transactions: InsertionOrderedMap::new(),
             active_tasks: BTreeSet::new(),

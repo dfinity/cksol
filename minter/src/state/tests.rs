@@ -1,8 +1,4 @@
-use super::{
-    event::*,
-    insertion_ordered_map::{InsertionOrderedMap, InsertionOrderedSet},
-    *,
-};
+use super::{event::*, insertion_ordered_map::InsertionOrderedMap, *};
 use crate::{
     constants::FEE_PER_SIGNATURE as SOLANA_LAMPORTS_PER_SIGNATURE,
     state::{SOLANA_RENT_EXEMPTION_THRESHOLD, audit::process_event, read_state},
@@ -57,8 +53,8 @@ mod state_from_init_args {
                 minimum_withdrawal_amount: MINIMUM_WITHDRAWAL_AMOUNT,
                 minimum_deposit_amount: MINIMUM_DEPOSIT_AMOUNT,
                 update_balance_required_cycles: UPDATE_BALANCE_REQUIRED_CYCLES,
-                pending_update_balance_requests: InsertionOrderedSet::new(),
-                pending_withdrawal_request_guards: InsertionOrderedSet::new(),
+                pending_update_balance_requests: BTreeSet::new(),
+                pending_withdrawal_request_guards: BTreeSet::new(),
                 accepted_deposits: InsertionOrderedMap::new(),
                 quarantined_deposits: InsertionOrderedMap::new(),
                 minted_deposits: InsertionOrderedMap::new(),
@@ -68,7 +64,7 @@ mod state_from_init_args {
                 failed_withdrawal_requests: InsertionOrderedMap::new(),
                 deposits_to_consolidate: InsertionOrderedMap::new(),
                 submitted_transactions: InsertionOrderedMap::new(),
-                succeeded_transactions: InsertionOrderedSet::new(),
+                succeeded_transactions: BTreeSet::new(),
                 failed_transactions: InsertionOrderedMap::new(),
                 consolidation_transactions: InsertionOrderedMap::new(),
                 active_tasks: BTreeSet::new(),
