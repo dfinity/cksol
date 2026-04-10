@@ -1102,4 +1102,69 @@ mod metrics_tests {
             .drop()
             .await;
     }
+
+    #[tokio::test]
+    async fn should_report_oldest_incomplete_withdrawal_age() {
+        use candid::Nat;
+        use cksol_int_tests::fixtures::DEFAULT_CALLER_ACCOUNT;
+        use icrc_ledger_types::icrc1::account::Account;
+
+        const WITHDRAWAL_AMOUNT: u64 = 100_000_000;
+        const WITHDRAWAL_ADDRESS: &str = "E4MpwNnMWs2XtW5gVrxZvyS7fMq31QD5HvbxmwP45Tz3";
+
+        let setup = SetupBuilder::new()
+            .with_initial_ledger_balances(vec![(
+                DEFAULT_CALLER_ACCOUNT,
+                Nat::from(10 * WITHDRAWAL_AMOUNT),
+            )])
+            .build()
+            .await;
+
+        // No incomplete withdrawals: metric should be absent
+        let setup = setup
+            .check_metrics()
+            .await
+            .assert_does_not_contain_metric_matching("oldest_incomplete_withdrawal_age_seconds")
+            .into();
+
+        setup
+            .ledger()
+            .approve(
+                None,
+                WITHDRAWAL_AMOUNT,
+                Account {
+                    owner: setup.minter_canister_id(),
+                    subaccount: None,
+                },
+            )
+            .await;
+
+        setup
+            .minter()
+            .withdraw(WithdrawalArgs {
+                from_subaccount: None,
+                amount: WITHDRAWAL_AMOUNT,
+                address: WITHDRAWAL_ADDRESS.to_string(),
+            })
+            .await
+            .expect("withdraw should succeed");
+
+        // Advance time by 60 seconds so the age is clearly nonzero
+        setup.advance_time(Duration::from_secs(60)).await;
+        setup.tick().await;
+
+        let metrics = setup.check_metrics().await;
+        let matches =
+            metrics.find_metrics_matching(r"oldest_incomplete_withdrawal_age_seconds (\d+)");
+        assert_eq!(matches.len(), 1, "expected exactly one metric match");
+        let age: u64 = matches[0]
+            .split_whitespace()
+            .nth(1)
+            .expect("metric should have a value")
+            .parse()
+            .expect("metric value should be a u64");
+        assert_eq!(age, 60);
+
+        metrics.into().drop().await;
+    }
 }

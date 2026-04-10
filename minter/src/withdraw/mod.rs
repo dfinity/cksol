@@ -115,14 +115,14 @@ pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: &R) {
             .values()
             .take(max_per_invocation)
             .take_while(|r| {
-                if available_balance >= r.withdrawal_amount {
-                    available_balance -= r.withdrawal_amount;
+                if available_balance >= r.request.withdrawal_amount {
+                    available_balance -= r.request.withdrawal_amount;
                     true
                 } else {
                     false
                 }
             })
-            .cloned()
+            .map(|t| t.request.clone())
             .collect();
 
         (affordable, pending.len())
