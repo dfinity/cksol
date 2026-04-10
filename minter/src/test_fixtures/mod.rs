@@ -156,9 +156,10 @@ pub mod events {
         )
     }
 
-    /// The runtime is only used by [`process_event`] to record the event timestamp.
+    /// The runtime is only used by [`process_event`] to supply timestamps
+    /// for the state transition and for the event log entry.
     fn runtime() -> TestCanisterRuntime {
-        TestCanisterRuntime::new().with_time(0)
+        TestCanisterRuntime::new().with_time(0).with_time(0)
     }
 
     pub fn accept_deposit(deposit_id: DepositId, amount: Lamport) {
@@ -221,6 +222,15 @@ pub mod events {
     }
 
     pub fn accept_withdrawal(account: Account, burn_index: u64, amount: Lamport) {
+        accept_withdrawal_at(account, burn_index, amount, 0);
+    }
+
+    pub fn accept_withdrawal_at(
+        account: Account,
+        burn_index: u64,
+        amount: Lamport,
+        timestamp: u64,
+    ) {
         mutate_state(|state| {
             process_event(
                 state,
@@ -231,7 +241,9 @@ pub mod events {
                     withdrawal_amount: amount - WITHDRAWAL_FEE,
                     amount_to_burn: amount,
                 }),
-                &runtime(),
+                &TestCanisterRuntime::new()
+                    .with_time(timestamp)
+                    .with_time(timestamp),
             )
         });
     }
@@ -277,6 +289,24 @@ pub mod events {
             process_event(
                 state,
                 EventType::FailedTransaction { signature },
+                &runtime(),
+            )
+        });
+    }
+
+    pub fn resubmit_transaction(
+        old_signature: Signature,
+        new_signature: Signature,
+        new_slot: Slot,
+    ) {
+        mutate_state(|state| {
+            process_event(
+                state,
+                EventType::ResubmittedTransaction {
+                    old_signature,
+                    new_signature,
+                    new_slot,
+                },
                 &runtime(),
             )
         });

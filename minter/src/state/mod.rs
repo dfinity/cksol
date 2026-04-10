@@ -96,7 +96,7 @@ pub struct State {
     accepted_deposits: BTreeMap<DepositId, Deposit>,
     quarantined_deposits: BTreeMap<DepositId, Deposit>,
     minted_deposits: BTreeMap<DepositId, MintedDeposit>,
-    pending_withdrawal_requests: BTreeMap<LedgerBurnIndex, WithdrawalRequest>,
+    pending_withdrawal_requests: BTreeMap<LedgerBurnIndex, PendingWithdrawalRequest>,
     sent_withdrawal_requests: BTreeMap<LedgerBurnIndex, SentWithdrawalRequest>,
     successful_withdrawal_requests: BTreeMap<LedgerBurnIndex, SentWithdrawalRequest>,
     failed_withdrawal_requests: BTreeMap<LedgerBurnIndex, SentWithdrawalRequest>,
@@ -416,14 +416,32 @@ impl State {
         WithdrawalStatus::NotFound
     }
 
-    pub fn pending_withdrawal_requests(&self) -> &BTreeMap<LedgerBurnIndex, WithdrawalRequest> {
+    pub fn pending_withdrawal_requests(
+        &self,
+    ) -> &BTreeMap<LedgerBurnIndex, PendingWithdrawalRequest> {
         &self.pending_withdrawal_requests
     }
 
-    fn process_accepted_withdrawal(&mut self, request: &WithdrawalRequest) {
+    /// Returns the creation timestamp (in nanoseconds) of the oldest incomplete withdrawal request.
+    /// An incomplete withdrawal is one that has not yet been finalized (succeeded or failed).
+    pub fn oldest_incomplete_withdrawal_created_at(&self) -> Option<u64> {
+        let pending = self
+            .pending_withdrawal_requests
+            .values()
+            .map(|r| r.created_at);
+        let sent = self.sent_withdrawal_requests.values().map(|r| r.created_at);
+        pending.chain(sent).min()
+    }
+
+    fn process_accepted_withdrawal(&mut self, request: &WithdrawalRequest, created_at: u64) {
         assert_eq!(
-            self.pending_withdrawal_requests
-                .insert(request.burn_block_index, request.clone()),
+            self.pending_withdrawal_requests.insert(
+                request.burn_block_index,
+                PendingWithdrawalRequest {
+                    request: request.clone(),
+                    created_at,
+                }
+            ),
             None,
             "Attempted to accept an already accepted withdrawal request: {:?}",
             request.burn_block_index
@@ -499,19 +517,20 @@ impl State {
             TransactionPurpose::WithdrawSol { burn_indices } => {
                 let mut total: Lamport = 0;
                 for burn_index in burn_indices {
-                    let request = self
+                    let pending = self
                         .pending_withdrawal_requests
                         .remove(burn_index)
                         .unwrap_or_else(|| {
                             panic!("Attempted to send transaction for unknown withdrawal request: {burn_index:?}")
                         });
-                    total += request.withdrawal_amount;
+                    total += pending.request.withdrawal_amount;
                     assert_eq!(
                         self.sent_withdrawal_requests.insert(
                             *burn_index,
                             SentWithdrawalRequest {
-                                request,
+                                request: pending.request,
                                 signature: *signature,
+                                created_at: pending.created_at,
                             },
                         ),
                         None,
@@ -703,11 +722,19 @@ impl TryFrom<InitArgs> for State {
     }
 }
 
+/// A pending withdrawal request.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PendingWithdrawalRequest {
+    pub request: WithdrawalRequest,
+    pub created_at: u64,
+}
+
 /// A withdrawal request that has been submitted in a Solana transaction.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SentWithdrawalRequest {
     pub request: WithdrawalRequest,
     pub signature: Signature,
+    pub created_at: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
