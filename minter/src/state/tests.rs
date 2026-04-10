@@ -8,7 +8,8 @@ use crate::{
         arb::arb_event,
         deposit_id,
         events::{
-            accept_deposit, accept_withdrawal, fail_transaction, mint_deposit, succeed_transaction,
+            accept_deposit, accept_withdrawal, accept_withdrawal_at, fail_transaction,
+            mint_deposit, submit_withdrawal, succeed_transaction,
         },
         init_state, ledger_canister_id,
         runtime::TestCanisterRuntime,
@@ -500,9 +501,6 @@ fn should_track_balance_through_deposits_withdrawals_and_failures() {
 
 mod oldest_incomplete_withdrawal_created_at {
     use super::*;
-    use crate::test_fixtures::events::{
-        accept_withdrawal_at, fail_transaction, submit_withdrawal, succeed_transaction,
-    };
 
     const AMOUNT: u64 = 50_000_000;
 
