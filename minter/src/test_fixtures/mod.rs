@@ -293,6 +293,24 @@ pub mod events {
             )
         });
     }
+
+    pub fn resubmit_transaction(
+        old_signature: Signature,
+        new_signature: Signature,
+        new_slot: Slot,
+    ) {
+        mutate_state(|state| {
+            process_event(
+                state,
+                EventType::ResubmittedTransaction {
+                    old_signature,
+                    new_signature,
+                    new_slot,
+                },
+                &runtime(),
+            )
+        });
+    }
 }
 
 pub mod arb {

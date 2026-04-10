@@ -9,7 +9,7 @@ use crate::{
         deposit_id,
         events::{
             accept_deposit, accept_withdrawal, accept_withdrawal_at, fail_transaction,
-            mint_deposit, submit_withdrawal, succeed_transaction,
+            mint_deposit, resubmit_transaction, submit_withdrawal, succeed_transaction,
         },
         init_balance, init_state, ledger_canister_id,
         runtime::TestCanisterRuntime,
@@ -596,6 +596,38 @@ mod oldest_incomplete_withdrawal_created_at {
 
         submit_withdrawal(signature(0xAA), account(100), 0, vec![0, 1]);
         succeed_transaction(signature(0xAA));
+
+        assert_eq!(
+            read_state(|s| s.oldest_incomplete_withdrawal_created_at()),
+            None
+        );
+    }
+
+    #[test]
+    fn should_preserve_created_at_through_resubmission() {
+        init_state();
+        init_balance();
+        accept_withdrawal_at(account(1), 0, AMOUNT, 1_000_000_000);
+        accept_withdrawal_at(account(2), 1, AMOUNT, 2_000_000_000);
+
+        submit_withdrawal(signature(0xAA), account(100), 0, vec![0, 1]);
+
+        assert_eq!(
+            read_state(|s| s.oldest_incomplete_withdrawal_created_at()),
+            Some(1_000_000_000)
+        );
+
+        // Resubmit the transaction with a new signature
+        resubmit_transaction(signature(0xAA), signature(0xBB), 42);
+
+        // created_at timestamps should be unchanged
+        assert_eq!(
+            read_state(|s| s.oldest_incomplete_withdrawal_created_at()),
+            Some(1_000_000_000)
+        );
+
+        // Finalize the resubmitted transaction
+        succeed_transaction(signature(0xBB));
 
         assert_eq!(
             read_state(|s| s.oldest_incomplete_withdrawal_created_at()),
