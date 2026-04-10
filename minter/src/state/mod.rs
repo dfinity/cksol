@@ -598,6 +598,14 @@ impl State {
         new_signature: &Signature,
         new_slot: Slot,
     ) {
+        // Handle event logs from before ExpiredTransaction was introduced:
+        // if the old transaction is still in submitted_transactions (no preceding
+        // ExpiredTransaction event in the log), move it to transactions_to_resubmit first.
+        if !self.transactions_to_resubmit.contains_key(old_signature)
+            && self.submitted_transactions.contains_key(old_signature)
+        {
+            self.process_transaction_expired(old_signature);
+        }
         let old_transaction = self
             .transactions_to_resubmit
             .remove(old_signature)
