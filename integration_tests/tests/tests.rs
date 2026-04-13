@@ -26,6 +26,11 @@ use sol_rpc_types::{CommitmentLevel, ConsensusStrategy, GetTransactionEncoding, 
 use std::time::Duration;
 use tokio::join;
 
+const WITHDRAWAL_PROCESSING_DELAY: Duration = Duration::from_mins(1);
+const FINALIZE_TRANSACTIONS_DELAY: Duration = Duration::from_mins(2);
+const RESUBMIT_TRANSACTIONS_DELAY: Duration = Duration::from_mins(3);
+const DEPOSIT_CONSOLIDATION_DELAY: Duration = Duration::from_mins(10);
+
 /// Deposits funds into the minter via `update_balance`, consolidates them,
 /// and finalizes the consolidation so the minter's internal balance is credited.
 ///
@@ -39,7 +44,7 @@ async fn deposit_and_consolidate_funds(setup: &Setup) {
     assert_matches!(result, Ok(DepositStatus::Minted { .. }));
 
     // Consolidate
-    setup.advance_time(Duration::from_mins(10)).await;
+    setup.advance_time(DEPOSIT_CONSOLIDATION_DELAY).await;
     setup
         .execute_http_mocks(
             MockBuilder::with_start_id(4)
@@ -53,7 +58,7 @@ async fn deposit_and_consolidate_funds(setup: &Setup) {
         .await;
 
     // Finalize
-    setup.advance_time(Duration::from_secs(60)).await;
+    setup.advance_time(FINALIZE_TRANSACTIONS_DELAY).await;
     setup
         .execute_http_mocks(
             MockBuilder::with_start_id(16)
@@ -255,7 +260,6 @@ mod withdrawal_tests {
 
     use super::*;
 
-    const WITHDRAWAL_PROCESSING_DELAY: Duration = Duration::from_mins(1);
     const MAX_BLOCKHASH_AGE: Slot = 150;
 
     #[tokio::test]
@@ -663,15 +667,20 @@ mod withdrawal_tests {
             other => panic!("Expected TxSent, got: {other:?}"),
         };
 
-        // Advance time to trigger resubmission. The mocked slot exceeds
-        // INITIAL_SLOT + MAX_PROCESSING_AGE, so the original transaction
-        // is now considered expired.
-        const MONITOR_DELAY: Duration = Duration::from_secs(60);
-        setup.advance_time(MONITOR_DELAY).await;
+        // Step 1: Advance time to trigger finalize_transactions, which fetches
+        // the current slot, checks statuses (not found), and marks the expired
+        // transaction for resubmission.
+        let resubmission_slot = INITIAL_SLOT + MAX_BLOCKHASH_AGE + 50;
+        setup.advance_time(FINALIZE_TRANSACTIONS_DELAY).await;
         setup
-            .execute_http_mocks(resubmit_withdrawal_http_mocks(
-                INITIAL_SLOT + MAX_BLOCKHASH_AGE + 50,
-            ))
+            .execute_http_mocks(mark_expired_withdrawal_http_mocks(resubmission_slot))
+            .await;
+
+        // Step 2: Advance time to trigger resubmit_transactions. finalize_transactions also
+        // fires but has no pending transactions, so it makes no HTTP outcalls.
+        setup.advance_time(RESUBMIT_TRANSACTIONS_DELAY).await;
+        setup
+            .execute_http_mocks(resubmit_withdrawal_http_mocks(resubmission_slot))
             .await;
 
         // Withdrawal status should now have a different signature
@@ -687,11 +696,11 @@ mod withdrawal_tests {
             other => panic!("Expected TxSent after resubmission, got: {other:?}"),
         };
 
-        // Advance time to trigger finalization. The monitor checks signature statuses
-        // and this time the transaction is reported as finalized.
-        setup.advance_time(MONITOR_DELAY).await;
+        // Advance time to trigger finalize_transactions again. This time the
+        // transaction is reported as finalized.
+        setup.advance_time(FINALIZE_TRANSACTIONS_DELAY).await;
         setup
-            .execute_http_mocks(finalize_withdrawal_http_mocks())
+            .execute_http_mocks(finalize_withdrawal_http_mocks(resubmission_slot))
             .await;
 
         // Withdrawal status should now be TxFinalized with Success
@@ -721,10 +730,19 @@ mod withdrawal_tests {
             .build()
     }
 
-    /// HTTP mocks for resubmitting an expired withdrawal transaction.
-    fn resubmit_withdrawal_http_mocks(current_slot: u64) -> MockHttpOutcalls {
+    /// HTTP mocks for finalize_transactions detecting an expired transaction:
+    /// fetches slot, checks status (not found), marks for resubmission.
+    fn mark_expired_withdrawal_http_mocks(current_slot: u64) -> MockHttpOutcalls {
         MockBuilder::with_start_id(40)
-            .resubmit_transaction(
+            .get_current_slot(current_slot, "9ZNTfG4NyQgxy2SWjSiQoUyBPEvXT2xo7fKc5hPYYJ7b")
+            .check_signature_statuses_not_found(1)
+            .build()
+    }
+
+    /// HTTP mocks for resubmit_transactions sending the replacement transaction.
+    fn resubmit_withdrawal_http_mocks(current_slot: u64) -> MockHttpOutcalls {
+        MockBuilder::with_start_id(52)
+            .submit_transaction(
                 current_slot,
                 "9ZNTfG4NyQgxy2SWjSiQoUyBPEvXT2xo7fKc5hPYYJ7b",
                 "5VERv8NMvzbJMEkV8xnrLkEaWRtSz9CosKDYjCJjBRnbJLgp8uirBgmQpjKhoR4tjF3ZpRzrFmBV6UjKdiSZkQUW",
@@ -732,10 +750,10 @@ mod withdrawal_tests {
             .build()
     }
 
-    /// HTTP mocks for finalizing a withdrawal transaction.
-    fn finalize_withdrawal_http_mocks() -> MockHttpOutcalls {
+    /// HTTP mocks for finalize_transactions confirming the resubmitted transaction.
+    fn finalize_withdrawal_http_mocks(current_slot: u64) -> MockHttpOutcalls {
         MockBuilder::with_start_id(64)
-            .get_current_slot(350_000_200, "9ZNTfG4NyQgxy2SWjSiQoUyBPEvXT2xo7fKc5hPYYJ7b")
+            .get_current_slot(current_slot, "9ZNTfG4NyQgxy2SWjSiQoUyBPEvXT2xo7fKc5hPYYJ7b")
             .check_signature_statuses_finalized(1)
             .build()
     }
@@ -1039,8 +1057,6 @@ mod anonymous_caller_tests {
 
 mod consolidation_tests {
     use super::*;
-
-    const DEPOSIT_CONSOLIDATION_DELAY: Duration = Duration::from_mins(10);
 
     #[tokio::test]
     async fn should_consolidate_deposits_after_timer() {

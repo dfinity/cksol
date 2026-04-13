@@ -1,6 +1,6 @@
 use crate::{
     address::derivation_path,
-    constants::MAX_CONCURRENT_RPC_CALLS,
+    constants::{MAX_CONCURRENT_RPC_CALLS, MAX_TIMER_ROUNDS},
     guard::TimerGuard,
     runtime::CanisterRuntime,
     signer::sign_bytes,
@@ -31,19 +31,22 @@ use thiserror::Error;
 #[cfg(test)]
 mod tests;
 
-pub const MONITOR_SUBMITTED_TRANSACTIONS_DELAY: Duration = Duration::from_secs(60);
+pub const FINALIZE_TRANSACTIONS_DELAY: Duration = Duration::from_mins(2);
+pub const RESUBMIT_TRANSACTIONS_DELAY: Duration = Duration::from_mins(3);
 const MAX_BLOCKHASH_AGE: Slot = 150;
 /// Maximum number of signatures per `getSignatureStatuses` RPC call.
 /// See https://solana.com/docs/rpc/http/getsignaturestatuses
 const MAX_SIGNATURES_PER_STATUS_CHECK: usize = 256;
 
-pub async fn monitor_submitted_transactions<R: CanisterRuntime>(runtime: R) {
-    let _guard = match TimerGuard::new(TaskType::MonitorSubmittedTransactions) {
+/// Check the status of all submitted transactions, finalize succeeded/failed
+/// ones, and mark expired transactions for resubmission.
+pub async fn finalize_transactions<R: CanisterRuntime>(runtime: R) {
+    let _guard = match TimerGuard::new(TaskType::FinalizeTransactions) {
         Ok(guard) => guard,
         Err(_) => return,
     };
 
-    let all_transactions: Vec<(Signature, Slot)> = read_state(|state| {
+    let all_transactions: BTreeMap<Signature, Slot> = read_state(|state| {
         state
             .submitted_transactions()
             .iter()
@@ -51,16 +54,6 @@ pub async fn monitor_submitted_transactions<R: CanisterRuntime>(runtime: R) {
             .collect()
     });
     if all_transactions.is_empty() {
-        let to_resubmit: Vec<_> = read_state(|state| {
-            state
-                .transactions_to_resubmit()
-                .iter()
-                .map(|(sig, tx)| (*sig, tx.message.clone(), tx.signers.clone()))
-                .collect()
-        });
-        if !to_resubmit.is_empty() {
-            resubmit_expired_transactions(&runtime, to_resubmit).await;
-        }
         return;
     }
 
@@ -75,7 +68,8 @@ pub async fn monitor_submitted_transactions<R: CanisterRuntime>(runtime: R) {
         }
     };
 
-    let statuses = check_transaction_statuses(&runtime, &all_transactions).await;
+    let signatures: Vec<Signature> = all_transactions.keys().copied().collect();
+    let statuses = check_transaction_statuses(&runtime, signatures).await;
 
     for (signature, error) in &statuses.errored {
         log!(
@@ -106,30 +100,28 @@ pub async fn monitor_submitted_transactions<R: CanisterRuntime>(runtime: R) {
         });
     }
 
-    if statuses.not_found.is_empty() {
-        return;
+    for signature in &statuses.not_found {
+        if all_transactions[signature] + MAX_BLOCKHASH_AGE < current_slot {
+            mutate_state(|state| {
+                process_event(
+                    state,
+                    EventType::ExpiredTransaction {
+                        signature: *signature,
+                    },
+                    &runtime,
+                )
+            });
+        }
     }
+}
 
-    let expired_signatures: BTreeSet<Signature> = all_transactions
-        .into_iter()
-        .filter(|(sig, slot)| {
-            statuses.not_found.contains(sig) && slot + MAX_BLOCKHASH_AGE < current_slot
-        })
-        .map(|(sig, _)| sig)
-        .collect();
-
-    if expired_signatures.is_empty() {
-        return;
-    }
-
-    for signature in expired_signatures {
-        mutate_state(|state| {
-            // Skip if the transaction was finalized concurrently.
-            if state.submitted_transactions().contains_key(&signature) {
-                process_event(state, EventType::ExpiredTransaction { signature }, &runtime);
-            }
-        });
-    }
+/// Resubmit transactions that have been marked for resubmission by
+/// [`finalize_transactions`].
+pub async fn resubmit_transactions<R: CanisterRuntime>(runtime: R) {
+    let _guard = match TimerGuard::new(TaskType::ResubmitTransactions) {
+        Ok(guard) => guard,
+        Err(_) => return,
+    };
 
     let to_resubmit: Vec<_> = read_state(|state| {
         state
@@ -138,7 +130,9 @@ pub async fn monitor_submitted_transactions<R: CanisterRuntime>(runtime: R) {
             .map(|(sig, tx)| (*sig, tx.message.clone(), tx.signers.clone()))
             .collect()
     });
-
+    if to_resubmit.is_empty() {
+        return;
+    }
     resubmit_expired_transactions(&runtime, to_resubmit).await;
 }
 
@@ -156,10 +150,9 @@ struct TransactionStatuses {
 
 async fn check_transaction_statuses<R: CanisterRuntime>(
     runtime: &R,
-    transactions: &[(Signature, Slot)],
+    signatures: Vec<Signature>,
 ) -> TransactionStatuses {
-    let signatures: Vec<Signature> = transactions.iter().map(|(sig, _)| *sig).collect();
-    let batches: Vec<Vec<Signature>> = signatures
+    let batches: Vec<Vec<_>> = signatures
         .into_iter()
         .chunks(MAX_SIGNATURES_PER_STATUS_CHECK)
         .into_iter()
@@ -211,9 +204,17 @@ async fn check_transaction_statuses<R: CanisterRuntime>(
 
 async fn resubmit_expired_transactions<R: CanisterRuntime>(
     runtime: &R,
-    expired: Vec<(Signature, VersionedMessage, Vec<Account>)>,
+    to_resubmit: Vec<(Signature, VersionedMessage, Vec<Account>)>,
 ) {
-    for round in &expired.into_iter().chunks(MAX_CONCURRENT_RPC_CALLS) {
+    let rounds: Vec<Vec<_>> = to_resubmit
+        .into_iter()
+        .chunks(MAX_CONCURRENT_RPC_CALLS)
+        .into_iter()
+        .take(MAX_TIMER_ROUNDS)
+        .map(Iterator::collect)
+        .collect();
+
+    for round in rounds {
         let (new_slot, new_blockhash) = match get_recent_slot_and_blockhash(runtime).await {
             Ok(result) => result,
             Err(e) => {
@@ -222,27 +223,29 @@ async fn resubmit_expired_transactions<R: CanisterRuntime>(
             }
         };
 
-        futures::future::join_all(round.map(async |(old_signature, message, signers)| {
-            match try_resubmit_transaction(
-                runtime,
-                old_signature,
-                message,
-                signers,
-                new_slot,
-                new_blockhash,
-            )
-            .await
-            {
-                Ok(new_sig) => log!(
-                    Priority::Info,
-                    "Resubmitted transaction {old_signature} as {new_sig}"
-                ),
-                Err(e) => log!(
-                    Priority::Info,
-                    "Failed to resubmit transaction {old_signature}: {e}"
-                ),
-            }
-        }))
+        futures::future::join_all(round.into_iter().map(
+            async |(old_signature, message, signers)| {
+                match try_resubmit_transaction(
+                    runtime,
+                    old_signature,
+                    message,
+                    signers,
+                    new_slot,
+                    new_blockhash,
+                )
+                .await
+                {
+                    Ok(new_sig) => log!(
+                        Priority::Info,
+                        "Resubmitted transaction {old_signature} as {new_sig}"
+                    ),
+                    Err(e) => log!(
+                        Priority::Info,
+                        "Failed to resubmit transaction {old_signature}: {e}"
+                    ),
+                }
+            },
+        ))
         .await;
     }
 }

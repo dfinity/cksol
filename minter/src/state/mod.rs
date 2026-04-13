@@ -796,7 +796,8 @@ pub struct MintedDeposit {
 pub enum TaskType {
     DepositConsolidation,
     Mint,
-    MonitorSubmittedTransactions,
+    FinalizeTransactions,
+    ResubmitTransactions,
     WithdrawalProcessing,
 }
 

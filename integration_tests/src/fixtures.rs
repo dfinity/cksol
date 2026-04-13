@@ -147,6 +147,12 @@ impl MockBuilder {
         self.get_transaction(get_deposit_transaction_response())
     }
 
+    /// Mocks for `getSlot` → `getBlock`.
+    pub fn get_slot_and_block(self, slot: u64, blockhash: &str) -> Self {
+        self.expect(get_slot_request(), get_slot_response(slot))
+            .expect(get_block_request(slot), get_block_response(blockhash))
+    }
+
     /// Mocks for `getSlot` → `getBlock` → `sendTransaction`.
     pub fn submit_transaction(self, slot: u64, blockhash: &str, tx_signature: &str) -> Self {
         self.expect(get_slot_request(), get_slot_response(slot))
