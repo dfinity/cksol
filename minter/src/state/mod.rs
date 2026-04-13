@@ -615,7 +615,10 @@ impl State {
             None,
             "Attempted to resubmit transaction with signature {new_signature:?} that already exists"
         );
-        self.transactions_to_resubmit.remove(old_signature);
+        assert!(
+            self.transactions_to_resubmit.remove(old_signature),
+            "BUG: transaction {old_signature} is not queued for resubmission"
+        );
         if let Some(info) = self.consolidation_transactions.remove(old_signature) {
             self.consolidation_transactions.insert(*new_signature, info);
         }
@@ -647,7 +650,10 @@ impl State {
                 .checked_sub(tx_fee)
                 .expect("BUG: consolidation amount is less than transaction fee");
         }
-        self.transactions_to_resubmit.remove(signature);
+        assert!(
+            !self.transactions_to_resubmit.contains(signature),
+            "BUG: transaction {signature} is queued for resubmission but is being marked as succeeded"
+        );
         assert!(
             self.succeeded_transactions.insert(*signature),
             "Attempted to mark transaction {signature:?} as succeeded twice"
@@ -670,7 +676,10 @@ impl State {
             .unwrap_or_else(|| {
                 panic!("Attempted to mark unknown transaction {signature:?} as failed")
             });
-        self.transactions_to_resubmit.remove(signature);
+        assert!(
+            !self.transactions_to_resubmit.contains(signature),
+            "BUG: transaction {signature} is queued for resubmission but is being marked as failed"
+        );
         assert_eq!(
             self.failed_transactions.insert(*signature, transaction),
             None,

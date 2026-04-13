@@ -8,8 +8,9 @@ use crate::{
         arb::arb_event,
         deposit_id,
         events::{
-            accept_deposit, accept_withdrawal, accept_withdrawal_at, fail_transaction,
-            mint_deposit, resubmit_transaction, submit_withdrawal, succeed_transaction,
+            accept_deposit, accept_withdrawal, accept_withdrawal_at, expire_transaction,
+            fail_transaction, mint_deposit, resubmit_transaction, submit_withdrawal,
+            succeed_transaction,
         },
         init_balance, init_state, ledger_canister_id,
         runtime::TestCanisterRuntime,
@@ -618,7 +619,8 @@ mod oldest_incomplete_withdrawal_created_at {
             Some(1_000_000_000)
         );
 
-        // Resubmit the transaction with a new signature
+        // Expire then resubmit the transaction with a new signature
+        expire_transaction(signature(0xAA));
         resubmit_transaction(signature(0xAA), signature(0xBB), 42);
 
         // created_at timestamps should be unchanged
