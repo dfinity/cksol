@@ -65,7 +65,7 @@ mod state_from_init_args {
                 failed_withdrawal_requests: BTreeMap::new(),
                 deposits_to_consolidate: BTreeMap::new(),
                 submitted_transactions: BTreeMap::new(),
-                transactions_to_resubmit: BTreeSet::new(),
+                transactions_to_resubmit: BTreeMap::new(),
                 succeeded_transactions: BTreeSet::new(),
                 failed_transactions: BTreeMap::new(),
                 consolidation_transactions: BTreeMap::new(),
