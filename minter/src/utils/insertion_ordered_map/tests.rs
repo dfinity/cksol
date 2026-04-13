@@ -248,19 +248,20 @@ mod partial_eq {
     }
 
     #[test]
-    fn should_be_equal_regardless_of_next_seq() {
-        // Map `a` has next_seq=2 after two inserts.
+    fn should_be_equal_regardless_of_internal_indices() {
+        // Map `a`: key 1 gets seq=0, key 2 gets seq=1.
         let mut a = InsertionOrderedMap::new();
         a.insert(1u32, "x");
         a.insert(2u32, "y");
 
-        // Map `b` has next_seq=3 because an extra element was inserted then removed,
-        // but the visible entries are the same.
+        // Map `b`: key 1 gets seq=0, key 3 gets seq=1 (then removed),
+        // key 2 gets seq=2 — a different internal index than in `a`.
+        // The visible entries and their order are identical.
         let mut b = InsertionOrderedMap::new();
         b.insert(1u32, "x");
-        b.insert(2u32, "y");
         b.insert(3u32, "z");
         b.remove(&3u32);
+        b.insert(2u32, "y");
 
         assert_eq!(a, b);
     }

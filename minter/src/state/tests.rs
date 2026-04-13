@@ -1,4 +1,5 @@
-use super::{event::*, insertion_ordered_map::InsertionOrderedMap, *};
+use super::{event::*, *};
+use crate::utils::insertion_ordered_map::InsertionOrderedMap;
 use crate::{
     constants::FEE_PER_SIGNATURE as SOLANA_LAMPORTS_PER_SIGNATURE,
     state::{SOLANA_RENT_EXEMPTION_THRESHOLD, audit::process_event, read_state},

@@ -8,10 +8,10 @@ use crate::{
         TaskType,
         audit::process_event,
         event::{EventType, TransactionPurpose},
-        insertion_ordered_map::InsertionOrderedMap,
         mutate_state, read_state,
     },
     transaction::{SubmitTransactionError, get_recent_slot_and_blockhash, submit_transaction},
+    utils::insertion_ordered_map::InsertionOrderedMap,
 };
 use canlog::log;
 use cksol_types_internal::log::Priority;

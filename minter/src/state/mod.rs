@@ -1,3 +1,4 @@
+use crate::utils::insertion_ordered_map::InsertionOrderedMap;
 use crate::{
     constants::FEE_PER_SIGNATURE,
     ledger::client::LedgerClient,
@@ -11,7 +12,6 @@ use cksol_types_internal::{Ed25519KeyName, InitArgs, UpgradeArgs};
 use ic_canister_runtime::Runtime;
 use ic_ed25519::PublicKey;
 use icrc_ledger_types::icrc1::account::Account;
-use insertion_ordered_map::InsertionOrderedMap;
 use sol_rpc_client::SolRpcClient;
 use sol_rpc_types::{ConsensusStrategy, Lamport, RpcSources, Slot, SolanaCluster};
 use solana_signature::Signature;
@@ -22,7 +22,6 @@ mod tests;
 
 pub mod audit;
 pub mod event;
-pub mod insertion_ordered_map;
 
 /// The minimum balance required for a Solana account to be rent-exempt.
 /// This is the rent-exemption threshold for a basic account with 0 data bytes.
