@@ -60,8 +60,6 @@ async fn should_return_early_if_fetching_current_slot_fails() {
     let events_before = EventsAssert::from_recorded();
 
     let error = SlotResult::Consistent(Err(RpcError::ValidationError("Error".to_string())));
-    // We try to fetch the current slot 3 times before giving up,
-    // and then no more RPC calls are made
     let runtime = TestCanisterRuntime::new()
         .add_stub_response(error.clone())
         .add_stub_response(error.clone())
@@ -84,6 +82,8 @@ mod finalization {
 
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
+            .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
+            .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())))
             .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![Some(
                 finalized_status(),
             )])));
@@ -120,18 +120,15 @@ mod finalization {
 
         submit_consolidation_transaction(slot);
 
-        let mut runtime = TestCanisterRuntime::new()
+        let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
+            .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
+            .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())))
             .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![
                 status.clone(),
             ])));
 
-        // If the transaction status is null, we also check if the transaction slot is expired
-        if status.is_none() {
-            runtime = runtime
-                .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
-                .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())));
-        }
+        let _ = status; // suppress unused warning
 
         let events_before = EventsAssert::from_recorded();
 
@@ -151,6 +148,8 @@ mod finalization {
 
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
+            .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
+            .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())))
             .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![Some(
                 TransactionStatus {
                     slot: RECENT_SLOT,
@@ -185,14 +184,14 @@ mod finalization {
 
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
+            .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
+            .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())))
             .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![
                 Some(finalized_status()),
                 None,
                 Some(finalized_status()),
-            ])))
-            // get_recent_slot_and_blockhash for the one not_found transaction (getSlot + getBlock)
-            .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
-            .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())));
+            ])));
+        // sig_b is not_found but RECENT_SLOT is not expired, so no resubmission.
 
         monitor_submitted_transactions(runtime).await;
 
@@ -251,12 +250,9 @@ mod resubmission {
 
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
-            // getSignatureStatuses: not found
-            .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![None])))
-            // get_recent_slot_and_blockhash for expiry check (getSlot + getBlock)
             .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
             .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())))
-            // get_recent_slot_and_blockhash for resubmission (getSlot + getBlock)
+            .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![None])))
             .add_stub_response(SlotResult::Consistent(Ok(RESUBMISSION_SLOT)))
             .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())))
             .add_stub_response(SendTransactionResult::Consistent(Ok(new_signature.into())))
@@ -286,6 +282,8 @@ mod resubmission {
 
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
+            .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
+            .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())))
             .add_stub_response(SignatureStatusesResult::Consistent(Err(
                 RpcError::ValidationError("Error".to_string()),
             )));
@@ -308,11 +306,9 @@ mod resubmission {
 
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
-            .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![None])))
-            // get_recent_slot_and_blockhash for expiry check (getSlot + getBlock)
             .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
             .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())))
-            // get_recent_slot_and_blockhash for resubmission (getSlot + getBlock)
+            .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![None])))
             .add_stub_response(SlotResult::Consistent(Ok(RESUBMISSION_SLOT)))
             .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())))
             .add_stub_response(SendTransactionResult::Inconsistent(vec![]))
@@ -340,13 +336,12 @@ mod resubmission {
 
         let mut runtime = TestCanisterRuntime::new()
             .with_increasing_time()
+            .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
+            .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())))
             // getSignatureStatuses: all not found
             .add_stub_response(SignatureStatusesResult::Consistent(Ok(
                 vec![None; num_transactions],
             )))
-            // get_recent_slot_and_blockhash for expiry check (getSlot + getBlock)
-            .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
-            .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())))
             // Round 1: get_recent_slot_and_blockhash for resubmission (getSlot + getBlock)
             .add_stub_response(SlotResult::Consistent(Ok(RESUBMISSION_SLOT)))
             .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())));

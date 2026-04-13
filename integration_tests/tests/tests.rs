@@ -57,6 +57,7 @@ async fn deposit_and_consolidate_funds(setup: &Setup) {
     setup
         .execute_http_mocks(
             MockBuilder::with_start_id(16)
+                .get_current_slot(100_000_000, "4sGjMW1sUnHzSxGspuhpqLDx6wiyjNtZAMdL4VZHirAn")
                 .check_signature_statuses_finalized(1)
                 .build(),
         )
@@ -711,7 +712,7 @@ mod withdrawal_tests {
     }
 
     fn estimate_blockhash_http_mocks(slot: u64) -> MockHttpOutcalls {
-        MockBuilder::with_start_id(20)
+        MockBuilder::with_start_id(28)
             .submit_transaction(
                 slot,
                 "4sGjMW1sUnHzSxGspuhpqLDx6wiyjNtZAMdL4VZHirAn",
@@ -722,7 +723,7 @@ mod withdrawal_tests {
 
     /// HTTP mocks for resubmitting an expired withdrawal transaction.
     fn resubmit_withdrawal_http_mocks(current_slot: u64) -> MockHttpOutcalls {
-        MockBuilder::with_start_id(32)
+        MockBuilder::with_start_id(40)
             .resubmit_transaction(
                 current_slot,
                 "9ZNTfG4NyQgxy2SWjSiQoUyBPEvXT2xo7fKc5hPYYJ7b",
@@ -733,7 +734,8 @@ mod withdrawal_tests {
 
     /// HTTP mocks for finalizing a withdrawal transaction.
     fn finalize_withdrawal_http_mocks() -> MockHttpOutcalls {
-        MockBuilder::with_start_id(56)
+        MockBuilder::with_start_id(64)
+            .get_current_slot(350_000_200, "9ZNTfG4NyQgxy2SWjSiQoUyBPEvXT2xo7fKc5hPYYJ7b")
             .check_signature_statuses_finalized(1)
             .build()
     }
