@@ -14,7 +14,6 @@ mod tests;
 /// [`iter`]: InsertionOrderedMap::iter
 /// [`keys`]: InsertionOrderedMap::keys
 /// [`values`]: InsertionOrderedMap::values
-#[derive(PartialEq, Eq)]
 pub struct InsertionOrderedMap<K, V> {
     entries: BTreeMap<K, (u64, V)>,
     order: BTreeMap<u64, K>,
@@ -118,6 +117,14 @@ impl<K: Ord + Clone, V> Default for InsertionOrderedMap<K, V> {
         Self::new()
     }
 }
+
+impl<K: Ord + Clone, V: PartialEq> PartialEq for InsertionOrderedMap<K, V> {
+    fn eq(&self, other: &Self) -> bool {
+        self.iter().eq(other.iter())
+    }
+}
+
+impl<K: Ord + Clone, V: Eq> Eq for InsertionOrderedMap<K, V> {}
 
 impl<K: Ord + Clone + std::fmt::Debug, V: std::fmt::Debug> std::fmt::Debug
     for InsertionOrderedMap<K, V>

@@ -246,4 +246,22 @@ mod partial_eq {
 
         assert_ne!(a, b);
     }
+
+    #[test]
+    fn should_be_equal_regardless_of_next_seq() {
+        // Map `a` has next_seq=2 after two inserts.
+        let mut a = InsertionOrderedMap::new();
+        a.insert(1u32, "x");
+        a.insert(2u32, "y");
+
+        // Map `b` has next_seq=3 because an extra element was inserted then removed,
+        // but the visible entries are the same.
+        let mut b = InsertionOrderedMap::new();
+        b.insert(1u32, "x");
+        b.insert(2u32, "y");
+        b.insert(3u32, "z");
+        b.remove(&3u32);
+
+        assert_eq!(a, b);
+    }
 }
