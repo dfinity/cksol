@@ -346,9 +346,11 @@ mod resubmission {
             .with_increasing_time()
             .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
             .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())))
+            // getSignatureStatuses: all not found
             .add_stub_response(SignatureStatusesResult::Consistent(Ok(
                 vec![None; num_transactions],
             )))
+            // Round 1: get_recent_slot_and_blockhash for resubmission (getSlot + getBlock)
             .add_stub_response(SlotResult::Consistent(Ok(RESUBMISSION_SLOT)))
             .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())));
 

@@ -100,7 +100,7 @@ pub async fn monitor_submitted_transactions<R: CanisterRuntime>(runtime: R) {
         return;
     }
 
-    let expired_signatures: Vec<Signature> = all_transactions
+    let expired_signatures: BTreeSet<Signature> = all_transactions
         .into_iter()
         .filter(|(sig, slot)| {
             statuses.not_found.contains(sig) && slot + MAX_BLOCKHASH_AGE < current_slot
