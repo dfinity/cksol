@@ -206,21 +206,21 @@ impl State {
         &self.transactions_to_resubmit
     }
 
-    pub fn process_transaction_expired(&mut self, signature: Signature) {
+    pub fn process_transaction_expired(&mut self, signature: &Signature) {
         assert!(
-            !self.succeeded_transactions.contains(&signature),
+            !self.succeeded_transactions.contains(signature),
             "BUG: cannot mark already succeeded transaction {signature} for resubmission"
         );
         assert!(
-            !self.failed_transactions.contains_key(&signature),
+            !self.failed_transactions.contains_key(signature),
             "BUG: cannot mark already failed transaction {signature} for resubmission"
         );
         assert!(
-            self.submitted_transactions.contains_key(&signature),
+            self.submitted_transactions.contains_key(signature),
             "BUG: cannot mark non-submitted transaction {signature} for resubmission"
         );
         assert!(
-            self.transactions_to_resubmit.insert(signature),
+            self.transactions_to_resubmit.insert(*signature),
             "BUG: transaction {signature} is already queued for resubmission"
         );
     }
