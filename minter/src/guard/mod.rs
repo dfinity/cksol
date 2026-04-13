@@ -1,8 +1,7 @@
 use crate::state::{State, TaskType, mutate_state};
 use cksol_types::{UpdateBalanceError, WithdrawalError};
 use icrc_ledger_types::icrc1::account::Account;
-use std::collections::BTreeSet;
-use std::marker::PhantomData;
+use std::{collections::BTreeSet, marker::PhantomData};
 
 #[cfg(test)]
 mod tests;
