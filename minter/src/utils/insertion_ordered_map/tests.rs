@@ -194,32 +194,6 @@ mod values_mut {
     }
 }
 
-mod extract_if {
-    use super::*;
-
-    #[test]
-    fn should_remove_and_return_matching_entries() {
-        let mut map = InsertionOrderedMap::new();
-        map.insert(1u32, 10u32);
-        map.insert(2, 20);
-        map.insert(3, 30);
-
-        let extracted: Vec<_> = map.extract_if(|_, v| *v > 15);
-        assert_eq!(extracted, vec![(2, 20), (3, 30)]);
-        assert_eq!(map.len(), 1);
-        assert_eq!(map.get(&1), Some(&10));
-    }
-
-    #[test]
-    fn should_return_empty_when_none_match() {
-        let mut map = InsertionOrderedMap::new();
-        map.insert(1u32, 1u32);
-        let extracted = map.extract_if(|_, v| *v > 100);
-        assert!(extracted.is_empty());
-        assert_eq!(map.len(), 1);
-    }
-}
-
 mod partial_eq {
     use super::*;
 

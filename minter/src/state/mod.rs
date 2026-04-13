@@ -15,7 +15,10 @@ use icrc_ledger_types::icrc1::account::Account;
 use sol_rpc_client::SolRpcClient;
 use sol_rpc_types::{ConsensusStrategy, Lamport, RpcSources, Slot, SolanaCluster};
 use solana_signature::Signature;
-use std::{cell::RefCell, collections::BTreeSet};
+use std::{
+    cell::RefCell,
+    collections::{BTreeMap, BTreeSet},
+};
 
 #[cfg(test)]
 mod tests;
@@ -94,11 +97,11 @@ pub struct State {
     accepted_deposits: InsertionOrderedMap<DepositId, Deposit>,
     quarantined_deposits: InsertionOrderedMap<DepositId, Deposit>,
     minted_deposits: InsertionOrderedMap<DepositId, MintedDeposit>,
-    pending_withdrawal_requests: InsertionOrderedMap<LedgerBurnIndex, PendingWithdrawalRequest>,
-    sent_withdrawal_requests: InsertionOrderedMap<LedgerBurnIndex, SentWithdrawalRequest>,
-    successful_withdrawal_requests: InsertionOrderedMap<LedgerBurnIndex, SentWithdrawalRequest>,
-    failed_withdrawal_requests: InsertionOrderedMap<LedgerBurnIndex, SentWithdrawalRequest>,
-    deposits_to_consolidate: InsertionOrderedMap<LedgerMintIndex, (Account, Lamport)>,
+    pending_withdrawal_requests: BTreeMap<LedgerBurnIndex, PendingWithdrawalRequest>,
+    sent_withdrawal_requests: BTreeMap<LedgerBurnIndex, SentWithdrawalRequest>,
+    successful_withdrawal_requests: BTreeMap<LedgerBurnIndex, SentWithdrawalRequest>,
+    failed_withdrawal_requests: BTreeMap<LedgerBurnIndex, SentWithdrawalRequest>,
+    deposits_to_consolidate: BTreeMap<LedgerMintIndex, (Account, Lamport)>,
     submitted_transactions: InsertionOrderedMap<Signature, SolanaTransaction>,
     transactions_to_resubmit: InsertionOrderedMap<Signature, SolanaTransaction>,
     succeeded_transactions: BTreeSet<Signature>,
@@ -178,27 +181,21 @@ impl State {
         &self.minted_deposits
     }
 
-    pub fn sent_withdrawal_requests(
-        &self,
-    ) -> &InsertionOrderedMap<LedgerBurnIndex, SentWithdrawalRequest> {
+    pub fn sent_withdrawal_requests(&self) -> &BTreeMap<LedgerBurnIndex, SentWithdrawalRequest> {
         &self.sent_withdrawal_requests
     }
 
     pub fn successful_withdrawal_requests(
         &self,
-    ) -> &InsertionOrderedMap<LedgerBurnIndex, SentWithdrawalRequest> {
+    ) -> &BTreeMap<LedgerBurnIndex, SentWithdrawalRequest> {
         &self.successful_withdrawal_requests
     }
 
-    pub fn failed_withdrawal_requests(
-        &self,
-    ) -> &InsertionOrderedMap<LedgerBurnIndex, SentWithdrawalRequest> {
+    pub fn failed_withdrawal_requests(&self) -> &BTreeMap<LedgerBurnIndex, SentWithdrawalRequest> {
         &self.failed_withdrawal_requests
     }
 
-    pub fn deposits_to_consolidate(
-        &self,
-    ) -> &InsertionOrderedMap<LedgerMintIndex, (Account, Lamport)> {
+    pub fn deposits_to_consolidate(&self) -> &BTreeMap<LedgerMintIndex, (Account, Lamport)> {
         &self.deposits_to_consolidate
     }
 
@@ -452,7 +449,7 @@ impl State {
 
     pub fn pending_withdrawal_requests(
         &self,
-    ) -> &InsertionOrderedMap<LedgerBurnIndex, PendingWithdrawalRequest> {
+    ) -> &BTreeMap<LedgerBurnIndex, PendingWithdrawalRequest> {
         &self.pending_withdrawal_requests
     }
 
@@ -665,7 +662,7 @@ impl State {
             "Attempted to mark transaction {signature:?} as succeeded twice"
         );
         self.sent_withdrawal_requests
-            .extract_if(|_, sent| &sent.signature == signature)
+            .extract_if(.., |_, sent| &sent.signature == signature)
             .into_iter()
             .for_each(|(burn_index, sent)| {
                 self.successful_withdrawal_requests.insert(burn_index, sent);
@@ -693,7 +690,7 @@ impl State {
             "Attempted to fail transaction {signature:?} twice"
         );
         self.sent_withdrawal_requests
-            .extract_if(|_, sent| &sent.signature == signature)
+            .extract_if(.., |_, sent| &sent.signature == signature)
             .into_iter()
             .for_each(|(burn_index, sent)| {
                 self.failed_withdrawal_requests.insert(burn_index, sent);
@@ -749,11 +746,11 @@ impl TryFrom<InitArgs> for State {
             accepted_deposits: InsertionOrderedMap::new(),
             quarantined_deposits: InsertionOrderedMap::new(),
             minted_deposits: InsertionOrderedMap::new(),
-            pending_withdrawal_requests: InsertionOrderedMap::new(),
-            sent_withdrawal_requests: InsertionOrderedMap::new(),
-            successful_withdrawal_requests: InsertionOrderedMap::new(),
-            failed_withdrawal_requests: InsertionOrderedMap::new(),
-            deposits_to_consolidate: InsertionOrderedMap::new(),
+            pending_withdrawal_requests: BTreeMap::new(),
+            sent_withdrawal_requests: BTreeMap::new(),
+            successful_withdrawal_requests: BTreeMap::new(),
+            failed_withdrawal_requests: BTreeMap::new(),
+            deposits_to_consolidate: BTreeMap::new(),
             submitted_transactions: InsertionOrderedMap::new(),
             transactions_to_resubmit: InsertionOrderedMap::new(),
             succeeded_transactions: BTreeSet::new(),

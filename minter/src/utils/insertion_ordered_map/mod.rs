@@ -93,23 +93,6 @@ impl<K: Ord + Clone, V> InsertionOrderedMap<K, V> {
     pub fn values_mut(&mut self) -> impl Iterator<Item = &mut V> + '_ {
         self.entries.values_mut().map(|(_, v)| v)
     }
-
-    /// Removes all entries for which `pred` returns `true` and returns them.
-    pub fn extract_if<F: FnMut(&K, &V) -> bool>(&mut self, mut pred: F) -> Vec<(K, V)> {
-        let matching_keys: Vec<K> = self
-            .entries
-            .iter()
-            .filter_map(|(k, (_, v))| if pred(k, v) { Some(k.clone()) } else { None })
-            .collect();
-        let mut result = Vec::with_capacity(matching_keys.len());
-        for key in matching_keys {
-            if let Some((seq, value)) = self.entries.remove(&key) {
-                self.order.remove(&seq);
-                result.push((key, value));
-            }
-        }
-        result
-    }
 }
 
 impl<K: Ord + Clone, V> Default for InsertionOrderedMap<K, V> {

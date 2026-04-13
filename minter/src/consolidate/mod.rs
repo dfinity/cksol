@@ -11,7 +11,6 @@ use crate::{
         mutate_state, read_state,
     },
     transaction::{SubmitTransactionError, get_recent_slot_and_blockhash, submit_transaction},
-    utils::insertion_ordered_map::InsertionOrderedMap,
 };
 use canlog::log;
 use cksol_types_internal::log::Priority;
@@ -68,7 +67,7 @@ pub async fn consolidate_deposits<R: CanisterRuntime>(runtime: R) {
 }
 
 fn group_deposits_by_account(
-    deposits: &InsertionOrderedMap<LedgerMintIndex, (Account, Lamport)>,
+    deposits: &BTreeMap<LedgerMintIndex, (Account, Lamport)>,
 ) -> Vec<(Account, (Lamport, Vec<LedgerMintIndex>))> {
     let mut by_account: BTreeMap<Account, (Lamport, Vec<LedgerMintIndex>)> = BTreeMap::new();
     for (mint_index, (account, lamport)) in deposits {

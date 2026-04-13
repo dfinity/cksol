@@ -1,5 +1,4 @@
 use super::{event::*, *};
-use crate::utils::insertion_ordered_map::InsertionOrderedMap;
 use crate::{
     constants::FEE_PER_SIGNATURE as SOLANA_LAMPORTS_PER_SIGNATURE,
     state::{SOLANA_RENT_EXEMPTION_THRESHOLD, audit::process_event, read_state},
@@ -17,6 +16,7 @@ use crate::{
         runtime::TestCanisterRuntime,
         signature, sol_rpc_canister_id, valid_init_args,
     },
+    utils::insertion_ordered_map::InsertionOrderedMap,
 };
 use assert_matches::assert_matches;
 use cksol_types_internal::SolanaNetwork;
@@ -60,11 +60,11 @@ mod state_from_init_args {
                 accepted_deposits: InsertionOrderedMap::new(),
                 quarantined_deposits: InsertionOrderedMap::new(),
                 minted_deposits: InsertionOrderedMap::new(),
-                pending_withdrawal_requests: InsertionOrderedMap::new(),
-                sent_withdrawal_requests: InsertionOrderedMap::new(),
-                successful_withdrawal_requests: InsertionOrderedMap::new(),
-                failed_withdrawal_requests: InsertionOrderedMap::new(),
-                deposits_to_consolidate: InsertionOrderedMap::new(),
+                pending_withdrawal_requests: BTreeMap::new(),
+                sent_withdrawal_requests: BTreeMap::new(),
+                successful_withdrawal_requests: BTreeMap::new(),
+                failed_withdrawal_requests: BTreeMap::new(),
+                deposits_to_consolidate: BTreeMap::new(),
                 submitted_transactions: InsertionOrderedMap::new(),
                 transactions_to_resubmit: InsertionOrderedMap::new(),
                 succeeded_transactions: BTreeSet::new(),
