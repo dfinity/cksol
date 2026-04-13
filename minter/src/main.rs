@@ -184,6 +184,9 @@ fn get_events(
             EventType::FailedTransaction { signature } => event::EventType::FailedTransaction {
                 signature: signature.into(),
             },
+            EventType::ExpiredTransaction { signature } => event::EventType::ExpiredTransaction {
+                signature: signature.into(),
+            },
         }
     }
 

@@ -100,6 +100,7 @@ pub struct State {
     failed_withdrawal_requests: InsertionOrderedMap<LedgerBurnIndex, SentWithdrawalRequest>,
     deposits_to_consolidate: InsertionOrderedMap<LedgerMintIndex, (Account, Lamport)>,
     submitted_transactions: InsertionOrderedMap<Signature, SolanaTransaction>,
+    transactions_to_resubmit: InsertionOrderedMap<Signature, SolanaTransaction>,
     succeeded_transactions: BTreeSet<Signature>,
     failed_transactions: InsertionOrderedMap<Signature, SolanaTransaction>,
     consolidation_transactions: InsertionOrderedMap<Signature, ConsolidationTransaction>,
@@ -203,6 +204,33 @@ impl State {
 
     pub fn submitted_transactions(&self) -> &InsertionOrderedMap<Signature, SolanaTransaction> {
         &self.submitted_transactions
+    }
+
+    pub fn transactions_to_resubmit(&self) -> &InsertionOrderedMap<Signature, SolanaTransaction> {
+        &self.transactions_to_resubmit
+    }
+
+    pub fn process_transaction_expired(&mut self, signature: &Signature) {
+        assert!(
+            !self.succeeded_transactions.contains(signature),
+            "BUG: cannot mark already succeeded transaction {signature} for resubmission"
+        );
+        assert!(
+            !self.failed_transactions.contains_key(signature),
+            "BUG: cannot mark already failed transaction {signature} for resubmission"
+        );
+        let transaction = self
+            .submitted_transactions
+            .remove(signature)
+            .unwrap_or_else(|| {
+                panic!("BUG: cannot mark non-submitted transaction {signature} for resubmission")
+            });
+        assert!(
+            self.transactions_to_resubmit
+                .insert(*signature, transaction)
+                .is_none(),
+            "BUG: transaction {signature} is already queued for resubmission"
+        );
     }
 
     pub fn succeeded_transactions(&self) -> &BTreeSet<Signature> {
@@ -574,7 +602,7 @@ impl State {
         new_slot: Slot,
     ) {
         let old_transaction = self
-            .submitted_transactions
+            .transactions_to_resubmit
             .remove(old_signature)
             .unwrap_or_else(|| {
                 panic!("Attempted to resubmit unknown transaction with signature {old_signature:?}")
@@ -629,6 +657,10 @@ impl State {
                 .expect("BUG: consolidation amount is less than transaction fee");
         }
         assert!(
+            !self.transactions_to_resubmit.contains_key(signature),
+            "BUG: transaction {signature} is queued for resubmission but is being marked as succeeded"
+        );
+        assert!(
             self.succeeded_transactions.insert(*signature),
             "Attempted to mark transaction {signature:?} as succeeded twice"
         );
@@ -651,6 +683,10 @@ impl State {
             .unwrap_or_else(|| {
                 panic!("Attempted to mark unknown transaction {signature:?} as failed")
             });
+        assert!(
+            !self.transactions_to_resubmit.contains_key(signature),
+            "BUG: transaction {signature} is queued for resubmission but is being marked as failed"
+        );
         assert_eq!(
             self.failed_transactions.insert(*signature, transaction),
             None,
@@ -719,6 +755,7 @@ impl TryFrom<InitArgs> for State {
             failed_withdrawal_requests: InsertionOrderedMap::new(),
             deposits_to_consolidate: InsertionOrderedMap::new(),
             submitted_transactions: InsertionOrderedMap::new(),
+            transactions_to_resubmit: InsertionOrderedMap::new(),
             succeeded_transactions: BTreeSet::new(),
             failed_transactions: InsertionOrderedMap::new(),
             consolidation_transactions: InsertionOrderedMap::new(),

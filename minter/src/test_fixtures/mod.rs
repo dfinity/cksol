@@ -294,6 +294,16 @@ pub mod events {
         });
     }
 
+    pub fn expire_transaction(signature: Signature) {
+        mutate_state(|state| {
+            process_event(
+                state,
+                EventType::ExpiredTransaction { signature },
+                &runtime(),
+            )
+        });
+    }
+
     pub fn resubmit_transaction(
         old_signature: Signature,
         new_signature: Signature,
@@ -558,6 +568,7 @@ pub mod arb {
             ),
             arb_signature().prop_map(|signature| EventType::SucceededTransaction { signature }),
             arb_signature().prop_map(|signature| EventType::FailedTransaction { signature }),
+            arb_signature().prop_map(|signature| EventType::ExpiredTransaction { signature }),
         ]
     }
 

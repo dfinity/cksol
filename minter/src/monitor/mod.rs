@@ -51,6 +51,16 @@ pub async fn monitor_submitted_transactions<R: CanisterRuntime>(runtime: R) {
             .collect()
     });
     if all_transactions.is_empty() {
+        let to_resubmit: Vec<_> = read_state(|state| {
+            state
+                .transactions_to_resubmit()
+                .iter()
+                .map(|(sig, tx)| (*sig, tx.message.clone(), tx.signers.clone()))
+                .collect()
+        });
+        if !to_resubmit.is_empty() {
+            resubmit_expired_transactions(&runtime, to_resubmit).await;
+        }
         return;
     }
 
@@ -112,15 +122,20 @@ pub async fn monitor_submitted_transactions<R: CanisterRuntime>(runtime: R) {
         return;
     }
 
+    for signature in expired_signatures {
+        mutate_state(|state| {
+            // Skip if the transaction was finalized concurrently.
+            if state.submitted_transactions().contains_key(&signature) {
+                process_event(state, EventType::ExpiredTransaction { signature }, &runtime);
+            }
+        });
+    }
+
     let to_resubmit: Vec<_> = read_state(|state| {
-        expired_signatures
+        state
+            .transactions_to_resubmit()
             .iter()
-            .filter_map(|sig| {
-                state
-                    .submitted_transactions()
-                    .get(sig)
-                    .map(|tx| (*sig, tx.message.clone(), tx.signers.clone()))
-            })
+            .map(|(sig, tx)| (*sig, tx.message.clone(), tx.signers.clone()))
             .collect()
     });
 

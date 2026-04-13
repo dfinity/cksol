@@ -260,11 +260,15 @@ mod resubmission {
 
         monitor_submitted_transactions(runtime).await;
 
-        EventsAssert::from_recorded().expect_contains_event_eq(EventType::ResubmittedTransaction {
-            old_signature,
-            new_signature,
-            new_slot: RESUBMISSION_SLOT,
-        });
+        EventsAssert::from_recorded()
+            .expect_contains_event_eq(EventType::ExpiredTransaction {
+                signature: old_signature,
+            })
+            .expect_contains_event_eq(EventType::ResubmittedTransaction {
+                old_signature,
+                new_signature,
+                new_slot: RESUBMISSION_SLOT,
+            });
 
         read_state(|s| {
             assert_eq!(s.submitted_transactions().len(), 1);
@@ -316,11 +320,15 @@ mod resubmission {
 
         monitor_submitted_transactions(runtime).await;
 
-        EventsAssert::from_recorded().expect_contains_event_eq(EventType::ResubmittedTransaction {
-            old_signature,
-            new_signature,
-            new_slot: RESUBMISSION_SLOT,
-        });
+        EventsAssert::from_recorded()
+            .expect_contains_event_eq(EventType::ExpiredTransaction {
+                signature: old_signature,
+            })
+            .expect_contains_event_eq(EventType::ResubmittedTransaction {
+                old_signature,
+                new_signature,
+                new_slot: RESUBMISSION_SLOT,
+            });
     }
 
     #[tokio::test]
@@ -355,7 +363,6 @@ mod resubmission {
                 .add_signature([0xA0 + i as u8; 64]);
         }
 
-        // Round 2: get_recent_slot_and_blockhash for resubmission (getSlot + getBlock)
         runtime = runtime
             .add_stub_response(SlotResult::Consistent(Ok(RESUBMISSION_SLOT)))
             .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())));
