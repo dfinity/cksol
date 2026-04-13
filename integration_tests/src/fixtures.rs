@@ -173,12 +173,18 @@ impl MockBuilder {
         )
     }
 
-    /// Mocks for resubmitting an expired transaction:
-    /// `getSignatureStatuses`(not found) → `getSlot` → `getBlock` → `getSlot` → `getBlock` → `sendTransaction`.
-    pub fn resubmit_transaction(self, slot: u64, blockhash: &str, tx_signature: &str) -> Self {
-        self.check_signature_statuses_not_found(1)
-            .expect(get_slot_request(), get_slot_response(slot))
+    /// Mocks for `getSlot` → `getBlock`, used by the monitor timer to snapshot the current slot.
+    pub fn get_current_slot(self, slot: u64, blockhash: &str) -> Self {
+        self.expect(get_slot_request(), get_slot_response(slot))
             .expect(get_block_request(slot), get_block_response(blockhash))
+    }
+
+    /// Mocks for resubmitting an expired transaction:
+    /// `getSlot` → `getBlock` → `getSignatureStatuses`(not found) → `getSlot` → `getBlock` → `sendTransaction`.
+    pub fn resubmit_transaction(self, slot: u64, blockhash: &str, tx_signature: &str) -> Self {
+        self.expect(get_slot_request(), get_slot_response(slot))
+            .expect(get_block_request(slot), get_block_response(blockhash))
+            .check_signature_statuses_not_found(1)
             .expect(get_slot_request(), get_slot_response(slot))
             .expect(get_block_request(slot), get_block_response(blockhash))
             .expect(

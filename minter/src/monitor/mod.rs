@@ -54,6 +54,17 @@ pub async fn monitor_submitted_transactions<R: CanisterRuntime>(runtime: R) {
         return;
     }
 
+    // Fetch the current slot before checking statuses: if a transaction finalizes
+    // after we snapshot the slot, the status check will see it as finalized rather
+    // than missing, so it will never be incorrectly marked as expired.
+    let (current_slot, _) = match get_recent_slot_and_blockhash(&runtime).await {
+        Ok(result) => result,
+        Err(e) => {
+            log!(Priority::Info, "Failed to get current slot: {e}");
+            return;
+        }
+    };
+
     let statuses = check_transaction_statuses(&runtime, &all_transactions).await;
 
     for (signature, error) in &statuses.errored {
@@ -88,14 +99,6 @@ pub async fn monitor_submitted_transactions<R: CanisterRuntime>(runtime: R) {
     if statuses.not_found.is_empty() {
         return;
     }
-
-    let (current_slot, _) = match get_recent_slot_and_blockhash(&runtime).await {
-        Ok(result) => result,
-        Err(e) => {
-            log!(Priority::Info, "Failed to get current slot: {e}");
-            return;
-        }
-    };
 
     let expired_signatures: BTreeSet<Signature> = all_transactions
         .into_iter()
