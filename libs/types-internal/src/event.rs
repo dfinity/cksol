@@ -105,6 +105,13 @@ pub enum EventType {
         /// The signature of the failed Solana transaction.
         signature: Signature,
     },
+    /// A previously submitted Solana transaction has an expired blockhash
+    /// and a null on-chain status, meaning it will never be executed.
+    /// The transaction has been marked for resubmission.
+    ExpiredTransaction {
+        /// The signature of the expired Solana transaction.
+        signature: Signature,
+    },
 }
 
 /// The purpose of a submitted Solana transaction.
