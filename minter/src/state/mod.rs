@@ -1,9 +1,9 @@
-use crate::utils::insertion_ordered_map::InsertionOrderedMap;
 use crate::{
     constants::FEE_PER_SIGNATURE,
     ledger::client::LedgerClient,
     numeric::{LedgerBurnIndex, LedgerMintIndex},
     state::event::{DepositId, TransactionPurpose, VersionedMessage, WithdrawalRequest},
+    utils::insertion_ordered_map::InsertionOrderedMap,
 };
 use candid::Principal;
 use cksol_types::{DepositStatus, SolTransaction, TxFinalizedStatus, WithdrawalStatus};
@@ -663,7 +663,6 @@ impl State {
         );
         self.sent_withdrawal_requests
             .extract_if(.., |_, sent| &sent.signature == signature)
-            .into_iter()
             .for_each(|(burn_index, sent)| {
                 self.successful_withdrawal_requests.insert(burn_index, sent);
             });
@@ -691,7 +690,6 @@ impl State {
         );
         self.sent_withdrawal_requests
             .extract_if(.., |_, sent| &sent.signature == signature)
-            .into_iter()
             .for_each(|(burn_index, sent)| {
                 self.failed_withdrawal_requests.insert(burn_index, sent);
             });
