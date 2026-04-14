@@ -497,7 +497,10 @@ mod process_pending_withdrawals_tests {
 
         process_pending_withdrawals(runtime.clone()).await;
 
-        assert!(!read_state(|s| s.pending_withdrawal_requests().is_empty()));
+        read_state(|s| {
+            assert_eq!(s.submitted_transactions().len(), MAX_CONCURRENT_RPC_CALLS);
+            assert_eq!(s.pending_withdrawal_requests().len(), 1);
+        });
         assert_eq!(runtime.set_timer_call_count(), 1);
 
         // Round 2: processes the remaining 1 request → no reschedule

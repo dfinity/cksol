@@ -427,10 +427,13 @@ mod resubmission {
 
         resubmit_transactions(runtime.clone()).await;
 
-        assert_eq!(
-            read_state(|s| s.transactions_to_resubmit().len()),
-            num_transactions - MAX_CONCURRENT_RPC_CALLS
-        );
+        read_state(|s| {
+            assert_eq!(s.submitted_transactions().len(), MAX_CONCURRENT_RPC_CALLS);
+            assert_eq!(
+                s.transactions_to_resubmit().len(),
+                num_transactions - MAX_CONCURRENT_RPC_CALLS
+            );
+        });
         assert_eq!(runtime.set_timer_call_count(), 1);
 
         // Round 2: resubmits remaining 2 transactions → no reschedule

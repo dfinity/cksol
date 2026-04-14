@@ -283,7 +283,10 @@ async fn should_reschedule_until_all_deposits_consolidated() {
 
     consolidate_deposits(runtime.clone()).await;
 
-    assert!(!read_state(|s| s.deposits_to_consolidate().is_empty()));
+    read_state(|s| {
+        assert_eq!(s.submitted_transactions().len(), MAX_CONCURRENT_RPC_CALLS);
+        assert_eq!(s.deposits_to_consolidate().len(), 1);
+    });
     assert_eq!(runtime.set_timer_call_count(), 1);
 
     // Round 2: processes the remaining 1 deposit → no reschedule
@@ -297,7 +300,13 @@ async fn should_reschedule_until_all_deposits_consolidated() {
 
     consolidate_deposits(runtime.clone()).await;
 
-    assert!(read_state(|s| s.deposits_to_consolidate().is_empty()));
+    read_state(|s| {
+        assert_eq!(
+            s.submitted_transactions().len(),
+            MAX_CONCURRENT_RPC_CALLS + 1
+        );
+        assert!(s.deposits_to_consolidate().is_empty());
+    });
     assert_eq!(runtime.set_timer_call_count(), 0);
 }
 
