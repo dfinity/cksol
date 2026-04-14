@@ -669,7 +669,7 @@ mod withdrawal_tests {
 
         // Advance time to trigger finalize_transactions, which fetches the current slot,
         // checks statuses (not found), and marks the expired transaction for resubmission.
-        let resubmission_slot = INITIAL_SLOT + MAX_BLOCKHASH_AGE;
+        let resubmission_slot = INITIAL_SLOT + MAX_BLOCKHASH_AGE + 1;
         setup.advance_time(FINALIZE_TRANSACTIONS_DELAY).await;
         setup
             .execute_http_mocks(mark_expired_withdrawal_http_mocks(resubmission_slot))
