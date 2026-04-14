@@ -16,6 +16,7 @@ pub mod state;
 pub mod storage;
 mod transaction;
 pub mod update_balance;
+pub mod utils;
 pub mod withdraw;
 
 #[cfg(test)]
