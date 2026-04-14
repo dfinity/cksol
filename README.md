@@ -200,18 +200,23 @@ cargo build
 
 ### Testing
 
-Run unit tests and PocketIC-based integration tests:
+The test suite has two parts:
+
+**Unit tests and PocketIC integration tests** — no external dependencies:
 
 ```sh
-cargo test
+cargo test --lib
+cargo test -p cksol-int-tests --test tests
 ```
 
-The integration tests in `integration_tests/tests/solana_test_validator.rs` additionally require a running Solana test validator at `http://localhost:8899`. Run them separately after starting the validator:
+**End-to-end tests** — require a running Solana test validator at `http://localhost:8899`:
 
 ```sh
 solana-test-validator &
 cargo test -p cksol-int-tests --test solana_test_validator
 ```
+
+> Running `cargo test` without arguments will attempt all tests, including the end-to-end suite, and will fail if no Solana validator is available.
 
 ## Related Projects
 
