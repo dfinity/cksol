@@ -468,9 +468,9 @@ fn submit_consolidation_transaction_with_signature(
     i: usize,
     slot: Slot,
 ) -> solana_signature::Signature {
-    let sig = signature(i);
+    let signature = signature(i);
     events::accept_deposit(deposit_id(i), 1_000_000);
     events::mint_deposit(deposit_id(i), i as u64);
-    events::submit_consolidation(sig, MINTER_ACCOUNT, slot, vec![i as u64]);
-    sig
+    events::submit_consolidation(signature, MINTER_ACCOUNT, slot, vec![i as u64]);
+    signature
 }
