@@ -147,6 +147,12 @@ impl MockBuilder {
         self.get_transaction(get_deposit_transaction_response())
     }
 
+    /// Mocks for `getSlot` → `getBlock`.
+    pub fn get_slot_and_block(self, slot: u64, blockhash: &str) -> Self {
+        self.expect(get_slot_request(), get_slot_response(slot))
+            .expect(get_block_request(slot), get_block_response(blockhash))
+    }
+
     /// Mocks for `getSlot` → `getBlock` → `sendTransaction`.
     pub fn submit_transaction(self, slot: u64, blockhash: &str, tx_signature: &str) -> Self {
         self.expect(get_slot_request(), get_slot_response(slot))
@@ -279,6 +285,9 @@ fn get_slot_response(slot: u64) -> JsonRpcResponse {
 }
 
 fn get_block_request(slot: u64) -> JsonRpcRequestMatcher {
+    // The SOL RPC canister rounds the slot down to the nearest multiple of 20
+    // before making getBlock requests, so we match that behavior here.
+    let slot = slot / 20 * 20;
     JsonRpcRequestMatcher::with_method("getBlock").with_params(json!([
         slot,
         {
