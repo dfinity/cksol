@@ -57,6 +57,8 @@ pub async fn finalize_transactions<R: CanisterRuntime>(runtime: R) {
         return;
     }
 
+    let more_to_process =
+        all_transactions.len() > MAX_CONCURRENT_RPC_CALLS * MAX_SIGNATURES_PER_STATUS_CHECK;
     let reschedule = scopeguard::guard(runtime.clone(), |runtime| {
         runtime.set_timer(Duration::ZERO, finalize_transactions);
     });
@@ -118,7 +120,8 @@ pub async fn finalize_transactions<R: CanisterRuntime>(runtime: R) {
         }
     }
 
-    if all_transactions.len() <= MAX_CONCURRENT_RPC_CALLS * MAX_SIGNATURES_PER_STATUS_CHECK {
+    if !more_to_process {
+        // All work fits in this round
         scopeguard::ScopeGuard::into_inner(reschedule);
     }
 }
@@ -142,14 +145,15 @@ pub async fn resubmit_transactions<R: CanisterRuntime>(runtime: R) {
         return;
     }
 
+    let more_to_process = to_resubmit.len() > MAX_CONCURRENT_RPC_CALLS;
     let reschedule = scopeguard::guard(runtime.clone(), |runtime| {
         runtime.set_timer(Duration::ZERO, resubmit_transactions);
     });
-    let fits_in_one_round = to_resubmit.len() <= MAX_CONCURRENT_RPC_CALLS;
 
     resubmit_expired_transactions(&runtime, to_resubmit).await;
 
-    if fits_in_one_round {
+    if !more_to_process {
+        // All work fits in this round
         scopeguard::ScopeGuard::into_inner(reschedule);
     }
 }

@@ -12,12 +12,11 @@ use itertools::Itertools;
 use sol_rpc_types::Slot;
 use solana_hash::Hash;
 
-use crate::ledger::BurnError;
 use crate::{
     consolidate::consolidate_deposits,
     constants::MAX_CONCURRENT_RPC_CALLS,
     guard::{TimerGuard, withdrawal_guard},
-    ledger::burn,
+    ledger::{BurnError, burn},
     runtime::CanisterRuntime,
     sol_transfer::{MAX_WITHDRAWALS_PER_TX, create_signed_batch_withdrawal_transaction},
     state::{
@@ -103,10 +102,6 @@ pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: R) {
         }
     };
 
-    let reschedule = scopeguard::guard(runtime.clone(), |runtime| {
-        runtime.set_timer(Duration::ZERO, process_pending_withdrawals);
-    });
-
     let (affordable_requests, num_pending_withdrawals) = read_state(|state| {
         let mut available_balance = state.balance();
         let pending = state.pending_withdrawal_requests();
@@ -135,6 +130,12 @@ pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: R) {
         runtime.set_timer(Duration::ZERO, consolidate_deposits);
     }
 
+    let more_to_process =
+        affordable_requests.len() > MAX_CONCURRENT_RPC_CALLS * MAX_WITHDRAWALS_PER_TX;
+    let reschedule = scopeguard::guard(runtime.clone(), |runtime| {
+        runtime.set_timer(Duration::ZERO, process_pending_withdrawals);
+    });
+
     let batches: Vec<Vec<_>> = affordable_requests
         .into_iter()
         .chunks(MAX_WITHDRAWALS_PER_TX)
@@ -144,7 +145,8 @@ pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: R) {
         .collect();
 
     if batches.is_empty() {
-        scopeguard::ScopeGuard::into_inner(reschedule); // nothing to do, defuse reschedule
+        // Nothing to process
+        scopeguard::ScopeGuard::into_inner(reschedule);
         return;
     }
 
@@ -161,8 +163,9 @@ pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: R) {
     }))
     .await;
 
-    if read_state(|s| s.pending_withdrawal_requests().is_empty()) {
-        scopeguard::ScopeGuard::into_inner(reschedule); // nothing left, defuse reschedule
+    if !more_to_process {
+        // All work fits in this round
+        scopeguard::ScopeGuard::into_inner(reschedule);
     }
 }
 

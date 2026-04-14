@@ -36,21 +36,24 @@ pub async fn consolidate_deposits<R: CanisterRuntime>(runtime: R) {
         Err(_) => return,
     };
 
+    let all_deposits = read_state(|s| group_deposits_by_account(s.deposits_to_consolidate()));
+    let more_to_process =
+        all_deposits.len() > MAX_CONCURRENT_RPC_CALLS * MAX_TRANSFERS_PER_CONSOLIDATION;
     let reschedule = scopeguard::guard(runtime.clone(), |runtime| {
         runtime.set_timer(Duration::ZERO, consolidate_deposits);
     });
 
-    let batches: Vec<Vec<_>> =
-        read_state(|s| group_deposits_by_account(s.deposits_to_consolidate()))
-            .into_iter()
-            .chunks(MAX_TRANSFERS_PER_CONSOLIDATION)
-            .into_iter()
-            .take(MAX_CONCURRENT_RPC_CALLS)
-            .map(Iterator::collect)
-            .collect();
+    let batches: Vec<Vec<_>> = all_deposits
+        .into_iter()
+        .chunks(MAX_TRANSFERS_PER_CONSOLIDATION)
+        .into_iter()
+        .take(MAX_CONCURRENT_RPC_CALLS)
+        .map(Iterator::collect)
+        .collect();
 
     if batches.is_empty() {
-        scopeguard::ScopeGuard::into_inner(reschedule); // nothing to do, defuse reschedule
+        // Nothing to process
+        scopeguard::ScopeGuard::into_inner(reschedule);
         return;
     }
 
@@ -70,8 +73,9 @@ pub async fn consolidate_deposits<R: CanisterRuntime>(runtime: R) {
     }))
     .await;
 
-    if read_state(|s| s.deposits_to_consolidate().is_empty()) {
-        scopeguard::ScopeGuard::into_inner(reschedule); // nothing left, defuse reschedule
+    if !more_to_process {
+        // All work fits in this round
+        scopeguard::ScopeGuard::into_inner(reschedule);
     }
 }
 

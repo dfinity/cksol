@@ -4,11 +4,10 @@ use super::{
 };
 use crate::{
     constants::MAX_CONCURRENT_RPC_CALLS,
-    state::event::DepositId,
     state::{TaskType, event::EventType, mutate_state, read_state, reset_state},
     storage::reset_events,
     test_fixtures::{
-        EventsAssert, MINTER_ACCOUNT, account, confirmed_block, events, init_schnorr_master_key,
+        EventsAssert, MINTER_ACCOUNT, confirmed_block, deposit_id, events, init_schnorr_master_key,
         init_state, runtime::TestCanisterRuntime, signature,
     },
 };
@@ -469,13 +468,9 @@ fn submit_consolidation_transaction_with_signature(
     i: usize,
     slot: Slot,
 ) -> solana_signature::Signature {
-    let sig = signature(i);
-    let dep_id = DepositId {
-        signature: sig,
-        account: account(0),
-    };
+    let dep_id = deposit_id(i);
     events::accept_deposit(dep_id, 1_000_000);
     events::mint_deposit(dep_id, i as u64);
-    events::submit_consolidation(sig, MINTER_ACCOUNT, slot, vec![i as u64]);
-    sig
+    events::submit_consolidation(dep_id.signature, MINTER_ACCOUNT, slot, vec![i as u64]);
+    dep_id.signature
 }
