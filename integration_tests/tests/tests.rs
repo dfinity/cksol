@@ -1113,7 +1113,7 @@ mod metrics_tests {
         let setup = setup
             .check_metrics()
             .await
-            .assert_contains_metric_matching(r"minter_post_upgrade_instructions_consumed 0 \d+")
+            .assert_contains_metric_matching(r"post_upgrade_instructions_consumed 0 \d+")
             .into();
 
         // Perform an upgrade
@@ -1127,9 +1127,7 @@ mod metrics_tests {
         setup
             .check_metrics()
             .await
-            .assert_contains_metric_matching(
-                r"minter_post_upgrade_instructions_consumed [1-9]\d* \d+",
-            )
+            .assert_contains_metric_matching(r"post_upgrade_instructions_consumed [1-9]\d* \d+")
             .into()
             .drop()
             .await;
