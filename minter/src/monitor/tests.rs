@@ -101,7 +101,7 @@ mod finalization {
         assert_eq!(runtime.set_timer_call_count(), 1);
 
         // Round 2: finalizes the remaining 1 transaction → no reschedule
-        let runtime2 = TestCanisterRuntime::new()
+        let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
             .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
             .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())))
@@ -109,10 +109,10 @@ mod finalization {
                 finalized_status(),
             )])));
 
-        finalize_transactions(runtime2.clone()).await;
+        finalize_transactions(runtime.clone()).await;
 
         assert!(read_state(|s| s.submitted_transactions().is_empty()));
-        assert_eq!(runtime2.set_timer_call_count(), 0);
+        assert_eq!(runtime.set_timer_call_count(), 0);
     }
 
     #[tokio::test]
@@ -434,22 +434,22 @@ mod resubmission {
         assert_eq!(runtime.set_timer_call_count(), 1);
 
         // Round 2: resubmits remaining 2 transactions → no reschedule
-        let mut runtime2 = TestCanisterRuntime::new()
+        let mut runtime = TestCanisterRuntime::new()
             .with_increasing_time()
             .add_stub_response(SlotResult::Consistent(Ok(RESUBMISSION_SLOT)))
             .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())));
         for i in 0..(num_transactions - MAX_CONCURRENT_RPC_CALLS) {
-            runtime2 = runtime2
+            runtime = runtime
                 .add_stub_response(SendTransactionResult::Consistent(Ok(
                     signature(0xB0 + i).into()
                 )))
                 .add_signature(signature(0xB0 + i).into());
         }
 
-        resubmit_transactions(runtime2.clone()).await;
+        resubmit_transactions(runtime.clone()).await;
 
         assert!(read_state(|s| s.transactions_to_resubmit().is_empty()));
-        assert_eq!(runtime2.set_timer_call_count(), 0);
+        assert_eq!(runtime.set_timer_call_count(), 0);
     }
 }
 

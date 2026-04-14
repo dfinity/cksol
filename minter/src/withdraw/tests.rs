@@ -502,17 +502,17 @@ mod process_pending_withdrawals_tests {
 
         // Round 2: processes the remaining 1 request → no reschedule
         let last_sig = signature(num_requests);
-        let runtime2 = TestCanisterRuntime::new()
+        let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
             .add_stub_response(GetSlotResult::Consistent(Ok(slot)))
             .add_stub_response(GetBlockResult::Consistent(Ok(confirmed_block())))
             .add_signature(last_sig.into())
             .add_stub_response(SendTransactionResult::Consistent(Ok(last_sig.into())));
 
-        process_pending_withdrawals(runtime2.clone()).await;
+        process_pending_withdrawals(runtime.clone()).await;
 
         assert!(read_state(|s| s.pending_withdrawal_requests().is_empty()));
-        assert_eq!(runtime2.set_timer_call_count(), 0);
+        assert_eq!(runtime.set_timer_call_count(), 0);
     }
 }
 

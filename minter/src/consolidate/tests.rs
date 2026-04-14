@@ -288,17 +288,17 @@ async fn should_reschedule_until_all_deposits_consolidated() {
 
     // Round 2: processes the remaining 1 deposit → no reschedule
     let last_sig = signature(num_deposits);
-    let runtime2 = TestCanisterRuntime::new()
+    let runtime = TestCanisterRuntime::new()
         .with_increasing_time()
         .add_stub_response(SlotResult::Consistent(Ok(slot)))
         .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())))
         .add_stub_response(SendTransactionResult::Consistent(Ok(last_sig.into())))
         .add_signature(last_sig.into());
 
-    consolidate_deposits(runtime2.clone()).await;
+    consolidate_deposits(runtime.clone()).await;
 
     assert!(read_state(|s| s.deposits_to_consolidate().is_empty()));
-    assert_eq!(runtime2.set_timer_call_count(), 0);
+    assert_eq!(runtime.set_timer_call_count(), 0);
 }
 
 fn setup() {
