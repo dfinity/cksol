@@ -251,16 +251,7 @@ mod resubmission {
     async fn should_return_early_if_task_already_active() {
         setup();
         let sig = submit_consolidation_transaction(EXPIRED_SLOT);
-
-        // expire the transaction so transactions_to_resubmit is non-empty
-        let finalize_runtime = TestCanisterRuntime::new()
-            .with_increasing_time()
-            .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
-            .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())))
-            .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![None])));
-        finalize_transactions(finalize_runtime).await;
-
-        let _ = sig;
+        events::expire_transaction(sig);
 
         mutate_state(|s| {
             s.active_tasks_mut().insert(TaskType::ResubmitTransactions);
