@@ -30,7 +30,20 @@ thread_local! {
               )
         );
 
-    static POST_UPGRADE_INSTRUCTIONS_CONSUMED: RefCell<u64> = const { RefCell::new(0) };
+    static UNSTABLE_METRICS: RefCell<Metrics> = const { RefCell::new(Metrics::new()) };
+}
+
+#[derive(Default)]
+pub struct Metrics {
+    pub post_upgrade_instructions_consumed: u64,
+}
+
+impl Metrics {
+    const fn new() -> Self {
+        Self {
+            post_upgrade_instructions_consumed: 0,
+        }
+    }
 }
 
 /// Appends the event to the event log.
@@ -50,12 +63,18 @@ pub fn total_event_count() -> u64 {
     EVENTS.with(|events| events.borrow().len())
 }
 
-pub fn set_post_upgrade_instructions_consumed(instructions: u64) {
-    POST_UPGRADE_INSTRUCTIONS_CONSUMED.with(|n| *n.borrow_mut() = instructions);
+pub fn with_unstable_metrics<F, R>(f: F) -> R
+where
+    F: FnOnce(&Metrics) -> R,
+{
+    UNSTABLE_METRICS.with(|m| f(&m.borrow()))
 }
 
-pub fn post_upgrade_instructions_consumed() -> u64 {
-    POST_UPGRADE_INSTRUCTIONS_CONSUMED.with(|n| *n.borrow())
+pub fn with_unstable_metrics_mut<F, R>(f: F) -> R
+where
+    F: FnOnce(&mut Metrics) -> R,
+{
+    UNSTABLE_METRICS.with(|m| f(&mut m.borrow_mut()))
 }
 
 pub fn with_event_iter<F, R>(f: F) -> R

@@ -6,9 +6,7 @@ use crate::{
         event::EventType,
         init_once_state, mutate_state,
     },
-    storage::{
-        record_event, set_post_upgrade_instructions_consumed, total_event_count, with_event_iter,
-    },
+    storage::{record_event, total_event_count, with_event_iter, with_unstable_metrics_mut},
 };
 use canlog::log;
 use cksol_types_internal::{InitArgs, UpgradeArgs, log::Priority};
@@ -44,5 +42,5 @@ pub fn post_upgrade<R: CanisterRuntime>(upgrade_args: Option<UpgradeArgs>, runti
         "[upgrade]: replaying {event_count} events consumed {instructions_consumed} instructions ({} instructions per event on average)",
         instructions_consumed / event_count
     );
-    set_post_upgrade_instructions_consumed(instructions_consumed);
+    with_unstable_metrics_mut(|m| m.post_upgrade_instructions_consumed = instructions_consumed);
 }
