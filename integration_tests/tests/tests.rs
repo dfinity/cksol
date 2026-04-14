@@ -667,16 +667,15 @@ mod withdrawal_tests {
             other => panic!("Expected TxSent, got: {other:?}"),
         };
 
-        // Step 1: Advance time to trigger finalize_transactions, which fetches
-        // the current slot, checks statuses (not found), and marks the expired
-        // transaction for resubmission.
-        let resubmission_slot = INITIAL_SLOT + MAX_BLOCKHASH_AGE + 50;
+        // Advance time to trigger finalize_transactions, which fetches the current slot,
+        // checks statuses (not found), and marks the expired transaction for resubmission.
+        let resubmission_slot = INITIAL_SLOT + MAX_BLOCKHASH_AGE;
         setup.advance_time(FINALIZE_TRANSACTIONS_DELAY).await;
         setup
             .execute_http_mocks(mark_expired_withdrawal_http_mocks(resubmission_slot))
             .await;
 
-        // Step 2: Advance time to trigger resubmit_transactions. finalize_transactions also
+        // Advance time to trigger resubmit_transactions. finalize_transactions also
         // fires but has no pending transactions, so it makes no HTTP outcalls.
         setup.advance_time(RESUBMIT_TRANSACTIONS_DELAY).await;
         setup
