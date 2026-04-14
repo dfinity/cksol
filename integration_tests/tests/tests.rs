@@ -1100,6 +1100,7 @@ mod metrics_tests {
             .assert_contains_metric_matching(r#"cycle_balance\{canister="cksol-minter"\} \d+ \d+"#)
             // Only the canister init event should have been recorded
             .assert_contains_metric_matching(r#"total_event_count 1 \d+"#)
+            .assert_contains_metric_matching(r#"minter_balance 0 \d+"#)
             .into()
             .drop()
             .await;
