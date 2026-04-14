@@ -30,7 +30,7 @@ The ckSOL minter canister is the core component of the system. It manages the co
 
 The ckSOL token itself is implemented as an [ICRC-1](https://github.com/dfinity/ICRC-1) ledger canister.
 
-The minter controls one or more Solana addresses derived from a [threshold Ed25519 (tEdDSA)](https://internetcomputer.org/docs/references/ic-interface-spec#ic-sign-with-schnorr) public key and a per-account derivation path. No private key ever exists in plaintext — Solana transactions are signed via the IC management canister's threshold Schnorr API (`sign_with_schnorr`).
+The minter controls one or more Solana addresses derived from a [threshold Schnorr over Ed25519](https://internetcomputer.org/docs/references/ic-interface-spec#ic-sign-with-schnorr) public key and a per-account derivation path. No private key ever exists in plaintext — Solana transactions are signed via the IC management canister's `sign_with_schnorr` API (`SchnorrAlgorithm::Ed25519`).
 
 ### Deposit: SOL → ckSOL
 
@@ -89,7 +89,7 @@ The minter controls one or more Solana addresses derived from a [threshold Ed255
          └──────────────┘
 ```
 
-**ckSOL Minter** — The main canister in this repository. It manages the deposit and withdrawal lifecycle, holds custody of SOL via chain-key addresses, signs Solana transactions using threshold Ed25519, and interacts with the ckSOL ledger.
+**ckSOL Minter** — The main canister in this repository. It manages the deposit and withdrawal lifecycle, holds custody of SOL via chain-key addresses, signs Solana transactions using threshold Schnorr over Ed25519, and interacts with the ckSOL ledger.
 
 **ckSOL Ledger** — A standard [ICRC-1/ICRC-2](https://github.com/dfinity/ICRC-1) ledger canister. It tracks ckSOL balances and processes mints and burns as instructed by the minter.
 
