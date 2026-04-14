@@ -87,6 +87,31 @@ pub mod id_vec {
     }
 }
 
+pub mod address {
+    use minicbor::{
+        decode::{Decoder, Error},
+        encode::{Encoder, Write},
+    };
+    use solana_address::Address;
+
+    pub fn decode<Ctx>(d: &mut Decoder<'_>, _ctx: &mut Ctx) -> Result<Address, Error> {
+        let bytes: &[u8] = d.bytes()?;
+        let arr: [u8; 32] = bytes
+            .try_into()
+            .map_err(|_| Error::message("expected 32-byte address"))?;
+        Ok(Address::from(arr))
+    }
+
+    pub fn encode<Ctx, W: Write>(
+        v: &Address,
+        e: &mut Encoder<W>,
+        _ctx: &mut Ctx,
+    ) -> Result<(), minicbor::encode::Error<W::Error>> {
+        e.bytes(v.as_ref())?;
+        Ok(())
+    }
+}
+
 pub mod message {
     use minicbor::{
         decode::{Decoder, Error},

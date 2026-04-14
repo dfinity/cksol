@@ -192,6 +192,13 @@ fn get_events(
             EventType::ExpiredTransaction { signature } => event::EventType::ExpiredTransaction {
                 signature: signature.into(),
             },
+            EventType::CheckedDepositAddress {
+                address,
+                highest_slot,
+            } => event::EventType::CheckedDepositAddress {
+                address: address.to_string(),
+                highest_slot,
+            },
         }
     }
 

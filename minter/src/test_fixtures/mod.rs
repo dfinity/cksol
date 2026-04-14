@@ -569,6 +569,12 @@ pub mod arb {
             arb_signature().prop_map(|signature| EventType::SucceededTransaction { signature }),
             arb_signature().prop_map(|signature| EventType::FailedTransaction { signature }),
             arb_signature().prop_map(|signature| EventType::ExpiredTransaction { signature }),
+            (arb_address(), any::<Slot>()).prop_map(|(address, highest_slot)| {
+                EventType::CheckedDepositAddress {
+                    address,
+                    highest_slot,
+                }
+            }),
         ]
     }
 

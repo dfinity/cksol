@@ -14,6 +14,7 @@ use ic_ed25519::PublicKey;
 use icrc_ledger_types::icrc1::account::Account;
 use sol_rpc_client::SolRpcClient;
 use sol_rpc_types::{ConsensusStrategy, Lamport, RpcSources, Slot, SolanaCluster};
+use solana_address::Address;
 use solana_signature::Signature;
 use std::{
     cell::RefCell,
@@ -109,6 +110,10 @@ pub struct State {
     consolidation_transactions: InsertionOrderedMap<Signature, ConsolidationTransaction>,
     active_tasks: BTreeSet<TaskType>,
     balance: Lamport,
+    monitored_addresses: BTreeMap<Address, MonitoredAddress>,
+    /// Transient set of addresses for which a deposit monitor timer is currently running.
+    /// Not persisted across upgrades.
+    active_deposit_monitors: BTreeSet<Address>,
 }
 
 impl State {
@@ -303,6 +308,27 @@ impl State {
 
     pub fn active_tasks_mut(&mut self) -> &mut BTreeSet<TaskType> {
         &mut self.active_tasks
+    }
+
+    pub fn monitored_addresses(&self) -> &BTreeMap<Address, MonitoredAddress> {
+        &self.monitored_addresses
+    }
+
+    pub fn active_deposit_monitors_mut(&mut self) -> &mut BTreeSet<Address> {
+        &mut self.active_deposit_monitors
+    }
+
+    fn process_checked_deposit_address(&mut self, address: &Address, highest_slot: Slot) {
+        let entry = self
+            .monitored_addresses
+            .entry(*address)
+            .or_insert(MonitoredAddress {
+                min_context_slot: 0,
+                timer_call_count: 0,
+                free_quota_exhausted: false,
+            });
+        entry.min_context_slot = highest_slot;
+        entry.timer_call_count += 1;
     }
 
     fn transaction_fee(&self, message: &VersionedMessage) -> Lamport {
@@ -756,6 +782,8 @@ impl TryFrom<InitArgs> for State {
             consolidation_transactions: InsertionOrderedMap::new(),
             active_tasks: BTreeSet::new(),
             balance: 0,
+            monitored_addresses: BTreeMap::new(),
+            active_deposit_monitors: BTreeSet::new(),
         };
         state.validate()?;
         Ok(state)
@@ -825,4 +853,18 @@ pub struct SolanaTransaction {
     pub purpose: TransactionPurpose,
     /// Total transfer amount in lamports (excluding fees).
     pub amount: Lamport,
+}
+
+/// Per-address state tracked for the automated deposit monitor.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MonitoredAddress {
+    /// The minimum context slot to pass to the next `getSignaturesForAddress` call,
+    /// set to the highest slot observed in the previous call.
+    pub min_context_slot: Slot,
+    /// Number of `getSignaturesForAddress` calls made for this address without finding a deposit.
+    /// Reset to zero when a deposit is minted.
+    pub timer_call_count: u32,
+    /// True when the free quota has been exhausted (too many calls without finding a deposit).
+    /// Must be cleared by a manual `update_balance` call.
+    pub free_quota_exhausted: bool,
 }

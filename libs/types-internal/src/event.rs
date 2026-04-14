@@ -112,6 +112,13 @@ pub enum EventType {
         /// The signature of the expired Solana transaction.
         signature: Signature,
     },
+    /// The minter called `getSignaturesForAddress` for a monitored deposit address.
+    CheckedDepositAddress {
+        /// The Solana address that was checked (base58-encoded).
+        address: String,
+        /// The highest slot observed in this check (0 if no transactions were found).
+        highest_slot: Slot,
+    },
 }
 
 /// The purpose of a submitted Solana transaction.

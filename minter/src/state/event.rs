@@ -5,6 +5,7 @@ use ic_stable_structures::{Storable, storable::Bound};
 use icrc_ledger_types::icrc1::account::Account;
 use minicbor::{Decode, Encode};
 use sol_rpc_types::{Lamport, Slot};
+use solana_address::Address;
 use solana_message::Message;
 use solana_signature::Signature;
 use std::borrow::Cow;
@@ -128,6 +129,18 @@ pub enum EventType {
         /// The signature of the expired Solana transaction.
         #[cbor(n(0), with = "cbor::signature")]
         signature: Signature,
+    },
+    /// The minter called `getSignaturesForAddress` for a monitored deposit address.
+    /// Records the highest slot observed, which will be used as `minContextSlot`
+    /// in the next call to avoid re-processing already-seen transactions.
+    #[n(11)]
+    CheckedDepositAddress {
+        /// The Solana address that was checked.
+        #[cbor(n(0), with = "cbor::address")]
+        address: Address,
+        /// The highest slot observed in this check (0 if no transactions were found).
+        #[n(1)]
+        highest_slot: Slot,
     },
 }
 

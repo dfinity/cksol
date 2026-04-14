@@ -72,6 +72,8 @@ mod state_from_init_args {
                 consolidation_transactions: InsertionOrderedMap::new(),
                 active_tasks: BTreeSet::new(),
                 balance: 0,
+                monitored_addresses: BTreeMap::new(),
+                active_deposit_monitors: BTreeSet::new(),
             }
         );
     }

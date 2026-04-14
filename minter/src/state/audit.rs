@@ -66,6 +66,12 @@ fn apply_state_transition(state: &mut State, payload: &EventType, timestamp: u64
         EventType::ExpiredTransaction { signature } => {
             state.process_transaction_expired(signature);
         }
+        EventType::CheckedDepositAddress {
+            address,
+            highest_slot,
+        } => {
+            state.process_checked_deposit_address(address, *highest_slot);
+        }
     }
 }
 

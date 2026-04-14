@@ -354,6 +354,14 @@ type EventType = variant {
         // The signature of the expired Solana transaction.
         signature: Signature;
     };
+    // The minter called getSignaturesForAddress for a monitored deposit address.
+    // Records the highest slot observed, used as minContextSlot in the next call.
+    CheckedDepositAddress : record {
+        // The Solana address that was checked (base58-encoded).
+        address: text;
+        // The highest slot observed in this check (0 if no transactions were found).
+        highest_slot: nat64;
+    };
 };
 
 // A single transaction can deposit to multiple accounts, so the signature alone
