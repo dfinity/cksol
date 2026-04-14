@@ -57,10 +57,9 @@ pub async fn finalize_transactions<R: CanisterRuntime>(runtime: R) {
         return;
     }
 
-    // Reschedule unless all submitted transactions were checked in this invocation.
-    let reschedule = scopeguard::guard(runtime.clone(), |runtime| {
-        runtime.set_timer(Duration::ZERO, finalize_transactions);
-    });
+    let num_remaining = all_transactions
+        .len()
+        .saturating_sub(MAX_CONCURRENT_RPC_CALLS * MAX_SIGNATURES_PER_STATUS_CHECK);
 
     // Fetch the current slot before checking statuses: if a transaction finalizes
     // after we snapshot the slot, the status check will see it as finalized rather
@@ -119,8 +118,8 @@ pub async fn finalize_transactions<R: CanisterRuntime>(runtime: R) {
         }
     }
 
-    if statuses.len() == all_transactions.len() {
-        scopeguard::ScopeGuard::into_inner(reschedule);
+    if num_remaining > 0 {
+        runtime.set_timer(Duration::ZERO, finalize_transactions);
     }
 }
 
@@ -153,6 +152,8 @@ pub async fn resubmit_transactions<R: CanisterRuntime>(runtime: R) {
 }
 
 /// Result of checking transaction statuses.
+// Transactions that are in-flight (Processed/Confirmed) or whose status
+// check failed are implicitly excluded from the below sets.
 struct TransactionStatuses {
     /// Transactions confirmed as finalized on-chain without errors.
     succeeded: BTreeSet<Signature>,
@@ -160,18 +161,6 @@ struct TransactionStatuses {
     errored: BTreeMap<Signature, String>,
     /// Transactions with no on-chain status (safe to resubmit if expired).
     not_found: BTreeSet<Signature>,
-    /// Number of signatures whose status was received (from successful batch requests).
-    /// Used to determine whether all submitted transactions were checked in this invocation.
-    checked_count: usize,
-    // Transactions that are in-flight (Processed/Confirmed) or whose status
-    // check failed are implicitly excluded from the above sets.
-}
-
-impl TransactionStatuses {
-    /// Total number of signatures whose status was received in this invocation.
-    fn len(&self) -> usize {
-        self.checked_count
-    }
 }
 
 async fn check_transaction_statuses<R: CanisterRuntime>(
@@ -190,7 +179,6 @@ async fn check_transaction_statuses<R: CanisterRuntime>(
         succeeded: BTreeSet::new(),
         errored: BTreeMap::new(),
         not_found: BTreeSet::new(),
-        checked_count: 0,
     };
 
     let batch_results: Vec<_> = futures::future::join_all(batches.into_iter().map(async |batch| {
@@ -205,7 +193,6 @@ async fn check_transaction_statuses<R: CanisterRuntime>(
     .await;
 
     for (sigs, statuses) in batch_results.into_iter().flatten() {
-        result.checked_count += sigs.len();
         for (signature, status) in sigs.iter().zip(statuses) {
             match status {
                 Some(s)
