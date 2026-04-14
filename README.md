@@ -91,7 +91,7 @@ The minter controls one or more Solana addresses derived from a [threshold Ed255
 
 **ckSOL Minter** — The main canister in this repository. It manages the deposit and withdrawal lifecycle, holds custody of SOL via chain-key addresses, signs Solana transactions using threshold Ed25519, and interacts with the ckSOL ledger.
 
-**ckSOL Ledger** — A standard ICRC-1/ICRC-2 ledger canister. It tracks ckSOL balances and processes mints and burns as instructed by the minter.
+**ckSOL Ledger** — A standard [ICRC-1/ICRC-2](https://github.com/dfinity/ICRC-1) ledger canister. It tracks ckSOL balances and processes mints and burns as instructed by the minter.
 
 **SOL RPC Canister** — A shared infrastructure canister on the Internet Computer that relays Solana JSON-RPC calls to multiple providers via HTTPS outcalls and aggregates their responses. See the [SOL RPC canister repository](https://github.com/dfinity/sol-rpc-canister) for details.
 
