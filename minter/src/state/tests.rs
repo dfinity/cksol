@@ -427,7 +427,9 @@ fn should_track_balance_through_deposits_withdrawals_and_failures() {
     }
 
     fn submit_transaction(sig: Signature, num_signers: u8, purpose: TransactionPurpose) {
-        let signers: Vec<_> = (0..num_signers).map(|i| account(100 + i)).collect();
+        let signers: Vec<_> = (0..num_signers)
+            .map(|i| account(100 + i as usize))
+            .collect();
         mutate_state(|state| {
             process_event(
                 state,

@@ -36,33 +36,46 @@ pub async fn consolidate_deposits<R: CanisterRuntime>(runtime: R) {
         Err(_) => return,
     };
 
-    let consolidation_rounds: Vec<Vec<_>> =
-        read_state(|s| group_deposits_by_account(s.deposits_to_consolidate()))
-            .into_iter()
-            .chunks(MAX_TRANSFERS_PER_CONSOLIDATION)
-            .into_iter()
-            .map(Iterator::collect)
-            .collect();
+    let all_deposits = read_state(|s| group_deposits_by_account(s.deposits_to_consolidate()));
+    let more_to_process =
+        all_deposits.len() > MAX_CONCURRENT_RPC_CALLS * MAX_TRANSFERS_PER_CONSOLIDATION;
+    let reschedule = scopeguard::guard(runtime.clone(), |runtime| {
+        runtime.set_timer(Duration::ZERO, consolidate_deposits);
+    });
 
-    for round in &consolidation_rounds
+    let batches: Vec<Vec<_>> = all_deposits
         .into_iter()
-        .chunks(MAX_CONCURRENT_RPC_CALLS)
-    {
-        let (slot, recent_blockhash) = match get_recent_slot_and_blockhash(&runtime).await {
-            Ok((slot, blockhash)) => (slot, blockhash),
-            Err(e) => {
-                log!(Priority::Info, "Failed to fetch recent blockhash: {e}");
-                return;
-            }
-        };
+        .chunks(MAX_TRANSFERS_PER_CONSOLIDATION)
+        .into_iter()
+        .take(MAX_CONCURRENT_RPC_CALLS)
+        .map(Iterator::collect)
+        .collect();
 
-        futures::future::join_all(round.map(async |funds| {
-            match submit_consolidation_transaction(&runtime, funds, slot, recent_blockhash).await {
-                Ok(sig) => log!(Priority::Info, "Submitted consolidation transaction {sig}"),
-                Err(e) => log!(Priority::Info, "Deposit consolidation failed: {e}"),
-            }
-        }))
-        .await;
+    if batches.is_empty() {
+        // Nothing to process
+        scopeguard::ScopeGuard::into_inner(reschedule);
+        return;
+    }
+
+    let (slot, recent_blockhash) = match get_recent_slot_and_blockhash(&runtime).await {
+        Ok(result) => result,
+        Err(e) => {
+            log!(Priority::Info, "Failed to fetch recent blockhash: {e}");
+            return;
+        }
+    };
+
+    futures::future::join_all(batches.into_iter().map(async |funds| {
+        match submit_consolidation_transaction(&runtime, funds, slot, recent_blockhash).await {
+            Ok(sig) => log!(Priority::Info, "Submitted consolidation transaction {sig}"),
+            Err(e) => log!(Priority::Info, "Deposit consolidation failed: {e}"),
+        }
+    }))
+    .await;
+
+    if !more_to_process {
+        // All work fits in this round
+        scopeguard::ScopeGuard::into_inner(reschedule);
     }
 }
 

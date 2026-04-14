@@ -207,8 +207,8 @@ fn should_paginate_minted_deposits_across_multiple_pages() {
     let remainder = total_deposits - DEFAULT_PAGE_SIZE * 2;
 
     for i in 0..total_deposits {
-        accept_deposit(deposit_id(i as u8), 500_000_000);
-        mint_deposit(deposit_id(i as u8), i as u64);
+        accept_deposit(deposit_id(i), 500_000_000);
+        mint_deposit(deposit_id(i), i as u64);
     }
 
     let page1 = dashboard();
