@@ -29,6 +29,8 @@ thread_local! {
                   )
               )
         );
+
+    static POST_UPGRADE_INSTRUCTIONS_CONSUMED: RefCell<u64> = const { RefCell::new(0) };
 }
 
 /// Appends the event to the event log.
@@ -46,6 +48,14 @@ pub fn record_event<R: CanisterRuntime>(payload: EventType, runtime: &R) {
 /// Returns the total number of events in the audit log.
 pub fn total_event_count() -> u64 {
     EVENTS.with(|events| events.borrow().len())
+}
+
+pub fn set_post_upgrade_instructions_consumed(instructions: u64) {
+    POST_UPGRADE_INSTRUCTIONS_CONSUMED.with(|n| *n.borrow_mut() = instructions);
+}
+
+pub fn post_upgrade_instructions_consumed() -> u64 {
+    POST_UPGRADE_INSTRUCTIONS_CONSUMED.with(|n| *n.borrow())
 }
 
 pub fn with_event_iter<F, R>(f: F) -> R
