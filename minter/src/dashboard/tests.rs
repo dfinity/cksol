@@ -1,8 +1,8 @@
 use crate::dashboard::{DashboardPaginationParameters, DashboardTemplate, lamports_to_sol};
 use crate::state::read_state;
 use crate::test_fixtures::{
-    DEPOSIT_FEE, MINIMUM_DEPOSIT_AMOUNT, MINIMUM_WITHDRAWAL_AMOUNT, WITHDRAWAL_FEE, account,
-    deposit_id,
+    AUTOMATED_DEPOSIT_FEE, DEPOSIT_FEE, MINIMUM_DEPOSIT_AMOUNT, MINIMUM_WITHDRAWAL_AMOUNT,
+    WITHDRAWAL_FEE, account, deposit_id,
     events::{
         accept_deposit, accept_withdrawal, fail_transaction, mint_deposit, quarantine_deposit,
         submit_consolidation, submit_withdrawal, succeed_transaction,
@@ -52,9 +52,14 @@ fn should_display_metadata() {
             "wrong sol rpc canister ID",
         )
         .has_string_value(
-            "#deposit-fee > td",
+            "#manual-deposit-fee > td",
             &lamports_to_sol(DEPOSIT_FEE),
-            "wrong deposit fee",
+            "wrong manual deposit fee",
+        )
+        .has_string_value(
+            "#automated-deposit-fee > td",
+            &lamports_to_sol(AUTOMATED_DEPOSIT_FEE),
+            "wrong automated deposit fee",
         )
         .has_string_value(
             "#withdrawal-fee > td",

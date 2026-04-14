@@ -3,8 +3,8 @@ use crate::{
     constants::FEE_PER_SIGNATURE as SOLANA_LAMPORTS_PER_SIGNATURE,
     state::{SOLANA_RENT_EXEMPTION_THRESHOLD, audit::process_event, read_state},
     test_fixtures::{
-        DEPOSIT_CONSOLIDATION_FEE, DEPOSIT_FEE, MINIMUM_DEPOSIT_AMOUNT, MINIMUM_WITHDRAWAL_AMOUNT,
-        UPDATE_BALANCE_REQUIRED_CYCLES, WITHDRAWAL_FEE, account,
+        AUTOMATED_DEPOSIT_FEE, DEPOSIT_CONSOLIDATION_FEE, DEPOSIT_FEE, MINIMUM_DEPOSIT_AMOUNT,
+        MINIMUM_WITHDRAWAL_AMOUNT, UPDATE_BALANCE_REQUIRED_CYCLES, WITHDRAWAL_FEE, account,
         arb::arb_event,
         deposit_id,
         events::{
@@ -49,7 +49,8 @@ mod state_from_init_args {
                 ledger_canister_id: ledger_canister_id(),
                 sol_rpc_canister_id: sol_rpc_canister_id(),
                 solana_network: SolanaNetwork::Mainnet,
-                deposit_fee: DEPOSIT_FEE,
+                manual_deposit_fee: DEPOSIT_FEE,
+                automated_deposit_fee: AUTOMATED_DEPOSIT_FEE,
                 deposit_consolidation_fee: DEPOSIT_CONSOLIDATION_FEE,
                 withdrawal_fee: WITHDRAWAL_FEE,
                 minimum_withdrawal_amount: MINIMUM_WITHDRAWAL_AMOUNT,
@@ -152,6 +153,7 @@ mod state_from_init_args {
                 deposit_fee
             }) if minimum_deposit_amount == insufficient_minimum_deposit_amount && deposit_fee == DEPOSIT_FEE
         );
+        // `deposit_fee` in the error refers to `manual_deposit_fee`
     }
 
     #[test]
@@ -190,18 +192,33 @@ mod state_upgrade {
     }
 
     #[test]
-    fn should_update_deposit_fee() {
+    fn should_update_manual_deposit_fee() {
         let mut state = initial_state();
         let new_deposit_fee = DEPOSIT_FEE / 2;
 
         state
             .upgrade(UpgradeArgs {
-                deposit_fee: Some(new_deposit_fee),
+                manual_deposit_fee: Some(new_deposit_fee),
                 ..Default::default()
             })
             .unwrap();
 
-        assert_eq!(state.deposit_fee(), new_deposit_fee);
+        assert_eq!(state.manual_deposit_fee(), new_deposit_fee);
+    }
+
+    #[test]
+    fn should_update_automated_deposit_fee() {
+        let mut state = initial_state();
+        let new_automated_fee = AUTOMATED_DEPOSIT_FEE * 2;
+
+        state
+            .upgrade(UpgradeArgs {
+                automated_deposit_fee: Some(new_automated_fee),
+                ..Default::default()
+            })
+            .unwrap();
+
+        assert_eq!(state.automated_deposit_fee(), new_automated_fee);
     }
 
     #[test]
@@ -251,13 +268,13 @@ mod state_upgrade {
     }
 
     #[test]
-    fn should_fail_when_new_deposit_fee_exceeds_minimum_deposit_amount() {
+    fn should_fail_when_new_manual_deposit_fee_exceeds_minimum_deposit_amount() {
         let mut state = initial_state();
         let new_deposit_fee = MINIMUM_DEPOSIT_AMOUNT + 1;
 
         assert_matches!(
             state.upgrade(UpgradeArgs {
-                deposit_fee: Some(new_deposit_fee),
+                manual_deposit_fee: Some(new_deposit_fee),
                 ..Default::default()
             }),
             Err(InvalidStateError::InvalidMinimumDepositAmount {
@@ -268,7 +285,7 @@ mod state_upgrade {
     }
 
     #[test]
-    fn should_fail_when_new_minimum_deposit_amount_below_deposit_fee() {
+    fn should_fail_when_new_minimum_deposit_amount_below_manual_deposit_fee() {
         let mut state = initial_state();
         let new_minimum_deposit_amount = DEPOSIT_FEE - 1;
 
@@ -285,7 +302,7 @@ mod state_upgrade {
     }
 
     #[test]
-    fn should_succeed_when_minimum_deposit_amount_equals_deposit_fee() {
+    fn should_succeed_when_minimum_deposit_amount_equals_manual_deposit_fee() {
         let mut state = initial_state();
 
         state

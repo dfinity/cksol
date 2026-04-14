@@ -117,7 +117,7 @@ async fn try_accept_deposit<R: CanisterRuntime>(
         });
     }
     let amount_to_mint = deposit_amount
-        .checked_sub(read_state(|state| state.deposit_fee()))
+        .checked_sub(read_state(|state| state.manual_deposit_fee()))
         .expect("BUG: deposit amount is less than deposit fee");
 
     mutate_state(|state| {

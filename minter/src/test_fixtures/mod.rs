@@ -27,6 +27,7 @@ mod stubs;
 
 pub const BLOCK_INDEX: u64 = 98763_u64;
 pub const DEPOSIT_FEE: Lamport = 10_000;
+pub const AUTOMATED_DEPOSIT_FEE: Lamport = 100_000;
 pub const DEPOSIT_CONSOLIDATION_FEE: u128 = 10_000_000_000; // 0.01T cycles
 pub const WITHDRAWAL_FEE: Lamport = 5_000_000; // 0.005 SOL
 pub const MINIMUM_WITHDRAWAL_AMOUNT: Lamport = 10_000_000; // 0.01 SOL
@@ -51,7 +52,8 @@ pub fn valid_init_args() -> InitArgs {
     InitArgs {
         sol_rpc_canister_id: sol_rpc_canister_id(),
         ledger_canister_id: ledger_canister_id(),
-        deposit_fee: DEPOSIT_FEE,
+        manual_deposit_fee: DEPOSIT_FEE,
+        automated_deposit_fee: AUTOMATED_DEPOSIT_FEE,
         master_key_name: Ed25519KeyName::default(),
         minimum_withdrawal_amount: MINIMUM_WITHDRAWAL_AMOUNT,
         minimum_deposit_amount: MINIMUM_DEPOSIT_AMOUNT,
@@ -421,6 +423,7 @@ pub mod arb {
             arb_principal(),
             arb_principal(),
             any::<u64>(),
+            any::<u64>(),
             arb_ed25519_key_name(),
             any::<u64>(),
             any::<u64>(),
@@ -433,7 +436,8 @@ pub mod arb {
                 |(
                     sol_rpc_canister_id,
                     ledger_canister_id,
-                    deposit_fee,
+                    manual_deposit_fee,
+                    automated_deposit_fee,
                     master_key_name,
                     minimum_withdrawal_amount,
                     minimum_deposit_amount,
@@ -445,7 +449,8 @@ pub mod arb {
                     InitArgs {
                         sol_rpc_canister_id,
                         ledger_canister_id,
-                        deposit_fee,
+                        manual_deposit_fee,
+                        automated_deposit_fee,
                         master_key_name,
                         minimum_withdrawal_amount,
                         minimum_deposit_amount,
@@ -467,11 +472,13 @@ pub mod arb {
             prop::option::of(any::<u64>()),
             prop::option::of(any::<u64>()),
             prop::option::of(any::<u64>()),
+            prop::option::of(any::<u64>()),
         )
             .prop_map(
                 |(
                     sol_rpc_canister_id,
-                    deposit_fee,
+                    manual_deposit_fee,
+                    automated_deposit_fee,
                     minimum_withdrawal_amount,
                     minimum_deposit_amount,
                     withdrawal_fee,
@@ -479,7 +486,8 @@ pub mod arb {
                     deposit_consolidation_fee,
                 )| UpgradeArgs {
                     sol_rpc_canister_id,
-                    deposit_fee,
+                    manual_deposit_fee,
+                    automated_deposit_fee,
                     minimum_withdrawal_amount,
                     minimum_deposit_amount,
                     withdrawal_fee,

@@ -131,11 +131,11 @@ mod lifecycle {
 
         let minter_info_before = minter.get_minter_info().await;
 
-        // Setting a deposit fee higher than the minimum deposit amount should fail!
+        // Setting a manual deposit fee higher than the minimum deposit amount should fail!
         let result = minter
             .upgrade(UpgradeArgs {
                 minimum_deposit_amount: Some(5_000_000),
-                deposit_fee: Some(20_000_000),
+                manual_deposit_fee: Some(20_000_000),
                 ..UpgradeArgs::default()
             })
             .await;
@@ -174,7 +174,8 @@ mod lifecycle {
         assert_eq!(
             initial_minter_info,
             MinterInfo {
-                deposit_fee: Setup::DEFAULT_DEPOSIT_FEE,
+                manual_deposit_fee: Setup::DEFAULT_DEPOSIT_FEE,
+                automated_deposit_fee: Setup::DEFAULT_AUTOMATED_DEPOSIT_FEE,
                 deposit_consolidation_fee: Setup::DEFAULT_DEPOSIT_CONSOLIDATION_FEE,
                 minimum_withdrawal_amount: Setup::DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT,
                 minimum_deposit_amount: Setup::DEFAULT_MINIMUM_DEPOSIT_AMOUNT,
@@ -199,7 +200,8 @@ mod lifecycle {
             .minter()
             .upgrade(UpgradeArgs {
                 sol_rpc_canister_id: None,
-                deposit_fee: Some(NEW_DEPOSIT_FEE),
+                manual_deposit_fee: Some(NEW_DEPOSIT_FEE),
+                automated_deposit_fee: None,
                 minimum_withdrawal_amount: Some(NEW_MINIMUM_WITHDRAWAL_AMOUNT),
                 minimum_deposit_amount: Some(NEW_MINIMUM_DEPOSIT_AMOUNT),
                 withdrawal_fee: Some(NEW_WITHDRAWAL_FEE),
@@ -213,7 +215,8 @@ mod lifecycle {
         assert_eq!(
             minter_info,
             MinterInfo {
-                deposit_fee: NEW_DEPOSIT_FEE,
+                manual_deposit_fee: NEW_DEPOSIT_FEE,
+                automated_deposit_fee: Setup::DEFAULT_AUTOMATED_DEPOSIT_FEE,
                 deposit_consolidation_fee: Setup::DEFAULT_DEPOSIT_CONSOLIDATION_FEE,
                 minimum_withdrawal_amount: NEW_MINIMUM_WITHDRAWAL_AMOUNT,
                 minimum_deposit_amount: NEW_MINIMUM_DEPOSIT_AMOUNT,

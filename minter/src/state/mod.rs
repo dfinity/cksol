@@ -86,7 +86,8 @@ pub struct State {
     ledger_canister_id: Principal,
     sol_rpc_canister_id: Principal,
     solana_network: SolanaNetwork,
-    deposit_fee: Lamport,
+    manual_deposit_fee: Lamport,
+    automated_deposit_fee: Lamport,
     withdrawal_fee: Lamport,
     minimum_withdrawal_amount: Lamport,
     minimum_deposit_amount: Lamport,
@@ -141,8 +142,12 @@ impl State {
         self.master_key_name
     }
 
-    pub fn deposit_fee(&self) -> u64 {
-        self.deposit_fee
+    pub fn manual_deposit_fee(&self) -> u64 {
+        self.manual_deposit_fee
+    }
+
+    pub fn automated_deposit_fee(&self) -> u64 {
+        self.automated_deposit_fee
     }
 
     pub fn deposit_consolidation_fee(&self) -> u128 {
@@ -324,10 +329,10 @@ impl State {
                 "ERROR: provided canister IDs are not distinct!".to_string(),
             ));
         }
-        if self.minimum_deposit_amount < self.deposit_fee {
+        if self.minimum_deposit_amount < self.manual_deposit_fee {
             return Err(InvalidStateError::InvalidMinimumDepositAmount {
                 minimum_deposit_amount: self.minimum_deposit_amount,
-                deposit_fee: self.deposit_fee,
+                deposit_fee: self.manual_deposit_fee,
             });
         }
         let minimum_required = self.withdrawal_fee + SOLANA_RENT_EXEMPTION_THRESHOLD;
@@ -345,7 +350,8 @@ impl State {
         &mut self,
         UpgradeArgs {
             sol_rpc_canister_id,
-            deposit_fee,
+            manual_deposit_fee,
+            automated_deposit_fee,
             minimum_withdrawal_amount,
             minimum_deposit_amount,
             withdrawal_fee,
@@ -356,8 +362,11 @@ impl State {
         if let Some(sol_rpc_canister_id) = sol_rpc_canister_id {
             self.sol_rpc_canister_id = sol_rpc_canister_id;
         }
-        if let Some(deposit_fee) = deposit_fee {
-            self.deposit_fee = deposit_fee;
+        if let Some(manual_deposit_fee) = manual_deposit_fee {
+            self.manual_deposit_fee = manual_deposit_fee;
+        }
+        if let Some(automated_deposit_fee) = automated_deposit_fee {
+            self.automated_deposit_fee = automated_deposit_fee;
         }
         if let Some(withdrawal_fee) = withdrawal_fee {
             self.withdrawal_fee = withdrawal_fee;
@@ -717,7 +726,8 @@ impl TryFrom<InitArgs> for State {
         InitArgs {
             sol_rpc_canister_id,
             ledger_canister_id,
-            deposit_fee,
+            manual_deposit_fee,
+            automated_deposit_fee,
             master_key_name,
             minimum_withdrawal_amount,
             minimum_deposit_amount,
@@ -733,7 +743,8 @@ impl TryFrom<InitArgs> for State {
             ledger_canister_id,
             sol_rpc_canister_id,
             solana_network,
-            deposit_fee,
+            manual_deposit_fee,
+            automated_deposit_fee,
             withdrawal_fee,
             minimum_withdrawal_amount,
             minimum_deposit_amount,
