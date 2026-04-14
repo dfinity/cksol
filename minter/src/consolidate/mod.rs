@@ -1,5 +1,5 @@
 use crate::{
-    constants::MAX_CONCURRENT_RPC_CALLS,
+    constants::{MAX_CONCURRENT_RPC_CALLS, RESCHEDULE_DELAY},
     guard::TimerGuard,
     numeric::LedgerMintIndex,
     runtime::CanisterRuntime,
@@ -36,33 +36,42 @@ pub async fn consolidate_deposits<R: CanisterRuntime>(runtime: R) {
         Err(_) => return,
     };
 
-    let consolidation_rounds: Vec<Vec<_>> =
+    let reschedule = scopeguard::guard(runtime.clone(), |runtime| {
+        runtime.set_timer_with_clone(RESCHEDULE_DELAY, consolidate_deposits);
+    });
+
+    let batches: Vec<Vec<_>> =
         read_state(|s| group_deposits_by_account(s.deposits_to_consolidate()))
             .into_iter()
             .chunks(MAX_TRANSFERS_PER_CONSOLIDATION)
             .into_iter()
+            .take(MAX_CONCURRENT_RPC_CALLS)
             .map(Iterator::collect)
             .collect();
 
-    for round in &consolidation_rounds
-        .into_iter()
-        .chunks(MAX_CONCURRENT_RPC_CALLS)
-    {
-        let (slot, recent_blockhash) = match get_recent_slot_and_blockhash(&runtime).await {
-            Ok((slot, blockhash)) => (slot, blockhash),
-            Err(e) => {
-                log!(Priority::Info, "Failed to fetch recent blockhash: {e}");
-                return;
-            }
-        };
+    if batches.is_empty() {
+        scopeguard::ScopeGuard::into_inner(reschedule); // nothing to do, defuse reschedule
+        return;
+    }
 
-        futures::future::join_all(round.map(async |funds| {
-            match submit_consolidation_transaction(&runtime, funds, slot, recent_blockhash).await {
-                Ok(sig) => log!(Priority::Info, "Submitted consolidation transaction {sig}"),
-                Err(e) => log!(Priority::Info, "Deposit consolidation failed: {e}"),
-            }
-        }))
-        .await;
+    let (slot, recent_blockhash) = match get_recent_slot_and_blockhash(&runtime).await {
+        Ok(result) => result,
+        Err(e) => {
+            log!(Priority::Info, "Failed to fetch recent blockhash: {e}");
+            return;
+        }
+    };
+
+    futures::future::join_all(batches.into_iter().map(async |funds| {
+        match submit_consolidation_transaction(&runtime, funds, slot, recent_blockhash).await {
+            Ok(sig) => log!(Priority::Info, "Submitted consolidation transaction {sig}"),
+            Err(e) => log!(Priority::Info, "Deposit consolidation failed: {e}"),
+        }
+    }))
+    .await;
+
+    if read_state(|s| s.deposits_to_consolidate().is_empty()) {
+        scopeguard::ScopeGuard::into_inner(reschedule); // nothing left, defuse reschedule
     }
 }
 

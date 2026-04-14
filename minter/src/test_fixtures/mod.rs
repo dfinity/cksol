@@ -94,9 +94,16 @@ pub fn init_schnorr_master_key() {
     });
 }
 
-/// Returns a [`Signature`] filled with byte `i`, e.g. `signature(1)` → `[0x01; 64]`.
-pub fn signature(i: u8) -> solana_signature::Signature {
-    solana_signature::Signature::from([i; 64])
+/// Returns a [`Signature`] unique for any `usize` index.
+/// For `i < 256`, produces `[i as u8; 64]`.
+pub fn signature(i: usize) -> solana_signature::Signature {
+    if i < 256 {
+        solana_signature::Signature::from([i as u8; 64])
+    } else {
+        let mut bytes = [0u8; 64];
+        bytes[..8].copy_from_slice(&(i as u64).to_le_bytes());
+        solana_signature::Signature::from(bytes)
+    }
 }
 
 /// Returns a [`ConfirmedBlock`] with a deterministic blockhash for use in RPC mock stubs.
@@ -115,17 +122,17 @@ pub fn confirmed_block() -> sol_rpc_types::ConfirmedBlock {
 }
 
 /// Returns a [`DepositId`] with deterministic signature and account derived from `i`.
-pub fn deposit_id(i: u8) -> DepositId {
+pub fn deposit_id(i: usize) -> DepositId {
     DepositId {
-        signature: solana_signature::Signature::from([i; 64]),
+        signature: signature(i),
         account: account(i),
     }
 }
 
 /// Returns an [`Account`] with a deterministic principal derived from `i`.
-pub fn account(i: u8) -> Account {
+pub fn account(i: usize) -> Account {
     Account {
-        owner: Principal::from_slice(&[i; 29]),
+        owner: Principal::from_slice(&[i as u8; 29]),
         subaccount: None,
     }
 }

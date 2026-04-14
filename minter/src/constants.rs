@@ -1,9 +1,10 @@
+use std::time::Duration;
+
 /// Maximum number of concurrent calls to the SOL RPC canister.
 pub const MAX_CONCURRENT_RPC_CALLS: usize = 10;
 
-/// Maximum number of rounds per timer invocation.
-/// Each round issues up to [`MAX_CONCURRENT_RPC_CALLS`] parallel RPC calls.
-pub const MAX_TIMER_ROUNDS: usize = 5;
+/// Short cooldown before rescheduling a timer that has more work to do.
+pub const RESCHEDULE_DELAY: Duration = Duration::from_secs(1);
 
 /// Matches the ICP HTTPS outcall response limit for variable-length RPC calls
 /// such as `getTransaction` and `getSignatureStatuses`:

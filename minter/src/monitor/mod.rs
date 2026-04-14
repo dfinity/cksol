@@ -1,6 +1,6 @@
 use crate::{
     address::derivation_path,
-    constants::{MAX_CONCURRENT_RPC_CALLS, MAX_TIMER_ROUNDS},
+    constants::{MAX_CONCURRENT_RPC_CALLS, RESCHEDULE_DELAY},
     guard::TimerGuard,
     runtime::CanisterRuntime,
     signer::sign_bytes,
@@ -56,6 +56,11 @@ pub async fn finalize_transactions<R: CanisterRuntime>(runtime: R) {
     if all_transactions.is_empty() {
         return;
     }
+
+    // Reschedule unless all submitted transactions were checked in this invocation.
+    let reschedule = scopeguard::guard(runtime.clone(), |runtime| {
+        runtime.set_timer_with_clone(RESCHEDULE_DELAY, finalize_transactions);
+    });
 
     // Fetch the current slot before checking statuses: if a transaction finalizes
     // after we snapshot the slot, the status check will see it as finalized rather
@@ -113,6 +118,10 @@ pub async fn finalize_transactions<R: CanisterRuntime>(runtime: R) {
             });
         }
     }
+
+    if statuses.len() == all_transactions.len() {
+        scopeguard::ScopeGuard::into_inner(reschedule);
+    }
 }
 
 /// Resubmit transactions that have been marked for resubmission by
@@ -133,7 +142,14 @@ pub async fn resubmit_transactions<R: CanisterRuntime>(runtime: R) {
     if to_resubmit.is_empty() {
         return;
     }
+
+    let num_remaining = to_resubmit.len().saturating_sub(MAX_CONCURRENT_RPC_CALLS);
+
     resubmit_expired_transactions(&runtime, to_resubmit).await;
+
+    if num_remaining > 0 {
+        runtime.set_timer_with_clone(RESCHEDULE_DELAY, resubmit_transactions);
+    }
 }
 
 /// Result of checking transaction statuses.
@@ -144,8 +160,18 @@ struct TransactionStatuses {
     errored: BTreeMap<Signature, String>,
     /// Transactions with no on-chain status (safe to resubmit if expired).
     not_found: BTreeSet<Signature>,
+    /// Number of signatures whose status was received (from successful batch requests).
+    /// Used to determine whether all submitted transactions were checked in this invocation.
+    checked_count: usize,
     // Transactions that are in-flight (Processed/Confirmed) or whose status
-    // check failed are implicitly excluded — they appear in neither set.
+    // check failed are implicitly excluded from the above sets.
+}
+
+impl TransactionStatuses {
+    /// Total number of signatures whose status was received in this invocation.
+    fn len(&self) -> usize {
+        self.checked_count
+    }
 }
 
 async fn check_transaction_statuses<R: CanisterRuntime>(
@@ -156,6 +182,7 @@ async fn check_transaction_statuses<R: CanisterRuntime>(
         .into_iter()
         .chunks(MAX_SIGNATURES_PER_STATUS_CHECK)
         .into_iter()
+        .take(MAX_CONCURRENT_RPC_CALLS)
         .map(Iterator::collect)
         .collect();
 
@@ -163,37 +190,36 @@ async fn check_transaction_statuses<R: CanisterRuntime>(
         succeeded: BTreeSet::new(),
         errored: BTreeMap::new(),
         not_found: BTreeSet::new(),
+        checked_count: 0,
     };
 
-    for round in &batches.into_iter().chunks(MAX_CONCURRENT_RPC_CALLS) {
-        let batch_results: Vec<_> = futures::future::join_all(round.map(async |batch| {
-            match get_signature_statuses(runtime, &batch).await {
-                Ok(statuses) => Some((batch, statuses)),
-                Err(e) => {
-                    log!(Priority::Info, "Failed to check transaction statuses: {e}");
-                    None
-                }
+    let batch_results: Vec<_> = futures::future::join_all(batches.into_iter().map(async |batch| {
+        match get_signature_statuses(runtime, &batch).await {
+            Ok(statuses) => Some((batch, statuses)),
+            Err(e) => {
+                log!(Priority::Info, "Failed to check transaction statuses: {e}");
+                None
             }
-        }))
-        .await;
+        }
+    }))
+    .await;
 
-        for (sigs, statuses) in batch_results.into_iter().flatten() {
-            for (signature, status) in sigs.iter().zip(statuses) {
-                match status {
-                    Some(s)
-                        if s.confirmation_status
-                            == Some(TransactionConfirmationStatus::Finalized) =>
-                    {
-                        if let Some(err) = s.err {
-                            result.errored.insert(*signature, format!("{err:?}"));
-                        } else {
-                            result.succeeded.insert(*signature);
-                        }
+    for (sigs, statuses) in batch_results.into_iter().flatten() {
+        result.checked_count += sigs.len();
+        for (signature, status) in sigs.iter().zip(statuses) {
+            match status {
+                Some(s)
+                    if s.confirmation_status == Some(TransactionConfirmationStatus::Finalized) =>
+                {
+                    if let Some(err) = s.err {
+                        result.errored.insert(*signature, format!("{err:?}"));
+                    } else {
+                        result.succeeded.insert(*signature);
                     }
-                    Some(_) => {} // in-flight (Processed/Confirmed)
-                    None => {
-                        result.not_found.insert(*signature);
-                    }
+                }
+                Some(_) => {} // in-flight (Processed/Confirmed)
+                None => {
+                    result.not_found.insert(*signature);
                 }
             }
         }
@@ -206,48 +232,38 @@ async fn resubmit_expired_transactions<R: CanisterRuntime>(
     runtime: &R,
     to_resubmit: Vec<(Signature, VersionedMessage, Vec<Account>)>,
 ) {
-    let rounds: Vec<Vec<_>> = to_resubmit
-        .into_iter()
-        .chunks(MAX_CONCURRENT_RPC_CALLS)
-        .into_iter()
-        .take(MAX_TIMER_ROUNDS)
-        .map(Iterator::collect)
-        .collect();
+    let (new_slot, new_blockhash) = match get_recent_slot_and_blockhash(runtime).await {
+        Ok(result) => result,
+        Err(e) => {
+            log!(Priority::Info, "Failed to get recent blockhash: {e}");
+            return;
+        }
+    };
 
-    for round in rounds {
-        let (new_slot, new_blockhash) = match get_recent_slot_and_blockhash(runtime).await {
-            Ok(result) => result,
-            Err(e) => {
-                log!(Priority::Info, "Failed to get recent blockhash: {e}");
-                return;
+    futures::future::join_all(to_resubmit.into_iter().take(MAX_CONCURRENT_RPC_CALLS).map(
+        async |(old_signature, message, signers)| {
+            match try_resubmit_transaction(
+                runtime,
+                old_signature,
+                message,
+                signers,
+                new_slot,
+                new_blockhash,
+            )
+            .await
+            {
+                Ok(new_sig) => log!(
+                    Priority::Info,
+                    "Resubmitted transaction {old_signature} as {new_sig}"
+                ),
+                Err(e) => log!(
+                    Priority::Info,
+                    "Failed to resubmit transaction {old_signature}: {e}"
+                ),
             }
-        };
-
-        futures::future::join_all(round.into_iter().map(
-            async |(old_signature, message, signers)| {
-                match try_resubmit_transaction(
-                    runtime,
-                    old_signature,
-                    message,
-                    signers,
-                    new_slot,
-                    new_blockhash,
-                )
-                .await
-                {
-                    Ok(new_sig) => log!(
-                        Priority::Info,
-                        "Resubmitted transaction {old_signature} as {new_sig}"
-                    ),
-                    Err(e) => log!(
-                        Priority::Info,
-                        "Failed to resubmit transaction {old_signature}: {e}"
-                    ),
-                }
-            },
-        ))
-        .await;
-    }
+        },
+    ))
+    .await;
 }
 
 async fn try_resubmit_transaction<R: CanisterRuntime>(

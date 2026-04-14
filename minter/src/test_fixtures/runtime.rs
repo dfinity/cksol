@@ -3,6 +3,7 @@ use crate::{runtime::CanisterRuntime, signer::SchnorrSigner};
 use candid::{CandidType, Principal};
 use ic_canister_runtime::{IcError, Runtime, StubRuntime};
 use ic_cdk_management_canister::SignCallError;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 pub const TEST_CANISTER_ID: Principal = Principal::from_slice(&[0xCA; 10]);
@@ -16,6 +17,7 @@ pub struct TestCanisterRuntime {
     msg_cycles_accept: Stubs<u128>,
     msg_cycles_available: Stubs<u128>,
     msg_cycles_refunded: Stubs<u128>,
+    set_timer_call_count: Arc<Mutex<usize>>,
 }
 
 impl TestCanisterRuntime {
@@ -68,6 +70,10 @@ impl TestCanisterRuntime {
         self.signer = self.signer.add_response(Err(error));
         self
     }
+
+    pub(crate) fn set_timer_call_count(&self) -> usize {
+        *self.set_timer_call_count.lock().unwrap()
+    }
 }
 
 impl CanisterRuntime for TestCanisterRuntime {
@@ -110,6 +116,7 @@ impl CanisterRuntime for TestCanisterRuntime {
         _delay: Duration,
         _future: impl Future<Output = ()> + 'static,
     ) -> ic_cdk_timers::TimerId {
+        *self.set_timer_call_count.lock().unwrap() += 1;
         Default::default()
     }
 }

@@ -1,7 +1,7 @@
 use crate::signer::{IcSchnorrSigner, SchnorrSigner};
 use candid::Principal;
 use ic_canister_runtime::{IcRuntime, Runtime};
-use std::{fmt::Debug, time::Duration};
+use std::{fmt::Debug, future::Future, time::Duration};
 
 pub trait CanisterRuntime: Clone + 'static {
     fn inter_canister_call_runtime(&self) -> impl Runtime;
@@ -17,6 +17,16 @@ pub trait CanisterRuntime: Clone + 'static {
         delay: Duration,
         future: impl Future<Output = ()> + 'static,
     ) -> ic_cdk_timers::TimerId;
+
+    fn set_timer_with_clone<F, Fut>(&self, delay: Duration, f: F) -> ic_cdk_timers::TimerId
+    where
+        Self: Sized,
+        F: FnOnce(Self) -> Fut + 'static,
+        Fut: Future<Output = ()> + 'static,
+    {
+        let clone = self.clone();
+        self.set_timer(delay, async move { f(clone).await })
+    }
 }
 
 #[derive(Clone, Default, Debug)]

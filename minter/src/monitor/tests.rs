@@ -1,9 +1,14 @@
-use super::{MAX_BLOCKHASH_AGE, finalize_transactions, resubmit_transactions};
+use super::{
+    MAX_BLOCKHASH_AGE, MAX_SIGNATURES_PER_STATUS_CHECK, finalize_transactions,
+    resubmit_transactions,
+};
 use crate::{
+    constants::MAX_CONCURRENT_RPC_CALLS,
+    state::event::DepositId,
     state::{TaskType, event::EventType, mutate_state, read_state, reset_state},
     storage::reset_events,
     test_fixtures::{
-        EventsAssert, MINTER_ACCOUNT, confirmed_block, deposit_id, events, init_schnorr_master_key,
+        EventsAssert, MINTER_ACCOUNT, account, confirmed_block, events, init_schnorr_master_key,
         init_state, runtime::TestCanisterRuntime, signature,
     },
 };
@@ -68,6 +73,77 @@ mod finalization {
 
         let events_after = EventsAssert::from_recorded();
         assert_eq!(events_before, events_after);
+    }
+
+    #[tokio::test]
+    async fn should_process_up_to_max_concurrent_batches_per_invocation() {
+        setup();
+
+        let num = MAX_CONCURRENT_RPC_CALLS * MAX_SIGNATURES_PER_STATUS_CHECK + 1;
+        for i in 0..num {
+            submit_consolidation_transaction_with_signature(i, RECENT_SLOT);
+        }
+
+        let mut runtime = TestCanisterRuntime::new()
+            .with_increasing_time()
+            .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
+            .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())));
+        for _ in 0..MAX_CONCURRENT_RPC_CALLS {
+            runtime = runtime.add_stub_response(SignatureStatusesResult::Consistent(Ok(
+                vec![None; MAX_SIGNATURES_PER_STATUS_CHECK],
+            )));
+        }
+
+        finalize_transactions(runtime).await;
+
+        // All transactions remain: processed ones are not expired (RECENT_SLOT),
+        // and the last one was not checked at all.
+        read_state(|s| assert_eq!(s.submitted_transactions().len(), num));
+    }
+
+    #[tokio::test]
+    async fn should_reschedule_immediately_when_transactions_remain() {
+        setup();
+
+        let num = MAX_CONCURRENT_RPC_CALLS * MAX_SIGNATURES_PER_STATUS_CHECK + 1;
+        for i in 0..num {
+            submit_consolidation_transaction_with_signature(i, RECENT_SLOT);
+        }
+
+        let mut runtime = TestCanisterRuntime::new()
+            .with_increasing_time()
+            .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
+            .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())));
+        for _ in 0..MAX_CONCURRENT_RPC_CALLS {
+            runtime = runtime.add_stub_response(SignatureStatusesResult::Consistent(Ok(
+                vec![None; MAX_SIGNATURES_PER_STATUS_CHECK],
+            )));
+        }
+
+        let runtime_ref = runtime.clone();
+        finalize_transactions(runtime).await;
+
+        assert_eq!(runtime_ref.set_timer_call_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn should_not_reschedule_when_all_transactions_finalized() {
+        setup();
+
+        submit_consolidation_transaction(RECENT_SLOT);
+
+        let runtime = TestCanisterRuntime::new()
+            .with_increasing_time()
+            .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
+            .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())))
+            .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![Some(
+                finalized_status(),
+            )])));
+
+        let runtime_ref = runtime.clone();
+        finalize_transactions(runtime).await;
+
+        assert_eq!(runtime_ref.set_timer_call_count(), 0);
     }
 
     #[tokio::test]
@@ -271,25 +347,12 @@ mod resubmission {
 
         let old_signature = submit_consolidation_transaction(EXPIRED_SLOT);
         let new_signature = signature(0xAA);
-
-        // Step 1: finalize_transactions fetches slot, checks status, marks expired
-        let finalize_runtime = TestCanisterRuntime::new()
-            .with_increasing_time()
-            .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
-            .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())))
-            .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![None])));
-
-        finalize_transactions(finalize_runtime).await;
-
-        EventsAssert::from_recorded().expect_contains_event_eq(EventType::ExpiredTransaction {
-            signature: old_signature,
-        });
+        events::expire_transaction(old_signature);
 
         read_state(|s| {
             assert!(s.transactions_to_resubmit().contains_key(&old_signature));
         });
 
-        // Step 2: resubmit_transactions fetches a fresh blockhash and resubmits
         let resubmit_runtime = TestCanisterRuntime::new()
             .with_increasing_time()
             .add_stub_response(SlotResult::Consistent(Ok(RESUBMISSION_SLOT)))
@@ -348,14 +411,7 @@ mod resubmission {
 
         let old_signature = submit_consolidation_transaction(EXPIRED_SLOT);
         let new_signature = signature(0xAA);
-
-        let finalize_runtime = TestCanisterRuntime::new()
-            .with_increasing_time()
-            .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
-            .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())))
-            .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![None])));
-
-        finalize_transactions(finalize_runtime).await;
+        events::expire_transaction(old_signature);
 
         let resubmit_runtime = TestCanisterRuntime::new()
             .with_increasing_time()
@@ -378,63 +434,93 @@ mod resubmission {
     }
 
     #[tokio::test]
-    async fn should_resubmit_multiple_expired_transactions_in_batches() {
-        use crate::constants::MAX_CONCURRENT_RPC_CALLS;
-
+    async fn should_process_up_to_max_concurrent_rpc_calls_per_invocation() {
         setup();
 
-        let num_transactions = MAX_CONCURRENT_RPC_CALLS + 2; // 10+2 = 12 transactions require 2 rounds
+        let num_transactions = MAX_CONCURRENT_RPC_CALLS + 2;
         for i in 0..num_transactions {
-            submit_consolidation_transaction_with_signature(i as u8, EXPIRED_SLOT);
+            let sig = submit_consolidation_transaction_with_signature(i, EXPIRED_SLOT);
+            events::expire_transaction(sig);
         }
-
-        // finalize_transactions: marks all as expired
-        let finalize_runtime = TestCanisterRuntime::new()
-            .with_increasing_time()
-            .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
-            .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())))
-            // getSignatureStatuses: all not found
-            .add_stub_response(SignatureStatusesResult::Consistent(Ok(
-                vec![None; num_transactions],
-            )));
-
-        finalize_transactions(finalize_runtime).await;
 
         read_state(|s| {
             assert_eq!(s.transactions_to_resubmit().len(), num_transactions);
         });
 
-        // resubmit_transactions: processes in rounds of MAX_CONCURRENT_RPC_CALLS
         let mut resubmit_runtime = TestCanisterRuntime::new()
             .with_increasing_time()
             .add_stub_response(SlotResult::Consistent(Ok(RESUBMISSION_SLOT)))
             .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())));
-
         for i in 0..MAX_CONCURRENT_RPC_CALLS {
             resubmit_runtime = resubmit_runtime
-                .add_stub_response(SendTransactionResult::Consistent(Ok(signature(
-                    0xA0 + i as u8,
-                )
-                .into())))
+                .add_stub_response(SendTransactionResult::Consistent(Ok(
+                    signature(0xA0 + i).into()
+                )))
                 .add_signature([0xA0 + i as u8; 64]);
-        }
-
-        resubmit_runtime = resubmit_runtime
-            .add_stub_response(SlotResult::Consistent(Ok(RESUBMISSION_SLOT)))
-            .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())));
-
-        for i in 0..2_usize {
-            resubmit_runtime = resubmit_runtime
-                .add_stub_response(SendTransactionResult::Consistent(Ok(signature(
-                    0xB0 + i as u8,
-                )
-                .into())))
-                .add_signature([0xB0 + i as u8; 64]);
         }
 
         resubmit_transactions(resubmit_runtime).await;
 
-        read_state(|s| assert_eq!(s.submitted_transactions().len(), num_transactions));
+        let remaining = num_transactions - MAX_CONCURRENT_RPC_CALLS;
+        read_state(|s| {
+            assert_eq!(s.submitted_transactions().len(), MAX_CONCURRENT_RPC_CALLS);
+            assert_eq!(s.transactions_to_resubmit().len(), remaining);
+        });
+    }
+
+    #[tokio::test]
+    async fn should_reschedule_immediately_when_transactions_remain() {
+        setup();
+
+        let num_transactions = MAX_CONCURRENT_RPC_CALLS + 2;
+        for i in 0..num_transactions {
+            let sig = submit_consolidation_transaction_with_signature(i, EXPIRED_SLOT);
+            events::expire_transaction(sig);
+        }
+
+        let mut resubmit_runtime = TestCanisterRuntime::new()
+            .with_increasing_time()
+            .add_stub_response(SlotResult::Consistent(Ok(RESUBMISSION_SLOT)))
+            .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())));
+        for i in 0..MAX_CONCURRENT_RPC_CALLS {
+            resubmit_runtime = resubmit_runtime
+                .add_stub_response(SendTransactionResult::Consistent(Ok(
+                    signature(0xA0 + i).into()
+                )))
+                .add_signature([0xA0 + i as u8; 64]);
+        }
+
+        let runtime_ref = resubmit_runtime.clone();
+        resubmit_transactions(resubmit_runtime).await;
+
+        assert_eq!(runtime_ref.set_timer_call_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn should_not_reschedule_when_all_transactions_resubmitted() {
+        setup();
+
+        let old_signature = submit_consolidation_transaction(EXPIRED_SLOT);
+        let new_signature = signature(0xAA);
+        events::expire_transaction(old_signature);
+
+        let resubmit_runtime = TestCanisterRuntime::new()
+            .with_increasing_time()
+            .add_stub_response(SlotResult::Consistent(Ok(RESUBMISSION_SLOT)))
+            .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())))
+            .add_stub_response(SendTransactionResult::Consistent(Ok(new_signature.into())))
+            .add_signature(new_signature.into());
+
+        let runtime_ref = resubmit_runtime.clone();
+        resubmit_transactions(resubmit_runtime).await;
+
+        EventsAssert::from_recorded().expect_contains_event_eq(EventType::ResubmittedTransaction {
+            old_signature,
+            new_signature,
+            new_slot: RESUBMISSION_SLOT,
+        });
+
+        assert_eq!(runtime_ref.set_timer_call_count(), 0);
     }
 }
 
@@ -448,12 +534,16 @@ fn submit_consolidation_transaction(slot: Slot) -> solana_signature::Signature {
 }
 
 fn submit_consolidation_transaction_with_signature(
-    i: u8,
+    i: usize,
     slot: Slot,
 ) -> solana_signature::Signature {
-    let signature = signature(i);
-    events::accept_deposit(deposit_id(i), 1_000_000);
-    events::mint_deposit(deposit_id(i), i as u64);
-    events::submit_consolidation(signature, MINTER_ACCOUNT, slot, vec![i as u64]);
-    signature
+    let sig = signature(i);
+    let dep_id = DepositId {
+        signature: sig,
+        account: account(0),
+    };
+    events::accept_deposit(dep_id, 1_000_000);
+    events::mint_deposit(dep_id, i as u64);
+    events::submit_consolidation(sig, MINTER_ACCOUNT, slot, vec![i as u64]);
+    sig
 }
