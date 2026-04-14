@@ -261,6 +261,9 @@ mod withdrawal_tests {
     use super::*;
 
     const MAX_BLOCKHASH_AGE: Slot = 150;
+    /// The SOL RPC canister rounds the slot returned by getSlot down to the nearest multiple
+    /// of this value before querying getBlock and returning the slot to callers.
+    const SOL_RPC_SLOT_ROUNDING: u64 = 20;
 
     #[tokio::test]
     async fn should_validate_solana_address() {
@@ -669,7 +672,10 @@ mod withdrawal_tests {
 
         // Advance time to trigger finalize_transactions, which fetches the current slot,
         // checks statuses (not found), and marks the expired transaction for resubmission.
-        let resubmission_slot = INITIAL_SLOT + MAX_BLOCKHASH_AGE + 1;
+        // The SOL RPC canister rounds the slot down to SOL_RPC_SLOT_ROUNDING before returning
+        // it, so we add SOL_RPC_SLOT_ROUNDING + 1 to ensure the rounded slot is strictly
+        // greater than INITIAL_SLOT + MAX_BLOCKHASH_AGE (the expiry threshold).
+        let resubmission_slot = INITIAL_SLOT + MAX_BLOCKHASH_AGE + SOL_RPC_SLOT_ROUNDING + 1;
         setup.advance_time(FINALIZE_TRANSACTIONS_DELAY).await;
         setup
             .execute_http_mocks(mark_expired_withdrawal_http_mocks(resubmission_slot))

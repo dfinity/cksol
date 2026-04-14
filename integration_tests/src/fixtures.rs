@@ -285,7 +285,7 @@ fn get_slot_response(slot: u64) -> JsonRpcResponse {
 }
 
 fn get_block_request(slot: u64) -> JsonRpcRequestMatcher {
-    // The sol-rpc canister rounds the slot down to the nearest multiple of 20
+    // The SOL RPC canister rounds the slot down to the nearest multiple of 20
     // before making getBlock requests, so we match that behavior here.
     let slot = slot / 20 * 20;
     JsonRpcRequestMatcher::with_method("getBlock").with_params(json!([
