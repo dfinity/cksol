@@ -405,13 +405,13 @@ mod resubmission {
     async fn should_reschedule_until_all_transactions_resubmitted() {
         setup();
 
-        let num_transactions = MAX_CONCURRENT_RPC_CALLS + 2;
+        let num_transactions = MAX_CONCURRENT_RPC_CALLS + 1;
         for i in 0..num_transactions {
             let sig = submit_consolidation_transaction_with_signature(i, EXPIRED_SLOT);
             events::expire_transaction(sig);
         }
 
-        // Round 1: resubmits MAX_CONCURRENT_RPC_CALLS transactions, 2 remain → reschedule
+        // Round 1: resubmits MAX_CONCURRENT_RPC_CALLS transactions, 1 remain → reschedule
         let mut runtime = TestCanisterRuntime::new()
             .with_increasing_time()
             .add_stub_response(SlotResult::Consistent(Ok(RESUBMISSION_SLOT)))
@@ -435,7 +435,7 @@ mod resubmission {
         });
         assert_eq!(runtime.set_timer_call_count(), 1);
 
-        // Round 2: resubmits remaining 2 transactions → no reschedule
+        // Round 2: resubmits remaining transaction → no reschedule
         let mut runtime = TestCanisterRuntime::new()
             .with_increasing_time()
             .add_stub_response(SlotResult::Consistent(Ok(RESUBMISSION_SLOT)))
