@@ -34,7 +34,7 @@ thread_local! {
 }
 
 #[derive(Default)]
-pub struct Metrics {
+pub(crate) struct Metrics {
     pub post_upgrade_instructions_consumed: u64,
 }
 
@@ -63,14 +63,14 @@ pub fn total_event_count() -> u64 {
     EVENTS.with(|events| events.borrow().len())
 }
 
-pub fn with_unstable_metrics<F, R>(f: F) -> R
+pub(crate) fn with_unstable_metrics<F, R>(f: F) -> R
 where
     F: FnOnce(&Metrics) -> R,
 {
     UNSTABLE_METRICS.with(|m| f(&m.borrow()))
 }
 
-pub fn with_unstable_metrics_mut<F, R>(f: F) -> R
+pub(crate) fn with_unstable_metrics_mut<F, R>(f: F) -> R
 where
     F: FnOnce(&mut Metrics) -> R,
 {
