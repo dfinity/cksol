@@ -1,6 +1,6 @@
 use crate::{
     address::derivation_path,
-    constants::{MAX_CONCURRENT_RPC_CALLS, RESCHEDULE_DELAY},
+    constants::MAX_CONCURRENT_RPC_CALLS,
     guard::TimerGuard,
     runtime::CanisterRuntime,
     signer::sign_bytes,
@@ -59,7 +59,7 @@ pub async fn finalize_transactions<R: CanisterRuntime>(runtime: R) {
 
     // Reschedule unless all submitted transactions were checked in this invocation.
     let reschedule = scopeguard::guard(runtime.clone(), |runtime| {
-        runtime.set_timer_with_clone(RESCHEDULE_DELAY, finalize_transactions);
+        runtime.set_timer(Duration::ZERO, finalize_transactions);
     });
 
     // Fetch the current slot before checking statuses: if a transaction finalizes
@@ -148,7 +148,7 @@ pub async fn resubmit_transactions<R: CanisterRuntime>(runtime: R) {
     resubmit_expired_transactions(&runtime, to_resubmit).await;
 
     if num_remaining > 0 {
-        runtime.set_timer_with_clone(RESCHEDULE_DELAY, resubmit_transactions);
+        runtime.set_timer(Duration::ZERO, resubmit_transactions);
     }
 }
 

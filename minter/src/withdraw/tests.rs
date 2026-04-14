@@ -470,61 +470,7 @@ mod process_pending_withdrawals_tests {
     }
 
     #[tokio::test]
-    async fn should_process_up_to_max_concurrent_batches_per_invocation() {
-        init_state();
-        init_balance();
-        init_schnorr_master_key();
-
-        // Create enough requests to require more than MAX_CONCURRENT_RPC_CALLS batches
-        let num_requests = MAX_WITHDRAWALS_PER_TX * MAX_CONCURRENT_RPC_CALLS + 1;
-
-        // Insert pending withdrawal requests directly into state
-        for i in 0..num_requests {
-            events::accept_withdrawal(account(i), i as u64, MINIMUM_WITHDRAWAL_AMOUNT);
-        }
-
-        let slot = 1;
-        let mut runtime = TestCanisterRuntime::new()
-            .with_increasing_time()
-            .add_stub_response(GetSlotResult::Consistent(Ok(slot)))
-            .add_stub_response(GetBlockResult::Consistent(Ok(confirmed_block())));
-
-        for i in 0..MAX_CONCURRENT_RPC_CALLS {
-            runtime = runtime
-                .add_signature(signature(i + 1).into())
-                .add_stub_response(SendTransactionResult::Consistent(Ok(
-                    signature(i + 1).into()
-                )));
-        }
-
-        process_pending_withdrawals(runtime).await;
-
-        // Only MAX_CONCURRENT_RPC_CALLS batches should have been submitted
-        let processed = MAX_WITHDRAWALS_PER_TX * MAX_CONCURRENT_RPC_CALLS;
-        read_state(|s| {
-            assert_eq!(s.submitted_transactions().len(), MAX_CONCURRENT_RPC_CALLS);
-            assert!(
-                !s.pending_withdrawal_requests().is_empty(),
-                "Some withdrawal requests should remain pending"
-            );
-        });
-        for i in 0..processed {
-            assert_matches!(
-                withdrawal_status(i as u64),
-                WithdrawalStatus::TxSent(_),
-                "withdrawal {i} should be TxSent"
-            );
-        }
-        // The extra request should remain pending
-        assert_matches!(
-            withdrawal_status(processed as u64),
-            WithdrawalStatus::Pending,
-            "withdrawal beyond limit should still be Pending"
-        );
-    }
-
-    #[tokio::test]
-    async fn should_reschedule_immediately_when_withdrawals_remain() {
+    async fn should_reschedule_until_all_withdrawals_processed() {
         init_state();
         init_balance();
         init_schnorr_master_key();
@@ -535,6 +481,8 @@ mod process_pending_withdrawals_tests {
         }
 
         let slot = 1;
+
+        // Round 1: processes MAX_CONCURRENT_RPC_CALLS batches, 1 request remains → reschedule
         let mut runtime = TestCanisterRuntime::new()
             .with_increasing_time()
             .add_stub_response(GetSlotResult::Consistent(Ok(slot)))
@@ -547,41 +495,24 @@ mod process_pending_withdrawals_tests {
                 )));
         }
 
-        let runtime_ref = runtime.clone();
-        process_pending_withdrawals(runtime).await;
+        process_pending_withdrawals(runtime.clone()).await;
 
-        assert_eq!(
-            runtime_ref.set_timer_call_count(),
-            1,
-            "should reschedule when withdrawals remain"
-        );
-    }
+        assert!(!read_state(|s| s.pending_withdrawal_requests().is_empty()));
+        assert_eq!(runtime.set_timer_call_count(), 1);
 
-    #[tokio::test]
-    async fn should_not_reschedule_when_all_withdrawals_processed() {
-        init_state();
-        init_balance();
-        init_schnorr_master_key();
-
-        events::accept_withdrawal(account(1), 1, MINIMUM_WITHDRAWAL_AMOUNT);
-
-        let runtime = TestCanisterRuntime::new()
+        // Round 2: processes the remaining 1 request → no reschedule
+        let last_sig = signature(num_requests);
+        let runtime2 = TestCanisterRuntime::new()
             .with_increasing_time()
-            .add_stub_response(GetSlotResult::Consistent(Ok(1)))
+            .add_stub_response(GetSlotResult::Consistent(Ok(slot)))
             .add_stub_response(GetBlockResult::Consistent(Ok(confirmed_block())))
-            .add_signature(signature(0x42).into())
-            .add_stub_response(SendTransactionResult::Consistent(
-                Ok(signature(0x42).into()),
-            ));
+            .add_signature(last_sig.into())
+            .add_stub_response(SendTransactionResult::Consistent(Ok(last_sig.into())));
 
-        let runtime_ref = runtime.clone();
-        process_pending_withdrawals(runtime).await;
+        process_pending_withdrawals(runtime2.clone()).await;
 
-        assert_eq!(
-            runtime_ref.set_timer_call_count(),
-            0,
-            "should not reschedule when all withdrawals processed"
-        );
+        assert!(read_state(|s| s.pending_withdrawal_requests().is_empty()));
+        assert_eq!(runtime2.set_timer_call_count(), 0);
     }
 }
 

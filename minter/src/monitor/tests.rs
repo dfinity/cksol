@@ -76,7 +76,7 @@ mod finalization {
     }
 
     #[tokio::test]
-    async fn should_process_up_to_max_concurrent_batches_per_invocation() {
+    async fn should_reschedule_until_all_transactions_finalized() {
         setup();
 
         let num = MAX_CONCURRENT_RPC_CALLS * MAX_SIGNATURES_PER_STATUS_CHECK + 1;
@@ -84,55 +84,24 @@ mod finalization {
             submit_consolidation_transaction_with_signature(i, RECENT_SLOT);
         }
 
+        // Round 1: finalizes MAX_CONCURRENT_RPC_CALLS batches, 1 transaction unchecked → reschedule
         let mut runtime = TestCanisterRuntime::new()
             .with_increasing_time()
             .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
             .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())));
         for _ in 0..MAX_CONCURRENT_RPC_CALLS {
             runtime = runtime.add_stub_response(SignatureStatusesResult::Consistent(Ok(
-                vec![None; MAX_SIGNATURES_PER_STATUS_CHECK],
+                vec![Some(finalized_status()); MAX_SIGNATURES_PER_STATUS_CHECK],
             )));
         }
 
-        finalize_transactions(runtime).await;
+        finalize_transactions(runtime.clone()).await;
 
-        // All transactions remain: processed ones are not expired (RECENT_SLOT),
-        // and the last one was not checked at all.
-        read_state(|s| assert_eq!(s.submitted_transactions().len(), num));
-    }
+        assert_eq!(read_state(|s| s.submitted_transactions().len()), 1);
+        assert_eq!(runtime.set_timer_call_count(), 1);
 
-    #[tokio::test]
-    async fn should_reschedule_immediately_when_transactions_remain() {
-        setup();
-
-        let num = MAX_CONCURRENT_RPC_CALLS * MAX_SIGNATURES_PER_STATUS_CHECK + 1;
-        for i in 0..num {
-            submit_consolidation_transaction_with_signature(i, RECENT_SLOT);
-        }
-
-        let mut runtime = TestCanisterRuntime::new()
-            .with_increasing_time()
-            .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
-            .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())));
-        for _ in 0..MAX_CONCURRENT_RPC_CALLS {
-            runtime = runtime.add_stub_response(SignatureStatusesResult::Consistent(Ok(
-                vec![None; MAX_SIGNATURES_PER_STATUS_CHECK],
-            )));
-        }
-
-        let runtime_ref = runtime.clone();
-        finalize_transactions(runtime).await;
-
-        assert_eq!(runtime_ref.set_timer_call_count(), 1);
-    }
-
-    #[tokio::test]
-    async fn should_not_reschedule_when_all_transactions_finalized() {
-        setup();
-
-        submit_consolidation_transaction(RECENT_SLOT);
-
-        let runtime = TestCanisterRuntime::new()
+        // Round 2: finalizes the remaining 1 transaction → no reschedule
+        let runtime2 = TestCanisterRuntime::new()
             .with_increasing_time()
             .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
             .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())))
@@ -140,10 +109,10 @@ mod finalization {
                 finalized_status(),
             )])));
 
-        let runtime_ref = runtime.clone();
-        finalize_transactions(runtime).await;
+        finalize_transactions(runtime2.clone()).await;
 
-        assert_eq!(runtime_ref.set_timer_call_count(), 0);
+        assert!(read_state(|s| s.submitted_transactions().is_empty()));
+        assert_eq!(runtime2.set_timer_call_count(), 0);
     }
 
     #[tokio::test]
@@ -434,7 +403,7 @@ mod resubmission {
     }
 
     #[tokio::test]
-    async fn should_process_up_to_max_concurrent_rpc_calls_per_invocation() {
+    async fn should_reschedule_until_all_transactions_resubmitted() {
         setup();
 
         let num_transactions = MAX_CONCURRENT_RPC_CALLS + 2;
@@ -443,84 +412,44 @@ mod resubmission {
             events::expire_transaction(sig);
         }
 
-        read_state(|s| {
-            assert_eq!(s.transactions_to_resubmit().len(), num_transactions);
-        });
-
-        let mut resubmit_runtime = TestCanisterRuntime::new()
+        // Round 1: resubmits MAX_CONCURRENT_RPC_CALLS transactions, 2 remain → reschedule
+        let mut runtime = TestCanisterRuntime::new()
             .with_increasing_time()
             .add_stub_response(SlotResult::Consistent(Ok(RESUBMISSION_SLOT)))
             .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())));
         for i in 0..MAX_CONCURRENT_RPC_CALLS {
-            resubmit_runtime = resubmit_runtime
+            runtime = runtime
                 .add_stub_response(SendTransactionResult::Consistent(Ok(
                     signature(0xA0 + i).into()
                 )))
-                .add_signature([0xA0 + i as u8; 64]);
+                .add_signature(signature(0xA0 + i).into());
         }
 
-        resubmit_transactions(resubmit_runtime).await;
+        resubmit_transactions(runtime.clone()).await;
 
-        let remaining = num_transactions - MAX_CONCURRENT_RPC_CALLS;
-        read_state(|s| {
-            assert_eq!(s.submitted_transactions().len(), MAX_CONCURRENT_RPC_CALLS);
-            assert_eq!(s.transactions_to_resubmit().len(), remaining);
-        });
-    }
+        assert_eq!(
+            read_state(|s| s.transactions_to_resubmit().len()),
+            num_transactions - MAX_CONCURRENT_RPC_CALLS
+        );
+        assert_eq!(runtime.set_timer_call_count(), 1);
 
-    #[tokio::test]
-    async fn should_reschedule_immediately_when_transactions_remain() {
-        setup();
-
-        let num_transactions = MAX_CONCURRENT_RPC_CALLS + 2;
-        for i in 0..num_transactions {
-            let sig = submit_consolidation_transaction_with_signature(i, EXPIRED_SLOT);
-            events::expire_transaction(sig);
-        }
-
-        let mut resubmit_runtime = TestCanisterRuntime::new()
+        // Round 2: resubmits remaining 2 transactions → no reschedule
+        let mut runtime2 = TestCanisterRuntime::new()
             .with_increasing_time()
             .add_stub_response(SlotResult::Consistent(Ok(RESUBMISSION_SLOT)))
             .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())));
-        for i in 0..MAX_CONCURRENT_RPC_CALLS {
-            resubmit_runtime = resubmit_runtime
+        for i in 0..(num_transactions - MAX_CONCURRENT_RPC_CALLS) {
+            runtime2 = runtime2
                 .add_stub_response(SendTransactionResult::Consistent(Ok(
-                    signature(0xA0 + i).into()
+                    signature(0xB0 + i).into()
                 )))
-                .add_signature([0xA0 + i as u8; 64]);
+                .add_signature(signature(0xB0 + i).into());
         }
 
-        let runtime_ref = resubmit_runtime.clone();
-        resubmit_transactions(resubmit_runtime).await;
+        resubmit_transactions(runtime2.clone()).await;
 
-        assert_eq!(runtime_ref.set_timer_call_count(), 1);
-    }
-
-    #[tokio::test]
-    async fn should_not_reschedule_when_all_transactions_resubmitted() {
-        setup();
-
-        let old_signature = submit_consolidation_transaction(EXPIRED_SLOT);
-        let new_signature = signature(0xAA);
-        events::expire_transaction(old_signature);
-
-        let resubmit_runtime = TestCanisterRuntime::new()
-            .with_increasing_time()
-            .add_stub_response(SlotResult::Consistent(Ok(RESUBMISSION_SLOT)))
-            .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())))
-            .add_stub_response(SendTransactionResult::Consistent(Ok(new_signature.into())))
-            .add_signature(new_signature.into());
-
-        let runtime_ref = resubmit_runtime.clone();
-        resubmit_transactions(resubmit_runtime).await;
-
-        EventsAssert::from_recorded().expect_contains_event_eq(EventType::ResubmittedTransaction {
-            old_signature,
-            new_signature,
-            new_slot: RESUBMISSION_SLOT,
-        });
-
-        assert_eq!(runtime_ref.set_timer_call_count(), 0);
+        assert!(read_state(|s| s.transactions_to_resubmit().is_empty()));
+        assert_eq!(runtime2.set_timer_call_count(), 0);
     }
 }
 

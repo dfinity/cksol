@@ -12,21 +12,11 @@ pub trait CanisterRuntime: Clone + 'static {
     fn msg_cycles_accept(&self, amount: u128) -> u128;
     fn msg_cycles_available(&self) -> u128;
     fn msg_cycles_refunded(&self) -> u128;
-    fn set_timer(
-        &self,
-        delay: Duration,
-        future: impl Future<Output = ()> + 'static,
-    ) -> ic_cdk_timers::TimerId;
-
-    fn set_timer_with_clone<F, Fut>(&self, delay: Duration, f: F) -> ic_cdk_timers::TimerId
+    fn set_timer<F, Fut>(&self, delay: Duration, f: F) -> ic_cdk_timers::TimerId
     where
         Self: Sized,
         F: FnOnce(Self) -> Fut + 'static,
-        Fut: Future<Output = ()> + 'static,
-    {
-        let clone = self.clone();
-        self.set_timer(delay, async move { f(clone).await })
-    }
+        Fut: Future<Output = ()> + 'static;
 }
 
 #[derive(Clone, Default, Debug)]
@@ -71,11 +61,13 @@ impl CanisterRuntime for IcCanisterRuntime {
         ic_cdk::api::msg_cycles_refunded()
     }
 
-    fn set_timer(
-        &self,
-        delay: Duration,
-        future: impl Future<Output = ()> + 'static,
-    ) -> ic_cdk_timers::TimerId {
-        ic_cdk_timers::set_timer(delay, future)
+    fn set_timer<F, Fut>(&self, delay: Duration, f: F) -> ic_cdk_timers::TimerId
+    where
+        Self: Sized,
+        F: FnOnce(Self) -> Fut + 'static,
+        Fut: Future<Output = ()> + 'static,
+    {
+        let clone = self.clone();
+        ic_cdk_timers::set_timer(delay, async move { f(clone).await })
     }
 }

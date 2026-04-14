@@ -3,8 +3,11 @@ use crate::{runtime::CanisterRuntime, signer::SchnorrSigner};
 use candid::{CandidType, Principal};
 use ic_canister_runtime::{IcError, Runtime, StubRuntime};
 use ic_cdk_management_canister::SignCallError;
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::{
+    future::Future,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
 pub const TEST_CANISTER_ID: Principal = Principal::from_slice(&[0xCA; 10]);
 
@@ -111,11 +114,12 @@ impl CanisterRuntime for TestCanisterRuntime {
         self.msg_cycles_refunded.next()
     }
 
-    fn set_timer(
-        &self,
-        _delay: Duration,
-        _future: impl Future<Output = ()> + 'static,
-    ) -> ic_cdk_timers::TimerId {
+    fn set_timer<F, Fut>(&self, _delay: Duration, _f: F) -> ic_cdk_timers::TimerId
+    where
+        Self: Sized,
+        F: FnOnce(Self) -> Fut + 'static,
+        Fut: Future<Output = ()> + 'static,
+    {
         *self.set_timer_call_count.lock().unwrap() += 1;
         Default::default()
     }

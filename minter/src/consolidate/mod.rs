@@ -1,5 +1,5 @@
 use crate::{
-    constants::{MAX_CONCURRENT_RPC_CALLS, RESCHEDULE_DELAY},
+    constants::MAX_CONCURRENT_RPC_CALLS,
     guard::TimerGuard,
     numeric::LedgerMintIndex,
     runtime::CanisterRuntime,
@@ -37,7 +37,7 @@ pub async fn consolidate_deposits<R: CanisterRuntime>(runtime: R) {
     };
 
     let reschedule = scopeguard::guard(runtime.clone(), |runtime| {
-        runtime.set_timer_with_clone(RESCHEDULE_DELAY, consolidate_deposits);
+        runtime.set_timer(Duration::ZERO, consolidate_deposits);
     });
 
     let batches: Vec<Vec<_>> =

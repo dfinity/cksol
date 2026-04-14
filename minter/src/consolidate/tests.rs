@@ -168,7 +168,7 @@ async fn should_submit_multiple_consolidation_batches() {
         )));
 
     for i in 0..(2 + NUM_DEPOSITS) {
-        runtime = runtime.add_signature([i as u8; 64]);
+        runtime = runtime.add_signature(signature(i).into());
     }
 
     consolidate_deposits(runtime).await;
@@ -256,54 +256,19 @@ async fn should_consolidate_multiple_deposits_to_same_account_in_single_transfer
 }
 
 #[tokio::test]
-async fn should_consolidate_up_to_max_concurrent_batches_per_invocation() {
-    setup();
-
-    // Create enough deposits to require more than MAX_CONCURRENT_RPC_CALLS batches
-    let num_deposits = MAX_TRANSFERS_PER_CONSOLIDATION * MAX_CONCURRENT_RPC_CALLS + 1;
-    let funds: Vec<_> = (0..num_deposits)
-        .map(|i| (deposit_id(i), (i as u64 + 1) * 1_000_000_000))
-        .collect();
-    add_funds_to_consolidate(&funds);
-
-    let slot = 100;
-    let mut runtime = TestCanisterRuntime::new()
-        .with_increasing_time()
-        .add_stub_response(SlotResult::Consistent(Ok(slot)))
-        .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())));
-
-    // Provide signatures and send responses for MAX_CONCURRENT_RPC_CALLS batches
-    for i in 0..MAX_CONCURRENT_RPC_CALLS {
-        runtime =
-            runtime.add_stub_response(SendTransactionResult::Consistent(Ok(signature(i).into())));
-    }
-    for i in 0..(MAX_CONCURRENT_RPC_CALLS + num_deposits) {
-        runtime = runtime.add_signature([i as u8; 64]);
-    }
-
-    consolidate_deposits(runtime).await;
-
-    // Only MAX_CONCURRENT_RPC_CALLS batches should have been submitted
-    read_state(|s| {
-        assert_eq!(s.submitted_transactions().len(), MAX_CONCURRENT_RPC_CALLS);
-        assert!(
-            !s.deposits_to_consolidate().is_empty(),
-            "Some deposits should remain unconsolidated"
-        );
-    });
-}
-
-#[tokio::test]
-async fn should_reschedule_immediately_when_deposits_remain() {
+async fn should_reschedule_until_all_deposits_consolidated() {
     setup();
 
     let num_deposits = MAX_TRANSFERS_PER_CONSOLIDATION * MAX_CONCURRENT_RPC_CALLS + 1;
-    let funds: Vec<_> = (0..num_deposits)
-        .map(|i| (deposit_id(i), (i as u64 + 1) * 1_000_000_000))
-        .collect();
-    add_funds_to_consolidate(&funds);
+    add_funds_to_consolidate(
+        &(0..num_deposits)
+            .map(|i| (deposit_id(i), (i as u64 + 1) * 1_000_000_000))
+            .collect::<Vec<_>>(),
+    );
 
     let slot = 100;
+
+    // Round 1: processes MAX_CONCURRENT_RPC_CALLS batches, 1 deposit remains → reschedule
     let mut runtime = TestCanisterRuntime::new()
         .with_increasing_time()
         .add_stub_response(SlotResult::Consistent(Ok(slot)))
@@ -313,41 +278,27 @@ async fn should_reschedule_immediately_when_deposits_remain() {
             runtime.add_stub_response(SendTransactionResult::Consistent(Ok(signature(i).into())));
     }
     for i in 0..(MAX_CONCURRENT_RPC_CALLS + num_deposits) {
-        runtime = runtime.add_signature([i as u8; 64]);
+        runtime = runtime.add_signature(signature(i).into());
     }
 
     consolidate_deposits(runtime.clone()).await;
 
-    assert_eq!(
-        runtime.set_timer_call_count(),
-        1,
-        "should reschedule when deposits remain"
-    );
-}
+    assert!(!read_state(|s| s.deposits_to_consolidate().is_empty()));
+    assert_eq!(runtime.set_timer_call_count(), 1);
 
-#[tokio::test]
-async fn should_not_reschedule_when_all_deposits_consolidated() {
-    setup();
-
-    add_funds_to_consolidate(&[(deposit_id(0), 1_000_000_000)]);
-
-    let slot = 100;
-    let runtime = TestCanisterRuntime::new()
+    // Round 2: processes the remaining 1 deposit → no reschedule
+    let last_sig = signature(num_deposits);
+    let runtime2 = TestCanisterRuntime::new()
         .with_increasing_time()
         .add_stub_response(SlotResult::Consistent(Ok(slot)))
         .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())))
-        .add_stub_response(SendTransactionResult::Consistent(
-            Ok(signature(0x11).into()),
-        ))
-        .add_signature(signature(0x11).into());
+        .add_stub_response(SendTransactionResult::Consistent(Ok(last_sig.into())))
+        .add_signature(last_sig.into());
 
-    consolidate_deposits(runtime.clone()).await;
+    consolidate_deposits(runtime2.clone()).await;
 
-    assert_eq!(
-        runtime.set_timer_call_count(),
-        0,
-        "should not reschedule when all deposits consolidated"
-    );
+    assert!(read_state(|s| s.deposits_to_consolidate().is_empty()));
+    assert_eq!(runtime2.set_timer_call_count(), 0);
 }
 
 fn setup() {

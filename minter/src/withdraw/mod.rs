@@ -12,7 +12,7 @@ use itertools::Itertools;
 use sol_rpc_types::Slot;
 use solana_hash::Hash;
 
-use crate::constants::{MAX_CONCURRENT_RPC_CALLS, RESCHEDULE_DELAY};
+use crate::constants::MAX_CONCURRENT_RPC_CALLS;
 use crate::ledger::BurnError;
 use crate::{
     consolidate::consolidate_deposits,
@@ -104,15 +104,13 @@ pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: R) {
     };
 
     let reschedule = scopeguard::guard(runtime.clone(), |runtime| {
-        runtime.set_timer_with_clone(RESCHEDULE_DELAY, process_pending_withdrawals);
+        runtime.set_timer(Duration::ZERO, process_pending_withdrawals);
     });
 
     let (affordable_requests, num_pending_withdrawals) = read_state(|state| {
         let mut available_balance = state.balance();
         let pending = state.pending_withdrawal_requests();
 
-        // Scan all pending requests to find what's affordable, so that we can accurately
-        // detect when balance (not capacity) is the limiting factor.
         let affordable: Vec<_> = pending
             .values()
             .take_while(|r| {
@@ -134,7 +132,7 @@ pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: R) {
             Priority::Info,
             "Insufficient minter balance for some withdrawal requests, scheduling consolidation"
         );
-        runtime.set_timer_with_clone(Duration::ZERO, consolidate_deposits);
+        runtime.set_timer(Duration::ZERO, consolidate_deposits);
     }
 
     let batches: Vec<Vec<_>> = affordable_requests
