@@ -94,8 +94,7 @@ pub fn init_schnorr_master_key() {
     });
 }
 
-/// Returns a [`Signature`] unique for any `usize` index.
-/// For `i < 256`, produces `[i as u8; 64]`.
+/// Returns a [`Signature`] unique for any `usize` index, derived from `i as u64` via le_bytes.
 pub fn signature(i: usize) -> solana_signature::Signature {
     let mut bytes = [0u8; 64];
     bytes[..8].copy_from_slice(&(i as u64).to_le_bytes());

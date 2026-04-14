@@ -57,9 +57,9 @@ pub async fn finalize_transactions<R: CanisterRuntime>(runtime: R) {
         return;
     }
 
-    let num_remaining = all_transactions
-        .len()
-        .saturating_sub(MAX_CONCURRENT_RPC_CALLS * MAX_SIGNATURES_PER_STATUS_CHECK);
+    let reschedule = scopeguard::guard(runtime.clone(), |runtime| {
+        runtime.set_timer(Duration::ZERO, finalize_transactions);
+    });
 
     // Fetch the current slot before checking statuses: if a transaction finalizes
     // after we snapshot the slot, the status check will see it as finalized rather
@@ -118,8 +118,8 @@ pub async fn finalize_transactions<R: CanisterRuntime>(runtime: R) {
         }
     }
 
-    if num_remaining > 0 {
-        runtime.set_timer(Duration::ZERO, finalize_transactions);
+    if all_transactions.len() <= MAX_CONCURRENT_RPC_CALLS * MAX_SIGNATURES_PER_STATUS_CHECK {
+        scopeguard::ScopeGuard::into_inner(reschedule);
     }
 }
 
@@ -142,12 +142,15 @@ pub async fn resubmit_transactions<R: CanisterRuntime>(runtime: R) {
         return;
     }
 
-    let num_remaining = to_resubmit.len().saturating_sub(MAX_CONCURRENT_RPC_CALLS);
+    let reschedule = scopeguard::guard(runtime.clone(), |runtime| {
+        runtime.set_timer(Duration::ZERO, resubmit_transactions);
+    });
+    let fits_in_one_round = to_resubmit.len() <= MAX_CONCURRENT_RPC_CALLS;
 
     resubmit_expired_transactions(&runtime, to_resubmit).await;
 
-    if num_remaining > 0 {
-        runtime.set_timer(Duration::ZERO, resubmit_transactions);
+    if fits_in_one_round {
+        scopeguard::ScopeGuard::into_inner(reschedule);
     }
 }
 

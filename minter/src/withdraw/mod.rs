@@ -12,10 +12,10 @@ use itertools::Itertools;
 use sol_rpc_types::Slot;
 use solana_hash::Hash;
 
-use crate::constants::MAX_CONCURRENT_RPC_CALLS;
 use crate::ledger::BurnError;
 use crate::{
     consolidate::consolidate_deposits,
+    constants::MAX_CONCURRENT_RPC_CALLS,
     guard::{TimerGuard, withdrawal_guard},
     ledger::burn,
     runtime::CanisterRuntime,
