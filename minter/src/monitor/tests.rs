@@ -1,4 +1,4 @@
-use super::{MAX_BLOCKHASH_AGE, monitor_submitted_transactions};
+use super::{MAX_BLOCKHASH_AGE, finalize_transactions, resubmit_transactions};
 use crate::{
     state::{TaskType, event::EventType, mutate_state, read_state, reset_state},
     storage::reset_events,
@@ -22,57 +22,53 @@ const RECENT_SLOT: Slot = CURRENT_SLOT - 10;
 const EXPIRED_SLOT: Slot = CURRENT_SLOT - MAX_BLOCKHASH_AGE - 1;
 const RESUBMISSION_SLOT: Slot = CURRENT_SLOT + 5;
 
-#[tokio::test]
-async fn should_return_early_if_no_submitted_transactions() {
-    setup();
-
-    monitor_submitted_transactions(TestCanisterRuntime::new().with_increasing_time()).await;
-
-    EventsAssert::assert_no_events_recorded();
-}
-
-#[tokio::test]
-async fn should_return_early_if_task_already_active() {
-    setup();
-    submit_consolidation_transaction(CURRENT_SLOT);
-
-    mutate_state(|s| {
-        s.active_tasks_mut()
-            .insert(TaskType::MonitorSubmittedTransactions);
-    });
-
-    let events_before = EventsAssert::from_recorded();
-
-    // We return early, therefore no RPC calls are made
-    let runtime = TestCanisterRuntime::new();
-
-    monitor_submitted_transactions(runtime).await;
-
-    let events_after = EventsAssert::from_recorded();
-    assert_eq!(events_before, events_after);
-}
-
-#[tokio::test]
-async fn should_return_early_if_fetching_current_slot_fails() {
-    setup();
-    submit_consolidation_transaction(EXPIRED_SLOT);
-
-    let events_before = EventsAssert::from_recorded();
-
-    let error = SlotResult::Consistent(Err(RpcError::ValidationError("Error".to_string())));
-    let runtime = TestCanisterRuntime::new()
-        .add_stub_response(error.clone())
-        .add_stub_response(error.clone())
-        .add_stub_response(error);
-
-    monitor_submitted_transactions(runtime).await;
-
-    let events_after = EventsAssert::from_recorded();
-    assert_eq!(events_before, events_after);
-}
-
 mod finalization {
     use super::*;
+
+    #[tokio::test]
+    async fn should_return_early_if_no_submitted_transactions() {
+        setup();
+
+        finalize_transactions(TestCanisterRuntime::new().with_increasing_time()).await;
+
+        EventsAssert::assert_no_events_recorded();
+    }
+
+    #[tokio::test]
+    async fn should_return_early_if_task_already_active() {
+        setup();
+        submit_consolidation_transaction(CURRENT_SLOT);
+
+        mutate_state(|s| {
+            s.active_tasks_mut().insert(TaskType::FinalizeTransactions);
+        });
+
+        let events_before = EventsAssert::from_recorded();
+
+        finalize_transactions(TestCanisterRuntime::new()).await;
+
+        let events_after = EventsAssert::from_recorded();
+        assert_eq!(events_before, events_after);
+    }
+
+    #[tokio::test]
+    async fn should_return_early_if_fetching_current_slot_fails() {
+        setup();
+        submit_consolidation_transaction(EXPIRED_SLOT);
+
+        let events_before = EventsAssert::from_recorded();
+
+        let error = SlotResult::Consistent(Err(RpcError::ValidationError("Error".to_string())));
+        let runtime = TestCanisterRuntime::new()
+            .add_stub_response(error.clone())
+            .add_stub_response(error.clone())
+            .add_stub_response(error);
+
+        finalize_transactions(runtime).await;
+
+        let events_after = EventsAssert::from_recorded();
+        assert_eq!(events_before, events_after);
+    }
 
     #[tokio::test]
     async fn should_finalize_transaction_with_finalized_status() {
@@ -88,7 +84,7 @@ mod finalization {
                 finalized_status(),
             )])));
 
-        monitor_submitted_transactions(runtime).await;
+        finalize_transactions(runtime).await;
 
         EventsAssert::from_recorded()
             .expect_contains_event_eq(EventType::SucceededTransaction { signature });
@@ -132,7 +128,7 @@ mod finalization {
 
         let events_before = EventsAssert::from_recorded();
 
-        monitor_submitted_transactions(runtime).await;
+        finalize_transactions(runtime).await;
 
         let events_after = EventsAssert::from_recorded();
         assert_eq!(events_before, events_after);
@@ -159,7 +155,7 @@ mod finalization {
                 },
             )])));
 
-        monitor_submitted_transactions(runtime).await;
+        finalize_transactions(runtime).await;
 
         EventsAssert::from_recorded()
             .expect_contains_event_eq(EventType::FailedTransaction { signature });
@@ -193,7 +189,7 @@ mod finalization {
             ])));
         // sig_b is not_found but RECENT_SLOT is not expired, so no resubmission.
 
-        monitor_submitted_transactions(runtime).await;
+        finalize_transactions(runtime).await;
 
         EventsAssert::from_recorded()
             .expect_contains_event_eq(EventType::SucceededTransaction {
@@ -206,6 +202,8 @@ mod finalization {
         read_state(|s| {
             assert_eq!(s.submitted_transactions().len(), 1);
             assert!(s.submitted_transactions().contains_key(&signature(sig_b)));
+            // sig_b is not yet expired (RECENT_SLOT), so not marked for resubmission
+            assert!(s.transactions_to_resubmit().is_empty());
         });
     }
 
@@ -241,24 +239,65 @@ mod resubmission {
     use super::*;
 
     #[tokio::test]
+    async fn should_return_early_if_no_transactions_to_resubmit() {
+        setup();
+
+        resubmit_transactions(TestCanisterRuntime::new().with_increasing_time()).await;
+
+        EventsAssert::assert_no_events_recorded();
+    }
+
+    #[tokio::test]
+    async fn should_return_early_if_task_already_active() {
+        setup();
+        let sig = submit_consolidation_transaction(EXPIRED_SLOT);
+        events::expire_transaction(sig);
+
+        mutate_state(|s| {
+            s.active_tasks_mut().insert(TaskType::ResubmitTransactions);
+        });
+
+        let events_before = EventsAssert::from_recorded();
+
+        resubmit_transactions(TestCanisterRuntime::new()).await;
+
+        let events_after = EventsAssert::from_recorded();
+        assert_eq!(events_before, events_after);
+    }
+
+    #[tokio::test]
     async fn should_resubmit_expired_transaction_with_no_status() {
         setup();
 
         let old_signature = submit_consolidation_transaction(EXPIRED_SLOT);
-
         let new_signature = signature(0xAA);
 
-        let runtime = TestCanisterRuntime::new()
+        // Step 1: finalize_transactions fetches slot, checks status, marks expired
+        let finalize_runtime = TestCanisterRuntime::new()
             .with_increasing_time()
             .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
             .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())))
-            .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![None])))
+            .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![None])));
+
+        finalize_transactions(finalize_runtime).await;
+
+        EventsAssert::from_recorded().expect_contains_event_eq(EventType::ExpiredTransaction {
+            signature: old_signature,
+        });
+
+        read_state(|s| {
+            assert!(s.transactions_to_resubmit().contains_key(&old_signature));
+        });
+
+        // Step 2: resubmit_transactions fetches a fresh blockhash and resubmits
+        let resubmit_runtime = TestCanisterRuntime::new()
+            .with_increasing_time()
             .add_stub_response(SlotResult::Consistent(Ok(RESUBMISSION_SLOT)))
             .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())))
             .add_stub_response(SendTransactionResult::Consistent(Ok(new_signature.into())))
             .add_signature(new_signature.into());
 
-        monitor_submitted_transactions(runtime).await;
+        resubmit_transactions(resubmit_runtime).await;
 
         EventsAssert::from_recorded()
             .expect_contains_event_eq(EventType::ExpiredTransaction {
@@ -284,7 +323,7 @@ mod resubmission {
 
         let events_before = EventsAssert::from_recorded();
 
-        let runtime = TestCanisterRuntime::new()
+        let finalize_runtime = TestCanisterRuntime::new()
             .with_increasing_time()
             .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
             .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())))
@@ -292,12 +331,15 @@ mod resubmission {
                 RpcError::ValidationError("Error".to_string()),
             )));
 
-        monitor_submitted_transactions(runtime).await;
+        finalize_transactions(finalize_runtime).await;
 
         let events_after = EventsAssert::from_recorded();
         assert_eq!(events_before, events_after);
 
-        read_state(|s| assert_eq!(s.submitted_transactions().len(), 1));
+        read_state(|s| {
+            assert_eq!(s.submitted_transactions().len(), 1);
+            assert!(s.transactions_to_resubmit().is_empty());
+        });
     }
 
     #[tokio::test]
@@ -305,20 +347,24 @@ mod resubmission {
         setup();
 
         let old_signature = submit_consolidation_transaction(EXPIRED_SLOT);
-
         let new_signature = signature(0xAA);
 
-        let runtime = TestCanisterRuntime::new()
+        let finalize_runtime = TestCanisterRuntime::new()
             .with_increasing_time()
             .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
             .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())))
-            .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![None])))
+            .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![None])));
+
+        finalize_transactions(finalize_runtime).await;
+
+        let resubmit_runtime = TestCanisterRuntime::new()
+            .with_increasing_time()
             .add_stub_response(SlotResult::Consistent(Ok(RESUBMISSION_SLOT)))
             .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())))
             .add_stub_response(SendTransactionResult::Inconsistent(vec![]))
             .add_signature(new_signature.into());
 
-        monitor_submitted_transactions(runtime).await;
+        resubmit_transactions(resubmit_runtime).await;
 
         EventsAssert::from_recorded()
             .expect_contains_event_eq(EventType::ExpiredTransaction {
@@ -342,20 +388,30 @@ mod resubmission {
             submit_consolidation_transaction_with_signature(i as u8, EXPIRED_SLOT);
         }
 
-        let mut runtime = TestCanisterRuntime::new()
+        // finalize_transactions: marks all as expired
+        let finalize_runtime = TestCanisterRuntime::new()
             .with_increasing_time()
             .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
             .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())))
             // getSignatureStatuses: all not found
             .add_stub_response(SignatureStatusesResult::Consistent(Ok(
                 vec![None; num_transactions],
-            )))
-            // Round 1: get_recent_slot_and_blockhash for resubmission (getSlot + getBlock)
+            )));
+
+        finalize_transactions(finalize_runtime).await;
+
+        read_state(|s| {
+            assert_eq!(s.transactions_to_resubmit().len(), num_transactions);
+        });
+
+        // resubmit_transactions: processes in rounds of MAX_CONCURRENT_RPC_CALLS
+        let mut resubmit_runtime = TestCanisterRuntime::new()
+            .with_increasing_time()
             .add_stub_response(SlotResult::Consistent(Ok(RESUBMISSION_SLOT)))
             .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())));
 
         for i in 0..MAX_CONCURRENT_RPC_CALLS {
-            runtime = runtime
+            resubmit_runtime = resubmit_runtime
                 .add_stub_response(SendTransactionResult::Consistent(Ok(signature(
                     0xA0 + i as u8,
                 )
@@ -363,12 +419,12 @@ mod resubmission {
                 .add_signature([0xA0 + i as u8; 64]);
         }
 
-        runtime = runtime
+        resubmit_runtime = resubmit_runtime
             .add_stub_response(SlotResult::Consistent(Ok(RESUBMISSION_SLOT)))
             .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())));
 
         for i in 0..2_usize {
-            runtime = runtime
+            resubmit_runtime = resubmit_runtime
                 .add_stub_response(SendTransactionResult::Consistent(Ok(signature(
                     0xB0 + i as u8,
                 )
@@ -376,7 +432,7 @@ mod resubmission {
                 .add_signature([0xB0 + i as u8; 64]);
         }
 
-        monitor_submitted_transactions(runtime).await;
+        resubmit_transactions(resubmit_runtime).await;
 
         read_state(|s| assert_eq!(s.submitted_transactions().len(), num_transactions));
     }

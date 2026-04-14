@@ -1,5 +1,5 @@
 use crate::{
-    constants::MAX_CONCURRENT_RPC_CALLS,
+    constants::{MAX_CONCURRENT_RPC_CALLS, MAX_TIMER_ROUNDS},
     guard::{TimerGuard, withdrawal_guard},
     sol_transfer::MAX_WITHDRAWALS_PER_TX,
     state::{TaskType, read_state},
@@ -8,7 +8,7 @@ use crate::{
         confirmed_block, events, init_balance, init_balance_to, init_schnorr_master_key,
         init_state, runtime::TestCanisterRuntime, signature,
     },
-    withdraw::{MAX_WITHDRAWAL_ROUNDS, process_pending_withdrawals, withdraw, withdrawal_status},
+    withdraw::{process_pending_withdrawals, withdraw, withdrawal_status},
 };
 use assert_matches::assert_matches;
 use candid::{Nat, Principal};
@@ -565,18 +565,18 @@ mod process_pending_withdrawals_tests {
 
         let slot = 1;
         let max_per_round = MAX_WITHDRAWALS_PER_TX * MAX_CONCURRENT_RPC_CALLS;
-        // Create enough requests to fill MAX_WITHDRAWAL_ROUNDS + 1 rounds.
-        let request_count = max_per_round * MAX_WITHDRAWAL_ROUNDS + 1;
+        // Create enough requests to fill MAX_TIMER_ROUNDS + 1 rounds.
+        let request_count = max_per_round * MAX_TIMER_ROUNDS + 1;
 
         // Insert pending withdrawal requests directly into state.
         for i in 0..request_count {
             events::accept_withdrawal(account(i as u8), i as u64, MINIMUM_WITHDRAWAL_AMOUNT);
         }
 
-        // Set up RPC responses for MAX_WITHDRAWAL_ROUNDS rounds.
+        // Set up RPC responses for MAX_TIMER_ROUNDS rounds.
         let mut runtime = TestCanisterRuntime::new().with_increasing_time();
         let mut sig_counter: u8 = 0;
-        for _round in 0..MAX_WITHDRAWAL_ROUNDS {
+        for _round in 0..MAX_TIMER_ROUNDS {
             runtime = runtime
                 .add_stub_response(GetSlotResult::Consistent(Ok(slot)))
                 .add_stub_response(GetBlockResult::Consistent(Ok(confirmed_block())));
@@ -593,8 +593,8 @@ mod process_pending_withdrawals_tests {
 
         process_pending_withdrawals(&runtime).await;
 
-        let processed = max_per_round * MAX_WITHDRAWAL_ROUNDS;
-        // All requests within MAX_WITHDRAWAL_ROUNDS rounds should be processed
+        let processed = max_per_round * MAX_TIMER_ROUNDS;
+        // All requests within MAX_TIMER_ROUNDS rounds should be processed
         for i in 0..processed {
             assert_matches!(
                 withdrawal_status(i as u64),
@@ -602,7 +602,7 @@ mod process_pending_withdrawals_tests {
                 "withdrawal {i} should be TxSent"
             );
         }
-        // The extra request beyond MAX_WITHDRAWAL_ROUNDS rounds should remain pending
+        // The extra request beyond MAX_TIMER_ROUNDS rounds should remain pending
         assert_matches!(
             withdrawal_status(processed as u64),
             WithdrawalStatus::Pending,

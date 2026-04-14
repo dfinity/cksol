@@ -12,7 +12,7 @@ use itertools::Itertools;
 use sol_rpc_types::Slot;
 use solana_hash::Hash;
 
-use crate::constants::MAX_CONCURRENT_RPC_CALLS;
+use crate::constants::{MAX_CONCURRENT_RPC_CALLS, MAX_TIMER_ROUNDS};
 use crate::ledger::BurnError;
 use crate::{
     consolidate::consolidate_deposits,
@@ -30,7 +30,6 @@ use crate::{
 };
 
 pub const WITHDRAWAL_PROCESSING_DELAY: Duration = Duration::from_mins(1);
-pub(crate) const MAX_WITHDRAWAL_ROUNDS: usize = 5;
 
 #[cfg(test)]
 mod tests;
@@ -104,8 +103,7 @@ pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: &R) {
         }
     };
 
-    let max_per_invocation =
-        MAX_WITHDRAWAL_ROUNDS * MAX_CONCURRENT_RPC_CALLS * MAX_WITHDRAWALS_PER_TX;
+    let max_per_invocation = MAX_TIMER_ROUNDS * MAX_CONCURRENT_RPC_CALLS * MAX_WITHDRAWALS_PER_TX;
 
     let (affordable_requests, num_pending_withdrawals) = read_state(|state| {
         let mut available_balance = state.balance();
@@ -152,7 +150,7 @@ pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: &R) {
         .into_iter()
         .chunks(MAX_CONCURRENT_RPC_CALLS)
         .into_iter()
-        .take(MAX_WITHDRAWAL_ROUNDS)
+        .take(MAX_TIMER_ROUNDS)
         .map(Iterator::collect)
         .collect();
 
