@@ -15,6 +15,7 @@ Each ckSOL is backed by exactly 1 SOL held by the ckSOL minter canister. ckSOL c
   - [Deposit: SOL → ckSOL](#deposit-sol--cksol)
   - [Withdrawal: ckSOL → SOL](#withdrawal-cksol--sol)
 - [Architecture](#architecture)
+- [Interacting via the CLI](#interacting-via-the-cli)
 - [Repository Structure](#repository-structure)
 - [Development](#development)
   - [Prerequisites](#prerequisites)
@@ -88,6 +89,55 @@ The minter controls one or more Solana addresses derived from [chain-key Ed25519
 **ckSOL Ledger** — A standard ICRC-1/ICRC-2 ledger canister. It tracks ckSOL balances and processes mints and burns as instructed by the minter.
 
 **SOL RPC Canister** — A shared infrastructure canister on the Internet Computer that relays Solana JSON-RPC calls to multiple providers via HTTPS outcalls and aggregates their responses. See the [SOL RPC canister repository](https://github.com/dfinity/sol-rpc-canister) for details.
+
+## Interacting via the CLI
+
+You can interact with the ckSOL minter directly using [`dfx`](https://internetcomputer.org/docs/building-apps/developer-tools/dev-tools-overview#dfx).
+
+The production minter canister ID is `lh22c-kyaaa-aaaar-qb5nq-cai`. For convenience, set it as a shell variable:
+
+```sh
+MINTER=lh22c-kyaaa-aaaar-qb5nq-cai
+```
+
+### Get minter info
+
+Query fees, minimum amounts, and the current minter balance:
+
+```sh
+dfx canister call --ic "$MINTER" get_minter_info '()'
+```
+
+### Get your deposit address
+
+Returns the Solana address you should send SOL to in order to deposit:
+
+```sh
+dfx canister call --ic "$MINTER" get_deposit_address '(record { owner = null; subaccount = null })'
+```
+
+### Notify the minter of a deposit
+
+After sending SOL to your deposit address, call `update_balance` with the Solana transaction signature to trigger minting. Replace `<SIGNATURE>` with the base-58 encoded transaction signature:
+
+```sh
+dfx canister call --ic "$MINTER" update_balance \
+  '(record { owner = null; subaccount = null; signature = "<SIGNATURE>" })'
+```
+
+A successful response looks like:
+
+```
+(variant { Ok = variant { Minted = record { block_index = 42; minted_amount = 990_000_000; deposit_id = ... } } })
+```
+
+### Check a withdrawal status
+
+After calling `withdraw`, track the status using the `block_index` returned in the response:
+
+```sh
+dfx canister call --ic "$MINTER" withdrawal_status '(42)'
+```
 
 ## Repository Structure
 
