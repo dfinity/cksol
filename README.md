@@ -92,20 +92,14 @@ The minter controls one or more Solana addresses derived from [chain-key Ed25519
 
 ## Interacting via the CLI
 
-You can interact with the ckSOL minter directly using [`dfx`](https://internetcomputer.org/docs/building-apps/developer-tools/dev-tools-overview#dfx).
-
-The production minter canister ID is `lh22c-kyaaa-aaaar-qb5nq-cai`. For convenience, set it as a shell variable:
-
-```sh
-MINTER=lh22c-kyaaa-aaaar-qb5nq-cai
-```
+You can interact with the ckSOL minter using [`icp-cli`](https://github.com/dfinity/icp-cli). Pass `-e prod` (or `-e staging`) to target the corresponding environment defined in `icp.yaml`.
 
 ### Get minter info
 
 Query fees, minimum amounts, and the current minter balance:
 
 ```sh
-dfx canister call --ic "$MINTER" get_minter_info '()'
+icp canister call -e prod cksol_minter get_minter_info '()'
 ```
 
 ### Get your deposit address
@@ -113,7 +107,8 @@ dfx canister call --ic "$MINTER" get_minter_info '()'
 Returns the Solana address you should send SOL to in order to deposit:
 
 ```sh
-dfx canister call --ic "$MINTER" get_deposit_address '(record { owner = null; subaccount = null })'
+icp canister call -e prod cksol_minter get_deposit_address \
+  '(record { owner = null; subaccount = null })'
 ```
 
 ### Notify the minter of a deposit
@@ -121,7 +116,7 @@ dfx canister call --ic "$MINTER" get_deposit_address '(record { owner = null; su
 After sending SOL to your deposit address, call `update_balance` with the Solana transaction signature to trigger minting. Replace `<SIGNATURE>` with the base-58 encoded transaction signature:
 
 ```sh
-dfx canister call --ic "$MINTER" update_balance \
+icp canister call -e prod cksol_minter update_balance \
   '(record { owner = null; subaccount = null; signature = "<SIGNATURE>" })'
 ```
 
@@ -136,7 +131,7 @@ A successful response looks like:
 After calling `withdraw`, track the status using the `block_index` returned in the response:
 
 ```sh
-dfx canister call --ic "$MINTER" withdrawal_status '(42)'
+icp canister call -e prod cksol_minter withdrawal_status '(42)'
 ```
 
 ## Repository Structure
