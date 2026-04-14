@@ -29,6 +29,21 @@ thread_local! {
                   )
               )
         );
+
+    static UNSTABLE_METRICS: RefCell<Metrics> = const { RefCell::new(Metrics::new()) };
+}
+
+#[derive(Default)]
+pub(crate) struct Metrics {
+    pub post_upgrade_instructions_consumed: u64,
+}
+
+impl Metrics {
+    const fn new() -> Self {
+        Self {
+            post_upgrade_instructions_consumed: 0,
+        }
+    }
 }
 
 /// Appends the event to the event log.
@@ -46,6 +61,20 @@ pub fn record_event<R: CanisterRuntime>(payload: EventType, runtime: &R) {
 /// Returns the total number of events in the audit log.
 pub fn total_event_count() -> u64 {
     EVENTS.with(|events| events.borrow().len())
+}
+
+pub(crate) fn with_unstable_metrics<F, R>(f: F) -> R
+where
+    F: FnOnce(&Metrics) -> R,
+{
+    UNSTABLE_METRICS.with(|m| f(&m.borrow()))
+}
+
+pub(crate) fn with_unstable_metrics_mut<F, R>(f: F) -> R
+where
+    F: FnOnce(&mut Metrics) -> R,
+{
+    UNSTABLE_METRICS.with(|m| f(&mut m.borrow_mut()))
 }
 
 pub fn with_event_iter<F, R>(f: F) -> R

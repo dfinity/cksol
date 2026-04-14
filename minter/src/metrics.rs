@@ -84,6 +84,16 @@ pub fn encode_metrics(w: &mut MetricsEncoder<Vec<u8>>, s: &State) -> std::io::Re
             "Age of the oldest incomplete withdrawal request in seconds.",
         )?;
     }
+    w.encode_gauge(
+        "minter_balance",
+        s.balance().metric_value(),
+        "Minter balance in Lamports.",
+    )?;
+    w.encode_gauge(
+        "post_upgrade_instructions_consumed",
+        storage::with_unstable_metrics(|m| m.post_upgrade_instructions_consumed).metric_value(),
+        "Number of instructions consumed during the last post-upgrade.",
+    )?;
     Ok(())
 }
 
