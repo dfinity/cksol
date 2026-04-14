@@ -30,7 +30,7 @@ The ckSOL minter canister is the core component of the system. It manages the co
 
 The ckSOL token itself is implemented as an [ICRC-1](https://github.com/dfinity/ICRC-1) ledger canister.
 
-The minter controls one or more Solana addresses derived from [chain-key Ed25519 signatures](https://internetcomputer.org/docs/references/ic-interface-spec#ic-sign-with-schnorr). No private key ever exists in plaintext — transactions are signed by the Internet Computer's threshold signature protocol.
+The minter controls one or more Solana addresses derived from a [chain-key Ed25519 public key](https://internetcomputer.org/docs/references/ic-interface-spec#ic-sign-with-schnorr) and a per-account derivation path. No private key ever exists in plaintext — transactions are signed by the Internet Computer's threshold signature protocol.
 
 ### Deposit: SOL → ckSOL
 
@@ -38,7 +38,7 @@ The minter controls one or more Solana addresses derived from [chain-key Ed25519
 
 2. **Send SOL.** Transfer SOL to that deposit address from any Solana wallet.
 
-3. **Notify the minter.** Call `update_balance` on the minter with the Solana transaction signature. The minter:
+3. **Notify the minter.** Call `update_balance` on the minter with the Solana transaction signature and the same owner/subaccount used in step 1. This call requires attaching cycles (see `update_balance_required_cycles` in `get_minter_info`). The minter:
    - Fetches the transaction from Solana via the SOL RPC canister.
    - Verifies it is a valid transfer to your deposit address.
    - Mints the corresponding amount of ckSOL (minus the deposit fee) to your ICRC-1 ledger account.
@@ -68,7 +68,7 @@ The minter controls one or more Solana addresses derived from [chain-key Ed25519
   │  │   (this repo)       │◀──────│                               │    │
   │  └──────────┬──────────┘       └───────────────────────────────┘    │
   │             │                                                       │
-  │             │ HTTPS outcalls                                        │
+  │             │ inter-canister call                                   │
   │             ▼                                                       │
   │  ┌─────────────────────┐                                            │
   │  │   SOL RPC Canister  │                                            │
@@ -113,7 +113,9 @@ icp canister call -e prod cksol_minter get_deposit_address \
 
 ### Notify the minter of a deposit
 
-After sending SOL to your deposit address, call `update_balance` with the Solana transaction signature to trigger minting. Replace `<SIGNATURE>` with the base-58 encoded transaction signature:
+After sending SOL to your deposit address, call `update_balance` with the Solana transaction signature to trigger minting. Pass the same `owner`/`subaccount` used when calling `get_deposit_address`. Replace `<SIGNATURE>` with the base-58 encoded transaction signature.
+
+> **Note:** This call requires attaching cycles. Check the required amount via `get_minter_info` (the `update_balance_required_cycles` field).
 
 ```sh
 icp canister call -e prod cksol_minter update_balance \
@@ -143,8 +145,8 @@ icp canister call -e prod cksol_minter withdrawal_status '(42)'
 │   │   ├── address/         # Deposit address derivation
 │   │   ├── consolidate/     # Deposit consolidation logic
 │   │   ├── dashboard/       # HTTP dashboard
-│   │   ├── lifecycle/       # Canister init/upgrade and event log
-│   │   ├── metrics/         # Prometheus metrics
+│   │   ├── lifecycle.rs     # Canister init/upgrade and event log
+│   │   ├── metrics.rs       # Prometheus metrics
 │   │   ├── monitor/         # Transaction monitoring
 │   │   ├── state/           # Minter state and event sourcing
 │   │   ├── update_balance/  # Deposit processing
