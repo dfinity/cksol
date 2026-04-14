@@ -30,7 +30,7 @@ The ckSOL minter canister is the core component of the system. It manages the co
 
 The ckSOL token itself is implemented as an [ICRC-1](https://github.com/dfinity/ICRC-1) ledger canister.
 
-The minter controls one or more Solana addresses derived from a [chain-key Ed25519 public key](https://internetcomputer.org/docs/references/ic-interface-spec#ic-sign-with-schnorr) and a per-account derivation path. No private key ever exists in plaintext — transactions are signed by the Internet Computer's threshold signature protocol.
+The minter controls one or more Solana addresses derived from a [threshold Ed25519 (tEdDSA)](https://internetcomputer.org/docs/references/ic-interface-spec#ic-sign-with-schnorr) public key and a per-account derivation path. No private key ever exists in plaintext — Solana transactions are signed via the IC management canister's threshold Schnorr API (`sign_with_schnorr`).
 
 ### Deposit: SOL → ckSOL
 
@@ -72,16 +72,15 @@ The minter controls one or more Solana addresses derived from a [chain-key Ed255
   │             ▼                                                       │
   │  ┌─────────────────────┐                                            │
   │  │   SOL RPC Canister  │                                            │
-  │  │   (tghme-zyaaa-...  │                                            │
   │  └──────────┬──────────┘                                            │
   │             │                                                       │
   └─────────────┼───────────────────────────────────────────────────────┘
                 │
                 ▼ HTTPS outcalls
-  ┌─────────────┬───────────────────────────────────────┐
-  │             │    Solana JSON-RPC providers          │
-  │             │  Alchemy, Helius, Ankr, dRPC, ...     │
-  └─────────────┴───────────────────────────────────────┘
+         ┌──────┴─────────────────────────────────────────┐
+         │       Solana JSON-RPC providers                │
+         │  Alchemy, Helius, Ankr, dRPC, Chainstack, ...  │
+         └──────┬─────────────────────────────────────────┘
                 │
                 ▼
          ┌──────────────┐
@@ -121,7 +120,7 @@ icp canister call -e prod cksol_minter get_deposit_address \
 
 After sending SOL to your deposit address, call `update_balance` with the Solana transaction signature to trigger minting. Pass the same `owner`/`subaccount` used when calling `get_deposit_address`. Replace `<SIGNATURE>` with the base-58 encoded transaction signature.
 
-> **Note:** This call requires attaching cycles. Check the required amount via `get_minter_info` (the `update_balance_required_cycles` field).
+> **Note:** This call requires attaching cycles. Check the required amount via `get_minter_info` (the `update_balance_required_cycles` field). To attach cycles with `icp-cli`, route the call through a cycles wallet using `--proxy <wallet-principal> --cycles <amount>`.
 
 ```sh
 icp canister call -e prod cksol_minter update_balance \
@@ -174,8 +173,10 @@ icp canister call -e prod cksol_minter withdrawal_status '(42)'
 
 - [Rust](https://rustup.rs/) — the correct toolchain version is pinned in `rust-toolchain.toml`.
 - [`ic-wasm`](https://github.com/dfinity/ic-wasm) version 0.3.5 — used for Wasm post-processing.
+- `jq` — used by `./scripts/build` to generate Wasm metadata.
+- `gzip` — used by `./scripts/build` to compress the output Wasm.
 
-Install all dependencies by running:
+Install the Rust toolchain and `ic-wasm` by running:
 
 ```sh
 ./scripts/bootstrap
@@ -199,10 +200,17 @@ cargo build
 
 ### Testing
 
-Run unit and integration tests:
+Run unit tests and PocketIC-based integration tests:
 
 ```sh
 cargo test
+```
+
+The integration tests in `integration_tests/tests/solana_test_validator.rs` additionally require a running Solana test validator at `http://localhost:8899`. Run them separately after starting the validator:
+
+```sh
+solana-test-validator &
+cargo test -p cksol-int-tests --test solana_test_validator
 ```
 
 ## Related Projects
