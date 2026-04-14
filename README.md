@@ -45,6 +45,21 @@ The minter controls one or more Solana addresses derived from a [threshold Schno
 
 4. **Consolidation.** The minter periodically consolidates funds from individual deposit addresses into its main Solana account. A small consolidation fee is charged in cycles when calling `update_balance`.
 
+```mermaid
+sequenceDiagram
+    actor User
+    participant Minter as ckSOL Minter
+    participant Ledger as ckSOL Ledger
+
+    User->>Minter: get_deposit_address(owner, subaccount)
+    Minter-->>User: deposit_address
+
+    User->>Minter: update_balance(owner, subaccount, signature)
+    Minter->>Ledger: icrc1_transfer(amount - deposit_fee, owner/subaccount)
+    Ledger-->>Minter: block_index
+    Minter-->>User: Minted { block_index, minted_amount }
+```
+
 ### Withdrawal: ckSOL → SOL
 
 1. **Approve the minter.** Grant the minter an [ICRC-2](https://github.com/dfinity/ICRC-1/blob/main/standards/ICRC-2/README.md) allowance on your ckSOL ledger account.
@@ -56,6 +71,24 @@ The minter controls one or more Solana addresses derived from a [threshold Schno
 3. **Transaction submission.** The minter constructs a Solana transaction, signs it using chain-key Ed25519, and submits it via the SOL RPC canister.
 
 4. **Monitor status.** Call `withdrawal_status` with the ledger burn index returned by `withdraw` to track the status of your withdrawal request (`Pending` → `TxSent` → `TxFinalized`).
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant Minter as ckSOL Minter
+    participant Ledger as ckSOL Ledger
+
+    User->>Ledger: icrc2_approve(spender=minter, amount)
+    Ledger-->>User: ok
+
+    User->>Minter: withdraw(destination_address, amount)
+    Minter->>Ledger: icrc2_transfer_from(from=user, amount)
+    Ledger-->>Minter: burn_block_index
+    Minter-->>User: burn_block_index
+
+    User->>Minter: withdrawal_status(burn_block_index)
+    Minter-->>User: TxFinalized(Success)
+```
 
 ## Architecture
 
