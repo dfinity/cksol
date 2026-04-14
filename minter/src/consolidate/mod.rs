@@ -11,11 +11,11 @@ use crate::{
         mutate_state, read_state,
     },
     transaction::{SubmitTransactionError, get_recent_slot_and_blockhash, submit_transaction},
+    utils::chunks::IntoChunksExt,
 };
 use canlog::log;
 use cksol_types_internal::log::Priority;
 use icrc_ledger_types::icrc1::account::Account;
-use itertools::Itertools;
 use sol_rpc_types::{Lamport, Slot};
 use solana_hash::Hash;
 use solana_signature::Signature;
@@ -36,20 +36,19 @@ pub async fn consolidate_deposits<R: CanisterRuntime>(runtime: R) {
         Err(_) => return,
     };
 
-    let all_deposits = read_state(|s| group_deposits_by_account(s.deposits_to_consolidate()));
-    let more_to_process =
-        all_deposits.len() > MAX_CONCURRENT_RPC_CALLS * MAX_TRANSFERS_PER_CONSOLIDATION;
+    let (batches, more_to_process) = read_state(|s| {
+        let all_deposits = group_deposits_by_account(s.deposits_to_consolidate());
+        let more_to_process =
+            all_deposits.len() > MAX_CONCURRENT_RPC_CALLS * MAX_TRANSFERS_PER_CONSOLIDATION;
+        let batches = all_deposits
+            .iter()
+            .into_chunks(MAX_TRANSFERS_PER_CONSOLIDATION)
+            .take_chunks(MAX_CONCURRENT_RPC_CALLS);
+        (batches, more_to_process)
+    });
     let reschedule = scopeguard::guard(runtime.clone(), |runtime| {
         runtime.set_timer(Duration::ZERO, consolidate_deposits);
     });
-
-    let batches: Vec<Vec<_>> = all_deposits
-        .into_iter()
-        .chunks(MAX_TRANSFERS_PER_CONSOLIDATION)
-        .into_iter()
-        .take(MAX_CONCURRENT_RPC_CALLS)
-        .map(Iterator::collect)
-        .collect();
 
     if batches.is_empty() {
         // Nothing to process
