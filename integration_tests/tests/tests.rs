@@ -1106,6 +1106,36 @@ mod metrics_tests {
     }
 
     #[tokio::test]
+    async fn should_report_post_upgrade_instructions_consumed() {
+        let setup = SetupBuilder::new().build().await;
+
+        // After init, the metric should be 0
+        let setup = setup
+            .check_metrics()
+            .await
+            .assert_contains_metric_matching(r"minter_post_upgrade_instructions_consumed 0 \d+")
+            .into();
+
+        // Perform an upgrade
+        setup
+            .minter()
+            .upgrade(UpgradeArgs::default())
+            .await
+            .expect("upgrade failed");
+
+        // After upgrade, the metric should be greater than 0
+        setup
+            .check_metrics()
+            .await
+            .assert_contains_metric_matching(
+                r"minter_post_upgrade_instructions_consumed [1-9]\d* \d+",
+            )
+            .into()
+            .drop()
+            .await;
+    }
+
+    #[tokio::test]
     async fn should_report_oldest_incomplete_withdrawal_age() {
         const WITHDRAWAL_AMOUNT: u64 = 100_000_000;
         const WITHDRAWAL_ADDRESS: &str = "E4MpwNnMWs2XtW5gVrxZvyS7fMq31QD5HvbxmwP45Tz3";
