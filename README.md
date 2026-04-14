@@ -77,7 +77,13 @@ The minter controls one or more Solana addresses derived from a [chain-key Ed255
   │             │                                                       │
   └─────────────┼───────────────────────────────────────────────────────┘
                 │
-                ▼ JSON-RPC (HTTPS outcalls)
+                ▼ HTTPS outcalls
+  ┌─────────────┬───────────────────────────────────────┐
+  │             │    Solana JSON-RPC providers          │
+  │             │  Alchemy, Helius, Ankr, dRPC, ...     │
+  └─────────────┴───────────────────────────────────────┘
+                │
+                ▼
          ┌──────────────┐
          │    Solana    │
          │  Blockchain  │
