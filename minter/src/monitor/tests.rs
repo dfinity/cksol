@@ -22,56 +22,53 @@ const RECENT_SLOT: Slot = CURRENT_SLOT - 10;
 const EXPIRED_SLOT: Slot = CURRENT_SLOT - MAX_BLOCKHASH_AGE - 1;
 const RESUBMISSION_SLOT: Slot = CURRENT_SLOT + 5;
 
-#[tokio::test]
-async fn should_return_early_if_no_submitted_transactions() {
-    setup();
-
-    finalize_transactions(TestCanisterRuntime::new().with_increasing_time()).await;
-
-    EventsAssert::assert_no_events_recorded();
-}
-
-#[tokio::test]
-async fn should_return_early_if_task_already_active() {
-    setup();
-    submit_consolidation_transaction(CURRENT_SLOT);
-
-    mutate_state(|s| {
-        s.active_tasks_mut().insert(TaskType::FinalizeTransactions);
-    });
-
-    let events_before = EventsAssert::from_recorded();
-
-    // We return early, therefore no RPC calls are made
-    let runtime = TestCanisterRuntime::new();
-
-    finalize_transactions(runtime).await;
-
-    let events_after = EventsAssert::from_recorded();
-    assert_eq!(events_before, events_after);
-}
-
-#[tokio::test]
-async fn should_return_early_if_fetching_current_slot_fails() {
-    setup();
-    submit_consolidation_transaction(EXPIRED_SLOT);
-
-    let events_before = EventsAssert::from_recorded();
-
-    let error = SlotResult::Consistent(Err(RpcError::ValidationError("Error".to_string())));
-    let runtime = TestCanisterRuntime::new()
-        .add_stub_response(error.clone())
-        .add_stub_response(error.clone())
-        .add_stub_response(error);
-
-    finalize_transactions(runtime).await;
-
-    let events_after = EventsAssert::from_recorded();
-    assert_eq!(events_before, events_after);
-}
-
 mod finalization {
     use super::*;
+
+    #[tokio::test]
+    async fn should_return_early_if_no_submitted_transactions() {
+        setup();
+
+        finalize_transactions(TestCanisterRuntime::new().with_increasing_time()).await;
+
+        EventsAssert::assert_no_events_recorded();
+    }
+
+    #[tokio::test]
+    async fn should_return_early_if_task_already_active() {
+        setup();
+        submit_consolidation_transaction(CURRENT_SLOT);
+
+        mutate_state(|s| {
+            s.active_tasks_mut().insert(TaskType::FinalizeTransactions);
+        });
+
+        let events_before = EventsAssert::from_recorded();
+
+        finalize_transactions(TestCanisterRuntime::new()).await;
+
+        let events_after = EventsAssert::from_recorded();
+        assert_eq!(events_before, events_after);
+    }
+
+    #[tokio::test]
+    async fn should_return_early_if_fetching_current_slot_fails() {
+        setup();
+        submit_consolidation_transaction(EXPIRED_SLOT);
+
+        let events_before = EventsAssert::from_recorded();
+
+        let error = SlotResult::Consistent(Err(RpcError::ValidationError("Error".to_string())));
+        let runtime = TestCanisterRuntime::new()
+            .add_stub_response(error.clone())
+            .add_stub_response(error.clone())
+            .add_stub_response(error);
+
+        finalize_transactions(runtime).await;
+
+        let events_after = EventsAssert::from_recorded();
+        assert_eq!(events_before, events_after);
+    }
 
     #[tokio::test]
     async fn should_finalize_transaction_with_finalized_status() {
@@ -240,6 +237,42 @@ mod finalization {
 
 mod resubmission {
     use super::*;
+
+    #[tokio::test]
+    async fn should_return_early_if_no_transactions_to_resubmit() {
+        setup();
+
+        resubmit_transactions(TestCanisterRuntime::new().with_increasing_time()).await;
+
+        EventsAssert::assert_no_events_recorded();
+    }
+
+    #[tokio::test]
+    async fn should_return_early_if_task_already_active() {
+        setup();
+        let sig = submit_consolidation_transaction(EXPIRED_SLOT);
+
+        // expire the transaction so transactions_to_resubmit is non-empty
+        let finalize_runtime = TestCanisterRuntime::new()
+            .with_increasing_time()
+            .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
+            .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())))
+            .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![None])));
+        finalize_transactions(finalize_runtime).await;
+
+        let _ = sig;
+
+        mutate_state(|s| {
+            s.active_tasks_mut().insert(TaskType::ResubmitTransactions);
+        });
+
+        let events_before = EventsAssert::from_recorded();
+
+        resubmit_transactions(TestCanisterRuntime::new()).await;
+
+        let events_after = EventsAssert::from_recorded();
+        assert_eq!(events_before, events_after);
+    }
 
     #[tokio::test]
     async fn should_resubmit_expired_transaction_with_no_status() {
