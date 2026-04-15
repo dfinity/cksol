@@ -142,7 +142,7 @@ icp canister call -e prod cksol_minter get_minter_info '()'
 
 ### Get your deposit address
 
-Returns the Solana address you should send SOL to in order to deposit:
+Returns the Solana address you should send SOL to in order to deposit. When `owner` is `null`, it defaults to your calling identity's principal:
 
 ```sh
 icp canister call -e prod cksol_minter get_deposit_address \
@@ -151,7 +151,7 @@ icp canister call -e prod cksol_minter get_deposit_address \
 
 ### Notify the minter of a deposit
 
-After sending SOL to your deposit address, call `update_balance` with the Solana transaction signature to trigger minting. Pass the same `owner`/`subaccount` used when calling `get_deposit_address`. Replace `<SIGNATURE>` with the base-58 encoded transaction signature.
+After sending SOL to your deposit address, call `update_balance` with the Solana transaction signature to trigger minting. Pass the same `owner`/`subaccount` used when calling `get_deposit_address` — when `owner` is `null`, it defaults to your calling identity's principal. Replace `<SIGNATURE>` with the base-58 encoded transaction signature.
 
 > **Note:** This call requires attaching cycles — check the required amount via `get_minter_info` (`update_balance_required_cycles` field). If your identity does not hold cycles directly, you can [convert ICP to cycles](https://cli.internetcomputer.org/0.2/guides/tokens-and-cycles/#converting-icp-to-cycles) first, or route the call through a proxy canister using `--proxy <proxy-principal> --cycles <amount>`.
 
@@ -164,6 +164,21 @@ A successful response looks like:
 
 ```
 (variant { Ok = variant { Minted = record { block_index = 42; minted_amount = 990_000_000; deposit_id = ... } } })
+```
+
+### Submit a withdrawal request
+
+Burns ckSOL from your ledger account and initiates a transfer of the equivalent SOL to the given Solana address. Replace `<SOLANA_ADDRESS>` with the destination address and `<AMOUNT>` with the amount in lamports. The optional `from_subaccount` field defaults to `null` (the default subaccount):
+
+```sh
+icp canister call -e prod cksol_minter withdraw \
+  '(record { address = "<SOLANA_ADDRESS>"; amount = <AMOUNT>; from_subaccount = null })'
+```
+
+A successful response returns the burn block index, which you can use to track the withdrawal:
+
+```
+(variant { Ok = record { block_index = 42 } })
 ```
 
 ### Check a withdrawal status
