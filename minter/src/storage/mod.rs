@@ -85,7 +85,7 @@ where
 }
 
 #[cfg(any(test, feature = "canbench-rs"))]
-pub fn reset_events() {
+pub(crate) fn reset_events() {
     MEMORY_MANAGER.with(|m| {
         EVENTS.with(|events| {
             *events.borrow_mut() = StableLog::new(
