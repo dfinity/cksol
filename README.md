@@ -101,35 +101,17 @@ sequenceDiagram
 
 ## Architecture
 
-```
-                    Internet Computer
-  ┌─────────────────────────────────────────────────────────────────────┐
-  │                       (inter-canister calls)                        │
-  │  ┌─────────────────────┐       ┌────────────────────────────────┐   │
-  │  │   ckSOL Minter      │──────▶│   ckSOL Ledger (ICRC-1/ICRC-2) │   │
-  │  │   (this repo)       │       │                                │   │
-  │  └──────────┬──────────┘       └────────────────────────────────┘   │
-  │             │                                                       │
-  │             │                                                       │
-  │             ▼                                                       │
-  │  ┌─────────────────────┐                                            │
-  │  │   SOL RPC Canister  │                                            │
-  │  └──────────┬──────────┘                                            │
-  │             │                                                       │
-  └─────────────┼───────────────────────────────────────────────────────┘
-                │
-                │ HTTPS outcalls
-                ▼
-         ┌────────────────────────────────────────────────┐
-         │       Solana JSON-RPC providers                │
-         │  Alchemy, Helius, Ankr, dRPC, Chainstack, ...  │
-         └──────┬─────────────────────────────────────────┘
-                │
-                ▼
-         ┌──────────────┐
-         │    Solana    │
-         │  Blockchain  │
-         └──────────────┘
+```mermaid
+graph TD
+    subgraph IC["Internet Computer"]
+        Minter["ckSOL Minter\n(this repo)"]
+        Ledger["ckSOL Ledger"]
+        RPC["SOL RPC Canister"]
+        Minter --> Ledger
+        Minter --> RPC
+    end
+    RPC -->|HTTPS outcalls| Providers["Solana JSON-RPC providers\n(Ankr, Helius, dRPC, ...)"]
+    Providers --> Solana["Solana Blockchain"]
 ```
 
 **ckSOL Minter** — The main canister in this repository. It manages the deposit and withdrawal lifecycle, holds custody of SOL via chain-key addresses, signs Solana transactions using threshold Schnorr over Ed25519, and interacts with the ckSOL ledger.
