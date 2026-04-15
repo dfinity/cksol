@@ -7,7 +7,7 @@
 
 ckSOL is a [chain-key token](https://internetcomputer.org/how-it-works/chain-key-tokens/) on the [Internet Computer](https://internetcomputer.org/) that is backed 1:1 by SOL, the native token of the [Solana](https://solana.com/) blockchain.
 
-Each ckSOL is backed by exactly 1 SOL held by the ckSOL minter canister. ckSOL can be converted back to SOL at any time, and vice versa.
+Each ckSOL is backed by exactly 1 SOL held by the ckSOL minter canister. ckSOL can be converted to SOL at any time, and vice versa.
 
 ## Table of Contents
 
