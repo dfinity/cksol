@@ -79,64 +79,79 @@ mod state_from_init_args {
     }
 
     #[test]
-    fn should_fail_when_any_canister_id_is_anonymous() {
-        assert_matches!(
-            State::try_from(InitArgs {
+    fn should_fail_with_invalid_init_args() {
+        fn assert_init_fails(args: InitArgs, expected: &str) {
+            let err = State::try_from(args).unwrap_err();
+            assert!(
+                format!("{err:?}").contains(expected),
+                "Expected error containing {expected:?}, got: {err:?}"
+            );
+        }
+
+        // Anonymous sol_rpc_canister_id
+        assert_init_fails(
+            InitArgs {
                 sol_rpc_canister_id: Principal::anonymous(),
                 ..valid_init_args()
-            }),
-            Err(InvalidStateError::InvalidCanisterId(_))
+            },
+            "InvalidCanisterId",
         );
 
-        assert_matches!(
-            State::try_from(InitArgs {
+        // Anonymous ledger_canister_id
+        assert_init_fails(
+            InitArgs {
                 ledger_canister_id: Principal::anonymous(),
                 ..valid_init_args()
-            }),
-            Err(InvalidStateError::InvalidCanisterId(_))
+            },
+            "InvalidCanisterId",
         );
 
-        assert_matches!(
-            State::try_from(InitArgs {
-                sol_rpc_canister_id: Principal::anonymous(),
-                ledger_canister_id: Principal::anonymous(),
+        // Identical canister IDs
+        assert_init_fails(
+            InitArgs {
+                sol_rpc_canister_id: sol_rpc_canister_id(),
+                ledger_canister_id: sol_rpc_canister_id(),
                 ..valid_init_args()
-            }),
-            Err(InvalidStateError::InvalidCanisterId(_))
+            },
+            "InvalidCanisterId",
         );
-    }
 
-    #[test]
-    fn should_fail_when_canister_ids_are_identical() {
-        let same_id = sol_rpc_canister_id();
-        let args = InitArgs {
-            sol_rpc_canister_id: same_id,
-            ledger_canister_id: same_id,
-            ..valid_init_args()
-        };
-
-        assert_matches!(
-            State::try_from(args),
-            Err(InvalidStateError::InvalidCanisterId(_))
+        // automated_deposit_fee below manual_deposit_fee
+        assert_init_fails(
+            InitArgs {
+                manual_deposit_fee: AUTOMATED_DEPOSIT_FEE + 1,
+                ..valid_init_args()
+            },
+            "InvalidAutomatedDepositFee",
         );
-    }
 
-    #[test]
-    fn should_fail_when_minimum_withdrawal_amount_too_low() {
-        let minimum_required = WITHDRAWAL_FEE + SOLANA_RENT_EXEMPTION_THRESHOLD;
-        let insufficient_minimum_withdrawal_amount = minimum_required - 1;
-        let args = InitArgs {
-            minimum_withdrawal_amount: insufficient_minimum_withdrawal_amount,
-            ..valid_init_args()
-        };
+        // automated_deposit_fee exceeds minimum_deposit_amount
+        assert_init_fails(
+            InitArgs {
+                automated_deposit_fee: MINIMUM_DEPOSIT_AMOUNT + 1,
+                manual_deposit_fee: MINIMUM_DEPOSIT_AMOUNT, // manual_deposit_fee == minimum, no overlap
+                ..valid_init_args()
+            },
+            "InvalidMinimumDepositAmount",
+        );
 
-        assert_eq!(
-            State::try_from(args),
-            Err(InvalidStateError::InvalidMinimumWithdrawalAmount {
-                minimum_withdrawal_amount: insufficient_minimum_withdrawal_amount,
-                withdrawal_fee: WITHDRAWAL_FEE,
-                rent_exemption_threshold: SOLANA_RENT_EXEMPTION_THRESHOLD,
-            })
+        // minimum_deposit_amount below automated_deposit_fee
+        assert_init_fails(
+            InitArgs {
+                minimum_deposit_amount: AUTOMATED_DEPOSIT_FEE - 1,
+                manual_deposit_fee: AUTOMATED_DEPOSIT_FEE - 1, // manual_deposit_fee == minimum, no overlap
+                ..valid_init_args()
+            },
+            "InvalidMinimumDepositAmount",
+        );
+
+        // minimum_withdrawal_amount below withdrawal_fee + rent exemption threshold
+        assert_init_fails(
+            InitArgs {
+                minimum_withdrawal_amount: WITHDRAWAL_FEE + SOLANA_RENT_EXEMPTION_THRESHOLD - 1,
+                ..valid_init_args()
+            },
+            "InvalidMinimumWithdrawalAmount",
         );
     }
 
