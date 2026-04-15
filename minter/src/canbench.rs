@@ -67,7 +67,7 @@ fn minter_account() -> Account {
 }
 
 /// Populates the event log with ~10k events covering every event type
-/// except Init and Upgrade, then clears in-memory state so that
+/// except Upgrade, then clears in-memory state so that
 /// `replay_events` can rebuild it from stable storage.
 fn setup_10k_events() {
     reset_events();
