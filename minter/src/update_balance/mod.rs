@@ -123,7 +123,7 @@ async fn try_accept_deposit<R: CanisterRuntime>(
     mutate_state(|state| {
         process_event(
             state,
-            EventType::AcceptedDeposit {
+            EventType::AcceptedManualDeposit {
                 deposit_id,
                 deposit_amount,
                 amount_to_mint,

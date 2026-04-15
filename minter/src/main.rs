@@ -116,11 +116,11 @@ fn get_events(
                     withdrawal_amount: request.withdrawal_amount,
                 }
             }
-            EventType::AcceptedDeposit {
+            EventType::AcceptedManualDeposit {
                 deposit_id,
                 deposit_amount,
                 amount_to_mint,
-            } => event::EventType::AcceptedDeposit {
+            } => event::EventType::AcceptedManualDeposit {
                 signature: deposit_id.signature.into(),
                 account: deposit_id.account,
                 deposit_amount,
