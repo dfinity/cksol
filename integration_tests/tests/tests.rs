@@ -174,7 +174,7 @@ mod lifecycle {
         assert_eq!(
             initial_minter_info,
             MinterInfo {
-                manual_deposit_fee: Setup::DEFAULT_DEPOSIT_FEE,
+                manual_deposit_fee: Setup::DEFAULT_MANUAL_DEPOSIT_FEE,
                 automated_deposit_fee: Setup::DEFAULT_AUTOMATED_DEPOSIT_FEE,
                 deposit_consolidation_fee: Setup::DEFAULT_DEPOSIT_CONSOLIDATION_FEE,
                 minimum_withdrawal_amount: Setup::DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT,

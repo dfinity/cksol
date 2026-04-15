@@ -140,10 +140,10 @@ mod state_from_init_args {
     }
 
     #[test]
-    fn should_fail_when_minimum_deposit_amount_too_low() {
-        let insufficient_minimum_deposit_amount = AUTOMATED_DEPOSIT_FEE / 2;
+    fn should_fail_when_minimum_deposit_amount_below_manual_deposit_fee() {
+        let insufficient = DEPOSIT_FEE / 2;
         let args = InitArgs {
-            minimum_deposit_amount: insufficient_minimum_deposit_amount,
+            minimum_deposit_amount: insufficient,
             ..valid_init_args()
         };
         assert_matches!(
@@ -151,7 +151,7 @@ mod state_from_init_args {
             Err(InvalidStateError::InvalidMinimumDepositAmount {
                 minimum_deposit_amount,
                 deposit_fee
-            }) if minimum_deposit_amount == insufficient_minimum_deposit_amount && deposit_fee == AUTOMATED_DEPOSIT_FEE
+            }) if minimum_deposit_amount == insufficient && deposit_fee == DEPOSIT_FEE
         );
     }
 

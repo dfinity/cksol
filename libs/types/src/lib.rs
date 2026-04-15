@@ -228,7 +228,6 @@ pub struct MinterInfo {
     /// Fee deducted from each deposit in the manual flow (SOL -> ckSOL).
     pub manual_deposit_fee: Lamport,
     /// Fee deducted from each deposit in the automated flow (SOL -> ckSOL).
-    /// Higher than [`manual_deposit_fee`] to cover polling costs.
     pub automated_deposit_fee: Lamport,
     /// Extra cycles charged per `update_balance` call to offset deposit consolidation costs.
     pub deposit_consolidation_fee: u128,

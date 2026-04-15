@@ -329,11 +329,16 @@ impl State {
                 "ERROR: provided canister IDs are not distinct!".to_string(),
             ));
         }
-        let max_deposit_fee = self.manual_deposit_fee.max(self.automated_deposit_fee);
-        if self.minimum_deposit_amount < max_deposit_fee {
+        if self.minimum_deposit_amount < self.manual_deposit_fee {
             return Err(InvalidStateError::InvalidMinimumDepositAmount {
                 minimum_deposit_amount: self.minimum_deposit_amount,
-                deposit_fee: max_deposit_fee,
+                deposit_fee: self.manual_deposit_fee,
+            });
+        }
+        if self.minimum_deposit_amount < self.automated_deposit_fee {
+            return Err(InvalidStateError::InvalidMinimumDepositAmount {
+                minimum_deposit_amount: self.minimum_deposit_amount,
+                deposit_fee: self.automated_deposit_fee,
             });
         }
         let minimum_required = self.withdrawal_fee + SOLANA_RENT_EXEMPTION_THRESHOLD;

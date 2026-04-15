@@ -40,8 +40,6 @@ pub struct InitArgs {
     #[cfg_attr(feature = "event", n(2))]
     pub manual_deposit_fee: Lamport,
     /// The deposit fee in lamports for the automated deposit flow.
-    /// Higher than [`manual_deposit_fee`] to cover the polling costs of the
-    /// automated deposit monitoring (signature scanning and transaction fetching).
     #[cfg_attr(feature = "event", n(10))]
     pub automated_deposit_fee: Lamport,
     /// The master Ed25519 key name.

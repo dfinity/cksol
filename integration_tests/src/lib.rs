@@ -96,7 +96,7 @@ pub struct Setup {
 }
 
 impl Setup {
-    pub const DEFAULT_DEPOSIT_FEE: Lamport = 10_000; // 0.00001 SOL
+    pub const DEFAULT_MANUAL_DEPOSIT_FEE: Lamport = 10_000; // 0.00001 SOL
     pub const DEFAULT_AUTOMATED_DEPOSIT_FEE: Lamport = 10_000_000; // 0.01 SOL
     pub const DEFAULT_DEPOSIT_CONSOLIDATION_FEE: u128 = 10_000_000_000; // 0.01T cycles
     pub const DEFAULT_WITHDRAWAL_FEE: Lamport = 1_000_000; // 0.001 SOL
@@ -653,7 +653,7 @@ fn cksol_minter_init_args(
     MinterArg::Init(InitArgs {
         sol_rpc_canister_id,
         ledger_canister_id,
-        manual_deposit_fee: Setup::DEFAULT_DEPOSIT_FEE,
+        manual_deposit_fee: Setup::DEFAULT_MANUAL_DEPOSIT_FEE,
         automated_deposit_fee: Setup::DEFAULT_AUTOMATED_DEPOSIT_FEE,
         master_key_name: Ed25519KeyName::MainnetProdKey1,
         minimum_withdrawal_amount: Setup::DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT,

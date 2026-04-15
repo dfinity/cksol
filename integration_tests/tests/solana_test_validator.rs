@@ -183,7 +183,7 @@ async fn deposit_to_account(
     account: Account,
     amount: Lamport,
 ) -> (Address, Lamport) {
-    let expected_mint_amount = amount - Setup::DEFAULT_DEPOSIT_FEE;
+    let expected_mint_amount = amount - Setup::DEFAULT_MANUAL_DEPOSIT_FEE;
     let deposit_address = setup.minter().get_deposit_address(account).await.into();
 
     println!("Depositing {amount} Lamport to address {deposit_address}");
