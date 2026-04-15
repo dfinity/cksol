@@ -28,7 +28,7 @@ Each ckSOL is backed by exactly 1 SOL held by the ckSOL minter canister. ckSOL c
 
 The ckSOL minter canister is the core component of the system. It manages the conversion between SOL and ckSOL, maintains custody of the SOL backing all outstanding ckSOL tokens, and interacts with the Solana blockchain via the [SOL RPC canister](https://github.com/dfinity/sol-rpc-canister).
 
-The ckSOL token itself is implemented as an [ICRC-1](https://github.com/dfinity/ICRC-1) ledger canister.
+The ckSOL token itself is implemented as an [ICRC-1/ICRC-2](https://github.com/dfinity/ICRC-1) ledger canister.
 
 The minter controls one or more Solana addresses derived from a [threshold Schnorr over Ed25519](https://internetcomputer.org/docs/references/ic-interface-spec#ic-sign-with-schnorr) public key and a per-account derivation path. No private key ever exists in plaintext — Solana transactions are signed via the IC management canister's `sign_with_schnorr` API (`SchnorrAlgorithm::Ed25519`).
 
@@ -105,10 +105,10 @@ sequenceDiagram
                     Internet Computer
   ┌─────────────────────────────────────────────────────────────────────┐
   │                                                                     │
-  │  ┌─────────────────────┐       ┌───────────────────────────────┐    │
-  │  │   ckSOL Minter      │──────▶│   ckSOL Ledger (ICRC-1)       │    │
-  │  │   (this repo)       │◀──────│                               │    │
-  │  └──────────┬──────────┘       └───────────────────────────────┘    │
+  │  ┌─────────────────────┐       ┌────────────────────────────────┐   │
+  │  │   ckSOL Minter      │──────▶│   ckSOL Ledger (ICRC-1/ICRC-2) │   │
+  │  │   (this repo)       │       │                                │   │
+  │  └──────────┬──────────┘       └────────────────────────────────┘   │
   │             │                                                       │
   │             │ inter-canister call                                   │
   │             ▼                                                       │
