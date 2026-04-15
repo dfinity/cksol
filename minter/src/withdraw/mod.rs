@@ -8,7 +8,6 @@ use solana_address::Address;
 use canlog::log;
 use cksol_types_internal::log::Priority;
 
-use itertools::Itertools;
 use sol_rpc_types::Slot;
 use solana_hash::Hash;
 
@@ -26,6 +25,7 @@ use crate::{
         mutate_state, read_state,
     },
     transaction::{get_recent_slot_and_blockhash, submit_transaction},
+    utils::chunks::IntoChunksExt,
 };
 
 pub const WITHDRAWAL_PROCESSING_DELAY: Duration = Duration::from_mins(1);
@@ -102,9 +102,10 @@ pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: R) {
         }
     };
 
-    let (affordable_requests, num_pending_withdrawals) = read_state(|state| {
+    let (batches, more_to_process, needs_consolidation) = read_state(|state| {
         let mut available_balance = state.balance();
         let pending = state.pending_withdrawal_requests();
+        let num_pending = pending.len();
 
         let affordable: Vec<_> = pending
             .values()
@@ -119,10 +120,16 @@ pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: R) {
             .map(|t| t.request.clone())
             .collect();
 
-        (affordable, pending.len())
+        let more_to_process = affordable.len() > MAX_CONCURRENT_RPC_CALLS * MAX_WITHDRAWALS_PER_TX;
+        let needs_consolidation = affordable.len() < num_pending;
+        let batches = affordable
+            .iter()
+            .into_chunks(MAX_WITHDRAWALS_PER_TX)
+            .take_chunks(MAX_CONCURRENT_RPC_CALLS);
+        (batches, more_to_process, needs_consolidation)
     });
 
-    if affordable_requests.len() < num_pending_withdrawals {
+    if needs_consolidation {
         log!(
             Priority::Info,
             "Insufficient minter balance for some withdrawal requests, scheduling consolidation"
@@ -130,19 +137,9 @@ pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: R) {
         runtime.set_timer(Duration::ZERO, consolidate_deposits);
     }
 
-    let more_to_process =
-        affordable_requests.len() > MAX_CONCURRENT_RPC_CALLS * MAX_WITHDRAWALS_PER_TX;
     let reschedule = scopeguard::guard(runtime.clone(), |runtime| {
         runtime.set_timer(Duration::ZERO, process_pending_withdrawals);
     });
-
-    let batches: Vec<Vec<_>> = affordable_requests
-        .into_iter()
-        .chunks(MAX_WITHDRAWALS_PER_TX)
-        .into_iter()
-        .take(MAX_CONCURRENT_RPC_CALLS)
-        .map(Iterator::collect)
-        .collect();
 
     if batches.is_empty() {
         // Nothing to process

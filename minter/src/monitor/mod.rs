@@ -14,12 +14,12 @@ use crate::{
         SubmitTransactionError, get_recent_slot_and_blockhash, get_signature_statuses,
         submit_transaction,
     },
+    utils::chunks::IntoChunksExt,
 };
 use canlog::log;
 use cksol_types_internal::log::Priority;
 use ic_cdk_management_canister::SignCallError;
 use icrc_ledger_types::icrc1::account::Account;
-use itertools::Itertools;
 use sol_rpc_types::Slot;
 use solana_signature::Signature;
 use solana_transaction::Transaction;
@@ -46,22 +46,27 @@ pub async fn finalize_transactions<R: CanisterRuntime>(runtime: R) {
         Err(_) => return,
     };
 
-    let all_transactions: BTreeMap<Signature, Slot> = read_state(|state| {
-        state
-            .submitted_transactions()
-            .iter()
-            .map(|(sig, tx)| (*sig, tx.slot))
-            .collect()
+    let (batches, more_to_process, slots) = read_state(|state| {
+        let submitted = state.submitted_transactions();
+        let more_to_process =
+            submitted.len() > MAX_CONCURRENT_RPC_CALLS * MAX_SIGNATURES_PER_STATUS_CHECK;
+        let slots: BTreeMap<Signature, Slot> =
+            submitted.iter().map(|(sig, tx)| (*sig, tx.slot)).collect();
+        let batches = slots
+            .keys()
+            .into_chunks(MAX_SIGNATURES_PER_STATUS_CHECK)
+            .take_chunks(MAX_CONCURRENT_RPC_CALLS);
+        (batches, more_to_process, slots)
     });
-    if all_transactions.is_empty() {
-        return;
-    }
-
-    let more_to_process =
-        all_transactions.len() > MAX_CONCURRENT_RPC_CALLS * MAX_SIGNATURES_PER_STATUS_CHECK;
     let reschedule = scopeguard::guard(runtime.clone(), |runtime| {
         runtime.set_timer(Duration::ZERO, finalize_transactions);
     });
+
+    if batches.is_empty() {
+        // Nothing to process
+        scopeguard::ScopeGuard::into_inner(reschedule);
+        return;
+    }
 
     // Fetch the current slot before checking statuses: if a transaction finalizes
     // after we snapshot the slot, the status check will see it as finalized rather
@@ -74,8 +79,7 @@ pub async fn finalize_transactions<R: CanisterRuntime>(runtime: R) {
         }
     };
 
-    let signatures: Vec<Signature> = all_transactions.keys().copied().collect();
-    let statuses = check_transaction_statuses(&runtime, signatures).await;
+    let statuses = check_transaction_statuses(&runtime, batches).await;
 
     for (signature, error) in &statuses.errored {
         log!(
@@ -107,7 +111,7 @@ pub async fn finalize_transactions<R: CanisterRuntime>(runtime: R) {
     }
 
     for signature in &statuses.not_found {
-        if all_transactions[signature] + MAX_BLOCKHASH_AGE < current_slot {
+        if slots[signature] + MAX_BLOCKHASH_AGE < current_slot {
             mutate_state(|state| {
                 process_event(
                     state,
@@ -172,16 +176,8 @@ struct TransactionStatuses {
 
 async fn check_transaction_statuses<R: CanisterRuntime>(
     runtime: &R,
-    signatures: Vec<Signature>,
+    batches: Vec<Vec<Signature>>,
 ) -> TransactionStatuses {
-    let batches: Vec<Vec<_>> = signatures
-        .into_iter()
-        .chunks(MAX_SIGNATURES_PER_STATUS_CHECK)
-        .into_iter()
-        .take(MAX_CONCURRENT_RPC_CALLS)
-        .map(Iterator::collect)
-        .collect();
-
     let mut result = TransactionStatuses {
         succeeded: BTreeSet::new(),
         errored: BTreeMap::new(),
