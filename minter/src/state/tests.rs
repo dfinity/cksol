@@ -19,7 +19,6 @@ use crate::{
     },
     utils::insertion_ordered_map::InsertionOrderedMap,
 };
-use assert_matches::assert_matches;
 use cksol_types_internal::SolanaNetwork;
 use cksol_types_internal::{Ed25519KeyName, InitArgs, UpgradeArgs};
 use ic_stable_structures::Storable;
