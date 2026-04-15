@@ -340,7 +340,8 @@ impl State {
         {
             return Err(InvalidStateError::InvalidMinimumDepositAmount {
                 minimum_deposit_amount: self.minimum_deposit_amount,
-                deposit_fee: self.automated_deposit_fee,
+                automated_deposit_fee: self.automated_deposit_fee,
+                rent_exemption_threshold: SOLANA_RENT_EXEMPTION_THRESHOLD,
             });
         }
         if self.minimum_withdrawal_amount < self.withdrawal_fee + SOLANA_RENT_EXEMPTION_THRESHOLD {
@@ -721,7 +722,8 @@ pub enum InvalidStateError {
     },
     InvalidMinimumDepositAmount {
         minimum_deposit_amount: u64,
-        deposit_fee: u64,
+        automated_deposit_fee: u64,
+        rent_exemption_threshold: u64,
     },
     InvalidMinimumWithdrawalAmount {
         minimum_withdrawal_amount: u64,
