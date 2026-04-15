@@ -335,14 +335,15 @@ impl State {
                 manual_deposit_fee: self.manual_deposit_fee,
             });
         }
-        if self.minimum_deposit_amount < self.automated_deposit_fee {
+        if self.minimum_deposit_amount
+            < self.automated_deposit_fee + SOLANA_RENT_EXEMPTION_THRESHOLD
+        {
             return Err(InvalidStateError::InvalidMinimumDepositAmount {
                 minimum_deposit_amount: self.minimum_deposit_amount,
                 deposit_fee: self.automated_deposit_fee,
             });
         }
-        let minimum_required = self.withdrawal_fee + SOLANA_RENT_EXEMPTION_THRESHOLD;
-        if self.minimum_withdrawal_amount < minimum_required {
+        if self.minimum_withdrawal_amount < self.withdrawal_fee + SOLANA_RENT_EXEMPTION_THRESHOLD {
             return Err(InvalidStateError::InvalidMinimumWithdrawalAmount {
                 minimum_withdrawal_amount: self.minimum_withdrawal_amount,
                 withdrawal_fee: self.withdrawal_fee,

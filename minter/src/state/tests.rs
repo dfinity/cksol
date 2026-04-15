@@ -84,13 +84,16 @@ mod state_from_init_args {
         .unwrap();
         assert_eq!(state.manual_deposit_fee(), AUTOMATED_DEPOSIT_FEE);
 
-        // minimum_deposit_amount can equal automated_deposit_fee
+        // minimum_deposit_amount can equal automated_deposit_fee + rent exemption threshold
         let state = State::try_from(InitArgs {
-            minimum_deposit_amount: AUTOMATED_DEPOSIT_FEE,
+            minimum_deposit_amount: AUTOMATED_DEPOSIT_FEE + SOLANA_RENT_EXEMPTION_THRESHOLD,
             ..valid_init_args()
         })
         .unwrap();
-        assert_eq!(state.minimum_deposit_amount(), AUTOMATED_DEPOSIT_FEE);
+        assert_eq!(
+            state.minimum_deposit_amount(),
+            AUTOMATED_DEPOSIT_FEE + SOLANA_RENT_EXEMPTION_THRESHOLD
+        );
 
         // minimum_withdrawal_amount can equal withdrawal_fee + rent exemption threshold exactly
         let minimum_required = WITHDRAWAL_FEE + SOLANA_RENT_EXEMPTION_THRESHOLD;
@@ -152,7 +155,7 @@ mod state_from_init_args {
             },
             "InvalidAutomatedDepositFee",
         );
-        // automated_deposit_fee exceeds minimum_deposit_amount
+        // automated_deposit_fee + rent exemption threshold exceeds minimum_deposit_amount
         assert_init_fails(
             InitArgs {
                 automated_deposit_fee: MINIMUM_DEPOSIT_AMOUNT + 1,
@@ -160,7 +163,7 @@ mod state_from_init_args {
             },
             "InvalidMinimumDepositAmount",
         );
-        // minimum_deposit_amount below automated_deposit_fee
+        // minimum_deposit_amount below automated_deposit_fee + rent exemption threshold
         assert_init_fails(
             InitArgs {
                 minimum_deposit_amount: AUTOMATED_DEPOSIT_FEE - 1,
@@ -286,15 +289,20 @@ mod state_upgrade {
             .unwrap();
         assert_eq!(state.manual_deposit_fee(), AUTOMATED_DEPOSIT_FEE);
 
-        // minimum_deposit_amount can equal automated_deposit_fee
+        // minimum_deposit_amount can equal automated_deposit_fee + rent exemption threshold
         let mut state = initial_state();
         state
             .upgrade(UpgradeArgs {
-                minimum_deposit_amount: Some(AUTOMATED_DEPOSIT_FEE),
+                minimum_deposit_amount: Some(
+                    AUTOMATED_DEPOSIT_FEE + SOLANA_RENT_EXEMPTION_THRESHOLD,
+                ),
                 ..Default::default()
             })
             .unwrap();
-        assert_eq!(state.minimum_deposit_amount(), AUTOMATED_DEPOSIT_FEE);
+        assert_eq!(
+            state.minimum_deposit_amount(),
+            AUTOMATED_DEPOSIT_FEE + SOLANA_RENT_EXEMPTION_THRESHOLD
+        );
 
         // minimum_withdrawal_amount can equal withdrawal_fee + rent exemption threshold exactly
         let minimum_required = WITHDRAWAL_FEE + SOLANA_RENT_EXEMPTION_THRESHOLD;
@@ -342,7 +350,7 @@ mod state_upgrade {
             },
             "InvalidAutomatedDepositFee",
         );
-        // automated_deposit_fee exceeds minimum_deposit_amount
+        // automated_deposit_fee + rent exemption threshold exceeds minimum_deposit_amount
         assert_upgrade_fails(
             UpgradeArgs {
                 automated_deposit_fee: Some(MINIMUM_DEPOSIT_AMOUNT + 1),
@@ -350,7 +358,7 @@ mod state_upgrade {
             },
             "InvalidMinimumDepositAmount",
         );
-        // minimum_deposit_amount below automated_deposit_fee
+        // minimum_deposit_amount below automated_deposit_fee + rent exemption threshold
         assert_upgrade_fails(
             UpgradeArgs {
                 minimum_deposit_amount: Some(AUTOMATED_DEPOSIT_FEE - 1),

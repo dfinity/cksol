@@ -29,15 +29,15 @@ pub const BLOCK_INDEX: u64 = 98763_u64;
 pub const MANUAL_DEPOSIT_FEE: Lamport = 10_000; // 0.00001 SOL
 pub const AUTOMATED_DEPOSIT_FEE: Lamport = 10_000_000; // 0.01 SOL
 pub const DEPOSIT_CONSOLIDATION_FEE: u128 = 10_000_000_000; // 0.01T cycles
-pub const WITHDRAWAL_FEE: Lamport = 5_000_000; // 0.005 SOL
-pub const MINIMUM_WITHDRAWAL_AMOUNT: Lamport = 10_000_000; // 0.01 SOL
+pub const WITHDRAWAL_FEE: Lamport = 1_000_000; // 0.001 SOL
+pub const MINIMUM_WITHDRAWAL_AMOUNT: Lamport = 2_000_000; // 0.002 SOL
 pub const MINTER_ACCOUNT: Account = Account {
     owner: runtime::TEST_CANISTER_ID,
     subaccount: None,
 };
 /// Solana address derived from [`MINTER_ACCOUNT`] using the test master key.
 pub const MINTER_ADDRESS: Address = address!("38ZYiAPZp4S9MqhU6AL5Ydm8wB7WfayCWLs1EGRi7Dou");
-pub const MINIMUM_DEPOSIT_AMOUNT: Lamport = 10_000_000; // 0.01 SOL
+pub const MINIMUM_DEPOSIT_AMOUNT: Lamport = 20_000_000; // 0.02 SOL
 pub const UPDATE_BALANCE_REQUIRED_CYCLES: u128 = 1_000_000_000_000;
 
 pub fn sol_rpc_canister_id() -> Principal {

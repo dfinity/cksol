@@ -105,7 +105,8 @@ impl Setup {
         Principal::from_slice(&[0xff, 0xff, 0xff, 0xff, 0xff, 0xe0, 0x0, 0x3, 0x1, 0x1]);
     // Must be >= DEFAULT_WITHDRAWAL_FEE + SOLANA_RENT_EXEMPTION_THRESHOLD (890,880)
     pub const DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT: Lamport = 2_000_000; // 0.002 SOL
-    pub const DEFAULT_MINIMUM_DEPOSIT_AMOUNT: Lamport = 10_000_000; // 0.01 SOL
+    // Must be >= DEFAULT_AUTOMATED_DEPOSIT_FEE + SOLANA_RENT_EXEMPTION_THRESHOLD (890,880)
+    pub const DEFAULT_MINIMUM_DEPOSIT_AMOUNT: Lamport = 20_000_000; // 0.02 SOL
     pub const DEFAULT_UPDATE_BALANCE_REQUIRED_CYCLES: u128 = 1_000_000_000_000;
 
     pub async fn new(
