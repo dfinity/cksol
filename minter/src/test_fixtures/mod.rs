@@ -170,7 +170,7 @@ pub mod events {
         mutate_state(|state| {
             process_event(
                 state,
-                EventType::AcceptedDeposit {
+                EventType::AcceptedManualDeposit {
                     deposit_id,
                     deposit_amount: amount,
                     amount_to_mint: amount - DEPOSIT_FEE,
@@ -525,7 +525,7 @@ pub mod arb {
             arb_withdrawal_request().prop_map(EventType::AcceptedWithdrawalRequest),
             (arb_deposit_id(), any::<u64>(), any::<u64>()).prop_map(
                 |(deposit_id, deposit_amount, amount_to_mint)| {
-                    EventType::AcceptedDeposit {
+                    EventType::AcceptedManualDeposit {
                         deposit_id,
                         deposit_amount,
                         amount_to_mint,
@@ -614,7 +614,7 @@ pub mod deposit {
     }
 
     pub fn accepted_deposit_event() -> EventType {
-        EventType::AcceptedDeposit {
+        EventType::AcceptedManualDeposit {
             deposit_id: deposit_id(),
             deposit_amount: DEPOSIT_AMOUNT,
             amount_to_mint: DEPOSIT_AMOUNT - DEPOSIT_FEE,
