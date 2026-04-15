@@ -84,7 +84,7 @@ where
     EVENTS.with(|events| f(Box::new(events.borrow().iter())))
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "canbench-rs"))]
 pub fn reset_events() {
     MEMORY_MANAGER.with(|m| {
         EVENTS.with(|events| {

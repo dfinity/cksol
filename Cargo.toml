@@ -65,6 +65,7 @@ solana-system-interface = "3.1.0"
 solana-system-transaction = "3.0.0"
 solana-transaction = "3.1.0"
 solana-transaction-status-client-types = "3.1.8"
+canbench-rs = "0.4"
 thiserror = "2.0.18"
 tokio = "1.49.0"
 

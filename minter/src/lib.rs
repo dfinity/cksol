@@ -19,5 +19,8 @@ pub mod update_balance;
 pub mod utils;
 pub mod withdraw;
 
-#[cfg(test)]
+#[cfg(any(test, feature = "canbench-rs"))]
 pub mod test_fixtures;
+
+#[cfg(feature = "canbench-rs")]
+mod canbench;
