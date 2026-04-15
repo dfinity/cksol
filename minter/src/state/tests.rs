@@ -3,8 +3,9 @@ use crate::{
     constants::FEE_PER_SIGNATURE as SOLANA_LAMPORTS_PER_SIGNATURE,
     state::{SOLANA_RENT_EXEMPTION_THRESHOLD, audit::process_event, read_state},
     test_fixtures::{
-        AUTOMATED_DEPOSIT_FEE, DEPOSIT_CONSOLIDATION_FEE, DEPOSIT_FEE, MINIMUM_DEPOSIT_AMOUNT,
-        MINIMUM_WITHDRAWAL_AMOUNT, UPDATE_BALANCE_REQUIRED_CYCLES, WITHDRAWAL_FEE, account,
+        AUTOMATED_DEPOSIT_FEE, DEPOSIT_CONSOLIDATION_FEE, MANUAL_DEPOSIT_FEE,
+        MINIMUM_DEPOSIT_AMOUNT, MINIMUM_WITHDRAWAL_AMOUNT, UPDATE_BALANCE_REQUIRED_CYCLES,
+        WITHDRAWAL_FEE, account,
         arb::arb_event,
         deposit_id,
         events::{
@@ -49,7 +50,7 @@ mod state_from_init_args {
                 ledger_canister_id: ledger_canister_id(),
                 sol_rpc_canister_id: sol_rpc_canister_id(),
                 solana_network: SolanaNetwork::Mainnet,
-                manual_deposit_fee: DEPOSIT_FEE,
+                manual_deposit_fee: MANUAL_DEPOSIT_FEE,
                 automated_deposit_fee: AUTOMATED_DEPOSIT_FEE,
                 deposit_consolidation_fee: DEPOSIT_CONSOLIDATION_FEE,
                 withdrawal_fee: WITHDRAWAL_FEE,
@@ -141,7 +142,7 @@ mod state_from_init_args {
 
     #[test]
     fn should_fail_when_minimum_deposit_amount_below_manual_deposit_fee() {
-        let insufficient = DEPOSIT_FEE / 2;
+        let insufficient = MANUAL_DEPOSIT_FEE / 2;
         let args = InitArgs {
             minimum_deposit_amount: insufficient,
             ..valid_init_args()
@@ -151,7 +152,7 @@ mod state_from_init_args {
             Err(InvalidStateError::InvalidMinimumDepositAmount {
                 minimum_deposit_amount,
                 deposit_fee
-            }) if minimum_deposit_amount == insufficient && deposit_fee == DEPOSIT_FEE
+            }) if minimum_deposit_amount == insufficient && deposit_fee == MANUAL_DEPOSIT_FEE
         );
     }
 
@@ -208,7 +209,7 @@ mod state_upgrade {
     #[test]
     fn should_update_manual_deposit_fee() {
         let mut state = initial_state();
-        let new_deposit_fee = DEPOSIT_FEE / 2;
+        let new_deposit_fee = MANUAL_DEPOSIT_FEE / 2;
 
         state
             .upgrade(UpgradeArgs {
@@ -437,7 +438,7 @@ mod state_upgrade {
     #[should_panic = "InvalidMinimumDepositAmount"]
     fn should_panic_when_upgrade_fails() {
         let mut state = initial_state();
-        let new_minimum_deposit_amount = DEPOSIT_FEE - 1;
+        let new_minimum_deposit_amount = MANUAL_DEPOSIT_FEE - 1;
 
         process_event(
             &mut state,

@@ -26,7 +26,7 @@ pub mod signer;
 mod stubs;
 
 pub const BLOCK_INDEX: u64 = 98763_u64;
-pub const DEPOSIT_FEE: Lamport = 10_000; // 0.00001 SOL
+pub const MANUAL_DEPOSIT_FEE: Lamport = 10_000; // 0.00001 SOL
 pub const AUTOMATED_DEPOSIT_FEE: Lamport = 10_000_000; // 0.01 SOL
 pub const DEPOSIT_CONSOLIDATION_FEE: u128 = 10_000_000_000; // 0.01T cycles
 pub const WITHDRAWAL_FEE: Lamport = 5_000_000; // 0.005 SOL
@@ -52,7 +52,7 @@ pub fn valid_init_args() -> InitArgs {
     InitArgs {
         sol_rpc_canister_id: sol_rpc_canister_id(),
         ledger_canister_id: ledger_canister_id(),
-        manual_deposit_fee: DEPOSIT_FEE,
+        manual_deposit_fee: MANUAL_DEPOSIT_FEE,
         automated_deposit_fee: AUTOMATED_DEPOSIT_FEE,
         master_key_name: Ed25519KeyName::default(),
         minimum_withdrawal_amount: MINIMUM_WITHDRAWAL_AMOUNT,
@@ -136,7 +136,7 @@ pub fn account(i: u8) -> Account {
 ///
 /// All helpers operate on the global thread-local state via [`mutate_state`].
 pub mod events {
-    use super::{DEPOSIT_FEE, WITHDRAWAL_FEE, runtime::TestCanisterRuntime};
+    use super::{MANUAL_DEPOSIT_FEE, WITHDRAWAL_FEE, runtime::TestCanisterRuntime};
     use crate::{
         numeric::{LedgerBurnIndex, LedgerMintIndex},
         state::{
@@ -171,7 +171,7 @@ pub mod events {
                 EventType::AcceptedDeposit {
                     deposit_id,
                     deposit_amount: amount,
-                    amount_to_mint: amount - DEPOSIT_FEE,
+                    amount_to_mint: amount - MANUAL_DEPOSIT_FEE,
                 },
                 &runtime(),
             )
@@ -600,7 +600,7 @@ pub mod deposit {
     pub fn deposit_status_processing() -> DepositStatus {
         DepositStatus::Processing {
             deposit_amount: DEPOSIT_AMOUNT,
-            amount_to_mint: DEPOSIT_AMOUNT - DEPOSIT_FEE,
+            amount_to_mint: DEPOSIT_AMOUNT - MANUAL_DEPOSIT_FEE,
             deposit_id: deposit_id().into(),
         }
     }
@@ -612,7 +612,7 @@ pub mod deposit {
     pub fn deposit_status_minted() -> DepositStatus {
         DepositStatus::Minted {
             block_index: BLOCK_INDEX,
-            minted_amount: DEPOSIT_AMOUNT - DEPOSIT_FEE,
+            minted_amount: DEPOSIT_AMOUNT - MANUAL_DEPOSIT_FEE,
             deposit_id: deposit_id().into(),
         }
     }
@@ -621,7 +621,7 @@ pub mod deposit {
         EventType::AcceptedDeposit {
             deposit_id: deposit_id(),
             deposit_amount: DEPOSIT_AMOUNT,
-            amount_to_mint: DEPOSIT_AMOUNT - DEPOSIT_FEE,
+            amount_to_mint: DEPOSIT_AMOUNT - MANUAL_DEPOSIT_FEE,
         }
     }
 

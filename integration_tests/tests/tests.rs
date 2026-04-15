@@ -161,7 +161,8 @@ mod lifecycle {
 
     #[tokio::test]
     async fn should_get_minter_info_and_upgrade() {
-        const NEW_DEPOSIT_FEE: Lamport = 10;
+        const NEW_MANUAL_DEPOSIT_FEE: Lamport = 10;
+        const NEW_AUTOMATED_DEPOSIT_FEE: Lamport = 20;
         // minimum_withdrawal_amount must be >= withdrawal_fee + rent exemption threshold (890,880 lamports)
         const NEW_WITHDRAWAL_FEE: Lamport = 100_000;
         const NEW_MINIMUM_WITHDRAWAL_AMOUNT: Lamport = 1_000_000;
@@ -200,8 +201,8 @@ mod lifecycle {
             .minter()
             .upgrade(UpgradeArgs {
                 sol_rpc_canister_id: None,
-                manual_deposit_fee: Some(NEW_DEPOSIT_FEE),
-                automated_deposit_fee: None,
+                manual_deposit_fee: Some(NEW_MANUAL_DEPOSIT_FEE),
+                automated_deposit_fee: Some(NEW_AUTOMATED_DEPOSIT_FEE),
                 minimum_withdrawal_amount: Some(NEW_MINIMUM_WITHDRAWAL_AMOUNT),
                 minimum_deposit_amount: Some(NEW_MINIMUM_DEPOSIT_AMOUNT),
                 withdrawal_fee: Some(NEW_WITHDRAWAL_FEE),
@@ -215,8 +216,8 @@ mod lifecycle {
         assert_eq!(
             minter_info,
             MinterInfo {
-                manual_deposit_fee: NEW_DEPOSIT_FEE,
-                automated_deposit_fee: Setup::DEFAULT_AUTOMATED_DEPOSIT_FEE,
+                manual_deposit_fee: NEW_MANUAL_DEPOSIT_FEE,
+                automated_deposit_fee: NEW_AUTOMATED_DEPOSIT_FEE,
                 deposit_consolidation_fee: Setup::DEFAULT_DEPOSIT_CONSOLIDATION_FEE,
                 minimum_withdrawal_amount: NEW_MINIMUM_WITHDRAWAL_AMOUNT,
                 minimum_deposit_amount: NEW_MINIMUM_DEPOSIT_AMOUNT,
