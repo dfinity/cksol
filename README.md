@@ -60,7 +60,7 @@ sequenceDiagram
 
     User->>Minter: update_balance(owner, subaccount, signature)
     Minter->>Solana: fetch & verify transaction
-    Minter->>Ledger: icrc1_transfer(amount - deposit_fee, owner/subaccount)
+    Minter->>Ledger: mint with icrc1_transfer(from=minter, to=user, amount - deposit_fee)
     Ledger-->>Minter: block_index
     Minter-->>User: Minted { block_index, minted_amount }
 ```
@@ -88,7 +88,7 @@ sequenceDiagram
     Ledger-->>User: ok
 
     User->>Minter: withdraw(destination_address, amount)
-    Minter->>Ledger: burn via icrc2_transfer_from(from=user, amount)
+    Minter->>Ledger: burn with icrc2_transfer_from(from=user, to=burn, amount)
     Ledger-->>Minter: burn_block_index
     Minter-->>User: burn_block_index
 
