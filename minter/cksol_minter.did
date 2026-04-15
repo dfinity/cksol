@@ -125,6 +125,9 @@ type SolanaNetwork = variant {
 };
 
 // The installation args for the ckSOL minter canister.
+//
+// *WARNING*: Backwards-compatibility is not guaranteed. Fields may be added,
+// removed, or renamed across releases.
 type InitArgs = record {
     sol_rpc_canister_id : principal;
     ledger_canister_id : principal;
@@ -156,6 +159,9 @@ type MinterArg = variant {
 };
 
 // The upgrade args for the ckSOL minter canister.
+//
+// *WARNING*: Backwards-compatibility is not guaranteed. Fields may be added,
+// removed, or renamed across releases.
 type UpgradeArgs = record {
     sol_rpc_canister_id : opt principal;
     deposit_fee : opt Lamport;
@@ -234,6 +240,9 @@ type WithdrawalStatus = variant {
 };
 
 // Request to convert ckSOL to Solana.
+//
+// *WARNING*: This type is used exclusively by the debug `get_events` endpoint.
+// Backwards-compatibility is not guaranteed.
 type AcceptedWithdrawalRequest = record {
     // The ckSOL ledger account.
     account : Account;
@@ -248,12 +257,18 @@ type AcceptedWithdrawalRequest = record {
 };
 
 // A versioned Solana transaction message.
+//
+// *WARNING*: This type is used exclusively by the debug `get_events` endpoint.
+// Backwards-compatibility is not guaranteed.
 type VersionedTransactionMessage = variant {
     // A legacy Solana transaction message, serialized with bincode.
     Legacy : blob;
 };
 
 // The purpose of a submitted Solana transaction.
+//
+// *WARNING*: This type is used exclusively by the debug `get_events` endpoint.
+// Backwards-compatibility is not guaranteed.
 type TransactionPurpose = variant {
     // Consolidate deposited funds into the minter's main account.
     ConsolidateDeposits : record {
@@ -268,6 +283,9 @@ type TransactionPurpose = variant {
 };
 
 // A minter event payload.
+//
+// *WARNING*: This type is used exclusively by the debug `get_events` endpoint.
+// Backwards-compatibility is not guaranteed.
 type EventType = variant {
     // The minter initialization event.
     // Must be the first event in the log.
@@ -369,18 +387,27 @@ type DepositId = record {
 };
 
 // A minter event.
+//
+// *WARNING*: This type is used exclusively by the debug `get_events` endpoint.
+// Backwards-compatibility is not guaranteed.
 type Event = record {
     timestamp : nat64;
     payload : EventType;
 };
 
 // Arguments for the `get_events` endpoint.
+//
+// *WARNING*: This type is used exclusively by the debug `get_events` endpoint.
+// Backwards-compatibility is not guaranteed.
 type GetEventsArgs = record {
     start : nat64;
     length : nat64;
 };
 
 // The result of a `get_events` call.
+//
+// *WARNING*: This type is used exclusively by the debug `get_events` endpoint.
+// Backwards-compatibility is not guaranteed.
 type GetEventsResult = record {
     events : vec Event;
     total_event_count : nat64;
