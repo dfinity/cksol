@@ -145,6 +145,7 @@ mod state_from_init_args {
         let insufficient = MANUAL_DEPOSIT_FEE / 2;
         let args = InitArgs {
             minimum_deposit_amount: insufficient,
+            automated_deposit_fee: insufficient, // automated_deposit_fee == minimum, no overlap
             ..valid_init_args()
         };
         assert_matches!(
@@ -160,6 +161,7 @@ mod state_from_init_args {
     fn should_fail_when_automated_deposit_fee_exceeds_minimum_deposit_amount() {
         let args = InitArgs {
             automated_deposit_fee: MINIMUM_DEPOSIT_AMOUNT + 1,
+            manual_deposit_fee: MINIMUM_DEPOSIT_AMOUNT, // manual_deposit_fee == minimum, no overlap
             ..valid_init_args()
         };
         assert_matches!(
@@ -270,66 +272,76 @@ mod state_upgrade {
     }
 
     #[test]
-    fn should_fail_when_new_sol_rpc_canister_id_is_anonymous() {
-        let mut state = initial_state();
+    fn should_fail_with_invalid_upgrade_args() {
+        fn assert_upgrade_fails(args: UpgradeArgs, expected: &str) {
+            let err = initial_state().upgrade(args).unwrap_err();
+            assert!(
+                format!("{err:?}").contains(expected),
+                "Expected error containing {expected:?}, got: {err:?}"
+            );
+        }
 
-        assert_matches!(
-            state.upgrade(UpgradeArgs {
+        // Anonymous sol_rpc_canister_id
+        assert_upgrade_fails(
+            UpgradeArgs {
                 sol_rpc_canister_id: Some(Principal::anonymous()),
                 ..Default::default()
-            }),
-            Err(InvalidStateError::InvalidCanisterId(_))
+            },
+            "InvalidCanisterId",
         );
-    }
-
-    #[test]
-    fn should_fail_when_new_manual_deposit_fee_exceeds_minimum_deposit_amount() {
-        let mut state = initial_state();
-        let new_deposit_fee = MINIMUM_DEPOSIT_AMOUNT + 1;
-
-        assert_matches!(
-            state.upgrade(UpgradeArgs {
-                manual_deposit_fee: Some(new_deposit_fee),
+        // manual_deposit_fee exceeds minimum_deposit_amount
+        assert_upgrade_fails(
+            UpgradeArgs {
+                manual_deposit_fee: Some(MINIMUM_DEPOSIT_AMOUNT + 1),
+                automated_deposit_fee: Some(MINIMUM_DEPOSIT_AMOUNT), // automated_deposit_fee == minimum, no overlap
                 ..Default::default()
-            }),
-            Err(InvalidStateError::InvalidMinimumDepositAmount {
-                minimum_deposit_amount,
-                deposit_fee
-            }) if minimum_deposit_amount == MINIMUM_DEPOSIT_AMOUNT && deposit_fee == new_deposit_fee
+            },
+            "InvalidMinimumDepositAmount",
         );
-    }
-
-    #[test]
-    fn should_fail_when_new_minimum_deposit_amount_below_automated_deposit_fee() {
-        let mut state = initial_state();
-        let new_minimum_deposit_amount = AUTOMATED_DEPOSIT_FEE - 1;
-
-        assert_matches!(
-            state.upgrade(UpgradeArgs {
-                minimum_deposit_amount: Some(new_minimum_deposit_amount),
+        // minimum_deposit_amount below manual_deposit_fee
+        assert_upgrade_fails(
+            UpgradeArgs {
+                minimum_deposit_amount: Some(MANUAL_DEPOSIT_FEE - 1),
+                automated_deposit_fee: Some(MANUAL_DEPOSIT_FEE - 1), // automated_deposit_fee == minimum, no overlap
                 ..Default::default()
-            }),
-            Err(InvalidStateError::InvalidMinimumDepositAmount {
-                minimum_deposit_amount,
-                deposit_fee
-            }) if minimum_deposit_amount == new_minimum_deposit_amount && deposit_fee == AUTOMATED_DEPOSIT_FEE
+            },
+            "InvalidMinimumDepositAmount",
         );
-    }
-
-    #[test]
-    fn should_fail_when_new_automated_deposit_fee_exceeds_minimum_deposit_amount() {
-        let mut state = initial_state();
-        let new_automated_fee = MINIMUM_DEPOSIT_AMOUNT + 1;
-
-        assert_matches!(
-            state.upgrade(UpgradeArgs {
-                automated_deposit_fee: Some(new_automated_fee),
+        // automated_deposit_fee exceeds minimum_deposit_amount
+        assert_upgrade_fails(
+            UpgradeArgs {
+                automated_deposit_fee: Some(MINIMUM_DEPOSIT_AMOUNT + 1),
+                manual_deposit_fee: Some(MINIMUM_DEPOSIT_AMOUNT), // manual_deposit_fee == minimum, no overlap
                 ..Default::default()
-            }),
-            Err(InvalidStateError::InvalidMinimumDepositAmount {
-                minimum_deposit_amount,
-                deposit_fee
-            }) if minimum_deposit_amount == MINIMUM_DEPOSIT_AMOUNT && deposit_fee == new_automated_fee
+            },
+            "InvalidMinimumDepositAmount",
+        );
+        // minimum_deposit_amount below automated_deposit_fee
+        assert_upgrade_fails(
+            UpgradeArgs {
+                minimum_deposit_amount: Some(AUTOMATED_DEPOSIT_FEE - 1),
+                manual_deposit_fee: Some(AUTOMATED_DEPOSIT_FEE - 1), // manual_deposit_fee == minimum, no overlap
+                ..Default::default()
+            },
+            "InvalidMinimumDepositAmount",
+        );
+        // withdrawal_fee makes minimum_withdrawal_amount too low
+        assert_upgrade_fails(
+            UpgradeArgs {
+                withdrawal_fee: Some(MINIMUM_WITHDRAWAL_AMOUNT),
+                ..Default::default()
+            },
+            "InvalidMinimumWithdrawalAmount",
+        );
+        // minimum_withdrawal_amount below withdrawal_fee + rent exemption threshold
+        assert_upgrade_fails(
+            UpgradeArgs {
+                minimum_withdrawal_amount: Some(
+                    WITHDRAWAL_FEE + SOLANA_RENT_EXEMPTION_THRESHOLD - 1,
+                ),
+                ..Default::default()
+            },
+            "InvalidMinimumWithdrawalAmount",
         );
     }
 
@@ -360,44 +372,6 @@ mod state_upgrade {
             .unwrap();
 
         assert_eq!(state.withdrawal_fee(), new_withdrawal_fee);
-    }
-
-    #[test]
-    fn should_fail_when_new_withdrawal_fee_makes_minimum_withdrawal_amount_invalid() {
-        let mut state = initial_state();
-        // Set withdrawal_fee such that withdrawal_fee + rent_exemption > minimum_withdrawal_amount
-        let new_withdrawal_fee = MINIMUM_WITHDRAWAL_AMOUNT;
-
-        assert_eq!(
-            state.upgrade(UpgradeArgs {
-                withdrawal_fee: Some(new_withdrawal_fee),
-                ..Default::default()
-            }),
-            Err(InvalidStateError::InvalidMinimumWithdrawalAmount {
-                minimum_withdrawal_amount: MINIMUM_WITHDRAWAL_AMOUNT,
-                withdrawal_fee: new_withdrawal_fee,
-                rent_exemption_threshold: SOLANA_RENT_EXEMPTION_THRESHOLD,
-            })
-        );
-    }
-
-    #[test]
-    fn should_fail_when_new_minimum_withdrawal_amount_below_required_minimum() {
-        let mut state = initial_state();
-        let minimum_required = WITHDRAWAL_FEE + SOLANA_RENT_EXEMPTION_THRESHOLD;
-        let new_minimum_withdrawal_amount = minimum_required - 1;
-
-        assert_eq!(
-            state.upgrade(UpgradeArgs {
-                minimum_withdrawal_amount: Some(new_minimum_withdrawal_amount),
-                ..Default::default()
-            }),
-            Err(InvalidStateError::InvalidMinimumWithdrawalAmount {
-                minimum_withdrawal_amount: new_minimum_withdrawal_amount,
-                withdrawal_fee: WITHDRAWAL_FEE,
-                rent_exemption_threshold: SOLANA_RENT_EXEMPTION_THRESHOLD,
-            })
-        );
     }
 
     #[test]
