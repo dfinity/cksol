@@ -153,7 +153,7 @@ icp canister call -e prod cksol_minter get_deposit_address \
 
 After sending SOL to your deposit address, call `update_balance` with the Solana transaction signature to trigger minting. Pass the same `owner`/`subaccount` used when calling `get_deposit_address`. Replace `<SIGNATURE>` with the base-58 encoded transaction signature.
 
-> **Note:** This call requires attaching cycles — check the required amount via `get_minter_info` (`update_balance_required_cycles` field). If your identity does not hold cycles directly, you can optionally route the call through a cycles wallet using `--proxy <wallet-principal> --cycles <amount>`.
+> **Note:** This call requires attaching cycles — check the required amount via `get_minter_info` (`update_balance_required_cycles` field). If your identity does not hold cycles directly, you can [convert ICP to cycles](https://cli.internetcomputer.org/0.2/guides/tokens-and-cycles/#converting-icp-to-cycles) first, or route the call through a proxy canister using `--proxy <proxy-principal> --cycles <amount>`.
 
 ```sh
 icp canister call -e prod cksol_minter update_balance \
