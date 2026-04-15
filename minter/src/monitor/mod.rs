@@ -2,6 +2,10 @@ use crate::{
     address::derivation_path,
     constants::MAX_CONCURRENT_RPC_CALLS,
     guard::TimerGuard,
+    rpc::{
+        SubmitTransactionError, get_recent_slot_and_blockhash, get_signature_statuses,
+        submit_transaction,
+    },
     runtime::CanisterRuntime,
     signer::sign_bytes,
     state::{
@@ -9,10 +13,6 @@ use crate::{
         audit::process_event,
         event::{EventType, VersionedMessage},
         mutate_state, read_state,
-    },
-    transaction::{
-        SubmitTransactionError, get_recent_slot_and_blockhash, get_signature_statuses,
-        submit_transaction,
     },
 };
 use canlog::log;
