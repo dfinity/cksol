@@ -153,6 +153,9 @@ type MinterInfo = record {
 };
 
 // The ckSOL minter service arguments.
+//
+// *WARNING*: Backwards-compatibility is not guaranteed. Fields may be added,
+// removed, or renamed across releases.
 type MinterArg = variant {
     Upgrade : UpgradeArgs;
     Init : InitArgs;
@@ -239,7 +242,7 @@ type WithdrawalStatus = variant {
     TxFinalized : TxFinalizedStatus;
 };
 
-// Request to convert ckSOL to Solana.
+// Event payload for an accepted ckSOL-to-Solana withdrawal request.
 //
 // *WARNING*: This type is used exclusively by the debug `get_events` endpoint.
 // Backwards-compatibility is not guaranteed.
