@@ -26,7 +26,7 @@ pub enum EventType {
     /// The minter discovered a Solana transaction that is a valid ckSOL
     /// deposit for the given account. ckSOL tokens have not yet been
     /// minted for this deposit.
-    AcceptedDeposit {
+    AcceptedManualDeposit {
         /// The signature of the Solana deposit transaction.
         signature: Signature,
         /// The account to which the minter should mint ckSOL.

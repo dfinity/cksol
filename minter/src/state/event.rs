@@ -46,7 +46,7 @@ pub enum EventType {
     /// deposit for the given account. ckSOL tokens have not yet been
     /// minted for this deposit.
     #[n(2)]
-    AcceptedDeposit {
+    AcceptedManualDeposit {
         #[n(0)]
         deposit_id: DepositId,
         #[n(1)]

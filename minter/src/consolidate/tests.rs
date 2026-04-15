@@ -44,7 +44,7 @@ async fn should_return_early_if_task_already_active() {
 
     // Only events from setup
     EventsAssert::from_recorded()
-        .expect_event(|e| assert_matches!(e, EventType::AcceptedDeposit { .. }))
+        .expect_event(|e| assert_matches!(e, EventType::AcceptedManualDeposit { .. }))
         .expect_event(|e| assert_matches!(e, EventType::Minted { .. }))
         .assert_no_more_events();
 }
@@ -65,7 +65,7 @@ async fn should_return_early_if_fetching_blockhash_fails() {
 
     // Only events from setup
     EventsAssert::from_recorded()
-        .expect_event(|e| assert_matches!(e, EventType::AcceptedDeposit { .. }))
+        .expect_event(|e| assert_matches!(e, EventType::AcceptedManualDeposit { .. }))
         .expect_event(|e| assert_matches!(e, EventType::Minted { .. }))
         .assert_no_more_events();
 }
@@ -91,7 +91,7 @@ async fn should_submit_single_consolidation_request() {
     consolidate_deposits(runtime).await;
 
     EventsAssert::from_recorded()
-        .expect_event(|e| assert_matches!(e, EventType::AcceptedDeposit { .. }))
+        .expect_event(|e| assert_matches!(e, EventType::AcceptedManualDeposit { .. }))
         .expect_event(|e| assert_matches!(e, EventType::Minted { .. }))
         .expect_event(|e| {
             assert_matches!(e, EventType::SubmittedTransaction {
@@ -127,7 +127,7 @@ async fn should_record_events_even_if_transaction_submission_fails() {
     consolidate_deposits(runtime).await;
 
     EventsAssert::from_recorded()
-        .expect_event(|e| assert_matches!(e, EventType::AcceptedDeposit { .. }))
+        .expect_event(|e| assert_matches!(e, EventType::AcceptedManualDeposit { .. }))
         .expect_event(|e| assert_matches!(e, EventType::Minted { .. }))
         .expect_event(|e| {
             assert_matches!(e, EventType::SubmittedTransaction {
@@ -177,7 +177,7 @@ async fn should_submit_multiple_consolidation_batches() {
     // Events from setup
     for _ in 0..NUM_DEPOSITS {
         events_assert = events_assert
-            .expect_event(|e| assert_matches!(e, EventType::AcceptedDeposit { .. }))
+            .expect_event(|e| assert_matches!(e, EventType::AcceptedManualDeposit { .. }))
             .expect_event(|e| assert_matches!(e, EventType::Minted { .. }));
     }
     // Batch 1:
@@ -239,9 +239,9 @@ async fn should_consolidate_multiple_deposits_to_same_account_in_single_transfer
     consolidate_deposits(runtime).await;
 
     EventsAssert::from_recorded()
-        .expect_event(|e| assert_matches!(e, EventType::AcceptedDeposit { .. }))
+        .expect_event(|e| assert_matches!(e, EventType::AcceptedManualDeposit { .. }))
         .expect_event(|e| assert_matches!(e, EventType::Minted { .. }))
-        .expect_event(|e| assert_matches!(e, EventType::AcceptedDeposit { .. }))
+        .expect_event(|e| assert_matches!(e, EventType::AcceptedManualDeposit { .. }))
         .expect_event(|e| assert_matches!(e, EventType::Minted { .. }))
         .expect_event(|e| {
             assert_matches!(e, EventType::SubmittedTransaction {
