@@ -60,7 +60,7 @@ sequenceDiagram
 
     User->>Minter: update_balance(owner, subaccount, signature)
     Minter->>Solana: fetch & verify transaction
-    Minter->>Ledger: mint with icrc1_transfer(from=minter, to=user, amount - deposit_fee)
+    Minter->>Ledger: mint with icrc1_transfer(to=user, amount - deposit_fee)
     Ledger-->>Minter: block_index
     Minter-->>User: Minted { block_index, minted_amount }
 ```
