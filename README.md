@@ -43,7 +43,7 @@ The minter controls one or more Solana addresses derived from a [threshold Schno
    - Verifies it is a valid transfer to your deposit address.
    - Mints the corresponding amount of ckSOL (minus the deposit fee) to your ICRC-1 ledger account.
 
-4. **Consolidation.** The minter periodically consolidates funds from individual deposit addresses into its main Solana account. A small consolidation fee is charged in cycles when calling `update_balance`.
+4. **Consolidation.** The minter periodically consolidates funds from individual deposit addresses into its main Solana account.
 
 ```mermaid
 sequenceDiagram
