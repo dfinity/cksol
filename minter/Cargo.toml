@@ -12,6 +12,9 @@ license.workspace = true
 name = "cksol_minter"
 path = "src/main.rs"
 
+[features]
+canbench-rs = ["dep:canbench-rs"]
+
 [dependencies]
 askama = { workspace = true }
 assert_matches = { workspace = true }
@@ -51,9 +54,6 @@ solana-system-interface = { workspace = true, features = ["bincode"] }
 solana-transaction = { workspace = true, features = ["bincode"] }
 solana-transaction-status-client-types = { workspace = true }
 thiserror = { workspace = true }
-
-[features]
-canbench-rs = ["dep:canbench-rs"]
 
 [dev-dependencies]
 candid_parser = { workspace = true }
