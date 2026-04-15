@@ -74,7 +74,7 @@ impl TestCanisterRuntime {
         self
     }
 
-    #[cfg(not(feature = "canbench-rs"))]
+    #[cfg(any(test, not(feature = "canbench-rs")))]
     pub(crate) fn set_timer_call_count(&self) -> usize {
         *self.set_timer_call_count.lock().unwrap()
     }
