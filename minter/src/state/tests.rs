@@ -223,7 +223,7 @@ mod state_upgrade {
     #[test]
     fn should_update_automated_deposit_fee() {
         let mut state = initial_state();
-        let new_automated_fee = AUTOMATED_DEPOSIT_FEE * 2;
+        let new_automated_fee = AUTOMATED_DEPOSIT_FEE / 2;
 
         state
             .upgrade(UpgradeArgs {

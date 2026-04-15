@@ -26,8 +26,8 @@ pub mod signer;
 mod stubs;
 
 pub const BLOCK_INDEX: u64 = 98763_u64;
-pub const DEPOSIT_FEE: Lamport = 10_000;
-pub const AUTOMATED_DEPOSIT_FEE: Lamport = 100_000;
+pub const DEPOSIT_FEE: Lamport = 10_000; // 0.00001 SOL
+pub const AUTOMATED_DEPOSIT_FEE: Lamport = 10_000_000; // 0.01 SOL
 pub const DEPOSIT_CONSOLIDATION_FEE: u128 = 10_000_000_000; // 0.01T cycles
 pub const WITHDRAWAL_FEE: Lamport = 5_000_000; // 0.005 SOL
 pub const MINIMUM_WITHDRAWAL_AMOUNT: Lamport = 10_000_000; // 0.01 SOL
