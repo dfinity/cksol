@@ -141,39 +141,6 @@ mod state_from_init_args {
     }
 
     #[test]
-    fn should_fail_when_minimum_deposit_amount_below_manual_deposit_fee() {
-        let insufficient = MANUAL_DEPOSIT_FEE / 2;
-        let args = InitArgs {
-            minimum_deposit_amount: insufficient,
-            automated_deposit_fee: insufficient, // automated_deposit_fee == minimum, no overlap
-            ..valid_init_args()
-        };
-        assert_matches!(
-            State::try_from(args),
-            Err(InvalidStateError::InvalidMinimumDepositAmount {
-                minimum_deposit_amount,
-                deposit_fee
-            }) if minimum_deposit_amount == insufficient && deposit_fee == MANUAL_DEPOSIT_FEE
-        );
-    }
-
-    #[test]
-    fn should_fail_when_automated_deposit_fee_exceeds_minimum_deposit_amount() {
-        let args = InitArgs {
-            automated_deposit_fee: MINIMUM_DEPOSIT_AMOUNT + 1,
-            manual_deposit_fee: MINIMUM_DEPOSIT_AMOUNT, // manual_deposit_fee == minimum, no overlap
-            ..valid_init_args()
-        };
-        assert_matches!(
-            State::try_from(args),
-            Err(InvalidStateError::InvalidMinimumDepositAmount {
-                minimum_deposit_amount,
-                deposit_fee
-            }) if minimum_deposit_amount == MINIMUM_DEPOSIT_AMOUNT && deposit_fee == MINIMUM_DEPOSIT_AMOUNT + 1
-        );
-    }
-
-    #[test]
     fn should_succeed_when_minimum_withdrawal_amount_equals_required_minimum() {
         let minimum_required = WITHDRAWAL_FEE + SOLANA_RENT_EXEMPTION_THRESHOLD;
         let args = InitArgs {
@@ -289,23 +256,13 @@ mod state_upgrade {
             },
             "InvalidCanisterId",
         );
-        // manual_deposit_fee exceeds minimum_deposit_amount
+        // automated_deposit_fee below manual_deposit_fee
         assert_upgrade_fails(
             UpgradeArgs {
-                manual_deposit_fee: Some(MINIMUM_DEPOSIT_AMOUNT + 1),
-                automated_deposit_fee: Some(MINIMUM_DEPOSIT_AMOUNT), // automated_deposit_fee == minimum, no overlap
+                manual_deposit_fee: Some(AUTOMATED_DEPOSIT_FEE + 1),
                 ..Default::default()
             },
-            "InvalidMinimumDepositAmount",
-        );
-        // minimum_deposit_amount below manual_deposit_fee
-        assert_upgrade_fails(
-            UpgradeArgs {
-                minimum_deposit_amount: Some(MANUAL_DEPOSIT_FEE - 1),
-                automated_deposit_fee: Some(MANUAL_DEPOSIT_FEE - 1), // automated_deposit_fee == minimum, no overlap
-                ..Default::default()
-            },
-            "InvalidMinimumDepositAmount",
+            "InvalidAutomatedDepositFee",
         );
         // automated_deposit_fee exceeds minimum_deposit_amount
         assert_upgrade_fails(

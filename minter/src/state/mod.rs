@@ -329,10 +329,10 @@ impl State {
                 "ERROR: provided canister IDs are not distinct!".to_string(),
             ));
         }
-        if self.minimum_deposit_amount < self.manual_deposit_fee {
-            return Err(InvalidStateError::InvalidMinimumDepositAmount {
-                minimum_deposit_amount: self.minimum_deposit_amount,
-                deposit_fee: self.manual_deposit_fee,
+        if self.automated_deposit_fee < self.manual_deposit_fee {
+            return Err(InvalidStateError::InvalidAutomatedDepositFee {
+                automated_deposit_fee: self.automated_deposit_fee,
+                manual_deposit_fee: self.manual_deposit_fee,
             });
         }
         if self.minimum_deposit_amount < self.automated_deposit_fee {
@@ -714,6 +714,10 @@ impl State {
 #[derive(Debug, PartialEq, Eq)]
 pub enum InvalidStateError {
     InvalidCanisterId(String),
+    InvalidAutomatedDepositFee {
+        automated_deposit_fee: u64,
+        manual_deposit_fee: u64,
+    },
     InvalidMinimumDepositAmount {
         minimum_deposit_amount: u64,
         deposit_fee: u64,
