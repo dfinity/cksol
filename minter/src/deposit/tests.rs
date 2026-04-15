@@ -1,5 +1,5 @@
 use crate::{
-    deposit_transaction::{GetDepositAmountError, get_deposit_amount_to_address},
+    deposit::{GetDepositAmountError, get_deposit_amount_to_address},
     test_fixtures::deposit::{
         DEPOSIT_ADDRESS, DEPOSIT_AMOUNT, deposit_transaction, deposit_transaction_to_wrong_address,
     },

@@ -1,7 +1,7 @@
 use crate::{
     address::get_deposit_address,
     cycles::{charge_caller_cycles, check_caller_available_cycles},
-    deposit_transaction::get_deposit_amount_to_address,
+    deposit::get_deposit_amount_to_address,
     guard::update_balance_guard,
     ledger::mint,
     rpc::get_transaction,

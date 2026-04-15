@@ -3,7 +3,7 @@ pub mod consolidate;
 mod constants;
 mod cycles;
 pub mod dashboard;
-mod deposit_transaction;
+mod deposit;
 mod guard;
 mod ledger;
 pub mod lifecycle;
