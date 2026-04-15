@@ -1,4 +1,3 @@
-use canbench_rs::bench;
 use crate::{
     lifecycle,
     numeric::LedgerMintIndex,
@@ -10,6 +9,7 @@ use crate::{
     },
     storage::{reset_events, with_event_iter},
 };
+use canbench_rs::bench;
 use candid::Principal;
 use cksol_types_internal::{Ed25519KeyName, InitArgs, SolanaNetwork};
 use icrc_ledger_types::icrc1::account::Account;
@@ -52,11 +52,7 @@ fn deposit_id(i: usize) -> DepositId {
 
 fn message() -> solana_message::Message {
     let payer = solana_address::Address::from([0x42; 32]);
-    solana_message::Message::new_with_blockhash(
-        &[],
-        Some(&payer),
-        &solana_message::Hash::default(),
-    )
+    solana_message::Message::new_with_blockhash(&[], Some(&payer), &solana_message::Hash::default())
 }
 
 fn setup_10k_events() {
