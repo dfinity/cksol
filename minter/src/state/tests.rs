@@ -141,7 +141,7 @@ mod state_from_init_args {
 
     #[test]
     fn should_fail_when_minimum_deposit_amount_too_low() {
-        let insufficient_minimum_deposit_amount = DEPOSIT_FEE / 2;
+        let insufficient_minimum_deposit_amount = AUTOMATED_DEPOSIT_FEE / 2;
         let args = InitArgs {
             minimum_deposit_amount: insufficient_minimum_deposit_amount,
             ..valid_init_args()
@@ -151,9 +151,23 @@ mod state_from_init_args {
             Err(InvalidStateError::InvalidMinimumDepositAmount {
                 minimum_deposit_amount,
                 deposit_fee
-            }) if minimum_deposit_amount == insufficient_minimum_deposit_amount && deposit_fee == DEPOSIT_FEE
+            }) if minimum_deposit_amount == insufficient_minimum_deposit_amount && deposit_fee == AUTOMATED_DEPOSIT_FEE
         );
-        // `deposit_fee` in the error refers to `manual_deposit_fee`
+    }
+
+    #[test]
+    fn should_fail_when_automated_deposit_fee_exceeds_minimum_deposit_amount() {
+        let args = InitArgs {
+            automated_deposit_fee: MINIMUM_DEPOSIT_AMOUNT + 1,
+            ..valid_init_args()
+        };
+        assert_matches!(
+            State::try_from(args),
+            Err(InvalidStateError::InvalidMinimumDepositAmount {
+                minimum_deposit_amount,
+                deposit_fee
+            }) if minimum_deposit_amount == MINIMUM_DEPOSIT_AMOUNT && deposit_fee == MINIMUM_DEPOSIT_AMOUNT + 1
+        );
     }
 
     #[test]
@@ -285,9 +299,9 @@ mod state_upgrade {
     }
 
     #[test]
-    fn should_fail_when_new_minimum_deposit_amount_below_manual_deposit_fee() {
+    fn should_fail_when_new_minimum_deposit_amount_below_automated_deposit_fee() {
         let mut state = initial_state();
-        let new_minimum_deposit_amount = DEPOSIT_FEE - 1;
+        let new_minimum_deposit_amount = AUTOMATED_DEPOSIT_FEE - 1;
 
         assert_matches!(
             state.upgrade(UpgradeArgs {
@@ -297,22 +311,39 @@ mod state_upgrade {
             Err(InvalidStateError::InvalidMinimumDepositAmount {
                 minimum_deposit_amount,
                 deposit_fee
-            }) if minimum_deposit_amount == new_minimum_deposit_amount && deposit_fee == DEPOSIT_FEE
+            }) if minimum_deposit_amount == new_minimum_deposit_amount && deposit_fee == AUTOMATED_DEPOSIT_FEE
         );
     }
 
     #[test]
-    fn should_succeed_when_minimum_deposit_amount_equals_manual_deposit_fee() {
+    fn should_fail_when_new_automated_deposit_fee_exceeds_minimum_deposit_amount() {
+        let mut state = initial_state();
+        let new_automated_fee = MINIMUM_DEPOSIT_AMOUNT + 1;
+
+        assert_matches!(
+            state.upgrade(UpgradeArgs {
+                automated_deposit_fee: Some(new_automated_fee),
+                ..Default::default()
+            }),
+            Err(InvalidStateError::InvalidMinimumDepositAmount {
+                minimum_deposit_amount,
+                deposit_fee
+            }) if minimum_deposit_amount == MINIMUM_DEPOSIT_AMOUNT && deposit_fee == new_automated_fee
+        );
+    }
+
+    #[test]
+    fn should_succeed_when_minimum_deposit_amount_equals_max_deposit_fee() {
         let mut state = initial_state();
 
         state
             .upgrade(UpgradeArgs {
-                minimum_deposit_amount: Some(DEPOSIT_FEE),
+                minimum_deposit_amount: Some(AUTOMATED_DEPOSIT_FEE),
                 ..Default::default()
             })
             .unwrap();
 
-        assert_eq!(state.minimum_deposit_amount(), DEPOSIT_FEE);
+        assert_eq!(state.minimum_deposit_amount(), AUTOMATED_DEPOSIT_FEE);
     }
 
     #[test]
