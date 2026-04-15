@@ -50,11 +50,16 @@ sequenceDiagram
     actor User
     participant Minter as ckSOL Minter
     participant Ledger as ckSOL Ledger
+    participant Solana
 
     User->>Minter: get_deposit_address(owner, subaccount)
     Minter-->>User: deposit_address
 
+    User->>Solana: transfer SOL to deposit_address
+    Solana-->>User: tx_signature
+
     User->>Minter: update_balance(owner, subaccount, signature)
+    Minter->>Solana: fetch & verify transaction
     Minter->>Ledger: icrc1_transfer(amount - deposit_fee, owner/subaccount)
     Ledger-->>Minter: block_index
     Minter-->>User: Minted { block_index, minted_amount }
@@ -77,14 +82,18 @@ sequenceDiagram
     actor User
     participant Minter as ckSOL Minter
     participant Ledger as ckSOL Ledger
+    participant Solana
 
     User->>Ledger: icrc2_approve(spender=minter, amount)
     Ledger-->>User: ok
 
     User->>Minter: withdraw(destination_address, amount)
-    Minter->>Ledger: icrc2_transfer_from(from=user, amount)
+    Minter->>Ledger: burn via icrc2_transfer_from(from=user, amount)
     Ledger-->>Minter: burn_block_index
     Minter-->>User: burn_block_index
+
+    Note over Minter,Solana: (processed asynchronously by the minter)
+    Minter->>Solana: submit SOL transfer to destination_address
 
     User->>Minter: withdrawal_status(burn_block_index)
     Minter-->>User: TxFinalized(Success)
