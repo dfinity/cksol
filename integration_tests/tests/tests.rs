@@ -131,11 +131,10 @@ mod lifecycle {
 
         let minter_info_before = minter.get_minter_info().await;
 
-        // Setting a manual deposit fee higher than the minimum deposit amount should fail!
+        // Setting minimum_deposit_amount below automated_deposit_fee should fail
         let result = minter
             .upgrade(UpgradeArgs {
-                minimum_deposit_amount: Some(5_000_000),
-                manual_deposit_fee: Some(20_000_000),
+                minimum_deposit_amount: Some(5_000_000), // Below DEFAULT_AUTOMATED_DEPOSIT_FEE (10,000,000)
                 ..UpgradeArgs::default()
             })
             .await;

@@ -115,12 +115,9 @@ mod state_from_init_args {
 
     #[test]
     fn should_fail_with_invalid_init_args() {
-        fn assert_init_fails(args: InitArgs, expected: &str) {
+        fn assert_init_fails(args: InitArgs, check: impl Fn(&InvalidStateError) -> bool) {
             let err = State::try_from(args).unwrap_err();
-            assert!(
-                format!("{err:?}").contains(expected),
-                "Expected error containing {expected:?}, got: {err:?}"
-            );
+            assert!(check(&err), "unexpected error: {err:?}");
         }
         // Anonymous sol_rpc_canister_id
         assert_init_fails(
@@ -128,7 +125,7 @@ mod state_from_init_args {
                 sol_rpc_canister_id: Principal::anonymous(),
                 ..valid_init_args()
             },
-            "InvalidCanisterId",
+            |e| matches!(e, InvalidStateError::InvalidCanisterId(_)),
         );
         // Anonymous ledger_canister_id
         assert_init_fails(
@@ -136,7 +133,7 @@ mod state_from_init_args {
                 ledger_canister_id: Principal::anonymous(),
                 ..valid_init_args()
             },
-            "InvalidCanisterId",
+            |e| matches!(e, InvalidStateError::InvalidCanisterId(_)),
         );
         // Identical canister IDs
         assert_init_fails(
@@ -145,7 +142,7 @@ mod state_from_init_args {
                 ledger_canister_id: sol_rpc_canister_id(),
                 ..valid_init_args()
             },
-            "InvalidCanisterId",
+            |e| matches!(e, InvalidStateError::InvalidCanisterId(_)),
         );
         // manual_deposit_fee exceeds automated_deposit_fee
         assert_init_fails(
@@ -153,7 +150,7 @@ mod state_from_init_args {
                 manual_deposit_fee: AUTOMATED_DEPOSIT_FEE + 1,
                 ..valid_init_args()
             },
-            "InvalidAutomatedDepositFee",
+            |e| matches!(e, InvalidStateError::InvalidAutomatedDepositFee { .. }),
         );
         // automated_deposit_fee below manual_deposit_fee
         assert_init_fails(
@@ -161,7 +158,7 @@ mod state_from_init_args {
                 automated_deposit_fee: MANUAL_DEPOSIT_FEE - 1,
                 ..valid_init_args()
             },
-            "InvalidAutomatedDepositFee",
+            |e| matches!(e, InvalidStateError::InvalidAutomatedDepositFee { .. }),
         );
         // automated_deposit_fee exceeds minimum_deposit_amount
         assert_init_fails(
@@ -169,7 +166,7 @@ mod state_from_init_args {
                 automated_deposit_fee: MINIMUM_DEPOSIT_AMOUNT + 1,
                 ..valid_init_args()
             },
-            "InvalidMinimumDepositAmount",
+            |e| matches!(e, InvalidStateError::InvalidMinimumDepositAmount { .. }),
         );
         // minimum_deposit_amount below automated_deposit_fee
         assert_init_fails(
@@ -177,7 +174,7 @@ mod state_from_init_args {
                 minimum_deposit_amount: AUTOMATED_DEPOSIT_FEE - 1,
                 ..valid_init_args()
             },
-            "InvalidMinimumDepositAmount",
+            |e| matches!(e, InvalidStateError::InvalidMinimumDepositAmount { .. }),
         );
         // minimum_deposit_amount below sol_transfer_fee + rent exemption threshold
         // (automated_deposit_fee and manual_deposit_fee lowered to isolate condition 3)
@@ -189,7 +186,7 @@ mod state_from_init_args {
                 minimum_deposit_amount: sol_transfer_fee - 1,
                 ..valid_init_args()
             },
-            "InvalidMinimumDepositAmount",
+            |e| matches!(e, InvalidStateError::InvalidMinimumDepositAmount { .. }),
         );
         // withdrawal_fee exceeds minimum_withdrawal_amount
         assert_init_fails(
@@ -197,7 +194,7 @@ mod state_from_init_args {
                 withdrawal_fee: MINIMUM_WITHDRAWAL_AMOUNT,
                 ..valid_init_args()
             },
-            "InvalidMinimumWithdrawalAmount",
+            |e| matches!(e, InvalidStateError::InvalidMinimumWithdrawalAmount { .. }),
         );
         // minimum_withdrawal_amount below withdrawal_fee + rent exemption threshold
         assert_init_fails(
@@ -205,7 +202,7 @@ mod state_from_init_args {
                 minimum_withdrawal_amount: WITHDRAWAL_FEE + RENT_EXEMPTION_THRESHOLD - 1,
                 ..valid_init_args()
             },
-            "InvalidMinimumWithdrawalAmount",
+            |e| matches!(e, InvalidStateError::InvalidMinimumWithdrawalAmount { .. }),
         );
     }
 }
@@ -346,12 +343,9 @@ mod state_upgrade {
 
     #[test]
     fn should_fail_with_invalid_upgrade_args() {
-        fn assert_upgrade_fails(args: UpgradeArgs, expected: &str) {
+        fn assert_upgrade_fails(args: UpgradeArgs, check: impl Fn(&InvalidStateError) -> bool) {
             let err = initial_state().upgrade(args).unwrap_err();
-            assert!(
-                format!("{err:?}").contains(expected),
-                "Expected error containing {expected:?}, got: {err:?}"
-            );
+            assert!(check(&err), "unexpected error: {err:?}");
         }
 
         // Anonymous sol_rpc_canister_id
@@ -360,7 +354,7 @@ mod state_upgrade {
                 sol_rpc_canister_id: Some(Principal::anonymous()),
                 ..Default::default()
             },
-            "InvalidCanisterId",
+            |e| matches!(e, InvalidStateError::InvalidCanisterId(_)),
         );
         // manual_deposit_fee exceeds automated_deposit_fee
         assert_upgrade_fails(
@@ -368,7 +362,7 @@ mod state_upgrade {
                 manual_deposit_fee: Some(AUTOMATED_DEPOSIT_FEE + 1),
                 ..Default::default()
             },
-            "InvalidAutomatedDepositFee",
+            |e| matches!(e, InvalidStateError::InvalidAutomatedDepositFee { .. }),
         );
         // automated_deposit_fee below manual_deposit_fee
         assert_upgrade_fails(
@@ -376,7 +370,7 @@ mod state_upgrade {
                 automated_deposit_fee: Some(MANUAL_DEPOSIT_FEE - 1),
                 ..Default::default()
             },
-            "InvalidAutomatedDepositFee",
+            |e| matches!(e, InvalidStateError::InvalidAutomatedDepositFee { .. }),
         );
         // automated_deposit_fee exceeds minimum_deposit_amount
         assert_upgrade_fails(
@@ -384,7 +378,7 @@ mod state_upgrade {
                 automated_deposit_fee: Some(MINIMUM_DEPOSIT_AMOUNT + 1),
                 ..Default::default()
             },
-            "InvalidMinimumDepositAmount",
+            |e| matches!(e, InvalidStateError::InvalidMinimumDepositAmount { .. }),
         );
         // minimum_deposit_amount below automated_deposit_fee
         assert_upgrade_fails(
@@ -392,7 +386,7 @@ mod state_upgrade {
                 minimum_deposit_amount: Some(AUTOMATED_DEPOSIT_FEE - 1),
                 ..Default::default()
             },
-            "InvalidMinimumDepositAmount",
+            |e| matches!(e, InvalidStateError::InvalidMinimumDepositAmount { .. }),
         );
         // minimum_deposit_amount below sol_transfer_fee + rent exemption threshold
         // (automated_deposit_fee and manual_deposit_fee lowered to isolate condition 3)
@@ -404,7 +398,7 @@ mod state_upgrade {
                 minimum_deposit_amount: Some(sol_transfer_fee - 1),
                 ..Default::default()
             },
-            "InvalidMinimumDepositAmount",
+            |e| matches!(e, InvalidStateError::InvalidMinimumDepositAmount { .. }),
         );
         // withdrawal_fee exceeds minimum_withdrawal_amount
         assert_upgrade_fails(
@@ -412,7 +406,7 @@ mod state_upgrade {
                 withdrawal_fee: Some(MINIMUM_WITHDRAWAL_AMOUNT),
                 ..Default::default()
             },
-            "InvalidMinimumWithdrawalAmount",
+            |e| matches!(e, InvalidStateError::InvalidMinimumWithdrawalAmount { .. }),
         );
         // minimum_withdrawal_amount below withdrawal_fee + rent exemption threshold
         assert_upgrade_fails(
@@ -420,7 +414,7 @@ mod state_upgrade {
                 minimum_withdrawal_amount: Some(WITHDRAWAL_FEE + RENT_EXEMPTION_THRESHOLD - 1),
                 ..Default::default()
             },
-            "InvalidMinimumWithdrawalAmount",
+            |e| matches!(e, InvalidStateError::InvalidMinimumWithdrawalAmount { .. }),
         );
     }
 
