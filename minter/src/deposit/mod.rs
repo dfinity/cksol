@@ -68,3 +68,5 @@ pub enum GetDepositAmountError {
     #[error("Invalid transaction: {0}")]
     TransactionParsingFailed(String),
 }
+
+pub mod manual;

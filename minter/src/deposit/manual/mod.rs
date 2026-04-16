@@ -22,7 +22,7 @@ use solana_signature::Signature;
 #[cfg(test)]
 mod tests;
 
-pub async fn update_balance<R: CanisterRuntime>(
+pub async fn update_balance_for_transaction<R: CanisterRuntime>(
     runtime: R,
     account: Account,
     signature: Signature,
