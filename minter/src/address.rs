@@ -27,6 +27,17 @@ pub fn minter_address<R: CanisterRuntime>(master_key: &SchnorrPublicKey, runtime
     )
 }
 
+/// Derives the Solana deposit address for the given account.
+///
+/// Requires the master Schnorr key to already be cached in state (i.e. after initialization).
+/// Panics if the master key is not yet initialized.
+pub fn deposit_address(account: &Account) -> Address {
+    let master_public_key = read_state(|s| s.minter_public_key().cloned())
+        .expect("master public key is not yet initialized");
+    let public_key = derive_public_key_from_account(&master_public_key, account);
+    Address::from(public_key.serialize_raw())
+}
+
 pub async fn get_deposit_address(account: Account) -> Address {
     let master_public_key = lazy_get_schnorr_master_key().await;
 

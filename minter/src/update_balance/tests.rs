@@ -20,7 +20,7 @@ use crate::{
 };
 use assert_matches::assert_matches;
 use candid_parser::Principal;
-use cksol_types::{DepositStatus, InsufficientCyclesError, UpdateBalanceError};
+use cksol_types::{DepositStatus, InsufficientCyclesError, UpdateBalanceForTransactionError};
 use cksol_types_internal::InitArgs;
 use ic_canister_runtime::IcError;
 use icrc_ledger_types::icrc1::{
@@ -43,7 +43,7 @@ async fn should_fail_if_insufficient_cycles_attached() {
 
     assert_eq!(
         result,
-        Err(UpdateBalanceError::InsufficientCycles(
+        Err(UpdateBalanceForTransactionError::InsufficientCycles(
             InsufficientCyclesError {
                 expected: UPDATE_BALANCE_REQUIRED_CYCLES,
                 received: UPDATE_BALANCE_REQUIRED_CYCLES - 1,
@@ -64,7 +64,7 @@ async fn should_return_error_if_get_transaction_fails() {
 
     assert_matches!(
         result,
-        Err(UpdateBalanceError::TemporarilyUnavailable(e)) => assert!(e.contains("Inter-canister call perform failed"))
+        Err(UpdateBalanceForTransactionError::TemporarilyUnavailable(e)) => assert!(e.contains("Inter-canister call perform failed"))
     );
     EventsAssert::assert_no_events_recorded();
 }
@@ -79,7 +79,10 @@ async fn should_return_error_if_transaction_not_found() {
 
     let result = update_balance(runtime, DEPOSITOR_ACCOUNT, deposit_transaction_signature()).await;
 
-    assert_eq!(result, Err(UpdateBalanceError::TransactionNotFound));
+    assert_eq!(
+        result,
+        Err(UpdateBalanceForTransactionError::TransactionNotFound)
+    );
     EventsAssert::assert_no_events_recorded();
 }
 
@@ -102,7 +105,7 @@ async fn should_return_error_if_transaction_not_valid_deposit() {
 
     assert_matches!(
         result,
-        Err(UpdateBalanceError::InvalidDepositTransaction(e)) => assert!(e.contains("Transaction must target deposit address"))
+        Err(UpdateBalanceForTransactionError::InvalidDepositTransaction(e)) => assert!(e.contains("Transaction must target deposit address"))
     );
     EventsAssert::assert_no_events_recorded();
 }
@@ -124,7 +127,7 @@ async fn should_fail_if_deposit_amount_is_below_minimum() {
 
     assert_eq!(
         result,
-        Err(UpdateBalanceError::ValueTooSmall {
+        Err(UpdateBalanceForTransactionError::ValueTooSmall {
             deposit_amount: DEPOSIT_AMOUNT,
             minimum_deposit_amount: MINIMUM_DEPOSIT_AMOUNT,
         })

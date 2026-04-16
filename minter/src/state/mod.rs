@@ -92,7 +92,7 @@ pub struct State {
     minimum_deposit_amount: Lamport,
     update_balance_required_cycles: u128,
     deposit_consolidation_fee: u128,
-    pending_update_balance_requests: BTreeSet<Account>,
+    active_update_balance_for_transaction_guards: BTreeSet<Account>,
     pending_withdrawal_request_guards: BTreeSet<Account>,
     accepted_deposits: InsertionOrderedMap<DepositId, Deposit>,
     quarantined_deposits: InsertionOrderedMap<DepositId, Deposit>,
@@ -293,8 +293,8 @@ impl State {
         LedgerClient::new(runtime, self.ledger_canister_id)
     }
 
-    pub fn pending_update_balance_requests_mut(&mut self) -> &mut BTreeSet<Account> {
-        &mut self.pending_update_balance_requests
+    pub fn active_update_balance_for_transaction_guards_mut(&mut self) -> &mut BTreeSet<Account> {
+        &mut self.active_update_balance_for_transaction_guards
     }
 
     pub fn pending_withdrawal_request_guards_mut(&mut self) -> &mut BTreeSet<Account> {
@@ -739,7 +739,7 @@ impl TryFrom<InitArgs> for State {
             minimum_deposit_amount,
             update_balance_required_cycles: update_balance_required_cycles as u128,
             deposit_consolidation_fee: deposit_consolidation_fee as u128,
-            pending_update_balance_requests: BTreeSet::new(),
+            active_update_balance_for_transaction_guards: BTreeSet::new(),
             pending_withdrawal_request_guards: BTreeSet::new(),
             accepted_deposits: InsertionOrderedMap::new(),
             quarantined_deposits: InsertionOrderedMap::new(),

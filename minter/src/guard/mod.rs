@@ -1,5 +1,5 @@
 use crate::state::{State, TaskType, mutate_state};
-use cksol_types::{UpdateBalanceError, WithdrawalError};
+use cksol_types::{UpdateBalanceForTransactionError, WithdrawalError};
 use icrc_ledger_types::icrc1::account::Account;
 use std::{collections::BTreeSet, marker::PhantomData};
 
@@ -14,7 +14,7 @@ pub enum GuardError {
     TooManyConcurrentRequests,
 }
 
-impl From<GuardError> for UpdateBalanceError {
+impl From<GuardError> for UpdateBalanceForTransactionError {
     fn from(e: GuardError) -> Self {
         match e {
             GuardError::AlreadyProcessing => Self::AlreadyProcessing,
@@ -40,11 +40,11 @@ pub trait PendingRequests {
     fn pending_requests(state: &mut State) -> &mut BTreeSet<Account>;
 }
 
-pub struct PendingUpdateBalanceRequests;
+pub struct ActiveUpdateBalanceForTransactionGuards;
 
-impl PendingRequests for PendingUpdateBalanceRequests {
+impl PendingRequests for ActiveUpdateBalanceForTransactionGuards {
     fn pending_requests(state: &mut State) -> &mut BTreeSet<Account> {
-        state.pending_update_balance_requests_mut()
+        state.active_update_balance_for_transaction_guards_mut()
     }
 }
 
@@ -92,9 +92,9 @@ impl PendingRequests for PendingWithdrawalRequests {
     }
 }
 
-pub fn update_balance_guard(
+pub fn update_balance_for_transaction_guard(
     account: Account,
-) -> Result<Guard<PendingUpdateBalanceRequests>, GuardError> {
+) -> Result<Guard<ActiveUpdateBalanceForTransactionGuards>, GuardError> {
     Guard::new(account)
 }
 

@@ -5,14 +5,14 @@ use cksol_int_tests::{
     CkSolMinter, Setup, SetupBuilder,
     fixtures::{
         DEFAULT_CALLER_ACCOUNT, DEFAULT_CALLER_DEPOSIT_ADDRESS, DEPOSIT_AMOUNT,
-        EXPECTED_MINT_AMOUNT, MockBuilder, SharedMockHttpOutcalls, default_update_balance_args,
-        deposit_transaction_signature,
+        EXPECTED_MINT_AMOUNT, MockBuilder, SharedMockHttpOutcalls,
+        default_update_balance_for_transaction_args, deposit_transaction_signature,
     },
 };
 use cksol_types::{
     DepositId, DepositStatus, GetDepositAddressArgs, InsufficientCyclesError, Lamport, MinterInfo,
-    TxFinalizedStatus, UpdateBalanceArgs, UpdateBalanceError, WithdrawalArgs, WithdrawalError,
-    WithdrawalStatus,
+    TxFinalizedStatus, UpdateBalanceForTransactionArgs, UpdateBalanceForTransactionError,
+    WithdrawalArgs, WithdrawalError, WithdrawalStatus,
 };
 use cksol_types_internal::{
     UpgradeArgs,
@@ -31,7 +31,7 @@ const FINALIZE_TRANSACTIONS_DELAY: Duration = Duration::from_mins(2);
 const RESUBMIT_TRANSACTIONS_DELAY: Duration = Duration::from_mins(3);
 const DEPOSIT_CONSOLIDATION_DELAY: Duration = Duration::from_mins(10);
 
-/// Deposits funds into the minter via `update_balance`, consolidates them,
+/// Deposits funds into the minter via `update_balance_for_transaction`, consolidates them,
 /// and finalizes the consolidation so the minter's internal balance is credited.
 ///
 /// Requires the setup to have been built with `.with_proxy_canister()`.
@@ -39,7 +39,7 @@ async fn deposit_and_consolidate_funds(setup: &Setup) {
     let result = setup
         .minter()
         .with_http_mocks(MockBuilder::new().get_deposit_transaction().build())
-        .update_balance(default_update_balance_args())
+        .update_balance_for_transaction(default_update_balance_for_transaction_args())
         .await;
     assert_matches!(result, Ok(DepositStatus::Minted { .. }));
 
@@ -764,7 +764,7 @@ mod withdrawal_tests {
     }
 }
 
-mod update_balance_tests {
+mod update_balance_for_transaction_tests {
     use super::*;
 
     #[tokio::test]
@@ -773,15 +773,15 @@ mod update_balance_tests {
 
         let result = setup
             .minter()
-            .update_balance_with_cycles(
-                default_update_balance_args(),
+            .update_balance_for_transaction_with_cycles(
+                default_update_balance_for_transaction_args(),
                 Setup::DEFAULT_UPDATE_BALANCE_REQUIRED_CYCLES - 1,
             )
             .await;
 
         assert_eq!(
             result,
-            Err(UpdateBalanceError::InsufficientCycles(
+            Err(UpdateBalanceForTransactionError::InsufficientCycles(
                 InsufficientCyclesError {
                     expected: Setup::DEFAULT_UPDATE_BALANCE_REQUIRED_CYCLES,
                     received: Setup::DEFAULT_UPDATE_BALANCE_REQUIRED_CYCLES - 1,
@@ -807,10 +807,13 @@ mod update_balance_tests {
                     .get_transaction(transaction_not_found_response())
                     .build(),
             )
-            .update_balance(default_update_balance_args())
+            .update_balance_for_transaction(default_update_balance_for_transaction_args())
             .await;
 
-        assert_eq!(result, Err(UpdateBalanceError::TransactionNotFound));
+        assert_eq!(
+            result,
+            Err(UpdateBalanceForTransactionError::TransactionNotFound)
+        );
 
         setup.drop().await;
     }
@@ -827,8 +830,8 @@ mod update_balance_tests {
         let minter2 = setup.minter().with_http_mocks(mocks.clone());
 
         let (result1, result2) = join!(
-            minter1.update_balance(default_update_balance_args()),
-            minter2.update_balance(default_update_balance_args())
+            minter1.update_balance_for_transaction(default_update_balance_for_transaction_args()),
+            minter2.update_balance_for_transaction(default_update_balance_for_transaction_args())
         );
 
         let (result1, result2) = match (&result1, &result2) {
@@ -849,7 +852,7 @@ mod update_balance_tests {
         assert!(
             results
                 .iter()
-                .any(|r| matches!(r, Err(UpdateBalanceError::AlreadyProcessing))),
+                .any(|r| matches!(r, Err(UpdateBalanceForTransactionError::AlreadyProcessing))),
             "Expected one AlreadyProcessing result, got: {:?}",
             results
         );
@@ -865,11 +868,11 @@ mod update_balance_tests {
 
         let deposit_signature = deposit_transaction_signature();
 
-        // First call to `update_balance` fails due to minting error
+        // First call to `update_balance_for_transaction` fails due to minting error
         let first_result = setup
             .minter()
             .with_http_mocks(MockBuilder::new().get_deposit_transaction().build())
-            .update_balance(default_update_balance_args())
+            .update_balance_for_transaction(default_update_balance_for_transaction_args())
             .await;
         assert_eq!(
             first_result,
@@ -883,11 +886,11 @@ mod update_balance_tests {
             })
         );
 
-        // Second call to `update_balance` while the ledger is stopped should still return
+        // Second call to `update_balance_for_transaction` while the ledger is stopped should still return
         // the same status
         let second_result = setup
             .minter()
-            .update_balance(default_update_balance_args())
+            .update_balance_for_transaction(default_update_balance_for_transaction_args())
             .await;
         assert_eq!(second_result, first_result);
 
@@ -900,7 +903,7 @@ mod update_balance_tests {
 
         let result = setup
             .minter()
-            .update_balance(default_update_balance_args())
+            .update_balance_for_transaction(default_update_balance_for_transaction_args())
             .await;
         assert_matches!(&result, Ok(DepositStatus::Minted {
             minted_amount,
@@ -925,11 +928,11 @@ mod update_balance_tests {
 
         let deposit_signature = deposit_transaction_signature();
 
-        // First call to `update_balance` should result in mint
+        // First call to `update_balance_for_transaction` should result in mint
         let first_result = setup
             .minter()
             .with_http_mocks(MockBuilder::new().get_deposit_transaction().build())
-            .update_balance(default_update_balance_args())
+            .update_balance_for_transaction(default_update_balance_for_transaction_args())
             .await;
         assert_matches!(&first_result, Ok(DepositStatus::Minted {
             minted_amount,
@@ -942,10 +945,10 @@ mod update_balance_tests {
         let balance_after = setup.ledger().balance_of(DEFAULT_CALLER_ACCOUNT).await;
         assert_eq!(balance_after, EXPECTED_MINT_AMOUNT);
 
-        // Second call to `update_balance` should not result in any JSON-RPC calls or mint
+        // Second call to `update_balance_for_transaction` should not result in any JSON-RPC calls or mint
         let second_result = setup
             .minter()
-            .update_balance(default_update_balance_args())
+            .update_balance_for_transaction(default_update_balance_for_transaction_args())
             .await;
         assert_eq!(second_result, first_result);
 
@@ -968,7 +971,7 @@ mod update_balance_tests {
         let result = setup
             .minter()
             .with_http_mocks(MockBuilder::new().get_deposit_transaction().build())
-            .update_balance(default_update_balance_args())
+            .update_balance_for_transaction(default_update_balance_for_transaction_args())
             .await;
         assert_matches!(result, Ok(DepositStatus::Minted { .. }));
 
@@ -1036,7 +1039,7 @@ mod anonymous_caller_tests {
 
             // `update_balance` endpoint
             let result = minter
-                .try_update_balance(UpdateBalanceArgs {
+                .try_update_balance_for_transaction(UpdateBalanceForTransactionArgs {
                     owner,
                     subaccount: None,
                     signature: deposit_transaction_signature(),
@@ -1070,7 +1073,7 @@ mod consolidation_tests {
         let result = setup
             .minter()
             .with_http_mocks(MockBuilder::new().get_deposit_transaction().build())
-            .update_balance(default_update_balance_args())
+            .update_balance_for_transaction(default_update_balance_for_transaction_args())
             .await;
         let mint_block_index =
             assert_matches!(result, Ok(DepositStatus::Minted { block_index, .. }) => block_index);

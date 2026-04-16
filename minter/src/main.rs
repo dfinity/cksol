@@ -12,8 +12,9 @@ use cksol_minter::{
     withdraw::{WITHDRAWAL_PROCESSING_DELAY, process_pending_withdrawals},
 };
 use cksol_types::{
-    Address, DepositStatus, GetDepositAddressArgs, MinterInfo, UpdateBalanceArgs,
-    UpdateBalanceError, WithdrawalArgs, WithdrawalError, WithdrawalOk, WithdrawalStatus,
+    Address, DepositStatus, GetDepositAddressArgs, MinterInfo, UpdateBalanceForTransactionArgs,
+    UpdateBalanceForTransactionError, WithdrawalArgs, WithdrawalError, WithdrawalOk,
+    WithdrawalStatus,
 };
 use cksol_types_internal::{MinterArg, log::Priority};
 use ic_http_types::{HttpRequest, HttpResponse, HttpResponseBuilder};
@@ -50,16 +51,16 @@ fn post_upgrade(args: Option<MinterArg>) {
     setup_timers();
 }
 
-#[ic_cdk::update]
-async fn get_deposit_address(args: GetDepositAddressArgs) -> Address {
+#[ic_cdk::query]
+fn get_deposit_address(args: GetDepositAddressArgs) -> Address {
     let account = assert_non_anonymous_account(args.owner, args.subaccount);
-    cksol_minter::address::get_deposit_address(account)
-        .await
-        .into()
+    cksol_minter::address::deposit_address(&account).into()
 }
 
 #[ic_cdk::update]
-async fn update_balance(args: UpdateBalanceArgs) -> Result<DepositStatus, UpdateBalanceError> {
+async fn update_balance_for_transaction(
+    args: UpdateBalanceForTransactionArgs,
+) -> Result<DepositStatus, UpdateBalanceForTransactionError> {
     let account = assert_non_anonymous_account(args.owner, args.subaccount);
     cksol_minter::update_balance::update_balance(
         IcCanisterRuntime::new(),

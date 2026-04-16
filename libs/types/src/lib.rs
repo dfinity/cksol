@@ -76,9 +76,9 @@ impl From<Account> for GetDepositAddressArgs {
     }
 }
 
-/// Arguments for a request to the `update_balance` ckSOL minter endpoint.
+/// Arguments for a request to the `update_balance_for_transaction` ckSOL minter endpoint.
 #[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize, Serialize)]
-pub struct UpdateBalanceArgs {
+pub struct UpdateBalanceForTransactionArgs {
     /// If provided, update the balance for this principal.
     ///
     /// If not set, defaults to the caller's principal.
@@ -90,17 +90,19 @@ pub struct UpdateBalanceArgs {
     pub signature: Signature,
 }
 
-/// An error from the `update_balance` ckSOL minter endpoint.
+/// An error from the `update_balance_for_transaction` ckSOL minter endpoint.
 #[derive(Debug, Clone, PartialEq, CandidType, Deserialize, Error)]
-pub enum UpdateBalanceError {
-    /// Insufficient cycles attached by the caller to complete the [`update_balance`] call.
+pub enum UpdateBalanceForTransactionError {
+    /// Insufficient cycles attached by the caller to complete the [`update_balance_for_transaction`] call.
     #[error(transparent)]
     InsufficientCycles(#[from] InsufficientCyclesError),
     /// The minter experiences temporary issues, try the call again later.
     #[error("Transient error, try the call again later: {0}")]
     TemporarilyUnavailable(String),
-    /// There is already a concurrent `update_balance` invocation from the same caller.
-    #[error("There is already a concurrent `update_balance` invocation from the same caller")]
+    /// There is already a concurrent `update_balance_for_transaction` invocation from the same caller.
+    #[error(
+        "There is already a concurrent `update_balance_for_transaction` invocation from the same caller"
+    )]
     AlreadyProcessing,
     /// No matching transaction was found for the given signature.
     ///
@@ -227,7 +229,7 @@ pub enum WithdrawalStatus {
 pub struct MinterInfo {
     /// Fee deducted from each deposit (SOL -> ckSOL).
     pub deposit_fee: Lamport,
-    /// Extra cycles charged per `update_balance` call to offset deposit consolidation costs.
+    /// Extra cycles charged per `update_balance_for_transaction` call to offset deposit consolidation costs.
     pub deposit_consolidation_fee: u128,
     /// Minimum withdrawal amount in lamports.
     pub minimum_withdrawal_amount: Lamport,
@@ -235,7 +237,7 @@ pub struct MinterInfo {
     pub minimum_deposit_amount: Lamport,
     /// Fee deducted from each withdrawal (ckSOL -> SOL).
     pub withdrawal_fee: Lamport,
-    /// Minimum cycles the caller must attach when calling `update_balance`.
+    /// Minimum cycles the caller must attach when calling `update_balance_for_transaction`.
     pub update_balance_required_cycles: u128,
     /// The minter's tracked SOL balance in lamports.
     pub balance: Lamport,

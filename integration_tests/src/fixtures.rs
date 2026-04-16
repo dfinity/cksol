@@ -1,6 +1,6 @@
 use crate::Setup;
 use async_trait::async_trait;
-use cksol_types::{GetDepositAddressArgs, Signature, UpdateBalanceArgs};
+use cksol_types::{GetDepositAddressArgs, Signature, UpdateBalanceForTransactionArgs};
 use ic_pocket_canister_runtime::{
     ExecuteHttpOutcallMocks, JsonRpcRequestMatcher, JsonRpcResponse, MockHttpOutcalls,
     MockHttpOutcallsBuilder,
@@ -46,8 +46,8 @@ pub fn default_get_deposit_address_args() -> GetDepositAddressArgs {
     }
 }
 
-pub fn default_update_balance_args() -> UpdateBalanceArgs {
-    UpdateBalanceArgs {
+pub fn default_update_balance_for_transaction_args() -> UpdateBalanceForTransactionArgs {
+    UpdateBalanceForTransactionArgs {
         owner: None,
         subaccount: None,
         signature: deposit_transaction_signature(),

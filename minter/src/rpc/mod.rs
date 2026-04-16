@@ -3,7 +3,7 @@ use crate::{
     runtime::CanisterRuntime,
     state::read_state,
 };
-use cksol_types::UpdateBalanceError;
+use cksol_types::UpdateBalanceForTransactionError;
 use derive_more::From;
 use ic_canister_runtime::IcError;
 use sol_rpc_types::{CommitmentLevel, GetTransactionEncoding, MultiRpcResult, RpcError, Slot};
@@ -46,9 +46,9 @@ pub enum GetTransactionError {
     InconsistentRpcResults,
 }
 
-impl From<GetTransactionError> for UpdateBalanceError {
+impl From<GetTransactionError> for UpdateBalanceForTransactionError {
     fn from(error: GetTransactionError) -> Self {
-        UpdateBalanceError::TemporarilyUnavailable(error.to_string())
+        UpdateBalanceForTransactionError::TemporarilyUnavailable(error.to_string())
     }
 }
 

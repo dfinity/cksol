@@ -2,8 +2,9 @@ use crate::{events::MinterEventAssert, ledger_init_args::ledger_init_args};
 use candid::{CandidType, Decode, Encode, Nat, Principal, utils::ArgumentEncoder};
 use canlog::{Log, LogEntry};
 use cksol_types::{
-    Address, DepositStatus, GetDepositAddressArgs, MinterInfo, UpdateBalanceArgs,
-    UpdateBalanceError, WithdrawalArgs, WithdrawalError, WithdrawalOk, WithdrawalStatus,
+    Address, DepositStatus, GetDepositAddressArgs, MinterInfo, UpdateBalanceForTransactionArgs,
+    UpdateBalanceForTransactionError, WithdrawalArgs, WithdrawalError, WithdrawalOk,
+    WithdrawalStatus,
 };
 use cksol_types_internal::{
     MinterArg,
@@ -371,43 +372,46 @@ impl CkSolMinter<'_> {
         &self,
         args: impl Into<GetDepositAddressArgs>,
     ) -> Result<Address, String> {
-        self.try_update_call("get_deposit_address", (args.into(),), 0)
+        self.try_query_call("get_deposit_address", (args.into(),))
             .await
     }
 
-    pub async fn update_balance(
+    pub async fn update_balance_for_transaction(
         &self,
-        args: UpdateBalanceArgs,
-    ) -> Result<DepositStatus, UpdateBalanceError> {
-        self.try_update_balance(args)
+        args: UpdateBalanceForTransactionArgs,
+    ) -> Result<DepositStatus, UpdateBalanceForTransactionError> {
+        self.try_update_balance_for_transaction(args)
             .await
-            .expect("update_balance failed")
+            .expect("update_balance_for_transaction failed")
     }
 
-    pub async fn update_balance_with_cycles(
+    pub async fn update_balance_for_transaction_with_cycles(
         &self,
-        args: UpdateBalanceArgs,
+        args: UpdateBalanceForTransactionArgs,
         cycles: u128,
-    ) -> Result<DepositStatus, UpdateBalanceError> {
-        self.try_update_balance_with_cycles(args, cycles)
+    ) -> Result<DepositStatus, UpdateBalanceForTransactionError> {
+        self.try_update_balance_for_transaction_with_cycles(args, cycles)
             .await
-            .expect("update_balance failed")
+            .expect("update_balance_for_transaction failed")
     }
 
-    pub async fn try_update_balance(
+    pub async fn try_update_balance_for_transaction(
         &self,
-        args: UpdateBalanceArgs,
-    ) -> Result<Result<DepositStatus, UpdateBalanceError>, String> {
-        self.try_update_balance_with_cycles(args, Setup::DEFAULT_UPDATE_BALANCE_REQUIRED_CYCLES)
-            .await
+        args: UpdateBalanceForTransactionArgs,
+    ) -> Result<Result<DepositStatus, UpdateBalanceForTransactionError>, String> {
+        self.try_update_balance_for_transaction_with_cycles(
+            args,
+            Setup::DEFAULT_UPDATE_BALANCE_REQUIRED_CYCLES,
+        )
+        .await
     }
 
-    pub async fn try_update_balance_with_cycles(
+    pub async fn try_update_balance_for_transaction_with_cycles(
         &self,
-        args: UpdateBalanceArgs,
+        args: UpdateBalanceForTransactionArgs,
         cycles: u128,
-    ) -> Result<Result<DepositStatus, UpdateBalanceError>, String> {
-        self.try_update_call("update_balance", (args,), cycles)
+    ) -> Result<Result<DepositStatus, UpdateBalanceForTransactionError>, String> {
+        self.try_update_call("update_balance_for_transaction", (args,), cycles)
             .await
     }
 

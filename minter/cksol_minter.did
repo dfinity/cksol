@@ -39,8 +39,8 @@ type Signature = text;
 // i.e. 1_000_000_000 Lamports is 1 SOL
 type Lamport = nat64;
 
-// Arguments for a request to the `update_balance` endpoint.
-type UpdateBalanceArgs = record {
+// Arguments for a request to the `update_balance_for_transaction` endpoint.
+type UpdateBalanceForTransactionArgs = record {
     // If provided, update the balance for this principal.
     //
     // If not set, defaults to the caller's principal.
@@ -52,13 +52,13 @@ type UpdateBalanceArgs = record {
     signature: Signature;
 };
 
-// An error from the `update_balance` ckSOL minter endpoint.
-type UpdateBalanceError = variant {
-    // Insufficient cycles attached by the caller to complete the [`update_balance`] call.
+// An error from the `update_balance_for_transaction` ckSOL minter endpoint.
+type UpdateBalanceForTransactionError = variant {
+    // Insufficient cycles attached by the caller to complete the [`update_balance_for_transaction`] call.
     InsufficientCycles : InsufficientCyclesError;
     // The minter experiences temporary issues, try the call again later.
     TemporarilyUnavailable : text;
-    // There is already a concurrent `update_balance` invocation from the same caller.
+    // There is already a concurrent `update_balance_for_transaction` invocation from the same caller.
     AlreadyProcessing;
     // No matching transaction was found for the given signature.
     //
@@ -114,8 +114,8 @@ type DepositStatus = variant {
     };
 };
 
-// Represents the result of a call to the `update_balance` endpoint.
-type UpdateBalanceResult = variant { Ok : DepositStatus; Err : UpdateBalanceError };
+// Represents the result of a call to the `update_balance_for_transaction` endpoint.
+type UpdateBalanceForTransactionResult = variant { Ok : DepositStatus; Err : UpdateBalanceForTransactionError };
 
 // The Solana network to connect to.
 type SolanaNetwork = variant {
@@ -390,11 +390,11 @@ service : (MinterArg) -> {
     //
     // If the owner is not set, it defaults to the caller's principal.
     // The resolved owner must be a non-anonymous principal.
-    get_deposit_address: (GetDepositAddressArgs) -> (Address);
+    get_deposit_address: (GetDepositAddressArgs) -> (Address) query;
 
     // Update the ckSOL balance of the given owner with the funds
     // deposited in a specific Solana transaction.
-    update_balance: (UpdateBalanceArgs) -> (UpdateBalanceResult);
+    update_balance_for_transaction: (UpdateBalanceForTransactionArgs) -> (UpdateBalanceForTransactionResult);
 
     // Submits a request to convert ckSOL to Solana.
     withdraw : (WithdrawalArgs) -> (variant { Ok : WithdrawalOk; Err : WithdrawalError });
