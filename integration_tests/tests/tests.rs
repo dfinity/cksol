@@ -1172,9 +1172,7 @@ mod metrics_tests {
         let setup = setup
             .check_metrics()
             .await
-            .assert_contains_metric_matching(
-                r"oldest_incomplete_withdrawal_age_seconds 0 \d+",
-            )
+            .assert_contains_metric_matching(r"oldest_incomplete_withdrawal_age_seconds 0 \d+")
             .into();
 
         setup
