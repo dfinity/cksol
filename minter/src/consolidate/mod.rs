@@ -2,6 +2,7 @@ use crate::{
     constants::MAX_CONCURRENT_RPC_CALLS,
     guard::TimerGuard,
     numeric::LedgerMintIndex,
+    rpc::{SubmitTransactionError, get_recent_slot_and_blockhash, submit_transaction},
     runtime::CanisterRuntime,
     sol_transfer::{CreateTransferError, MAX_SIGNATURES, create_signed_consolidation_transaction},
     state::{
@@ -10,7 +11,6 @@ use crate::{
         event::{EventType, TransactionPurpose},
         mutate_state, read_state,
     },
-    transaction::{SubmitTransactionError, get_recent_slot_and_blockhash, submit_transaction},
 };
 use canlog::log;
 use cksol_types_internal::log::Priority;

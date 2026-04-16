@@ -1,8 +1,10 @@
 use crate::{
     address::get_deposit_address,
     cycles::{charge_caller_cycles, check_caller_available_cycles},
+    deposit::get_deposit_amount_to_address,
     guard::update_balance_guard,
     ledger::mint,
+    rpc::get_transaction,
     runtime::CanisterRuntime,
     state::{
         Deposit,
@@ -10,7 +12,6 @@ use crate::{
         event::{DepositId, EventType},
         mutate_state, read_state,
     },
-    transaction::{get_deposit_amount_to_address, try_get_transaction},
 };
 use canlog::log;
 use cksol_types::{DepositStatus, UpdateBalanceError};
@@ -81,7 +82,7 @@ async fn try_accept_deposit<R: CanisterRuntime>(
 
     // Reserve the consolidation fee and forward the rest to the HTTP outcall
     let cycles_for_rpc = cycles_to_attach.saturating_sub(deposit_consolidation_fee);
-    let maybe_transaction = try_get_transaction(runtime, signature, cycles_for_rpc)
+    let maybe_transaction = get_transaction(runtime, signature, cycles_for_rpc)
         .await
         .map_err(|e| {
             log!(

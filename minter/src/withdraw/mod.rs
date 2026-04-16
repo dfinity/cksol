@@ -17,6 +17,7 @@ use crate::{
     constants::MAX_CONCURRENT_RPC_CALLS,
     guard::{TimerGuard, withdrawal_guard},
     ledger::{BurnError, burn},
+    rpc::{get_recent_slot_and_blockhash, submit_transaction},
     runtime::CanisterRuntime,
     sol_transfer::{MAX_WITHDRAWALS_PER_TX, create_signed_batch_withdrawal_transaction},
     state::{
@@ -25,7 +26,6 @@ use crate::{
         event::{EventType, TransactionPurpose, VersionedMessage, WithdrawalRequest},
         mutate_state, read_state,
     },
-    transaction::{get_recent_slot_and_blockhash, submit_transaction},
 };
 
 pub const WITHDRAWAL_PROCESSING_DELAY: Duration = Duration::from_mins(1);
