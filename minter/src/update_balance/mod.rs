@@ -74,7 +74,7 @@ async fn try_accept_deposit<R: CanisterRuntime>(
 ) -> Result<Deposit, UpdateBalanceForTransactionError> {
     let (cycles_to_attach, deposit_consolidation_fee) = read_state(|state| {
         (
-            state.update_balance_required_cycles(),
+            state.update_balance_for_transaction_required_cycles(),
             state.deposit_consolidation_fee(),
         )
     });

@@ -2,7 +2,7 @@ use crate::{
     state::event::{DepositId, EventType},
     test_fixtures::{
         BLOCK_INDEX, DEPOSIT_CONSOLIDATION_FEE, DEPOSIT_FEE, EventsAssert,
-        UPDATE_BALANCE_REQUIRED_CYCLES,
+        UPDATE_BALANCE_FOR_TRANSACTION_REQUIRED_CYCLES,
         deposit::{
             DEPOSIT_AMOUNT, DEPOSITOR_ACCOUNT, DEPOSITOR_PRINCIPAL, accepted_deposit_event,
             deposit_status_minted, deposit_status_processing, deposit_status_quarantined,
@@ -36,8 +36,8 @@ type GetTransactionResult = MultiRpcResult<Option<EncodedConfirmedTransactionWit
 async fn should_fail_if_insufficient_cycles_attached() {
     init_state();
 
-    let runtime =
-        TestCanisterRuntime::new().add_msg_cycles_available(UPDATE_BALANCE_REQUIRED_CYCLES - 1);
+    let runtime = TestCanisterRuntime::new()
+        .add_msg_cycles_available(UPDATE_BALANCE_FOR_TRANSACTION_REQUIRED_CYCLES - 1);
 
     let result = update_balance(runtime, DEPOSITOR_ACCOUNT, deposit_transaction_signature()).await;
 
@@ -45,8 +45,8 @@ async fn should_fail_if_insufficient_cycles_attached() {
         result,
         Err(UpdateBalanceForTransactionError::InsufficientCycles(
             InsufficientCyclesError {
-                expected: UPDATE_BALANCE_REQUIRED_CYCLES,
-                received: UPDATE_BALANCE_REQUIRED_CYCLES - 1,
+                expected: UPDATE_BALANCE_FOR_TRANSACTION_REQUIRED_CYCLES,
+                received: UPDATE_BALANCE_FOR_TRANSACTION_REQUIRED_CYCLES - 1,
             }
         ))
     );
@@ -350,13 +350,13 @@ async fn should_allow_deposits_to_multiple_accounts_with_single_transaction() {
 
 fn runtime_with_time_and_cycles() -> TestCanisterRuntime {
     // Cycles forwarded to the RPC call = total - consolidation fee
-    let cycles_for_rpc = UPDATE_BALANCE_REQUIRED_CYCLES - DEPOSIT_CONSOLIDATION_FEE;
+    let cycles_for_rpc = UPDATE_BALANCE_FOR_TRANSACTION_REQUIRED_CYCLES - DEPOSIT_CONSOLIDATION_FEE;
     // Simulate the RPC canister refunding most of the forwarded cycles
     let refunded: u128 = cycles_for_rpc - 100_000_000_000;
     let rpc_cost = cycles_for_rpc - refunded;
     TestCanisterRuntime::new()
         .with_increasing_time()
-        .add_msg_cycles_available(UPDATE_BALANCE_REQUIRED_CYCLES)
+        .add_msg_cycles_available(UPDATE_BALANCE_FOR_TRANSACTION_REQUIRED_CYCLES)
         .add_msg_cycles_accept(rpc_cost + DEPOSIT_CONSOLIDATION_FEE)
         .add_msg_cycles_refunded(refunded)
 }

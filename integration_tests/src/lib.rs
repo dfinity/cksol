@@ -106,7 +106,7 @@ impl Setup {
     // Must be >= DEFAULT_WITHDRAWAL_FEE + SOLANA_RENT_EXEMPTION_THRESHOLD (890,880)
     pub const DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT: Lamport = 2_000_000; // 0.002 SOL
     pub const DEFAULT_MINIMUM_DEPOSIT_AMOUNT: Lamport = 10_000_000; // 0.01 SOL
-    pub const DEFAULT_UPDATE_BALANCE_REQUIRED_CYCLES: u128 = 1_000_000_000_000;
+    pub const DEFAULT_UPDATE_BALANCE_FOR_TRANSACTION_REQUIRED_CYCLES: u128 = 1_000_000_000_000;
 
     pub async fn new(
         make_live: PocketIcMode,
@@ -401,7 +401,7 @@ impl CkSolMinter<'_> {
     ) -> Result<Result<DepositStatus, UpdateBalanceForTransactionError>, String> {
         self.try_update_balance_for_transaction_with_cycles(
             args,
-            Setup::DEFAULT_UPDATE_BALANCE_REQUIRED_CYCLES,
+            Setup::DEFAULT_UPDATE_BALANCE_FOR_TRANSACTION_REQUIRED_CYCLES,
         )
         .await
     }
@@ -661,7 +661,8 @@ fn cksol_minter_init_args(
         minimum_withdrawal_amount: Setup::DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT,
         minimum_deposit_amount: Setup::DEFAULT_MINIMUM_DEPOSIT_AMOUNT,
         withdrawal_fee: Setup::DEFAULT_WITHDRAWAL_FEE,
-        update_balance_required_cycles: Setup::DEFAULT_UPDATE_BALANCE_REQUIRED_CYCLES as u64,
+        update_balance_for_transaction_required_cycles:
+            Setup::DEFAULT_UPDATE_BALANCE_FOR_TRANSACTION_REQUIRED_CYCLES as u64,
         solana_network: SolanaNetwork::Mainnet,
         deposit_consolidation_fee: Setup::DEFAULT_DEPOSIT_CONSOLIDATION_FEE as u64,
     })

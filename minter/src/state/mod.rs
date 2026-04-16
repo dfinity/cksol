@@ -90,7 +90,7 @@ pub struct State {
     withdrawal_fee: Lamport,
     minimum_withdrawal_amount: Lamport,
     minimum_deposit_amount: Lamport,
-    update_balance_required_cycles: u128,
+    update_balance_for_transaction_required_cycles: u128,
     deposit_consolidation_fee: u128,
     pending_update_balance_for_transaction_request_guards: BTreeSet<Account>,
     pending_withdrawal_request_guards: BTreeSet<Account>,
@@ -165,8 +165,8 @@ impl State {
         self.solana_network
     }
 
-    pub fn update_balance_required_cycles(&self) -> u128 {
-        self.update_balance_required_cycles
+    pub fn update_balance_for_transaction_required_cycles(&self) -> u128 {
+        self.update_balance_for_transaction_required_cycles
     }
 
     pub fn accepted_deposits(&self) -> &InsertionOrderedMap<DepositId, Deposit> {
@@ -351,7 +351,7 @@ impl State {
             minimum_withdrawal_amount,
             minimum_deposit_amount,
             withdrawal_fee,
-            update_balance_required_cycles,
+            update_balance_for_transaction_required_cycles,
             deposit_consolidation_fee,
         }: UpgradeArgs,
     ) -> Result<(), InvalidStateError> {
@@ -370,8 +370,11 @@ impl State {
         if let Some(minimum_deposit_amount) = minimum_deposit_amount {
             self.minimum_deposit_amount = minimum_deposit_amount;
         }
-        if let Some(update_balance_required_cycles) = update_balance_required_cycles {
-            self.update_balance_required_cycles = update_balance_required_cycles as u128;
+        if let Some(update_balance_for_transaction_required_cycles) =
+            update_balance_for_transaction_required_cycles
+        {
+            self.update_balance_for_transaction_required_cycles =
+                update_balance_for_transaction_required_cycles as u128;
         }
         if let Some(deposit_consolidation_fee) = deposit_consolidation_fee {
             self.deposit_consolidation_fee = deposit_consolidation_fee as u128;
@@ -724,7 +727,7 @@ impl TryFrom<InitArgs> for State {
             minimum_withdrawal_amount,
             minimum_deposit_amount,
             withdrawal_fee,
-            update_balance_required_cycles,
+            update_balance_for_transaction_required_cycles,
             solana_network,
             deposit_consolidation_fee,
         }: InitArgs,
@@ -739,7 +742,8 @@ impl TryFrom<InitArgs> for State {
             withdrawal_fee,
             minimum_withdrawal_amount,
             minimum_deposit_amount,
-            update_balance_required_cycles: update_balance_required_cycles as u128,
+            update_balance_for_transaction_required_cycles:
+                update_balance_for_transaction_required_cycles as u128,
             deposit_consolidation_fee: deposit_consolidation_fee as u128,
             pending_update_balance_for_transaction_request_guards: BTreeSet::new(),
             pending_withdrawal_request_guards: BTreeSet::new(),

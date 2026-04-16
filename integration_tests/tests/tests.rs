@@ -166,7 +166,7 @@ mod lifecycle {
         const NEW_WITHDRAWAL_FEE: Lamport = 100_000;
         const NEW_MINIMUM_WITHDRAWAL_AMOUNT: Lamport = 1_000_000;
         const NEW_MINIMUM_DEPOSIT_AMOUNT: Lamport = 25;
-        const NEW_UPDATE_BALANCE_REQUIRED_CYCLES: u128 = 500_000_000_000;
+        const NEW_UPDATE_BALANCE_FOR_TRANSACTION_REQUIRED_CYCLES: u128 = 500_000_000_000;
 
         let setup = SetupBuilder::new().build().await;
 
@@ -179,7 +179,8 @@ mod lifecycle {
                 minimum_withdrawal_amount: Setup::DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT,
                 minimum_deposit_amount: Setup::DEFAULT_MINIMUM_DEPOSIT_AMOUNT,
                 withdrawal_fee: Setup::DEFAULT_WITHDRAWAL_FEE,
-                update_balance_required_cycles: Setup::DEFAULT_UPDATE_BALANCE_REQUIRED_CYCLES,
+                update_balance_for_transaction_required_cycles:
+                    Setup::DEFAULT_UPDATE_BALANCE_FOR_TRANSACTION_REQUIRED_CYCLES,
                 balance: 0,
             }
         );
@@ -203,7 +204,9 @@ mod lifecycle {
                 minimum_withdrawal_amount: Some(NEW_MINIMUM_WITHDRAWAL_AMOUNT),
                 minimum_deposit_amount: Some(NEW_MINIMUM_DEPOSIT_AMOUNT),
                 withdrawal_fee: Some(NEW_WITHDRAWAL_FEE),
-                update_balance_required_cycles: Some(NEW_UPDATE_BALANCE_REQUIRED_CYCLES as u64),
+                update_balance_for_transaction_required_cycles: Some(
+                    NEW_UPDATE_BALANCE_FOR_TRANSACTION_REQUIRED_CYCLES as u64,
+                ),
                 deposit_consolidation_fee: None,
             })
             .await
@@ -218,7 +221,8 @@ mod lifecycle {
                 minimum_withdrawal_amount: NEW_MINIMUM_WITHDRAWAL_AMOUNT,
                 minimum_deposit_amount: NEW_MINIMUM_DEPOSIT_AMOUNT,
                 withdrawal_fee: NEW_WITHDRAWAL_FEE,
-                update_balance_required_cycles: NEW_UPDATE_BALANCE_REQUIRED_CYCLES,
+                update_balance_for_transaction_required_cycles:
+                    NEW_UPDATE_BALANCE_FOR_TRANSACTION_REQUIRED_CYCLES,
                 balance: 0,
             }
         );
@@ -775,7 +779,7 @@ mod update_balance_for_transaction_tests {
             .minter()
             .update_balance_for_transaction_with_cycles(
                 default_update_balance_for_transaction_args(),
-                Setup::DEFAULT_UPDATE_BALANCE_REQUIRED_CYCLES - 1,
+                Setup::DEFAULT_UPDATE_BALANCE_FOR_TRANSACTION_REQUIRED_CYCLES - 1,
             )
             .await;
 
@@ -783,8 +787,8 @@ mod update_balance_for_transaction_tests {
             result,
             Err(UpdateBalanceForTransactionError::InsufficientCycles(
                 InsufficientCyclesError {
-                    expected: Setup::DEFAULT_UPDATE_BALANCE_REQUIRED_CYCLES,
-                    received: Setup::DEFAULT_UPDATE_BALANCE_REQUIRED_CYCLES - 1,
+                    expected: Setup::DEFAULT_UPDATE_BALANCE_FOR_TRANSACTION_REQUIRED_CYCLES,
+                    received: Setup::DEFAULT_UPDATE_BALANCE_FOR_TRANSACTION_REQUIRED_CYCLES - 1,
                 }
             ))
         );
