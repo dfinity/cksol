@@ -134,7 +134,7 @@ mod lifecycle {
         // Setting minimum_deposit_amount below automated_deposit_fee should fail
         let result = minter
             .upgrade(UpgradeArgs {
-                minimum_deposit_amount: Some(5_000_000), // Below DEFAULT_AUTOMATED_DEPOSIT_FEE (10,000,000)
+                minimum_deposit_amount: Some(Setup::DEFAULT_AUTOMATED_DEPOSIT_FEE - 1),
                 ..UpgradeArgs::default()
             })
             .await;
