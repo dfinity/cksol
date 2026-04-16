@@ -1037,7 +1037,7 @@ mod anonymous_caller_tests {
                 .await;
             assert_matches!(result, Err(s) => s.contains("the owner must be non-anonymous"));
 
-            // `update_balance` endpoint
+            // `update_balance_for_transaction` endpoint
             let result = minter
                 .try_update_balance_for_transaction(UpdateBalanceForTransactionArgs {
                     owner,

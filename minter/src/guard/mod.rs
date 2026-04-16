@@ -40,11 +40,11 @@ pub trait PendingRequests {
     fn pending_requests(state: &mut State) -> &mut BTreeSet<Account>;
 }
 
-pub struct ActiveUpdateBalanceForTransactionGuards;
+pub struct PendingUpdateBalanceForTransactionRequests;
 
-impl PendingRequests for ActiveUpdateBalanceForTransactionGuards {
+impl PendingRequests for PendingUpdateBalanceForTransactionRequests {
     fn pending_requests(state: &mut State) -> &mut BTreeSet<Account> {
-        state.active_update_balance_for_transaction_guards_mut()
+        state.pending_update_balance_for_transaction_request_guards_mut()
     }
 }
 
@@ -94,7 +94,7 @@ impl PendingRequests for PendingWithdrawalRequests {
 
 pub fn update_balance_for_transaction_guard(
     account: Account,
-) -> Result<Guard<ActiveUpdateBalanceForTransactionGuards>, GuardError> {
+) -> Result<Guard<PendingUpdateBalanceForTransactionRequests>, GuardError> {
     Guard::new(account)
 }
 

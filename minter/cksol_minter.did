@@ -279,7 +279,7 @@ type EventType = variant {
     // The Solana transaction was not generated yet.
     AcceptedWithdrawalRequest : AcceptedWithdrawalRequest;
     // A user manually submitted a valid ckSOL deposit transaction via
-    // `update_balance`. ckSOL tokens have not yet been minted for this deposit.
+    // `update_balance_for_transaction`. ckSOL tokens have not yet been minted for this deposit.
     AcceptedManualDeposit : record {
         // The signature of the Solana deposit transaction.
         signature: Signature;
@@ -390,7 +390,7 @@ service : (MinterArg) -> {
     //
     // If the owner is not set, it defaults to the caller's principal.
     // The resolved owner must be a non-anonymous principal.
-    get_deposit_address: (GetDepositAddressArgs) -> (Address) query;
+    get_deposit_address: (GetDepositAddressArgs) -> (Address);
 
     // Update the ckSOL balance of the given owner with the funds
     // deposited in a specific Solana transaction.

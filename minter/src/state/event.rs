@@ -43,7 +43,7 @@ pub enum EventType {
     #[n(1)]
     Upgrade(#[n(0)] UpgradeArgs),
     /// A user manually submitted a valid ckSOL deposit transaction via
-    /// `update_balance`. ckSOL tokens have not yet been minted for this deposit.
+    /// `update_balance_for_transaction`. ckSOL tokens have not yet been minted for this deposit.
     #[n(2)]
     AcceptedManualDeposit {
         #[n(0)]

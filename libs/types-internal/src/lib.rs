@@ -51,13 +51,13 @@ pub struct InitArgs {
     /// The withdrawal fee in lamports.
     #[cfg_attr(feature = "event", n(6))]
     pub withdrawal_fee: Lamport,
-    /// Minimum cycles the caller must attach when calling `update_balance`.
+    /// Minimum cycles the caller must attach when calling `update_balance_for_transaction`.
     #[cfg_attr(feature = "event", n(7))]
     pub update_balance_required_cycles: u64,
     /// The Solana network to use.
     #[cfg_attr(feature = "event", n(8))]
     pub solana_network: SolanaNetwork,
-    /// Extra cycles charged per `update_balance` call to offset the cost of consolidation transactions.
+    /// Extra cycles charged per `update_balance_for_transaction` call to offset the cost of consolidation transactions.
     #[cfg_attr(feature = "event", n(9))]
     pub deposit_consolidation_fee: u64,
 }
@@ -81,10 +81,10 @@ pub struct UpgradeArgs {
     /// The new withdrawal fee in lamports.
     #[cfg_attr(feature = "event", n(4))]
     pub withdrawal_fee: Option<Lamport>,
-    /// New minimum cycles the caller must attach when calling `update_balance`.
+    /// New minimum cycles the caller must attach when calling `update_balance_for_transaction`.
     #[cfg_attr(feature = "event", n(5))]
     pub update_balance_required_cycles: Option<u64>,
-    /// New extra cycles charged per `update_balance` call to offset consolidation costs.
+    /// New extra cycles charged per `update_balance_for_transaction` call to offset consolidation costs.
     #[cfg_attr(feature = "event", n(6))]
     pub deposit_consolidation_fee: Option<u64>,
 }

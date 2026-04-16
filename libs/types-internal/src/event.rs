@@ -24,7 +24,7 @@ pub enum EventType {
     /// The minter upgraded with the specified arguments.
     Upgrade(UpgradeArgs),
     /// A user manually submitted a valid ckSOL deposit transaction via
-    /// `update_balance`. ckSOL tokens have not yet been minted for this deposit.
+    /// `update_balance_for_transaction`. ckSOL tokens have not yet been minted for this deposit.
     AcceptedManualDeposit {
         /// The signature of the Solana deposit transaction.
         signature: Signature,
