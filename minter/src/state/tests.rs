@@ -150,7 +150,7 @@ mod state_from_init_args {
                 manual_deposit_fee: AUTOMATED_DEPOSIT_FEE + 1,
                 ..valid_init_args()
             },
-            |e| matches!(e, InvalidStateError::InvalidAutomatedDepositFee { .. }),
+            |e| matches!(e, InvalidStateError::InvalidDepositFees { .. }),
         );
         // automated_deposit_fee below manual_deposit_fee
         assert_init_fails(
@@ -158,7 +158,7 @@ mod state_from_init_args {
                 automated_deposit_fee: MANUAL_DEPOSIT_FEE - 1,
                 ..valid_init_args()
             },
-            |e| matches!(e, InvalidStateError::InvalidAutomatedDepositFee { .. }),
+            |e| matches!(e, InvalidStateError::InvalidDepositFees { .. }),
         );
         // automated_deposit_fee exceeds minimum_deposit_amount
         assert_init_fails(
@@ -362,7 +362,7 @@ mod state_upgrade {
                 manual_deposit_fee: Some(AUTOMATED_DEPOSIT_FEE + 1),
                 ..Default::default()
             },
-            |e| matches!(e, InvalidStateError::InvalidAutomatedDepositFee { .. }),
+            |e| matches!(e, InvalidStateError::InvalidDepositFees { .. }),
         );
         // automated_deposit_fee below manual_deposit_fee
         assert_upgrade_fails(
@@ -370,7 +370,7 @@ mod state_upgrade {
                 automated_deposit_fee: Some(MANUAL_DEPOSIT_FEE - 1),
                 ..Default::default()
             },
-            |e| matches!(e, InvalidStateError::InvalidAutomatedDepositFee { .. }),
+            |e| matches!(e, InvalidStateError::InvalidDepositFees { .. }),
         );
         // automated_deposit_fee exceeds minimum_deposit_amount
         assert_upgrade_fails(

@@ -326,7 +326,7 @@ impl State {
             ));
         }
         if self.automated_deposit_fee < self.manual_deposit_fee {
-            return Err(InvalidStateError::InvalidAutomatedDepositFee {
+            return Err(InvalidStateError::InvalidDepositFees {
                 automated_deposit_fee: self.automated_deposit_fee,
                 manual_deposit_fee: self.manual_deposit_fee,
             });
@@ -716,7 +716,7 @@ impl State {
 #[derive(Debug, PartialEq, Eq)]
 pub enum InvalidStateError {
     InvalidCanisterId(String),
-    InvalidAutomatedDepositFee {
+    InvalidDepositFees {
         automated_deposit_fee: u64,
         manual_deposit_fee: u64,
     },
