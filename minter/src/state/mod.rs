@@ -1,5 +1,5 @@
 use crate::{
-    constants::FEE_PER_SIGNATURE,
+    constants::{FEE_PER_SIGNATURE, RENT_EXEMPTION_THRESHOLD},
     ledger::client::LedgerClient,
     numeric::{LedgerBurnIndex, LedgerMintIndex},
     state::event::{DepositId, TransactionPurpose, VersionedMessage, WithdrawalRequest},
@@ -25,10 +25,6 @@ mod tests;
 
 pub mod audit;
 pub mod event;
-
-/// The minimum balance required for a Solana account to be rent-exempt.
-/// This is the rent-exemption threshold for a basic account with 0 data bytes.
-pub const SOLANA_RENT_EXEMPTION_THRESHOLD: Lamport = 890_880;
 
 thread_local! {
     static STATE: RefCell<Option<State>> = RefCell::default();
@@ -335,20 +331,24 @@ impl State {
                 manual_deposit_fee: self.manual_deposit_fee,
             });
         }
-        if self.minimum_deposit_amount
-            < self.automated_deposit_fee + SOLANA_RENT_EXEMPTION_THRESHOLD
-        {
+        if self.minimum_deposit_amount < self.automated_deposit_fee {
             return Err(InvalidStateError::InvalidMinimumDepositAmount {
                 minimum_deposit_amount: self.minimum_deposit_amount,
-                automated_deposit_fee: self.automated_deposit_fee,
-                rent_exemption_threshold: SOLANA_RENT_EXEMPTION_THRESHOLD,
+                minimum_required: self.automated_deposit_fee,
             });
         }
-        if self.minimum_withdrawal_amount < self.withdrawal_fee + SOLANA_RENT_EXEMPTION_THRESHOLD {
+        let sol_transfer_fee = FEE_PER_SIGNATURE + RENT_EXEMPTION_THRESHOLD;
+        if self.minimum_deposit_amount < sol_transfer_fee {
+            return Err(InvalidStateError::InvalidMinimumDepositAmount {
+                minimum_deposit_amount: self.minimum_deposit_amount,
+                minimum_required: sol_transfer_fee,
+            });
+        }
+        if self.minimum_withdrawal_amount < self.withdrawal_fee + RENT_EXEMPTION_THRESHOLD {
             return Err(InvalidStateError::InvalidMinimumWithdrawalAmount {
                 minimum_withdrawal_amount: self.minimum_withdrawal_amount,
                 withdrawal_fee: self.withdrawal_fee,
-                rent_exemption_threshold: SOLANA_RENT_EXEMPTION_THRESHOLD,
+                rent_exemption_threshold: RENT_EXEMPTION_THRESHOLD,
             });
         }
         Ok(())
@@ -722,8 +722,7 @@ pub enum InvalidStateError {
     },
     InvalidMinimumDepositAmount {
         minimum_deposit_amount: u64,
-        automated_deposit_fee: u64,
-        rent_exemption_threshold: u64,
+        minimum_required: u64,
     },
     InvalidMinimumWithdrawalAmount {
         minimum_withdrawal_amount: u64,

@@ -1,7 +1,7 @@
 use super::{event::*, *};
 use crate::{
-    constants::FEE_PER_SIGNATURE as SOLANA_LAMPORTS_PER_SIGNATURE,
-    state::{SOLANA_RENT_EXEMPTION_THRESHOLD, audit::process_event, read_state},
+    constants::{FEE_PER_SIGNATURE as SOLANA_LAMPORTS_PER_SIGNATURE, RENT_EXEMPTION_THRESHOLD},
+    state::{audit::process_event, read_state},
     test_fixtures::{
         AUTOMATED_DEPOSIT_FEE, DEPOSIT_CONSOLIDATION_FEE, MANUAL_DEPOSIT_FEE,
         MINIMUM_DEPOSIT_AMOUNT, MINIMUM_WITHDRAWAL_AMOUNT, UPDATE_BALANCE_REQUIRED_CYCLES,
@@ -84,19 +84,27 @@ mod state_from_init_args {
         .unwrap();
         assert_eq!(state.manual_deposit_fee(), AUTOMATED_DEPOSIT_FEE);
 
-        // minimum_deposit_amount can equal automated_deposit_fee + rent exemption threshold
+        // minimum_deposit_amount can equal automated_deposit_fee
         let state = State::try_from(InitArgs {
-            minimum_deposit_amount: AUTOMATED_DEPOSIT_FEE + SOLANA_RENT_EXEMPTION_THRESHOLD,
+            minimum_deposit_amount: AUTOMATED_DEPOSIT_FEE,
             ..valid_init_args()
         })
         .unwrap();
-        assert_eq!(
-            state.minimum_deposit_amount(),
-            AUTOMATED_DEPOSIT_FEE + SOLANA_RENT_EXEMPTION_THRESHOLD
-        );
+        assert_eq!(state.minimum_deposit_amount(), AUTOMATED_DEPOSIT_FEE);
+
+        // minimum_deposit_amount can equal sol_transfer_fee + rent exemption threshold
+        let sol_transfer_fee = SOLANA_LAMPORTS_PER_SIGNATURE + RENT_EXEMPTION_THRESHOLD;
+        let state = State::try_from(InitArgs {
+            automated_deposit_fee: SOLANA_LAMPORTS_PER_SIGNATURE,
+            manual_deposit_fee: SOLANA_LAMPORTS_PER_SIGNATURE,
+            minimum_deposit_amount: sol_transfer_fee,
+            ..valid_init_args()
+        })
+        .unwrap();
+        assert_eq!(state.minimum_deposit_amount(), sol_transfer_fee);
 
         // minimum_withdrawal_amount can equal withdrawal_fee + rent exemption threshold exactly
-        let minimum_required = WITHDRAWAL_FEE + SOLANA_RENT_EXEMPTION_THRESHOLD;
+        let minimum_required = WITHDRAWAL_FEE + RENT_EXEMPTION_THRESHOLD;
         let state = State::try_from(InitArgs {
             minimum_withdrawal_amount: minimum_required,
             ..valid_init_args()
@@ -155,7 +163,7 @@ mod state_from_init_args {
             },
             "InvalidAutomatedDepositFee",
         );
-        // automated_deposit_fee + rent exemption threshold exceeds minimum_deposit_amount
+        // automated_deposit_fee exceeds minimum_deposit_amount
         assert_init_fails(
             InitArgs {
                 automated_deposit_fee: MINIMUM_DEPOSIT_AMOUNT + 1,
@@ -163,10 +171,22 @@ mod state_from_init_args {
             },
             "InvalidMinimumDepositAmount",
         );
-        // minimum_deposit_amount below automated_deposit_fee + rent exemption threshold
+        // minimum_deposit_amount below automated_deposit_fee
         assert_init_fails(
             InitArgs {
                 minimum_deposit_amount: AUTOMATED_DEPOSIT_FEE - 1,
+                ..valid_init_args()
+            },
+            "InvalidMinimumDepositAmount",
+        );
+        // minimum_deposit_amount below sol_transfer_fee + rent exemption threshold
+        // (automated_deposit_fee and manual_deposit_fee lowered to isolate condition 3)
+        let sol_transfer_fee = SOLANA_LAMPORTS_PER_SIGNATURE + RENT_EXEMPTION_THRESHOLD;
+        assert_init_fails(
+            InitArgs {
+                automated_deposit_fee: SOLANA_LAMPORTS_PER_SIGNATURE,
+                manual_deposit_fee: SOLANA_LAMPORTS_PER_SIGNATURE,
+                minimum_deposit_amount: sol_transfer_fee - 1,
                 ..valid_init_args()
             },
             "InvalidMinimumDepositAmount",
@@ -182,7 +202,7 @@ mod state_from_init_args {
         // minimum_withdrawal_amount below withdrawal_fee + rent exemption threshold
         assert_init_fails(
             InitArgs {
-                minimum_withdrawal_amount: WITHDRAWAL_FEE + SOLANA_RENT_EXEMPTION_THRESHOLD - 1,
+                minimum_withdrawal_amount: WITHDRAWAL_FEE + RENT_EXEMPTION_THRESHOLD - 1,
                 ..valid_init_args()
             },
             "InvalidMinimumWithdrawalAmount",
@@ -289,23 +309,31 @@ mod state_upgrade {
             .unwrap();
         assert_eq!(state.manual_deposit_fee(), AUTOMATED_DEPOSIT_FEE);
 
-        // minimum_deposit_amount can equal automated_deposit_fee + rent exemption threshold
+        // minimum_deposit_amount can equal automated_deposit_fee
         let mut state = initial_state();
         state
             .upgrade(UpgradeArgs {
-                minimum_deposit_amount: Some(
-                    AUTOMATED_DEPOSIT_FEE + SOLANA_RENT_EXEMPTION_THRESHOLD,
-                ),
+                minimum_deposit_amount: Some(AUTOMATED_DEPOSIT_FEE),
                 ..Default::default()
             })
             .unwrap();
-        assert_eq!(
-            state.minimum_deposit_amount(),
-            AUTOMATED_DEPOSIT_FEE + SOLANA_RENT_EXEMPTION_THRESHOLD
-        );
+        assert_eq!(state.minimum_deposit_amount(), AUTOMATED_DEPOSIT_FEE);
+
+        // minimum_deposit_amount can equal sol_transfer_fee + rent exemption threshold
+        let sol_transfer_fee = SOLANA_LAMPORTS_PER_SIGNATURE + RENT_EXEMPTION_THRESHOLD;
+        let mut state = initial_state();
+        state
+            .upgrade(UpgradeArgs {
+                automated_deposit_fee: Some(SOLANA_LAMPORTS_PER_SIGNATURE),
+                manual_deposit_fee: Some(SOLANA_LAMPORTS_PER_SIGNATURE),
+                minimum_deposit_amount: Some(sol_transfer_fee),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(state.minimum_deposit_amount(), sol_transfer_fee);
 
         // minimum_withdrawal_amount can equal withdrawal_fee + rent exemption threshold exactly
-        let minimum_required = WITHDRAWAL_FEE + SOLANA_RENT_EXEMPTION_THRESHOLD;
+        let minimum_required = WITHDRAWAL_FEE + RENT_EXEMPTION_THRESHOLD;
         let mut state = initial_state();
         state
             .upgrade(UpgradeArgs {
@@ -350,7 +378,7 @@ mod state_upgrade {
             },
             "InvalidAutomatedDepositFee",
         );
-        // automated_deposit_fee + rent exemption threshold exceeds minimum_deposit_amount
+        // automated_deposit_fee exceeds minimum_deposit_amount
         assert_upgrade_fails(
             UpgradeArgs {
                 automated_deposit_fee: Some(MINIMUM_DEPOSIT_AMOUNT + 1),
@@ -358,10 +386,22 @@ mod state_upgrade {
             },
             "InvalidMinimumDepositAmount",
         );
-        // minimum_deposit_amount below automated_deposit_fee + rent exemption threshold
+        // minimum_deposit_amount below automated_deposit_fee
         assert_upgrade_fails(
             UpgradeArgs {
                 minimum_deposit_amount: Some(AUTOMATED_DEPOSIT_FEE - 1),
+                ..Default::default()
+            },
+            "InvalidMinimumDepositAmount",
+        );
+        // minimum_deposit_amount below sol_transfer_fee + rent exemption threshold
+        // (automated_deposit_fee and manual_deposit_fee lowered to isolate condition 3)
+        let sol_transfer_fee = SOLANA_LAMPORTS_PER_SIGNATURE + RENT_EXEMPTION_THRESHOLD;
+        assert_upgrade_fails(
+            UpgradeArgs {
+                automated_deposit_fee: Some(SOLANA_LAMPORTS_PER_SIGNATURE),
+                manual_deposit_fee: Some(SOLANA_LAMPORTS_PER_SIGNATURE),
+                minimum_deposit_amount: Some(sol_transfer_fee - 1),
                 ..Default::default()
             },
             "InvalidMinimumDepositAmount",
@@ -377,9 +417,7 @@ mod state_upgrade {
         // minimum_withdrawal_amount below withdrawal_fee + rent exemption threshold
         assert_upgrade_fails(
             UpgradeArgs {
-                minimum_withdrawal_amount: Some(
-                    WITHDRAWAL_FEE + SOLANA_RENT_EXEMPTION_THRESHOLD - 1,
-                ),
+                minimum_withdrawal_amount: Some(WITHDRAWAL_FEE + RENT_EXEMPTION_THRESHOLD - 1),
                 ..Default::default()
             },
             "InvalidMinimumWithdrawalAmount",
