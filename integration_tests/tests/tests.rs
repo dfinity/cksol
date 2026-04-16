@@ -161,10 +161,8 @@ mod lifecycle {
     #[tokio::test]
     async fn should_get_minter_info_and_upgrade() {
         const NEW_MANUAL_DEPOSIT_FEE: Lamport = 10;
-        // minimum_deposit_amount must be >= automated_deposit_fee + rent exemption threshold (890,880 lamports)
         const NEW_AUTOMATED_DEPOSIT_FEE: Lamport = 20;
         const NEW_MINIMUM_DEPOSIT_AMOUNT: Lamport = 1_000_000;
-        // minimum_withdrawal_amount must be >= withdrawal_fee + rent exemption threshold (890,880 lamports)
         const NEW_WITHDRAWAL_FEE: Lamport = 100_000;
         const NEW_MINIMUM_WITHDRAWAL_AMOUNT: Lamport = 1_000_000;
         const NEW_UPDATE_BALANCE_REQUIRED_CYCLES: u128 = 500_000_000_000;
