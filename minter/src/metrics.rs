@@ -85,7 +85,7 @@ pub fn encode_metrics(w: &mut MetricsEncoder<Vec<u8>>, s: &State) -> std::io::Re
     w.encode_gauge(
         "oldest_incomplete_withdrawal_age_seconds",
         oldest_incomplete_withdrawal_age_seconds.metric_value(),
-        "Age of the oldest incomplete withdrawal request in seconds.",
+        "Age of the oldest incomplete withdrawal request in seconds. Returns 0 if there are no incomplete withdrawals.",
     )?;
     w.encode_gauge(
         "minter_balance",
