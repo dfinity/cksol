@@ -19,11 +19,12 @@ use crate::{
     },
     utils::insertion_ordered_map::InsertionOrderedMap,
 };
-use cksol_types_internal::SolanaNetwork;
-use cksol_types_internal::{Ed25519KeyName, InitArgs, UpgradeArgs};
+use cksol_types_internal::{Ed25519KeyName, InitArgs, SolanaNetwork, UpgradeArgs};
 use ic_stable_structures::Storable;
 use proptest::prelude::*;
 use std::borrow::Cow;
+
+const MINIMUM_VIABLE_DEPOSIT_AMOUNT: u64 = SOLANA_LAMPORTS_PER_SIGNATURE + RENT_EXEMPTION_THRESHOLD;
 
 proptest! {
     #[test]
@@ -93,15 +94,17 @@ mod state_from_init_args {
         assert_eq!(state.minimum_deposit_amount(), AUTOMATED_DEPOSIT_FEE);
 
         // minimum_deposit_amount can equal sol_transfer_fee + rent exemption threshold
-        let sol_transfer_fee = SOLANA_LAMPORTS_PER_SIGNATURE + RENT_EXEMPTION_THRESHOLD;
         let state = State::try_from(InitArgs {
             automated_deposit_fee: SOLANA_LAMPORTS_PER_SIGNATURE,
             manual_deposit_fee: SOLANA_LAMPORTS_PER_SIGNATURE,
-            minimum_deposit_amount: sol_transfer_fee,
+            minimum_deposit_amount: MINIMUM_VIABLE_DEPOSIT_AMOUNT,
             ..valid_init_args()
         })
         .unwrap();
-        assert_eq!(state.minimum_deposit_amount(), sol_transfer_fee);
+        assert_eq!(
+            state.minimum_deposit_amount(),
+            MINIMUM_VIABLE_DEPOSIT_AMOUNT
+        );
 
         // minimum_withdrawal_amount can equal withdrawal_fee + rent exemption threshold exactly
         let minimum_required = WITHDRAWAL_FEE + RENT_EXEMPTION_THRESHOLD;
@@ -166,7 +169,7 @@ mod state_from_init_args {
                 automated_deposit_fee: MINIMUM_DEPOSIT_AMOUNT + 1,
                 ..valid_init_args()
             },
-            |e| matches!(e, InvalidStateError::InvalidMinimumDepositAmount { .. }),
+            |e| matches!(e, InvalidStateError::InvalidDepositFees { .. }),
         );
         // minimum_deposit_amount below automated_deposit_fee
         assert_init_fails(
@@ -174,16 +177,15 @@ mod state_from_init_args {
                 minimum_deposit_amount: AUTOMATED_DEPOSIT_FEE - 1,
                 ..valid_init_args()
             },
-            |e| matches!(e, InvalidStateError::InvalidMinimumDepositAmount { .. }),
+            |e| matches!(e, InvalidStateError::InvalidDepositFees { .. }),
         );
         // minimum_deposit_amount below sol_transfer_fee + rent exemption threshold
         // (automated_deposit_fee and manual_deposit_fee lowered to isolate condition 3)
-        let sol_transfer_fee = SOLANA_LAMPORTS_PER_SIGNATURE + RENT_EXEMPTION_THRESHOLD;
         assert_init_fails(
             InitArgs {
                 automated_deposit_fee: SOLANA_LAMPORTS_PER_SIGNATURE,
                 manual_deposit_fee: SOLANA_LAMPORTS_PER_SIGNATURE,
-                minimum_deposit_amount: sol_transfer_fee - 1,
+                minimum_deposit_amount: MINIMUM_VIABLE_DEPOSIT_AMOUNT - 1,
                 ..valid_init_args()
             },
             |e| matches!(e, InvalidStateError::InvalidMinimumDepositAmount { .. }),
@@ -217,7 +219,7 @@ mod state_upgrade {
     #[test]
     fn should_update_fields() {
         let new_canister_id = Principal::from_slice(&[3_u8; 20]);
-        let new_deposit_fee = MANUAL_DEPOSIT_FEE / 2;
+        let new_manual_fee = MANUAL_DEPOSIT_FEE / 2;
         let new_automated_fee = AUTOMATED_DEPOSIT_FEE / 2;
         let new_minimum_deposit_amount = MINIMUM_DEPOSIT_AMOUNT * 2;
         let new_minimum_withdrawal_amount = MINIMUM_WITHDRAWAL_AMOUNT * 2;
@@ -236,11 +238,11 @@ mod state_upgrade {
         let mut state = initial_state();
         state
             .upgrade(UpgradeArgs {
-                manual_deposit_fee: Some(new_deposit_fee),
+                manual_deposit_fee: Some(new_manual_fee),
                 ..Default::default()
             })
             .unwrap();
-        assert_eq!(state.manual_deposit_fee(), new_deposit_fee);
+        assert_eq!(state.manual_deposit_fee(), new_manual_fee);
 
         let mut state = initial_state();
         state
@@ -317,17 +319,19 @@ mod state_upgrade {
         assert_eq!(state.minimum_deposit_amount(), AUTOMATED_DEPOSIT_FEE);
 
         // minimum_deposit_amount can equal sol_transfer_fee + rent exemption threshold
-        let sol_transfer_fee = SOLANA_LAMPORTS_PER_SIGNATURE + RENT_EXEMPTION_THRESHOLD;
         let mut state = initial_state();
         state
             .upgrade(UpgradeArgs {
                 automated_deposit_fee: Some(SOLANA_LAMPORTS_PER_SIGNATURE),
                 manual_deposit_fee: Some(SOLANA_LAMPORTS_PER_SIGNATURE),
-                minimum_deposit_amount: Some(sol_transfer_fee),
+                minimum_deposit_amount: Some(MINIMUM_VIABLE_DEPOSIT_AMOUNT),
                 ..Default::default()
             })
             .unwrap();
-        assert_eq!(state.minimum_deposit_amount(), sol_transfer_fee);
+        assert_eq!(
+            state.minimum_deposit_amount(),
+            MINIMUM_VIABLE_DEPOSIT_AMOUNT
+        );
 
         // minimum_withdrawal_amount can equal withdrawal_fee + rent exemption threshold exactly
         let minimum_required = WITHDRAWAL_FEE + RENT_EXEMPTION_THRESHOLD;
@@ -378,7 +382,7 @@ mod state_upgrade {
                 automated_deposit_fee: Some(MINIMUM_DEPOSIT_AMOUNT + 1),
                 ..Default::default()
             },
-            |e| matches!(e, InvalidStateError::InvalidMinimumDepositAmount { .. }),
+            |e| matches!(e, InvalidStateError::InvalidDepositFees { .. }),
         );
         // minimum_deposit_amount below automated_deposit_fee
         assert_upgrade_fails(
@@ -386,16 +390,15 @@ mod state_upgrade {
                 minimum_deposit_amount: Some(AUTOMATED_DEPOSIT_FEE - 1),
                 ..Default::default()
             },
-            |e| matches!(e, InvalidStateError::InvalidMinimumDepositAmount { .. }),
+            |e| matches!(e, InvalidStateError::InvalidDepositFees { .. }),
         );
         // minimum_deposit_amount below sol_transfer_fee + rent exemption threshold
         // (automated_deposit_fee and manual_deposit_fee lowered to isolate condition 3)
-        let sol_transfer_fee = SOLANA_LAMPORTS_PER_SIGNATURE + RENT_EXEMPTION_THRESHOLD;
         assert_upgrade_fails(
             UpgradeArgs {
                 automated_deposit_fee: Some(SOLANA_LAMPORTS_PER_SIGNATURE),
                 manual_deposit_fee: Some(SOLANA_LAMPORTS_PER_SIGNATURE),
-                minimum_deposit_amount: Some(sol_transfer_fee - 1),
+                minimum_deposit_amount: Some(MINIMUM_VIABLE_DEPOSIT_AMOUNT - 1),
                 ..Default::default()
             },
             |e| matches!(e, InvalidStateError::InvalidMinimumDepositAmount { .. }),
@@ -420,7 +423,7 @@ mod state_upgrade {
 
     // This test ensures the canister state is rolled back after a failed upgrade
     #[test]
-    #[should_panic = "InvalidMinimumDepositAmount"]
+    #[should_panic = "InvalidDepositFees"]
     fn should_panic_when_upgrade_fails() {
         let mut state = initial_state();
         let new_minimum_deposit_amount = AUTOMATED_DEPOSIT_FEE - 1;

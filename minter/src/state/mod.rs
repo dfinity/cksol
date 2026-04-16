@@ -332,16 +332,16 @@ impl State {
             });
         }
         if self.minimum_deposit_amount < self.automated_deposit_fee {
-            return Err(InvalidStateError::InvalidMinimumDepositAmount {
-                minimum_deposit_amount: self.minimum_deposit_amount,
-                minimum_required: self.automated_deposit_fee,
+            return Err(InvalidStateError::InvalidDepositFees {
+                automated_deposit_fee: self.automated_deposit_fee,
+                manual_deposit_fee: self.manual_deposit_fee,
             });
         }
-        let sol_transfer_fee = FEE_PER_SIGNATURE + RENT_EXEMPTION_THRESHOLD;
-        if self.minimum_deposit_amount < sol_transfer_fee {
+        if self.minimum_deposit_amount < FEE_PER_SIGNATURE + RENT_EXEMPTION_THRESHOLD {
             return Err(InvalidStateError::InvalidMinimumDepositAmount {
                 minimum_deposit_amount: self.minimum_deposit_amount,
-                minimum_required: sol_transfer_fee,
+                fee_per_signature: FEE_PER_SIGNATURE,
+                rent_exemption_threshold: RENT_EXEMPTION_THRESHOLD,
             });
         }
         if self.minimum_withdrawal_amount < self.withdrawal_fee + RENT_EXEMPTION_THRESHOLD {
@@ -722,7 +722,8 @@ pub enum InvalidStateError {
     },
     InvalidMinimumDepositAmount {
         minimum_deposit_amount: u64,
-        minimum_required: u64,
+        fee_per_signature: u64,
+        rent_exemption_threshold: u64,
     },
     InvalidMinimumWithdrawalAmount {
         minimum_withdrawal_amount: u64,
