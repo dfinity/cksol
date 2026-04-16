@@ -38,7 +38,7 @@ The minter controls one or more Solana addresses derived from a [threshold Schno
 
 2. **Send SOL.** Transfer SOL to that deposit address from any Solana wallet.
 
-3. **Notify the minter.** Call `update_balance_for_transaction` on the minter with the Solana transaction signature and the same owner/subaccount used in step 1. This call requires attaching cycles (see `update_balance_required_cycles` in `get_minter_info`). The minter:
+3. **Notify the minter.** Call `update_balance_for_transaction` on the minter with the Solana transaction signature and the same owner/subaccount used in step 1. This call requires attaching cycles (see `update_balance_for_transaction_required_cycles` in `get_minter_info`). The minter:
    - Fetches the transaction from Solana via the SOL RPC canister.
    - Verifies it is a valid transfer to your deposit address.
    - Mints the corresponding amount of ckSOL (minus the deposit fee) to your ICRC-1 ledger account.
@@ -145,7 +145,7 @@ icp canister call -e prod cksol_minter get_deposit_address \
 
 After sending SOL to your deposit address, call `update_balance_for_transaction` with the Solana transaction signature to trigger minting. Pass the same `owner`/`subaccount` used when calling `get_deposit_address` — when `owner` is `null`, it defaults to your calling identity's principal. Replace `<SIGNATURE>` with the base-58 encoded transaction signature.
 
-> **Note:** This call requires attaching cycles — check the required amount via `get_minter_info` (`update_balance_required_cycles` field). If your identity does not hold cycles directly, you can [convert ICP to cycles](https://cli.internetcomputer.org/0.2/guides/tokens-and-cycles/#converting-icp-to-cycles) first, or route the call through a proxy canister using `--proxy <proxy-principal> --cycles <amount>`.
+> **Note:** This call requires attaching cycles — check the required amount via `get_minter_info` (`update_balance_for_transaction_required_cycles` field). If your identity does not hold cycles directly, you can [convert ICP to cycles](https://cli.internetcomputer.org/0.2/guides/tokens-and-cycles/#converting-icp-to-cycles) first, or route the call through a proxy canister using `--proxy <proxy-principal> --cycles <amount>`.
 
 ```sh
 icp canister call -e prod cksol_minter update_balance_for_transaction \
