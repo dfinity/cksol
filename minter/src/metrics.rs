@@ -75,15 +75,18 @@ pub fn encode_metrics(w: &mut MetricsEncoder<Vec<u8>>, s: &State) -> std::io::Re
         s.failed_transactions().len().metric_value(),
         "Number of failed Solana transactions.",
     )?;
-    if let Some(created_at) = s.oldest_incomplete_withdrawal_created_at() {
-        let now = ic_cdk::api::time();
-        let age_seconds = now.saturating_sub(created_at) / 1_000_000_000;
-        w.encode_gauge(
-            "oldest_incomplete_withdrawal_age_seconds",
-            age_seconds.metric_value(),
-            "Age of the oldest incomplete withdrawal request in seconds.",
-        )?;
-    }
+    let oldest_incomplete_withdrawal_age_seconds = s
+        .oldest_incomplete_withdrawal_created_at()
+        .map(|created_at| {
+            let now = ic_cdk::api::time();
+            now.saturating_sub(created_at) / 1_000_000_000
+        })
+        .unwrap_or(0);
+    w.encode_gauge(
+        "oldest_incomplete_withdrawal_age_seconds",
+        oldest_incomplete_withdrawal_age_seconds.metric_value(),
+        "Age of the oldest incomplete withdrawal request in seconds.",
+    )?;
     w.encode_gauge(
         "minter_balance",
         s.balance().metric_value(),
