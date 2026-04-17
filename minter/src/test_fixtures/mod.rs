@@ -96,9 +96,11 @@ pub fn init_schnorr_master_key() {
     });
 }
 
-/// Returns a [`Signature`] filled with byte `i`, e.g. `signature(1)` → `[0x01; 64]`.
-pub fn signature(i: u8) -> solana_signature::Signature {
-    solana_signature::Signature::from([i; 64])
+/// Returns a [`Signature`] unique for any `usize` index, derived from `i as u64` via le_bytes.
+pub fn signature(i: usize) -> solana_signature::Signature {
+    let mut bytes = [0u8; 64];
+    bytes[..8].copy_from_slice(&(i as u64).to_le_bytes());
+    solana_signature::Signature::from(bytes)
 }
 
 /// Returns a [`ConfirmedBlock`] with a deterministic blockhash for use in RPC mock stubs.
@@ -117,17 +119,19 @@ pub fn confirmed_block() -> sol_rpc_types::ConfirmedBlock {
 }
 
 /// Returns a [`DepositId`] with deterministic signature and account derived from `i`.
-pub fn deposit_id(i: u8) -> DepositId {
+pub fn deposit_id(i: usize) -> DepositId {
     DepositId {
-        signature: solana_signature::Signature::from([i; 64]),
+        signature: signature(i),
         account: account(i),
     }
 }
 
 /// Returns an [`Account`] with a deterministic principal derived from `i`.
-pub fn account(i: u8) -> Account {
+pub fn account(i: usize) -> Account {
+    let mut bytes = [0u8; 29];
+    bytes[..8].copy_from_slice(&(i as u64).to_le_bytes());
     Account {
-        owner: Principal::from_slice(&[i; 29]),
+        owner: Principal::from_slice(&bytes),
         subaccount: None,
     }
 }
@@ -168,7 +172,7 @@ pub mod events {
         mutate_state(|state| {
             process_event(
                 state,
-                EventType::AcceptedDeposit {
+                EventType::AcceptedManualDeposit {
                     deposit_id,
                     deposit_amount: amount,
                     amount_to_mint: amount - MANUAL_DEPOSIT_FEE,
@@ -529,7 +533,7 @@ pub mod arb {
             arb_withdrawal_request().prop_map(EventType::AcceptedWithdrawalRequest),
             (arb_deposit_id(), any::<u64>(), any::<u64>()).prop_map(
                 |(deposit_id, deposit_amount, amount_to_mint)| {
-                    EventType::AcceptedDeposit {
+                    EventType::AcceptedManualDeposit {
                         deposit_id,
                         deposit_amount,
                         amount_to_mint,
@@ -618,7 +622,7 @@ pub mod deposit {
     }
 
     pub fn accepted_deposit_event() -> EventType {
-        EventType::AcceptedDeposit {
+        EventType::AcceptedManualDeposit {
             deposit_id: deposit_id(),
             deposit_amount: DEPOSIT_AMOUNT,
             amount_to_mint: DEPOSIT_AMOUNT - MANUAL_DEPOSIT_FEE,

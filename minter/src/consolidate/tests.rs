@@ -1,10 +1,11 @@
 use super::{MAX_TRANSFERS_PER_CONSOLIDATION, consolidate_deposits};
 use crate::{
+    constants::MAX_CONCURRENT_RPC_CALLS,
     numeric::LedgerMintIndex,
     state::{
         TaskType,
         event::{DepositId, EventType, TransactionPurpose},
-        mutate_state,
+        mutate_state, read_state,
     },
     test_fixtures::{
         EventsAssert, account, confirmed_block, deposit_id,
@@ -43,7 +44,7 @@ async fn should_return_early_if_task_already_active() {
 
     // Only events from setup
     EventsAssert::from_recorded()
-        .expect_event(|e| assert_matches!(e, EventType::AcceptedDeposit { .. }))
+        .expect_event(|e| assert_matches!(e, EventType::AcceptedManualDeposit { .. }))
         .expect_event(|e| assert_matches!(e, EventType::Minted { .. }))
         .assert_no_more_events();
 }
@@ -64,7 +65,7 @@ async fn should_return_early_if_fetching_blockhash_fails() {
 
     // Only events from setup
     EventsAssert::from_recorded()
-        .expect_event(|e| assert_matches!(e, EventType::AcceptedDeposit { .. }))
+        .expect_event(|e| assert_matches!(e, EventType::AcceptedManualDeposit { .. }))
         .expect_event(|e| assert_matches!(e, EventType::Minted { .. }))
         .assert_no_more_events();
 }
@@ -90,7 +91,7 @@ async fn should_submit_single_consolidation_request() {
     consolidate_deposits(runtime).await;
 
     EventsAssert::from_recorded()
-        .expect_event(|e| assert_matches!(e, EventType::AcceptedDeposit { .. }))
+        .expect_event(|e| assert_matches!(e, EventType::AcceptedManualDeposit { .. }))
         .expect_event(|e| assert_matches!(e, EventType::Minted { .. }))
         .expect_event(|e| {
             assert_matches!(e, EventType::SubmittedTransaction {
@@ -126,7 +127,7 @@ async fn should_record_events_even_if_transaction_submission_fails() {
     consolidate_deposits(runtime).await;
 
     EventsAssert::from_recorded()
-        .expect_event(|e| assert_matches!(e, EventType::AcceptedDeposit { .. }))
+        .expect_event(|e| assert_matches!(e, EventType::AcceptedManualDeposit { .. }))
         .expect_event(|e| assert_matches!(e, EventType::Minted { .. }))
         .expect_event(|e| {
             assert_matches!(e, EventType::SubmittedTransaction {
@@ -144,14 +145,14 @@ async fn should_submit_multiple_consolidation_batches() {
     setup();
 
     let funds: Vec<_> = (0..NUM_DEPOSITS)
-        .map(|i| (deposit_id(i as u8), (i as u64 + 1) * 1_000_000_000))
+        .map(|i| (deposit_id(i), (i as u64 + 1) * 1_000_000_000))
         .collect();
     add_funds_to_consolidate(&funds);
 
     const BATCH_1_SIZE: usize = MAX_TRANSFERS_PER_CONSOLIDATION;
 
     let fee_payer_signature_1 = signature(0);
-    let fee_payer_signature_2 = signature(BATCH_1_SIZE as u8);
+    let fee_payer_signature_2 = signature(BATCH_1_SIZE);
     let slot = 100;
 
     let mut runtime = TestCanisterRuntime::new()
@@ -167,7 +168,7 @@ async fn should_submit_multiple_consolidation_batches() {
         )));
 
     for i in 0..(2 + NUM_DEPOSITS) {
-        runtime = runtime.add_signature([i as u8; 64]);
+        runtime = runtime.add_signature(signature(i).into());
     }
 
     consolidate_deposits(runtime).await;
@@ -176,7 +177,7 @@ async fn should_submit_multiple_consolidation_batches() {
     // Events from setup
     for _ in 0..NUM_DEPOSITS {
         events_assert = events_assert
-            .expect_event(|e| assert_matches!(e, EventType::AcceptedDeposit { .. }))
+            .expect_event(|e| assert_matches!(e, EventType::AcceptedManualDeposit { .. }))
             .expect_event(|e| assert_matches!(e, EventType::Minted { .. }));
     }
     // Batch 1:
@@ -238,9 +239,9 @@ async fn should_consolidate_multiple_deposits_to_same_account_in_single_transfer
     consolidate_deposits(runtime).await;
 
     EventsAssert::from_recorded()
-        .expect_event(|e| assert_matches!(e, EventType::AcceptedDeposit { .. }))
+        .expect_event(|e| assert_matches!(e, EventType::AcceptedManualDeposit { .. }))
         .expect_event(|e| assert_matches!(e, EventType::Minted { .. }))
-        .expect_event(|e| assert_matches!(e, EventType::AcceptedDeposit { .. }))
+        .expect_event(|e| assert_matches!(e, EventType::AcceptedManualDeposit { .. }))
         .expect_event(|e| assert_matches!(e, EventType::Minted { .. }))
         .expect_event(|e| {
             assert_matches!(e, EventType::SubmittedTransaction {
@@ -252,6 +253,61 @@ async fn should_consolidate_multiple_deposits_to_same_account_in_single_transfer
             )
         })
         .assert_no_more_events();
+}
+
+#[tokio::test]
+async fn should_reschedule_until_all_deposits_consolidated() {
+    setup();
+
+    let num_deposits = MAX_TRANSFERS_PER_CONSOLIDATION * MAX_CONCURRENT_RPC_CALLS + 1;
+    add_funds_to_consolidate(
+        &(0..num_deposits)
+            .map(|i| (deposit_id(i), (i as u64 + 1) * 1_000_000_000))
+            .collect::<Vec<_>>(),
+    );
+
+    let slot = 100;
+
+    // Round 1: processes MAX_CONCURRENT_RPC_CALLS batches, 1 deposit remains → reschedule
+    let mut runtime = TestCanisterRuntime::new()
+        .with_increasing_time()
+        .add_stub_response(SlotResult::Consistent(Ok(slot)))
+        .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())));
+    for i in 0..MAX_CONCURRENT_RPC_CALLS {
+        runtime =
+            runtime.add_stub_response(SendTransactionResult::Consistent(Ok(signature(i).into())));
+    }
+    for i in 0..(MAX_CONCURRENT_RPC_CALLS + num_deposits) {
+        runtime = runtime.add_signature(signature(i).into());
+    }
+
+    consolidate_deposits(runtime.clone()).await;
+
+    read_state(|s| {
+        assert_eq!(s.submitted_transactions().len(), MAX_CONCURRENT_RPC_CALLS);
+        assert_eq!(s.deposits_to_consolidate().len(), 1);
+    });
+    assert_eq!(runtime.set_timer_call_count(), 1);
+
+    // Round 2: processes the remaining 1 deposit → no reschedule
+    let last_sig = signature(num_deposits);
+    let runtime = TestCanisterRuntime::new()
+        .with_increasing_time()
+        .add_stub_response(SlotResult::Consistent(Ok(slot)))
+        .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())))
+        .add_stub_response(SendTransactionResult::Consistent(Ok(last_sig.into())))
+        .add_signature(last_sig.into());
+
+    consolidate_deposits(runtime.clone()).await;
+
+    read_state(|s| {
+        assert_eq!(
+            s.submitted_transactions().len(),
+            MAX_CONCURRENT_RPC_CALLS + 1
+        );
+        assert!(s.deposits_to_consolidate().is_empty());
+    });
+    assert_eq!(runtime.set_timer_call_count(), 0);
 }
 
 fn setup() {

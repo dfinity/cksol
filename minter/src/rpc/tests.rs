@@ -1,24 +1,19 @@
 use crate::{
+    rpc::{
+        GetRecentBlockhashError, GetTransactionError, SubmitTransactionError,
+        get_recent_slot_and_blockhash, get_transaction, submit_transaction,
+    },
     test_fixtures::{
         UPDATE_BALANCE_REQUIRED_CYCLES, confirmed_block,
-        deposit::{
-            DEPOSIT_ADDRESS, DEPOSIT_AMOUNT, deposit_transaction, deposit_transaction_signature,
-            deposit_transaction_to_wrong_address,
-        },
+        deposit::{deposit_transaction, deposit_transaction_signature},
         init_state,
         runtime::TestCanisterRuntime,
-    },
-    transaction::{
-        GetDepositAmountError, GetRecentBlockhashError, GetTransactionError,
-        SubmitTransactionError, get_deposit_amount_to_address, get_recent_slot_and_blockhash,
-        submit_transaction, try_get_transaction,
     },
 };
 use assert_matches::assert_matches;
 use ic_canister_runtime::IcError;
 use sol_rpc_types::{HttpOutcallError, RpcError, RpcSource, SupportedRpcProviderId};
 use solana_transaction::{Message, Transaction};
-use solana_transaction_status_client_types::{EncodedTransaction, TransactionBinaryEncoding};
 
 // TODO DEFI-2643: Test behavior with cycles
 mod get_transaction_tests {
@@ -36,7 +31,7 @@ mod get_transaction_tests {
             .add_msg_cycles_available(UPDATE_BALANCE_REQUIRED_CYCLES)
             .add_stub_error(IcError::CallPerformFailed);
 
-        let result = try_get_transaction(
+        let result = get_transaction(
             &runtime,
             deposit_transaction_signature(),
             UPDATE_BALANCE_REQUIRED_CYCLES,
@@ -63,7 +58,7 @@ mod get_transaction_tests {
             .add_msg_cycles_available(UPDATE_BALANCE_REQUIRED_CYCLES)
             .add_stub_response(MultiRpcResult::Consistent(Err(rpc_error.clone())));
 
-        let result = try_get_transaction(
+        let result = get_transaction(
             &runtime,
             deposit_transaction_signature(),
             UPDATE_BALANCE_REQUIRED_CYCLES,
@@ -92,7 +87,7 @@ mod get_transaction_tests {
             .add_msg_cycles_available(UPDATE_BALANCE_REQUIRED_CYCLES)
             .add_stub_response(MultiRpcResult::Inconsistent(results));
 
-        let result = try_get_transaction(
+        let result = get_transaction(
             &runtime,
             deposit_transaction_signature(),
             UPDATE_BALANCE_REQUIRED_CYCLES,
@@ -110,7 +105,7 @@ mod get_transaction_tests {
             .add_msg_cycles_available(UPDATE_BALANCE_REQUIRED_CYCLES)
             .add_stub_response(MultiRpcResult::Consistent(Ok(None)));
 
-        let result = try_get_transaction(
+        let result = get_transaction(
             &runtime,
             deposit_transaction_signature(),
             UPDATE_BALANCE_REQUIRED_CYCLES,
@@ -130,7 +125,7 @@ mod get_transaction_tests {
                 deposit_transaction().try_into().unwrap(),
             ))));
 
-        let result = try_get_transaction(
+        let result = get_transaction(
             &runtime,
             deposit_transaction_signature(),
             UPDATE_BALANCE_REQUIRED_CYCLES,
@@ -138,55 +133,6 @@ mod get_transaction_tests {
         .await;
 
         assert_eq!(result, Ok(Some(deposit_transaction())))
-    }
-}
-
-mod get_deposit_amount_tests {
-    use super::*;
-
-    #[test]
-    fn should_fail_if_transaction_decoding_fails() {
-        let mut transaction = deposit_transaction();
-        transaction.transaction.transaction =
-            EncodedTransaction::Binary("invalid".to_string(), TransactionBinaryEncoding::Base64);
-
-        let result = get_deposit_amount_to_address(transaction, DEPOSIT_ADDRESS);
-
-        assert_matches!(
-            result,
-            Err(GetDepositAmountError::TransactionParsingFailed(e)) => assert!(e.contains("Transaction decoding failed"))
-        );
-    }
-
-    #[test]
-    fn should_fail_if_transaction_has_no_meta() {
-        let mut transaction = deposit_transaction();
-        transaction.transaction.meta = None;
-
-        let result = get_deposit_amount_to_address(transaction, DEPOSIT_ADDRESS);
-
-        assert_eq!(result, Err(GetDepositAmountError::NoMetaField));
-    }
-
-    #[test]
-    fn should_fail_if_transaction_deposit_to_wrong_address() {
-        let transaction = deposit_transaction_to_wrong_address();
-
-        let result = get_deposit_amount_to_address(transaction, DEPOSIT_ADDRESS);
-
-        assert_eq!(
-            result,
-            Err(GetDepositAmountError::DepositAddressNotInAccountKeys)
-        );
-    }
-
-    #[test]
-    fn should_succeed_for_valid_deposit() {
-        let transaction = deposit_transaction();
-
-        let result = get_deposit_amount_to_address(transaction, DEPOSIT_ADDRESS);
-
-        assert_eq!(result, Ok(DEPOSIT_AMOUNT));
     }
 }
 

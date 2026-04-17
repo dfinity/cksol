@@ -133,6 +133,17 @@ mod iter {
     }
 
     #[test]
+    fn should_iterate_in_reverse_via_rev() {
+        let mut map = InsertionOrderedMap::new();
+        map.insert(1u32, "a");
+        map.insert(2, "b");
+        map.insert(3, "c");
+
+        let keys: Vec<_> = map.iter().rev().map(|(k, _)| *k).collect();
+        assert_eq!(keys, vec![3, 2, 1]);
+    }
+
+    #[test]
     fn should_work_in_for_loop() {
         let mut map = InsertionOrderedMap::new();
         map.insert(10u32, 100u32);

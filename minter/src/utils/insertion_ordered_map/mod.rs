@@ -10,6 +10,8 @@ mod tests;
 /// - `order`: sequence number → key
 ///
 /// Iteration via [`iter`], [`keys`], and [`values`] is in insertion order (oldest first).
+/// [`DoubleEndedIterator`] is supported on [`Iter`], so callers can call `.rev()` on
+/// [`iter`] to get newest-first.
 ///
 /// [`iter`]: InsertionOrderedMap::iter
 /// [`keys`]: InsertionOrderedMap::keys
@@ -138,6 +140,14 @@ impl<'a, K: Ord, V> Iterator for Iter<'a, K, V> {
 
     fn next(&mut self) -> Option<Self::Item> {
         let key = self.order_iter.next()?;
+        let (_, value) = self.entries.get(key)?;
+        Some((key, value))
+    }
+}
+
+impl<'a, K: Ord, V> DoubleEndedIterator for Iter<'a, K, V> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        let key = self.order_iter.next_back()?;
         let (_, value) = self.entries.get(key)?;
         Some((key, value))
     }

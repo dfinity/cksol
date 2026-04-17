@@ -7,7 +7,7 @@ use askama::Template;
 use candid::Principal;
 use cksol_types_internal::SolanaNetwork;
 use ic_http_types::HttpRequest;
-use std::{cmp::Reverse, str::FromStr};
+use std::str::FromStr;
 
 const LAMPORTS_PER_SOL: u64 = 1_000_000_000;
 
@@ -259,7 +259,8 @@ impl DashboardTemplate {
             });
         }
 
-        for (deposit_id, deposit) in state.accepted_deposits() {
+        // Accepted and quarantined (in-progress) newest-first, then minted/consolidated newest-first.
+        for (deposit_id, deposit) in state.accepted_deposits().iter().rev() {
             push_deposit(
                 &mut deposits,
                 deposit_id,
@@ -268,7 +269,7 @@ impl DashboardTemplate {
                 "Accepted",
             );
         }
-        for (deposit_id, deposit) in state.quarantined_deposits() {
+        for (deposit_id, deposit) in state.quarantined_deposits().iter().rev() {
             push_deposit(
                 &mut deposits,
                 deposit_id,
@@ -277,7 +278,7 @@ impl DashboardTemplate {
                 "Quarantined",
             );
         }
-        for (deposit_id, minted) in state.minted_deposits() {
+        for (deposit_id, minted) in state.minted_deposits().iter().rev() {
             let pending_consolidation = deposits_to_consolidate.contains_key(&minted.block_index);
             push_deposit(
                 &mut deposits,
@@ -291,18 +292,6 @@ impl DashboardTemplate {
                 },
             );
         }
-
-        // Sort deposits: non-minted (most recent) first, then minted by block index descending.
-        deposits.sort_by(|a, b| {
-            let a_idx = a.mint_block_index.parse::<u64>().ok();
-            let b_idx = b.mint_block_index.parse::<u64>().ok();
-            match (a_idx, b_idx) {
-                (None, Some(_)) => std::cmp::Ordering::Less,
-                (Some(_), None) => std::cmp::Ordering::Greater,
-                (Some(a), Some(b)) => b.cmp(&a),
-                (None, None) => std::cmp::Ordering::Equal,
-            }
-        });
 
         let deposits_table = DashboardPaginatedTable::from_items(
             &deposits,
@@ -321,11 +310,12 @@ impl DashboardTemplate {
             info: &ConsolidationTransaction,
             status: &'static str,
         ) -> DashboardConsolidation {
+            let mut deposits: Vec<_> = info.deposits.iter().collect();
+            deposits.sort_by(|a, b| b.0.cmp(&a.0));
             DashboardConsolidation {
                 transaction: signature.to_string(),
-                deposits: info
-                    .deposits
-                    .iter()
+                deposits: deposits
+                    .into_iter()
                     .map(|(mint_index, amount)| DashboardConsolidationDeposit {
                         mint_index: mint_index.to_string(),
                         deposit_amount: lamports_to_sol(*amount),
@@ -335,23 +325,24 @@ impl DashboardTemplate {
             }
         }
 
-        let consolidations: Vec<DashboardConsolidation> = [
-            (
-                state.submitted_transactions().keys().collect::<Vec<_>>(),
-                "Submitted",
-            ),
-            (state.succeeded_transactions().iter().collect(), "Succeeded"),
-            (state.failed_transactions().keys().collect(), "Failed"),
-        ]
-        .into_iter()
-        .flat_map(|(signatures, status)| {
-            signatures.into_iter().filter_map(move |sig| {
-                consolidation_transactions
-                    .get(sig)
-                    .map(|info| to_dashboard_consolidation(sig, info, status))
+        let consolidations: Vec<DashboardConsolidation> = consolidation_transactions
+            .iter()
+            .rev()
+            .filter_map(|(sig, info)| {
+                let status = if state.submitted_transactions().contains_key(sig) {
+                    "Submitted"
+                } else if state.succeeded_transactions().contains(sig) {
+                    "Succeeded"
+                } else if state.failed_transactions().contains_key(sig) {
+                    "Failed"
+                } else if state.transactions_to_resubmit().contains_key(sig) {
+                    "Queued for resubmission"
+                } else {
+                    return None;
+                };
+                Some(to_dashboard_consolidation(sig, info, status))
             })
-        })
-        .collect();
+            .collect();
 
         // The num_cols for consolidations uses the max column span (transaction + status + deposit columns)
         let consolidations_table = DashboardPaginatedTable::from_items(
@@ -364,29 +355,27 @@ impl DashboardTemplate {
             pagination.other_params("consolidations_start"),
         );
 
-        let mut withdrawals: Vec<_> = Vec::new();
+        let mut withdrawals: Vec<DashboardWithdrawal> = Vec::new();
 
         fn push_withdrawal(
-            withdrawals: &mut Vec<(u64, DashboardWithdrawal)>,
+            withdrawals: &mut Vec<DashboardWithdrawal>,
             burn_index: &crate::numeric::LedgerBurnIndex,
             req: &crate::state::event::WithdrawalRequest,
             status: &'static str,
             transaction: Option<String>,
         ) {
-            withdrawals.push((
-                *burn_index.get(),
-                DashboardWithdrawal {
-                    transaction,
-                    account: req.account.to_string(),
-                    withdrawal_amount: lamports_to_sol(req.withdrawal_amount),
-                    burnt_amount: lamports_to_sol(req.amount_to_burn),
-                    burn_block_index: burn_index.to_string(),
-                    status,
-                },
-            ));
+            withdrawals.push(DashboardWithdrawal {
+                transaction,
+                account: req.account.to_string(),
+                withdrawal_amount: lamports_to_sol(req.withdrawal_amount),
+                burnt_amount: lamports_to_sol(req.amount_to_burn),
+                burn_block_index: burn_index.to_string(),
+                status,
+            });
         }
 
-        for (burn_index, pending) in state.pending_withdrawal_requests() {
+        // Pending and sent (active) newest-first, then finalized (succeeded/failed) newest-first.
+        for (burn_index, pending) in state.pending_withdrawal_requests().iter().rev() {
             push_withdrawal(
                 &mut withdrawals,
                 burn_index,
@@ -395,7 +384,7 @@ impl DashboardTemplate {
                 None,
             );
         }
-        for (burn_index, sent) in state.sent_withdrawal_requests() {
+        for (burn_index, sent) in state.sent_withdrawal_requests().iter().rev() {
             push_withdrawal(
                 &mut withdrawals,
                 burn_index,
@@ -404,7 +393,7 @@ impl DashboardTemplate {
                 Some(sent.signature.to_string()),
             );
         }
-        for (burn_index, sent) in state.successful_withdrawal_requests() {
+        for (burn_index, sent) in state.successful_withdrawal_requests().iter().rev() {
             push_withdrawal(
                 &mut withdrawals,
                 burn_index,
@@ -413,7 +402,7 @@ impl DashboardTemplate {
                 Some(sent.signature.to_string()),
             );
         }
-        for (burn_index, sent) in state.failed_withdrawal_requests() {
+        for (burn_index, sent) in state.failed_withdrawal_requests().iter().rev() {
             push_withdrawal(
                 &mut withdrawals,
                 burn_index,
@@ -422,8 +411,6 @@ impl DashboardTemplate {
                 Some(sent.signature.to_string()),
             );
         }
-        withdrawals.sort_unstable_by_key(|(burn_index, _)| Reverse(*burn_index));
-        let withdrawals: Vec<_> = withdrawals.into_iter().map(|(_, w)| w).collect();
 
         let withdrawals_table = DashboardPaginatedTable::from_items(
             &withdrawals,

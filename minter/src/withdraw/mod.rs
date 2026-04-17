@@ -12,12 +12,12 @@ use itertools::Itertools;
 use sol_rpc_types::Slot;
 use solana_hash::Hash;
 
-use crate::constants::{MAX_CONCURRENT_RPC_CALLS, MAX_TIMER_ROUNDS};
-use crate::ledger::BurnError;
 use crate::{
     consolidate::consolidate_deposits,
+    constants::MAX_CONCURRENT_RPC_CALLS,
     guard::{TimerGuard, withdrawal_guard},
-    ledger::burn,
+    ledger::{BurnError, burn},
+    rpc::{get_recent_slot_and_blockhash, submit_transaction},
     runtime::CanisterRuntime,
     sol_transfer::{MAX_WITHDRAWALS_PER_TX, create_signed_batch_withdrawal_transaction},
     state::{
@@ -26,7 +26,6 @@ use crate::{
         event::{EventType, TransactionPurpose, VersionedMessage, WithdrawalRequest},
         mutate_state, read_state,
     },
-    transaction::{get_recent_slot_and_blockhash, submit_transaction},
 };
 
 pub const WITHDRAWAL_PROCESSING_DELAY: Duration = Duration::from_mins(1);
@@ -91,7 +90,7 @@ pub async fn withdraw<R: CanisterRuntime>(
     Ok(WithdrawalOk { block_index })
 }
 
-pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: &R) {
+pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: R) {
     let _guard = match TimerGuard::new(TaskType::WithdrawalProcessing) {
         Ok(guard) => guard,
         Err(_) => {
@@ -103,15 +102,12 @@ pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: &R) {
         }
     };
 
-    let max_per_invocation = MAX_TIMER_ROUNDS * MAX_CONCURRENT_RPC_CALLS * MAX_WITHDRAWALS_PER_TX;
-
     let (affordable_requests, num_pending_withdrawals) = read_state(|state| {
         let mut available_balance = state.balance();
         let pending = state.pending_withdrawal_requests();
 
         let affordable: Vec<_> = pending
             .values()
-            .take(max_per_invocation)
             .take_while(|r| {
                 if available_balance >= r.request.withdrawal_amount {
                     available_balance -= r.request.withdrawal_amount;
@@ -131,42 +127,45 @@ pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: &R) {
             Priority::Info,
             "Insufficient minter balance for some withdrawal requests, scheduling consolidation"
         );
-        let runtime_clone = runtime.clone();
-        runtime.set_timer(Duration::ZERO, async move {
-            consolidate_deposits(runtime_clone).await;
-        });
+        runtime.set_timer(Duration::ZERO, consolidate_deposits);
     }
 
-    if affordable_requests.is_empty() {
-        return;
-    }
+    let more_to_process =
+        affordable_requests.len() > MAX_CONCURRENT_RPC_CALLS * MAX_WITHDRAWALS_PER_TX;
+    let reschedule = scopeguard::guard(runtime.clone(), |runtime| {
+        runtime.set_timer(Duration::ZERO, process_pending_withdrawals);
+    });
 
-    let rounds: Vec<Vec<Vec<_>>> = affordable_requests
+    let batches: Vec<Vec<_>> = affordable_requests
         .into_iter()
         .chunks(MAX_WITHDRAWALS_PER_TX)
         .into_iter()
-        .map(Iterator::collect)
-        .collect::<Vec<Vec<_>>>()
-        .into_iter()
-        .chunks(MAX_CONCURRENT_RPC_CALLS)
-        .into_iter()
-        .take(MAX_TIMER_ROUNDS)
+        .take(MAX_CONCURRENT_RPC_CALLS)
         .map(Iterator::collect)
         .collect();
 
-    for round in rounds {
-        let (slot, recent_blockhash) = match get_recent_slot_and_blockhash(runtime).await {
-            Ok((slot, blockhash)) => (slot, blockhash),
-            Err(e) => {
-                log!(Priority::Info, "Failed to fetch recent blockhash: {e}");
-                return;
-            }
-        };
+    if batches.is_empty() {
+        // Nothing to process
+        scopeguard::ScopeGuard::into_inner(reschedule);
+        return;
+    }
 
-        futures::future::join_all(round.into_iter().map(async |batch| {
-            submit_withdrawal_transaction(runtime, batch, slot, recent_blockhash).await
-        }))
-        .await;
+    let (slot, recent_blockhash) = match get_recent_slot_and_blockhash(&runtime).await {
+        Ok(result) => result,
+        Err(e) => {
+            log!(Priority::Info, "Failed to fetch recent blockhash: {e}");
+            return;
+        }
+    };
+
+    futures::future::join_all(batches.into_iter().map(async |batch| {
+        submit_withdrawal_transaction(&runtime, batch, slot, recent_blockhash).await
+    }))
+    .await;
+
+    if !more_to_process {
+        // All work fits in this round
+        scopeguard::ScopeGuard::into_inner(reschedule);
     }
 }
 

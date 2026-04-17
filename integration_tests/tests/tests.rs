@@ -1123,6 +1123,35 @@ mod metrics_tests {
             .assert_contains_metric_matching(r#"cycle_balance\{canister="cksol-minter"\} \d+ \d+"#)
             // Only the canister init event should have been recorded
             .assert_contains_metric_matching(r#"total_event_count 1 \d+"#)
+            .assert_contains_metric_matching(r#"minter_balance 0 \d+"#)
+            .into()
+            .drop()
+            .await;
+    }
+
+    #[tokio::test]
+    async fn should_report_post_upgrade_instructions_consumed() {
+        let setup = SetupBuilder::new().build().await;
+
+        // After init, the metric should be 0
+        let setup = setup
+            .check_metrics()
+            .await
+            .assert_contains_metric_matching(r"post_upgrade_instructions_consumed 0 \d+")
+            .into();
+
+        // Perform an upgrade
+        setup
+            .minter()
+            .upgrade(UpgradeArgs::default())
+            .await
+            .expect("upgrade failed");
+
+        // After upgrade, the metric should be greater than 0
+        setup
+            .check_metrics()
+            .await
+            .assert_contains_metric_matching(r"post_upgrade_instructions_consumed [1-9]\d* \d+")
             .into()
             .drop()
             .await;
