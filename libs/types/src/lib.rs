@@ -79,12 +79,12 @@ impl From<Account> for GetDepositAddressArgs {
 /// Arguments for a request to the `process_deposit` ckSOL minter endpoint.
 #[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize, Serialize)]
 pub struct ProcessDepositArgs {
-    /// If provided, update the balance for this principal.
+    /// The principal to credit with the deposit.
     ///
     /// If not set, defaults to the caller's principal.
     /// The resolved owner must be a non-anonymous principal.
     pub owner: Option<Principal>,
-    /// The subaccount for which to update the balance.
+    /// The subaccount to credit with the deposit.
     pub subaccount: Option<Subaccount>,
     /// Signature of the deposit transaction.
     pub signature: Signature,

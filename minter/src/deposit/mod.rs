@@ -3,6 +3,8 @@ use solana_address::Address;
 use solana_transaction_status_client_types::EncodedConfirmedTransactionWithStatusMeta;
 use thiserror::Error;
 
+pub mod manual;
+
 #[cfg(test)]
 mod tests;
 
@@ -68,5 +70,3 @@ pub enum GetDepositAmountError {
     #[error("Invalid transaction: {0}")]
     TransactionParsingFailed(String),
 }
-
-pub mod manual;
