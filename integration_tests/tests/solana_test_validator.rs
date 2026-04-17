@@ -3,7 +3,7 @@ use candid::Principal;
 use cksol_int_tests::{
     Setup, SetupBuilder, fixtures::MINTER_ADDRESS, ledger_init_args::LEDGER_TRANSFER_FEE,
 };
-use cksol_types::{DepositStatus, UpdateBalanceArgs, WithdrawalArgs, WithdrawalStatus};
+use cksol_types::{DepositStatus, ProcessDepositArgs, WithdrawalArgs, WithdrawalStatus};
 use icrc_ledger_types::icrc1::account::Account;
 use itertools::Itertools;
 use sol_rpc_types::{InstallArgs, Lamport, OverrideProvider, RegexSubstitution};
@@ -195,7 +195,7 @@ async fn deposit_to_account(
 
     let result = setup
         .minter()
-        .update_balance(UpdateBalanceArgs {
+        .process_deposit(ProcessDepositArgs {
             owner: Some(account.owner),
             subaccount: account.subaccount,
             signature: deposit_signature.into(),

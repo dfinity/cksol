@@ -4,7 +4,7 @@ use crate::{
     state::{SOLANA_RENT_EXEMPTION_THRESHOLD, audit::process_event, read_state},
     test_fixtures::{
         DEPOSIT_CONSOLIDATION_FEE, DEPOSIT_FEE, MINIMUM_DEPOSIT_AMOUNT, MINIMUM_WITHDRAWAL_AMOUNT,
-        UPDATE_BALANCE_REQUIRED_CYCLES, WITHDRAWAL_FEE, account,
+        PROCESS_DEPOSIT_REQUIRED_CYCLES, WITHDRAWAL_FEE, account,
         arb::arb_event,
         deposit_id,
         events::{
@@ -54,8 +54,8 @@ mod state_from_init_args {
                 withdrawal_fee: WITHDRAWAL_FEE,
                 minimum_withdrawal_amount: MINIMUM_WITHDRAWAL_AMOUNT,
                 minimum_deposit_amount: MINIMUM_DEPOSIT_AMOUNT,
-                update_balance_required_cycles: UPDATE_BALANCE_REQUIRED_CYCLES,
-                pending_update_balance_requests: BTreeSet::new(),
+                process_deposit_required_cycles: PROCESS_DEPOSIT_REQUIRED_CYCLES,
+                pending_process_deposit_request_guards: BTreeSet::new(),
                 pending_withdrawal_request_guards: BTreeSet::new(),
                 accepted_deposits: InsertionOrderedMap::new(),
                 quarantined_deposits: InsertionOrderedMap::new(),
@@ -367,20 +367,20 @@ mod state_upgrade {
     }
 
     #[test]
-    fn should_update_update_balance_required_cycles() {
+    fn should_update_process_deposit_required_cycles() {
         let mut state = initial_state();
-        let new_update_balance_required_cycles = (UPDATE_BALANCE_REQUIRED_CYCLES * 2) as u64;
+        let new_process_deposit_required_cycles = (PROCESS_DEPOSIT_REQUIRED_CYCLES * 2) as u64;
 
         state
             .upgrade(UpgradeArgs {
-                update_balance_required_cycles: Some(new_update_balance_required_cycles),
+                process_deposit_required_cycles: Some(new_process_deposit_required_cycles),
                 ..Default::default()
             })
             .unwrap();
 
         assert_eq!(
-            state.update_balance_required_cycles(),
-            new_update_balance_required_cycles as u128
+            state.process_deposit_required_cycles(),
+            new_process_deposit_required_cycles as u128
         );
     }
 

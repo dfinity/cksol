@@ -3,6 +3,8 @@ use solana_address::Address;
 use solana_transaction_status_client_types::EncodedConfirmedTransactionWithStatusMeta;
 use thiserror::Error;
 
+pub mod manual;
+
 #[cfg(test)]
 mod tests;
 
