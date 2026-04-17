@@ -1066,6 +1066,8 @@ mod anonymous_caller_tests {
 mod consolidation_tests {
     use super::*;
 
+    const INITIAL_SLOT: Slot = 100_000_000;
+
     #[tokio::test]
     async fn should_consolidate_deposits_after_timer() {
         let setup = SetupBuilder::new().with_proxy_canister().build().await;
@@ -1117,7 +1119,7 @@ mod consolidation_tests {
 
         setup.minter().assert_that_events().await.satisfy(|events| {
             check!(events.iter().any(|e| matches!(
-                &e.payload,
+                e,
                 EventType::SubmittedTransaction {
                     purpose: TransactionPurpose::ConsolidateDeposits { mint_indices },
                     ..
@@ -1128,7 +1130,6 @@ mod consolidation_tests {
         // Advance time to trigger finalize_transactions. The mocked slot exceeds
         // INITIAL_SLOT + MAX_BLOCKHASH_AGE + SOL_RPC_SLOT_ROUNDING, so the
         // consolidation transaction is considered expired.
-        const INITIAL_SLOT: Slot = 100_000_000;
         let resubmission_slot = INITIAL_SLOT + MAX_BLOCKHASH_AGE + SOL_RPC_SLOT_ROUNDING + 1;
         setup.advance_time(FINALIZE_TRANSACTIONS_DELAY).await;
         setup
@@ -1142,11 +1143,13 @@ mod consolidation_tests {
             .await;
 
         setup.minter().assert_that_events().await.satisfy(|events| {
-            check!(
-                events
-                    .iter()
-                    .any(|e| matches!(&e.payload, EventType::ResubmittedTransaction { .. }))
-            );
+            check!(events.iter().any(|e| matches!(
+                e,
+                // new_slot must be past the original blockhash expiry threshold,
+                // confirming the resubmitted transaction uses a fresh blockhash.
+                EventType::ResubmittedTransaction { new_slot, .. }
+                    if *new_slot >= INITIAL_SLOT + MAX_BLOCKHASH_AGE
+            )));
         });
 
         setup.drop().await;
@@ -1156,7 +1159,7 @@ mod consolidation_tests {
     fn http_mocks_for_deposit_consolidation() -> MockHttpOutcalls {
         MockBuilder::with_start_id(4)
             .submit_transaction(
-                100_000_000,
+                INITIAL_SLOT,
                 "4sGjMW1sUnHzSxGspuhpqLDx6wiyjNtZAMdL4VZHirAn",
                 "5VERv8NMvzbJMEkV8xnrLkEaWRtSz9CosKDYjCJjBRnbJLgp8uirBgmQpjKhoR4tjF3ZpRzrFmBV6UjKdiSZkQUW",
             )
