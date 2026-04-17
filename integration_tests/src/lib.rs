@@ -2,8 +2,8 @@ use crate::{events::MinterEventAssert, ledger_init_args::ledger_init_args};
 use candid::{CandidType, Decode, Encode, Nat, Principal, utils::ArgumentEncoder};
 use canlog::{Log, LogEntry};
 use cksol_types::{
-    Address, DepositStatus, GetDepositAddressArgs, MinterInfo, UpdateBalanceArgs,
-    UpdateBalanceError, WithdrawalArgs, WithdrawalError, WithdrawalOk, WithdrawalStatus,
+    Address, DepositStatus, GetDepositAddressArgs, MinterInfo, ProcessDepositArgs,
+    ProcessDepositError, WithdrawalArgs, WithdrawalError, WithdrawalOk, WithdrawalStatus,
 };
 use cksol_types_internal::{
     MinterArg,
@@ -102,7 +102,7 @@ impl Setup {
     pub const DEFAULT_WITHDRAWAL_FEE: Lamport = 1_000_000; // 0.001 SOL
     pub const DEFAULT_CONTROLLER: Principal = Principal::from_slice(&[0x9d, 0xf7, 0x01]);
     pub const DEFAULT_MINIMUM_DEPOSIT_AMOUNT: Lamport = 20_000_000; // 0.02 SOL
-    pub const DEFAULT_UPDATE_BALANCE_REQUIRED_CYCLES: u128 = 1_000_000_000_000;
+    pub const DEFAULT_PROCESS_DEPOSIT_REQUIRED_CYCLES: u128 = 1_000_000_000_000;
     pub const DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT: Lamport = 2_000_000; // 0.002 SOL
     pub const DEFAULT_CALLER: Principal =
         Principal::from_slice(&[0xff, 0xff, 0xff, 0xff, 0xff, 0xe0, 0x0, 0x3, 0x1, 0x1]);
@@ -375,39 +375,39 @@ impl CkSolMinter<'_> {
             .await
     }
 
-    pub async fn update_balance(
+    pub async fn process_deposit(
         &self,
-        args: UpdateBalanceArgs,
-    ) -> Result<DepositStatus, UpdateBalanceError> {
-        self.try_update_balance(args)
+        args: ProcessDepositArgs,
+    ) -> Result<DepositStatus, ProcessDepositError> {
+        self.try_process_deposit(args)
             .await
-            .expect("update_balance failed")
+            .expect("process_deposit failed")
     }
 
-    pub async fn update_balance_with_cycles(
+    pub async fn process_deposit_with_cycles(
         &self,
-        args: UpdateBalanceArgs,
+        args: ProcessDepositArgs,
         cycles: u128,
-    ) -> Result<DepositStatus, UpdateBalanceError> {
-        self.try_update_balance_with_cycles(args, cycles)
+    ) -> Result<DepositStatus, ProcessDepositError> {
+        self.try_process_deposit_with_cycles(args, cycles)
             .await
-            .expect("update_balance failed")
+            .expect("process_deposit failed")
     }
 
-    pub async fn try_update_balance(
+    pub async fn try_process_deposit(
         &self,
-        args: UpdateBalanceArgs,
-    ) -> Result<Result<DepositStatus, UpdateBalanceError>, String> {
-        self.try_update_balance_with_cycles(args, Setup::DEFAULT_UPDATE_BALANCE_REQUIRED_CYCLES)
+        args: ProcessDepositArgs,
+    ) -> Result<Result<DepositStatus, ProcessDepositError>, String> {
+        self.try_process_deposit_with_cycles(args, Setup::DEFAULT_PROCESS_DEPOSIT_REQUIRED_CYCLES)
             .await
     }
 
-    pub async fn try_update_balance_with_cycles(
+    pub async fn try_process_deposit_with_cycles(
         &self,
-        args: UpdateBalanceArgs,
+        args: ProcessDepositArgs,
         cycles: u128,
-    ) -> Result<Result<DepositStatus, UpdateBalanceError>, String> {
-        self.try_update_call("update_balance", (args,), cycles)
+    ) -> Result<Result<DepositStatus, ProcessDepositError>, String> {
+        self.try_update_call("process_deposit", (args,), cycles)
             .await
     }
 
@@ -658,7 +658,7 @@ fn cksol_minter_init_args(
         minimum_withdrawal_amount: Setup::DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT,
         minimum_deposit_amount: Setup::DEFAULT_MINIMUM_DEPOSIT_AMOUNT,
         withdrawal_fee: Setup::DEFAULT_WITHDRAWAL_FEE,
-        update_balance_required_cycles: Setup::DEFAULT_UPDATE_BALANCE_REQUIRED_CYCLES as u64,
+        process_deposit_required_cycles: Setup::DEFAULT_PROCESS_DEPOSIT_REQUIRED_CYCLES as u64,
         solana_network: SolanaNetwork::Mainnet,
         deposit_consolidation_fee: Setup::DEFAULT_DEPOSIT_CONSOLIDATION_FEE as u64,
     })

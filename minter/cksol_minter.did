@@ -39,8 +39,8 @@ type Signature = text;
 // i.e. 1_000_000_000 Lamports is 1 SOL
 type Lamport = nat64;
 
-// Arguments for a request to the `update_balance` endpoint.
-type UpdateBalanceArgs = record {
+// Arguments for a request to the `process_deposit` endpoint.
+type ProcessDepositArgs = record {
     // If provided, update the balance for this principal.
     //
     // If not set, defaults to the caller's principal.
@@ -52,13 +52,13 @@ type UpdateBalanceArgs = record {
     signature: Signature;
 };
 
-// An error from the `update_balance` ckSOL minter endpoint.
-type UpdateBalanceError = variant {
-    // Insufficient cycles attached by the caller to complete the [`update_balance`] call.
+// An error from the `process_deposit` ckSOL minter endpoint.
+type ProcessDepositError = variant {
+    // Insufficient cycles attached by the caller to complete the [`process_deposit`] call.
     InsufficientCycles : InsufficientCyclesError;
     // The minter experiences temporary issues, try the call again later.
     TemporarilyUnavailable : text;
-    // There is already a concurrent `update_balance` invocation from the same caller.
+    // There is already a concurrent `process_deposit` invocation from the same caller.
     AlreadyProcessing;
     // No matching transaction was found for the given signature.
     //
@@ -114,8 +114,8 @@ type DepositStatus = variant {
     };
 };
 
-// Represents the result of a call to the `update_balance` endpoint.
-type UpdateBalanceResult = variant { Ok : DepositStatus; Err : UpdateBalanceError };
+// Represents the result of a call to the `process_deposit` endpoint.
+type ProcessDepositResult = variant { Ok : DepositStatus; Err : ProcessDepositError };
 
 // The Solana network to connect to.
 type SolanaNetwork = variant {
@@ -138,7 +138,7 @@ type InitArgs = record {
     minimum_withdrawal_amount : Lamport;
     minimum_deposit_amount : Lamport;
     withdrawal_fee : Lamport;
-    update_balance_required_cycles : nat64;
+    process_deposit_required_cycles : nat64;
     solana_network : SolanaNetwork;
 };
 
@@ -150,7 +150,7 @@ type MinterInfo = record {
     minimum_withdrawal_amount : Lamport;
     minimum_deposit_amount : Lamport;
     withdrawal_fee : Lamport;
-    update_balance_required_cycles : nat;
+    process_deposit_required_cycles : nat;
     balance : Lamport;
 };
 
@@ -175,7 +175,7 @@ type UpgradeArgs = record {
     minimum_withdrawal_amount : opt Lamport;
     minimum_deposit_amount : opt Lamport;
     withdrawal_fee : opt Lamport;
-    update_balance_required_cycles : opt nat64;
+    process_deposit_required_cycles : opt nat64;
 };
 
 type WithdrawalArgs = record {
@@ -303,7 +303,7 @@ type EventType = variant {
     // The Solana transaction was not generated yet.
     AcceptedWithdrawalRequest : AcceptedWithdrawalRequest;
     // A user manually submitted a valid ckSOL deposit transaction via
-    // `update_balance`. ckSOL tokens have not yet been minted for this deposit.
+    // `process_deposit`. ckSOL tokens have not yet been minted for this deposit.
     AcceptedManualDeposit : record {
         // The signature of the Solana deposit transaction.
         signature: Signature;
@@ -427,7 +427,7 @@ service : (MinterArg) -> {
 
     // Update the ckSOL balance of the given owner with the funds
     // deposited in a specific Solana transaction.
-    update_balance: (UpdateBalanceArgs) -> (UpdateBalanceResult);
+    process_deposit: (ProcessDepositArgs) -> (ProcessDepositResult);
 
     // Submits a request to convert ckSOL to Solana.
     withdraw : (WithdrawalArgs) -> (variant { Ok : WithdrawalOk; Err : WithdrawalError });

@@ -87,9 +87,9 @@ pub struct State {
     withdrawal_fee: Lamport,
     minimum_withdrawal_amount: Lamport,
     minimum_deposit_amount: Lamport,
-    update_balance_required_cycles: u128,
+    process_deposit_required_cycles: u128,
     deposit_consolidation_fee: u128,
-    pending_update_balance_requests: BTreeSet<Account>,
+    pending_process_deposit_request_guards: BTreeSet<Account>,
     pending_withdrawal_request_guards: BTreeSet<Account>,
     accepted_deposits: InsertionOrderedMap<DepositId, Deposit>,
     quarantined_deposits: InsertionOrderedMap<DepositId, Deposit>,
@@ -166,8 +166,8 @@ impl State {
         self.solana_network
     }
 
-    pub fn update_balance_required_cycles(&self) -> u128 {
-        self.update_balance_required_cycles
+    pub fn process_deposit_required_cycles(&self) -> u128 {
+        self.process_deposit_required_cycles
     }
 
     pub fn accepted_deposits(&self) -> &InsertionOrderedMap<DepositId, Deposit> {
@@ -294,8 +294,8 @@ impl State {
         LedgerClient::new(runtime, self.ledger_canister_id)
     }
 
-    pub fn pending_update_balance_requests_mut(&mut self) -> &mut BTreeSet<Account> {
-        &mut self.pending_update_balance_requests
+    pub fn pending_process_deposit_request_guards_mut(&mut self) -> &mut BTreeSet<Account> {
+        &mut self.pending_process_deposit_request_guards
     }
 
     pub fn pending_withdrawal_request_guards_mut(&mut self) -> &mut BTreeSet<Account> {
@@ -363,7 +363,7 @@ impl State {
             minimum_withdrawal_amount,
             minimum_deposit_amount,
             withdrawal_fee,
-            update_balance_required_cycles,
+            process_deposit_required_cycles,
             deposit_consolidation_fee,
         }: UpgradeArgs,
     ) -> Result<(), InvalidStateError> {
@@ -385,8 +385,8 @@ impl State {
         if let Some(minimum_deposit_amount) = minimum_deposit_amount {
             self.minimum_deposit_amount = minimum_deposit_amount;
         }
-        if let Some(update_balance_required_cycles) = update_balance_required_cycles {
-            self.update_balance_required_cycles = update_balance_required_cycles as u128;
+        if let Some(process_deposit_required_cycles) = process_deposit_required_cycles {
+            self.process_deposit_required_cycles = process_deposit_required_cycles as u128;
         }
         if let Some(deposit_consolidation_fee) = deposit_consolidation_fee {
             self.deposit_consolidation_fee = deposit_consolidation_fee as u128;
@@ -745,7 +745,7 @@ impl TryFrom<InitArgs> for State {
             minimum_withdrawal_amount,
             minimum_deposit_amount,
             withdrawal_fee,
-            update_balance_required_cycles,
+            process_deposit_required_cycles,
             solana_network,
             deposit_consolidation_fee,
         }: InitArgs,
@@ -761,9 +761,9 @@ impl TryFrom<InitArgs> for State {
             withdrawal_fee,
             minimum_withdrawal_amount,
             minimum_deposit_amount,
-            update_balance_required_cycles: update_balance_required_cycles as u128,
+            process_deposit_required_cycles: process_deposit_required_cycles as u128,
             deposit_consolidation_fee: deposit_consolidation_fee as u128,
-            pending_update_balance_requests: BTreeSet::new(),
+            pending_process_deposit_request_guards: BTreeSet::new(),
             pending_withdrawal_request_guards: BTreeSet::new(),
             accepted_deposits: InsertionOrderedMap::new(),
             quarantined_deposits: InsertionOrderedMap::new(),

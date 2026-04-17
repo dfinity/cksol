@@ -3,7 +3,7 @@ pub mod consolidate;
 mod constants;
 mod cycles;
 pub mod dashboard;
-mod deposit;
+pub mod deposit;
 mod guard;
 mod ledger;
 pub mod lifecycle;
@@ -16,7 +16,6 @@ mod signer;
 mod sol_transfer;
 pub mod state;
 pub mod storage;
-pub mod update_balance;
 pub mod utils;
 pub mod withdraw;
 

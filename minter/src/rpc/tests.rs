@@ -4,7 +4,7 @@ use crate::{
         get_recent_slot_and_blockhash, get_transaction, submit_transaction,
     },
     test_fixtures::{
-        UPDATE_BALANCE_REQUIRED_CYCLES, confirmed_block,
+        PROCESS_DEPOSIT_REQUIRED_CYCLES, confirmed_block,
         deposit::{deposit_transaction, deposit_transaction_signature},
         init_state,
         runtime::TestCanisterRuntime,
@@ -28,13 +28,13 @@ mod get_transaction_tests {
         init_state();
 
         let runtime = TestCanisterRuntime::new()
-            .add_msg_cycles_available(UPDATE_BALANCE_REQUIRED_CYCLES)
+            .add_msg_cycles_available(PROCESS_DEPOSIT_REQUIRED_CYCLES)
             .add_stub_error(IcError::CallPerformFailed);
 
         let result = get_transaction(
             &runtime,
             deposit_transaction_signature(),
-            UPDATE_BALANCE_REQUIRED_CYCLES,
+            PROCESS_DEPOSIT_REQUIRED_CYCLES,
         )
         .await;
 
@@ -55,13 +55,13 @@ mod get_transaction_tests {
         });
 
         let runtime = TestCanisterRuntime::new()
-            .add_msg_cycles_available(UPDATE_BALANCE_REQUIRED_CYCLES)
+            .add_msg_cycles_available(PROCESS_DEPOSIT_REQUIRED_CYCLES)
             .add_stub_response(MultiRpcResult::Consistent(Err(rpc_error.clone())));
 
         let result = get_transaction(
             &runtime,
             deposit_transaction_signature(),
-            UPDATE_BALANCE_REQUIRED_CYCLES,
+            PROCESS_DEPOSIT_REQUIRED_CYCLES,
         )
         .await;
 
@@ -84,13 +84,13 @@ mod get_transaction_tests {
         ];
 
         let runtime = TestCanisterRuntime::new()
-            .add_msg_cycles_available(UPDATE_BALANCE_REQUIRED_CYCLES)
+            .add_msg_cycles_available(PROCESS_DEPOSIT_REQUIRED_CYCLES)
             .add_stub_response(MultiRpcResult::Inconsistent(results));
 
         let result = get_transaction(
             &runtime,
             deposit_transaction_signature(),
-            UPDATE_BALANCE_REQUIRED_CYCLES,
+            PROCESS_DEPOSIT_REQUIRED_CYCLES,
         )
         .await;
 
@@ -102,13 +102,13 @@ mod get_transaction_tests {
         init_state();
 
         let runtime = TestCanisterRuntime::new()
-            .add_msg_cycles_available(UPDATE_BALANCE_REQUIRED_CYCLES)
+            .add_msg_cycles_available(PROCESS_DEPOSIT_REQUIRED_CYCLES)
             .add_stub_response(MultiRpcResult::Consistent(Ok(None)));
 
         let result = get_transaction(
             &runtime,
             deposit_transaction_signature(),
-            UPDATE_BALANCE_REQUIRED_CYCLES,
+            PROCESS_DEPOSIT_REQUIRED_CYCLES,
         )
         .await;
 
@@ -120,7 +120,7 @@ mod get_transaction_tests {
         init_state();
 
         let runtime = TestCanisterRuntime::new()
-            .add_msg_cycles_available(UPDATE_BALANCE_REQUIRED_CYCLES)
+            .add_msg_cycles_available(PROCESS_DEPOSIT_REQUIRED_CYCLES)
             .add_stub_response(MultiRpcResult::Consistent(Ok(Some(
                 deposit_transaction().try_into().unwrap(),
             ))));
@@ -128,7 +128,7 @@ mod get_transaction_tests {
         let result = get_transaction(
             &runtime,
             deposit_transaction_signature(),
-            UPDATE_BALANCE_REQUIRED_CYCLES,
+            PROCESS_DEPOSIT_REQUIRED_CYCLES,
         )
         .await;
 
