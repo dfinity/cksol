@@ -225,8 +225,10 @@ pub enum WithdrawalStatus {
 /// Information about the ckSOL minter canister.
 #[derive(Clone, Debug, Eq, PartialEq, CandidType, Deserialize, Serialize)]
 pub struct MinterInfo {
-    /// Fee deducted from each deposit (SOL -> ckSOL).
-    pub deposit_fee: Lamport,
+    /// Fee deducted from each deposit in the manual flow (SOL -> ckSOL).
+    pub manual_deposit_fee: Lamport,
+    /// Fee deducted from each deposit in the automated flow (SOL -> ckSOL).
+    pub automated_deposit_fee: Lamport,
     /// Extra cycles charged per `process_deposit` call to offset deposit consolidation costs.
     pub deposit_consolidation_fee: u128,
     /// Minimum withdrawal amount in lamports.

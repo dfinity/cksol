@@ -131,11 +131,10 @@ mod lifecycle {
 
         let minter_info_before = minter.get_minter_info().await;
 
-        // Setting a deposit fee higher than the minimum deposit amount should fail!
+        // Setting minimum_deposit_amount below automated_deposit_fee should fail
         let result = minter
             .upgrade(UpgradeArgs {
-                minimum_deposit_amount: Some(5_000_000),
-                deposit_fee: Some(20_000_000),
+                minimum_deposit_amount: Some(Setup::DEFAULT_AUTOMATED_DEPOSIT_FEE - 1),
                 ..UpgradeArgs::default()
             })
             .await;
@@ -161,11 +160,11 @@ mod lifecycle {
 
     #[tokio::test]
     async fn should_get_minter_info_and_upgrade() {
-        const NEW_DEPOSIT_FEE: Lamport = 10;
-        // minimum_withdrawal_amount must be >= withdrawal_fee + rent exemption threshold (890,880 lamports)
+        const NEW_MANUAL_DEPOSIT_FEE: Lamport = 10;
+        const NEW_AUTOMATED_DEPOSIT_FEE: Lamport = 20;
+        const NEW_MINIMUM_DEPOSIT_AMOUNT: Lamport = 1_000_000;
         const NEW_WITHDRAWAL_FEE: Lamport = 100_000;
         const NEW_MINIMUM_WITHDRAWAL_AMOUNT: Lamport = 1_000_000;
-        const NEW_MINIMUM_DEPOSIT_AMOUNT: Lamport = 25;
         const NEW_PROCESS_DEPOSIT_REQUIRED_CYCLES: u128 = 500_000_000_000;
 
         let setup = SetupBuilder::new().build().await;
@@ -174,7 +173,8 @@ mod lifecycle {
         assert_eq!(
             initial_minter_info,
             MinterInfo {
-                deposit_fee: Setup::DEFAULT_DEPOSIT_FEE,
+                manual_deposit_fee: Setup::DEFAULT_MANUAL_DEPOSIT_FEE,
+                automated_deposit_fee: Setup::DEFAULT_AUTOMATED_DEPOSIT_FEE,
                 deposit_consolidation_fee: Setup::DEFAULT_DEPOSIT_CONSOLIDATION_FEE,
                 minimum_withdrawal_amount: Setup::DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT,
                 minimum_deposit_amount: Setup::DEFAULT_MINIMUM_DEPOSIT_AMOUNT,
@@ -199,7 +199,8 @@ mod lifecycle {
             .minter()
             .upgrade(UpgradeArgs {
                 sol_rpc_canister_id: None,
-                deposit_fee: Some(NEW_DEPOSIT_FEE),
+                manual_deposit_fee: Some(NEW_MANUAL_DEPOSIT_FEE),
+                automated_deposit_fee: Some(NEW_AUTOMATED_DEPOSIT_FEE),
                 minimum_withdrawal_amount: Some(NEW_MINIMUM_WITHDRAWAL_AMOUNT),
                 minimum_deposit_amount: Some(NEW_MINIMUM_DEPOSIT_AMOUNT),
                 withdrawal_fee: Some(NEW_WITHDRAWAL_FEE),
@@ -213,7 +214,8 @@ mod lifecycle {
         assert_eq!(
             minter_info,
             MinterInfo {
-                deposit_fee: NEW_DEPOSIT_FEE,
+                manual_deposit_fee: NEW_MANUAL_DEPOSIT_FEE,
+                automated_deposit_fee: NEW_AUTOMATED_DEPOSIT_FEE,
                 deposit_consolidation_fee: Setup::DEFAULT_DEPOSIT_CONSOLIDATION_FEE,
                 minimum_withdrawal_amount: NEW_MINIMUM_WITHDRAWAL_AMOUNT,
                 minimum_deposit_amount: NEW_MINIMUM_DEPOSIT_AMOUNT,

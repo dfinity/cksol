@@ -36,9 +36,12 @@ pub struct InitArgs {
     /// The canister ID of the ckSOL ledger canister.
     #[cfg_attr(feature = "event", n(1), cbor(with = "icrc_cbor::principal"))]
     pub ledger_canister_id: Principal,
-    /// The deposit fee in lamports.
+    /// The deposit fee in lamports for the manual deposit flow.
     #[cfg_attr(feature = "event", n(2))]
-    pub deposit_fee: Lamport,
+    pub manual_deposit_fee: Lamport,
+    /// The deposit fee in lamports for the automated deposit flow.
+    #[cfg_attr(feature = "event", n(10))]
+    pub automated_deposit_fee: Lamport,
     /// The master Ed25519 key name.
     #[cfg_attr(feature = "event", n(3))]
     pub master_key_name: Ed25519KeyName,
@@ -69,9 +72,12 @@ pub struct UpgradeArgs {
     /// The canister ID of the SOL RPC canister.
     #[cfg_attr(feature = "event", n(0), cbor(with = "icrc_cbor::principal::option"))]
     pub sol_rpc_canister_id: Option<Principal>,
-    /// The new deposit fee in lamports.
+    /// The new deposit fee in lamports for the manual deposit flow.
     #[cfg_attr(feature = "event", n(1))]
-    pub deposit_fee: Option<Lamport>,
+    pub manual_deposit_fee: Option<Lamport>,
+    /// The new deposit fee in lamports for the automated deposit flow.
+    #[cfg_attr(feature = "event", n(7))]
+    pub automated_deposit_fee: Option<Lamport>,
     /// The new minimum withdrawal amount in lamports.
     #[cfg_attr(feature = "event", n(2))]
     pub minimum_withdrawal_amount: Option<Lamport>,
