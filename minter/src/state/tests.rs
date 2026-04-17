@@ -19,6 +19,7 @@ use crate::{
     },
     utils::insertion_ordered_map::InsertionOrderedMap,
 };
+use assert_matches::assert_matches;
 use cksol_types_internal::{Ed25519KeyName, InitArgs, SolanaNetwork, UpgradeArgs};
 use ic_stable_structures::Storable;
 use proptest::prelude::*;
@@ -30,6 +31,176 @@ proptest! {
         let bytes = event.to_bytes();
         let decoded = Event::from_bytes(Cow::Borrowed(&bytes));
         assert_eq!(event, decoded);
+    }
+}
+
+mod state_validation {
+    use super::*;
+
+    #[test]
+    fn should_fail_with_invalid_args() {
+        // manual_deposit_fee exceeds automated_deposit_fee
+        assert_fails_both(
+            InitArgs {
+                manual_deposit_fee: AUTOMATED_DEPOSIT_FEE + 1,
+                ..valid_init_args()
+            },
+            UpgradeArgs {
+                manual_deposit_fee: Some(AUTOMATED_DEPOSIT_FEE + 1),
+                ..Default::default()
+            },
+            |e| matches!(e, InvalidStateError::InvalidDepositFees { .. }),
+        );
+        // automated_deposit_fee below manual_deposit_fee
+        assert_fails_both(
+            InitArgs {
+                automated_deposit_fee: MANUAL_DEPOSIT_FEE - 1,
+                ..valid_init_args()
+            },
+            UpgradeArgs {
+                automated_deposit_fee: Some(MANUAL_DEPOSIT_FEE - 1),
+                ..Default::default()
+            },
+            |e| matches!(e, InvalidStateError::InvalidDepositFees { .. }),
+        );
+        // automated_deposit_fee exceeds minimum_deposit_amount
+        assert_fails_both(
+            InitArgs {
+                automated_deposit_fee: MINIMUM_DEPOSIT_AMOUNT + 1,
+                ..valid_init_args()
+            },
+            UpgradeArgs {
+                automated_deposit_fee: Some(MINIMUM_DEPOSIT_AMOUNT + 1),
+                ..Default::default()
+            },
+            |e| matches!(e, InvalidStateError::InvalidDepositFees { .. }),
+        );
+        // minimum_deposit_amount below automated_deposit_fee
+        assert_fails_both(
+            InitArgs {
+                minimum_deposit_amount: AUTOMATED_DEPOSIT_FEE - 1,
+                ..valid_init_args()
+            },
+            UpgradeArgs {
+                minimum_deposit_amount: Some(AUTOMATED_DEPOSIT_FEE - 1),
+                ..Default::default()
+            },
+            |e| matches!(e, InvalidStateError::InvalidDepositFees { .. }),
+        );
+        // minimum_deposit_amount below sol_transfer_fee + rent exemption threshold
+        // (automated_deposit_fee and manual_deposit_fee set to 1 to isolate this condition)
+        let minimum_required = FEE_PER_SIGNATURE + RENT_EXEMPTION_THRESHOLD;
+        assert_fails_both(
+            InitArgs {
+                automated_deposit_fee: 1,
+                manual_deposit_fee: 1,
+                minimum_deposit_amount: minimum_required - 1,
+                ..valid_init_args()
+            },
+            UpgradeArgs {
+                automated_deposit_fee: Some(1),
+                manual_deposit_fee: Some(1),
+                minimum_deposit_amount: Some(minimum_required - 1),
+                ..Default::default()
+            },
+            |e| matches!(e, InvalidStateError::InvalidMinimumDepositAmount { .. }),
+        );
+        // withdrawal_fee exceeds minimum_withdrawal_amount - rent exemption threshold
+        assert_fails_both(
+            InitArgs {
+                withdrawal_fee: MINIMUM_WITHDRAWAL_AMOUNT - RENT_EXEMPTION_THRESHOLD + 1,
+                ..valid_init_args()
+            },
+            UpgradeArgs {
+                withdrawal_fee: Some(MINIMUM_WITHDRAWAL_AMOUNT - RENT_EXEMPTION_THRESHOLD + 1),
+                ..Default::default()
+            },
+            |e| matches!(e, InvalidStateError::InvalidMinimumWithdrawalAmount { .. }),
+        );
+        // minimum_withdrawal_amount below withdrawal_fee + rent exemption threshold
+        assert_fails_both(
+            InitArgs {
+                minimum_withdrawal_amount: WITHDRAWAL_FEE + RENT_EXEMPTION_THRESHOLD - 1,
+                ..valid_init_args()
+            },
+            UpgradeArgs {
+                minimum_withdrawal_amount: Some(WITHDRAWAL_FEE + RENT_EXEMPTION_THRESHOLD - 1),
+                ..Default::default()
+            },
+            |e| matches!(e, InvalidStateError::InvalidMinimumWithdrawalAmount { .. }),
+        );
+    }
+
+    #[test]
+    fn should_succeed_at_boundary_conditions() {
+        // manual_deposit_fee can equal automated_deposit_fee
+        assert_succeeds_both(
+            InitArgs {
+                manual_deposit_fee: AUTOMATED_DEPOSIT_FEE,
+                ..valid_init_args()
+            },
+            UpgradeArgs {
+                manual_deposit_fee: Some(AUTOMATED_DEPOSIT_FEE),
+                ..Default::default()
+            },
+        );
+        // minimum_deposit_amount can equal automated_deposit_fee
+        assert_succeeds_both(
+            InitArgs {
+                minimum_deposit_amount: AUTOMATED_DEPOSIT_FEE,
+                ..valid_init_args()
+            },
+            UpgradeArgs {
+                minimum_deposit_amount: Some(AUTOMATED_DEPOSIT_FEE),
+                ..Default::default()
+            },
+        );
+        // minimum_deposit_amount can equal sol_transfer_fee + rent exemption threshold
+        let minimum_required = FEE_PER_SIGNATURE + RENT_EXEMPTION_THRESHOLD;
+        assert_succeeds_both(
+            InitArgs {
+                automated_deposit_fee: 1,
+                manual_deposit_fee: 1,
+                minimum_deposit_amount: minimum_required,
+                ..valid_init_args()
+            },
+            UpgradeArgs {
+                automated_deposit_fee: Some(1),
+                manual_deposit_fee: Some(1),
+                minimum_deposit_amount: Some(minimum_required),
+                ..Default::default()
+            },
+        );
+        // minimum_withdrawal_amount can equal withdrawal_fee + rent exemption threshold
+        let minimum_required = WITHDRAWAL_FEE + RENT_EXEMPTION_THRESHOLD;
+        assert_succeeds_both(
+            InitArgs {
+                minimum_withdrawal_amount: minimum_required,
+                ..valid_init_args()
+            },
+            UpgradeArgs {
+                minimum_withdrawal_amount: Some(minimum_required),
+                ..Default::default()
+            },
+        );
+    }
+
+    fn assert_fails_both(
+        init_args: InitArgs,
+        upgrade_args: UpgradeArgs,
+        check: impl Fn(&InvalidStateError) -> bool + Copy,
+    ) {
+        let err = State::try_from(init_args).unwrap_err();
+        assert!(check(&err), "init: unexpected error: {err:?}");
+        let mut state = State::try_from(valid_init_args()).unwrap();
+        let err = state.upgrade(upgrade_args).unwrap_err();
+        assert!(check(&err), "upgrade: unexpected error: {err:?}");
+    }
+
+    fn assert_succeeds_both(init_args: InitArgs, upgrade_args: UpgradeArgs) {
+        State::try_from(init_args).unwrap();
+        let mut state = State::try_from(valid_init_args()).unwrap();
+        state.upgrade(upgrade_args).unwrap();
     }
 }
 
@@ -74,46 +245,10 @@ mod state_from_init_args {
                 balance: 0,
             }
         );
-
-        // manual_deposit_fee can equal automated_deposit_fee
-        let state = State::try_from(InitArgs {
-            manual_deposit_fee: AUTOMATED_DEPOSIT_FEE,
-            ..valid_init_args()
-        })
-        .unwrap();
-        assert_eq!(state.manual_deposit_fee(), AUTOMATED_DEPOSIT_FEE);
-
-        // minimum_deposit_amount can equal automated_deposit_fee
-        let state = State::try_from(InitArgs {
-            minimum_deposit_amount: AUTOMATED_DEPOSIT_FEE,
-            ..valid_init_args()
-        })
-        .unwrap();
-        assert_eq!(state.minimum_deposit_amount(), AUTOMATED_DEPOSIT_FEE);
-
-        // minimum_deposit_amount can equal sol_transfer_fee + rent exemption threshold
-        let minimum_required = FEE_PER_SIGNATURE + RENT_EXEMPTION_THRESHOLD;
-        let state = State::try_from(InitArgs {
-            automated_deposit_fee: FEE_PER_SIGNATURE,
-            manual_deposit_fee: FEE_PER_SIGNATURE,
-            minimum_deposit_amount: minimum_required,
-            ..valid_init_args()
-        })
-        .unwrap();
-        assert_eq!(state.minimum_deposit_amount(), minimum_required);
-
-        // minimum_withdrawal_amount can equal withdrawal_fee + rent exemption threshold exactly
-        let minimum_required = WITHDRAWAL_FEE + RENT_EXEMPTION_THRESHOLD;
-        let state = State::try_from(InitArgs {
-            minimum_withdrawal_amount: minimum_required,
-            ..valid_init_args()
-        })
-        .unwrap();
-        assert_eq!(state.minimum_withdrawal_amount(), minimum_required);
     }
 
     #[test]
-    fn should_fail_with_invalid_init_args() {
+    fn should_fail_with_invalid_canister_ids() {
         fn assert_init_fails(args: InitArgs, check: impl Fn(&InvalidStateError) -> bool) {
             let err = State::try_from(args).unwrap_err();
             assert!(check(&err), "unexpected error: {err:?}");
@@ -142,66 +277,6 @@ mod state_from_init_args {
                 ..valid_init_args()
             },
             |e| matches!(e, InvalidStateError::InvalidCanisterId(_)),
-        );
-        // manual_deposit_fee exceeds automated_deposit_fee
-        assert_init_fails(
-            InitArgs {
-                manual_deposit_fee: AUTOMATED_DEPOSIT_FEE + 1,
-                ..valid_init_args()
-            },
-            |e| matches!(e, InvalidStateError::InvalidDepositFees { .. }),
-        );
-        // automated_deposit_fee below manual_deposit_fee
-        assert_init_fails(
-            InitArgs {
-                automated_deposit_fee: MANUAL_DEPOSIT_FEE - 1,
-                ..valid_init_args()
-            },
-            |e| matches!(e, InvalidStateError::InvalidDepositFees { .. }),
-        );
-        // automated_deposit_fee exceeds minimum_deposit_amount
-        assert_init_fails(
-            InitArgs {
-                automated_deposit_fee: MINIMUM_DEPOSIT_AMOUNT + 1,
-                ..valid_init_args()
-            },
-            |e| matches!(e, InvalidStateError::InvalidDepositFees { .. }),
-        );
-        // minimum_deposit_amount below automated_deposit_fee
-        assert_init_fails(
-            InitArgs {
-                minimum_deposit_amount: AUTOMATED_DEPOSIT_FEE - 1,
-                ..valid_init_args()
-            },
-            |e| matches!(e, InvalidStateError::InvalidDepositFees { .. }),
-        );
-        // minimum_deposit_amount below sol_transfer_fee + rent exemption threshold
-        // (automated_deposit_fee and manual_deposit_fee lowered to isolate condition 3)
-        let minimum_required = FEE_PER_SIGNATURE + RENT_EXEMPTION_THRESHOLD;
-        assert_init_fails(
-            InitArgs {
-                automated_deposit_fee: FEE_PER_SIGNATURE,
-                manual_deposit_fee: FEE_PER_SIGNATURE,
-                minimum_deposit_amount: minimum_required - 1,
-                ..valid_init_args()
-            },
-            |e| matches!(e, InvalidStateError::InvalidMinimumDepositAmount { .. }),
-        );
-        // withdrawal_fee exceeds minimum_withdrawal_amount - rent exemption threshold
-        assert_init_fails(
-            InitArgs {
-                withdrawal_fee: MINIMUM_WITHDRAWAL_AMOUNT - RENT_EXEMPTION_THRESHOLD + 1,
-                ..valid_init_args()
-            },
-            |e| matches!(e, InvalidStateError::InvalidMinimumWithdrawalAmount { .. }),
-        );
-        // minimum_withdrawal_amount below withdrawal_fee + rent exemption threshold
-        assert_init_fails(
-            InitArgs {
-                minimum_withdrawal_amount: WITHDRAWAL_FEE + RENT_EXEMPTION_THRESHOLD - 1,
-                ..valid_init_args()
-            },
-            |e| matches!(e, InvalidStateError::InvalidMinimumWithdrawalAmount { .. }),
         );
     }
 }
@@ -294,126 +369,13 @@ mod state_upgrade {
     }
 
     #[test]
-    fn should_succeed() {
-        // manual_deposit_fee can equal automated_deposit_fee
-        let mut state = initial_state();
-        state
-            .upgrade(UpgradeArgs {
-                manual_deposit_fee: Some(AUTOMATED_DEPOSIT_FEE),
-                ..Default::default()
-            })
-            .unwrap();
-        assert_eq!(state.manual_deposit_fee(), AUTOMATED_DEPOSIT_FEE);
-
-        // minimum_deposit_amount can equal automated_deposit_fee
-        let mut state = initial_state();
-        state
-            .upgrade(UpgradeArgs {
-                minimum_deposit_amount: Some(AUTOMATED_DEPOSIT_FEE),
-                ..Default::default()
-            })
-            .unwrap();
-        assert_eq!(state.minimum_deposit_amount(), AUTOMATED_DEPOSIT_FEE);
-
-        // minimum_deposit_amount can equal sol_transfer_fee + rent exemption threshold
-        let minimum_required = FEE_PER_SIGNATURE + RENT_EXEMPTION_THRESHOLD;
-        let mut state = initial_state();
-        state
-            .upgrade(UpgradeArgs {
-                automated_deposit_fee: Some(FEE_PER_SIGNATURE),
-                manual_deposit_fee: Some(FEE_PER_SIGNATURE),
-                minimum_deposit_amount: Some(minimum_required),
-                ..Default::default()
-            })
-            .unwrap();
-        assert_eq!(state.minimum_deposit_amount(), minimum_required);
-
-        // minimum_withdrawal_amount can equal withdrawal_fee + rent exemption threshold exactly
-        let minimum_required = WITHDRAWAL_FEE + RENT_EXEMPTION_THRESHOLD;
-        let mut state = initial_state();
-        state
-            .upgrade(UpgradeArgs {
-                minimum_withdrawal_amount: Some(minimum_required),
-                ..Default::default()
-            })
-            .unwrap();
-        assert_eq!(state.minimum_withdrawal_amount(), minimum_required);
-    }
-
-    #[test]
-    fn should_fail_with_invalid_upgrade_args() {
-        fn assert_upgrade_fails(args: UpgradeArgs, check: impl Fn(&InvalidStateError) -> bool) {
-            let err = initial_state().upgrade(args).unwrap_err();
-            assert!(check(&err), "unexpected error: {err:?}");
-        }
-
-        // Anonymous sol_rpc_canister_id
-        assert_upgrade_fails(
-            UpgradeArgs {
+    fn should_fail_when_sol_rpc_canister_id_is_anonymous() {
+        assert_matches!(
+            initial_state().upgrade(UpgradeArgs {
                 sol_rpc_canister_id: Some(Principal::anonymous()),
                 ..Default::default()
-            },
-            |e| matches!(e, InvalidStateError::InvalidCanisterId(_)),
-        );
-        // manual_deposit_fee exceeds automated_deposit_fee
-        assert_upgrade_fails(
-            UpgradeArgs {
-                manual_deposit_fee: Some(AUTOMATED_DEPOSIT_FEE + 1),
-                ..Default::default()
-            },
-            |e| matches!(e, InvalidStateError::InvalidDepositFees { .. }),
-        );
-        // automated_deposit_fee below manual_deposit_fee
-        assert_upgrade_fails(
-            UpgradeArgs {
-                automated_deposit_fee: Some(MANUAL_DEPOSIT_FEE - 1),
-                ..Default::default()
-            },
-            |e| matches!(e, InvalidStateError::InvalidDepositFees { .. }),
-        );
-        // automated_deposit_fee exceeds minimum_deposit_amount
-        assert_upgrade_fails(
-            UpgradeArgs {
-                automated_deposit_fee: Some(MINIMUM_DEPOSIT_AMOUNT + 1),
-                ..Default::default()
-            },
-            |e| matches!(e, InvalidStateError::InvalidDepositFees { .. }),
-        );
-        // minimum_deposit_amount below automated_deposit_fee
-        assert_upgrade_fails(
-            UpgradeArgs {
-                minimum_deposit_amount: Some(AUTOMATED_DEPOSIT_FEE - 1),
-                ..Default::default()
-            },
-            |e| matches!(e, InvalidStateError::InvalidDepositFees { .. }),
-        );
-        // minimum_deposit_amount below sol_transfer_fee + rent exemption threshold
-        // (automated_deposit_fee and manual_deposit_fee lowered to isolate condition 3)
-        let minimum_required = FEE_PER_SIGNATURE + RENT_EXEMPTION_THRESHOLD;
-        assert_upgrade_fails(
-            UpgradeArgs {
-                automated_deposit_fee: Some(FEE_PER_SIGNATURE),
-                manual_deposit_fee: Some(FEE_PER_SIGNATURE),
-                minimum_deposit_amount: Some(minimum_required - 1),
-                ..Default::default()
-            },
-            |e| matches!(e, InvalidStateError::InvalidMinimumDepositAmount { .. }),
-        );
-        // withdrawal_fee exceeds minimum_withdrawal_amount - rent exemption threshold
-        assert_upgrade_fails(
-            UpgradeArgs {
-                withdrawal_fee: Some(MINIMUM_WITHDRAWAL_AMOUNT - RENT_EXEMPTION_THRESHOLD + 1),
-                ..Default::default()
-            },
-            |e| matches!(e, InvalidStateError::InvalidMinimumWithdrawalAmount { .. }),
-        );
-        // minimum_withdrawal_amount below withdrawal_fee + rent exemption threshold
-        assert_upgrade_fails(
-            UpgradeArgs {
-                minimum_withdrawal_amount: Some(WITHDRAWAL_FEE + RENT_EXEMPTION_THRESHOLD - 1),
-                ..Default::default()
-            },
-            |e| matches!(e, InvalidStateError::InvalidMinimumWithdrawalAmount { .. }),
+            }),
+            Err(InvalidStateError::InvalidCanisterId(_))
         );
     }
 
