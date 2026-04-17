@@ -11,8 +11,8 @@ use cksol_int_tests::{
 };
 use cksol_types::{
     DepositId, DepositStatus, GetDepositAddressArgs, InsufficientCyclesError, Lamport, MinterInfo,
-    ProcessDepositArgs, ProcessDepositError, TxFinalizedStatus, WithdrawalArgs, WithdrawalError,
-    WithdrawalStatus,
+    ProcessDepositArgs, ProcessDepositError, TxFinalizedStatus, UpdateBalanceArgs, WithdrawalArgs,
+    WithdrawalError, WithdrawalStatus,
 };
 use cksol_types_internal::{
     UpgradeArgs,
@@ -1012,6 +1012,73 @@ mod process_deposit_tests {
     }
 }
 
+mod update_balance_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn should_register_accounts_and_be_idempotent() {
+        let setup = SetupBuilder::new().build().await;
+        let minter = setup.minter();
+
+        // Register the same accounts as used in get_deposit_address_tests
+        let accounts = vec![
+            Account {
+                owner: Setup::DEFAULT_CALLER,
+                subaccount: None,
+            },
+            Account {
+                owner: Principal::from_slice(&[1]),
+                subaccount: None,
+            },
+            Account {
+                owner: Setup::DEFAULT_CALLER,
+                subaccount: Some([1; 32]),
+            },
+            Account {
+                owner: Setup::DEFAULT_CALLER,
+                subaccount: Some([2; 32]),
+            },
+        ];
+
+        for account in &accounts {
+            let result = minter
+                .update_balance(UpdateBalanceArgs {
+                    owner: Some(account.owner),
+                    subaccount: account.subaccount,
+                })
+                .await;
+            assert_eq!(result, Ok(()));
+        }
+
+        // Calling again for an already-monitored account is idempotent — no new event
+        let result = minter
+            .update_balance(UpdateBalanceArgs {
+                owner: None,
+                subaccount: None,
+            })
+            .await;
+        assert_eq!(result, Ok(()));
+
+        // Exactly one StartedMonitoringAccount event per account, no duplicates
+        let expected_accounts = accounts.clone();
+        minter.assert_that_events().await.satisfy(|events| {
+            let monitoring_events: Vec<&Account> = events
+                .iter()
+                .filter_map(|e| match e {
+                    EventType::StartedMonitoringAccount { account } => Some(account),
+                    _ => None,
+                })
+                .collect();
+            check!(monitoring_events.len() == expected_accounts.len());
+            for account in &expected_accounts {
+                check!(monitoring_events.contains(&account));
+            }
+        });
+
+        setup.drop().await;
+    }
+}
+
 mod anonymous_caller_tests {
     use super::*;
 
@@ -1030,6 +1097,15 @@ mod anonymous_caller_tests {
             // `get_deposit_address` endpoint
             let result = minter
                 .try_get_deposit_address(GetDepositAddressArgs {
+                    owner,
+                    subaccount: None,
+                })
+                .await;
+            assert_matches!(result, Err(s) => s.contains("the owner must be non-anonymous"));
+
+            // `update_balance` endpoint
+            let result = minter
+                .try_update_balance(UpdateBalanceArgs {
                     owner,
                     subaccount: None,
                 })

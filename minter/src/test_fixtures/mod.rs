@@ -310,6 +310,16 @@ pub mod events {
         });
     }
 
+    pub fn start_monitoring_account(account: Account) {
+        mutate_state(|state| {
+            process_event(
+                state,
+                EventType::StartedMonitoringAccount { account },
+                &runtime(),
+            )
+        });
+    }
+
     pub fn resubmit_transaction(
         old_signature: Signature,
         new_signature: Signature,
