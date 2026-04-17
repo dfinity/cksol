@@ -187,10 +187,10 @@ mod state_from_init_args {
             },
             |e| matches!(e, InvalidStateError::InvalidMinimumDepositAmount { .. }),
         );
-        // withdrawal_fee exceeds minimum_withdrawal_amount
+        // withdrawal_fee exceeds minimum_withdrawal_amount - rent exemption threshold
         assert_init_fails(
             InitArgs {
-                withdrawal_fee: MINIMUM_WITHDRAWAL_AMOUNT,
+                withdrawal_fee: MINIMUM_WITHDRAWAL_AMOUNT - RENT_EXEMPTION_THRESHOLD + 1,
                 ..valid_init_args()
             },
             |e| matches!(e, InvalidStateError::InvalidMinimumWithdrawalAmount { .. }),
@@ -399,10 +399,10 @@ mod state_upgrade {
             },
             |e| matches!(e, InvalidStateError::InvalidMinimumDepositAmount { .. }),
         );
-        // withdrawal_fee exceeds minimum_withdrawal_amount
+        // withdrawal_fee exceeds minimum_withdrawal_amount - rent exemption threshold
         assert_upgrade_fails(
             UpgradeArgs {
-                withdrawal_fee: Some(MINIMUM_WITHDRAWAL_AMOUNT),
+                withdrawal_fee: Some(MINIMUM_WITHDRAWAL_AMOUNT - RENT_EXEMPTION_THRESHOLD + 1),
                 ..Default::default()
             },
             |e| matches!(e, InvalidStateError::InvalidMinimumWithdrawalAmount { .. }),
