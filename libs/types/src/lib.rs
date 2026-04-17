@@ -139,8 +139,8 @@ pub struct UpdateBalanceArgs {
 /// An error from the `update_balance` ckSOL minter endpoint.
 #[derive(Debug, Clone, PartialEq, CandidType, Deserialize, Error)]
 pub enum UpdateBalanceError {
-    /// The monitored address queue is at capacity.
-    #[error("The monitored address queue is at capacity")]
+    /// The monitored account queue is at capacity.
+    #[error("The monitored account queue is at capacity")]
     QueueFull,
 }
 

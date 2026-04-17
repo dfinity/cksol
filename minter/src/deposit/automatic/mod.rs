@@ -11,7 +11,7 @@ mod tests;
 /// Maximum number of accounts the minter will monitor simultaneously for automated deposits.
 pub const MAX_MONITORED_ACCOUNTS: usize = 100;
 
-/// Registers the caller's account for automated deposit monitoring.
+/// Registers the given account for automated deposit monitoring.
 ///
 /// Returns `Ok(())` if the account was registered (or was already being monitored).
 /// Returns `Err(UpdateBalanceError::QueueFull)` if the monitored account queue is at capacity.

@@ -89,7 +89,7 @@ type UpdateBalanceArgs = record {
 
 // An error from the `update_balance` ckSOL minter endpoint.
 type UpdateBalanceError = variant {
-    // The monitored address queue is at capacity.
+    // The monitored account queue is at capacity.
     QueueFull;
 };
 

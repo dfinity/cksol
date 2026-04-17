@@ -12,7 +12,7 @@ fn monitored_accounts_count() -> usize {
 }
 
 fn fill_monitored_accounts_to_capacity() {
-    for i in 0..MAX_MONITORED_ACCOUNTS as usize {
+    for i in 0..MAX_MONITORED_ACCOUNTS {
         start_monitoring_account(account(i));
     }
 }
@@ -59,12 +59,12 @@ fn should_return_queue_full_when_at_capacity() {
     init_state();
 
     fill_monitored_accounts_to_capacity();
-    assert_eq!(monitored_accounts_count(), MAX_MONITORED_ACCOUNTS as usize);
+    assert_eq!(monitored_accounts_count(), MAX_MONITORED_ACCOUNTS);
 
     let runtime = TestCanisterRuntime::new().with_increasing_time();
-    let result = update_balance(&runtime, account(MAX_MONITORED_ACCOUNTS as usize + 1));
+    let result = update_balance(&runtime, account(MAX_MONITORED_ACCOUNTS + 1));
     assert_eq!(result, Err(UpdateBalanceError::QueueFull));
-    assert_eq!(monitored_accounts_count(), MAX_MONITORED_ACCOUNTS as usize);
+    assert_eq!(monitored_accounts_count(), MAX_MONITORED_ACCOUNTS);
 }
 
 #[test]
@@ -72,7 +72,7 @@ fn should_not_return_queue_full_if_account_already_monitored() {
     init_state();
 
     fill_monitored_accounts_to_capacity();
-    assert_eq!(monitored_accounts_count(), MAX_MONITORED_ACCOUNTS as usize);
+    assert_eq!(monitored_accounts_count(), MAX_MONITORED_ACCOUNTS);
 
     // Re-registering an already-monitored account should still return Ok
     let runtime = TestCanisterRuntime::new().with_increasing_time();
