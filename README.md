@@ -22,6 +22,7 @@ Each ckSOL is backed by exactly 1 SOL held by the ckSOL minter canister. ckSOL c
   - [Building](#building)
   - [Testing](#testing)
 - [Related Projects](#related-projects)
+- [Contributing](#contributing)
 - [License](#license)
 
 ## How It Works
@@ -264,6 +265,10 @@ cargo test -p cksol-int-tests --test solana_test_validator
 - [ckETH](https://github.com/dfinity/ic/tree/master/rs/ethereum/cketh) — Chain-key Ethereum token, which ckSOL is modeled after.
 - [ckBTC](https://github.com/dfinity/ic/tree/master/rs/bitcoin/ckbtc) — Chain-key Bitcoin token.
 - [ICRC-1 Ledger](https://github.com/dfinity/ICRC-1) — The token standard used by the ckSOL ledger.
+
+## Contributing
+
+At this point we do not accept external contributions yet. External contributions will be accepted after the initial release.
 
 ## License
 
