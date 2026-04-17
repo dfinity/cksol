@@ -1168,13 +1168,11 @@ mod metrics_tests {
             .build()
             .await;
 
-        // No incomplete withdrawals: metric should be absent
+        // No incomplete withdrawals: metric should be 0
         let setup = setup
             .check_metrics()
             .await
-            .assert_does_not_contain_metric_matching(
-                r"oldest_incomplete_withdrawal_age_seconds \d+ \d+",
-            )
+            .assert_contains_metric_matching(r"oldest_incomplete_withdrawal_age_seconds 0 \d+")
             .into();
 
         setup
