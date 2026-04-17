@@ -1,8 +1,5 @@
 use crate::{
-    guard::{
-        GuardError, MAX_CONCURRENT, TimerGuard, TimerGuardError,
-        update_balance_for_transaction_guard,
-    },
+    guard::{GuardError, MAX_CONCURRENT, TimerGuard, TimerGuardError, process_deposit_guard},
     state::TaskType,
     test_fixtures::init_state,
 };
@@ -31,11 +28,11 @@ mod guard {
         let account1 = account(0, None);
         let account2 = account(0, Some(0));
         {
-            let _guard = update_balance_for_transaction_guard(account1).unwrap();
-            let res = update_balance_for_transaction_guard(account2).err();
+            let _guard = process_deposit_guard(account1).unwrap();
+            let res = process_deposit_guard(account2).err();
             assert_eq!(res, Some(GuardError::AlreadyProcessing));
         }
-        let _guard = update_balance_for_transaction_guard(account1).unwrap();
+        let _guard = process_deposit_guard(account1).unwrap();
     }
 
     #[test]
@@ -44,9 +41,9 @@ mod guard {
 
         let account = account(0, None);
         {
-            let _guard = update_balance_for_transaction_guard(account).unwrap();
+            let _guard = process_deposit_guard(account).unwrap();
         }
-        let _guard = update_balance_for_transaction_guard(account).unwrap();
+        let _guard = process_deposit_guard(account).unwrap();
     }
 
     #[test]
@@ -55,18 +52,18 @@ mod guard {
 
         let guards: Vec<_> = (0..MAX_CONCURRENT / 2)
             .map(|id| {
-                update_balance_for_transaction_guard(account(0, Some(id as u8))).unwrap_or_else(
-                    |e| panic!("Could not create guard for subaccount {id}: {e:#?}"),
-                )
+                process_deposit_guard(account(0, Some(id as u8))).unwrap_or_else(|e| {
+                    panic!("Could not create guard for subaccount {id}: {e:#?}")
+                })
             })
             .chain((MAX_CONCURRENT / 2..MAX_CONCURRENT).map(|id| {
-                update_balance_for_transaction_guard(account(id as u64, None))
+                process_deposit_guard(account(id as u64, None))
                     .unwrap_or_else(|e| panic!("Could not create guard for principal {id}: {e:#?}"))
             }))
             .collect();
         assert_eq!(guards.len(), MAX_CONCURRENT);
         let account = account(MAX_CONCURRENT as u64 + 1, None);
-        let res = update_balance_for_transaction_guard(account).err();
+        let res = process_deposit_guard(account).err();
         assert_eq!(res, Some(GuardError::TooManyConcurrentRequests));
     }
 }

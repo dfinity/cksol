@@ -56,8 +56,7 @@ pub fn valid_init_args() -> InitArgs {
         minimum_withdrawal_amount: MINIMUM_WITHDRAWAL_AMOUNT,
         minimum_deposit_amount: MINIMUM_DEPOSIT_AMOUNT,
         withdrawal_fee: WITHDRAWAL_FEE,
-        update_balance_for_transaction_required_cycles:
-            UPDATE_BALANCE_FOR_TRANSACTION_REQUIRED_CYCLES as u64,
+        process_deposit_required_cycles: UPDATE_BALANCE_FOR_TRANSACTION_REQUIRED_CYCLES as u64,
         solana_network: SolanaNetwork::Mainnet,
         deposit_consolidation_fee: DEPOSIT_CONSOLIDATION_FEE as u64,
     }
@@ -443,7 +442,7 @@ pub mod arb {
                     minimum_withdrawal_amount,
                     minimum_deposit_amount,
                     withdrawal_fee,
-                    update_balance_for_transaction_required_cycles,
+                    process_deposit_required_cycles,
                     solana_network,
                     deposit_consolidation_fee,
                 )| {
@@ -455,7 +454,7 @@ pub mod arb {
                         minimum_withdrawal_amount,
                         minimum_deposit_amount,
                         withdrawal_fee,
-                        update_balance_for_transaction_required_cycles,
+                        process_deposit_required_cycles,
                         solana_network,
                         deposit_consolidation_fee,
                     }
@@ -480,7 +479,7 @@ pub mod arb {
                     minimum_withdrawal_amount,
                     minimum_deposit_amount,
                     withdrawal_fee,
-                    update_balance_for_transaction_required_cycles,
+                    process_deposit_required_cycles,
                     deposit_consolidation_fee,
                 )| UpgradeArgs {
                     sol_rpc_canister_id,
@@ -488,7 +487,7 @@ pub mod arb {
                     minimum_withdrawal_amount,
                     minimum_deposit_amount,
                     withdrawal_fee,
-                    update_balance_for_transaction_required_cycles,
+                    process_deposit_required_cycles,
                     deposit_consolidation_fee,
                 },
             )

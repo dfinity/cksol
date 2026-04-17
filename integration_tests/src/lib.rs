@@ -2,9 +2,8 @@ use crate::{events::MinterEventAssert, ledger_init_args::ledger_init_args};
 use candid::{CandidType, Decode, Encode, Nat, Principal, utils::ArgumentEncoder};
 use canlog::{Log, LogEntry};
 use cksol_types::{
-    Address, DepositStatus, GetDepositAddressArgs, MinterInfo, UpdateBalanceForTransactionArgs,
-    UpdateBalanceForTransactionError, WithdrawalArgs, WithdrawalError, WithdrawalOk,
-    WithdrawalStatus,
+    Address, DepositStatus, GetDepositAddressArgs, MinterInfo, ProcessDepositArgs,
+    ProcessDepositError, WithdrawalArgs, WithdrawalError, WithdrawalOk, WithdrawalStatus,
 };
 use cksol_types_internal::{
     MinterArg,
@@ -106,7 +105,7 @@ impl Setup {
     // Must be >= DEFAULT_WITHDRAWAL_FEE + SOLANA_RENT_EXEMPTION_THRESHOLD (890,880)
     pub const DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT: Lamport = 2_000_000; // 0.002 SOL
     pub const DEFAULT_MINIMUM_DEPOSIT_AMOUNT: Lamport = 10_000_000; // 0.01 SOL
-    pub const DEFAULT_UPDATE_BALANCE_FOR_TRANSACTION_REQUIRED_CYCLES: u128 = 1_000_000_000_000;
+    pub const DEFAULT_PROCESS_DEPOSIT_REQUIRED_CYCLES: u128 = 1_000_000_000_000;
 
     pub async fn new(
         make_live: PocketIcMode,
@@ -376,42 +375,39 @@ impl CkSolMinter<'_> {
             .await
     }
 
-    pub async fn update_balance_for_transaction(
+    pub async fn process_deposit(
         &self,
-        args: UpdateBalanceForTransactionArgs,
-    ) -> Result<DepositStatus, UpdateBalanceForTransactionError> {
-        self.try_update_balance_for_transaction(args)
+        args: ProcessDepositArgs,
+    ) -> Result<DepositStatus, ProcessDepositError> {
+        self.try_process_deposit(args)
             .await
-            .expect("update_balance_for_transaction failed")
+            .expect("process_deposit failed")
     }
 
-    pub async fn update_balance_for_transaction_with_cycles(
+    pub async fn process_deposit_with_cycles(
         &self,
-        args: UpdateBalanceForTransactionArgs,
+        args: ProcessDepositArgs,
         cycles: u128,
-    ) -> Result<DepositStatus, UpdateBalanceForTransactionError> {
-        self.try_update_balance_for_transaction_with_cycles(args, cycles)
+    ) -> Result<DepositStatus, ProcessDepositError> {
+        self.try_process_deposit_with_cycles(args, cycles)
             .await
-            .expect("update_balance_for_transaction failed")
+            .expect("process_deposit failed")
     }
 
-    pub async fn try_update_balance_for_transaction(
+    pub async fn try_process_deposit(
         &self,
-        args: UpdateBalanceForTransactionArgs,
-    ) -> Result<Result<DepositStatus, UpdateBalanceForTransactionError>, String> {
-        self.try_update_balance_for_transaction_with_cycles(
-            args,
-            Setup::DEFAULT_UPDATE_BALANCE_FOR_TRANSACTION_REQUIRED_CYCLES,
-        )
-        .await
+        args: ProcessDepositArgs,
+    ) -> Result<Result<DepositStatus, ProcessDepositError>, String> {
+        self.try_process_deposit_with_cycles(args, Setup::DEFAULT_PROCESS_DEPOSIT_REQUIRED_CYCLES)
+            .await
     }
 
-    pub async fn try_update_balance_for_transaction_with_cycles(
+    pub async fn try_process_deposit_with_cycles(
         &self,
-        args: UpdateBalanceForTransactionArgs,
+        args: ProcessDepositArgs,
         cycles: u128,
-    ) -> Result<Result<DepositStatus, UpdateBalanceForTransactionError>, String> {
-        self.try_update_call("update_balance_for_transaction", (args,), cycles)
+    ) -> Result<Result<DepositStatus, ProcessDepositError>, String> {
+        self.try_update_call("process_deposit", (args,), cycles)
             .await
     }
 
@@ -661,8 +657,7 @@ fn cksol_minter_init_args(
         minimum_withdrawal_amount: Setup::DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT,
         minimum_deposit_amount: Setup::DEFAULT_MINIMUM_DEPOSIT_AMOUNT,
         withdrawal_fee: Setup::DEFAULT_WITHDRAWAL_FEE,
-        update_balance_for_transaction_required_cycles:
-            Setup::DEFAULT_UPDATE_BALANCE_FOR_TRANSACTION_REQUIRED_CYCLES as u64,
+        process_deposit_required_cycles: Setup::DEFAULT_PROCESS_DEPOSIT_REQUIRED_CYCLES as u64,
         solana_network: SolanaNetwork::Mainnet,
         deposit_consolidation_fee: Setup::DEFAULT_DEPOSIT_CONSOLIDATION_FEE as u64,
     })

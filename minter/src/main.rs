@@ -12,9 +12,8 @@ use cksol_minter::{
     withdraw::{WITHDRAWAL_PROCESSING_DELAY, process_pending_withdrawals},
 };
 use cksol_types::{
-    Address, DepositStatus, GetDepositAddressArgs, MinterInfo, UpdateBalanceForTransactionArgs,
-    UpdateBalanceForTransactionError, WithdrawalArgs, WithdrawalError, WithdrawalOk,
-    WithdrawalStatus,
+    Address, DepositStatus, GetDepositAddressArgs, MinterInfo, ProcessDepositArgs,
+    ProcessDepositError, WithdrawalArgs, WithdrawalError, WithdrawalOk, WithdrawalStatus,
 };
 use cksol_types_internal::{MinterArg, log::Priority};
 use ic_http_types::{HttpRequest, HttpResponse, HttpResponseBuilder};
@@ -60,11 +59,9 @@ async fn get_deposit_address(args: GetDepositAddressArgs) -> Address {
 }
 
 #[ic_cdk::update]
-async fn update_balance_for_transaction(
-    args: UpdateBalanceForTransactionArgs,
-) -> Result<DepositStatus, UpdateBalanceForTransactionError> {
+async fn process_deposit(args: ProcessDepositArgs) -> Result<DepositStatus, ProcessDepositError> {
     let account = assert_non_anonymous_account(args.owner, args.subaccount);
-    cksol_minter::deposit::manual::update_balance_for_transaction(
+    cksol_minter::deposit::manual::process_deposit(
         IcCanisterRuntime::new(),
         account,
         args.signature.into(),
@@ -218,8 +215,7 @@ fn get_minter_info() -> MinterInfo {
         minimum_withdrawal_amount: s.minimum_withdrawal_amount(),
         minimum_deposit_amount: s.minimum_deposit_amount(),
         withdrawal_fee: s.withdrawal_fee(),
-        update_balance_for_transaction_required_cycles: s
-            .update_balance_for_transaction_required_cycles(),
+        process_deposit_required_cycles: s.process_deposit_required_cycles(),
         balance: s.balance(),
     })
 }

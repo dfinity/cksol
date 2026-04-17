@@ -1,5 +1,5 @@
 use crate::{
-    deposit::manual::update_balance_for_transaction,
+    deposit::manual::process_deposit,
     state::event::{DepositId, EventType},
     test_fixtures::{
         BLOCK_INDEX, DEPOSIT_CONSOLIDATION_FEE, DEPOSIT_FEE, EventsAssert,
@@ -20,7 +20,7 @@ use crate::{
 };
 use assert_matches::assert_matches;
 use candid_parser::Principal;
-use cksol_types::{DepositStatus, InsufficientCyclesError, UpdateBalanceForTransactionError};
+use cksol_types::{DepositStatus, InsufficientCyclesError, ProcessDepositError};
 use cksol_types_internal::InitArgs;
 use ic_canister_runtime::IcError;
 use icrc_ledger_types::icrc1::{
@@ -39,13 +39,11 @@ async fn should_fail_if_insufficient_cycles_attached() {
     let runtime = TestCanisterRuntime::new()
         .add_msg_cycles_available(UPDATE_BALANCE_FOR_TRANSACTION_REQUIRED_CYCLES - 1);
 
-    let result =
-        update_balance_for_transaction(runtime, DEPOSITOR_ACCOUNT, deposit_transaction_signature())
-            .await;
+    let result = process_deposit(runtime, DEPOSITOR_ACCOUNT, deposit_transaction_signature()).await;
 
     assert_eq!(
         result,
-        Err(UpdateBalanceForTransactionError::InsufficientCycles(
+        Err(ProcessDepositError::InsufficientCycles(
             InsufficientCyclesError {
                 expected: UPDATE_BALANCE_FOR_TRANSACTION_REQUIRED_CYCLES,
                 received: UPDATE_BALANCE_FOR_TRANSACTION_REQUIRED_CYCLES - 1,
@@ -62,13 +60,11 @@ async fn should_return_error_if_get_transaction_fails() {
 
     let runtime = runtime_with_time_and_cycles().add_stub_error(IcError::CallPerformFailed);
 
-    let result =
-        update_balance_for_transaction(runtime, DEPOSITOR_ACCOUNT, deposit_transaction_signature())
-            .await;
+    let result = process_deposit(runtime, DEPOSITOR_ACCOUNT, deposit_transaction_signature()).await;
 
     assert_matches!(
         result,
-        Err(UpdateBalanceForTransactionError::TemporarilyUnavailable(e)) => assert!(e.contains("Inter-canister call perform failed"))
+        Err(ProcessDepositError::TemporarilyUnavailable(e)) => assert!(e.contains("Inter-canister call perform failed"))
     );
     EventsAssert::assert_no_events_recorded();
 }
@@ -81,14 +77,9 @@ async fn should_return_error_if_transaction_not_found() {
     let runtime = runtime_with_time_and_cycles()
         .add_stub_response(GetTransactionResult::Consistent(Ok(None)));
 
-    let result =
-        update_balance_for_transaction(runtime, DEPOSITOR_ACCOUNT, deposit_transaction_signature())
-            .await;
+    let result = process_deposit(runtime, DEPOSITOR_ACCOUNT, deposit_transaction_signature()).await;
 
-    assert_eq!(
-        result,
-        Err(UpdateBalanceForTransactionError::TransactionNotFound)
-    );
+    assert_eq!(result, Err(ProcessDepositError::TransactionNotFound));
     EventsAssert::assert_no_events_recorded();
 }
 
@@ -102,7 +93,7 @@ async fn should_return_error_if_transaction_not_valid_deposit() {
     )));
     let runtime = runtime_with_time_and_cycles().add_stub_response(get_transaction_response);
 
-    let result = update_balance_for_transaction(
+    let result = process_deposit(
         runtime,
         DEPOSITOR_ACCOUNT,
         deposit_transaction_to_wrong_address_signature(),
@@ -111,7 +102,7 @@ async fn should_return_error_if_transaction_not_valid_deposit() {
 
     assert_matches!(
         result,
-        Err(UpdateBalanceForTransactionError::InvalidDepositTransaction(e)) => assert!(e.contains("Transaction must target deposit address"))
+        Err(ProcessDepositError::InvalidDepositTransaction(e)) => assert!(e.contains("Transaction must target deposit address"))
     );
     EventsAssert::assert_no_events_recorded();
 }
@@ -129,13 +120,11 @@ async fn should_fail_if_deposit_amount_is_below_minimum() {
         GetTransactionResult::Consistent(Ok(Some(deposit_transaction().try_into().unwrap())));
     let runtime = runtime_with_time_and_cycles().add_stub_response(get_transaction_response);
 
-    let result =
-        update_balance_for_transaction(runtime, DEPOSITOR_ACCOUNT, deposit_transaction_signature())
-            .await;
+    let result = process_deposit(runtime, DEPOSITOR_ACCOUNT, deposit_transaction_signature()).await;
 
     assert_eq!(
         result,
-        Err(UpdateBalanceForTransactionError::ValueTooSmall {
+        Err(ProcessDepositError::ValueTooSmall {
             deposit_amount: DEPOSIT_AMOUNT,
             minimum_deposit_amount: MINIMUM_DEPOSIT_AMOUNT,
         })
@@ -156,9 +145,7 @@ async fn should_return_processing_if_mint_fails() {
             TransferError::TemporarilyUnavailable,
         ));
 
-    let result =
-        update_balance_for_transaction(runtime, DEPOSITOR_ACCOUNT, deposit_transaction_signature())
-            .await;
+    let result = process_deposit(runtime, DEPOSITOR_ACCOUNT, deposit_transaction_signature()).await;
 
     assert_eq!(result, Ok(deposit_status_processing()));
 
@@ -180,9 +167,7 @@ async fn should_successfully_mint_on_second_call() {
         .add_stub_response(Err::<BlockIndex, TransferError>(
             TransferError::TemporarilyUnavailable,
         ));
-    let result =
-        update_balance_for_transaction(runtime, DEPOSITOR_ACCOUNT, deposit_transaction_signature())
-            .await;
+    let result = process_deposit(runtime, DEPOSITOR_ACCOUNT, deposit_transaction_signature()).await;
     assert_eq!(result, Ok(deposit_status_processing()));
 
     // Second call: fetches status from minter state, and mints successfully without making any
@@ -190,9 +175,7 @@ async fn should_successfully_mint_on_second_call() {
     let runtime = TestCanisterRuntime::new()
         .with_increasing_time()
         .add_stub_response(Ok::<BlockIndex, TransferError>(BLOCK_INDEX.into()));
-    let result =
-        update_balance_for_transaction(runtime, DEPOSITOR_ACCOUNT, deposit_transaction_signature())
-            .await;
+    let result = process_deposit(runtime, DEPOSITOR_ACCOUNT, deposit_transaction_signature()).await;
     assert_eq!(result, Ok(deposit_status_minted()));
 
     EventsAssert::from_recorded()
@@ -212,9 +195,7 @@ async fn should_succeed_with_valid_deposit_transaction() {
         .add_stub_response(get_transaction_response)
         .add_stub_response(Ok::<BlockIndex, TransferError>(BLOCK_INDEX.into()));
 
-    let result =
-        update_balance_for_transaction(runtime, DEPOSITOR_ACCOUNT, deposit_transaction_signature())
-            .await;
+    let result = process_deposit(runtime, DEPOSITOR_ACCOUNT, deposit_transaction_signature()).await;
 
     assert_eq!(result, Ok(deposit_status_minted()));
 
@@ -235,16 +216,12 @@ async fn should_not_double_mint() {
     let runtime = runtime_with_time_and_cycles()
         .add_stub_response(get_transaction_response)
         .add_stub_response(Ok::<BlockIndex, TransferError>(BLOCK_INDEX.into()));
-    let result =
-        update_balance_for_transaction(runtime, DEPOSITOR_ACCOUNT, deposit_transaction_signature())
-            .await;
+    let result = process_deposit(runtime, DEPOSITOR_ACCOUNT, deposit_transaction_signature()).await;
     assert_eq!(result, Ok(deposit_status_minted()));
 
     // Second call: returns the same status
     let runtime = TestCanisterRuntime::new();
-    let result =
-        update_balance_for_transaction(runtime, DEPOSITOR_ACCOUNT, deposit_transaction_signature())
-            .await;
+    let result = process_deposit(runtime, DEPOSITOR_ACCOUNT, deposit_transaction_signature()).await;
     assert_eq!(result, Ok(deposit_status_minted()));
 
     // Only one mint event recorded
@@ -264,7 +241,7 @@ async fn should_quarantine_deposit() {
         GetTransactionResult::Consistent(Ok(Some(deposit_transaction().try_into().unwrap())));
     let runtime = || runtime_with_time_and_cycles().add_stub_response(get_transaction_response);
     let first_result = tokio::spawn(async move {
-        update_balance_for_transaction(
+        process_deposit(
             runtime(),
             DEPOSITOR_ACCOUNT,
             deposit_transaction_signature(),
@@ -277,15 +254,13 @@ async fn should_quarantine_deposit() {
     // On the second call, the deposit should have been quarantined
     let runtime = TestCanisterRuntime::new();
     let second_result =
-        update_balance_for_transaction(runtime, DEPOSITOR_ACCOUNT, deposit_transaction_signature())
-            .await;
+        process_deposit(runtime, DEPOSITOR_ACCOUNT, deposit_transaction_signature()).await;
     assert_eq!(second_result, Ok(deposit_status_quarantined()));
 
-    // Calling `update_balance` again for the same deposit should return the same status
+    // Calling `process_deposit` again for the same deposit should return the same status
     let runtime = TestCanisterRuntime::new();
     let third_result =
-        update_balance_for_transaction(runtime, DEPOSITOR_ACCOUNT, deposit_transaction_signature())
-            .await;
+        process_deposit(runtime, DEPOSITOR_ACCOUNT, deposit_transaction_signature()).await;
     assert_eq!(third_result, second_result);
 
     // Only one mint event recorded
@@ -331,7 +306,7 @@ async fn should_allow_deposits_to_multiple_accounts_with_single_transaction() {
         let runtime = runtime_with_time_and_cycles()
             .add_stub_response(get_transaction_response.clone())
             .add_stub_response(Ok::<BlockIndex, TransferError>(BLOCK_INDEXES[i].into()));
-        let result = update_balance_for_transaction(
+        let result = process_deposit(
             runtime,
             ACCOUNTS[i],
             deposit_transaction_to_multiple_accounts_signature(),
