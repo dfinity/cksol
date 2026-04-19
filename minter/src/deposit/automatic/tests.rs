@@ -11,7 +11,7 @@ fn monitored_accounts_count() -> usize {
     read_state(|s| s.monitored_accounts().len())
 }
 
-fn fill_monitored_accounts_to_capacity() {
+fn start_monitoring_max_number_of_accounts() {
     for i in 0..MAX_MONITORED_ACCOUNTS {
         start_monitoring_account(account(i));
     }
@@ -58,7 +58,7 @@ fn should_be_idempotent_for_already_monitored_account() {
 fn should_return_queue_full_when_at_capacity() {
     init_state();
 
-    fill_monitored_accounts_to_capacity();
+    start_monitoring_max_number_of_accounts();
     assert_eq!(monitored_accounts_count(), MAX_MONITORED_ACCOUNTS);
 
     let runtime = TestCanisterRuntime::new().with_increasing_time();
@@ -71,7 +71,7 @@ fn should_return_queue_full_when_at_capacity() {
 fn should_not_return_queue_full_if_account_already_monitored() {
     init_state();
 
-    fill_monitored_accounts_to_capacity();
+    start_monitoring_max_number_of_accounts();
     assert_eq!(monitored_accounts_count(), MAX_MONITORED_ACCOUNTS);
 
     // Re-registering an already-monitored account should still return Ok
