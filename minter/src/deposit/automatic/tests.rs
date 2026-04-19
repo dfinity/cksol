@@ -40,11 +40,11 @@ fn should_be_idempotent_for_already_monitored_account() {
     init_state();
     let runtime = TestCanisterRuntime::new().with_increasing_time();
 
-    update_balance(&runtime, account(1)).unwrap();
-    let result = update_balance(&runtime, account(1));
-
-    assert_eq!(result, Ok(()));
-    assert_eq!(monitored_accounts_count(), 1);
+    for _ in 0..2 {
+        let result = update_balance(&runtime, account(1));
+        assert_eq!(result, Ok(()));
+        assert_eq!(monitored_accounts_count(), 1);
+    }
 
     // Only one event should have been emitted
     EventsAssert::from_recorded()
