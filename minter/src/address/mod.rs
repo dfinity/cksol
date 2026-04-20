@@ -20,9 +20,7 @@ pub fn minter_account<R: CanisterRuntime>(runtime: &R) -> Account {
 }
 
 pub fn minter_address<R: CanisterRuntime>(master_key: &SchnorrPublicKey, runtime: &R) -> Address {
-    derive_public_key(master_key, derivation_path(&minter_account(runtime)))
-        .serialize_raw()
-        .into()
+    account_address(master_key, &minter_account(runtime))
 }
 
 pub fn account_address(master_key: &SchnorrPublicKey, account: &Account) -> Address {
