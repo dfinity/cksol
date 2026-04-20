@@ -1,5 +1,5 @@
 use crate::{
-    address::derive_account_address,
+    address::{account_address, lazy_get_schnorr_master_key},
     cycles::{charge_caller_cycles, check_caller_available_cycles},
     deposit::get_deposit_amount_to_address,
     guard::process_deposit_guard,
@@ -101,7 +101,8 @@ async fn try_accept_deposit<R: CanisterRuntime>(
         None => Err(ProcessDepositError::TransactionNotFound),
     }?;
 
-    let deposit_address = derive_account_address(account, runtime).await;
+    let master_key = lazy_get_schnorr_master_key(runtime).await;
+    let deposit_address = account_address(&master_key, &account);
     let deposit_amount =
         get_deposit_amount_to_address(transaction, deposit_address).map_err(|e| {
             log!(

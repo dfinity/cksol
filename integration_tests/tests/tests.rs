@@ -84,8 +84,31 @@ mod get_deposit_address_tests {
     }
 
     #[tokio::test]
+    async fn should_trap_before_master_key_is_initialized() {
+        let setup = SetupBuilder::new().build().await;
+        let minter = setup.minter();
+
+        let err = minter
+            .try_get_deposit_address(GetDepositAddressArgs {
+                owner: None,
+                subaccount: None,
+            })
+            .await
+            .expect_err("expected trap before master key is initialized");
+
+        assert!(
+            err.contains("master key not yet initialized"),
+            "unexpected error: {err}"
+        );
+
+        setup.drop().await;
+    }
+
+    #[tokio::test]
     async fn should_get_deposit_address() {
         let setup = SetupBuilder::new().build().await;
+        // Tick once so the initialization timer fires and the master key is fetched.
+        setup.tick().await;
         let minter = setup.minter();
 
         // Owner is the default caller

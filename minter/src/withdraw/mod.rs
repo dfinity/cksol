@@ -127,9 +127,7 @@ pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: R) {
             Priority::Info,
             "Insufficient minter balance for some withdrawal requests, scheduling consolidation"
         );
-        runtime.set_timer(Duration::ZERO, |runtime| async move {
-            consolidate_deposits(runtime).await;
-        });
+        runtime.set_timer(Duration::ZERO, consolidate_deposits);
     }
 
     let more_to_process =

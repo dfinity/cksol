@@ -20,17 +20,15 @@ pub fn minter_account<R: CanisterRuntime>(runtime: &R) -> Account {
 }
 
 pub fn minter_address<R: CanisterRuntime>(master_key: &SchnorrPublicKey, runtime: &R) -> Address {
-    Address::from(
-        derive_public_key(master_key, derivation_path(&minter_account(runtime))).serialize_raw(),
-    )
+    derive_public_key(master_key, derivation_path(&minter_account(runtime)))
+        .serialize_raw()
+        .into()
 }
 
-pub async fn derive_account_address<R: CanisterRuntime>(account: Account, runtime: &R) -> Address {
-    let master_public_key = lazy_get_schnorr_master_key(runtime).await;
-
-    let public_key = derive_public_key_from_account(&master_public_key, &account);
-
-    Address::from(public_key.serialize_raw())
+pub fn account_address(master_key: &SchnorrPublicKey, account: &Account) -> Address {
+    derive_public_key_from_account(master_key, account)
+        .serialize_raw()
+        .into()
 }
 
 pub async fn lazy_get_schnorr_master_key<R: CanisterRuntime>(runtime: &R) -> SchnorrPublicKey {
@@ -50,10 +48,9 @@ pub async fn lazy_get_schnorr_master_key<R: CanisterRuntime>(runtime: &R) -> Sch
     };
     let response = runtime.schnorr_public_key(arg).await;
 
-    let public_key = PublicKey::deserialize_raw(response.public_key.as_slice())
-        .expect("Failed to deserialize public key");
     let schnorr_public_key = SchnorrPublicKey {
-        public_key,
+        public_key: PublicKey::deserialize_raw(response.public_key.as_slice())
+            .expect("Failed to deserialize public key"),
         chain_code: response.chain_code.as_slice().try_into().unwrap(),
     };
 
@@ -76,7 +73,6 @@ pub(crate) fn derive_public_key(
     let (public_key, _chain_code) = master_public_key
         .public_key
         .derive_subkey_with_chain_code(&derivation_path, &master_public_key.chain_code);
-
     public_key
 }
 

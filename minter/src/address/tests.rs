@@ -1,58 +1,3 @@
-
-mod lazy_schnorr_master_key {
-    use ic_cdk_management_canister::SchnorrPublicKeyResult;
-    use ic_ed25519::{PocketIcMasterPublicKeyId, PublicKey};
-
-    use crate::{
-        address::lazy_get_schnorr_master_key,
-        state::{SchnorrPublicKey, read_state, reset_state},
-        test_fixtures::{init_schnorr_master_key, init_state, runtime::TestCanisterRuntime},
-    };
-
-    fn test_key() -> SchnorrPublicKey {
-        SchnorrPublicKey {
-            public_key: PublicKey::pocketic_key(PocketIcMasterPublicKeyId::DfxTestKey),
-            chain_code: [42; 32],
-        }
-    }
-
-    fn test_key_result() -> SchnorrPublicKeyResult {
-        let key = test_key();
-        SchnorrPublicKeyResult {
-            public_key: key.public_key.serialize_raw().to_vec(),
-            chain_code: key.chain_code.to_vec(),
-        }
-    }
-
-    #[tokio::test]
-    async fn uses_cached_key_without_calling_runtime() {
-        init_state();
-        init_schnorr_master_key();
-        let cached = read_state(|s| s.minter_public_key().cloned().unwrap());
-
-        // No stub registered — panics if schnorr_public_key is called on the runtime.
-        let runtime = TestCanisterRuntime::new();
-        let result = lazy_get_schnorr_master_key(&runtime).await;
-
-        assert_eq!(result, cached);
-        reset_state();
-    }
-
-    #[tokio::test]
-    async fn fetches_key_and_caches_it() {
-        init_state();
-        let runtime = TestCanisterRuntime::new().with_schnorr_public_key(test_key_result());
-
-        let result = lazy_get_schnorr_master_key(&runtime).await;
-
-        assert_eq!(result, test_key());
-        // Second call must use the cache — no more stubs, so it would panic if it hit the runtime.
-        let cached = lazy_get_schnorr_master_key(&runtime).await;
-        assert_eq!(result, cached);
-        reset_state();
-    }
-}
-
 mod derive_key {
     use candid::Principal;
     use ic_ed25519::{PocketIcMasterPublicKeyId, PublicKey};
@@ -142,5 +87,59 @@ mod derive_key {
             derive_public_key_from_account(&master_key1, &account),
             derive_public_key_from_account(&master_key2, &account)
         );
+    }
+}
+
+mod lazy_schnorr_master_key {
+    use ic_cdk_management_canister::SchnorrPublicKeyResult;
+    use ic_ed25519::{PocketIcMasterPublicKeyId, PublicKey};
+
+    use crate::{
+        address::lazy_get_schnorr_master_key,
+        state::{SchnorrPublicKey, read_state, reset_state},
+        test_fixtures::{init_schnorr_master_key, init_state, runtime::TestCanisterRuntime},
+    };
+
+    fn test_key() -> SchnorrPublicKey {
+        SchnorrPublicKey {
+            public_key: PublicKey::pocketic_key(PocketIcMasterPublicKeyId::DfxTestKey),
+            chain_code: [42; 32],
+        }
+    }
+
+    fn test_key_result() -> SchnorrPublicKeyResult {
+        let key = test_key();
+        SchnorrPublicKeyResult {
+            public_key: key.public_key.serialize_raw().to_vec(),
+            chain_code: key.chain_code.to_vec(),
+        }
+    }
+
+    #[tokio::test]
+    async fn uses_cached_key_without_calling_runtime() {
+        init_state();
+        init_schnorr_master_key();
+        let cached = read_state(|s| s.minter_public_key().cloned().unwrap());
+
+        // No stub registered — panics if schnorr_public_key is called on the runtime.
+        let runtime = TestCanisterRuntime::new();
+        let result = lazy_get_schnorr_master_key(&runtime).await;
+
+        assert_eq!(result, cached);
+        reset_state();
+    }
+
+    #[tokio::test]
+    async fn fetches_key_and_caches_it() {
+        init_state();
+        let runtime = TestCanisterRuntime::new().with_schnorr_public_key(test_key_result());
+
+        let result = lazy_get_schnorr_master_key(&runtime).await;
+
+        assert_eq!(result, test_key());
+        // Second call must use the cache — no more stubs, so it would panic if it hit the runtime.
+        let cached = lazy_get_schnorr_master_key(&runtime).await;
+        assert_eq!(result, cached);
+        reset_state();
     }
 }
