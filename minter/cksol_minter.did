@@ -39,6 +39,12 @@ type Signature = text;
 // i.e. 1_000_000_000 Lamports is 1 SOL
 type Lamport = nat64;
 
+// Index of a mint transaction on the ckSOL ledger.
+type LedgerMintIndex = nat64;
+
+// Index of a burn transaction on the ckSOL ledger.
+type LedgerBurnIndex = nat64;
+
 // Arguments for a request to the `process_deposit` endpoint.
 type ProcessDepositArgs = record {
     // If provided, update the balance for this principal.
@@ -124,7 +130,7 @@ type DepositStatus = variant {
     // The minter accepted the deposit and minted ckSOL tokens on the ledger.
     Minted : record {
         // The mint transaction index on the ledger.
-        block_index: nat64;
+        block_index: LedgerMintIndex;
         // The minted amount (deposit amount minus fees).
         minted_amount: Lamport;
         // The deposit identifier.
@@ -208,7 +214,7 @@ type WithdrawalArgs = record {
 type WithdrawalOk = record {
     // Returns the burn transaction index corresponding to the withdrawal.
     // You can use this index to query the withdrawal status.
-    block_index : nat64
+    block_index : LedgerBurnIndex
 };
 
 type WithdrawalError = variant {
@@ -271,7 +277,7 @@ type AcceptedWithdrawalRequest = record {
     // The solana address to receive the funds.
     solana_address : Address;
     // The index of the ledger block that burned the ckSOL tokens.
-    burn_block_index : nat64;
+    burn_block_index : LedgerBurnIndex;
     // The total amount burned from the user.
     burned_amount : Lamport;
     // The net amount to transfer to the user (burned_amount minus fees).
@@ -295,12 +301,12 @@ type TransactionPurpose = variant {
     // Consolidate deposited funds into the minter's main account.
     ConsolidateDeposits : record {
         // The ledger mint indices of the deposits being consolidated.
-        mint_indices: vec nat64;
+        mint_indices: vec LedgerMintIndex;
     };
     // Withdraw SOL to users' Solana addresses.
     WithdrawSol : record {
         // The ledger burn indices of the withdrawal requests included in this transaction.
-        burn_indices: vec nat64;
+        burn_indices: vec LedgerBurnIndex;
     };
 };
 
@@ -352,7 +358,7 @@ type EventType = variant {
         // The account to which the minter minted ckSOL.
         account: Account;
         // The transaction index on the ckSOL ledger.
-        mint_block_index: nat64;
+        mint_block_index: LedgerMintIndex;
     };
     // Submitted a Solana transaction.
     SubmittedTransaction : record {
@@ -468,7 +474,7 @@ service : (MinterArg) -> {
     withdraw : (WithdrawalArgs) -> (variant { Ok : WithdrawalOk; Err : WithdrawalError });
 
     // Retrieve the status of a Solana withdrawal request.
-    withdrawal_status : (nat64) -> (WithdrawalStatus);
+    withdrawal_status : (LedgerBurnIndex) -> (WithdrawalStatus);
 
     // *WARNING*: This is a debug endpoint, backwards-compatibility is not guaranteed.
     // Returns events from the event log starting at the given index.
