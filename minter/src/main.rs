@@ -14,7 +14,7 @@ use cksol_minter::{
 use cksol_types::{
     Address, DepositStatus, GetDepositAddressArgs, MinterInfo, ProcessDepositArgs,
     ProcessDepositError, UpdateBalanceArgs, UpdateBalanceError, WithdrawalArgs, WithdrawalError,
-    WithdrawalOk, WithdrawalStatus,
+    WithdrawalOk, WithdrawalStatus, WithdrawalStatusArgs,
 };
 use cksol_types_internal::{MinterArg, log::Priority};
 use ic_http_types::{HttpRequest, HttpResponse, HttpResponseBuilder};
@@ -90,8 +90,8 @@ async fn withdraw(args: WithdrawalArgs) -> Result<WithdrawalOk, WithdrawalError>
 }
 
 #[ic_cdk::update]
-fn withdrawal_status(block_index: u64) -> WithdrawalStatus {
-    cksol_minter::withdraw::withdrawal_status(block_index)
+fn withdrawal_status(args: WithdrawalStatusArgs) -> WithdrawalStatus {
+    cksol_minter::withdraw::withdrawal_status(args.block_index)
 }
 
 #[ic_cdk::query]

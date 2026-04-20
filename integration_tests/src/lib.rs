@@ -4,7 +4,7 @@ use canlog::{Log, LogEntry};
 use cksol_types::{
     Address, DepositStatus, GetDepositAddressArgs, MinterInfo, ProcessDepositArgs,
     ProcessDepositError, UpdateBalanceArgs, UpdateBalanceError, WithdrawalArgs, WithdrawalError,
-    WithdrawalOk, WithdrawalStatus,
+    WithdrawalOk, WithdrawalStatus, WithdrawalStatusArgs,
 };
 use cksol_types_internal::{
     MinterArg,
@@ -437,8 +437,12 @@ impl CkSolMinter<'_> {
     }
 
     pub async fn withdrawal_status(&self, block_index: u64) -> WithdrawalStatus {
-        self.update_call("withdrawal_status", (block_index,), 0)
-            .await
+        self.update_call(
+            "withdrawal_status",
+            (WithdrawalStatusArgs { block_index },),
+            0,
+        )
+        .await
     }
 
     pub async fn get_minter_info(&self) -> MinterInfo {

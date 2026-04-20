@@ -217,6 +217,12 @@ type WithdrawalOk = record {
     block_index : LedgerBurnIndex
 };
 
+// Arguments for a request to the `withdrawal_status` endpoint.
+type WithdrawalStatusArgs = record {
+    // The burn block index returned by the `withdraw` endpoint.
+    block_index : LedgerBurnIndex;
+};
+
 type WithdrawalError = variant {
     // The minter is already processing another retrieval request for the same
     // principal.
@@ -474,7 +480,7 @@ service : (MinterArg) -> {
     withdraw : (WithdrawalArgs) -> (variant { Ok : WithdrawalOk; Err : WithdrawalError });
 
     // Retrieve the status of a Solana withdrawal request.
-    withdrawal_status : (LedgerBurnIndex) -> (WithdrawalStatus);
+    withdrawal_status : (WithdrawalStatusArgs) -> (WithdrawalStatus);
 
     // *WARNING*: This is a debug endpoint, backwards-compatibility is not guaranteed.
     // Returns events from the event log starting at the given index.

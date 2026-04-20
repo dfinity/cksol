@@ -12,6 +12,12 @@ use thiserror::Error;
 
 mod memo;
 
+/// Index of a mint transaction on the ckSOL ledger.
+pub type LedgerMintIndex = u64;
+
+/// Index of a burn transaction on the ckSOL ledger.
+pub type LedgerBurnIndex = u64;
+
 /// A single transaction can deposit to multiple accounts, so the signature alone is not sufficient.
 /// The combination of a Solana transaction signature and the account it targets together
 /// uniquely identify a deposit. If a transaction contains multiple transfers to the same account,
@@ -47,7 +53,7 @@ pub enum DepositStatus {
     /// The minter accepted the deposit and minted ckSOL tokens on the ledger.
     Minted {
         /// The mint transaction index on the ledger.
-        block_index: u64,
+        block_index: LedgerMintIndex,
         /// The minted amount (deposit amount minus fees).
         minted_amount: Lamport,
         /// The deposit identifier.
@@ -159,10 +165,8 @@ pub struct InsufficientCyclesError {
 pub struct WithdrawalArgs {
     /// The subaccount to burn ckSOL from.
     pub from_subaccount: Option<Subaccount>,
-
     /// Amount to withdraw in Lamports.
-    pub amount: u64,
-
+    pub amount: Lamport,
     /// Address where to send Solana tokens.
     pub address: String,
 }
@@ -171,7 +175,14 @@ pub struct WithdrawalArgs {
 #[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize)]
 pub struct WithdrawalOk {
     /// The index of the burn block on the ckSOL ledger.
-    pub block_index: u64,
+    pub block_index: LedgerBurnIndex,
+}
+
+/// Arguments for a request to the `withdrawal_status` ckSOL minter endpoint.
+#[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize)]
+pub struct WithdrawalStatusArgs {
+    /// The burn block index returned by the `withdraw` endpoint.
+    pub block_index: LedgerBurnIndex,
 }
 
 /// The error result of a withdrawal request.
@@ -224,16 +235,13 @@ pub enum TxFinalizedStatus {
 pub enum WithdrawalStatus {
     /// Withdrawal request is not found.
     NotFound,
-
     /// Withdrawal request is waiting to be processed.
     Pending,
-
     /// Solana transaction was signed and is sent to the network.
     TxSent {
         /// The unique identifier (signature) of the Solana transaction.
         transaction_id: Signature,
     },
-
     /// Solana transaction is finalized.
     TxFinalized(TxFinalizedStatus),
 }
