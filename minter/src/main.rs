@@ -120,7 +120,7 @@ fn get_events(
                     solana_address: solana_address::Address::from(request.solana_address).into(),
                     burn_block_index: *request.burn_block_index.get(),
                     burned_amount: request.burned_amount,
-                    transferred_amount: request.transferred_amount,
+                    amount_to_transfer: request.transferred_amount,
                 }
             }
             EventType::AcceptedManualDeposit {

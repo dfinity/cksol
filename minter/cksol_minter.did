@@ -274,8 +274,8 @@ type AcceptedWithdrawalRequest = record {
     burn_block_index : nat64;
     // The total amount burned from the user.
     burned_amount : Lamport;
-    // The net amount transferred to the user (burned_amount minus fees).
-    transferred_amount : Lamport;
+    // The net amount to transfer to the user (burned_amount minus fees).
+    amount_to_transfer : Lamport;
 };
 
 // A versioned Solana transaction message.

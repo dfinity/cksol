@@ -70,7 +70,7 @@ pub enum EventType {
         /// The total amount burned from the user (in lamports).
         burned_amount: Lamport,
         /// The net amount to transfer to the user (in lamports).
-        transferred_amount: Lamport,
+        amount_to_transfer: Lamport,
     },
     /// Submitted a Solana transaction.
     SubmittedTransaction {
