@@ -3,6 +3,9 @@
 
 # ckSOL
 
+> [!IMPORTANT]
+> The ckSOL minter is under active development and subject to change. Access to the repository has been opened to allow for early feedback. Check back regularly for updates.
+
 <img src="static/images/cksol-token.svg" alt="ckSOL logo" width="100" />
 
 ckSOL is a [chain-key token](https://internetcomputer.org/how-it-works/chain-key-tokens/) on the [Internet Computer](https://internetcomputer.org/) that is backed 1:1 by SOL, the native token of the [Solana](https://solana.com/) blockchain.
