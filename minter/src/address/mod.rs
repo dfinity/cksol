@@ -2,9 +2,7 @@ use crate::{
     runtime::CanisterRuntime,
     state::{SchnorrPublicKey, mutate_state, read_state},
 };
-use ic_cdk_management_canister::{
-    SchnorrAlgorithm, SchnorrKeyId, SchnorrPublicKeyArgs, schnorr_public_key,
-};
+use ic_cdk_management_canister::{SchnorrAlgorithm, SchnorrKeyId, SchnorrPublicKeyArgs};
 use ic_ed25519::{DerivationIndex, DerivationPath as IcDerivationPath, PublicKey};
 use icrc_ledger_types::icrc1::account::Account;
 use solana_address::Address;
@@ -14,6 +12,15 @@ mod tests;
 
 pub(crate) type DerivationPath = Vec<Vec<u8>>;
 
+/// Implementation of the `get_deposit_address` canister endpoint.
+/// Because the endpoint is a query, it must be synchronous and cannot fetch the
+/// master key on demand — it traps if the key has not yet been initialized.
+pub fn get_deposit_address(account: &Account) -> Address {
+    let master_key = read_state(|s| s.minter_public_key().cloned())
+        .unwrap_or_else(|| ic_cdk::trap("master key not yet initialized"));
+    account_address(&master_key, account)
+}
+
 pub fn minter_account<R: CanisterRuntime>(runtime: &R) -> Account {
     Account {
         owner: runtime.canister_self(),
@@ -22,20 +29,16 @@ pub fn minter_account<R: CanisterRuntime>(runtime: &R) -> Account {
 }
 
 pub fn minter_address<R: CanisterRuntime>(master_key: &SchnorrPublicKey, runtime: &R) -> Address {
-    Address::from(
-        derive_public_key(master_key, derivation_path(&minter_account(runtime))).serialize_raw(),
-    )
+    account_address(master_key, &minter_account(runtime))
 }
 
-pub async fn get_deposit_address(account: Account) -> Address {
-    let master_public_key = lazy_get_schnorr_master_key().await;
-
-    let public_key = derive_public_key_from_account(&master_public_key, &account);
-
-    Address::from(public_key.serialize_raw())
+pub fn account_address(master_key: &SchnorrPublicKey, account: &Account) -> Address {
+    derive_public_key_from_account(master_key, account)
+        .serialize_raw()
+        .into()
 }
 
-pub async fn lazy_get_schnorr_master_key() -> SchnorrPublicKey {
+pub async fn lazy_get_schnorr_master_key<R: CanisterRuntime>(runtime: &R) -> SchnorrPublicKey {
     if let Some(public_key) = read_state(|s| s.minter_public_key().cloned()) {
         return public_key;
     }
@@ -50,14 +53,11 @@ pub async fn lazy_get_schnorr_master_key() -> SchnorrPublicKey {
             name: key_name.to_string(),
         },
     };
-    let response = schnorr_public_key(&arg)
-        .await
-        .expect("failed to obtain the canister master key");
+    let response = runtime.schnorr_public_key(arg).await;
 
-    let public_key = PublicKey::deserialize_raw(response.public_key.as_slice())
-        .expect("Failed to deserialize public key");
     let schnorr_public_key = SchnorrPublicKey {
-        public_key,
+        public_key: PublicKey::deserialize_raw(response.public_key.as_slice())
+            .expect("Failed to deserialize public key"),
         chain_code: response.chain_code.as_slice().try_into().unwrap(),
     };
 
@@ -80,7 +80,6 @@ pub(crate) fn derive_public_key(
     let (public_key, _chain_code) = master_public_key
         .public_key
         .derive_subkey_with_chain_code(&derivation_path, &master_public_key.chain_code);
-
     public_key
 }
 

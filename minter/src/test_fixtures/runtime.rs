@@ -2,7 +2,7 @@ use super::{signer::MockSchnorrSigner, stubs::Stubs};
 use crate::{runtime::CanisterRuntime, signer::SchnorrSigner};
 use candid::{CandidType, Principal};
 use ic_canister_runtime::{IcError, Runtime, StubRuntime};
-use ic_cdk_management_canister::SignCallError;
+use ic_cdk_management_canister::{SchnorrPublicKeyArgs, SchnorrPublicKeyResult, SignCallError};
 use std::{
     future::Future,
     sync::{Arc, Mutex},
@@ -21,6 +21,7 @@ pub struct TestCanisterRuntime {
     msg_cycles_available: Stubs<u128>,
     msg_cycles_refunded: Stubs<u128>,
     set_timer_call_count: Arc<Mutex<usize>>,
+    schnorr_public_key_results: Stubs<SchnorrPublicKeyResult>,
 }
 
 impl TestCanisterRuntime {
@@ -74,6 +75,11 @@ impl TestCanisterRuntime {
         self
     }
 
+    pub fn with_schnorr_public_key(mut self, result: SchnorrPublicKeyResult) -> Self {
+        self.schnorr_public_key_results = self.schnorr_public_key_results.add(result);
+        self
+    }
+
     #[cfg(any(test, not(feature = "canbench-rs")))]
     pub(crate) fn set_timer_call_count(&self) -> usize {
         *self.set_timer_call_count.lock().unwrap()
@@ -123,5 +129,9 @@ impl CanisterRuntime for TestCanisterRuntime {
     {
         *self.set_timer_call_count.lock().unwrap() += 1;
         Default::default()
+    }
+
+    async fn schnorr_public_key(&self, _args: SchnorrPublicKeyArgs) -> SchnorrPublicKeyResult {
+        self.schnorr_public_key_results.next()
     }
 }

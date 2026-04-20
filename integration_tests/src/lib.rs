@@ -211,6 +211,10 @@ impl Setup {
             env
         };
 
+        // Tick once so the initialization timer fires and the minter fetches its
+        // Schnorr master key, making get_deposit_address available as a query.
+        env.tick().await;
+
         Self {
             env: Some(env),
             minter_canister_id,
@@ -372,7 +376,7 @@ impl CkSolMinter<'_> {
         &self,
         args: impl Into<GetDepositAddressArgs>,
     ) -> Result<Address, String> {
-        self.try_update_call("get_deposit_address", (args.into(),), 0)
+        self.try_query_call("get_deposit_address", (args.into(),))
             .await
     }
 
