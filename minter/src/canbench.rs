@@ -7,7 +7,7 @@ use crate::{
         event::{DepositId, EventType, TransactionPurpose, VersionedMessage, WithdrawalRequest},
         init_once_state, mutate_state, reset_state,
     },
-    storage::{reset_events, with_event_iter},
+    storage::{reset_events, total_event_count, with_event_iter},
 };
 use canbench_rs::bench;
 use candid::Principal;
@@ -320,6 +320,7 @@ fn setup_10k_events() {
     }
 
     // Total: 1 (init) + 4000 + 400 + 1500 + 2000 + 1800 = 9701 events
+    assert_eq!(total_event_count(), 9701);
     reset_state();
 }
 
