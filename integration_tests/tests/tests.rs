@@ -667,7 +667,7 @@ mod withdrawal_tests {
 
         // Withdrawal status should be TxSent with some signature
         let status = setup.minter().withdrawal_status(block_index).await;
-        let original_tx_hash = match &status {
+        let original_transaction_id = match &status {
             WithdrawalStatus::TxSent { transaction_id } => transaction_id.clone(),
             other => panic!("Expected TxSent, got: {other:?}"),
         };
@@ -692,11 +692,11 @@ mod withdrawal_tests {
 
         // Withdrawal status should now have a different signature
         let status = setup.minter().withdrawal_status(block_index).await;
-        let resubmitted_tx_hash = match &status {
+        let resubmitted_transaction_id = match &status {
             WithdrawalStatus::TxSent { transaction_id } => {
                 assert_ne!(
-                    *transaction_id, original_tx_hash,
-                    "Expected signature to change after resubmission"
+                    *transaction_id, original_transaction_id,
+                    "Expected transaction ID to change after resubmission"
                 );
                 transaction_id.clone()
             }
@@ -717,8 +717,8 @@ mod withdrawal_tests {
                 transaction_id, ..
             }) => {
                 assert_eq!(
-                    *transaction_id, resubmitted_tx_hash,
-                    "Expected finalized tx hash to match resubmitted tx hash"
+                    *transaction_id, resubmitted_transaction_id,
+                    "Expected finalized transaction ID to match resubmitted transaction ID"
                 );
             }
             other => panic!("Expected TxFinalized(Success), got: {other:?}"),

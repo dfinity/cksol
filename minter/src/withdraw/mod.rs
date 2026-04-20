@@ -72,7 +72,7 @@ pub async fn withdraw<R: CanisterRuntime>(
     let withdrawal_fee = read_state(|s| s.withdrawal_fee());
     let transferred_amount = amount_to_burn
         .checked_sub(withdrawal_fee)
-        .expect("BUG: withdrawal amount must be >= withdrawal fee");
+        .expect("BUG: burned amount must be >= withdrawal fee");
     mutate_state(|s| {
         process_event(
             s,

@@ -54,7 +54,7 @@ type ProcessDepositArgs = record {
 
 // An error from the `process_deposit` ckSOL minter endpoint.
 type ProcessDepositError = variant {
-    // Insufficient cycles attached by the caller to complete the [`process_deposit`] call.
+    // Insufficient cycles attached by the caller to complete the `process_deposit` call.
     InsufficientCycles : InsufficientCyclesError;
     // The minter experiences temporary issues, try the call again later.
     TemporarilyUnavailable : text;
@@ -62,7 +62,8 @@ type ProcessDepositError = variant {
     AlreadyProcessing;
     // No matching transaction was found for the given signature.
     //
-    // This can also happen if the transaction is not yet finalized.
+    // This can also happen if the transaction is not yet finalized, in which
+    // case trying this call again later may result in a successful mint.
     TransactionNotFound;
     // The Solana transaction with the given signature is not a valid
     // deposit to the owner's deposit address.
@@ -237,6 +238,7 @@ type TxFinalizedStatus = variant {
     // Transaction was successful.
     Success : record {
         transaction_id : Signature;
+        // The fee that was paid by the user.
         effective_transaction_fee: opt nat;
     };
     // Transaction failed.
@@ -457,13 +459,9 @@ service : (MinterArg) -> {
     // deposited in a specific Solana transaction.
     //
     // Safe to call multiple times with the same signature: if the deposit was
-    // already accepted, the call returns the current status (Processing,
-    // Quarantined, or Minted) without charging additional cycles. If minting
-    // previously failed (status Processing), calling again will retry the mint.
-    //
-    // Note: AlreadyProcessing is returned only when there is already a concurrent
-    // in-flight call for the same (owner, signature) pair, not for repeated calls
-    // after the deposit has been accepted.
+    // already accepted, the call returns the current status (`Processing`,
+    // `Quarantined`, or `Minted`) without charging additional cycles. If minting
+    // previously failed (status `Processing`), calling again will retry the mint.
     process_deposit: (ProcessDepositArgs) -> (ProcessDepositResult);
 
     // Submits a request to convert ckSOL to Solana.
