@@ -86,6 +86,10 @@ pub async fn withdraw<R: CanisterRuntime>(
             runtime,
         )
     });
+    log!(
+        Priority::Info,
+        "Accepted withdrawal request from {from:?}: burning {amount_to_burn} lamports, sending {withdrawal_amount} lamports to {solana_address} (burn block index {block_index})"
+    );
 
     Ok(WithdrawalOk { block_index })
 }
@@ -219,7 +223,21 @@ async fn submit_withdrawal_transaction<R: CanisterRuntime>(
         )
     });
 
-    let _ = submit_transaction(runtime, signed_tx).await;
+    log!(
+        Priority::Info,
+        "Submitted withdrawal transaction {signature} for burn indices {:?}",
+        requests
+            .iter()
+            .map(|r| r.burn_block_index)
+            .collect::<Vec<_>>()
+    );
+
+    if let Err(e) = submit_transaction(runtime, signed_tx).await {
+        log!(
+            Priority::Info,
+            "Failed to send withdrawal transaction {signature} (will be resubmitted): {e}"
+        );
+    }
 }
 
 pub fn withdrawal_status(block_index: u64) -> WithdrawalStatus {

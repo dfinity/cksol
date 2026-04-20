@@ -68,7 +68,14 @@ pub async fn consolidate_deposits<R: CanisterRuntime>(runtime: R) {
     futures::future::join_all(batches.into_iter().map(async |funds| {
         match submit_consolidation_transaction(&runtime, funds, slot, recent_blockhash).await {
             Ok(sig) => log!(Priority::Info, "Submitted consolidation transaction {sig}"),
-            Err(e) => log!(Priority::Info, "Deposit consolidation failed: {e}"),
+            Err(ConsolidationError::CreateTransactionFailed(e)) => log!(
+                Priority::Error,
+                "Failed to create deposit consolidation transaction: {e}"
+            ),
+            Err(ConsolidationError::SubmitTransactionFailed(e)) => log!(
+                Priority::Info,
+                "Failed to submit deposit consolidation transaction (will retry): {e}"
+            ),
         }
     }))
     .await;

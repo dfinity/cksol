@@ -79,8 +79,8 @@ pub async fn finalize_transactions<R: CanisterRuntime>(runtime: R) {
 
     for (signature, error) in &statuses.errored {
         log!(
-            Priority::Info,
-            "Transaction {signature} finalized with error: {error}"
+            Priority::Error,
+            "Transaction {signature} finalized with on-chain error: {error}"
         );
         mutate_state(|state| {
             process_event(
@@ -108,6 +108,10 @@ pub async fn finalize_transactions<R: CanisterRuntime>(runtime: R) {
 
     for signature in &statuses.not_found {
         if all_transactions[signature] + MAX_BLOCKHASH_AGE < current_slot {
+            log!(
+                Priority::Info,
+                "Transaction {signature} expired, marking for resubmission"
+            );
             mutate_state(|state| {
                 process_event(
                     state,

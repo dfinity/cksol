@@ -2,7 +2,9 @@ use crate::{
     runtime::CanisterRuntime,
     state::{audit::process_event, event::EventType, mutate_state, read_state},
 };
+use canlog::log;
 use cksol_types::UpdateBalanceError;
+use cksol_types_internal::log::Priority;
 use icrc_ledger_types::icrc1::account::Account;
 
 #[cfg(test)]
@@ -34,6 +36,10 @@ pub fn update_balance<R: CanisterRuntime>(
             runtime,
         );
     });
+    log!(
+        Priority::Info,
+        "Started monitoring account {account:?} for automated deposits"
+    );
 
     Ok(())
 }

@@ -7,7 +7,9 @@ use crate::{
         mutate_state,
     },
 };
+use canlog::log;
 use cksol_types::{BurnMemo, DepositStatus, Memo, MintMemo};
+use cksol_types_internal::log::Priority;
 use icrc_ledger_types::{
     icrc1::{
         account::Account,
@@ -72,6 +74,12 @@ pub async fn mint<R: CanisterRuntime>(
             runtime,
         )
     });
+
+    log!(
+        Priority::Info,
+        "Minted {amount_to_mint} lamports for deposit {deposit_id:?} (ledger block index {})",
+        block_index.get()
+    );
 
     // Minting succeeded, defuse guard
     ScopeGuard::into_inner(prevent_double_minting_guard);
@@ -148,10 +156,17 @@ pub async fn burn<R: CanisterRuntime>(
         }
     };
 
-    Ok(block_index
+    let block_index = block_index
         .0
         .to_u64()
-        .expect("ledger block index does not fit into u64"))
+        .expect("ledger block index does not fit into u64");
+
+    log!(
+        Priority::Info,
+        "Burned {burn_amount} lamports from {from:?} for withdrawal to {to_address} (ledger block index {block_index})"
+    );
+
+    Ok(block_index)
 }
 
 fn parse_burn_transfer_from_error(error: TransferFromError) -> BurnError {
