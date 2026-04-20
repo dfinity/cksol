@@ -1,5 +1,6 @@
 use crate::{
     address::{account_address, lazy_get_schnorr_master_key},
+    constants::MAX_CONCURRENT_RPC_CALLS,
     guard::TimerGuard,
     rpc::get_signatures_for_address,
     runtime::CanisterRuntime,
@@ -24,12 +25,8 @@ pub const MAX_MONITORED_ACCOUNTS: usize = 100;
 /// How often the minter polls monitored addresses for new deposit transactions.
 pub const POLL_MONITORED_ADDRESSES_DELAY: Duration = Duration::from_mins(5);
 
-/// Number of signatures to request per `getSignaturesForAddress` call.
-/// Must be between 1 and 1,000.
-pub const SIGNATURES_FOR_ADDRESS_LIMIT: u32 = 100;
-
-/// Maximum number of addresses to poll in a single timer invocation.
-pub const MAX_ADDRESSES_PER_POLL: usize = 10;
+/// Maximum number of `getTransaction` calls to make per polled account.
+pub const MAX_TRANSACTIONS_PER_ACCOUNT: usize = 10;
 
 /// Registers the given account for automated deposit monitoring.
 ///
@@ -67,25 +64,31 @@ pub async fn poll_monitored_addresses<R: CanisterRuntime>(runtime: R) {
         Err(_) => return,
     };
 
-    let master_key = lazy_get_schnorr_master_key(&runtime).await;
-
-    let accounts_to_poll: Vec<Account> = read_state(|s| {
-        s.monitored_accounts()
-            .iter()
-            .take(MAX_ADDRESSES_PER_POLL)
-            .copied()
-            .collect()
-    });
-    if accounts_to_poll.is_empty() {
+    let all_accounts: Vec<Account> =
+        read_state(|s| s.monitored_accounts().iter().copied().collect());
+    if all_accounts.is_empty() {
         return;
     }
 
-    let mut futures = vec![];
-    for account in &accounts_to_poll {
-        futures.push(poll_account(&runtime, &master_key, *account));
-    }
+    let more_to_process = all_accounts.len() > MAX_CONCURRENT_RPC_CALLS;
+    let reschedule = scopeguard::guard(runtime.clone(), |runtime| {
+        runtime.set_timer(Duration::ZERO, poll_monitored_addresses);
+    });
 
-    futures::future::join_all(futures).await;
+    let master_key = lazy_get_schnorr_master_key(&runtime).await;
+
+    futures::future::join_all(
+        all_accounts
+            .into_iter()
+            .take(MAX_CONCURRENT_RPC_CALLS)
+            .map(|account| poll_account(&runtime, &master_key, account)),
+    )
+    .await;
+
+    if !more_to_process {
+        // All work fits in this round
+        scopeguard::ScopeGuard::into_inner(reschedule);
+    }
 }
 
 async fn poll_account<R: CanisterRuntime>(
@@ -99,10 +102,11 @@ async fn poll_account<R: CanisterRuntime>(
         pubkey: deposit_address.into(),
         commitment: Some(CommitmentLevel::Finalized),
         min_context_slot: None,
+        // Fetch no more signatures than we intend to process with `getTransaction`.
         limit: Some(
-            SIGNATURES_FOR_ADDRESS_LIMIT
+            (MAX_TRANSACTIONS_PER_ACCOUNT as u32)
                 .try_into()
-                .expect("SIGNATURES_FOR_ADDRESS_LIMIT must be between 1 and 1000"),
+                .expect("MAX_TRANSACTIONS_PER_ACCOUNT must be between 1 and 1000"),
         ),
         before: None,
         until: None,

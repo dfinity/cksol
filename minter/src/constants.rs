@@ -9,9 +9,6 @@ pub const MAX_HTTP_OUTCALL_RESPONSE_BYTES: u64 = 2_000_000;
 /// Cycles to attach for `getSignatureStatuses` RPC calls.
 pub const GET_SIGNATURE_STATUSES_CYCLES: u128 = 1_000_000_000_000;
 
-/// Cycles to attach for `getSignaturesForAddress` RPC calls.
-pub const GET_SIGNATURES_FOR_ADDRESS_CYCLES: u128 = 1_000_000_000_000;
-
 /// Cost in lamports per signature included in a Solana transaction.
 ///
 /// See <https://solana.com/docs/core/fees#base-fee>.

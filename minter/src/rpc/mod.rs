@@ -1,8 +1,5 @@
 use crate::{
-    constants::{
-        GET_SIGNATURE_STATUSES_CYCLES, GET_SIGNATURES_FOR_ADDRESS_CYCLES,
-        MAX_HTTP_OUTCALL_RESPONSE_BYTES,
-    },
+    constants::{GET_SIGNATURE_STATUSES_CYCLES, MAX_HTTP_OUTCALL_RESPONSE_BYTES},
     runtime::CanisterRuntime,
     state::read_state,
 };
@@ -145,12 +142,7 @@ pub async fn get_signatures_for_address<R: CanisterRuntime>(
     params: GetSignaturesForAddressParams,
 ) -> Result<Vec<ConfirmedTransactionStatusWithSignature>, GetSignaturesForAddressError> {
     let client = read_state(|state| state.sol_rpc_client(runtime.inter_canister_call_runtime()));
-    let result = client
-        .get_signatures_for_address(params)
-        .with_response_size_estimate(MAX_HTTP_OUTCALL_RESPONSE_BYTES)
-        .with_cycles(GET_SIGNATURES_FOR_ADDRESS_CYCLES)
-        .try_send()
-        .await;
+    let result = client.get_signatures_for_address(params).try_send().await;
     match result? {
         MultiRpcResult::Consistent(Ok(signatures)) => Ok(signatures),
         MultiRpcResult::Consistent(Err(e)) => Err(GetSignaturesForAddressError::RpcError(e)),
