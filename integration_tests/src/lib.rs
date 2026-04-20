@@ -3,7 +3,8 @@ use candid::{CandidType, Decode, Encode, Nat, Principal, utils::ArgumentEncoder}
 use canlog::{Log, LogEntry};
 use cksol_types::{
     Address, DepositStatus, GetDepositAddressArgs, MinterInfo, ProcessDepositArgs,
-    ProcessDepositError, WithdrawalArgs, WithdrawalError, WithdrawalOk, WithdrawalStatus,
+    ProcessDepositError, UpdateBalanceArgs, UpdateBalanceError, WithdrawalArgs, WithdrawalError,
+    WithdrawalOk, WithdrawalStatus,
 };
 use cksol_types_internal::{
     MinterArg,
@@ -154,7 +155,7 @@ impl Setup {
             cksol_minter_wasm(),
             Encode!(&cksol_minter_init_args(
                 sol_rpc_canister_id,
-                ledger_canister_id,
+                ledger_canister_id
             ))
             .unwrap(),
             Some(Self::DEFAULT_CONTROLLER),
@@ -409,6 +410,19 @@ impl CkSolMinter<'_> {
     ) -> Result<Result<DepositStatus, ProcessDepositError>, String> {
         self.try_update_call("process_deposit", (args,), cycles)
             .await
+    }
+
+    pub async fn update_balance(&self, args: UpdateBalanceArgs) -> Result<(), UpdateBalanceError> {
+        self.try_update_balance(args)
+            .await
+            .expect("update_balance failed")
+    }
+
+    pub async fn try_update_balance(
+        &self,
+        args: UpdateBalanceArgs,
+    ) -> Result<Result<(), UpdateBalanceError>, String> {
+        self.try_update_call("update_balance", (args,), 0).await
     }
 
     pub async fn withdraw(&self, args: WithdrawalArgs) -> Result<WithdrawalOk, WithdrawalError> {

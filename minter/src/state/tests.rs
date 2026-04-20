@@ -226,6 +226,7 @@ mod state_from_init_args {
                 minimum_withdrawal_amount: MINIMUM_WITHDRAWAL_AMOUNT,
                 minimum_deposit_amount: MINIMUM_DEPOSIT_AMOUNT,
                 process_deposit_required_cycles: PROCESS_DEPOSIT_REQUIRED_CYCLES,
+                monitored_accounts: BTreeSet::new(),
                 pending_process_deposit_request_guards: BTreeSet::new(),
                 pending_withdrawal_request_guards: BTreeSet::new(),
                 accepted_deposits: InsertionOrderedMap::new(),

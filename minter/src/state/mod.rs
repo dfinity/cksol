@@ -89,6 +89,7 @@ pub struct State {
     minimum_deposit_amount: Lamport,
     process_deposit_required_cycles: u128,
     deposit_consolidation_fee: u128,
+    monitored_accounts: BTreeSet<Account>,
     pending_process_deposit_request_guards: BTreeSet<Account>,
     pending_withdrawal_request_guards: BTreeSet<Account>,
     accepted_deposits: InsertionOrderedMap<DepositId, Deposit>,
@@ -241,6 +242,14 @@ impl State {
 
     pub fn balance(&self) -> Lamport {
         self.balance
+    }
+
+    pub fn monitored_accounts(&self) -> &BTreeSet<Account> {
+        &self.monitored_accounts
+    }
+
+    pub(crate) fn process_started_monitoring_account(&mut self, account: &Account) {
+        self.monitored_accounts.insert(*account);
     }
 
     pub fn consolidation_transactions(
@@ -763,6 +772,7 @@ impl TryFrom<InitArgs> for State {
             minimum_deposit_amount,
             process_deposit_required_cycles: process_deposit_required_cycles as u128,
             deposit_consolidation_fee: deposit_consolidation_fee as u128,
+            monitored_accounts: BTreeSet::new(),
             pending_process_deposit_request_guards: BTreeSet::new(),
             pending_withdrawal_request_guards: BTreeSet::new(),
             accepted_deposits: InsertionOrderedMap::new(),

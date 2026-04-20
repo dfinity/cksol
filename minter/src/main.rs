@@ -13,7 +13,8 @@ use cksol_minter::{
 };
 use cksol_types::{
     Address, DepositStatus, GetDepositAddressArgs, MinterInfo, ProcessDepositArgs,
-    ProcessDepositError, WithdrawalArgs, WithdrawalError, WithdrawalOk, WithdrawalStatus,
+    ProcessDepositError, UpdateBalanceArgs, UpdateBalanceError, WithdrawalArgs, WithdrawalError,
+    WithdrawalOk, WithdrawalStatus,
 };
 use cksol_types_internal::{MinterArg, log::Priority};
 use ic_http_types::{HttpRequest, HttpResponse, HttpResponseBuilder};
@@ -56,6 +57,12 @@ async fn get_deposit_address(args: GetDepositAddressArgs) -> Address {
     cksol_minter::address::get_deposit_address(account)
         .await
         .into()
+}
+
+#[ic_cdk::update]
+fn update_balance(args: UpdateBalanceArgs) -> Result<(), UpdateBalanceError> {
+    let account = assert_non_anonymous_account(args.owner, args.subaccount);
+    cksol_minter::deposit::automatic::update_balance(&IcCanisterRuntime::new(), account)
 }
 
 #[ic_cdk::update]
@@ -192,6 +199,9 @@ fn get_events(
             EventType::ExpiredTransaction { signature } => event::EventType::ExpiredTransaction {
                 signature: signature.into(),
             },
+            EventType::StartedMonitoringAccount { account } => {
+                event::EventType::StartedMonitoringAccount { account }
+            }
         }
     }
 
