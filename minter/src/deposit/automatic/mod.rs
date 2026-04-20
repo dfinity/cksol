@@ -23,7 +23,7 @@ mod tests;
 pub const MAX_MONITORED_ACCOUNTS: usize = 100;
 
 /// How often the minter polls monitored addresses for new deposit transactions.
-pub const POLL_MONITORED_ADDRESSES_DELAY: Duration = Duration::from_mins(5);
+pub const POLL_MONITORED_ADDRESSES_DELAY: Duration = Duration::from_mins(1);
 
 /// Maximum number of `getTransaction` calls to make per polled account.
 pub const MAX_TRANSACTIONS_PER_ACCOUNT: usize = 10;
