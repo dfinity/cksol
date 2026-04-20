@@ -252,7 +252,9 @@ type WithdrawalStatus = variant {
     // Withdrawal request is waiting to be processed.
     Pending;
     // Solana transaction was signed and is sent to the network.
-    TxSent : record { transaction_id : Signature };
+    TxSent : record {
+        transaction_id : Signature;
+    };
     // Solana transaction is finalized.
     TxFinalized : TxFinalizedStatus;
 };
