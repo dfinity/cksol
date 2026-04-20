@@ -54,9 +54,7 @@ fn post_upgrade(args: Option<MinterArg>) {
 #[ic_cdk::query]
 fn get_deposit_address(args: GetDepositAddressArgs) -> Address {
     let account = assert_non_anonymous_account(args.owner, args.subaccount);
-    let master_key = read_state(|s| s.minter_public_key().cloned())
-        .unwrap_or_else(|| ic_cdk::trap("master key not yet initialized"));
-    cksol_minter::address::account_address(&master_key, &account).into()
+    cksol_minter::address::get_deposit_address(&account).into()
 }
 
 #[ic_cdk::update]

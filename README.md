@@ -35,7 +35,7 @@ The minter controls one or more Solana addresses derived from a [threshold Schno
 
 ### Deposit: SOL → ckSOL
 
-1. **Get a deposit address.** Call `get_deposit_address` on the minter with your ICP principal (and an optional subaccount). The minter returns a Solana address derived specifically for your account.
+1. **Get a deposit address.** Call `get_deposit_address` (a query) on the minter with your ICP principal (and an optional subaccount). The minter returns a Solana address derived specifically for your account.
 
 2. **Send SOL.** Transfer SOL to that deposit address from any Solana wallet.
 
@@ -135,11 +135,11 @@ icp canister call -e prod cksol_minter get_minter_info '()'
 
 ### Get your deposit address
 
-Returns the Solana address you should send SOL to in order to deposit. When `owner` is `null`, it defaults to your calling identity's principal:
+Returns the Solana address you should send SOL to in order to deposit. This is a **query** call, so it returns immediately without consensus overhead. When `owner` is `null`, it defaults to your calling identity's principal:
 
 ```sh
 icp canister call -e prod cksol_minter get_deposit_address \
-  '(record { owner = null; subaccount = null })'
+  '(record { owner = null; subaccount = null })' --query
 ```
 
 ### Notify the minter of a deposit

@@ -1,9 +1,19 @@
-mod derive_key {
-    use candid::Principal;
-    use ic_ed25519::{PocketIcMasterPublicKeyId, PublicKey};
-    use icrc_ledger_types::icrc1::account::Account;
+use candid::Principal;
+use ic_cdk_management_canister::SchnorrPublicKeyResult;
+use ic_ed25519::{PocketIcMasterPublicKeyId, PublicKey};
+use icrc_ledger_types::icrc1::account::Account;
 
-    use crate::{address::derive_public_key_from_account, state::SchnorrPublicKey};
+use crate::{
+    address::{
+        account_address, derive_public_key_from_account, get_deposit_address,
+        lazy_get_schnorr_master_key,
+    },
+    state::{SchnorrPublicKey, read_state, reset_state},
+    test_fixtures::{init_schnorr_master_key, init_state, runtime::TestCanisterRuntime},
+};
+
+mod derive_key {
+    use super::*;
 
     #[test]
     fn test_derive_default_subaccount() {
@@ -91,14 +101,7 @@ mod derive_key {
 }
 
 mod lazy_schnorr_master_key {
-    use ic_cdk_management_canister::SchnorrPublicKeyResult;
-    use ic_ed25519::{PocketIcMasterPublicKeyId, PublicKey};
-
-    use crate::{
-        address::lazy_get_schnorr_master_key,
-        state::{SchnorrPublicKey, read_state, reset_state},
-        test_fixtures::{init_schnorr_master_key, init_state, runtime::TestCanisterRuntime},
-    };
+    use super::*;
 
     fn test_key() -> SchnorrPublicKey {
         SchnorrPublicKey {
@@ -116,30 +119,56 @@ mod lazy_schnorr_master_key {
     }
 
     #[tokio::test]
-    async fn uses_cached_key_without_calling_runtime() {
+    async fn fetches_key_then_uses_cache() {
+        init_state();
+
+        // First call: no key cached, stub returns test_key.
+        let runtime = TestCanisterRuntime::new().with_schnorr_public_key(test_key_result());
+        let result = lazy_get_schnorr_master_key(&runtime).await;
+        assert_eq!(result, test_key());
+
+        // Second call: key is now cached — no stubs left, would panic if it hit the runtime.
+        let cached = lazy_get_schnorr_master_key(&runtime).await;
+        assert_eq!(result, cached);
+
+        // Pre-cached path: a fresh runtime with no stubs also works.
+        let cached_direct = read_state(|s| s.minter_public_key().cloned().unwrap());
+        let runtime2 = TestCanisterRuntime::new();
+        assert_eq!(lazy_get_schnorr_master_key(&runtime2).await, cached_direct);
+
+        reset_state();
+    }
+}
+
+mod get_deposit_address_tests {
+    use super::*;
+
+    fn test_account() -> Account {
+        Account {
+            owner: Principal::from_slice(&[1]),
+            subaccount: None,
+        }
+    }
+
+    #[test]
+    fn returns_address_when_key_is_cached() {
         init_state();
         init_schnorr_master_key();
-        let cached = read_state(|s| s.minter_public_key().cloned().unwrap());
+        let master_key = read_state(|s| s.minter_public_key().cloned().unwrap());
+        let account = test_account();
 
-        // No stub registered — panics if schnorr_public_key is called on the runtime.
-        let runtime = TestCanisterRuntime::new();
-        let result = lazy_get_schnorr_master_key(&runtime).await;
+        assert_eq!(
+            get_deposit_address(&account),
+            account_address(&master_key, &account),
+        );
 
-        assert_eq!(result, cached);
         reset_state();
     }
 
-    #[tokio::test]
-    async fn fetches_key_and_caches_it() {
+    #[test]
+    #[should_panic(expected = "master key not yet initialized")]
+    fn traps_when_key_is_not_cached() {
         init_state();
-        let runtime = TestCanisterRuntime::new().with_schnorr_public_key(test_key_result());
-
-        let result = lazy_get_schnorr_master_key(&runtime).await;
-
-        assert_eq!(result, test_key());
-        // Second call must use the cache — no more stubs, so it would panic if it hit the runtime.
-        let cached = lazy_get_schnorr_master_key(&runtime).await;
-        assert_eq!(result, cached);
-        reset_state();
+        get_deposit_address(&test_account());
     }
 }

@@ -31,6 +31,21 @@ pub fn account_address(master_key: &SchnorrPublicKey, account: &Account) -> Addr
         .into()
 }
 
+/// Returns the Solana deposit address for the given ICRC-1 account.
+///
+/// This is the core logic of the [`get_deposit_address`] canister endpoint.
+/// Reads the cached Schnorr master key from state and traps with
+/// `"master key not yet initialized"` if the initialization timer has not yet
+/// fired.  Callers that need the async fallback should call
+/// [`lazy_get_schnorr_master_key`] first.
+///
+/// [`get_deposit_address`]: https://github.com/dfinity/cksol/blob/main/minter/cksol_minter.did
+pub fn get_deposit_address(account: &Account) -> Address {
+    let master_key = read_state(|s| s.minter_public_key().cloned())
+        .unwrap_or_else(|| panic!("master key not yet initialized"));
+    account_address(&master_key, account)
+}
+
 pub async fn lazy_get_schnorr_master_key<R: CanisterRuntime>(runtime: &R) -> SchnorrPublicKey {
     if let Some(public_key) = read_state(|s| s.minter_public_key().cloned()) {
         return public_key;
