@@ -146,7 +146,8 @@ icp canister call -e prod cksol_minter get_deposit_address \
 
 After sending SOL to your deposit address, call `process_deposit` with the Solana transaction signature to trigger minting. Pass the same `owner`/`subaccount` used when calling `get_deposit_address` — when `owner` is `null`, it defaults to your calling identity's principal. Replace `<SIGNATURE>` with the base-58 encoded transaction signature.
 
-> **Note:** This call requires attaching cycles — check the required amount via `get_minter_info` (`process_deposit_required_cycles` field). If your identity does not hold cycles directly, you can [convert ICP to cycles](https://cli.internetcomputer.org/0.2/guides/tokens-and-cycles/#converting-icp-to-cycles) first, or route the call through a proxy canister using `--proxy <proxy-principal> --cycles <amount>`.
+> [!NOTE]
+> This call requires attaching cycles — check the required amount via `get_minter_info` (`process_deposit_required_cycles` field). If your identity does not hold cycles directly, you can [convert ICP to cycles](https://cli.internetcomputer.org/0.2/guides/tokens-and-cycles/#converting-icp-to-cycles) first, or route the call through a proxy canister using `--proxy <proxy-principal> --cycles <amount>`.
 
 ```sh
 icp canister call -e prod cksol_minter process_deposit \
@@ -257,6 +258,7 @@ solana-test-validator &
 cargo test -p cksol-int-tests --test solana_test_validator
 ```
 
+> [!CAUTION]
 > Running `cargo test` without arguments will attempt all tests, including the Solana validator suite, and will fail if no validator is running.
 
 ## Related Projects
