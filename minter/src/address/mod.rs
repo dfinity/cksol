@@ -42,7 +42,7 @@ pub fn account_address(master_key: &SchnorrPublicKey, account: &Account) -> Addr
 /// [`get_deposit_address`]: https://github.com/dfinity/cksol/blob/main/minter/cksol_minter.did
 pub fn get_deposit_address(account: &Account) -> Address {
     let master_key = read_state(|s| s.minter_public_key().cloned())
-        .unwrap_or_else(|| panic!("master key not yet initialized"));
+        .unwrap_or_else(|| ic_cdk::trap("master key not yet initialized"));
     account_address(&master_key, account)
 }
 

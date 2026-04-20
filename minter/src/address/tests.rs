@@ -166,7 +166,7 @@ mod get_deposit_address_tests {
     }
 
     #[test]
-    #[should_panic(expected = "master key not yet initialized")]
+    #[should_panic]
     fn traps_when_key_is_not_cached() {
         init_state();
         get_deposit_address(&test_account());
