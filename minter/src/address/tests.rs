@@ -3,8 +3,8 @@ use crate::{
         account_address, derive_public_key_from_account, get_deposit_address,
         lazy_get_schnorr_master_key,
     },
-    state::{SchnorrPublicKey, read_state, reset_state},
-    test_fixtures::{init_schnorr_master_key, init_state, runtime::TestCanisterRuntime},
+    state::{SchnorrPublicKey, read_state},
+    test_fixtures::{account, init_schnorr_master_key, init_state, runtime::TestCanisterRuntime},
 };
 use candid::Principal;
 use ic_cdk_management_canister::SchnorrPublicKeyResult;
@@ -13,11 +13,6 @@ use icrc_ledger_types::icrc1::account::Account;
 
 #[test]
 fn test_derive_default_subaccount() {
-    let public_key = PublicKey::pocketic_key(PocketIcMasterPublicKeyId::DfxTestKey);
-    let master_key = SchnorrPublicKey {
-        public_key,
-        chain_code: [1; 32],
-    };
     let account_none = Account {
         owner: Principal::from_slice(&[1]),
         subaccount: None,
@@ -27,18 +22,13 @@ fn test_derive_default_subaccount() {
         subaccount: Some([0; 32]),
     };
     assert_eq!(
-        derive_public_key_from_account(&master_key, &account_none),
-        derive_public_key_from_account(&master_key, &account_zeros)
+        derive_public_key_from_account(&test_key(), &account_none),
+        derive_public_key_from_account(&test_key(), &account_zeros)
     );
 }
 
 #[test]
 fn test_derive_different_principal() {
-    let public_key = PublicKey::pocketic_key(PocketIcMasterPublicKeyId::DfxTestKey);
-    let master_key = SchnorrPublicKey {
-        public_key,
-        chain_code: [1; 32],
-    };
     let account1 = Account {
         owner: Principal::from_slice(&[1]),
         subaccount: None,
@@ -48,18 +38,13 @@ fn test_derive_different_principal() {
         subaccount: None,
     };
     assert_ne!(
-        derive_public_key_from_account(&master_key, &account1),
-        derive_public_key_from_account(&master_key, &account2)
+        derive_public_key_from_account(&test_key(), &account1),
+        derive_public_key_from_account(&test_key(), &account2)
     );
 }
 
 #[test]
 fn test_derive_different_subaccount() {
-    let public_key = PublicKey::pocketic_key(PocketIcMasterPublicKeyId::DfxTestKey);
-    let master_key = SchnorrPublicKey {
-        public_key,
-        chain_code: [1; 32],
-    };
     let account1 = Account {
         owner: Principal::from_slice(&[1]),
         subaccount: Some([10; 32]),
@@ -69,49 +54,29 @@ fn test_derive_different_subaccount() {
         subaccount: Some([11; 32]),
     };
     assert_ne!(
-        derive_public_key_from_account(&master_key, &account1),
-        derive_public_key_from_account(&master_key, &account2)
+        derive_public_key_from_account(&test_key(), &account1),
+        derive_public_key_from_account(&test_key(), &account2)
     );
 }
 
 #[test]
 fn test_derive_different_chain_code() {
-    let public_key = PublicKey::pocketic_key(PocketIcMasterPublicKeyId::DfxTestKey);
-    let master_key1 = SchnorrPublicKey {
-        public_key,
-        chain_code: [1; 32],
-    };
     let master_key2 = SchnorrPublicKey {
-        public_key,
         chain_code: [2; 32],
+        ..test_key()
     };
     let account = Account {
         owner: Principal::from_slice(&[1]),
         subaccount: Some([10; 32]),
     };
     assert_ne!(
-        derive_public_key_from_account(&master_key1, &account),
+        derive_public_key_from_account(&test_key(), &account),
         derive_public_key_from_account(&master_key2, &account)
     );
 }
 
 mod lazy_schnorr_master_key {
     use super::*;
-
-    fn test_key() -> SchnorrPublicKey {
-        SchnorrPublicKey {
-            public_key: PublicKey::pocketic_key(PocketIcMasterPublicKeyId::DfxTestKey),
-            chain_code: [42; 32],
-        }
-    }
-
-    fn test_key_result() -> SchnorrPublicKeyResult {
-        let key = test_key();
-        SchnorrPublicKeyResult {
-            public_key: key.public_key.serialize_raw().to_vec(),
-            chain_code: key.chain_code.to_vec(),
-        }
-    }
 
     #[tokio::test]
     async fn fetches_key_then_uses_cache() {
@@ -125,45 +90,44 @@ mod lazy_schnorr_master_key {
         // Second call: key is now cached — no stubs left, would panic if it hit the runtime.
         let cached = lazy_get_schnorr_master_key(&runtime).await;
         assert_eq!(result, cached);
-
-        // Pre-cached path: a fresh runtime with no stubs also works.
-        let cached_direct = read_state(|s| s.minter_public_key().cloned().unwrap());
-        let runtime2 = TestCanisterRuntime::new();
-        assert_eq!(lazy_get_schnorr_master_key(&runtime2).await, cached_direct);
-
-        reset_state();
     }
 }
 
 mod get_deposit_address_tests {
     use super::*;
 
-    fn test_account() -> Account {
-        Account {
-            owner: Principal::from_slice(&[1]),
-            subaccount: None,
-        }
-    }
-
     #[test]
     fn returns_address_when_key_is_cached() {
         init_state();
         init_schnorr_master_key();
         let master_key = read_state(|s| s.minter_public_key().cloned().unwrap());
-        let account = test_account();
+        let acc = account(1);
 
         assert_eq!(
-            get_deposit_address(&account),
-            account_address(&master_key, &account),
+            get_deposit_address(&acc),
+            account_address(&master_key, &acc),
         );
-
-        reset_state();
     }
 
     #[test]
     #[should_panic]
     fn traps_when_key_is_not_cached() {
         init_state();
-        get_deposit_address(&test_account());
+        get_deposit_address(&account(1));
+    }
+}
+
+fn test_key() -> SchnorrPublicKey {
+    SchnorrPublicKey {
+        public_key: PublicKey::pocketic_key(PocketIcMasterPublicKeyId::DfxTestKey),
+        chain_code: [42; 32],
+    }
+}
+
+fn test_key_result() -> SchnorrPublicKeyResult {
+    let key = test_key();
+    SchnorrPublicKeyResult {
+        public_key: key.public_key.serialize_raw().to_vec(),
+        chain_code: key.chain_code.to_vec(),
     }
 }
