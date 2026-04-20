@@ -142,7 +142,7 @@ Returns the Solana address you should send SOL to in order to deposit. When `own
 
 ```sh
 icp canister call -e prod cksol_minter get_deposit_address \
-  '(record { owner = null; subaccount = null })'
+  '(record { owner = null; subaccount = null })' --query
 ```
 
 ### Notify the minter of a deposit
