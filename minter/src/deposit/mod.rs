@@ -6,6 +6,9 @@ use thiserror::Error;
 #[cfg(test)]
 mod tests;
 
+pub mod automatic;
+pub mod manual;
+
 pub fn get_deposit_amount_to_address(
     transaction: EncodedConfirmedTransactionWithStatusMeta,
     deposit_address: Address,

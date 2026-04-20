@@ -36,9 +36,12 @@ pub struct InitArgs {
     /// The canister ID of the ckSOL ledger canister.
     #[cfg_attr(feature = "event", n(1), cbor(with = "icrc_cbor::principal"))]
     pub ledger_canister_id: Principal,
-    /// The deposit fee in lamports.
+    /// The deposit fee in lamports for the manual deposit flow.
     #[cfg_attr(feature = "event", n(2))]
-    pub deposit_fee: Lamport,
+    pub manual_deposit_fee: Lamport,
+    /// The deposit fee in lamports for the automated deposit flow.
+    #[cfg_attr(feature = "event", n(10))]
+    pub automated_deposit_fee: Lamport,
     /// The master Ed25519 key name.
     #[cfg_attr(feature = "event", n(3))]
     pub master_key_name: Ed25519KeyName,
@@ -51,13 +54,13 @@ pub struct InitArgs {
     /// The withdrawal fee in lamports.
     #[cfg_attr(feature = "event", n(6))]
     pub withdrawal_fee: Lamport,
-    /// Minimum cycles the caller must attach when calling `update_balance`.
+    /// Minimum cycles the caller must attach when calling `process_deposit`.
     #[cfg_attr(feature = "event", n(7))]
-    pub update_balance_required_cycles: u64,
+    pub process_deposit_required_cycles: u64,
     /// The Solana network to use.
     #[cfg_attr(feature = "event", n(8))]
     pub solana_network: SolanaNetwork,
-    /// Extra cycles charged per `update_balance` call to offset the cost of consolidation transactions.
+    /// Extra cycles charged per `process_deposit` call to offset the cost of consolidation transactions.
     #[cfg_attr(feature = "event", n(9))]
     pub deposit_consolidation_fee: u64,
 }
@@ -69,9 +72,12 @@ pub struct UpgradeArgs {
     /// The canister ID of the SOL RPC canister.
     #[cfg_attr(feature = "event", n(0), cbor(with = "icrc_cbor::principal::option"))]
     pub sol_rpc_canister_id: Option<Principal>,
-    /// The new deposit fee in lamports.
+    /// The new deposit fee in lamports for the manual deposit flow.
     #[cfg_attr(feature = "event", n(1))]
-    pub deposit_fee: Option<Lamport>,
+    pub manual_deposit_fee: Option<Lamport>,
+    /// The new deposit fee in lamports for the automated deposit flow.
+    #[cfg_attr(feature = "event", n(7))]
+    pub automated_deposit_fee: Option<Lamport>,
     /// The new minimum withdrawal amount in lamports.
     #[cfg_attr(feature = "event", n(2))]
     pub minimum_withdrawal_amount: Option<Lamport>,
@@ -81,10 +87,10 @@ pub struct UpgradeArgs {
     /// The new withdrawal fee in lamports.
     #[cfg_attr(feature = "event", n(4))]
     pub withdrawal_fee: Option<Lamport>,
-    /// New minimum cycles the caller must attach when calling `update_balance`.
+    /// New minimum cycles the caller must attach when calling `process_deposit`.
     #[cfg_attr(feature = "event", n(5))]
-    pub update_balance_required_cycles: Option<u64>,
-    /// New extra cycles charged per `update_balance` call to offset consolidation costs.
+    pub process_deposit_required_cycles: Option<u64>,
+    /// New extra cycles charged per `process_deposit` call to offset consolidation costs.
     #[cfg_attr(feature = "event", n(6))]
     pub deposit_consolidation_fee: Option<u64>,
 }

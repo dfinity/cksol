@@ -12,8 +12,9 @@ use cksol_minter::{
     withdraw::{WITHDRAWAL_PROCESSING_DELAY, process_pending_withdrawals},
 };
 use cksol_types::{
-    Address, DepositStatus, GetDepositAddressArgs, MinterInfo, UpdateBalanceArgs,
-    UpdateBalanceError, WithdrawalArgs, WithdrawalError, WithdrawalOk, WithdrawalStatus,
+    Address, DepositStatus, GetDepositAddressArgs, MinterInfo, ProcessDepositArgs,
+    ProcessDepositError, UpdateBalanceArgs, UpdateBalanceError, WithdrawalArgs, WithdrawalError,
+    WithdrawalOk, WithdrawalStatus,
 };
 use cksol_types_internal::{MinterArg, log::Priority};
 use ic_http_types::{HttpRequest, HttpResponse, HttpResponseBuilder};
@@ -66,9 +67,15 @@ async fn get_deposit_address(args: GetDepositAddressArgs) -> Address {
 }
 
 #[ic_cdk::update]
-async fn update_balance(args: UpdateBalanceArgs) -> Result<DepositStatus, UpdateBalanceError> {
+fn update_balance(args: UpdateBalanceArgs) -> Result<(), UpdateBalanceError> {
     let account = assert_non_anonymous_account(args.owner, args.subaccount);
-    cksol_minter::update_balance::update_balance(
+    cksol_minter::deposit::automatic::update_balance(&IcCanisterRuntime::new(), account)
+}
+
+#[ic_cdk::update]
+async fn process_deposit(args: ProcessDepositArgs) -> Result<DepositStatus, ProcessDepositError> {
+    let account = assert_non_anonymous_account(args.owner, args.subaccount);
+    cksol_minter::deposit::manual::process_deposit(
         IcCanisterRuntime::new(),
         account,
         args.signature.into(),
@@ -199,6 +206,9 @@ fn get_events(
             EventType::ExpiredTransaction { signature } => event::EventType::ExpiredTransaction {
                 signature: signature.into(),
             },
+            EventType::StartedMonitoringAccount { account } => {
+                event::EventType::StartedMonitoringAccount { account }
+            }
         }
     }
 
@@ -217,12 +227,13 @@ fn get_events(
 #[ic_cdk::query]
 fn get_minter_info() -> MinterInfo {
     read_state(|s| MinterInfo {
-        deposit_fee: s.deposit_fee(),
+        manual_deposit_fee: s.manual_deposit_fee(),
+        automated_deposit_fee: s.automated_deposit_fee(),
         deposit_consolidation_fee: s.deposit_consolidation_fee(),
         minimum_withdrawal_amount: s.minimum_withdrawal_amount(),
         minimum_deposit_amount: s.minimum_deposit_amount(),
         withdrawal_fee: s.withdrawal_fee(),
-        update_balance_required_cycles: s.update_balance_required_cycles(),
+        process_deposit_required_cycles: s.process_deposit_required_cycles(),
         balance: s.balance(),
     })
 }

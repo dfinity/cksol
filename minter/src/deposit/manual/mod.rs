@@ -2,7 +2,7 @@ use crate::{
     address::get_deposit_address,
     cycles::{charge_caller_cycles, check_caller_available_cycles},
     deposit::get_deposit_amount_to_address,
-    guard::update_balance_guard,
+    guard::process_deposit_guard,
     ledger::mint,
     rpc::get_transaction,
     runtime::CanisterRuntime,
@@ -14,7 +14,7 @@ use crate::{
     },
 };
 use canlog::log;
-use cksol_types::{DepositStatus, UpdateBalanceError};
+use cksol_types::{DepositStatus, ProcessDepositError};
 use cksol_types_internal::log::Priority;
 use icrc_ledger_types::icrc1::account::Account;
 use solana_signature::Signature;
@@ -22,12 +22,12 @@ use solana_signature::Signature;
 #[cfg(test)]
 mod tests;
 
-pub async fn update_balance<R: CanisterRuntime>(
+pub async fn process_deposit<R: CanisterRuntime>(
     runtime: R,
     account: Account,
     signature: Signature,
-) -> Result<DepositStatus, UpdateBalanceError> {
-    let _guard = update_balance_guard(account)?;
+) -> Result<DepositStatus, ProcessDepositError> {
+    let _guard = process_deposit_guard(account)?;
 
     let deposit_id = DepositId { account, signature };
 
@@ -71,10 +71,10 @@ async fn try_accept_deposit<R: CanisterRuntime>(
     account: Account,
     signature: Signature,
     deposit_id: DepositId,
-) -> Result<Deposit, UpdateBalanceError> {
+) -> Result<Deposit, ProcessDepositError> {
     let (cycles_to_attach, deposit_consolidation_fee) = read_state(|state| {
         (
-            state.update_balance_required_cycles(),
+            state.process_deposit_required_cycles(),
             state.deposit_consolidation_fee(),
         )
     });
@@ -89,7 +89,7 @@ async fn try_accept_deposit<R: CanisterRuntime>(
                 Priority::Info,
                 "Error fetching transaction for deposit {deposit_id:?}: {e}"
             );
-            UpdateBalanceError::from(e)
+            ProcessDepositError::from(e)
         })?;
 
     // Charge the actual RPC cost plus the consolidation fee
@@ -98,7 +98,7 @@ async fn try_accept_deposit<R: CanisterRuntime>(
 
     let transaction = match maybe_transaction {
         Some(transaction) => Ok(transaction),
-        None => Err(UpdateBalanceError::TransactionNotFound),
+        None => Err(ProcessDepositError::TransactionNotFound),
     }?;
 
     let deposit_address = get_deposit_address(account).await;
@@ -108,18 +108,18 @@ async fn try_accept_deposit<R: CanisterRuntime>(
                 Priority::Info,
                 "Error parsing deposit transaction with signature {signature}: {e}"
             );
-            UpdateBalanceError::InvalidDepositTransaction(e.to_string())
+            ProcessDepositError::InvalidDepositTransaction(e.to_string())
         })?;
     let minimum_deposit_amount = read_state(|state| state.minimum_deposit_amount());
     if deposit_amount < minimum_deposit_amount {
-        return Err(UpdateBalanceError::ValueTooSmall {
+        return Err(ProcessDepositError::ValueTooSmall {
             minimum_deposit_amount,
             deposit_amount,
         });
     }
     let amount_to_mint = deposit_amount
-        .checked_sub(read_state(|state| state.deposit_fee()))
-        .expect("BUG: deposit amount is less than deposit fee");
+        .checked_sub(read_state(|state| state.manual_deposit_fee()))
+        .expect("BUG: deposit amount is less than manual deposit fee");
 
     mutate_state(|state| {
         process_event(

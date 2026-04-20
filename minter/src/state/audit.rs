@@ -66,6 +66,9 @@ fn apply_state_transition(state: &mut State, payload: &EventType, timestamp: u64
         EventType::ExpiredTransaction { signature } => {
             state.process_transaction_expired(signature);
         }
+        EventType::StartedMonitoringAccount { account } => {
+            state.process_started_monitoring_account(account);
+        }
     }
 }
 

@@ -13,3 +13,9 @@ pub const GET_SIGNATURE_STATUSES_CYCLES: u128 = 1_000_000_000_000;
 ///
 /// See <https://solana.com/docs/core/fees#base-fee>.
 pub const FEE_PER_SIGNATURE: u64 = 5_000;
+
+/// Minimum lamport balance required to keep a zero-data Solana account
+/// rent-exempt (i.e. exempt from being purged by the runtime).
+///
+/// See <https://solana.com/docs/core/rent#rent-exempt-minimum>.
+pub const RENT_EXEMPTION_THRESHOLD: u64 = 890_880;

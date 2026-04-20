@@ -1,5 +1,5 @@
 use crate::{
-    constants::FEE_PER_SIGNATURE,
+    constants::{FEE_PER_SIGNATURE, RENT_EXEMPTION_THRESHOLD},
     ledger::client::LedgerClient,
     numeric::{LedgerBurnIndex, LedgerMintIndex},
     state::event::{DepositId, TransactionPurpose, VersionedMessage, WithdrawalRequest},
@@ -25,10 +25,6 @@ mod tests;
 
 pub mod audit;
 pub mod event;
-
-/// The minimum balance required for a Solana account to be rent-exempt.
-/// This is the rent-exemption threshold for a basic account with 0 data bytes.
-pub const SOLANA_RENT_EXEMPTION_THRESHOLD: Lamport = 890_880;
 
 thread_local! {
     static STATE: RefCell<Option<State>> = RefCell::default();
@@ -86,13 +82,15 @@ pub struct State {
     ledger_canister_id: Principal,
     sol_rpc_canister_id: Principal,
     solana_network: SolanaNetwork,
-    deposit_fee: Lamport,
+    manual_deposit_fee: Lamport,
+    automated_deposit_fee: Lamport,
     withdrawal_fee: Lamport,
     minimum_withdrawal_amount: Lamport,
     minimum_deposit_amount: Lamport,
-    update_balance_required_cycles: u128,
+    process_deposit_required_cycles: u128,
     deposit_consolidation_fee: u128,
-    pending_update_balance_requests: BTreeSet<Account>,
+    monitored_accounts: BTreeSet<Account>,
+    pending_process_deposit_request_guards: BTreeSet<Account>,
     pending_withdrawal_request_guards: BTreeSet<Account>,
     accepted_deposits: InsertionOrderedMap<DepositId, Deposit>,
     quarantined_deposits: InsertionOrderedMap<DepositId, Deposit>,
@@ -141,8 +139,12 @@ impl State {
         self.master_key_name
     }
 
-    pub fn deposit_fee(&self) -> u64 {
-        self.deposit_fee
+    pub fn manual_deposit_fee(&self) -> u64 {
+        self.manual_deposit_fee
+    }
+
+    pub fn automated_deposit_fee(&self) -> u64 {
+        self.automated_deposit_fee
     }
 
     pub fn deposit_consolidation_fee(&self) -> u128 {
@@ -165,8 +167,8 @@ impl State {
         self.solana_network
     }
 
-    pub fn update_balance_required_cycles(&self) -> u128 {
-        self.update_balance_required_cycles
+    pub fn process_deposit_required_cycles(&self) -> u128 {
+        self.process_deposit_required_cycles
     }
 
     pub fn accepted_deposits(&self) -> &InsertionOrderedMap<DepositId, Deposit> {
@@ -242,6 +244,14 @@ impl State {
         self.balance
     }
 
+    pub fn monitored_accounts(&self) -> &BTreeSet<Account> {
+        &self.monitored_accounts
+    }
+
+    pub(crate) fn process_started_monitoring_account(&mut self, account: &Account) {
+        self.monitored_accounts.insert(*account);
+    }
+
     pub fn consolidation_transactions(
         &self,
     ) -> &InsertionOrderedMap<Signature, ConsolidationTransaction> {
@@ -293,8 +303,8 @@ impl State {
         LedgerClient::new(runtime, self.ledger_canister_id)
     }
 
-    pub fn pending_update_balance_requests_mut(&mut self) -> &mut BTreeSet<Account> {
-        &mut self.pending_update_balance_requests
+    pub fn pending_process_deposit_request_guards_mut(&mut self) -> &mut BTreeSet<Account> {
+        &mut self.pending_process_deposit_request_guards
     }
 
     pub fn pending_withdrawal_request_guards_mut(&mut self) -> &mut BTreeSet<Account> {
@@ -324,18 +334,30 @@ impl State {
                 "ERROR: provided canister IDs are not distinct!".to_string(),
             ));
         }
-        if self.minimum_deposit_amount < self.deposit_fee {
-            return Err(InvalidStateError::InvalidMinimumDepositAmount {
-                minimum_deposit_amount: self.minimum_deposit_amount,
-                deposit_fee: self.deposit_fee,
+        if self.automated_deposit_fee < self.manual_deposit_fee {
+            return Err(InvalidStateError::InvalidDepositFees {
+                automated_deposit_fee: self.automated_deposit_fee,
+                manual_deposit_fee: self.manual_deposit_fee,
             });
         }
-        let minimum_required = self.withdrawal_fee + SOLANA_RENT_EXEMPTION_THRESHOLD;
-        if self.minimum_withdrawal_amount < minimum_required {
+        if self.minimum_deposit_amount < self.automated_deposit_fee {
+            return Err(InvalidStateError::InvalidDepositFees {
+                automated_deposit_fee: self.automated_deposit_fee,
+                manual_deposit_fee: self.manual_deposit_fee,
+            });
+        }
+        if self.minimum_deposit_amount < FEE_PER_SIGNATURE + RENT_EXEMPTION_THRESHOLD {
+            return Err(InvalidStateError::InvalidMinimumDepositAmount {
+                minimum_deposit_amount: self.minimum_deposit_amount,
+                fee_per_signature: FEE_PER_SIGNATURE,
+                rent_exemption_threshold: RENT_EXEMPTION_THRESHOLD,
+            });
+        }
+        if self.minimum_withdrawal_amount < self.withdrawal_fee + RENT_EXEMPTION_THRESHOLD {
             return Err(InvalidStateError::InvalidMinimumWithdrawalAmount {
                 minimum_withdrawal_amount: self.minimum_withdrawal_amount,
                 withdrawal_fee: self.withdrawal_fee,
-                rent_exemption_threshold: SOLANA_RENT_EXEMPTION_THRESHOLD,
+                rent_exemption_threshold: RENT_EXEMPTION_THRESHOLD,
             });
         }
         Ok(())
@@ -345,19 +367,23 @@ impl State {
         &mut self,
         UpgradeArgs {
             sol_rpc_canister_id,
-            deposit_fee,
+            manual_deposit_fee,
+            automated_deposit_fee,
             minimum_withdrawal_amount,
             minimum_deposit_amount,
             withdrawal_fee,
-            update_balance_required_cycles,
+            process_deposit_required_cycles,
             deposit_consolidation_fee,
         }: UpgradeArgs,
     ) -> Result<(), InvalidStateError> {
         if let Some(sol_rpc_canister_id) = sol_rpc_canister_id {
             self.sol_rpc_canister_id = sol_rpc_canister_id;
         }
-        if let Some(deposit_fee) = deposit_fee {
-            self.deposit_fee = deposit_fee;
+        if let Some(manual_deposit_fee) = manual_deposit_fee {
+            self.manual_deposit_fee = manual_deposit_fee;
+        }
+        if let Some(automated_deposit_fee) = automated_deposit_fee {
+            self.automated_deposit_fee = automated_deposit_fee;
         }
         if let Some(withdrawal_fee) = withdrawal_fee {
             self.withdrawal_fee = withdrawal_fee;
@@ -368,8 +394,8 @@ impl State {
         if let Some(minimum_deposit_amount) = minimum_deposit_amount {
             self.minimum_deposit_amount = minimum_deposit_amount;
         }
-        if let Some(update_balance_required_cycles) = update_balance_required_cycles {
-            self.update_balance_required_cycles = update_balance_required_cycles as u128;
+        if let Some(process_deposit_required_cycles) = process_deposit_required_cycles {
+            self.process_deposit_required_cycles = process_deposit_required_cycles as u128;
         }
         if let Some(deposit_consolidation_fee) = deposit_consolidation_fee {
             self.deposit_consolidation_fee = deposit_consolidation_fee as u128;
@@ -699,9 +725,14 @@ impl State {
 #[derive(Debug, PartialEq, Eq)]
 pub enum InvalidStateError {
     InvalidCanisterId(String),
+    InvalidDepositFees {
+        automated_deposit_fee: u64,
+        manual_deposit_fee: u64,
+    },
     InvalidMinimumDepositAmount {
         minimum_deposit_amount: u64,
-        deposit_fee: u64,
+        fee_per_signature: u64,
+        rent_exemption_threshold: u64,
     },
     InvalidMinimumWithdrawalAmount {
         minimum_withdrawal_amount: u64,
@@ -717,12 +748,13 @@ impl TryFrom<InitArgs> for State {
         InitArgs {
             sol_rpc_canister_id,
             ledger_canister_id,
-            deposit_fee,
+            manual_deposit_fee,
+            automated_deposit_fee,
             master_key_name,
             minimum_withdrawal_amount,
             minimum_deposit_amount,
             withdrawal_fee,
-            update_balance_required_cycles,
+            process_deposit_required_cycles,
             solana_network,
             deposit_consolidation_fee,
         }: InitArgs,
@@ -733,13 +765,15 @@ impl TryFrom<InitArgs> for State {
             ledger_canister_id,
             sol_rpc_canister_id,
             solana_network,
-            deposit_fee,
+            manual_deposit_fee,
+            automated_deposit_fee,
             withdrawal_fee,
             minimum_withdrawal_amount,
             minimum_deposit_amount,
-            update_balance_required_cycles: update_balance_required_cycles as u128,
+            process_deposit_required_cycles: process_deposit_required_cycles as u128,
             deposit_consolidation_fee: deposit_consolidation_fee as u128,
-            pending_update_balance_requests: BTreeSet::new(),
+            monitored_accounts: BTreeSet::new(),
+            pending_process_deposit_request_guards: BTreeSet::new(),
             pending_withdrawal_request_guards: BTreeSet::new(),
             accepted_deposits: InsertionOrderedMap::new(),
             quarantined_deposits: InsertionOrderedMap::new(),

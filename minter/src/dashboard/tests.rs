@@ -1,8 +1,8 @@
 use crate::dashboard::{DashboardPaginationParameters, DashboardTemplate, lamports_to_sol};
 use crate::state::read_state;
 use crate::test_fixtures::{
-    DEPOSIT_FEE, MINIMUM_DEPOSIT_AMOUNT, MINIMUM_WITHDRAWAL_AMOUNT, WITHDRAWAL_FEE, account,
-    deposit_id,
+    AUTOMATED_DEPOSIT_FEE, MANUAL_DEPOSIT_FEE, MINIMUM_DEPOSIT_AMOUNT, MINIMUM_WITHDRAWAL_AMOUNT,
+    WITHDRAWAL_FEE, account, deposit_id,
     events::{
         accept_deposit, accept_withdrawal, fail_transaction, mint_deposit, quarantine_deposit,
         submit_consolidation, submit_withdrawal, succeed_transaction,
@@ -52,9 +52,14 @@ fn should_display_metadata() {
             "wrong sol rpc canister ID",
         )
         .has_string_value(
-            "#deposit-fee > td",
-            &lamports_to_sol(DEPOSIT_FEE),
-            "wrong deposit fee",
+            "#manual-deposit-fee > td",
+            &lamports_to_sol(MANUAL_DEPOSIT_FEE),
+            "wrong manual deposit fee",
+        )
+        .has_string_value(
+            "#automated-deposit-fee > td",
+            &lamports_to_sol(AUTOMATED_DEPOSIT_FEE),
+            "wrong automated deposit fee",
         )
         .has_string_value(
             "#withdrawal-fee > td",
@@ -139,7 +144,7 @@ fn should_display_minted_deposits() {
                 &deposit.signature.to_string(),
                 &deposit.account.to_string(),
                 &lamports_to_sol(deposit_amount),
-                &lamports_to_sol(deposit_amount - DEPOSIT_FEE),
+                &lamports_to_sol(deposit_amount - MANUAL_DEPOSIT_FEE),
                 "42",
                 "Minted",
             ],
