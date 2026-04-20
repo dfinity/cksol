@@ -2,7 +2,7 @@ use crate::signer::{IcSchnorrSigner, SchnorrSigner};
 use candid::Principal;
 use ic_canister_runtime::{IcRuntime, Runtime};
 use ic_cdk_management_canister::{SchnorrPublicKeyArgs, SchnorrPublicKeyResult};
-use std::{fmt::Debug, future::Future, time::Duration};
+use std::{future::Future, time::Duration};
 
 pub trait CanisterRuntime: Clone + 'static {
     fn inter_canister_call_runtime(&self) -> impl Runtime;
