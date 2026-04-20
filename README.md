@@ -179,7 +179,8 @@ A successful response returns the burn block index, which you can use to track t
 After calling `withdraw`, track the status using the `block_index` returned in the response:
 
 ```sh
-icp canister call -e prod cksol_minter withdrawal_status '(42)'
+icp canister call -e prod cksol_minter withdrawal_status \
+  '(record { block_index = 42 })'
 ```
 
 ## Repository Structure
