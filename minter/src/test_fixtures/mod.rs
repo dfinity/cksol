@@ -244,7 +244,7 @@ pub mod events {
                     account,
                     solana_address: [0u8; 32],
                     burn_block_index: LedgerBurnIndex::from(burn_index),
-                    transferred_amount: amount - WITHDRAWAL_FEE,
+                    amount_to_transfer: amount - WITHDRAWAL_FEE,
                     burned_amount: amount,
                 }),
                 &TestCanisterRuntime::new()
@@ -524,13 +524,13 @@ pub mod arb {
             any::<u64>(),
         )
             .prop_map(
-                |(account, solana_address, burn_block_index, burned_amount, transferred_amount)| {
+                |(account, solana_address, burn_block_index, burned_amount, amount_to_transfer)| {
                     WithdrawalRequest {
                         account,
                         solana_address,
                         burn_block_index,
                         burned_amount,
-                        transferred_amount,
+                        amount_to_transfer,
                     }
                 },
             )

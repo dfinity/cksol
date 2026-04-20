@@ -154,7 +154,7 @@ pub struct WithdrawalRequest {
     pub burned_amount: Lamport,
     /// The net amount to transfer to the user (in lamports).
     #[n(4)]
-    pub transferred_amount: Lamport,
+    pub amount_to_transfer: Lamport,
 }
 
 #[derive(Clone, Eq, PartialEq, Debug, Decode, Encode)]

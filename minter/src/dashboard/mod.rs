@@ -367,7 +367,7 @@ impl DashboardTemplate {
             withdrawals.push(DashboardWithdrawal {
                 transaction,
                 account: req.account.to_string(),
-                withdrawal_amount: lamports_to_sol(req.transferred_amount),
+                withdrawal_amount: lamports_to_sol(req.amount_to_transfer),
                 burned_amount: lamports_to_sol(req.burned_amount),
                 burn_block_index: burn_index.to_string(),
                 status,

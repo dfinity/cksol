@@ -580,7 +580,7 @@ impl State {
                         .unwrap_or_else(|| {
                             panic!("Attempted to send transaction for unknown withdrawal request: {burn_index:?}")
                         });
-                    total += pending.request.transferred_amount;
+                    total += pending.request.amount_to_transfer;
                     assert_eq!(
                         self.sent_withdrawal_requests.insert(
                             *burn_index,
