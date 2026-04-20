@@ -836,6 +836,7 @@ pub enum TaskType {
     FinalizeTransactions,
     ResubmitTransactions,
     WithdrawalProcessing,
+    PollMonitoredAddresses,
 }
 
 /// Details about a consolidation transaction, capturing the individual
