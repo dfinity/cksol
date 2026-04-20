@@ -31,7 +31,7 @@ const WITHDRAWAL_PROCESSING_DELAY: Duration = Duration::from_mins(1);
 const FINALIZE_TRANSACTIONS_DELAY: Duration = Duration::from_mins(2);
 const RESUBMIT_TRANSACTIONS_DELAY: Duration = Duration::from_mins(3);
 const DEPOSIT_CONSOLIDATION_DELAY: Duration = Duration::from_mins(10);
-const POLL_MONITORED_ADDRESSES_DELAY: Duration = Duration::from_mins(5);
+const POLL_MONITORED_ADDRESSES_DELAY: Duration = Duration::from_mins(1);
 
 /// Deposits funds into the minter via `process_deposit`, consolidates them,
 /// and finalizes the consolidation so the minter's internal balance is credited.
