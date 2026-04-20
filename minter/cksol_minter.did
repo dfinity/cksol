@@ -100,6 +100,9 @@ type UpdateBalanceError = variant {
     QueueFull;
 };
 
+// The result of a call to the `update_balance` endpoint.
+type UpdateBalanceResult = variant { Ok; Err : UpdateBalanceError };
+
 // Insufficient cycles attached by the caller to complete the call.
 type InsufficientCyclesError = record {
     // The amount of cycles the call requires.
@@ -244,6 +247,9 @@ type WithdrawalError = variant {
     // The payload contains a human-readable message explaining what caused the unavailability.
     TemporarilyUnavailable : text;
 };
+
+// The result of a call to the `withdraw` endpoint.
+type WithdrawalResult = variant { Ok : WithdrawalOk; Err : WithdrawalError };
 
 // Status of a finalized transaction.
 type TxFinalizedStatus = variant {
@@ -465,7 +471,7 @@ service : (MinterArg) -> {
     //
     // Returns Ok if the account was registered (or was already being monitored).
     // Returns Err(QueueFull) if the monitored account queue is at capacity.
-    update_balance: (UpdateBalanceArgs) -> (variant { Ok; Err : UpdateBalanceError });
+    update_balance: (UpdateBalanceArgs) -> (UpdateBalanceResult);
 
     // Update the ckSOL balance of the given owner with the funds
     // deposited in a specific Solana transaction.
@@ -477,7 +483,7 @@ service : (MinterArg) -> {
     process_deposit: (ProcessDepositArgs) -> (ProcessDepositResult);
 
     // Submits a request to convert ckSOL to Solana.
-    withdraw : (WithdrawalArgs) -> (variant { Ok : WithdrawalOk; Err : WithdrawalError });
+    withdraw : (WithdrawalArgs) -> (WithdrawalResult);
 
     // Retrieve the status of a Solana withdrawal request.
     withdrawal_status : (WithdrawalStatusArgs) -> (WithdrawalStatus);
