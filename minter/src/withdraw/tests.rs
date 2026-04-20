@@ -539,10 +539,12 @@ mod withdrawal_finalization_tests {
 
         events::succeed_transaction(tx_signature);
 
-        assert_matches!(
+        assert_eq!(
             withdrawal_status(1),
-            WithdrawalStatus::TxFinalized(TxFinalizedStatus::Success { transaction_id, .. })
-                if transaction_id == tx_signature.into()
+            WithdrawalStatus::TxFinalized(TxFinalizedStatus::Success {
+                transaction_id: tx_signature.into(),
+                effective_transaction_fee: None,
+            })
         );
     }
 
@@ -556,10 +558,11 @@ mod withdrawal_finalization_tests {
 
         events::fail_transaction(tx_signature);
 
-        assert_matches!(
+        assert_eq!(
             withdrawal_status(1),
-            WithdrawalStatus::TxFinalized(TxFinalizedStatus::Failure { transaction_id })
-                if transaction_id == tx_signature.into()
+            WithdrawalStatus::TxFinalized(TxFinalizedStatus::Failure {
+                transaction_id: tx_signature.into(),
+            })
         );
     }
 }
