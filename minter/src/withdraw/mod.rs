@@ -88,7 +88,7 @@ pub async fn withdraw<R: CanisterRuntime>(
     });
     log!(
         Priority::Info,
-        "Accepted withdrawal request from {from:?}: burning {amount_to_burn} lamports, sending {withdrawal_amount} lamports to {solana_address} (burn block index {block_index})"
+        "Accepted withdrawal request from {from:?}: burned {amount_to_burn} lamports, queued withdrawal of {withdrawal_amount} lamports to {solana_address} (burn block index {block_index})"
     );
 
     Ok(WithdrawalOk { block_index })
