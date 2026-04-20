@@ -57,7 +57,7 @@ pub async fn create_signed_consolidation_transaction<R: CanisterRuntime>(
 ) -> Result<(Transaction, Vec<Account>), CreateTransferError> {
     assert!(!sources.is_empty(), "BUG: sources must not be empty");
 
-    let master_public_key = lazy_get_schnorr_master_key().await;
+    let master_public_key = lazy_get_schnorr_master_key(runtime).await;
     let target_address = minter_address(&master_public_key, runtime);
     let (derivation_paths, addresses): (Vec<_>, Vec<_>) = sources
         .iter()
@@ -138,7 +138,7 @@ pub async fn create_signed_batch_withdrawal_transaction<R: CanisterRuntime>(
     recent_blockhash: Hash,
 ) -> Result<(Transaction, Vec<Account>), CreateTransferError> {
     let fee_payer_account = Account::from(runtime.canister_self());
-    let master_public_key = lazy_get_schnorr_master_key().await;
+    let master_public_key = lazy_get_schnorr_master_key(runtime).await;
     let fee_payer_derivation_path = derivation_path(&fee_payer_account);
     let fee_payer_address = Address::from(
         derive_public_key(&master_public_key, fee_payer_derivation_path.to_vec()).serialize_raw(),

@@ -2,9 +2,7 @@ use crate::{
     runtime::CanisterRuntime,
     state::{SchnorrPublicKey, mutate_state, read_state},
 };
-use ic_cdk_management_canister::{
-    SchnorrAlgorithm, SchnorrKeyId, SchnorrPublicKeyArgs, schnorr_public_key,
-};
+use ic_cdk_management_canister::{SchnorrAlgorithm, SchnorrKeyId, SchnorrPublicKeyArgs};
 use ic_ed25519::{DerivationIndex, DerivationPath as IcDerivationPath, PublicKey};
 use icrc_ledger_types::icrc1::account::Account;
 use solana_address::Address;
@@ -27,15 +25,15 @@ pub fn minter_address<R: CanisterRuntime>(master_key: &SchnorrPublicKey, runtime
     )
 }
 
-pub async fn get_deposit_address(account: Account) -> Address {
-    let master_public_key = lazy_get_schnorr_master_key().await;
+pub async fn derive_account_address<R: CanisterRuntime>(account: Account, runtime: &R) -> Address {
+    let master_public_key = lazy_get_schnorr_master_key(runtime).await;
 
     let public_key = derive_public_key_from_account(&master_public_key, &account);
 
     Address::from(public_key.serialize_raw())
 }
 
-pub async fn lazy_get_schnorr_master_key() -> SchnorrPublicKey {
+pub async fn lazy_get_schnorr_master_key<R: CanisterRuntime>(runtime: &R) -> SchnorrPublicKey {
     if let Some(public_key) = read_state(|s| s.minter_public_key().cloned()) {
         return public_key;
     }
@@ -50,9 +48,7 @@ pub async fn lazy_get_schnorr_master_key() -> SchnorrPublicKey {
             name: key_name.to_string(),
         },
     };
-    let response = schnorr_public_key(&arg)
-        .await
-        .expect("failed to obtain the canister master key");
+    let response = runtime.schnorr_public_key(arg).await;
 
     let public_key = PublicKey::deserialize_raw(response.public_key.as_slice())
         .expect("Failed to deserialize public key");

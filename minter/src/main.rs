@@ -54,7 +54,7 @@ fn post_upgrade(args: Option<MinterArg>) {
 #[ic_cdk::update]
 async fn get_deposit_address(args: GetDepositAddressArgs) -> Address {
     let account = assert_non_anonymous_account(args.owner, args.subaccount);
-    cksol_minter::address::get_deposit_address(account)
+    cksol_minter::address::derive_account_address(account, &IcCanisterRuntime::new())
         .await
         .into()
 }
@@ -343,7 +343,7 @@ fn assert_non_anonymous_account(
 fn setup_timers() {
     ic_cdk_timers::set_timer(Duration::from_secs(0), async {
         // Initialize the minter's Ed25519 public key
-        let _ = lazy_get_schnorr_master_key().await;
+        let _ = lazy_get_schnorr_master_key(&IcCanisterRuntime::new()).await;
     });
     ic_cdk_timers::set_timer_interval(DEPOSIT_CONSOLIDATION_DELAY, async || {
         consolidate_deposits(IcCanisterRuntime::new()).await;

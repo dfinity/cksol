@@ -1,5 +1,5 @@
 use crate::{
-    address::get_deposit_address,
+    address::derive_account_address,
     cycles::{charge_caller_cycles, check_caller_available_cycles},
     deposit::get_deposit_amount_to_address,
     guard::process_deposit_guard,
@@ -101,7 +101,7 @@ async fn try_accept_deposit<R: CanisterRuntime>(
         None => Err(ProcessDepositError::TransactionNotFound),
     }?;
 
-    let deposit_address = get_deposit_address(account).await;
+    let deposit_address = derive_account_address(account, runtime).await;
     let deposit_amount =
         get_deposit_amount_to_address(transaction, deposit_address).map_err(|e| {
             log!(

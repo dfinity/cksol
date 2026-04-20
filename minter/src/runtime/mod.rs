@@ -1,6 +1,7 @@
 use crate::signer::{IcSchnorrSigner, SchnorrSigner};
 use candid::Principal;
 use ic_canister_runtime::{IcRuntime, Runtime};
+use ic_cdk_management_canister::{SchnorrPublicKeyArgs, SchnorrPublicKeyResult};
 use std::{fmt::Debug, future::Future, time::Duration};
 
 pub trait CanisterRuntime: Clone + 'static {
@@ -17,6 +18,10 @@ pub trait CanisterRuntime: Clone + 'static {
         Self: Sized,
         F: FnOnce(Self) -> Fut + 'static,
         Fut: Future<Output = ()> + 'static;
+    fn schnorr_public_key(
+        &self,
+        args: SchnorrPublicKeyArgs,
+    ) -> impl Future<Output = SchnorrPublicKeyResult>;
 }
 
 #[derive(Clone, Default, Debug)]
@@ -67,7 +72,13 @@ impl CanisterRuntime for IcCanisterRuntime {
         F: FnOnce(Self) -> Fut + 'static,
         Fut: Future<Output = ()> + 'static,
     {
-        let clone = self.clone();
-        ic_cdk_timers::set_timer(delay, async move { f(clone).await })
+        let runtime = self.clone();
+        ic_cdk_timers::set_timer(delay, async move { f(runtime).await })
+    }
+
+    async fn schnorr_public_key(&self, args: SchnorrPublicKeyArgs) -> SchnorrPublicKeyResult {
+        ic_cdk_management_canister::schnorr_public_key(&args)
+            .await
+            .expect("failed to obtain the Schnorr public key")
     }
 }
