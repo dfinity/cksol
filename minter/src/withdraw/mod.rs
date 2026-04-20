@@ -223,20 +223,23 @@ async fn submit_withdrawal_transaction<R: CanisterRuntime>(
         )
     });
 
-    log!(
-        Priority::Info,
-        "Submitted withdrawal transaction {signature} for burn indices {:?}",
-        requests
-            .iter()
-            .map(|r| r.burn_block_index)
-            .collect::<Vec<_>>()
-    );
-
-    if let Err(e) = submit_transaction(runtime, signed_tx).await {
-        log!(
-            Priority::Info,
-            "Failed to send withdrawal transaction {signature} (will be resubmitted): {e}"
-        );
+    match submit_transaction(runtime, signed_tx).await {
+        Ok(()) => {
+            log!(
+                Priority::Info,
+                "Submitted withdrawal transaction {signature} for burn indices {:?}",
+                requests
+                    .iter()
+                    .map(|r| r.burn_block_index)
+                    .collect::<Vec<_>>()
+            );
+        }
+        Err(e) => {
+            log!(
+                Priority::Info,
+                "Failed to send withdrawal transaction {signature} (will be resubmitted): {e}"
+            );
+        }
     }
 }
 
