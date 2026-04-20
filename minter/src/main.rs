@@ -14,7 +14,7 @@ use cksol_minter::{
 use cksol_types::{
     Address, DepositStatus, GetDepositAddressArgs, MinterInfo, ProcessDepositArgs,
     ProcessDepositError, UpdateBalanceArgs, UpdateBalanceError, WithdrawalArgs, WithdrawalError,
-    WithdrawalOk, WithdrawalStatus,
+    WithdrawalOk, WithdrawalStatus, WithdrawalStatusArgs,
 };
 use cksol_types_internal::{MinterArg, log::Priority};
 use ic_http_types::{HttpRequest, HttpResponse, HttpResponseBuilder};
@@ -88,8 +88,8 @@ async fn withdraw(args: WithdrawalArgs) -> Result<WithdrawalOk, WithdrawalError>
 }
 
 #[ic_cdk::update]
-fn withdrawal_status(block_index: u64) -> WithdrawalStatus {
-    cksol_minter::withdraw::withdrawal_status(block_index)
+fn withdrawal_status(args: WithdrawalStatusArgs) -> WithdrawalStatus {
+    cksol_minter::withdraw::withdrawal_status(args.block_index)
 }
 
 #[ic_cdk::query]
@@ -115,10 +115,10 @@ fn get_events(
             EventType::AcceptedWithdrawalRequest(request) => {
                 event::EventType::AcceptedWithdrawalRequest {
                     account: request.account,
-                    solana_address: request.solana_address,
+                    solana_address: solana_address::Address::from(request.solana_address).into(),
                     burn_block_index: *request.burn_block_index.get(),
-                    amount_to_burn: request.amount_to_burn,
-                    withdrawal_amount: request.withdrawal_amount,
+                    burned_amount: request.burned_amount,
+                    amount_to_transfer: request.amount_to_transfer,
                 }
             }
             EventType::AcceptedManualDeposit {

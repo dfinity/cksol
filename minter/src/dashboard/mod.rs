@@ -193,7 +193,7 @@ pub struct DashboardWithdrawal {
     pub transaction: Option<String>,
     pub account: String,
     pub withdrawal_amount: String,
-    pub burnt_amount: String,
+    pub burned_amount: String,
     pub burn_block_index: String,
     pub status: &'static str,
 }
@@ -367,8 +367,8 @@ impl DashboardTemplate {
             withdrawals.push(DashboardWithdrawal {
                 transaction,
                 account: req.account.to_string(),
-                withdrawal_amount: lamports_to_sol(req.withdrawal_amount),
-                burnt_amount: lamports_to_sol(req.amount_to_burn),
+                withdrawal_amount: lamports_to_sol(req.amount_to_transfer),
+                burned_amount: lamports_to_sol(req.burned_amount),
                 burn_block_index: burn_index.to_string(),
                 status,
             });

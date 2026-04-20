@@ -70,9 +70,9 @@ pub async fn withdraw<R: CanisterRuntime>(
     })?;
 
     let withdrawal_fee = read_state(|s| s.withdrawal_fee());
-    let withdrawal_amount = amount_to_burn
+    let amount_to_transfer = amount_to_burn
         .checked_sub(withdrawal_fee)
-        .expect("BUG: withdrawal amount must be >= withdrawal fee");
+        .expect("BUG: burned amount must be >= withdrawal fee");
     mutate_state(|s| {
         process_event(
             s,
@@ -80,8 +80,8 @@ pub async fn withdraw<R: CanisterRuntime>(
                 account: from,
                 solana_address: solana_address.to_bytes(),
                 burn_block_index: block_index.into(),
-                withdrawal_amount,
-                amount_to_burn,
+                amount_to_transfer,
+                burned_amount: amount_to_burn,
             }),
             runtime,
         )
@@ -109,8 +109,8 @@ pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: R) {
         let affordable: Vec<_> = pending
             .values()
             .take_while(|r| {
-                if available_balance >= r.request.withdrawal_amount {
-                    available_balance -= r.request.withdrawal_amount;
+                if available_balance >= r.request.amount_to_transfer {
+                    available_balance -= r.request.amount_to_transfer;
                     true
                 } else {
                     false
@@ -179,7 +179,7 @@ async fn submit_withdrawal_transaction<R: CanisterRuntime>(
         .iter()
         .map(|request| {
             let destination = Address::from(request.solana_address);
-            (destination, request.withdrawal_amount)
+            (destination, request.amount_to_transfer)
         })
         .collect();
 

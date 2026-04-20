@@ -322,8 +322,8 @@ mod process_pending_withdrawals_tests {
         process_pending_withdrawals(runtime).await;
 
         // First two withdrawals should be submitted, third should remain pending
-        assert_matches!(withdrawal_status(0), WithdrawalStatus::TxSent(_));
-        assert_matches!(withdrawal_status(1), WithdrawalStatus::TxSent(_));
+        assert_matches!(withdrawal_status(0), WithdrawalStatus::TxSent { .. });
+        assert_matches!(withdrawal_status(1), WithdrawalStatus::TxSent { .. });
         assert_eq!(withdrawal_status(2), WithdrawalStatus::Pending);
 
         // One new event (the submitted transaction batching both withdrawals)
@@ -350,7 +350,7 @@ mod process_pending_withdrawals_tests {
 
         process_pending_withdrawals(runtime).await;
 
-        assert_matches!(withdrawal_status(1), WithdrawalStatus::TxSent(_));
+        assert_matches!(withdrawal_status(1), WithdrawalStatus::TxSent { .. });
     }
 
     #[tokio::test]
@@ -462,7 +462,7 @@ mod process_pending_withdrawals_tests {
         // All withdrawals should be processed in a single invocation
         // (2 batches in 1 round, both within MAX_CONCURRENT_RPC_CALLS)
         for i in 0..request_count {
-            assert_matches!(withdrawal_status(i), WithdrawalStatus::TxSent(_));
+            assert_matches!(withdrawal_status(i), WithdrawalStatus::TxSent { .. });
         }
 
         // Verify that withdrawals were split into 2 batches
@@ -535,14 +535,16 @@ mod withdrawal_finalization_tests {
         init_balance();
         let tx_signature = setup_sent_withdrawal(1);
 
-        assert_matches!(withdrawal_status(1), WithdrawalStatus::TxSent(_));
+        assert_matches!(withdrawal_status(1), WithdrawalStatus::TxSent { .. });
 
         events::succeed_transaction(tx_signature);
 
-        assert_matches!(
+        assert_eq!(
             withdrawal_status(1),
-            WithdrawalStatus::TxFinalized(TxFinalizedStatus::Success { transaction_hash, .. })
-                if transaction_hash == tx_signature.to_string()
+            WithdrawalStatus::TxFinalized(TxFinalizedStatus::Success {
+                transaction_id: tx_signature.into(),
+                effective_transaction_fee: None,
+            })
         );
     }
 
@@ -552,14 +554,15 @@ mod withdrawal_finalization_tests {
         init_balance();
         let tx_signature = setup_sent_withdrawal(1);
 
-        assert_matches!(withdrawal_status(1), WithdrawalStatus::TxSent(_));
+        assert_matches!(withdrawal_status(1), WithdrawalStatus::TxSent { .. });
 
         events::fail_transaction(tx_signature);
 
-        assert_matches!(
+        assert_eq!(
             withdrawal_status(1),
-            WithdrawalStatus::TxFinalized(TxFinalizedStatus::Failure { transaction_hash })
-                if transaction_hash == tx_signature.to_string()
+            WithdrawalStatus::TxFinalized(TxFinalizedStatus::Failure {
+                transaction_id: tx_signature.into(),
+            })
         );
     }
 }
