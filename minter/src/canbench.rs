@@ -25,12 +25,13 @@ fn init_args() -> InitArgs {
     InitArgs {
         sol_rpc_canister_id: Principal::from_slice(&[1_u8; 20]),
         ledger_canister_id: Principal::from_slice(&[2_u8; 20]),
-        deposit_fee: 10_000,
+        manual_deposit_fee: 10_000,
+        automated_deposit_fee: 10_000_000,
         master_key_name: Ed25519KeyName::default(),
         minimum_withdrawal_amount: 10_000_000,
         minimum_deposit_amount: 10_000_000,
         withdrawal_fee: 5_000_000,
-        update_balance_required_cycles: 1_000_000_000_000,
+        process_deposit_required_cycles: 1_000_000_000_000,
         solana_network: SolanaNetwork::Mainnet,
         deposit_consolidation_fee: 10_000_000_000,
     }
