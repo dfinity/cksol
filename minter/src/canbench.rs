@@ -42,13 +42,17 @@ fn signature(i: usize) -> Signature {
     Signature::from(bytes)
 }
 
-fn deposit_id(i: usize) -> DepositId {
+fn principal(i: usize) -> Principal {
     let mut principal_bytes = [0u8; 29];
     principal_bytes[..8].copy_from_slice(&(i as u64).to_le_bytes());
+    Principal::from_slice(&principal_bytes)
+}
+
+fn deposit_id(i: usize) -> DepositId {
     DepositId {
         signature: signature(i),
         account: Account {
-            owner: Principal::from_slice(&principal_bytes),
+            owner: principal(i),
             subaccount: None,
         },
     }
