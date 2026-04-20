@@ -202,13 +202,6 @@ pub enum WithdrawalError {
     TemporarilyUnavailable(String),
 }
 
-/// Identifier for a Solana transaction.
-#[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize)]
-pub struct SolTransaction {
-    /// The unique identifier (signature) of the Solana transaction.
-    pub transaction_id: Signature,
-}
-
 /// Status of a finalized transaction.
 #[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize)]
 pub enum TxFinalizedStatus {
@@ -236,7 +229,10 @@ pub enum WithdrawalStatus {
     Pending,
 
     /// Solana transaction was signed and is sent to the network.
-    TxSent(SolTransaction),
+    TxSent {
+        /// The unique identifier (signature) of the Solana transaction.
+        transaction_id: Signature,
+    },
 
     /// Solana transaction is finalized.
     TxFinalized(TxFinalizedStatus),

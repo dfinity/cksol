@@ -232,8 +232,6 @@ type WithdrawalError = variant {
     TemporarilyUnavailable : text;
 };
 
-type SolTransaction = record { transaction_id : Signature };
-
 // Status of a finalized transaction.
 type TxFinalizedStatus = variant {
     // Transaction was successful.
@@ -251,13 +249,10 @@ type TxFinalizedStatus = variant {
 type WithdrawalStatus = variant {
     // Withdrawal request is not found.
     NotFound;
-
     // Withdrawal request is waiting to be processed.
     Pending;
-
     // Solana transaction was signed and is sent to the network.
-    TxSent : SolTransaction;
-
+    TxSent : record { transaction_id : Signature };
     // Solana transaction is finalized.
     TxFinalized : TxFinalizedStatus;
 };
@@ -459,9 +454,10 @@ service : (MinterArg) -> {
     // Update the ckSOL balance of the given owner with the funds
     // deposited in a specific Solana transaction.
     //
-    // This endpoint is idempotent: calling it again after a successful deposit
-    // returns the already-computed status (Processing, Quarantined, or Minted)
-    // without repeating any work or charging additional cycles.
+    // Safe to call multiple times with the same signature: if the deposit was
+    // already accepted, the call returns the current status (Processing,
+    // Quarantined, or Minted) without charging additional cycles. If minting
+    // previously failed (status Processing), calling again will retry the mint.
     //
     // Note: AlreadyProcessing is returned only when there is already a concurrent
     // in-flight call for the same (owner, signature) pair, not for repeated calls

@@ -6,7 +6,7 @@ use crate::{
     utils::insertion_ordered_map::InsertionOrderedMap,
 };
 use candid::Principal;
-use cksol_types::{DepositStatus, SolTransaction, TxFinalizedStatus, WithdrawalStatus};
+use cksol_types::{DepositStatus, TxFinalizedStatus, WithdrawalStatus};
 use cksol_types_internal::SolanaNetwork;
 use cksol_types_internal::{Ed25519KeyName, InitArgs, UpgradeArgs};
 use ic_canister_runtime::Runtime;
@@ -455,9 +455,9 @@ impl State {
             return WithdrawalStatus::Pending;
         }
         if let Some(sent) = self.sent_withdrawal_requests.get(&burn_index) {
-            return WithdrawalStatus::TxSent(SolTransaction {
+            return WithdrawalStatus::TxSent {
                 transaction_id: sent.signature.into(),
-            });
+            };
         }
         if let Some(sent) = self.successful_withdrawal_requests.get(&burn_index) {
             return WithdrawalStatus::TxFinalized(TxFinalizedStatus::Success {
