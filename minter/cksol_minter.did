@@ -224,26 +224,26 @@ type WithdrawalError = variant {
     // The minter failed to parse the destination address.
     MalformedAddress : Address;
     // The ckSOL balance of the withdrawal account is too low.
-    InsufficientFunds : record { balance : nat64 };
+    InsufficientFunds : record { balance : Lamport };
     // The minter is not approved to transfer the requested amount.
-    InsufficientAllowance : record { allowance : nat64 };
+    InsufficientAllowance : record { allowance : Lamport };
     // The minter is overloaded, retry the request.
     // The payload contains a human-readable message explaining what caused the unavailability.
     TemporarilyUnavailable : text;
 };
 
-type SolTransaction = record { transaction_hash : text };
+type SolTransaction = record { transaction_id : Signature };
 
 // Status of a finalized transaction.
 type TxFinalizedStatus = variant {
     // Transaction was successful.
     Success : record {
-        transaction_hash : text;
+        transaction_id : Signature;
         effective_transaction_fee: opt nat;
     };
     // Transaction failed.
     Failure : record {
-        transaction_hash : text;
+        transaction_id : Signature;
     };
 };
 
@@ -270,13 +270,13 @@ type AcceptedWithdrawalRequest = record {
     // The ckSOL ledger account.
     account : Account;
     // The solana address to receive the funds.
-    solana_address : blob;
+    solana_address : Address;
     // The index of the ledger block that burned the ckSOL tokens.
     burn_block_index : nat64;
     // The total amount burned from the user.
-    amount_to_burn : Lamport;
-    // The net amount to transfer to the user.
-    withdrawal_amount : Lamport;
+    burned_amount : Lamport;
+    // The net amount transferred to the user (burned_amount minus fees).
+    transferred_amount : Lamport;
 };
 
 // A versioned Solana transaction message.
@@ -458,6 +458,14 @@ service : (MinterArg) -> {
 
     // Update the ckSOL balance of the given owner with the funds
     // deposited in a specific Solana transaction.
+    //
+    // This endpoint is idempotent: calling it again after a successful deposit
+    // returns the already-computed status (Processing, Quarantined, or Minted)
+    // without repeating any work or charging additional cycles.
+    //
+    // Note: AlreadyProcessing is returned only when there is already a concurrent
+    // in-flight call for the same (owner, signature) pair, not for repeated calls
+    // after the deposit has been accepted.
     process_deposit: (ProcessDepositArgs) -> (ProcessDepositResult);
 
     // Submits a request to convert ckSOL to Solana.

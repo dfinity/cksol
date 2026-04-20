@@ -456,18 +456,18 @@ impl State {
         }
         if let Some(sent) = self.sent_withdrawal_requests.get(&burn_index) {
             return WithdrawalStatus::TxSent(SolTransaction {
-                transaction_hash: sent.signature.to_string(),
+                transaction_id: sent.signature.into(),
             });
         }
         if let Some(sent) = self.successful_withdrawal_requests.get(&burn_index) {
             return WithdrawalStatus::TxFinalized(TxFinalizedStatus::Success {
-                transaction_hash: sent.signature.to_string(),
+                transaction_id: sent.signature.into(),
                 effective_transaction_fee: None,
             });
         }
         if let Some(sent) = self.failed_withdrawal_requests.get(&burn_index) {
             return WithdrawalStatus::TxFinalized(TxFinalizedStatus::Failure {
-                transaction_hash: sent.signature.to_string(),
+                transaction_id: sent.signature.into(),
             });
         }
         WithdrawalStatus::NotFound
@@ -580,7 +580,7 @@ impl State {
                         .unwrap_or_else(|| {
                             panic!("Attempted to send transaction for unknown withdrawal request: {burn_index:?}")
                         });
-                    total += pending.request.withdrawal_amount;
+                    total += pending.request.transferred_amount;
                     assert_eq!(
                         self.sent_withdrawal_requests.insert(
                             *burn_index,

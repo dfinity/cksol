@@ -4,7 +4,7 @@ use crate::{InitArgs, UpgradeArgs};
 use candid::CandidType;
 use icrc_ledger_types::icrc1::account::Account;
 use serde::Deserialize;
-use sol_rpc_types::{Lamport, Signature, Slot};
+use sol_rpc_types::{Lamport, Pubkey as Address, Signature, Slot};
 
 /// A minter event that can be serialized to Candid.
 #[derive(Clone, Debug, CandidType, Deserialize)]
@@ -64,13 +64,13 @@ pub enum EventType {
         /// The ledger account from which ckSOL was burned.
         account: Account,
         /// The destination Solana address.
-        solana_address: [u8; 32],
+        solana_address: Address,
         /// The burn transaction index on the ckSOL ledger.
         burn_block_index: u64,
         /// The total amount burned from the user (in lamports).
-        amount_to_burn: Lamport,
+        burned_amount: Lamport,
         /// The net amount to transfer to the user (in lamports).
-        withdrawal_amount: Lamport,
+        transferred_amount: Lamport,
     },
     /// Submitted a Solana transaction.
     SubmittedTransaction {

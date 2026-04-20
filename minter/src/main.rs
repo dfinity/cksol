@@ -100,6 +100,7 @@ fn get_events(
 ) -> cksol_types_internal::event::GetEventsResult {
     use cksol_minter::state::event::{Event, EventType, TransactionPurpose, VersionedMessage};
     use cksol_types_internal::event;
+    use solana_address::Address as SolanaAddress;
 
     const MAX_EVENTS_PER_RESPONSE: u64 = 2_000;
 
@@ -117,10 +118,10 @@ fn get_events(
             EventType::AcceptedWithdrawalRequest(request) => {
                 event::EventType::AcceptedWithdrawalRequest {
                     account: request.account,
-                    solana_address: request.solana_address,
+                    solana_address: SolanaAddress::from(request.solana_address).into(),
                     burn_block_index: *request.burn_block_index.get(),
-                    amount_to_burn: request.amount_to_burn,
-                    withdrawal_amount: request.withdrawal_amount,
+                    burned_amount: request.burned_amount,
+                    transferred_amount: request.transferred_amount,
                 }
             }
             EventType::AcceptedManualDeposit {

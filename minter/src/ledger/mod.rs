@@ -202,7 +202,7 @@ pub enum BurnError {
     #[error("Failed to burn ckSOL: {0}")]
     TemporarilyUnavailable(String),
     #[error("Insufficient funds to burn ckSOL, balance: {balance}")]
-    InsufficientFunds { balance: u64 },
+    InsufficientFunds { balance: Lamport },
     #[error("Insufficient allowance to burn ckSOL, allowance: {allowance}")]
-    InsufficientAllowance { allowance: u64 },
+    InsufficientAllowance { allowance: Lamport },
 }

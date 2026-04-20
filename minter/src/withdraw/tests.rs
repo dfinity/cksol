@@ -541,8 +541,8 @@ mod withdrawal_finalization_tests {
 
         assert_matches!(
             withdrawal_status(1),
-            WithdrawalStatus::TxFinalized(TxFinalizedStatus::Success { transaction_hash, .. })
-                if transaction_hash == tx_signature.to_string()
+            WithdrawalStatus::TxFinalized(TxFinalizedStatus::Success { transaction_id, .. })
+                if transaction_id == tx_signature.into()
         );
     }
 
@@ -558,8 +558,8 @@ mod withdrawal_finalization_tests {
 
         assert_matches!(
             withdrawal_status(1),
-            WithdrawalStatus::TxFinalized(TxFinalizedStatus::Failure { transaction_hash })
-                if transaction_hash == tx_signature.to_string()
+            WithdrawalStatus::TxFinalized(TxFinalizedStatus::Failure { transaction_id })
+                if transaction_id == tx_signature.into()
         );
     }
 }

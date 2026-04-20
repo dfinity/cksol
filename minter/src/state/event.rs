@@ -151,10 +151,10 @@ pub struct WithdrawalRequest {
     pub burn_block_index: LedgerBurnIndex,
     /// The total amount burned from the user (in lamports).
     #[n(3)]
-    pub amount_to_burn: Lamport,
+    pub burned_amount: Lamport,
     /// The net amount to transfer to the user (in lamports).
     #[n(4)]
-    pub withdrawal_amount: Lamport,
+    pub transferred_amount: Lamport,
 }
 
 #[derive(Clone, Eq, PartialEq, Debug, Decode, Encode)]

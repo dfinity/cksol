@@ -191,43 +191,43 @@ pub enum WithdrawalError {
     /// The withdrawal account does not hold the requested ckSOL amount.
     InsufficientFunds {
         /// The current balance of the withdrawal account.
-        balance: u64,
+        balance: Lamport,
     },
     /// The minter is not approved to transfer the requested amount.
     InsufficientAllowance {
         /// The current allowance for the minter.
-        allowance: u64,
+        allowance: Lamport,
     },
     /// There are too many concurrent requests, retry later.
     TemporarilyUnavailable(String),
 }
 
-/// Idetifier for a Solana transaction.
-#[derive(Clone, Eq, PartialEq, Hash, Debug, CandidType, Deserialize)]
+/// Identifier for a Solana transaction.
+#[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize)]
 pub struct SolTransaction {
-    /// The transaction hash of the Solana transaction.
-    pub transaction_hash: String,
+    /// The unique identifier (signature) of the Solana transaction.
+    pub transaction_id: Signature,
 }
 
 /// Status of a finalized transaction.
-#[derive(Clone, Eq, PartialEq, Hash, Debug, CandidType, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize)]
 pub enum TxFinalizedStatus {
     /// The transaction was successful.
     Success {
-        /// The Solana transaction hash.
-        transaction_hash: String,
+        /// The unique identifier (signature) of the Solana transaction.
+        transaction_id: Signature,
         /// The fee that was payed by the user.
         effective_transaction_fee: Option<Nat>,
     },
     /// The transaction failed.
     Failure {
-        /// The Solana transaction hash.
-        transaction_hash: String,
+        /// The unique identifier (signature) of the Solana transaction.
+        transaction_id: Signature,
     },
 }
 
 /// Status of a withdrawal request.
-#[derive(Clone, Eq, PartialEq, Hash, Debug, CandidType, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize)]
 pub enum WithdrawalStatus {
     /// Withdrawal request is not found.
     NotFound,
