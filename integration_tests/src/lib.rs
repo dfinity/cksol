@@ -211,6 +211,10 @@ impl Setup {
             env
         };
 
+        // Tick once so the initialization timer fires and the minter fetches its
+        // Schnorr master key, making get_deposit_address available as a query.
+        env.tick().await;
+
         Self {
             env: Some(env),
             minter_canister_id,

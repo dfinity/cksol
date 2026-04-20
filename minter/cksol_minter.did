@@ -443,9 +443,6 @@ type GetEventsResult = record {
 service : (MinterArg) -> {
     // Returns the Solana address to which the owner should send SOL.
     //
-    // This is a query call. It traps if the minter's Schnorr master key has not
-    // yet been initialized (which happens automatically at canister startup).
-    //
     // If the owner is not set, it defaults to the caller's principal.
     // The resolved owner must be a non-anonymous principal.
     get_deposit_address: (GetDepositAddressArgs) -> (Address) query;
