@@ -13,7 +13,8 @@ mod tests;
 pub(crate) type DerivationPath = Vec<Vec<u8>>;
 
 /// Implementation of the `get_deposit_address` canister endpoint.
-/// Traps if the Schnorr master key has not yet been initialized.
+/// Because the endpoint is a query, it must be synchronous and cannot fetch the
+/// master key on demand — it traps if the key has not yet been initialized.
 pub fn get_deposit_address(account: &Account) -> Address {
     let master_key = read_state(|s| s.minter_public_key().cloned())
         .unwrap_or_else(|| ic_cdk::trap("master key not yet initialized"));
