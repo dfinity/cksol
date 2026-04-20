@@ -216,7 +216,7 @@ pub enum TxFinalizedStatus {
     Success {
         /// The unique identifier (signature) of the Solana transaction.
         transaction_id: Signature,
-        /// The fee that was payed by the user.
+        /// The fee that was paid by the user.
         effective_transaction_fee: Option<Nat>,
     },
     /// The transaction failed.
