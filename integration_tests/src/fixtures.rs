@@ -46,6 +46,13 @@ pub fn default_get_deposit_address_args() -> GetDepositAddressArgs {
     }
 }
 
+pub fn default_update_balance_args() -> cksol_types::UpdateBalanceArgs {
+    cksol_types::UpdateBalanceArgs {
+        owner: None,
+        subaccount: None,
+    }
+}
+
 pub fn default_process_deposit_args() -> ProcessDepositArgs {
     ProcessDepositArgs {
         owner: None,
@@ -98,7 +105,7 @@ pub struct MockBuilder {
 
 /// Number of Solana RPC providers used for redundancy.
 /// Each logical RPC call generates this many HTTP outcalls with consecutive IDs.
-const NUM_RPC_PROVIDERS: u64 = 4;
+pub const NUM_RPC_PROVIDERS: u64 = 4;
 
 impl Default for MockBuilder {
     fn default() -> Self {
@@ -197,6 +204,14 @@ impl MockBuilder {
                 send_transaction_request(),
                 send_transaction_response(tx_signature),
             )
+    }
+
+    /// Mock for `getSignaturesForAddress` returning the given list of signature objects.
+    pub fn get_signatures_for_address(self, signatures: Vec<serde_json::Value>) -> Self {
+        self.expect(
+            get_signatures_for_address_request(),
+            get_signatures_for_address_response(signatures),
+        )
     }
 }
 
@@ -357,6 +372,18 @@ fn send_transaction_response(signature: &str) -> JsonRpcResponse {
     JsonRpcResponse::from(json!({
         "jsonrpc": "2.0",
         "result": signature,
+        "id": 1
+    }))
+}
+
+fn get_signatures_for_address_request() -> JsonRpcRequestMatcher {
+    JsonRpcRequestMatcher::with_method("getSignaturesForAddress")
+}
+
+fn get_signatures_for_address_response(signatures: Vec<serde_json::Value>) -> JsonRpcResponse {
+    JsonRpcResponse::from(json!({
+        "jsonrpc": "2.0",
+        "result": signatures,
         "id": 1
     }))
 }

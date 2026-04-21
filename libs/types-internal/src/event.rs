@@ -7,7 +7,7 @@ use serde::Deserialize;
 use sol_rpc_types::{Lamport, Pubkey as Address, Signature, Slot};
 
 /// A minter event that can be serialized to Candid.
-#[derive(Clone, Debug, CandidType, Deserialize)]
+#[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]
 pub struct Event {
     /// The canister time at which the minter generated this event.
     pub timestamp: u64,
@@ -16,7 +16,7 @@ pub struct Event {
 }
 
 /// The type of a minter event.
-#[derive(Clone, Debug, CandidType, Deserialize)]
+#[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]
 pub enum EventType {
     /// The minter initialization event.
     /// Must be the first event in the log.
@@ -116,10 +116,15 @@ pub enum EventType {
         /// The account to monitor for incoming deposits.
         account: Account,
     },
+    /// The minter stopped monitoring an account for automated deposits.
+    StoppedMonitoringAccount {
+        /// The account that is no longer being monitored.
+        account: Account,
+    },
 }
 
 /// The purpose of a submitted Solana transaction.
-#[derive(Clone, Debug, CandidType, Deserialize)]
+#[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]
 pub enum TransactionPurpose {
     /// Consolidate deposited funds into the minter's main account.
     ConsolidateDeposits {
@@ -134,7 +139,7 @@ pub enum TransactionPurpose {
 }
 
 /// A versioned Solana transaction message.
-#[derive(Clone, Debug, CandidType, Deserialize)]
+#[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]
 pub enum VersionedTransactionMessage {
     /// A legacy Solana transaction message, serialized with bincode.
     Legacy(Vec<u8>),

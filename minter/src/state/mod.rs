@@ -252,6 +252,10 @@ impl State {
         self.monitored_accounts.insert(*account);
     }
 
+    pub(crate) fn process_stopped_monitoring_account(&mut self, account: &Account) {
+        self.monitored_accounts.remove(account);
+    }
+
     pub fn consolidation_transactions(
         &self,
     ) -> &InsertionOrderedMap<Signature, ConsolidationTransaction> {
@@ -836,6 +840,7 @@ pub enum TaskType {
     FinalizeTransactions,
     ResubmitTransactions,
     WithdrawalProcessing,
+    PollMonitoredAddresses,
 }
 
 /// Details about a consolidation transaction, capturing the individual
