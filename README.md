@@ -21,6 +21,7 @@ Each ckSOL is backed by exactly 1 SOL held by the ckSOL minter canister. ckSOL c
   - [Deposit: SOL → ckSOL](#deposit-sol--cksol)
   - [Withdrawal: ckSOL → SOL](#withdrawal-cksol--sol)
 - [Architecture](#architecture)
+- [Deployment](#deployment)
 - [Interacting via the CLI](#interacting-via-the-cli)
 - [Repository Structure](#repository-structure)
 - [Development](#development)
@@ -128,6 +129,23 @@ graph TD
 **ckSOL Ledger** — A standard [ICRC-1/ICRC-2](https://github.com/dfinity/ICRC-1) ledger canister. It tracks ckSOL balances and processes mints and burns as instructed by the minter.
 
 **SOL RPC Canister** — A shared infrastructure canister on the Internet Computer that relays Solana JSON-RPC calls to multiple providers via HTTPS outcalls and aggregates their responses. See the [SOL RPC canister repository](https://github.com/dfinity/sol-rpc-canister) for details.
+
+<a id="deployment"></a>
+## 🚀 Deployment
+
+### <img src="static/images/ckdevnetsol-token.svg" width="20" valign="middle"> ckDevnetSOL — 🧪 Staging (Solana Devnet)
+
+| Canister | Canister ID |
+|----------|-------------|
+| Minter | [`ljyxk-riaaa-aaaar-qb5mq-cai`](https://dashboard.internetcomputer.org/canister/ljyxk-riaaa-aaaar-qb5mq-cai) |
+| Ledger | [`la34w-haaaa-aaaar-qb5na-cai`](https://dashboard.internetcomputer.org/canister/la34w-haaaa-aaaar-qb5na-cai) |
+
+### <img src="static/images/cksol-token.svg" width="20" valign="middle"> ckSOL — 🚀 Production (Solana Mainnet)
+
+| Canister | Canister ID |
+|----------|-------------|
+| Minter | `lh22c-kyaaa-aaaar-qb5nq-cai` *(not yet deployed)* |
+| Ledger | `ls5lp-lqaaa-aaaar-qb5oa-cai` *(not yet deployed)* |
 
 <a id="interacting-via-the-cli"></a>
 ## 💻 Interacting via the CLI
