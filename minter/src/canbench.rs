@@ -15,11 +15,11 @@ use cksol_types_internal::{Ed25519KeyName, InitArgs, SolanaNetwork};
 use icrc_ledger_types::icrc1::account::Account;
 use solana_signature::Signature;
 
-const OFFSET_QUARANTINE: usize = 10_000;
-const OFFSET_WITHDRAWAL: usize = 20_000;
-const OFFSET_FAILED: usize = 30_000;
-const OFFSET_EXPIRED: usize = 40_000;
-const OFFSET_RESUBMIT: usize = 50_000;
+const INDEX_OFFSET_QUARANTINE: usize = 10_000;
+const INDEX_OFFSET_WITHDRAWAL: usize = 20_000;
+const INDEX_OFFSET_FAILED: usize = 30_000;
+const INDEX_OFFSET_EXPIRED: usize = 40_000;
+const INDEX_OFFSET_RESUBMIT: usize = 50_000;
 
 fn init_args() -> InitArgs {
     InitArgs {
@@ -142,7 +142,7 @@ fn setup_10k_events() {
     // Quarantined deposits: accept → quarantine
     // 200 × 2 = 400 events
     for i in 0..200 {
-        let id = deposit_id(OFFSET_QUARANTINE + i);
+        let id = deposit_id(INDEX_OFFSET_QUARANTINE + i);
 
         mutate_state(|s| {
             process_event(
@@ -161,7 +161,7 @@ fn setup_10k_events() {
     // Withdrawal cycles: accept withdrawal → submit withdrawal → succeed
     // 500 × 3 = 1500 events
     for i in 0..500 {
-        let sig = signature(OFFSET_WITHDRAWAL + i);
+        let sig = signature(INDEX_OFFSET_WITHDRAWAL + i);
         let burn_index = LedgerBurnIndex::from(i as u64);
 
         mutate_state(|s| {
@@ -204,9 +204,9 @@ fn setup_10k_events() {
     // Failed consolidation cycles: accept → mint → submit → fail
     // 500 × 4 = 2000 events
     for i in 0..500 {
-        let id = deposit_id(OFFSET_FAILED + i);
-        let sig = signature(OFFSET_FAILED + i);
-        let mint_index = LedgerMintIndex::from((OFFSET_FAILED + i) as u64);
+        let id = deposit_id(INDEX_OFFSET_FAILED + i);
+        let sig = signature(INDEX_OFFSET_FAILED + i);
+        let mint_index = LedgerMintIndex::from((INDEX_OFFSET_FAILED + i) as u64);
 
         mutate_state(|s| {
             process_event(
@@ -252,10 +252,10 @@ fn setup_10k_events() {
     // Expired + resubmitted cycles: accept → mint → submit → expire → resubmit → succeed
     // 300 × 6 = 1800 events
     for i in 0..300 {
-        let id = deposit_id(OFFSET_EXPIRED + i);
-        let old_sig = signature(OFFSET_EXPIRED + i);
-        let new_sig = signature(OFFSET_RESUBMIT + i);
-        let mint_index = LedgerMintIndex::from((OFFSET_EXPIRED + i) as u64);
+        let id = deposit_id(INDEX_OFFSET_EXPIRED + i);
+        let old_sig = signature(INDEX_OFFSET_EXPIRED + i);
+        let new_sig = signature(INDEX_OFFSET_RESUBMIT + i);
+        let mint_index = LedgerMintIndex::from((INDEX_OFFSET_EXPIRED + i) as u64);
 
         mutate_state(|s| {
             process_event(
