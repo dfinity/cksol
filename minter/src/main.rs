@@ -22,6 +22,7 @@ use ic_metrics_encoder::MetricsEncoder;
 use icrc_ledger_types::icrc1::account::{Account, Subaccount};
 use std::{str::FromStr, time::Duration};
 
+#[cfg(not(feature = "canbench-rs"))]
 #[ic_cdk::init]
 fn init(args: MinterArg) {
     match args {
@@ -34,6 +35,12 @@ fn init(args: MinterArg) {
     }
     setup_timers();
 }
+
+// Benchmark functions handle their own state setup,
+// so the canister init is a no-op.
+#[cfg(feature = "canbench-rs")]
+#[ic_cdk::init]
+fn init() {}
 
 #[ic_cdk::post_upgrade]
 fn post_upgrade(args: Option<MinterArg>) {

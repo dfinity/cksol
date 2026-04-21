@@ -1,0 +1,2 @@
+build_cmd: "cargo build --locked --release --target wasm32-unknown-unknown --features canbench-rs"
+wasm_path: "../target/wasm32-unknown-unknown/release/cksol_minter.wasm"

@@ -339,6 +339,7 @@ pub mod events {
     }
 }
 
+#[cfg(test)]
 pub mod arb {
     use crate::{
         numeric::{LedgerBurnIndex, LedgerMintIndex},

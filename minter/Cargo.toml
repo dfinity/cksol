@@ -12,10 +12,14 @@ license.workspace = true
 name = "cksol_minter"
 path = "src/main.rs"
 
+[features]
+canbench-rs = ["dep:canbench-rs"]
+
 [dependencies]
 askama = { workspace = true }
 assert_matches = { workspace = true }
 bincode = { workspace = true }
+canbench-rs = { workspace = true, optional = true }
 candid = { workspace = true }
 canlog = { workspace = true, features = ["derive"] }
 cksol-types = { path = "../libs/types" }
