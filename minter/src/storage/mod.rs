@@ -26,7 +26,7 @@ thread_local! {
                   StableLog::init(
                       m.borrow().get(EVENT_LOG_INDEX_MEMORY_ID),
                       m.borrow().get(EVENT_LOG_DATA_MEMORY_ID)
-                  )
+                  ).expect("failed to initialize event log")
               )
         );
 

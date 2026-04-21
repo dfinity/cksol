@@ -206,10 +206,6 @@ impl Storable for Event {
         Cow::Owned(buf)
     }
 
-    fn into_bytes(self) -> Vec<u8> {
-        self.to_bytes().into_owned()
-    }
-
     fn from_bytes(bytes: Cow<[u8]>) -> Self {
         minicbor::decode(bytes.as_ref())
             .unwrap_or_else(|e| panic!("failed to decode event bytes {}: {e}", hex::encode(bytes)))
