@@ -127,12 +127,10 @@ graph TD
 
 ## Deployment
 
-| Environment | Canister | Canister ID |
-|-------------|----------|-------------|
-| 🧪 Staging | Minter | [`ljyxk-riaaa-aaaar-qb5mq-cai`](https://dashboard.internetcomputer.org/canister/ljyxk-riaaa-aaaar-qb5mq-cai) |
-| 🧪 Staging | Ledger | [`la34w-haaaa-aaaar-qb5na-cai`](https://dashboard.internetcomputer.org/canister/la34w-haaaa-aaaar-qb5na-cai) |
-| 🚀 Production | Minter | `lh22c-kyaaa-aaaar-qb5nq-cai` *(not yet deployed)* |
-| 🚀 Production | Ledger | `ls5lp-lqaaa-aaaar-qb5oa-cai` *(not yet deployed)* |
+| Token | Environment | Solana Cluster | Minter Canister ID | Ledger Canister ID |
+|-------|-------------|----------------|-------------------|-------------------|
+| <img src="static/images/ckdevnetsol-token.svg" width="20" valign="middle"> **ckDevnetSOL** | 🧪 Staging | Solana Devnet | [`ljyxk-riaaa-aaaar-qb5mq-cai`](https://dashboard.internetcomputer.org/canister/ljyxk-riaaa-aaaar-qb5mq-cai) | [`la34w-haaaa-aaaar-qb5na-cai`](https://dashboard.internetcomputer.org/canister/la34w-haaaa-aaaar-qb5na-cai) |
+| <img src="static/images/cksol-token.svg" width="20" valign="middle"> **ckSOL** | 🚀 Production | Solana Mainnet | `lh22c-kyaaa-aaaar-qb5nq-cai` *(not yet deployed)* | `ls5lp-lqaaa-aaaar-qb5oa-cai` *(not yet deployed)* |
 
 ## Interacting via the CLI
 
