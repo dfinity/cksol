@@ -45,6 +45,16 @@ impl TestCanisterRuntime {
         self
     }
 
+    pub fn add_times<I>(mut self, times: I) -> Self
+    where
+        I: IntoIterator<Item = u64>,
+    {
+        for time in times {
+            self.times = self.times.add(time);
+        }
+        self
+    }
+
     pub fn with_increasing_time(mut self) -> Self {
         self.times = (0..).into();
         self
