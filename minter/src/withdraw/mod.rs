@@ -224,7 +224,7 @@ async fn submit_withdrawal_transaction<R: CanisterRuntime>(
     });
 
     match submit_transaction(runtime, signed_tx).await {
-        Ok(()) => {
+        Ok(_) => {
             log!(
                 Priority::Info,
                 "Submitted withdrawal transaction {signature} for burn indices {:?}",
