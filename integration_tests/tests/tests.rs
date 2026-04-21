@@ -5,7 +5,7 @@ use cksol_int_tests::{
     CkSolMinter, Setup, SetupBuilder,
     fixtures::{
         DEFAULT_CALLER_ACCOUNT, DEFAULT_CALLER_DEPOSIT_ADDRESS, DEPOSIT_AMOUNT,
-        EXPECTED_MINT_AMOUNT, MockBuilder, NUM_RPC_PROVIDERS, SharedMockHttpOutcalls,
+        EXPECTED_MINT_AMOUNT, MockBuilder, SharedMockHttpOutcalls,
         default_get_deposit_address_args, default_process_deposit_args,
         default_update_balance_args, deposit_transaction_signature,
     },
