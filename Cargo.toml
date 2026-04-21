@@ -36,7 +36,7 @@ ic-management-canister-types = "0.5.0"
 ic-metrics-assert = { version = "0.4.0", features = ["pocket_ic"] }
 ic-metrics-encoder = "1.1.2"
 ic-pocket-canister-runtime = "0.4.2"
-ic-stable-structures = "0.7.2"
+ic-stable-structures = "0.6.9"
 ic-test-utilities-load-wasm = { git = "https://github.com/dfinity/ic", tag = "release-2026-01-29_23-28-base" }
 icrc-cbor = "0.1.0"
 icrc-ledger-client-cdk = "0.1.4"

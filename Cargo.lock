@@ -931,7 +931,7 @@ dependencies = [
  "ic-ed25519",
  "ic-http-types",
  "ic-metrics-encoder",
- "ic-stable-structures 0.7.2",
+ "ic-stable-structures",
  "icrc-cbor",
  "icrc-ledger-types",
  "itertools 0.14.0",
@@ -2492,15 +2492,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ic-stable-structures"
-version = "0.7.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8ee3372ddc0cf2a747fc26ce2d075a240ed6bfab151e63bc70109e8967f7ce6f"
-dependencies = [
- "ic_principal",
-]
-
-[[package]]
 name = "ic-test-utilities-load-wasm"
 version = "0.9.0"
 source = "git+https://github.com/dfinity/ic?tag=release-2026-01-29_23-28-base#6f1ce3bb4c253f1bc4c5f432c7c47b06dccdba7e"
@@ -2569,7 +2560,7 @@ dependencies = [
  "candid",
  "crc32fast",
  "hex",
- "ic-stable-structures 0.6.9",
+ "ic-stable-structures",
  "icrc-cbor",
  "itertools 0.12.1",
  "minicbor",
