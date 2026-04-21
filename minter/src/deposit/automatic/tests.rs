@@ -1,7 +1,8 @@
 use super::*;
 use crate::{
     constants::MAX_CONCURRENT_RPC_CALLS,
-    state::{event::EventType, read_state},
+    state::{event::EventType, read_state, reset_state},
+    storage::{reset_automatic_deposit_cache, reset_events, with_automatic_deposit_cache},
     test_fixtures::{
         EventsAssert, account, events::start_monitoring_account, init_schnorr_master_key,
         init_state, runtime::TestCanisterRuntime,
@@ -9,10 +10,25 @@ use crate::{
 };
 use sol_rpc_types::{ConfirmedTransactionStatusWithSignature, MultiRpcResult};
 
+const ONE_MIN_NS: u64 = Duration::from_mins(1).as_nanos() as u64;
+
 type SignaturesResult = MultiRpcResult<Vec<ConfirmedTransactionStatusWithSignature>>;
+
+fn empty_signatures_response() -> SignaturesResult {
+    MultiRpcResult::Consistent(Ok(vec![]))
+}
 
 fn monitored_accounts_count() -> usize {
     read_state(|s| s.monitored_accounts().len())
+}
+
+fn cache_entry(account: Account) -> Option<(Option<u64>, AutomaticDepositCacheEntry)> {
+    with_automatic_deposit_cache(|cache| {
+        cache.get_with_index(&account).map(|(t, entry)| {
+            let next_poll_at = if t == u64::MAX { None } else { Some(t) };
+            (next_poll_at, entry)
+        })
+    })
 }
 
 fn start_monitoring_max_number_of_accounts() {
@@ -34,6 +50,7 @@ mod update_balance {
 
         assert!(read_state(|s| s.monitored_accounts().contains(&account(1))));
         assert_eq!(monitored_accounts_count(), 1);
+        assert!(cache_entry(account(1)).is_some());
 
         EventsAssert::from_recorded()
             .expect_event_eq(EventType::StartedMonitoringAccount {
@@ -95,43 +112,77 @@ mod poll_monitored_addresses {
     async fn should_poll_monitored_addresses_in_rounds() {
         setup();
 
-        // Add MAX_CONCURRENT_RPC_CALLS + 1 accounts to monitor so that 2 rounds are needed.
+        // Seed MAX_CONCURRENT_RPC_CALLS + 1 accounts, all due immediately.
         let num_accounts = MAX_CONCURRENT_RPC_CALLS + 1;
         for i in 0..num_accounts {
             start_monitoring_account(account(i));
+            with_automatic_deposit_cache_mut(|cache| {
+                cache.insert(account(i), 0, AutomaticDepositCacheEntry::default());
+            });
         }
         assert_eq!(monitored_accounts_count(), num_accounts);
 
-        // Round 1: polls MAX_CONCURRENT_RPC_CALLS accounts, 1 remains → reschedule.
+        // Round 1: processes MAX_CONCURRENT_RPC_CALLS accounts (rescheduled into the future),
+        // detects 1 more remaining → sets timer.
         let mut runtime = TestCanisterRuntime::new().with_increasing_time();
         for _ in 0..MAX_CONCURRENT_RPC_CALLS {
-            runtime = runtime.add_stub_response(SignaturesResult::Consistent(Ok(vec![])));
+            runtime = runtime.add_stub_response(empty_signatures_response());
         }
         poll_monitored_addresses(runtime.clone()).await;
 
-        assert_eq!(monitored_accounts_count(), 1);
+        // Accounts are rescheduled (not removed), so count stays the same.
+        assert_eq!(monitored_accounts_count(), num_accounts);
         assert_eq!(runtime.set_timer_call_count(), 1);
 
-        // Round 2: polls the remaining 1 account → no reschedule, queue empty.
+        // Round 2: only the 1 unprocessed account is due → processes it, no set_timer.
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
-            .add_stub_response(SignaturesResult::Consistent(Ok(vec![])));
+            .add_stub_response(empty_signatures_response());
         poll_monitored_addresses(runtime.clone()).await;
 
-        assert_eq!(monitored_accounts_count(), 0);
+        assert_eq!(monitored_accounts_count(), num_accounts);
         assert_eq!(runtime.set_timer_call_count(), 0);
+    }
 
-        // Verify StoppedMonitoringAccount was emitted for each account.
-        let mut events_assert = EventsAssert::from_recorded();
-        for i in 0..num_accounts {
-            events_assert =
-                events_assert.expect_contains_event_eq(EventType::StoppedMonitoringAccount {
-                    account: account(i),
-                });
+    #[tokio::test]
+    async fn should_poll_signatures_for_address_with_exponential_backoff() {
+        setup();
+        let t0 = 0u64;
+
+        let account = account(1);
+        let runtime = TestCanisterRuntime::new().add_times([t0, t0, t0]);
+        update_balance(&runtime, account).unwrap();
+
+        let mut next_poll_at = t0;
+
+        for i in 0u8..MAX_GET_SIGNATURES_FOR_ADDRESS_CALLS {
+            next_poll_at += ONE_MIN_NS << i;
+
+            EventsAssert::from_recorded()
+                .expect_event_eq(EventType::StartedMonitoringAccount { account })
+                .assert_no_more_events();
+
+            // Just before next scheduled time: no JSON-RPC calls
+            let runtime = TestCanisterRuntime::new().add_times([next_poll_at - 1]);
+            poll_monitored_addresses(runtime).await;
+
+            // Next scheduled time: one `getSignaturesForAddress` call
+            let runtime = TestCanisterRuntime::new()
+                .add_times([next_poll_at; 3])
+                .add_stub_response(empty_signatures_response());
+            poll_monitored_addresses(runtime).await;
         }
+
+        EventsAssert::from_recorded()
+            .expect_event_eq(EventType::StartedMonitoringAccount { account })
+            .expect_event_eq(EventType::StoppedMonitoringAccount { account })
+            .assert_no_more_events();
     }
 
     fn setup() {
+        reset_state();
+        reset_events();
+        reset_automatic_deposit_cache();
         init_state();
         init_schnorr_master_key();
     }

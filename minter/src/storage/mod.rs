@@ -1,4 +1,5 @@
 use crate::{
+    deposit::automatic::cache::AutomaticDepositCache,
     runtime::CanisterRuntime,
     state::event::{Event, EventType},
 };
@@ -10,6 +11,8 @@ use std::cell::RefCell;
 
 const EVENT_LOG_INDEX_MEMORY_ID: MemoryId = MemoryId::new(0);
 const EVENT_LOG_DATA_MEMORY_ID: MemoryId = MemoryId::new(1);
+const AUTOMATIC_DEPOSIT_CACHE_BY_ACCOUNT_MEMORY_ID: MemoryId = MemoryId::new(2);
+const AUTOMATIC_DEPOSIT_CACHE_BY_POLL_TIME_MEMORY_ID: MemoryId = MemoryId::new(3);
 
 type VMem = VirtualMemory<DefaultMemoryImpl>;
 type EventLog = StableLog<Event, VMem, VMem>;
@@ -30,6 +33,14 @@ thread_local! {
               )
         );
 
+    /// Stable-memory cache for per-account automated deposit discovery state.
+    static AUTOMATIC_DEPOSIT_CACHE: RefCell<AutomaticDepositCache> = MEMORY_MANAGER.with(|m| {
+        RefCell::new(AutomaticDepositCache::init(
+            m.borrow().get(AUTOMATIC_DEPOSIT_CACHE_BY_ACCOUNT_MEMORY_ID),
+            m.borrow().get(AUTOMATIC_DEPOSIT_CACHE_BY_POLL_TIME_MEMORY_ID),
+        ))
+    });
+
     static UNSTABLE_METRICS: RefCell<Metrics> = const { RefCell::new(Metrics::new()) };
 }
 
@@ -44,6 +55,20 @@ impl Metrics {
             post_upgrade_instructions_consumed: 0,
         }
     }
+}
+
+pub fn with_automatic_deposit_cache<F, R>(f: F) -> R
+where
+    F: FnOnce(&AutomaticDepositCache) -> R,
+{
+    AUTOMATIC_DEPOSIT_CACHE.with(|c| f(&c.borrow()))
+}
+
+pub fn with_automatic_deposit_cache_mut<F, R>(f: F) -> R
+where
+    F: FnOnce(&mut AutomaticDepositCache) -> R,
+{
+    AUTOMATIC_DEPOSIT_CACHE.with(|c| f(&mut c.borrow_mut()))
 }
 
 /// Appends the event to the event log.
@@ -91,6 +116,19 @@ pub(crate) fn reset_events() {
             *events.borrow_mut() = StableLog::new(
                 m.borrow().get(EVENT_LOG_INDEX_MEMORY_ID),
                 m.borrow().get(EVENT_LOG_DATA_MEMORY_ID),
+            );
+        });
+    });
+}
+
+#[cfg(test)]
+pub fn reset_automatic_deposit_cache() {
+    MEMORY_MANAGER.with(|m| {
+        AUTOMATIC_DEPOSIT_CACHE.with(|cache| {
+            *cache.borrow_mut() = AutomaticDepositCache::new(
+                m.borrow().get(AUTOMATIC_DEPOSIT_CACHE_BY_ACCOUNT_MEMORY_ID),
+                m.borrow()
+                    .get(AUTOMATIC_DEPOSIT_CACHE_BY_POLL_TIME_MEMORY_ID),
             );
         });
     });

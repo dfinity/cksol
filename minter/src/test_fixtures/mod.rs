@@ -597,6 +597,15 @@ pub mod arb {
         (any::<u64>(), arb_event_type())
             .prop_map(|(timestamp, payload)| Event { timestamp, payload })
     }
+
+    pub fn arb_cache_entry()
+    -> impl Strategy<Value = crate::deposit::automatic::cache::AutomaticDepositCacheEntry> {
+        any::<u8>().prop_map(|get_signatures_calls| {
+            crate::deposit::automatic::cache::AutomaticDepositCacheEntry {
+                get_signatures_calls,
+            }
+        })
+    }
 }
 
 pub mod deposit {
