@@ -549,11 +549,15 @@ mod withdrawal_tests {
 
         let initial_balance = 10 * WITHDRAWAL_AMOUNT;
 
+        // The proxy canister is required so that the two concurrent `withdraw` calls are
+        // inter-canister calls. This allows them to genuinely interleave in PocketIC at the yield
+        // point (the ledger burn), so the second call sees the AlreadyProcessing guard.
         let setup = SetupBuilder::new()
             .with_initial_ledger_balances(vec![(
                 DEFAULT_CALLER_ACCOUNT,
                 Nat::from(initial_balance),
             )])
+            .with_proxy_canister()
             .build()
             .await;
 
