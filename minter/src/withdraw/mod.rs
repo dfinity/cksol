@@ -207,7 +207,7 @@ async fn submit_withdrawal_transaction<R: CanisterRuntime>(
 
     let signature = signed_tx.signatures[0];
     let message = VersionedMessage::Legacy(signed_tx.message.clone());
-    let burn_indices = requests.iter().map(|r| r.burn_block_index).collect();
+    let burn_indices: Vec<_> = requests.iter().map(|r| r.burn_block_index).collect();
 
     mutate_state(|state| {
         process_event(
@@ -217,7 +217,9 @@ async fn submit_withdrawal_transaction<R: CanisterRuntime>(
                 message,
                 signers,
                 slot,
-                purpose: TransactionPurpose::WithdrawSol { burn_indices },
+                purpose: TransactionPurpose::WithdrawSol {
+                    burn_indices: burn_indices.clone(),
+                },
             },
             runtime,
         )
@@ -227,11 +229,7 @@ async fn submit_withdrawal_transaction<R: CanisterRuntime>(
         Ok(_) => {
             log!(
                 Priority::Info,
-                "Submitted withdrawal transaction {signature} for burn indices {:?}",
-                requests
-                    .iter()
-                    .map(|r| r.burn_block_index)
-                    .collect::<Vec<_>>()
+                "Submitted withdrawal transaction {signature} for burn indices {burn_indices:?}"
             );
         }
         Err(e) => {
