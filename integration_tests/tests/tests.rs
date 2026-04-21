@@ -31,6 +31,12 @@ const FINALIZE_TRANSACTIONS_DELAY: Duration = Duration::from_mins(2);
 const RESUBMIT_TRANSACTIONS_DELAY: Duration = Duration::from_mins(3);
 const DEPOSIT_CONSOLIDATION_DELAY: Duration = Duration::from_mins(10);
 
+/// Must match `MAX_BLOCKHASH_AGE` in the minter's monitor module.
+const MAX_BLOCKHASH_AGE: Slot = 150;
+/// The SOL RPC canister rounds the slot returned by getSlot down to the nearest multiple
+/// of this value before querying getBlock and returning the slot to callers.
+const SOL_RPC_SLOT_ROUNDING: u64 = 20;
+
 /// Deposits funds into the minter via `process_deposit`, consolidates them,
 /// and finalizes the consolidation so the minter's internal balance is credited.
 ///
@@ -261,11 +267,6 @@ mod withdrawal_tests {
     use solana_address::Address;
 
     use super::*;
-
-    const MAX_BLOCKHASH_AGE: Slot = 150;
-    /// The SOL RPC canister rounds the slot returned by getSlot down to the nearest multiple
-    /// of this value before querying getBlock and returning the slot to callers.
-    const SOL_RPC_SLOT_ROUNDING: u64 = 20;
 
     #[tokio::test]
     async fn should_validate_solana_address() {
@@ -1141,6 +1142,8 @@ mod anonymous_caller_tests {
 mod consolidation_tests {
     use super::*;
 
+    const INITIAL_SLOT: Slot = 100_000_000;
+
     #[tokio::test]
     async fn should_consolidate_deposits_after_timer() {
         let setup = SetupBuilder::new().with_proxy_canister().build().await;
@@ -1172,13 +1175,88 @@ mod consolidation_tests {
         setup.drop().await;
     }
 
+    #[tokio::test]
+    async fn should_resubmit_expired_consolidation_transaction() {
+        let setup = SetupBuilder::new().with_proxy_canister().build().await;
+
+        let result = setup
+            .minter()
+            .with_http_mocks(MockBuilder::new().get_deposit_transaction().build())
+            .process_deposit(default_process_deposit_args())
+            .await;
+        let mint_block_index =
+            assert_matches!(result, Ok(DepositStatus::Minted { block_index, .. }) => block_index);
+
+        // Advance time past the consolidation delay to trigger the timer
+        setup.advance_time(DEPOSIT_CONSOLIDATION_DELAY).await;
+        setup
+            .execute_http_mocks(http_mocks_for_deposit_consolidation())
+            .await;
+
+        setup.minter().assert_that_events().await.satisfy(|events| {
+            check!(events.iter().any(|e| matches!(
+                e,
+                EventType::SubmittedTransaction {
+                    purpose: TransactionPurpose::ConsolidateDeposits { mint_indices },
+                    ..
+                } if mint_indices == &[mint_block_index]
+            )));
+        });
+
+        // Advance time to trigger finalize_transactions. The mocked slot exceeds
+        // INITIAL_SLOT + MAX_BLOCKHASH_AGE + SOL_RPC_SLOT_ROUNDING, so the
+        // consolidation transaction is considered expired.
+        let resubmission_slot = INITIAL_SLOT + MAX_BLOCKHASH_AGE + SOL_RPC_SLOT_ROUNDING + 1;
+        setup.advance_time(FINALIZE_TRANSACTIONS_DELAY).await;
+        setup
+            .execute_http_mocks(mark_expired_consolidation_http_mocks(resubmission_slot))
+            .await;
+
+        // Advance time to trigger resubmit_transactions
+        setup.advance_time(RESUBMIT_TRANSACTIONS_DELAY).await;
+        setup
+            .execute_http_mocks(resubmit_consolidation_http_mocks(resubmission_slot))
+            .await;
+
+        setup.minter().assert_that_events().await.satisfy(|events| {
+            check!(events.iter().any(|e| matches!(
+                e,
+                // new_slot must be past the original blockhash expiry threshold,
+                // confirming the resubmitted transaction uses a fresh blockhash.
+                EventType::ResubmittedTransaction { new_slot, .. }
+                    if *new_slot >= INITIAL_SLOT + MAX_BLOCKHASH_AGE
+            )));
+        });
+
+        setup.drop().await;
+    }
+
     // Returns the required HTTP outcall mocks for executing the deposit consolidation task
     fn http_mocks_for_deposit_consolidation() -> MockHttpOutcalls {
         MockBuilder::with_start_id(4)
             .submit_transaction(
-                100_000_000,
+                INITIAL_SLOT,
                 "4sGjMW1sUnHzSxGspuhpqLDx6wiyjNtZAMdL4VZHirAn",
                 "5VERv8NMvzbJMEkV8xnrLkEaWRtSz9CosKDYjCJjBRnbJLgp8uirBgmQpjKhoR4tjF3ZpRzrFmBV6UjKdiSZkQUW",
+            )
+            .build()
+    }
+
+    /// HTTP mocks for finalize_transactions detecting an expired consolidation transaction.
+    fn mark_expired_consolidation_http_mocks(current_slot: Slot) -> MockHttpOutcalls {
+        MockBuilder::with_start_id(16)
+            .get_current_slot(current_slot, "9ZNTfG4NyQgxy2SWjSiQoUyBPEvXT2xo7fKc5hPYYJ7b")
+            .check_signature_statuses_not_found(1)
+            .build()
+    }
+
+    /// HTTP mocks for resubmit_transactions sending the replacement consolidation transaction.
+    fn resubmit_consolidation_http_mocks(current_slot: Slot) -> MockHttpOutcalls {
+        MockBuilder::with_start_id(28)
+            .submit_transaction(
+                current_slot,
+                "9ZNTfG4NyQgxy2SWjSiQoUyBPEvXT2xo7fKc5hPYYJ7b",
+                "2gQDVht4vqs8FeKnbGCtXjCXjbTwRnKJNzuYfDFXhkWBn5MhZKXaKMDJSzaq4G7FnNmah7SWj4TX2mB3bo7NQGnm",
             )
             .build()
     }
