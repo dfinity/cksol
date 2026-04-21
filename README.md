@@ -28,7 +28,8 @@ Each ckSOL is backed by exactly 1 SOL held by the ckSOL minter canister. ckSOL c
 - [Contributing](#contributing)
 - [License](#license)
 
-## How It Works
+<a id="how-it-works"></a>
+## ⚙️ How It Works
 
 The ckSOL minter canister is the core component of the system. It manages the conversion between SOL and ckSOL, maintains custody of the SOL backing all outstanding ckSOL tokens, and interacts with the Solana blockchain via the [SOL RPC canister](https://github.com/dfinity/sol-rpc-canister).
 
@@ -103,7 +104,8 @@ sequenceDiagram
     Minter-->>User: TxFinalized(Success)
 ```
 
-## Architecture
+<a id="architecture"></a>
+## 🏗️ Architecture
 
 ```mermaid
 graph TD
@@ -124,7 +126,8 @@ graph TD
 
 **SOL RPC Canister** — A shared infrastructure canister on the Internet Computer that relays Solana JSON-RPC calls to multiple providers via HTTPS outcalls and aggregates their responses. See the [SOL RPC canister repository](https://github.com/dfinity/sol-rpc-canister) for details.
 
-## Interacting via the CLI
+<a id="interacting-via-the-cli"></a>
+## 💻 Interacting via the CLI
 
 You can interact with the ckSOL minter using [`icp-cli`](https://github.com/dfinity/icp-cli). Pass `-e prod` (or `-e staging`) to target the corresponding environment defined in `icp.yaml`.
 
@@ -187,7 +190,8 @@ icp canister call -e prod cksol_minter withdrawal_status \
   '(record { block_index = 42 })'
 ```
 
-## Repository Structure
+<a id="repository-structure"></a>
+## 📁 Repository Structure
 
 ```
 .
@@ -213,7 +217,8 @@ icp canister call -e prod cksol_minter withdrawal_status \
     └── bootstrap            # Install build dependencies
 ```
 
-## Development
+<a id="development"></a>
+## 🛠️ Development
 
 ### Prerequisites
 
@@ -265,17 +270,20 @@ cargo test -p cksol-int-tests --test solana_test_validator
 > [!CAUTION]
 > Running `cargo test` without arguments will attempt all tests, including the Solana validator suite, and will fail if no validator is running.
 
-## Related Projects
+<a id="related-projects"></a>
+## 🔗 Related Projects
 
 - [SOL RPC Canister](https://github.com/dfinity/sol-rpc-canister) — Solana JSON-RPC access from the Internet Computer.
 - [ckETH](https://github.com/dfinity/ic/tree/master/rs/ethereum/cketh) — Chain-key Ethereum token, which ckSOL is modeled after.
 - [ckBTC](https://github.com/dfinity/ic/tree/master/rs/bitcoin/ckbtc) — Chain-key Bitcoin token.
 - [ICRC-1 Ledger](https://github.com/dfinity/ICRC-1) — The token standard used by the ckSOL ledger.
 
-## Contributing
+<a id="contributing"></a>
+## 🤝 Contributing
 
 At this point we do not accept external contributions yet. External contributions will be accepted after the initial release.
 
-## License
+<a id="license"></a>
+## 📄 License
 
 This project is licensed under the [Apache License 2.0](LICENSE).
