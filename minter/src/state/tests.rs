@@ -393,7 +393,7 @@ mod state_upgrade {
                 minimum_deposit_amount: Some(new_minimum_deposit_amount),
                 ..Default::default()
             }),
-            &TestCanisterRuntime::new().with_time(0).with_time(0),
+            &TestCanisterRuntime::new().with_times([0, 0]),
         );
     }
 }
@@ -436,7 +436,7 @@ fn should_track_balance_through_deposits_withdrawals_and_failures() {
                     slot: 0,
                     purpose,
                 },
-                &TestCanisterRuntime::new().with_time(0).with_time(0),
+                &TestCanisterRuntime::new().with_times([0, 0]),
             )
         });
     }
