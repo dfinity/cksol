@@ -3,6 +3,7 @@ use canlog::{Log, Sort};
 use cksol_minter::{
     address::lazy_get_schnorr_master_key,
     consolidate::{DEPOSIT_CONSOLIDATION_DELAY, consolidate_deposits},
+    deposit::automatic::{POLL_MONITORED_ADDRESSES_DELAY, poll_monitored_addresses},
     monitor::{
         FINALIZE_TRANSACTIONS_DELAY, RESUBMIT_TRANSACTIONS_DELAY, finalize_transactions,
         resubmit_transactions,
@@ -22,6 +23,7 @@ use ic_metrics_encoder::MetricsEncoder;
 use icrc_ledger_types::icrc1::account::{Account, Subaccount};
 use std::{str::FromStr, time::Duration};
 
+#[cfg(not(feature = "canbench-rs"))]
 #[ic_cdk::init]
 fn init(args: MinterArg) {
     match args {
@@ -34,6 +36,12 @@ fn init(args: MinterArg) {
     }
     setup_timers();
 }
+
+// Benchmark functions handle their own state setup,
+// so the canister init is a no-op.
+#[cfg(feature = "canbench-rs")]
+#[ic_cdk::init]
+fn init() {}
 
 #[ic_cdk::post_upgrade]
 fn post_upgrade(args: Option<MinterArg>) {
@@ -200,6 +208,9 @@ fn get_events(
             EventType::StartedMonitoringAccount { account } => {
                 event::EventType::StartedMonitoringAccount { account }
             }
+            EventType::StoppedMonitoringAccount { account } => {
+                event::EventType::StoppedMonitoringAccount { account }
+            }
         }
     }
 
@@ -355,6 +366,9 @@ fn setup_timers() {
     });
     ic_cdk_timers::set_timer_interval(RESUBMIT_TRANSACTIONS_DELAY, async || {
         resubmit_transactions(IcCanisterRuntime::new()).await;
+    });
+    ic_cdk_timers::set_timer_interval(POLL_MONITORED_ADDRESSES_DELAY, async || {
+        poll_monitored_addresses(IcCanisterRuntime::new()).await;
     });
 }
 

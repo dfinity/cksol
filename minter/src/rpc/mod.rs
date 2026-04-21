@@ -6,7 +6,10 @@ use crate::{
 use cksol_types::ProcessDepositError;
 use derive_more::From;
 use ic_canister_runtime::IcError;
-use sol_rpc_types::{CommitmentLevel, GetTransactionEncoding, MultiRpcResult, RpcError, Slot};
+use sol_rpc_types::{
+    CommitmentLevel, ConfirmedTransactionStatusWithSignature, GetSignaturesForAddressParams,
+    GetTransactionEncoding, MultiRpcResult, RpcError, Slot,
+};
 use solana_hash::Hash;
 use solana_signature::Signature;
 use solana_transaction::Transaction;
@@ -131,5 +134,30 @@ pub enum GetSignatureStatusesError {
     #[error("RPC error while fetching signature statuses: {0}")]
     RpcError(RpcError),
     #[error("Inconsistent RPC results for getSignatureStatuses")]
+    InconsistentRpcResults,
+}
+
+pub async fn get_signatures_for_address<R: CanisterRuntime>(
+    runtime: &R,
+    params: GetSignaturesForAddressParams,
+) -> Result<Vec<ConfirmedTransactionStatusWithSignature>, GetSignaturesForAddressError> {
+    let client = read_state(|state| state.sol_rpc_client(runtime.inter_canister_call_runtime()));
+    let result = client.get_signatures_for_address(params).try_send().await;
+    match result? {
+        MultiRpcResult::Consistent(Ok(signatures)) => Ok(signatures),
+        MultiRpcResult::Consistent(Err(e)) => Err(GetSignaturesForAddressError::RpcError(e)),
+        MultiRpcResult::Inconsistent(_) => {
+            Err(GetSignaturesForAddressError::InconsistentRpcResults)
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Error)]
+pub enum GetSignaturesForAddressError {
+    #[error("Error while calling SOL RPC canister: {0}")]
+    IcError(#[from] IcError),
+    #[error("RPC error while fetching signatures for address: {0}")]
+    RpcError(RpcError),
+    #[error("Inconsistent RPC results for getSignaturesForAddress")]
     InconsistentRpcResults,
 }

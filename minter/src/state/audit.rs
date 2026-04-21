@@ -69,6 +69,9 @@ fn apply_state_transition(state: &mut State, payload: &EventType, timestamp: u64
         EventType::StartedMonitoringAccount { account } => {
             state.process_started_monitoring_account(account);
         }
+        EventType::StoppedMonitoringAccount { account } => {
+            state.process_stopped_monitoring_account(account);
+        }
     }
 }
 

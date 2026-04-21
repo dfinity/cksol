@@ -43,7 +43,7 @@ pub fn init_once_state(state: State) {
     });
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "canbench-rs"))]
 pub fn reset_state() {
     STATE.with(|s| {
         *s.borrow_mut() = None;
@@ -250,6 +250,10 @@ impl State {
 
     pub(crate) fn process_started_monitoring_account(&mut self, account: &Account) {
         self.monitored_accounts.insert(*account);
+    }
+
+    pub(crate) fn process_stopped_monitoring_account(&mut self, account: &Account) {
+        self.monitored_accounts.remove(account);
     }
 
     pub fn consolidation_transactions(
@@ -836,6 +840,7 @@ pub enum TaskType {
     FinalizeTransactions,
     ResubmitTransactions,
     WithdrawalProcessing,
+    PollMonitoredAddresses,
 }
 
 /// Details about a consolidation transaction, capturing the individual

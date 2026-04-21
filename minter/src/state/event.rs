@@ -135,6 +135,13 @@ pub enum EventType {
         #[n(0)]
         account: Account,
     },
+    /// The minter stopped monitoring an account for automated deposits.
+    #[n(12)]
+    StoppedMonitoringAccount {
+        /// The account that is no longer being monitored.
+        #[n(0)]
+        account: Account,
+    },
 }
 
 /// Payload of the `AcceptedWithdrawalRequest` event.

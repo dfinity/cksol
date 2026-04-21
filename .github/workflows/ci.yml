@@ -74,6 +74,18 @@ jobs:
       - name: 'Run unit tests'
         run: cargo test --locked --workspace --exclude cksol-int-tests
 
+  benchmarks:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 'Checkout'
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: 'Install canbench'
+        run: cargo install canbench --version 0.4.1 --locked
+
+      - name: 'Run benchmarks'
+        run: cd minter && canbench --less-verbose
+
   integration-tests:
     needs: [ reproducible-build ]
     runs-on: ubuntu-22.04

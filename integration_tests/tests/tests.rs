@@ -5,8 +5,9 @@ use cksol_int_tests::{
     CkSolMinter, Setup, SetupBuilder,
     fixtures::{
         DEFAULT_CALLER_ACCOUNT, DEFAULT_CALLER_DEPOSIT_ADDRESS, DEPOSIT_AMOUNT,
-        EXPECTED_MINT_AMOUNT, MockBuilder, SharedMockHttpOutcalls, default_process_deposit_args,
-        deposit_transaction_signature,
+        EXPECTED_MINT_AMOUNT, MockBuilder, SharedMockHttpOutcalls,
+        default_get_deposit_address_args, default_process_deposit_args,
+        default_update_balance_args, deposit_transaction_signature,
     },
 };
 use cksol_types::{
@@ -30,6 +31,7 @@ const WITHDRAWAL_PROCESSING_DELAY: Duration = Duration::from_mins(1);
 const FINALIZE_TRANSACTIONS_DELAY: Duration = Duration::from_mins(2);
 const RESUBMIT_TRANSACTIONS_DELAY: Duration = Duration::from_mins(3);
 const DEPOSIT_CONSOLIDATION_DELAY: Duration = Duration::from_mins(10);
+const POLL_MONITORED_ADDRESSES_DELAY: Duration = Duration::from_mins(1);
 
 /// Deposits funds into the minter via `process_deposit`, consolidates them,
 /// and finalizes the consolidation so the minter's internal balance is credited.
@@ -1286,5 +1288,56 @@ mod metrics_tests {
             .into()
             .drop()
             .await;
+    }
+}
+
+mod automated_deposit_flow_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn should_poll_monitored_address() {
+        let setup = SetupBuilder::new().build().await;
+        let minter = setup.minter();
+
+        // Initialize the minter public key and register the account for monitoring.
+        assert_eq!(
+            minter
+                .get_deposit_address(default_get_deposit_address_args())
+                .await
+                .to_string(),
+            DEFAULT_CALLER_DEPOSIT_ADDRESS
+        );
+        minter
+            .update_balance(default_update_balance_args())
+            .await
+            .expect("update_balance should succeed");
+
+        minter.assert_that_events().await.satisfy(|events| {
+            check!(events.iter().any(|e| {
+                e == &EventType::StartedMonitoringAccount {
+                    account: DEFAULT_CALLER_ACCOUNT,
+                }
+            }));
+        });
+
+        // Advance time: the minter should poll getSignaturesForAddress once, then remove the account.
+        setup.advance_time(POLL_MONITORED_ADDRESSES_DELAY).await;
+        setup
+            .execute_http_mocks(
+                MockBuilder::with_start_id(0)
+                    .get_signatures_for_address(vec![])
+                    .build(),
+            )
+            .await;
+
+        minter.assert_that_events().await.satisfy(|events| {
+            check!(events.iter().any(|e| {
+                e == &EventType::StoppedMonitoringAccount {
+                    account: DEFAULT_CALLER_ACCOUNT,
+                }
+            }));
+        });
+
+        setup.drop().await;
     }
 }
