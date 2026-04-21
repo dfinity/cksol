@@ -1,6 +1,11 @@
 [![Internet Computer portal](https://img.shields.io/badge/InternetComputer-grey?logo=internet%20computer&style=for-the-badge)](https://internetcomputer.org)
 [![GitHub license](https://img.shields.io/badge/license-Apache%202.0-blue.svg?logo=apache&style=for-the-badge)](LICENSE)
 
+[![CI](https://github.com/dfinity/cksol/actions/workflows/ci.yml/badge.svg)](https://github.com/dfinity/cksol/actions/workflows/ci.yml)
+[![Rust](https://img.shields.io/badge/Rust-stable-orange.svg)](https://www.rust-lang.org/)
+[![Solana](https://img.shields.io/badge/Solana-mainnet-9945FF.svg)](https://solana.com/)
+[![Internet Computer](https://img.shields.io/badge/Internet%20Computer-mainnet-blueviolet.svg)](https://internetcomputer.org/)
+
 # ckSOL
 
 > [!IMPORTANT]
