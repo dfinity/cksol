@@ -45,12 +45,13 @@ impl TestCanisterRuntime {
         self
     }
 
-    pub fn with_times<I>(mut self, times: I) -> Self
+    pub fn add_times<I>(mut self, times: I) -> Self
     where
-        I: IntoIterator<Item = u64> + 'static,
-        I::IntoIter: Send,
+        I: IntoIterator<Item = u64>,
     {
-        self.times = times.into();
+        for time in times {
+            self.times = self.times.add(time);
+        }
         self
     }
 
