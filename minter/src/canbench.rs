@@ -171,8 +171,8 @@ fn setup_10k_events() {
                     account: deposit_id(i).account,
                     solana_address: [0u8; 32],
                     burn_block_index: burn_index,
-                    amount_to_burn: withdrawal_amount,
-                    withdrawal_amount: withdrawal_amount - withdrawal_fee,
+                    burned_amount: withdrawal_amount,
+                    amount_to_transfer: withdrawal_amount - withdrawal_fee,
                 }),
                 &runtime,
             )
