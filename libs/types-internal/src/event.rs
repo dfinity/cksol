@@ -116,6 +116,11 @@ pub enum EventType {
         /// The account to monitor for incoming deposits.
         account: Account,
     },
+    /// The minter stopped monitoring an account for automated deposits.
+    StoppedMonitoringAccount {
+        /// The account that is no longer being monitored.
+        account: Account,
+    },
 }
 
 /// The purpose of a submitted Solana transaction.

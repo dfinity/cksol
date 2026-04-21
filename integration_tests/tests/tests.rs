@@ -1320,19 +1320,23 @@ mod automated_deposit_flow_tests {
             }));
         });
 
-        // Advance time: the minter should poll getSignaturesForAddress.
-        // Each poll increments the RPC request ID by NUM_RPC_PROVIDERS (one per provider),
-        // so subsequent mocks must use the correct start ID.
-        for i in 0..3_u64 {
-            setup.advance_time(POLL_MONITORED_ADDRESSES_DELAY).await;
-            setup
-                .execute_http_mocks(
-                    MockBuilder::with_start_id(i * NUM_RPC_PROVIDERS)
-                        .get_signatures_for_address(vec![])
-                        .build(),
-                )
-                .await;
-        }
+        // Advance time: the minter should poll getSignaturesForAddress once, then remove the account.
+        setup.advance_time(POLL_MONITORED_ADDRESSES_DELAY).await;
+        setup
+            .execute_http_mocks(
+                MockBuilder::with_start_id(0)
+                    .get_signatures_for_address(vec![])
+                    .build(),
+            )
+            .await;
+
+        minter.assert_that_events().await.satisfy(|events| {
+            check!(events.iter().any(|e| {
+                e == &EventType::StoppedMonitoringAccount {
+                    account: DEFAULT_CALLER_ACCOUNT,
+                }
+            }));
+        });
 
         setup.drop().await;
     }

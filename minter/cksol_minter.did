@@ -416,6 +416,11 @@ type EventType = variant {
         // The account to monitor for incoming deposits.
         account: Account;
     };
+    // The minter stopped monitoring an account for automated deposits.
+    StoppedMonitoringAccount : record {
+        // The account that is no longer being monitored.
+        account: Account;
+    };
 };
 
 // A single transaction can deposit to multiple accounts, so the signature alone

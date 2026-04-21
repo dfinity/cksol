@@ -201,6 +201,9 @@ fn get_events(
             EventType::StartedMonitoringAccount { account } => {
                 event::EventType::StartedMonitoringAccount { account }
             }
+            EventType::StoppedMonitoringAccount { account } => {
+                event::EventType::StoppedMonitoringAccount { account }
+            }
         }
     }
 

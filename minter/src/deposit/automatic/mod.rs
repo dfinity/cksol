@@ -123,4 +123,12 @@ async fn poll_account<R: CanisterRuntime>(
             // TODO(DEFI-2780): Process discovered deposit signatures.
         }
     }
+
+    mutate_state(|state| {
+        process_event(
+            state,
+            EventType::StoppedMonitoringAccount { account },
+            runtime,
+        );
+    });
 }
