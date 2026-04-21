@@ -91,11 +91,6 @@ mod update_balance {
 mod poll_monitored_addresses {
     use super::*;
 
-    fn setup() {
-        init_state();
-        init_schnorr_master_key();
-    }
-
     #[tokio::test]
     async fn should_poll_monitored_addresses_in_rounds() {
         setup();
@@ -134,5 +129,10 @@ mod poll_monitored_addresses {
                     account: account(i),
                 });
         }
+    }
+
+    fn setup() {
+        init_state();
+        init_schnorr_master_key();
     }
 }
