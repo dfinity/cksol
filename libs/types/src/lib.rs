@@ -148,6 +148,9 @@ pub enum UpdateBalanceError {
     /// The monitored account queue is at capacity.
     #[error("The monitored account queue is at capacity")]
     QueueFull,
+    /// The RPC call quota for this account has been exhausted.
+    #[error("The RPC call quota for this account has been exhausted")]
+    MonitoringQuotaExhausted,
 }
 
 /// Insufficient cycles attached by the caller to complete the call.

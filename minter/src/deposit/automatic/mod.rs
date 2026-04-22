@@ -10,7 +10,10 @@ use crate::{
     },
     storage::{with_automatic_deposit_cache, with_automatic_deposit_cache_mut},
 };
-use cache::AutomaticDepositCacheEntry;
+use cache::{
+    AccountMonitoringState, AutomaticDepositCacheEntry, AutomaticDepositCacheExt,
+    INITIAL_BACKOFF_DELAY_MINS,
+};
 use canlog::log;
 use cksol_types::UpdateBalanceError;
 use cksol_types_internal::log::Priority;
@@ -29,29 +32,38 @@ pub const MAX_MONITORED_ACCOUNTS: usize = 100;
 /// How often the minter polls monitored addresses for new deposit transactions.
 pub const POLL_MONITORED_ADDRESSES_DELAY: Duration = Duration::from_mins(1);
 
-/// Maximum number of `getTransaction` calls to make per polled account.
-pub const MAX_GET_TRANSACTION_CALLS: usize = 5;
-
-/// Maximum number of `getSignaturesForAddress` calls to make per monitored account before stopping.
-/// The delays follow an exponential backoff: 1, 2, 4, ..., 512 minutes (1023 minutes total).
-pub const MAX_GET_SIGNATURES_FOR_ADDRESS_CALLS: u8 = 10;
+/// Maximum number of signatures to fetch per `getSignaturesForAddress` call.
+pub const GET_SIGNATURES_FOR_ADDRESS_LIMIT: u32 = 100;
 
 /// Registers the given account for automated deposit monitoring.
 ///
-/// Returns `Ok(())` if the account was registered (or was already being monitored).
-/// Returns `Err(UpdateBalanceError::QueueFull)` if the monitored account queue is at capacity.
+/// - If the account is already actively monitored (has a scheduled poll), returns `Ok(())`.
+/// - If the account's RPC quota is exhausted, returns `Err(MonitoringQuotaExhausted)`.
+/// - If the account has remaining quota but is not scheduled (e.g. was stopped), reschedules it.
+/// - If the account is unknown, allocates a fresh quota and schedules the first poll.
+/// - Returns `Err(QueueFull)` if the monitored account limit has been reached.
 pub fn update_balance<R: CanisterRuntime>(
     runtime: &R,
     account: Account,
 ) -> Result<(), UpdateBalanceError> {
-    if read_state(|state| state.monitored_accounts().contains(&account)) {
-        return Ok(());
-    }
+    let cached_entry = match with_automatic_deposit_cache(|cache| cache.monitoring_state(&account))
+    {
+        AccountMonitoringState::Active { .. } => {
+            debug_assert!(read_state(|s| s.monitored_accounts().contains(&account)));
+            return Ok(());
+        }
+        AccountMonitoringState::Exhausted { .. } => {
+            return Err(UpdateBalanceError::MonitoringQuotaExhausted);
+        }
+        AccountMonitoringState::Stopped { entry } => Some(entry),
+        AccountMonitoringState::Unknown => None,
+    };
 
-    if read_state(|state| state.monitored_accounts().len() >= MAX_MONITORED_ACCOUNTS) {
+    if read_state(|state| state.monitored_accounts().len()) >= MAX_MONITORED_ACCOUNTS {
         return Err(UpdateBalanceError::QueueFull);
     }
 
+    debug_assert!(!read_state(|s| s.monitored_accounts().contains(&account)));
     mutate_state(|state| {
         process_event(
             state,
@@ -60,10 +72,16 @@ pub fn update_balance<R: CanisterRuntime>(
         );
     });
 
-    // Schedule first poll in 2^0 = 1 minute.
-    let next_poll_at = runtime.time() + Duration::from_mins(1).as_nanos() as u64;
+    let new_entry = match cached_entry {
+        Some(entry) => AutomaticDepositCacheEntry {
+            rpc_quota_left: entry.rpc_quota_left,
+            next_backoff_delay_mins: INITIAL_BACKOFF_DELAY_MINS,
+        },
+        None => AutomaticDepositCacheEntry::default(),
+    };
+    let next_poll_at = runtime.time() + POLL_MONITORED_ADDRESSES_DELAY.as_nanos() as u64;
     with_automatic_deposit_cache_mut(|cache| {
-        cache.insert(account, next_poll_at, AutomaticDepositCacheEntry::default());
+        cache.insert(account, next_poll_at, new_entry);
     });
 
     Ok(())
@@ -72,8 +90,8 @@ pub fn update_balance<R: CanisterRuntime>(
 /// Polls all monitored addresses that are due for a check.
 ///
 /// For each due address, calls `getSignaturesForAddress` on the Solana RPC.
-/// After each call, reschedules the account with exponential backoff, or emits
-/// `StoppedMonitoringAccount` if `MAX_GET_SIGNATURES_FOR_ADDRESS_CALLS` has been reached.
+/// After each call, reschedules the account with exponential backoff, or marks it
+/// as stopped (index `u64::MAX`) if the RPC quota has been exhausted.
 pub async fn poll_monitored_addresses<R: CanisterRuntime>(runtime: R) {
     let _guard = match TimerGuard::new(TaskType::PollMonitoredAddresses) {
         Ok(guard) => guard,
@@ -82,11 +100,11 @@ pub async fn poll_monitored_addresses<R: CanisterRuntime>(runtime: R) {
 
     let now = runtime.time();
 
-    let due: Vec<(Account, u8)> = with_automatic_deposit_cache(|cache| {
+    let due: Vec<(Account, AutomaticDepositCacheEntry)> = with_automatic_deposit_cache(|cache| {
         cache
             .iter()
             .take_while(|(t, ..)| *t <= now)
-            .map(|(_, account, entry)| (account, entry.get_signatures_calls))
+            .map(|(_, account, entry)| (account, entry))
             // +1 to detect whether more accounts remain after this round.
             .take(MAX_CONCURRENT_RPC_CALLS + 1)
             .collect()
@@ -103,11 +121,11 @@ pub async fn poll_monitored_addresses<R: CanisterRuntime>(runtime: R) {
 
     let master_key = lazy_get_schnorr_master_key(&runtime).await;
 
-    futures::future::join_all(due.into_iter().take(MAX_CONCURRENT_RPC_CALLS).map(
-        |(account, get_signatures_calls)| {
-            poll_account(&runtime, &master_key, account, get_signatures_calls)
-        },
-    ))
+    futures::future::join_all(
+        due.into_iter()
+            .take(MAX_CONCURRENT_RPC_CALLS)
+            .map(|(account, entry)| poll_account(&runtime, &master_key, account, entry)),
+    )
     .await;
 
     if !more_to_process {
@@ -119,23 +137,24 @@ async fn poll_account<R: CanisterRuntime>(
     runtime: &R,
     master_key: &SchnorrPublicKey,
     account: Account,
-    get_signatures_calls: u8,
+    entry: AutomaticDepositCacheEntry,
 ) {
     let deposit_address = account_address(master_key, &account);
 
     let params = GetSignaturesForAddressParams {
         pubkey: deposit_address.into(),
         commitment: Some(CommitmentLevel::Finalized),
-        // Fetch no more signatures than we intend to process with `getTransaction`.
         limit: Some(
-            (MAX_GET_TRANSACTION_CALLS as u32)
+            GET_SIGNATURES_FOR_ADDRESS_LIMIT
                 .try_into()
-                .expect("MAX_GET_TRANSACTION_CALLS must be between 1 and 1000"),
+                .expect("GET_SIGNATURES_FOR_ADDRESS_LIMIT must be between 1 and 1000"),
         ),
         min_context_slot: None,
         before: None,
         until: None,
     };
+
+    let rpc_quota_left = entry.rpc_quota_left.saturating_sub(1);
 
     match get_signatures_for_address(runtime, params).await {
         Err(e) => {
@@ -149,18 +168,19 @@ async fn poll_account<R: CanisterRuntime>(
         }
     }
 
-    let get_signatures_calls = get_signatures_calls + 1;
-    if get_signatures_calls >= MAX_GET_SIGNATURES_FOR_ADDRESS_CALLS {
+    if rpc_quota_left == 0 {
         // Use u64::MAX so the entry is retained but never scheduled for another poll.
         with_automatic_deposit_cache_mut(|cache| {
             cache.insert(
                 account,
                 u64::MAX,
                 AutomaticDepositCacheEntry {
-                    get_signatures_calls,
+                    rpc_quota_left,
+                    next_backoff_delay_mins: entry.next_backoff_delay_mins,
                 },
             );
         });
+        debug_assert!(read_state(|s| s.monitored_accounts().contains(&account)));
         mutate_state(|state| {
             process_event(
                 state,
@@ -170,18 +190,20 @@ async fn poll_account<R: CanisterRuntime>(
         });
         log!(
             Priority::Info,
-            "Stopped monitoring {deposit_address}: reached maximum getSignaturesForAddress calls ({MAX_GET_SIGNATURES_FOR_ADDRESS_CALLS})"
+            "Stopped monitoring {deposit_address}: RPC quota exhausted"
         );
     } else {
-        // Exponential backoff: delay before next poll is 2^get_signatures_calls minutes.
-        let delay = Duration::from_mins(1u64 << get_signatures_calls);
-        let next_poll_at = runtime.time() + delay.as_nanos() as u64;
+        let delay_mins = entry.next_backoff_delay_mins;
+        let delay = Duration::from_mins(delay_mins);
+        let delay_ns: u64 = delay.as_nanos().try_into().unwrap_or(u64::MAX - 1);
+        let next_poll_at = runtime.time().saturating_add(delay_ns).min(u64::MAX - 1);
         with_automatic_deposit_cache_mut(|cache| {
             cache.insert(
                 account,
                 next_poll_at,
                 AutomaticDepositCacheEntry {
-                    get_signatures_calls,
+                    rpc_quota_left,
+                    next_backoff_delay_mins: delay_mins.saturating_mul(2),
                 },
             );
         });
