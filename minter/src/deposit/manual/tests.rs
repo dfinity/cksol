@@ -1,17 +1,18 @@
 use crate::{
     deposit::manual::process_deposit,
     state::event::{DepositId, EventType},
+    storage::reset_events,
     test_fixtures::{
         BLOCK_INDEX, DEPOSIT_CONSOLIDATION_FEE, EventsAssert, MANUAL_DEPOSIT_FEE,
         PROCESS_DEPOSIT_REQUIRED_CYCLES,
         deposit::{
             DEPOSIT_AMOUNT, DEPOSITOR_ACCOUNT, DEPOSITOR_PRINCIPAL, accepted_deposit_event,
             deposit_status_minted, deposit_status_processing, deposit_status_quarantined,
-            deposit_transaction, deposit_transaction_signature,
             deposit_transaction_to_multiple_accounts,
             deposit_transaction_to_multiple_accounts_signature,
             deposit_transaction_to_wrong_address, deposit_transaction_to_wrong_address_signature,
-            minted_event, quarantined_deposit_event,
+            legacy_deposit_transaction, legacy_deposit_transaction_signature, minted_event,
+            quarantined_deposit_event, v0_deposit_transaction, v0_deposit_transaction_signature,
         },
         init_schnorr_master_key, init_state, init_state_with_args,
         runtime::TestCanisterRuntime,
@@ -39,7 +40,12 @@ async fn should_fail_if_insufficient_cycles_attached() {
     let runtime =
         TestCanisterRuntime::new().add_msg_cycles_available(PROCESS_DEPOSIT_REQUIRED_CYCLES - 1);
 
-    let result = process_deposit(runtime, DEPOSITOR_ACCOUNT, deposit_transaction_signature()).await;
+    let result = process_deposit(
+        runtime,
+        DEPOSITOR_ACCOUNT,
+        legacy_deposit_transaction_signature(),
+    )
+    .await;
 
     assert_eq!(
         result,
@@ -60,7 +66,12 @@ async fn should_return_error_if_get_transaction_fails() {
 
     let runtime = runtime_with_time_and_cycles().add_stub_error(IcError::CallPerformFailed);
 
-    let result = process_deposit(runtime, DEPOSITOR_ACCOUNT, deposit_transaction_signature()).await;
+    let result = process_deposit(
+        runtime,
+        DEPOSITOR_ACCOUNT,
+        legacy_deposit_transaction_signature(),
+    )
+    .await;
 
     assert_matches!(
         result,
@@ -77,7 +88,12 @@ async fn should_return_error_if_transaction_not_found() {
     let runtime = runtime_with_time_and_cycles()
         .add_stub_response(GetTransactionResult::Consistent(Ok(None)));
 
-    let result = process_deposit(runtime, DEPOSITOR_ACCOUNT, deposit_transaction_signature()).await;
+    let result = process_deposit(
+        runtime,
+        DEPOSITOR_ACCOUNT,
+        legacy_deposit_transaction_signature(),
+    )
+    .await;
 
     assert_eq!(result, Err(ProcessDepositError::TransactionNotFound));
     EventsAssert::assert_no_events_recorded();
@@ -116,11 +132,17 @@ async fn should_fail_if_deposit_amount_is_below_minimum() {
     });
     init_schnorr_master_key();
 
-    let get_transaction_response =
-        GetTransactionResult::Consistent(Ok(Some(deposit_transaction().try_into().unwrap())));
+    let get_transaction_response = GetTransactionResult::Consistent(Ok(Some(
+        legacy_deposit_transaction().try_into().unwrap(),
+    )));
     let runtime = runtime_with_time_and_cycles().add_stub_response(get_transaction_response);
 
-    let result = process_deposit(runtime, DEPOSITOR_ACCOUNT, deposit_transaction_signature()).await;
+    let result = process_deposit(
+        runtime,
+        DEPOSITOR_ACCOUNT,
+        legacy_deposit_transaction_signature(),
+    )
+    .await;
 
     assert_eq!(
         result,
@@ -137,15 +159,21 @@ async fn should_return_processing_if_mint_fails() {
     init_state();
     init_schnorr_master_key();
 
-    let get_transaction_response =
-        GetTransactionResult::Consistent(Ok(Some(deposit_transaction().try_into().unwrap())));
+    let get_transaction_response = GetTransactionResult::Consistent(Ok(Some(
+        legacy_deposit_transaction().try_into().unwrap(),
+    )));
     let runtime = runtime_with_time_and_cycles()
         .add_stub_response(get_transaction_response)
         .add_stub_response(Err::<BlockIndex, TransferError>(
             TransferError::TemporarilyUnavailable,
         ));
 
-    let result = process_deposit(runtime, DEPOSITOR_ACCOUNT, deposit_transaction_signature()).await;
+    let result = process_deposit(
+        runtime,
+        DEPOSITOR_ACCOUNT,
+        legacy_deposit_transaction_signature(),
+    )
+    .await;
 
     assert_eq!(result, Ok(deposit_status_processing()));
 
@@ -160,14 +188,20 @@ async fn should_successfully_mint_on_second_call() {
     init_schnorr_master_key();
 
     // First call: makes JSON-RPC call and attempts to mint
-    let get_transaction_response =
-        GetTransactionResult::Consistent(Ok(Some(deposit_transaction().try_into().unwrap())));
+    let get_transaction_response = GetTransactionResult::Consistent(Ok(Some(
+        legacy_deposit_transaction().try_into().unwrap(),
+    )));
     let runtime = runtime_with_time_and_cycles()
         .add_stub_response(get_transaction_response)
         .add_stub_response(Err::<BlockIndex, TransferError>(
             TransferError::TemporarilyUnavailable,
         ));
-    let result = process_deposit(runtime, DEPOSITOR_ACCOUNT, deposit_transaction_signature()).await;
+    let result = process_deposit(
+        runtime,
+        DEPOSITOR_ACCOUNT,
+        legacy_deposit_transaction_signature(),
+    )
+    .await;
     assert_eq!(result, Ok(deposit_status_processing()));
 
     // Second call: fetches status from minter state, and mints successfully without making any
@@ -175,7 +209,12 @@ async fn should_successfully_mint_on_second_call() {
     let runtime = TestCanisterRuntime::new()
         .with_increasing_time()
         .add_stub_response(Ok::<BlockIndex, TransferError>(BLOCK_INDEX.into()));
-    let result = process_deposit(runtime, DEPOSITOR_ACCOUNT, deposit_transaction_signature()).await;
+    let result = process_deposit(
+        runtime,
+        DEPOSITOR_ACCOUNT,
+        legacy_deposit_transaction_signature(),
+    )
+    .await;
     assert_eq!(result, Ok(deposit_status_minted()));
 
     EventsAssert::from_recorded()
@@ -189,20 +228,58 @@ async fn should_succeed_with_valid_deposit_transaction() {
     init_state();
     init_schnorr_master_key();
 
-    let get_transaction_response =
-        GetTransactionResult::Consistent(Ok(Some(deposit_transaction().try_into().unwrap())));
-    let runtime = runtime_with_time_and_cycles()
-        .add_stub_response(get_transaction_response)
-        .add_stub_response(Ok::<BlockIndex, TransferError>(BLOCK_INDEX.into()));
+    for (block_index, transaction, signature) in [
+        (
+            BLOCK_INDEX,
+            legacy_deposit_transaction(),
+            legacy_deposit_transaction_signature(),
+        ),
+        (
+            BLOCK_INDEX + 1,
+            v0_deposit_transaction(),
+            v0_deposit_transaction_signature(),
+        ),
+    ] {
+        reset_events();
 
-    let result = process_deposit(runtime, DEPOSITOR_ACCOUNT, deposit_transaction_signature()).await;
+        let get_transaction_response =
+            GetTransactionResult::Consistent(Ok(Some(transaction.try_into().unwrap())));
+        let runtime = runtime_with_time_and_cycles()
+            .add_stub_response(get_transaction_response)
+            .add_stub_response(Ok::<BlockIndex, TransferError>(block_index.into()));
 
-    assert_eq!(result, Ok(deposit_status_minted()));
+        let result = process_deposit(runtime, DEPOSITOR_ACCOUNT, signature).await;
 
-    EventsAssert::from_recorded()
-        .expect_event_eq(accepted_deposit_event())
-        .expect_event_eq(minted_event(BLOCK_INDEX))
-        .assert_no_more_events();
+        assert_eq!(
+            result,
+            Ok(DepositStatus::Minted {
+                block_index,
+                minted_amount: DEPOSIT_AMOUNT - MANUAL_DEPOSIT_FEE,
+                deposit_id: cksol_types::DepositId {
+                    signature: signature.into(),
+                    account: DEPOSITOR_ACCOUNT,
+                },
+            })
+        );
+
+        EventsAssert::from_recorded()
+            .expect_event_eq(EventType::AcceptedManualDeposit {
+                deposit_id: DepositId {
+                    signature,
+                    account: DEPOSITOR_ACCOUNT,
+                },
+                deposit_amount: DEPOSIT_AMOUNT,
+                amount_to_mint: DEPOSIT_AMOUNT - MANUAL_DEPOSIT_FEE,
+            })
+            .expect_event_eq(EventType::Minted {
+                deposit_id: DepositId {
+                    signature,
+                    account: DEPOSITOR_ACCOUNT,
+                },
+                mint_block_index: block_index.into(),
+            })
+            .assert_no_more_events();
+    }
 }
 
 #[tokio::test]
@@ -211,17 +288,28 @@ async fn should_not_double_mint() {
     init_schnorr_master_key();
 
     // Successful mint
-    let get_transaction_response =
-        GetTransactionResult::Consistent(Ok(Some(deposit_transaction().try_into().unwrap())));
+    let get_transaction_response = GetTransactionResult::Consistent(Ok(Some(
+        legacy_deposit_transaction().try_into().unwrap(),
+    )));
     let runtime = runtime_with_time_and_cycles()
         .add_stub_response(get_transaction_response)
         .add_stub_response(Ok::<BlockIndex, TransferError>(BLOCK_INDEX.into()));
-    let result = process_deposit(runtime, DEPOSITOR_ACCOUNT, deposit_transaction_signature()).await;
+    let result = process_deposit(
+        runtime,
+        DEPOSITOR_ACCOUNT,
+        legacy_deposit_transaction_signature(),
+    )
+    .await;
     assert_eq!(result, Ok(deposit_status_minted()));
 
     // Second call: returns the same status
     let runtime = TestCanisterRuntime::new();
-    let result = process_deposit(runtime, DEPOSITOR_ACCOUNT, deposit_transaction_signature()).await;
+    let result = process_deposit(
+        runtime,
+        DEPOSITOR_ACCOUNT,
+        legacy_deposit_transaction_signature(),
+    )
+    .await;
     assert_eq!(result, Ok(deposit_status_minted()));
 
     // Only one mint event recorded
@@ -237,14 +325,15 @@ async fn should_quarantine_deposit() {
     init_schnorr_master_key();
 
     // Don't mock the ledger response so the runtime panics when calling it to mint
-    let get_transaction_response =
-        GetTransactionResult::Consistent(Ok(Some(deposit_transaction().try_into().unwrap())));
+    let get_transaction_response = GetTransactionResult::Consistent(Ok(Some(
+        legacy_deposit_transaction().try_into().unwrap(),
+    )));
     let runtime = || runtime_with_time_and_cycles().add_stub_response(get_transaction_response);
     let first_result = tokio::spawn(async move {
         process_deposit(
             runtime(),
             DEPOSITOR_ACCOUNT,
-            deposit_transaction_signature(),
+            legacy_deposit_transaction_signature(),
         )
         .await
     })
@@ -253,14 +342,22 @@ async fn should_quarantine_deposit() {
 
     // On the second call, the deposit should have been quarantined
     let runtime = TestCanisterRuntime::new();
-    let second_result =
-        process_deposit(runtime, DEPOSITOR_ACCOUNT, deposit_transaction_signature()).await;
+    let second_result = process_deposit(
+        runtime,
+        DEPOSITOR_ACCOUNT,
+        legacy_deposit_transaction_signature(),
+    )
+    .await;
     assert_eq!(second_result, Ok(deposit_status_quarantined()));
 
     // Calling `process_deposit` again for the same deposit should return the same status
     let runtime = TestCanisterRuntime::new();
-    let third_result =
-        process_deposit(runtime, DEPOSITOR_ACCOUNT, deposit_transaction_signature()).await;
+    let third_result = process_deposit(
+        runtime,
+        DEPOSITOR_ACCOUNT,
+        legacy_deposit_transaction_signature(),
+    )
+    .await;
     assert_eq!(third_result, second_result);
 
     // Only one mint event recorded

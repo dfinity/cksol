@@ -14,6 +14,7 @@ use ic_ed25519::{PocketIcMasterPublicKeyId, PublicKey};
 use icrc_ledger_types::icrc1::account::Account;
 use sol_rpc_types::Lamport;
 use solana_address::{Address, address};
+use solana_transaction::versioned::TransactionVersion;
 use solana_transaction_status_client_types::{
     EncodedConfirmedTransactionWithStatusMeta, EncodedTransaction,
     EncodedTransactionWithStatusMeta, TransactionBinaryEncoding, UiLoadedAddresses,
@@ -651,20 +652,71 @@ pub mod deposit {
 
     pub fn deposit_id() -> DepositId {
         DepositId {
-            signature: deposit_transaction_signature(),
+            signature: legacy_deposit_transaction_signature(),
             account: DEPOSITOR_ACCOUNT,
         }
     }
 
+    // Anonymized v0 transaction: 0.5 SOL transfer to DEPOSIT_ADDRESS (BVH7GZXRdqyZLSLBS4cm1Yom8Yvekw6ytgSFz9y9on4e).
+    // Derived from a real devnet v0 transaction with sender, signature, and amount replaced by dummy values.
+    pub fn v0_deposit_transaction_signature() -> solana_signature::Signature {
+        solana_signature::Signature::from([0x42; 64])
+    }
+
+    // v0 (versioned) 0.5 SOL transfer to DEPOSITOR_ACCOUNT's deposit address (BVH7GZXRdqyZLSLBS4cm1Yom8Yvekw6ytgSFz9y9on4e).
+    pub fn v0_deposit_transaction() -> EncodedConfirmedTransactionWithStatusMeta {
+        const ENCODED: &str = "AUJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkKAAQACBBERERERERERERERERERERERERERERERERERERERERERm9NYan1lUBJ+p+uJV+FG8uZ+ZU5ZkqbFoBB9YL+y21cDBkZv5SEXMv/srbpyw5vnvIzlu8X3EmssQ5s6QAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVUDAgAJA9i4BQAAAAAAAgAFAkANAwADAgABDAIAAAAAZc0dAAAAAAA=";
+        EncodedConfirmedTransactionWithStatusMeta {
+            slot: 457247193,
+            transaction: EncodedTransactionWithStatusMeta {
+                transaction: EncodedTransaction::Binary(
+                    ENCODED.to_string(),
+                    TransactionBinaryEncoding::Base64,
+                ),
+                meta: Some(UiTransactionStatusMeta {
+                    compute_units_consumed: OptionSerializer::Some(450),
+                    cost_units: OptionSerializer::Some(1784),
+                    err: None,
+                    fee: 80000,
+                    inner_instructions: OptionSerializer::Some(vec![]),
+                    loaded_addresses: OptionSerializer::Some(UiLoadedAddresses {
+                        writable: vec![],
+                        readonly: vec![],
+                    }),
+                    log_messages: OptionSerializer::Some(vec![
+                        "Program ComputeBudget111111111111111111111111111111 invoke [1]"
+                            .to_string(),
+                        "Program ComputeBudget111111111111111111111111111111 success".to_string(),
+                        "Program ComputeBudget111111111111111111111111111111 invoke [1]"
+                            .to_string(),
+                        "Program ComputeBudget111111111111111111111111111111 success".to_string(),
+                        "Program 11111111111111111111111111111111 invoke [1]".to_string(),
+                        "Program 11111111111111111111111111111111 success".to_string(),
+                    ]),
+                    post_balances: vec![4499920000, 500000000, 1, 1],
+                    post_token_balances: OptionSerializer::Some(vec![]),
+                    pre_balances: vec![5000000000, 0, 1, 1],
+                    pre_token_balances: OptionSerializer::Some(vec![]),
+                    rewards: OptionSerializer::None,
+                    status: Ok(()),
+                    return_data: OptionSerializer::Skip,
+                }),
+                version: Some(TransactionVersion::Number(0)),
+            },
+            block_time: Some(1776843321),
+        }
+    }
+
+    // Legacy (non-versioned) deposit transaction.
     // https://explorer.solana.com/tx/49aFRmEtgnVN3UetkKHJbz3ZMcDY6pgS9oDoN4Y4NQYfHSx4nsDsx3PSKubxfmY69URcosJj3CWu4aypeddduZYX?cluster=devnet
-    pub fn deposit_transaction_signature() -> solana_signature::Signature {
+    pub fn legacy_deposit_transaction_signature() -> solana_signature::Signature {
         const SIGNATURE: &str = "49aFRmEtgnVN3UetkKHJbz3ZMcDY6pgS9oDoN4Y4NQYfHSx4nsDsx3PSKubxfmY69URcosJj3CWu4aypeddduZYX";
         solana_signature::Signature::from_str(SIGNATURE).unwrap()
     }
 
-    // 0.5 SOL transfer to DEPOSITOR_ACCOUNT's deposit address (BVH7GZXRdqyZLSLBS4cm1Yom8Yvekw6ytgSFz9y9on4e)
+    // Legacy (non-versioned) 0.5 SOL transfer to DEPOSITOR_ACCOUNT's deposit address (BVH7GZXRdqyZLSLBS4cm1Yom8Yvekw6ytgSFz9y9on4e).
     // https://explorer.solana.com/tx/49aFRmEtgnVN3UetkKHJbz3ZMcDY6pgS9oDoN4Y4NQYfHSx4nsDsx3PSKubxfmY69URcosJj3CWu4aypeddduZYX?cluster=devnet
-    pub fn deposit_transaction() -> EncodedConfirmedTransactionWithStatusMeta {
+    pub fn legacy_deposit_transaction() -> EncodedConfirmedTransactionWithStatusMeta {
         const ENCODED_DEPOSIT_TRANSACTION: &str = "AZ1xufshIEi/hzGnwqjbgjUqDzcH3dfZQs3hZUbR8iHESSc+4eGeOwll0PMlDtORri5YQi433FjgQ5YK138CXQQBAAEDIg5JU11WGypQAKfOpxcE0+UIiKney1G6hf+6GRXcmseb01hqfWVQEn6n64lX4Uby5n5lTlmSpsWgEH1gv7LbVwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA/S7SHgiiNOkFs7RGKc0VhLBrkHbCp47AK4FytcYYlDgBAgIAAQwCAAAAAGXNHQAAAAA=";
         EncodedConfirmedTransactionWithStatusMeta {
             slot: 443421331,

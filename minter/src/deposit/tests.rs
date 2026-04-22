@@ -1,5 +1,6 @@
 use crate::test_fixtures::deposit::{
-    DEPOSIT_ADDRESS, DEPOSIT_AMOUNT, deposit_transaction, deposit_transaction_to_wrong_address,
+    DEPOSIT_ADDRESS, DEPOSIT_AMOUNT, deposit_transaction_to_wrong_address,
+    legacy_deposit_transaction,
 };
 use assert_matches::assert_matches;
 use solana_transaction_status_client_types::{EncodedTransaction, TransactionBinaryEncoding};
@@ -10,7 +11,7 @@ mod get_deposit_amount_tests {
 
     #[test]
     fn should_fail_if_transaction_decoding_fails() {
-        let mut transaction = deposit_transaction();
+        let mut transaction = legacy_deposit_transaction();
         transaction.transaction.transaction =
             EncodedTransaction::Binary("invalid".to_string(), TransactionBinaryEncoding::Base64);
 
@@ -24,7 +25,7 @@ mod get_deposit_amount_tests {
 
     #[test]
     fn should_fail_if_transaction_has_no_meta() {
-        let mut transaction = deposit_transaction();
+        let mut transaction = legacy_deposit_transaction();
         transaction.transaction.meta = None;
 
         let result = get_deposit_amount_to_address(transaction, DEPOSIT_ADDRESS);
@@ -46,7 +47,7 @@ mod get_deposit_amount_tests {
 
     #[test]
     fn should_succeed_for_valid_deposit() {
-        let transaction = deposit_transaction();
+        let transaction = legacy_deposit_transaction();
 
         let result = get_deposit_amount_to_address(transaction, DEPOSIT_ADDRESS);
 

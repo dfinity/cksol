@@ -28,6 +28,7 @@ pub async fn get_transaction<R: CanisterRuntime>(
         .get_transaction(signature)
         .with_encoding(GetTransactionEncoding::Base64)
         .with_commitment(CommitmentLevel::Finalized)
+        .with_max_supported_transaction_version(0)
         .with_response_size_estimate(MAX_HTTP_OUTCALL_RESPONSE_BYTES)
         .with_cycles(cycles_to_attach)
         .try_send()
