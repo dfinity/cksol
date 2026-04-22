@@ -1,4 +1,7 @@
-use crate::numeric::{LedgerBurnIndex, LedgerMintIndex};
+use crate::{
+    numeric::{LedgerBurnIndex, LedgerMintIndex},
+    utils::cbor,
+};
 use cksol_types_internal::{InitArgs, UpgradeArgs};
 use derive_more::From;
 use ic_stable_structures::{Storable, storable::Bound};
@@ -20,8 +23,6 @@ pub enum VersionedMessage {
         Message,
     ),
 }
-
-mod cbor;
 
 #[derive(Eq, PartialEq, Debug, Decode, Encode)]
 pub struct Event {

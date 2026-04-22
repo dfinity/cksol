@@ -70,6 +70,27 @@ where
         self.by_key.insert(key, (index, value, ()));
     }
 
+    /// Updates the index and value for an existing entry.
+    ///
+    /// Unlike [`insert`], this communicates that the entry already exists and
+    /// its sort position (index) is being updated — e.g. to reschedule a poll.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `key` is not present in the map.
+    ///
+    /// [`insert`]: Self::insert
+    pub fn update_index(&mut self, key: K, new_index: I, new_value: V) {
+        let (old_index, _, _) = self
+            .by_key
+            .get(&key)
+            .expect("update_index called for non-existent key");
+        self.by_index.remove(&(old_index, key.clone(), ()));
+        self.by_index
+            .insert((new_index.clone(), key.clone(), ()), ());
+        self.by_key.insert(key, (new_index, new_value, ()));
+    }
+
     /// Returns the `(index, key)` of the entry with the smallest index, if any.
     ///
     /// O(log n).

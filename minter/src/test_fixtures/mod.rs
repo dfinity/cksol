@@ -340,6 +340,7 @@ pub mod events {
 #[cfg(test)]
 pub mod arb {
     use crate::{
+        deposit::automatic::cache::AutomaticDepositCacheEntry,
         numeric::{LedgerBurnIndex, LedgerMintIndex},
         state::event::{DepositId, Event, EventType, TransactionPurpose, WithdrawalRequest},
     };
@@ -598,13 +599,13 @@ pub mod arb {
             .prop_map(|(timestamp, payload)| Event { timestamp, payload })
     }
 
-    pub fn arb_cache_entry()
-    -> impl Strategy<Value = crate::deposit::automatic::cache::AutomaticDepositCacheEntry> {
-        any::<u8>().prop_map(|get_signatures_calls| {
-            crate::deposit::automatic::cache::AutomaticDepositCacheEntry {
+    pub fn arb_cache_entry() -> impl Strategy<Value = AutomaticDepositCacheEntry> {
+        (any::<u8>(), prop::option::of(arb_signature())).prop_map(
+            |(get_signatures_calls, last_discovered_signature)| AutomaticDepositCacheEntry {
                 get_signatures_calls,
-            }
-        })
+                last_discovered_signature,
+            },
+        )
     }
 }
 

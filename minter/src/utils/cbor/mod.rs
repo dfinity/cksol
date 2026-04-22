@@ -51,6 +51,32 @@ pub mod signature {
         e.bytes(v.as_ref())?;
         Ok(())
     }
+
+    pub mod option {
+        use super::*;
+
+        pub fn decode<Ctx>(d: &mut Decoder<'_>, ctx: &mut Ctx) -> Result<Option<Signature>, Error> {
+            if d.datatype()? == minicbor::data::Type::Null {
+                d.null()?;
+                return Ok(None);
+            }
+            super::decode(d, ctx).map(Some)
+        }
+
+        pub fn encode<Ctx, W: Write>(
+            v: &Option<Signature>,
+            e: &mut Encoder<W>,
+            ctx: &mut Ctx,
+        ) -> Result<(), minicbor::encode::Error<W::Error>> {
+            match v {
+                None => {
+                    e.null()?;
+                    Ok(())
+                }
+                Some(sig) => super::encode(sig, e, ctx),
+            }
+        }
+    }
 }
 
 pub mod id_vec {

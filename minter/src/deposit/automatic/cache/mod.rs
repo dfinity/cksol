@@ -2,6 +2,7 @@ use crate::utils::stable_sort_key_map::StableSortKeyMap;
 use ic_stable_structures::{Storable, storable::Bound};
 use icrc_ledger_types::icrc1::account::Account;
 use minicbor::{Decode, Encode};
+use solana_signature::Signature;
 use std::borrow::Cow;
 
 #[cfg(test)]
@@ -17,6 +18,13 @@ pub struct AutomaticDepositCacheEntry {
     /// The number of `getSignaturesForAddress` calls made so far for this account.
     #[n(0)]
     pub get_signatures_calls: u8,
+    /// The most recent transaction signature seen for this address.
+    ///
+    /// Passed as the `until` parameter to the next `getSignaturesForAddress` call
+    /// so that only transactions newer than this one are returned, avoiding
+    /// redundant re-fetching of already-seen signatures.
+    #[cbor(n(1), with = "crate::utils::cbor::signature::option")]
+    pub last_discovered_signature: Option<Signature>,
 }
 
 impl Storable for AutomaticDepositCacheEntry {
