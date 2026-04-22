@@ -1,6 +1,7 @@
 use crate::{
-    state::event::{VersionedMessage, cbor},
+    state::event::VersionedMessage,
     test_fixtures::arb::{arb_message, arb_signature},
+    utils::cbor,
 };
 use proptest::{prop_assert_eq, proptest};
 
@@ -26,6 +27,36 @@ mod signature_tests {
     fn decode_signature(bytes: &[u8]) -> solana_signature::Signature {
         let mut decoder = minicbor::Decoder::new(bytes);
         cbor::signature::decode(&mut decoder, &mut ()).unwrap()
+    }
+}
+
+mod signature_option_tests {
+    use super::*;
+
+    #[test]
+    fn none_roundtrips() {
+        let encoded = encode_opt(None);
+        assert_eq!(decode_opt(&encoded), None);
+    }
+
+    proptest! {
+        #[test]
+        fn some_minicbor_roundtrip(signature in arb_signature()) {
+            let encoded = encode_opt(Some(signature));
+            prop_assert_eq!(decode_opt(&encoded), Some(signature));
+        }
+    }
+
+    fn encode_opt(v: Option<solana_signature::Signature>) -> Vec<u8> {
+        let mut buf = Vec::new();
+        let mut encoder = minicbor::Encoder::new(&mut buf);
+        cbor::signature::option::encode(&v, &mut encoder, &mut ()).unwrap();
+        buf
+    }
+
+    fn decode_opt(bytes: &[u8]) -> Option<solana_signature::Signature> {
+        let mut decoder = minicbor::Decoder::new(bytes);
+        cbor::signature::option::decode(&mut decoder, &mut ()).unwrap()
     }
 }
 

@@ -87,10 +87,9 @@ pub async fn poll_monitored_addresses<R: CanisterRuntime>(runtime: R) {
         return;
     }
 
-    let due: Vec<(Account, u8)> = with_automatic_deposit_cache(|cache| {
+    let due: Vec<(Account, AutomaticDepositCacheEntry)> = with_automatic_deposit_cache(|cache| {
         cache
             .iter_by_index_up_to(&now)
-            .map(|(account, entry)| (account, entry.get_signatures_calls))
             // +1 to detect whether more accounts remain after this round.
             .take(MAX_CONCURRENT_RPC_CALLS + 1)
             .collect()
@@ -103,11 +102,11 @@ pub async fn poll_monitored_addresses<R: CanisterRuntime>(runtime: R) {
 
     let master_key = lazy_get_schnorr_master_key(&runtime).await;
 
-    futures::future::join_all(due.into_iter().take(MAX_CONCURRENT_RPC_CALLS).map(
-        |(account, get_signatures_calls)| {
-            poll_account(&runtime, &master_key, account, get_signatures_calls)
-        },
-    ))
+    futures::future::join_all(
+        due.into_iter()
+            .take(MAX_CONCURRENT_RPC_CALLS)
+            .map(|(account, entry)| poll_account(&runtime, &master_key, account, entry)),
+    )
     .await;
 
     if !more_to_process {
@@ -119,10 +118,11 @@ async fn poll_account<R: CanisterRuntime>(
     runtime: &R,
     master_key: &SchnorrPublicKey,
     account: Account,
-    get_signatures_calls: u8,
+    mut entry: AutomaticDepositCacheEntry,
 ) {
     let deposit_address = account_address(master_key, &account);
 
+    let is_new_scan = entry.page_cursor.is_none();
     let params = GetSignaturesForAddressParams {
         pubkey: deposit_address.into(),
         commitment: Some(CommitmentLevel::Finalized),
@@ -133,8 +133,15 @@ async fn poll_account<R: CanisterRuntime>(
                 .expect("MAX_GET_TRANSACTION_CALLS must be between 1 and 1000"),
         ),
         min_context_slot: None,
-        before: None,
-        until: None,
+        // When continuing a scan, page backwards using the cursor as the upper bound.
+        // No lower bound is needed since the call budget limits how far back we go.
+        // When starting a new scan, use last_discovered_signature as the lower bound
+        // to avoid re-fetching already-seen transactions.
+        before: entry.page_cursor.map(Into::into),
+        until: is_new_scan
+            .then(|| entry.last_discovered_signature)
+            .flatten()
+            .map(Into::into),
     };
 
     match get_signatures_for_address(runtime, params).await {
@@ -144,23 +151,26 @@ async fn poll_account<R: CanisterRuntime>(
                 "Failed to get signatures for address {deposit_address}: {e}"
             );
         }
-        Ok(_signatures) => {
-            // TODO(DEFI-2780): Process discovered deposit signatures.
+        Ok(signatures) => {
+            if is_new_scan {
+                // Record the newest signature at the start of the scan; it becomes
+                // last_discovered_signature once the scan completes.
+                entry.last_discovered_signature =
+                    signatures.first().map(|s| s.signature.clone().into());
+            }
+            entry.page_cursor = if signatures.len() >= MAX_GET_TRANSACTION_CALLS {
+                // Full batch returned — there may be more; continue paginating.
+                signatures.last().map(|s| s.signature.clone().into())
+            } else {
+                // Fewer results than the limit — this batch exhausts the range.
+                None
+            };
         }
     }
 
-    let get_signatures_calls = get_signatures_calls + 1;
-    if get_signatures_calls >= MAX_GET_SIGNATURES_FOR_ADDRESS_CALLS {
-        // Use u64::MAX so the entry is retained but never scheduled for another poll.
-        with_automatic_deposit_cache_mut(|cache| {
-            cache.insert(
-                account,
-                u64::MAX,
-                AutomaticDepositCacheEntry {
-                    get_signatures_calls,
-                },
-            );
-        });
+    entry.get_signatures_calls += 1;
+    let next_poll_at = if entry.get_signatures_calls >= MAX_GET_SIGNATURES_FOR_ADDRESS_CALLS {
+        // Maximum number of getSignaturesForAddress calls made, stop polling.
         mutate_state(|state| {
             process_event(
                 state,
@@ -172,18 +182,13 @@ async fn poll_account<R: CanisterRuntime>(
             Priority::Info,
             "Stopped monitoring {deposit_address}: reached maximum getSignaturesForAddress calls ({MAX_GET_SIGNATURES_FOR_ADDRESS_CALLS})"
         );
+        u64::MAX
     } else {
         // Exponential backoff: delay before next poll is 2^get_signatures_calls minutes.
-        let delay = Duration::from_mins(1u64 << get_signatures_calls);
-        let next_poll_at = runtime.time() + delay.as_nanos() as u64;
-        with_automatic_deposit_cache_mut(|cache| {
-            cache.insert(
-                account,
-                next_poll_at,
-                AutomaticDepositCacheEntry {
-                    get_signatures_calls,
-                },
-            );
-        });
-    }
+        let delay = Duration::from_mins(1u64 << entry.get_signatures_calls);
+        runtime.time() + delay.as_nanos() as u64
+    };
+    with_automatic_deposit_cache_mut(|cache| {
+        cache.update_index(account, next_poll_at, entry);
+    });
 }
