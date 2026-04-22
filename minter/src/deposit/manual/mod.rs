@@ -133,6 +133,10 @@ async fn try_accept_deposit<R: CanisterRuntime>(
             runtime,
         )
     });
+    log!(
+        Priority::Info,
+        "Accepted manual deposit {deposit_id:?}: {deposit_amount} lamports deposited, minting {amount_to_mint} lamports"
+    );
     Ok(Deposit {
         deposit_amount,
         amount_to_mint,

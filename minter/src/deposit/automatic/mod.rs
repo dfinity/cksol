@@ -51,6 +51,10 @@ pub fn update_balance<R: CanisterRuntime>(
             runtime,
         );
     });
+    log!(
+        Priority::Info,
+        "Started monitoring account {account:?} for automated deposits"
+    );
 
     Ok(())
 }

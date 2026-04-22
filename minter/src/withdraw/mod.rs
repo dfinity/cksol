@@ -86,6 +86,10 @@ pub async fn withdraw<R: CanisterRuntime>(
             runtime,
         )
     });
+    log!(
+        Priority::Info,
+        "Accepted withdrawal request from {from:?}: burned {amount_to_burn} lamports, queued withdrawal of {amount_to_transfer} lamports to {solana_address} (burn block index {block_index})"
+    );
 
     Ok(WithdrawalOk { block_index })
 }
@@ -203,7 +207,7 @@ async fn submit_withdrawal_transaction<R: CanisterRuntime>(
 
     let signature = signed_tx.signatures[0];
     let message = VersionedMessage::Legacy(signed_tx.message.clone());
-    let burn_indices = requests.iter().map(|r| r.burn_block_index).collect();
+    let burn_indices: Vec<_> = requests.iter().map(|r| r.burn_block_index).collect();
 
     mutate_state(|state| {
         process_event(
@@ -213,13 +217,28 @@ async fn submit_withdrawal_transaction<R: CanisterRuntime>(
                 message,
                 signers,
                 slot,
-                purpose: TransactionPurpose::WithdrawSol { burn_indices },
+                purpose: TransactionPurpose::WithdrawSol {
+                    burn_indices: burn_indices.clone(),
+                },
             },
             runtime,
         )
     });
 
-    let _ = submit_transaction(runtime, signed_tx).await;
+    match submit_transaction(runtime, signed_tx).await {
+        Ok(_) => {
+            log!(
+                Priority::Info,
+                "Submitted withdrawal transaction {signature} for burn indices {burn_indices:?}"
+            );
+        }
+        Err(e) => {
+            log!(
+                Priority::Info,
+                "Failed to send withdrawal transaction {signature} (will be resubmitted): {e}"
+            );
+        }
+    }
 }
 
 pub fn withdrawal_status(block_index: u64) -> WithdrawalStatus {
