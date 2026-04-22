@@ -11,13 +11,12 @@ mod tests;
 ///
 /// Two `StableBTreeMap`s are kept in sync:
 /// - `by_key`: primary store, always contains every entry.
-/// - `by_index`: drives [`peek`] and [`iter_by_index_up_to`].
+/// - `by_index`: drives [`iter`].
 ///
 // TODO: simplify value/key types to 2-tuples once ic-stable-structures supports 2-tuples
 // with one unbounded element.
 ///
-/// [`peek`]: StableSortKeyMap::peek
-/// [`iter_by_index_up_to`]: StableSortKeyMap::iter_by_index_up_to
+/// [`iter`]: StableSortKeyMap::iter
 /// [`get`]: StableSortKeyMap::get
 pub struct StableSortKeyMap<K, I, V>
 where
@@ -70,26 +69,15 @@ where
         self.by_key.insert(key, (index, value, ()));
     }
 
-    /// Returns the `(index, key)` of the entry with the smallest index, if any.
+    /// Iterates all `(index, key, value)` triples in ascending index order.
     ///
-    /// O(log n).
-    pub fn peek(&self) -> Option<(I, K)> {
-        self.by_index.iter().next().map(|((i, k, _), _)| (i, k))
-    }
-
-    /// Iterates `(key, value)` pairs in ascending index order, stopping at
-    /// the first entry whose index exceeds `max` (inclusive bound).
-    pub fn iter_by_index_up_to<'a>(&'a self, max: &'a I) -> impl Iterator<Item = (K, V)> + 'a {
-        let by_key = &self.by_key;
-        self.by_index
-            .iter()
-            .take_while(move |((i, _, _), _)| i <= max)
-            .map(move |((_, k, _), _)| {
-                let (_, v, _) = by_key
-                    .get(&k)
-                    .expect("index and by_key map must be in sync");
-                (k, v)
-            })
+    /// To iterate only entries up to a given index bound, use standard iterator
+    /// adapters: `map.iter().take_while(|(i, ..)| *i <= max)`.
+    pub fn iter(&self) -> Iter<'_, K, I, V> {
+        Iter {
+            index_iter: self.by_index.iter(),
+            by_key: &self.by_key,
+        }
     }
 
     pub fn len(&self) -> usize {
@@ -98,5 +86,34 @@ where
 
     pub fn is_empty(&self) -> bool {
         self.by_key.is_empty()
+    }
+}
+
+/// Iterator over `(index, key, value)` triples in ascending index order.
+pub struct Iter<'a, K, I, V>
+where
+    K: Storable + Ord + Clone,
+    I: Storable + Ord + Clone,
+    V: Storable + Clone,
+{
+    index_iter: ic_stable_structures::btreemap::Iter<'a, (I, K, ()), (), Memory>,
+    by_key: &'a StableBTreeMap<K, (I, V, ()), Memory>,
+}
+
+impl<'a, K, I, V> Iterator for Iter<'a, K, I, V>
+where
+    K: Storable + Ord + Clone,
+    I: Storable + Ord + Clone,
+    V: Storable + Clone,
+{
+    type Item = (I, K, V);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let ((i, k, _), _) = self.index_iter.next()?;
+        let (_, v, _) = self
+            .by_key
+            .get(&k)
+            .expect("index and by_key map must be in sync");
+        Some((i, k, v))
     }
 }

@@ -82,19 +82,19 @@ pub async fn poll_monitored_addresses<R: CanisterRuntime>(runtime: R) {
 
     let now = runtime.time();
 
-    // Early return if no accounts are scheduled or the earliest isn't due yet.
-    if !with_automatic_deposit_cache(|cache| cache.peek().is_some_and(|(t, _)| t <= now)) {
-        return;
-    }
-
     let due: Vec<(Account, u8)> = with_automatic_deposit_cache(|cache| {
         cache
-            .iter_by_index_up_to(&now)
-            .map(|(account, entry)| (account, entry.get_signatures_calls))
+            .iter()
+            .take_while(|(t, ..)| *t <= now)
+            .map(|(_, account, entry)| (account, entry.get_signatures_calls))
             // +1 to detect whether more accounts remain after this round.
             .take(MAX_CONCURRENT_RPC_CALLS + 1)
             .collect()
     });
+
+    if due.is_empty() {
+        return;
+    }
 
     let more_to_process = due.len() > MAX_CONCURRENT_RPC_CALLS;
     let reschedule = scopeguard::guard(runtime.clone(), |runtime| {

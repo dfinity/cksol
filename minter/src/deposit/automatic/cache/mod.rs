@@ -45,5 +45,5 @@ impl Storable for AutomaticDepositCacheEntry {
 /// `InsertionOrderedMap` stores the sequence number alongside the value.
 ///
 /// Accounts that have been stopped from monitoring are stored with index `u64::MAX`
-/// so they are retained in the map but never returned by `iter_by_index_up_to`.
+/// so they are never scheduled for another poll.
 pub type AutomaticDepositCache = StableSortKeyMap<Account, u64, AutomaticDepositCacheEntry>;
