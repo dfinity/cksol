@@ -42,16 +42,8 @@ jobs:
       - name: 'Checkout'
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
-      # TODO: Revert to './scripts/docker-build' once the archive.ubuntu.com
-      # outage is resolved, or once we have a more resilient Docker build
-      # (e.g. using a mirror or pre-cached apt packages). The Docker build
-      # depends on apt packages from archive.ubuntu.com which are currently
-      # unavailable, blocking CI.
-      - name: 'Build (non-reproducible stand-in)'
-        run: |
-          rustup target add wasm32-unknown-unknown
-          cargo build --locked --target wasm32-unknown-unknown --release --package cksol_minter
-          gzip -fckn9 target/wasm32-unknown-unknown/release/cksol_minter.wasm > ./wasms/cksol_minter.wasm.gz
+      - name: 'Docker build'
+        run: ./scripts/docker-build
 
       - name: 'Archive Artifact'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
