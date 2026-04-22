@@ -600,12 +600,20 @@ pub mod arb {
     }
 
     pub fn arb_cache_entry() -> impl Strategy<Value = AutomaticDepositCacheEntry> {
-        (any::<u8>(), prop::option::of(arb_signature())).prop_map(
-            |(get_signatures_calls, last_discovered_signature)| AutomaticDepositCacheEntry {
-                get_signatures_calls,
-                last_discovered_signature,
-            },
+        (
+            any::<u8>(),
+            prop::option::of(arb_signature()),
+            prop::option::of(arb_signature()),
         )
+            .prop_map(
+                |(get_signatures_calls, last_discovered_signature, page_cursor)| {
+                    AutomaticDepositCacheEntry {
+                        get_signatures_calls,
+                        last_discovered_signature,
+                        page_cursor,
+                    }
+                },
+            )
     }
 }
 

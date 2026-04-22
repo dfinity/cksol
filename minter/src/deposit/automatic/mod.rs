@@ -122,6 +122,7 @@ async fn poll_account<R: CanisterRuntime>(
 ) {
     let deposit_address = account_address(master_key, &account);
 
+    let is_new_scan = entry.page_cursor.is_none();
     let params = GetSignaturesForAddressParams {
         pubkey: deposit_address.into(),
         commitment: Some(CommitmentLevel::Finalized),
@@ -132,8 +133,15 @@ async fn poll_account<R: CanisterRuntime>(
                 .expect("MAX_GET_TRANSACTION_CALLS must be between 1 and 1000"),
         ),
         min_context_slot: None,
-        before: None,
-        until: entry.last_discovered_signature.map(Into::into),
+        // When continuing a scan, page backwards using the cursor as the upper bound.
+        // No lower bound is needed since the call budget limits how far back we go.
+        // When starting a new scan, use last_discovered_signature as the lower bound
+        // to avoid re-fetching already-seen transactions.
+        before: entry.page_cursor.map(Into::into),
+        until: is_new_scan
+            .then(|| entry.last_discovered_signature)
+            .flatten()
+            .map(Into::into),
     };
 
     match get_signatures_for_address(runtime, params).await {
@@ -144,10 +152,19 @@ async fn poll_account<R: CanisterRuntime>(
             );
         }
         Ok(signatures) => {
-            if let Some(newest) = signatures.first() {
+            if is_new_scan {
+                // Record the newest signature at the start of the scan; it becomes
+                // last_discovered_signature once the scan completes.
                 entry.last_discovered_signature =
-                    Some(solana_signature::Signature::from(newest.signature.clone()));
+                    signatures.first().map(|s| s.signature.clone().into());
             }
+            entry.page_cursor = if signatures.len() >= MAX_GET_TRANSACTION_CALLS {
+                // Full batch returned — there may be more; continue paginating.
+                signatures.last().map(|s| s.signature.clone().into())
+            } else {
+                // Fewer results than the limit — this batch exhausts the range.
+                None
+            };
         }
     }
 
