@@ -222,7 +222,7 @@ impl MockBuilder {
 fn get_deposit_transaction_request() -> JsonRpcRequestMatcher {
     JsonRpcRequestMatcher::with_method("getTransaction").with_params(json!([
         DEPOSIT_TRANSACTION_SIGNATURE,
-        {"encoding": "base64", "commitment": "finalized"}
+        {"encoding": "base64", "commitment": "finalized", "maxSupportedTransactionVersion": 0}
     ]))
 }
 

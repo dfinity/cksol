@@ -6,7 +6,7 @@ use crate::{
     },
     test_fixtures::{
         PROCESS_DEPOSIT_REQUIRED_CYCLES, confirmed_block,
-        deposit::{deposit_transaction, deposit_transaction_signature},
+        deposit::{legacy_deposit_transaction, legacy_deposit_transaction_signature},
         init_state,
         runtime::TestCanisterRuntime,
     },
@@ -34,7 +34,7 @@ mod get_transaction_tests {
 
         let result = get_transaction(
             &runtime,
-            deposit_transaction_signature(),
+            legacy_deposit_transaction_signature(),
             PROCESS_DEPOSIT_REQUIRED_CYCLES,
         )
         .await;
@@ -61,7 +61,7 @@ mod get_transaction_tests {
 
         let result = get_transaction(
             &runtime,
-            deposit_transaction_signature(),
+            legacy_deposit_transaction_signature(),
             PROCESS_DEPOSIT_REQUIRED_CYCLES,
         )
         .await;
@@ -90,7 +90,7 @@ mod get_transaction_tests {
 
         let result = get_transaction(
             &runtime,
-            deposit_transaction_signature(),
+            legacy_deposit_transaction_signature(),
             PROCESS_DEPOSIT_REQUIRED_CYCLES,
         )
         .await;
@@ -108,7 +108,7 @@ mod get_transaction_tests {
 
         let result = get_transaction(
             &runtime,
-            deposit_transaction_signature(),
+            legacy_deposit_transaction_signature(),
             PROCESS_DEPOSIT_REQUIRED_CYCLES,
         )
         .await;
@@ -123,17 +123,17 @@ mod get_transaction_tests {
         let runtime = TestCanisterRuntime::new()
             .add_msg_cycles_available(PROCESS_DEPOSIT_REQUIRED_CYCLES)
             .add_stub_response(MultiRpcResult::Consistent(Ok(Some(
-                deposit_transaction().try_into().unwrap(),
+                legacy_deposit_transaction().try_into().unwrap(),
             ))));
 
         let result = get_transaction(
             &runtime,
-            deposit_transaction_signature(),
+            legacy_deposit_transaction_signature(),
             PROCESS_DEPOSIT_REQUIRED_CYCLES,
         )
         .await;
 
-        assert_eq!(result, Ok(Some(deposit_transaction())))
+        assert_eq!(result, Ok(Some(legacy_deposit_transaction())))
     }
 }
 
