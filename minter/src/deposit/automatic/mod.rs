@@ -8,6 +8,7 @@ use crate::{
         SchnorrPublicKey, TaskType, audit::process_event, event::EventType, mutate_state,
         read_state,
     },
+    storage::with_discovered_signatures_mut,
 };
 use canlog::log;
 use cksol_types::UpdateBalanceError;
@@ -123,8 +124,14 @@ async fn poll_account<R: CanisterRuntime>(
                 "Failed to get signatures for address {deposit_address}: {e}"
             );
         }
-        Ok(_signatures) => {
-            // TODO(DEFI-2780): Process discovered deposit signatures.
+        Ok(signatures) => {
+            with_discovered_signatures_mut(|queue| {
+                for sig_entry in &signatures {
+                    let sig_bytes: [u8; 64] =
+                        solana_signature::Signature::from(sig_entry.signature.clone()).into();
+                    queue.insert(sig_bytes, account);
+                }
+            });
         }
     }
 
