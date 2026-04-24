@@ -2,6 +2,7 @@ use super::*;
 use crate::{
     constants::MAX_CONCURRENT_RPC_CALLS,
     state::{event::EventType, read_state},
+    storage::{reset_discovered_signatures, with_discovered_signatures},
     test_fixtures::{
         EventsAssert, account, events::start_monitoring_account, init_schnorr_master_key,
         init_state, runtime::TestCanisterRuntime,
@@ -18,6 +19,17 @@ fn monitored_accounts_count() -> usize {
 fn start_monitoring_max_number_of_accounts() {
     for i in 0..MAX_MONITORED_ACCOUNTS {
         start_monitoring_account(account(i));
+    }
+}
+
+fn confirmed_tx_status(signature_bytes: [u8; 64]) -> ConfirmedTransactionStatusWithSignature {
+    ConfirmedTransactionStatusWithSignature {
+        signature: solana_signature::Signature::from(signature_bytes).into(),
+        slot: 12345,
+        err: None,
+        memo: None,
+        block_time: None,
+        confirmation_status: None,
     }
 }
 
@@ -131,8 +143,56 @@ mod poll_monitored_addresses {
         }
     }
 
+    #[tokio::test]
+    async fn should_enqueue_discovered_signatures() {
+        setup();
+
+        let account = account(0);
+        start_monitoring_account(account);
+
+        let sig1: [u8; 64] = [1u8; 64];
+        let sig2: [u8; 64] = [2u8; 64];
+        let runtime = TestCanisterRuntime::new()
+            .with_increasing_time()
+            .add_stub_response(SignaturesResult::Consistent(Ok(vec![
+                confirmed_tx_status(sig1),
+                confirmed_tx_status(sig2),
+            ])));
+
+        poll_monitored_addresses(runtime).await;
+
+        with_discovered_signatures(|queue| {
+            assert_eq!(queue.get(&sig1), Some(account));
+            assert_eq!(queue.get(&sig2), Some(account));
+            assert_eq!(queue.len(), 2);
+        });
+    }
+
+    #[tokio::test]
+    async fn should_not_enqueue_signatures_on_rpc_failure() {
+        setup();
+
+        let account = account(0);
+        start_monitoring_account(account);
+
+        let runtime = TestCanisterRuntime::new()
+            .with_increasing_time()
+            .add_stub_response(SignaturesResult::Consistent(Err(
+                sol_rpc_types::RpcError::ProviderError(
+                    sol_rpc_types::ProviderError::InvalidRpcConfig("test".to_string()),
+                ),
+            )));
+
+        poll_monitored_addresses(runtime).await;
+
+        with_discovered_signatures(|queue| {
+            assert_eq!(queue.len(), 0);
+        });
+    }
+
     fn setup() {
         init_state();
         init_schnorr_master_key();
+        reset_discovered_signatures();
     }
 }
