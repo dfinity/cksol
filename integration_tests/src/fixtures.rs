@@ -26,6 +26,8 @@ pub const MINTER_ADDRESS: Address = address!("5G64DcCfSFRTwZWSTjub1qGRYrJFLeNMkY
 
 pub const DEPOSIT_AMOUNT: Lamport = 500_000_000;
 pub const EXPECTED_MINT_AMOUNT: Lamport = DEPOSIT_AMOUNT - Setup::DEFAULT_MANUAL_DEPOSIT_FEE;
+pub const EXPECTED_AUTOMATED_MINT_AMOUNT: Lamport =
+    DEPOSIT_AMOUNT - Setup::DEFAULT_AUTOMATED_DEPOSIT_FEE;
 
 /// Signature for a Solana transaction depositing [`DEPOSIT_AMOUNT`] lamports to
 /// the address [`DEFAULT_CALLER_DEPOSIT_ADDRESS`].

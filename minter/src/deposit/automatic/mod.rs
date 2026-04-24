@@ -3,6 +3,7 @@ use crate::{
     constants::MAX_CONCURRENT_RPC_CALLS,
     deposit::fetch_and_validate_deposit,
     guard::TimerGuard,
+    ledger::mint,
     rpc::get_signatures_for_address,
     runtime::CanisterRuntime,
     state::{
@@ -16,7 +17,7 @@ use canlog::log;
 use cksol_types::UpdateBalanceError;
 use cksol_types_internal::log::Priority;
 use icrc_ledger_types::icrc1::account::Account;
-use sol_rpc_types::{CommitmentLevel, GetSignaturesForAddressParams};
+use sol_rpc_types::{CommitmentLevel, GetSignaturesForAddressParams, Lamport};
 use solana_signature::Signature;
 use std::{
     cell::RefCell,
@@ -43,6 +44,9 @@ pub const MAX_TRANSACTIONS_PER_ACCOUNT: usize = 10;
 
 /// How often the minter processes the pending-signatures queue.
 pub const PROCESS_PENDING_SIGNATURES_DELAY: Duration = Duration::from_secs(5);
+
+/// How often the minter attempts to mint accepted automatic deposits.
+pub const MINT_AUTOMATIC_DEPOSITS_DELAY: Duration = Duration::from_secs(5);
 
 /// Registers the given account for automated deposit monitoring.
 ///
@@ -262,6 +266,64 @@ async fn process_signature<R: CanisterRuntime>(
             log!(
                 Priority::Info,
                 "Discarding automatic deposit signature {signature}: {e}"
+            );
+        }
+    }
+}
+
+/// Drains accepted automatic deposits and mints ckSOL for each.
+///
+/// Processes up to [`MAX_CONCURRENT_RPC_CALLS`] deposits per round and
+/// reschedules itself at `Duration::ZERO` if more remain.
+pub async fn mint_automatic_deposits<R: CanisterRuntime>(runtime: R) {
+    let _guard = match TimerGuard::new(TaskType::Mint) {
+        Ok(guard) => guard,
+        Err(_) => return,
+    };
+
+    let to_mint: Vec<(DepositId, Lamport)> = read_state(|s| {
+        s.accepted_deposits()
+            .iter()
+            .filter(|(_, d)| d.source == DepositSource::Automatic)
+            .take(MAX_CONCURRENT_RPC_CALLS)
+            .map(|(deposit_id, deposit)| (*deposit_id, deposit.amount_to_mint))
+            .collect()
+    });
+
+    if to_mint.is_empty() {
+        return;
+    }
+
+    let more_to_process = read_state(|s| {
+        s.accepted_deposits()
+            .iter()
+            .filter(|(_, d)| d.source == DepositSource::Automatic)
+            .count()
+            > MAX_CONCURRENT_RPC_CALLS
+    });
+    let reschedule = scopeguard::guard(runtime.clone(), |runtime| {
+        runtime.set_timer(Duration::ZERO, mint_automatic_deposits);
+    });
+
+    futures::future::join_all(
+        to_mint
+            .into_iter()
+            .map(|(deposit_id, amount_to_mint)| mint_one(&runtime, deposit_id, amount_to_mint)),
+    )
+    .await;
+
+    if !more_to_process {
+        scopeguard::ScopeGuard::into_inner(reschedule);
+    }
+}
+
+async fn mint_one<R: CanisterRuntime>(runtime: &R, deposit_id: DepositId, amount_to_mint: Lamport) {
+    match mint(runtime, deposit_id, amount_to_mint).await {
+        Ok(_) => {}
+        Err(e) => {
+            log!(
+                Priority::Info,
+                "Failed to mint ckSOL for automatic deposit {deposit_id:?}: {e}. Will retry."
             );
         }
     }

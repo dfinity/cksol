@@ -413,3 +413,133 @@ mod process_pending_signatures_tests {
         init_schnorr_master_key();
     }
 }
+
+mod mint_automatic_deposits_tests {
+    use super::*;
+    use crate::{
+        storage::reset_events,
+        test_fixtures::{BLOCK_INDEX, events::accept_automatic_deposit},
+    };
+    use icrc_ledger_types::icrc1::transfer::{BlockIndex, TransferError};
+
+    #[tokio::test]
+    async fn should_mint_accepted_deposit() {
+        setup();
+
+        let deposit_id = DepositId {
+            account: DEPOSITOR_ACCOUNT,
+            signature: legacy_deposit_transaction_signature(),
+        };
+        let amount_to_mint = DEPOSIT_AMOUNT - AUTOMATED_DEPOSIT_FEE;
+        accept_automatic_deposit(deposit_id, DEPOSIT_AMOUNT, amount_to_mint);
+        reset_events();
+
+        let runtime = TestCanisterRuntime::new()
+            .with_increasing_time()
+            .add_stub_response(Ok::<BlockIndex, TransferError>(BLOCK_INDEX.into()));
+
+        mint_automatic_deposits(runtime).await;
+
+        assert!(
+            read_state(|s| s.accepted_deposits().is_empty()),
+            "deposit should have been minted"
+        );
+        EventsAssert::from_recorded()
+            .expect_event_eq(EventType::Minted {
+                deposit_id,
+                mint_block_index: BLOCK_INDEX.into(),
+            })
+            .assert_no_more_events();
+    }
+
+    #[tokio::test]
+    async fn should_keep_deposit_on_mint_failure() {
+        setup();
+
+        let deposit_id = DepositId {
+            account: DEPOSITOR_ACCOUNT,
+            signature: legacy_deposit_transaction_signature(),
+        };
+        let amount_to_mint = DEPOSIT_AMOUNT - AUTOMATED_DEPOSIT_FEE;
+        accept_automatic_deposit(deposit_id, DEPOSIT_AMOUNT, amount_to_mint);
+
+        let runtime = TestCanisterRuntime::new()
+            .with_increasing_time()
+            .add_stub_response(Err::<BlockIndex, TransferError>(
+                TransferError::TemporarilyUnavailable,
+            ));
+
+        mint_automatic_deposits(runtime).await;
+
+        // Deposit should still be in accepted_deposits for retry.
+        assert_eq!(read_state(|s| s.accepted_deposits().len()), 1);
+    }
+
+    #[tokio::test]
+    async fn should_do_nothing_when_no_accepted_deposits() {
+        setup();
+
+        let runtime = TestCanisterRuntime::new().with_increasing_time();
+        mint_automatic_deposits(runtime).await;
+
+        EventsAssert::assert_no_events_recorded();
+    }
+
+    #[tokio::test]
+    async fn should_reschedule_when_more_deposits_than_capacity() {
+        setup();
+
+        // Accept MAX_CONCURRENT_RPC_CALLS + 1 automatic deposits.
+        let amount_to_mint = DEPOSIT_AMOUNT - AUTOMATED_DEPOSIT_FEE;
+        for i in 0..=MAX_CONCURRENT_RPC_CALLS {
+            let deposit_id = DepositId {
+                account: DEPOSITOR_ACCOUNT,
+                signature: signature(i),
+            };
+            accept_automatic_deposit(deposit_id, DEPOSIT_AMOUNT, amount_to_mint);
+        }
+        reset_events();
+
+        // Provide exactly MAX_CONCURRENT_RPC_CALLS mint stubs.
+        let mut runtime = TestCanisterRuntime::new().with_increasing_time();
+        for i in 0..MAX_CONCURRENT_RPC_CALLS {
+            runtime = runtime.add_stub_response(Ok::<BlockIndex, TransferError>(
+                (BLOCK_INDEX + i as u64).into(),
+            ));
+        }
+
+        mint_automatic_deposits(runtime.clone()).await;
+
+        // One deposit remains → reschedule.
+        assert_eq!(read_state(|s| s.accepted_deposits().len()), 1);
+        assert_eq!(runtime.set_timer_call_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn should_skip_manual_deposits() {
+        use crate::test_fixtures::events::accept_deposit;
+
+        setup();
+
+        let deposit_id = DepositId {
+            account: DEPOSITOR_ACCOUNT,
+            signature: legacy_deposit_transaction_signature(),
+        };
+        accept_deposit(deposit_id, DEPOSIT_AMOUNT);
+
+        let runtime = TestCanisterRuntime::new().with_increasing_time();
+        mint_automatic_deposits(runtime).await;
+
+        // Manual deposit should not have been minted by this timer.
+        assert_eq!(
+            read_state(|s| s.accepted_deposits().len()),
+            1,
+            "manual deposit should remain in accepted_deposits"
+        );
+    }
+
+    fn setup() {
+        init_state();
+        init_schnorr_master_key();
+    }
+}
