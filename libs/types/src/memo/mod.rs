@@ -36,7 +36,7 @@ pub enum Memo {
     Mint(#[n(0)] MintMemo),
     /// The minter burned some ckSOL tokens.
     #[n(1)]
-    Burn(#[n(1)] BurnMemo),
+    Burn(#[n(0)] BurnMemo),
 }
 
 /// The minter minted some ckSOL tokens.
