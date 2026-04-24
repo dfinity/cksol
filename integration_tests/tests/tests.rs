@@ -1099,12 +1099,6 @@ mod anonymous_caller_tests {
                 .await;
             assert_matches!(result, Err(s) => s.contains("the owner must be non-anonymous"));
 
-            // `update_balance` endpoint
-            let result = minter
-                .try_update_balance(UpdateBalanceArgs::default())
-                .await;
-            assert_matches!(result, Err(s) => s.contains("the owner must be non-anonymous"));
-
             // `process_deposit` endpoint
             let result = minter
                 .try_process_deposit(ProcessDepositArgs {
@@ -1115,6 +1109,13 @@ mod anonymous_caller_tests {
                 .await;
             assert_matches!(result, Err(s) => s.contains("the owner must be non-anonymous"));
         }
+
+        // `update_balance` endpoint (no `owner` field, only anonymous caller applies)
+        let minter = setup.minter_with_caller(Principal::anonymous());
+        let result = minter
+            .try_update_balance(UpdateBalanceArgs::default())
+            .await;
+        assert_matches!(result, Err(s) => s.contains("the owner must be non-anonymous"));
 
         // `withdraw` endpoint (no `owner` field, only anonymous caller applies)
         let minter = setup.minter_with_caller(Principal::anonymous());
