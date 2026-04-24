@@ -7,7 +7,7 @@ use cksol_int_tests::{
         DEFAULT_CALLER_ACCOUNT, DEFAULT_CALLER_DEPOSIT_ADDRESS, DEPOSIT_AMOUNT,
         EXPECTED_MINT_AMOUNT, MockBuilder, SharedMockHttpOutcalls,
         default_get_deposit_address_args, default_process_deposit_args,
-        default_update_balance_args, deposit_transaction_signature,
+        deposit_transaction_signature,
     },
 };
 use cksol_types::{
@@ -1052,9 +1052,7 @@ mod update_balance_tests {
         }
 
         // Calling again for an already-monitored account is idempotent — no new event
-        let result = minter
-            .update_balance(UpdateBalanceArgs { subaccount: None })
-            .await;
+        let result = minter.update_balance(UpdateBalanceArgs::default()).await;
         assert_eq!(result, Ok(()));
 
         // Exactly one StartedMonitoringAccount event per account, no duplicates
@@ -1103,7 +1101,7 @@ mod anonymous_caller_tests {
 
             // `update_balance` endpoint
             let result = minter
-                .try_update_balance(UpdateBalanceArgs { subaccount: None })
+                .try_update_balance(UpdateBalanceArgs::default())
                 .await;
             assert_matches!(result, Err(s) => s.contains("the owner must be non-anonymous"));
 
@@ -1301,7 +1299,7 @@ mod automated_deposit_flow_tests {
             DEFAULT_CALLER_DEPOSIT_ADDRESS
         );
         minter
-            .update_balance(default_update_balance_args())
+            .update_balance(UpdateBalanceArgs::default())
             .await
             .expect("update_balance should succeed");
 

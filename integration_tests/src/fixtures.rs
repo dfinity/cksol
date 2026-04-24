@@ -46,10 +46,6 @@ pub fn default_get_deposit_address_args() -> GetDepositAddressArgs {
     }
 }
 
-pub fn default_update_balance_args() -> cksol_types::UpdateBalanceArgs {
-    cksol_types::UpdateBalanceArgs { subaccount: None }
-}
-
 pub fn default_process_deposit_args() -> ProcessDepositArgs {
     ProcessDepositArgs {
         owner: None,
