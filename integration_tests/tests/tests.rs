@@ -1045,7 +1045,6 @@ mod update_balance_tests {
         for account in &accounts {
             let result = minter
                 .update_balance(UpdateBalanceArgs {
-                    owner: Some(account.owner),
                     subaccount: account.subaccount,
                 })
                 .await;
@@ -1054,10 +1053,7 @@ mod update_balance_tests {
 
         // Calling again for an already-monitored account is idempotent — no new event
         let result = minter
-            .update_balance(UpdateBalanceArgs {
-                owner: None,
-                subaccount: None,
-            })
+            .update_balance(UpdateBalanceArgs { subaccount: None })
             .await;
         assert_eq!(result, Ok(()));
 
@@ -1107,10 +1103,7 @@ mod anonymous_caller_tests {
 
             // `update_balance` endpoint
             let result = minter
-                .try_update_balance(UpdateBalanceArgs {
-                    owner,
-                    subaccount: None,
-                })
+                .try_update_balance(UpdateBalanceArgs { subaccount: None })
                 .await;
             assert_matches!(result, Err(s) => s.contains("the owner must be non-anonymous"));
 

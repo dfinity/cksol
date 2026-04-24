@@ -67,7 +67,7 @@ fn get_deposit_address(args: GetDepositAddressArgs) -> Address {
 
 #[ic_cdk::update]
 fn update_balance(args: UpdateBalanceArgs) -> Result<(), UpdateBalanceError> {
-    let account = assert_non_anonymous_account(args.owner, args.subaccount);
+    let account = assert_non_anonymous_account(None, args.subaccount);
     cksol_minter::deposit::automatic::update_balance(&IcCanisterRuntime::new(), account)
 }
 
