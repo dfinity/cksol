@@ -1,6 +1,8 @@
 use sol_rpc_types::Lamport;
 use solana_address::Address;
-use solana_transaction_status_client_types::EncodedConfirmedTransactionWithStatusMeta;
+use solana_transaction_status_client_types::{
+    EncodedConfirmedTransactionWithStatusMeta, UiTransactionError,
+};
 use thiserror::Error;
 
 #[cfg(test)]
@@ -46,6 +48,13 @@ pub fn get_deposit_amount_to_address(
         .transaction
         .meta
         .ok_or(GetDepositAmountError::NoMetaField)?;
+
+    // Sanity check: a failed transaction shouldn't affect post balances, but
+    // we reject it explicitly rather than relying on that invariant.
+    if let Some(err) = meta.err {
+        return Err(GetDepositAmountError::TransactionFailed(err));
+    }
+
     let pre_balance = *meta.pre_balances.get(deposit_address_index).ok_or(
         GetDepositAmountError::TransactionParsingFailed(
             "Index out of bounds for pre-balances".to_string(),
@@ -68,6 +77,8 @@ pub enum GetDepositAmountError {
     DepositAddressNotWriteable,
     #[error("'getTransaction' RPC response has no 'meta' field")]
     NoMetaField,
+    #[error("Transaction failed: {0}")]
+    TransactionFailed(UiTransactionError),
     #[error("Invalid transaction: {0}")]
     TransactionParsingFailed(String),
 }

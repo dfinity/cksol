@@ -3,7 +3,10 @@ use crate::test_fixtures::deposit::{
     legacy_deposit_transaction,
 };
 use assert_matches::assert_matches;
-use solana_transaction_status_client_types::{EncodedTransaction, TransactionBinaryEncoding};
+use solana_transaction::TransactionError;
+use solana_transaction_status_client_types::{
+    EncodedTransaction, TransactionBinaryEncoding, UiTransactionError,
+};
 
 mod get_deposit_amount_tests {
     use super::*;
@@ -43,6 +46,17 @@ mod get_deposit_amount_tests {
             result,
             Err(GetDepositAmountError::DepositAddressNotInAccountKeys)
         );
+    }
+
+    #[test]
+    fn should_fail_if_transaction_has_err_field() {
+        let mut transaction = legacy_deposit_transaction();
+        transaction.transaction.meta.as_mut().unwrap().err =
+            Some(UiTransactionError::from(TransactionError::AccountInUse));
+
+        let result = get_deposit_amount_to_address(transaction, DEPOSIT_ADDRESS);
+
+        assert_matches!(result, Err(GetDepositAmountError::TransactionFailed(_)));
     }
 
     #[test]
