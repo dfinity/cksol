@@ -2,7 +2,9 @@ use crate::{
     constants::{FEE_PER_SIGNATURE, RENT_EXEMPTION_THRESHOLD},
     ledger::client::LedgerClient,
     numeric::{LedgerBurnIndex, LedgerMintIndex},
-    state::event::{DepositId, TransactionPurpose, VersionedMessage, WithdrawalRequest},
+    state::event::{
+        DepositId, DepositSource, TransactionPurpose, VersionedMessage, WithdrawalRequest,
+    },
     utils::{
         insertion_ordered_map::InsertionOrderedMap, insertion_ordered_set::InsertionOrderedSet,
     },
@@ -271,6 +273,7 @@ impl State {
         if let Some(Deposit {
             deposit_amount,
             amount_to_mint,
+            ..
         }) = self.accepted_deposits.get(deposit_id)
         {
             return Some(DepositStatus::Processing {
@@ -414,6 +417,7 @@ impl State {
         deposit_id: &DepositId,
         deposit_amount: &Lamport,
         amount_to_mint: &Lamport,
+        source: DepositSource,
     ) {
         assert!(
             !self.quarantined_deposits.contains_key(deposit_id),
@@ -429,6 +433,7 @@ impl State {
                 Deposit {
                     deposit_amount: *deposit_amount,
                     amount_to_mint: *amount_to_mint,
+                    source,
                 }
             ),
             None,
@@ -827,6 +832,7 @@ pub struct SchnorrPublicKey {
 pub struct Deposit {
     pub deposit_amount: Lamport,
     pub amount_to_mint: Lamport,
+    pub source: DepositSource,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -843,6 +849,7 @@ pub enum TaskType {
     ResubmitTransactions,
     WithdrawalProcessing,
     PollMonitoredAddresses,
+    ProcessPendingSignatures,
 }
 
 /// Details about a consolidation transaction, capturing the individual

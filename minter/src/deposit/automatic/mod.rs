@@ -1,12 +1,15 @@
 use crate::{
     address::{account_address, lazy_get_schnorr_master_key},
     constants::MAX_CONCURRENT_RPC_CALLS,
+    deposit::fetch_and_validate_deposit,
     guard::TimerGuard,
     rpc::get_signatures_for_address,
     runtime::CanisterRuntime,
     state::{
-        SchnorrPublicKey, TaskType, audit::process_event, event::EventType, mutate_state,
-        read_state,
+        SchnorrPublicKey, TaskType,
+        audit::process_event,
+        event::{DepositId, DepositSource, EventType},
+        mutate_state, read_state,
     },
 };
 use canlog::log;
@@ -37,6 +40,9 @@ pub const POLL_MONITORED_ADDRESSES_DELAY: Duration = Duration::from_mins(1);
 
 /// Maximum number of `getTransaction` calls to make per polled account.
 pub const MAX_TRANSACTIONS_PER_ACCOUNT: usize = 10;
+
+/// How often the minter processes the pending-signatures queue.
+pub const PROCESS_PENDING_SIGNATURES_DELAY: Duration = Duration::from_secs(5);
 
 /// Registers the given account for automated deposit monitoring.
 ///
@@ -158,6 +164,107 @@ async fn poll_account<R: CanisterRuntime>(
             runtime,
         );
     });
+}
+
+/// Processes pending deposit signatures using a round-robin, capacity-filling strategy.
+///
+/// Each pass takes one signature per account (fair round-robin by `Account` key order). If
+/// capacity remains after a full pass, another pass begins — so up to `MAX_CONCURRENT_RPC_CALLS`
+/// signatures are dispatched in parallel each call. For each signature, calls `getTransaction`
+/// and emits [`EventType::AcceptedDeposit`] with `source: Automatic` if valid. Invalid or
+/// already-processed signatures are silently discarded. Reschedules itself immediately if
+/// signatures remain after the capacity is exhausted.
+pub async fn process_pending_signatures<R: CanisterRuntime>(runtime: R) {
+    let _guard = match TimerGuard::new(TaskType::ProcessPendingSignatures) {
+        Ok(guard) => guard,
+        Err(_) => return,
+    };
+
+    // Round-robin across accounts, refilling capacity with additional passes until exhausted.
+    let to_process: Vec<(Account, Signature)> = PENDING_SIGNATURES.with(|pending| {
+        let mut pending = pending.borrow_mut();
+        let mut to_process = Vec::with_capacity(MAX_CONCURRENT_RPC_CALLS);
+        let mut capacity = MAX_CONCURRENT_RPC_CALLS;
+        loop {
+            let before = to_process.len();
+            for (account, queue) in pending.iter_mut() {
+                if capacity == 0 {
+                    break;
+                }
+                if let Some(sig) = queue.pop_front() {
+                    to_process.push((*account, sig));
+                    capacity -= 1;
+                }
+            }
+            if to_process.len() == before || capacity == 0 {
+                break;
+            }
+        }
+        pending.retain(|_, queue| !queue.is_empty());
+        to_process
+    });
+
+    if to_process.is_empty() {
+        return;
+    }
+
+    let more_to_process = PENDING_SIGNATURES.with(|p| !p.borrow().is_empty());
+    let reschedule = scopeguard::guard(runtime.clone(), |runtime| {
+        runtime.set_timer(Duration::ZERO, process_pending_signatures);
+    });
+
+    let fee = read_state(|s| s.automated_deposit_fee());
+
+    futures::future::join_all(
+        to_process
+            .into_iter()
+            .map(|(account, signature)| process_signature(&runtime, account, signature, fee)),
+    )
+    .await;
+
+    if !more_to_process {
+        scopeguard::ScopeGuard::into_inner(reschedule);
+    }
+}
+
+async fn process_signature<R: CanisterRuntime>(
+    runtime: &R,
+    account: Account,
+    signature: Signature,
+    fee: u64,
+) {
+    // Skip signatures that were already accepted or minted (e.g. via manual deposit).
+    let deposit_id = DepositId { account, signature };
+    if read_state(|s| s.deposit_status(&deposit_id)).is_some() {
+        return;
+    }
+
+    match fetch_and_validate_deposit(runtime, account, signature, fee).await {
+        Ok((deposit_id, deposit_amount, amount_to_mint)) => {
+            mutate_state(|state| {
+                process_event(
+                    state,
+                    EventType::AcceptedDeposit {
+                        deposit_id,
+                        deposit_amount,
+                        amount_to_mint,
+                        source: DepositSource::Automatic,
+                    },
+                    runtime,
+                )
+            });
+            log!(
+                Priority::Info,
+                "Accepted automatic deposit {deposit_id:?}: {deposit_amount} lamports deposited, minting {amount_to_mint} lamports"
+            );
+        }
+        Err(e) => {
+            log!(
+                Priority::Info,
+                "Discarding automatic deposit signature {signature}: {e}"
+            );
+        }
+    }
 }
 
 #[cfg(any(test, feature = "canbench-rs"))]

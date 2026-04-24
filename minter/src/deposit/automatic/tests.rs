@@ -1,13 +1,28 @@
 use super::*;
 use crate::{
     constants::MAX_CONCURRENT_RPC_CALLS,
-    state::{event::EventType, read_state},
+    state::{
+        event::{DepositId, DepositSource, EventType},
+        read_state,
+    },
     test_fixtures::{
-        EventsAssert, account, events::start_monitoring_account, init_schnorr_master_key,
-        init_state, runtime::TestCanisterRuntime, signature,
+        AUTOMATED_DEPOSIT_FEE, EventsAssert, account,
+        deposit::{
+            DEPOSIT_AMOUNT, DEPOSITOR_ACCOUNT, legacy_deposit_transaction,
+            legacy_deposit_transaction_signature,
+        },
+        events::start_monitoring_account,
+        init_schnorr_master_key, init_state,
+        runtime::TestCanisterRuntime,
+        signature,
     },
 };
-use sol_rpc_types::{ConfirmedTransactionStatusWithSignature, MultiRpcResult, TransactionError};
+use sol_rpc_types::{
+    ConfirmedTransactionStatusWithSignature, EncodedConfirmedTransactionWithStatusMeta,
+    MultiRpcResult, TransactionError,
+};
+
+type GetTransactionResult = MultiRpcResult<Option<EncodedConfirmedTransactionWithStatusMeta>>;
 
 type SignaturesResult = MultiRpcResult<Vec<ConfirmedTransactionStatusWithSignature>>;
 
@@ -214,6 +229,183 @@ mod poll_monitored_addresses {
         poll_monitored_addresses(runtime).await;
 
         assert_eq!(pending_signatures_for(&acc), vec![]);
+    }
+
+    fn setup() {
+        init_state();
+        init_schnorr_master_key();
+    }
+}
+
+mod process_pending_signatures_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn should_accept_valid_deposit() {
+        setup();
+        reset_pending_signatures();
+
+        let signature = legacy_deposit_transaction_signature();
+        PENDING_SIGNATURES.with(|p| {
+            p.borrow_mut()
+                .entry(DEPOSITOR_ACCOUNT)
+                .or_default()
+                .push_back(signature);
+        });
+
+        let get_tx_response = GetTransactionResult::Consistent(Ok(Some(
+            legacy_deposit_transaction().try_into().unwrap(),
+        )));
+        let runtime = TestCanisterRuntime::new()
+            .with_increasing_time()
+            .add_stub_response(get_tx_response);
+
+        process_pending_signatures(runtime).await;
+
+        assert!(
+            pending_signatures_for(&DEPOSITOR_ACCOUNT).is_empty(),
+            "signature should have been consumed"
+        );
+
+        let deposit_id = DepositId {
+            account: DEPOSITOR_ACCOUNT,
+            signature,
+        };
+        EventsAssert::from_recorded()
+            .expect_event_eq(EventType::AcceptedDeposit {
+                deposit_id,
+                deposit_amount: DEPOSIT_AMOUNT,
+                amount_to_mint: DEPOSIT_AMOUNT - AUTOMATED_DEPOSIT_FEE,
+                source: DepositSource::Automatic,
+            })
+            .assert_no_more_events();
+    }
+
+    #[tokio::test]
+    async fn should_discard_invalid_deposit() {
+        setup();
+        reset_pending_signatures();
+
+        let signature = legacy_deposit_transaction_signature();
+        PENDING_SIGNATURES.with(|p| {
+            p.borrow_mut()
+                .entry(DEPOSITOR_ACCOUNT)
+                .or_default()
+                .push_back(signature);
+        });
+
+        // getTransaction returns None (tx not found)
+        let runtime = TestCanisterRuntime::new()
+            .with_increasing_time()
+            .add_stub_response(GetTransactionResult::Consistent(Ok(None)));
+
+        process_pending_signatures(runtime).await;
+
+        assert!(pending_signatures_for(&DEPOSITOR_ACCOUNT).is_empty());
+        EventsAssert::assert_no_events_recorded();
+    }
+
+    #[tokio::test]
+    async fn should_skip_already_processed_deposit() {
+        setup();
+        reset_pending_signatures();
+
+        let signature = legacy_deposit_transaction_signature();
+
+        // Pre-populate state as if this deposit was already accepted manually.
+        crate::test_fixtures::events::accept_deposit(
+            DepositId {
+                account: DEPOSITOR_ACCOUNT,
+                signature,
+            },
+            DEPOSIT_AMOUNT,
+        );
+
+        PENDING_SIGNATURES.with(|p| {
+            p.borrow_mut()
+                .entry(DEPOSITOR_ACCOUNT)
+                .or_default()
+                .push_back(signature);
+        });
+
+        // No getTransaction stub — if called it would panic.
+        let runtime = TestCanisterRuntime::new().with_increasing_time();
+
+        process_pending_signatures(runtime).await;
+
+        use crate::test_fixtures::MANUAL_DEPOSIT_FEE;
+        // No new AcceptedDeposit (Automatic) event should have been emitted.
+        EventsAssert::from_recorded()
+            .expect_event_eq(EventType::AcceptedDeposit {
+                deposit_id: DepositId {
+                    account: DEPOSITOR_ACCOUNT,
+                    signature,
+                },
+                deposit_amount: DEPOSIT_AMOUNT,
+                amount_to_mint: DEPOSIT_AMOUNT - MANUAL_DEPOSIT_FEE,
+                source: DepositSource::Manual,
+            })
+            .assert_no_more_events();
+    }
+
+    #[tokio::test]
+    async fn should_process_multiple_signatures_per_account_when_capacity_allows() {
+        setup();
+        reset_pending_signatures();
+
+        // Two accounts with two signatures each — all four fit within MAX_CONCURRENT_RPC_CALLS.
+        let acc1 = DEPOSITOR_ACCOUNT;
+        let acc2 = account(2);
+        let sigs: Vec<_> = (1..=4).map(signature).collect();
+
+        PENDING_SIGNATURES.with(|p| {
+            let mut p = p.borrow_mut();
+            p.entry(acc1).or_default().extend([sigs[0], sigs[1]]);
+            p.entry(acc2).or_default().extend([sigs[2], sigs[3]]);
+        });
+
+        // All four getTransaction calls return None (invalid deposit — just discard).
+        let mut runtime = TestCanisterRuntime::new().with_increasing_time();
+        for _ in 0..4 {
+            runtime = runtime.add_stub_response(GetTransactionResult::Consistent(Ok(None)));
+        }
+
+        process_pending_signatures(runtime.clone()).await;
+
+        // All consumed in one call thanks to multi-pass round-robin; no reschedule.
+        assert!(pending_signatures_for(&acc1).is_empty());
+        assert!(pending_signatures_for(&acc2).is_empty());
+        assert_eq!(runtime.set_timer_call_count(), 0);
+        EventsAssert::assert_no_events_recorded();
+    }
+
+    #[tokio::test]
+    async fn should_reschedule_when_capacity_exhausted() {
+        setup();
+        reset_pending_signatures();
+
+        // MAX_CONCURRENT_RPC_CALLS + 1 signatures → only MAX fit in one round.
+        let sigs: Vec<_> = (0..=MAX_CONCURRENT_RPC_CALLS).map(signature).collect();
+        PENDING_SIGNATURES.with(|p| {
+            p.borrow_mut()
+                .entry(DEPOSITOR_ACCOUNT)
+                .or_default()
+                .extend(sigs.iter().copied());
+        });
+
+        let mut runtime = TestCanisterRuntime::new().with_increasing_time();
+        for _ in 0..MAX_CONCURRENT_RPC_CALLS {
+            runtime = runtime.add_stub_response(GetTransactionResult::Consistent(Ok(None)));
+        }
+
+        process_pending_signatures(runtime.clone()).await;
+
+        // Last signature still pending → reschedule.
+        assert_eq!(
+            pending_signatures_for(&DEPOSITOR_ACCOUNT),
+            vec![sigs[MAX_CONCURRENT_RPC_CALLS]]
+        );
+        assert_eq!(runtime.set_timer_call_count(), 1);
     }
 
     fn setup() {

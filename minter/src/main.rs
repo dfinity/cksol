@@ -3,7 +3,10 @@ use canlog::{Log, Sort};
 use cksol_minter::{
     address::lazy_get_schnorr_master_key,
     consolidate::{DEPOSIT_CONSOLIDATION_DELAY, consolidate_deposits},
-    deposit::automatic::{POLL_MONITORED_ADDRESSES_DELAY, poll_monitored_addresses},
+    deposit::automatic::{
+        POLL_MONITORED_ADDRESSES_DELAY, PROCESS_PENDING_SIGNATURES_DELAY, poll_monitored_addresses,
+        process_pending_signatures,
+    },
     monitor::{
         FINALIZE_TRANSACTIONS_DELAY, RESUBMIT_TRANSACTIONS_DELAY, finalize_transactions,
         resubmit_transactions,
@@ -376,6 +379,9 @@ fn setup_timers() {
     });
     ic_cdk_timers::set_timer_interval(POLL_MONITORED_ADDRESSES_DELAY, async || {
         poll_monitored_addresses(IcCanisterRuntime::new()).await;
+    });
+    ic_cdk_timers::set_timer_interval(PROCESS_PENDING_SIGNATURES_DELAY, async || {
+        process_pending_signatures(IcCanisterRuntime::new()).await;
     });
 }
 
