@@ -273,16 +273,12 @@ icp canister call -e prod cksol_minter withdrawal_status \
 │   │   ├── deposit/
 │   │   │   ├── manual/      # Manual deposit processing
 │   │   │   └── automatic/   # Automatic deposit processing (WIP)
-│   │   ├── guard/           # Concurrency guards
-│   │   ├── ledger/          # ckSOL ledger client
+│   │   ├── lifecycle.rs     # Canister init/upgrade and event log
+│   │   ├── metrics.rs       # Prometheus metrics
 │   │   ├── monitor/         # Transaction monitoring
-│   │   ├── rpc/             # Solana RPC client
-│   │   ├── signer/          # Threshold Schnorr signing
-│   │   ├── sol_transfer/    # Solana transaction construction
 │   │   ├── state/           # Minter state and event sourcing
 │   │   ├── withdraw/        # Withdrawal processing
-│   │   ├── lifecycle.rs     # Canister init/upgrade
-│   │   └── metrics.rs       # Prometheus metrics
+│   │   └── ...
 │   └── cksol_minter.did     # Candid interface
 ├── libs/
 │   ├── types/               # Public ckSOL types (cksol-types crate)
