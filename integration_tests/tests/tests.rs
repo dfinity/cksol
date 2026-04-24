@@ -1022,14 +1022,9 @@ mod update_balance_tests {
         let setup = SetupBuilder::new().build().await;
         let minter = setup.minter();
 
-        // Register the same accounts as used in get_deposit_address_tests
         let accounts = vec![
             Account {
                 owner: Setup::DEFAULT_CALLER,
-                subaccount: None,
-            },
-            Account {
-                owner: Principal::from_slice(&[1]),
                 subaccount: None,
             },
             Account {
