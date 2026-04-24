@@ -3,7 +3,9 @@ use crate::{
     ledger::client::LedgerClient,
     numeric::{LedgerBurnIndex, LedgerMintIndex},
     state::event::{DepositId, TransactionPurpose, VersionedMessage, WithdrawalRequest},
-    utils::insertion_ordered_map::InsertionOrderedMap,
+    utils::{
+        insertion_ordered_map::InsertionOrderedMap, insertion_ordered_set::InsertionOrderedSet,
+    },
 };
 use candid::Principal;
 use cksol_types::{DepositStatus, TxFinalizedStatus, WithdrawalStatus};
@@ -89,7 +91,7 @@ pub struct State {
     minimum_deposit_amount: Lamport,
     process_deposit_required_cycles: u128,
     deposit_consolidation_fee: u128,
-    monitored_accounts: BTreeSet<Account>,
+    monitored_accounts: InsertionOrderedSet<Account>,
     pending_process_deposit_request_guards: BTreeSet<Account>,
     pending_withdrawal_request_guards: BTreeSet<Account>,
     accepted_deposits: InsertionOrderedMap<DepositId, Deposit>,
@@ -244,7 +246,7 @@ impl State {
         self.balance
     }
 
-    pub fn monitored_accounts(&self) -> &BTreeSet<Account> {
+    pub fn monitored_accounts(&self) -> &InsertionOrderedSet<Account> {
         &self.monitored_accounts
     }
 
@@ -776,7 +778,7 @@ impl TryFrom<InitArgs> for State {
             minimum_deposit_amount,
             process_deposit_required_cycles: process_deposit_required_cycles as u128,
             deposit_consolidation_fee: deposit_consolidation_fee as u128,
-            monitored_accounts: BTreeSet::new(),
+            monitored_accounts: InsertionOrderedSet::new(),
             pending_process_deposit_request_guards: BTreeSet::new(),
             pending_withdrawal_request_guards: BTreeSet::new(),
             accepted_deposits: InsertionOrderedMap::new(),
