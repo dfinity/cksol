@@ -5,7 +5,7 @@ use cksol_int_tests::{
     CkSolMinter, Setup, SetupBuilder,
     fixtures::{
         DEFAULT_CALLER_ACCOUNT, DEFAULT_CALLER_DEPOSIT_ADDRESS, DEPOSIT_AMOUNT,
-        EXPECTED_MINT_AMOUNT, MockBuilder, SharedMockHttpOutcalls,
+        EXPECTED_MINT_AMOUNT, MockBuilder, NUM_RPC_PROVIDERS, SharedMockHttpOutcalls,
         default_get_deposit_address_args, default_process_deposit_args,
         default_update_balance_args, deposit_transaction_signature,
     },
@@ -1320,15 +1320,21 @@ mod automated_deposit_flow_tests {
             }));
         });
 
-        // Advance time: the minter should poll getSignaturesForAddress once, then remove the account.
-        setup.advance_time(POLL_MONITORED_ADDRESSES_DELAY).await;
-        setup
-            .execute_http_mocks(
-                MockBuilder::with_start_id(0)
-                    .get_signatures_for_address(vec![])
-                    .build(),
-            )
-            .await;
+        // Advance time through all 10 polls with exponential backoff (1, 2, 4, ..., 512 minutes).
+        let mut delay = POLL_MONITORED_ADDRESSES_DELAY;
+        let mut start_id = 0u64;
+        for _ in 0..10 {
+            setup.advance_time(delay).await;
+            setup
+                .execute_http_mocks(
+                    MockBuilder::with_start_id(start_id)
+                        .get_signatures_for_address(vec![])
+                        .build(),
+                )
+                .await;
+            start_id += NUM_RPC_PROVIDERS;
+            delay *= 2;
+        }
 
         minter.assert_that_events().await.satisfy(|events| {
             check!(events.iter().any(|e| {

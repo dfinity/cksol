@@ -98,6 +98,8 @@ type UpdateBalanceArgs = record {
 type UpdateBalanceError = variant {
     // The monitored account queue is at capacity.
     QueueFull;
+    // The RPC call quota for this account has been exhausted.
+    MonitoringQuotaExhausted;
 };
 
 // The result of a call to the `update_balance` endpoint.
@@ -473,9 +475,6 @@ service : (MinterArg) -> {
     //
     // If the owner is not set, it defaults to the caller's principal.
     // The resolved owner must be a non-anonymous principal.
-    //
-    // Returns Ok if the account was registered (or was already being monitored).
-    // Returns Err(QueueFull) if the monitored account queue is at capacity.
     update_balance: (UpdateBalanceArgs) -> (UpdateBalanceResult);
 
     // Update the ckSOL balance of the given owner with the funds

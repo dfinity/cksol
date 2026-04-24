@@ -598,6 +598,16 @@ pub mod arb {
         (any::<u64>(), arb_event_type())
             .prop_map(|(timestamp, payload)| Event { timestamp, payload })
     }
+
+    pub fn arb_cache_entry()
+    -> impl Strategy<Value = crate::deposit::automatic::cache::AutomaticDepositCacheEntry> {
+        (any::<u64>(), any::<u64>()).prop_map(|(rpc_quota_left, next_backoff_delay_mins)| {
+            crate::deposit::automatic::cache::AutomaticDepositCacheEntry {
+                rpc_quota_left,
+                next_backoff_delay_mins,
+            }
+        })
+    }
 }
 
 pub mod deposit {
