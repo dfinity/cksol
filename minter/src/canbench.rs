@@ -4,7 +4,10 @@ use crate::{
     runtime::IcCanisterRuntime,
     state::{
         audit::{process_event, replay_events},
-        event::{DepositId, EventType, TransactionPurpose, VersionedMessage, WithdrawalRequest},
+        event::{
+            DepositId, DepositSource, EventType, TransactionPurpose, VersionedMessage,
+            WithdrawalRequest,
+        },
         init_once_state, mutate_state, reset_state,
     },
     storage::{reset_events, total_event_count, with_event_iter},
@@ -97,10 +100,11 @@ fn setup_10k_events() {
         mutate_state(|s| {
             process_event(
                 s,
-                EventType::AcceptedManualDeposit {
+                EventType::AcceptedDeposit {
                     deposit_id: id,
                     deposit_amount: amount,
                     amount_to_mint: amount - deposit_fee,
+                    source: DepositSource::Manual,
                 },
                 &runtime,
             )
@@ -147,10 +151,11 @@ fn setup_10k_events() {
         mutate_state(|s| {
             process_event(
                 s,
-                EventType::AcceptedManualDeposit {
+                EventType::AcceptedDeposit {
                     deposit_id: id,
                     deposit_amount: amount,
                     amount_to_mint: amount - deposit_fee,
+                    source: DepositSource::Manual,
                 },
                 &runtime,
             )
@@ -211,10 +216,11 @@ fn setup_10k_events() {
         mutate_state(|s| {
             process_event(
                 s,
-                EventType::AcceptedManualDeposit {
+                EventType::AcceptedDeposit {
                     deposit_id: id,
                     deposit_amount: amount,
                     amount_to_mint: amount - deposit_fee,
+                    source: DepositSource::Manual,
                 },
                 &runtime,
             )
@@ -260,10 +266,11 @@ fn setup_10k_events() {
         mutate_state(|s| {
             process_event(
                 s,
-                EventType::AcceptedManualDeposit {
+                EventType::AcceptedDeposit {
                     deposit_id: id,
                     deposit_amount: amount,
                     amount_to_mint: amount - deposit_fee,
+                    source: DepositSource::Manual,
                 },
                 &runtime,
             )
