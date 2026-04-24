@@ -1,4 +1,5 @@
 use crate::{
+    constants::GET_TRANSACTION_CYCLES,
     deposit::manual::process_deposit,
     state::event::{DepositId, EventType},
     storage::reset_events,
@@ -64,7 +65,8 @@ async fn should_return_error_if_get_transaction_fails() {
     init_state();
     init_schnorr_master_key();
 
-    let runtime = runtime_with_time_and_cycles().add_stub_error(IcError::CallPerformFailed);
+    let runtime =
+        runtime_with_time_and_cycles_no_deposit().add_stub_error(IcError::CallPerformFailed);
 
     let result = process_deposit(
         runtime,
@@ -85,7 +87,7 @@ async fn should_return_error_if_transaction_not_found() {
     init_state();
     init_schnorr_master_key();
 
-    let runtime = runtime_with_time_and_cycles()
+    let runtime = runtime_with_time_and_cycles_no_deposit()
         .add_stub_response(GetTransactionResult::Consistent(Ok(None)));
 
     let result = process_deposit(
@@ -107,7 +109,8 @@ async fn should_return_error_if_transaction_not_valid_deposit() {
     let get_transaction_response = GetTransactionResult::Consistent(Ok(Some(
         deposit_transaction_to_wrong_address().try_into().unwrap(),
     )));
-    let runtime = runtime_with_time_and_cycles().add_stub_response(get_transaction_response);
+    let runtime =
+        runtime_with_time_and_cycles_no_deposit().add_stub_response(get_transaction_response);
 
     let result = process_deposit(
         runtime,
@@ -135,7 +138,8 @@ async fn should_fail_if_deposit_amount_is_below_minimum() {
     let get_transaction_response = GetTransactionResult::Consistent(Ok(Some(
         legacy_deposit_transaction().try_into().unwrap(),
     )));
-    let runtime = runtime_with_time_and_cycles().add_stub_response(get_transaction_response);
+    let runtime =
+        runtime_with_time_and_cycles_no_deposit().add_stub_response(get_transaction_response);
 
     let result = process_deposit(
         runtime,
@@ -443,14 +447,21 @@ async fn should_allow_deposits_to_multiple_accounts_with_single_transaction() {
 }
 
 fn runtime_with_time_and_cycles() -> TestCanisterRuntime {
-    // Cycles forwarded to the RPC call = total - consolidation fee
-    let cycles_for_rpc = PROCESS_DEPOSIT_REQUIRED_CYCLES - DEPOSIT_CONSOLIDATION_FEE;
-    // Simulate the RPC canister refunding most of the forwarded cycles
-    let refunded: u128 = cycles_for_rpc - 100_000_000_000;
-    let rpc_cost = cycles_for_rpc - refunded;
+    let rpc_cost = 25_000_000_000u128;
+    let refunded = GET_TRANSACTION_CYCLES - rpc_cost;
     TestCanisterRuntime::new()
         .with_increasing_time()
         .add_msg_cycles_available(PROCESS_DEPOSIT_REQUIRED_CYCLES)
-        .add_msg_cycles_accept(rpc_cost + DEPOSIT_CONSOLIDATION_FEE)
         .add_msg_cycles_refunded(refunded)
+        .add_msg_cycles_accept(rpc_cost + DEPOSIT_CONSOLIDATION_FEE)
+}
+
+fn runtime_with_time_and_cycles_no_deposit() -> TestCanisterRuntime {
+    let rpc_cost = 25_000_000_000u128;
+    let refunded = GET_TRANSACTION_CYCLES - rpc_cost;
+    TestCanisterRuntime::new()
+        .with_increasing_time()
+        .add_msg_cycles_available(PROCESS_DEPOSIT_REQUIRED_CYCLES)
+        .add_msg_cycles_refunded(refunded)
+        .add_msg_cycles_accept(rpc_cost)
 }
