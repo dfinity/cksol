@@ -1022,25 +1022,12 @@ mod update_balance_tests {
         let setup = SetupBuilder::new().build().await;
         let minter = setup.minter();
 
-        let accounts = vec![
-            Account {
-                owner: Setup::DEFAULT_CALLER,
-                subaccount: None,
-            },
-            Account {
-                owner: Setup::DEFAULT_CALLER,
-                subaccount: Some([1; 32]),
-            },
-            Account {
-                owner: Setup::DEFAULT_CALLER,
-                subaccount: Some([2; 32]),
-            },
-        ];
+        let subaccounts: Vec<Option<Subaccount>> = vec![None, Some([1; 32]), Some([2; 32])];
 
-        for account in &accounts {
+        for subaccount in &subaccounts {
             let result = minter
                 .update_balance(UpdateBalanceArgs {
-                    subaccount: account.subaccount,
+                    subaccount: *subaccount,
                 })
                 .await;
             assert_eq!(result, Ok(()));
@@ -1050,8 +1037,14 @@ mod update_balance_tests {
         let result = minter.update_balance(UpdateBalanceArgs::default()).await;
         assert_eq!(result, Ok(()));
 
-        // Exactly one StartedMonitoringAccount event per account, no duplicates
-        let expected_accounts = accounts.clone();
+        // Exactly one StartedMonitoringAccount event per subaccount, no duplicates
+        let expected_accounts: Vec<Account> = subaccounts
+            .iter()
+            .map(|subaccount| Account {
+                owner: Setup::DEFAULT_CALLER,
+                subaccount: *subaccount,
+            })
+            .collect();
         minter.assert_that_events().await.satisfy(|events| {
             let monitoring_events: Vec<&Account> = events
                 .iter()
