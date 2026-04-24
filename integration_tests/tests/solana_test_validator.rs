@@ -3,7 +3,10 @@ use candid::Principal;
 use cksol_int_tests::{
     Setup, SetupBuilder, fixtures::MINTER_ADDRESS, ledger_init_args::LEDGER_TRANSFER_FEE,
 };
-use cksol_types::{DepositStatus, ProcessDepositArgs, WithdrawalArgs, WithdrawalStatus};
+use cksol_types::{
+    DepositStatus, ProcessDepositArgs, UpdateBalanceArgs, WithdrawalArgs, WithdrawalStatus,
+};
+use cksol_types_internal::event::{DepositSource, EventType};
 use icrc_ledger_types::icrc1::account::Account;
 use itertools::Itertools;
 use sol_rpc_types::{InstallArgs, Lamport, OverrideProvider, RegexSubstitution};
@@ -18,6 +21,9 @@ const SOLANA_VALIDATOR_URL: &str = "http://localhost:8899";
 const DEPOSITOR: Principal = Setup::DEFAULT_CALLER;
 // Solana base fee per signature included in a transaction.
 const FEE_PER_SIGNATURE: Lamport = 5_000;
+const POLL_MONITORED_ADDRESSES_DELAY: Duration = Duration::from_mins(1);
+const PROCESS_PENDING_SIGNATURES_DELAY: Duration = Duration::from_secs(5);
+const MINT_AUTOMATIC_DEPOSITS_DELAY: Duration = Duration::from_secs(5);
 
 // TODO DEFI-2643: Add tests with more exotic transactions, e.g.:
 //  - a transaction with multiple transfer instructions to same target address: single mint with the summed up amount
@@ -156,6 +162,73 @@ async fn should_deposit_consolidate_and_withdraw() {
             "Minter SOL balance should not decrease"
         );
     }
+
+    setup.drop().await;
+}
+
+/// Registers an account for automated deposit monitoring, sends SOL to its
+/// deposit address, and verifies that ckSOL is automatically minted.
+#[tokio::test(flavor = "multi_thread")]
+async fn should_automatically_deposit_and_mint() {
+    let setup = setup_with_solana_validator().await;
+
+    let account = Account {
+        owner: DEPOSITOR,
+        subaccount: Some([99u8; 32]),
+    };
+
+    let deposit_amount = LAMPORTS_PER_SOL / 2; // 0.5 SOL
+    let expected_mint_amount = deposit_amount - Setup::DEFAULT_AUTOMATED_DEPOSIT_FEE;
+
+    // Initialize the minter's Schnorr key and obtain the deposit address.
+    let deposit_address = setup.minter().get_deposit_address(account).await.into();
+    assert_eq!(setup.ledger().balance_of(account).await, 0);
+
+    // Fund the deposit address on-chain and wait for finalization.
+    println!("Sending {deposit_amount} lamports to deposit address {deposit_address}");
+    send_deposit_to_address(deposit_address, deposit_amount).await;
+
+    // Register the account so the minter starts monitoring it.
+    setup
+        .minter()
+        .update_balance(UpdateBalanceArgs {
+            owner: Some(account.owner),
+            subaccount: account.subaccount,
+        })
+        .await
+        .expect("update_balance should succeed");
+
+    // Poll phase: advance time to fire poll_monitored_addresses, then wait for it
+    // to call getSignaturesForAddress and discover the deposit signature.
+    setup.advance_time(POLL_MONITORED_ADDRESSES_DELAY).await;
+    wait_for_event(&setup, |e| {
+        matches!(e, EventType::StoppedMonitoringAccount { .. })
+    })
+    .await;
+
+    // Process phase: advance time to fire process_pending_signatures, then wait
+    // for it to call getTransaction and accept the deposit.
+    setup.advance_time(PROCESS_PENDING_SIGNATURES_DELAY).await;
+    wait_for_event(&setup, |e| {
+        matches!(
+            e,
+            EventType::AcceptedDeposit {
+                source: DepositSource::Automatic,
+                ..
+            }
+        )
+    })
+    .await;
+
+    // Mint phase: advance time to fire mint_automatic_deposits, then wait for the
+    // ckSOL balance to appear.
+    setup.advance_time(MINT_AUTOMATIC_DEPOSITS_DELAY).await;
+    wait_for_cksol_balance(&setup, account, expected_mint_amount).await;
+
+    assert_eq!(
+        setup.ledger().balance_of(account).await,
+        expected_mint_amount
+    );
 
     setup.drop().await;
 }
@@ -309,6 +382,32 @@ async fn get_solana_balance(address: &Address) -> Lamport {
 
 async fn get_balances(addresses: &[Address]) -> Vec<Lamport> {
     futures::future::join_all(addresses.iter().map(get_solana_balance)).await
+}
+
+/// Polls the minter event log until an event matching `predicate` appears.
+async fn wait_for_event<F>(setup: &Setup, predicate: F)
+where
+    F: Fn(&EventType) -> bool,
+{
+    for _ in 0..120 {
+        let events = setup.minter().get_all_events().await;
+        if events.iter().any(|e| predicate(&e.payload)) {
+            return;
+        }
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+    panic!("Expected event did not appear within timeout");
+}
+
+/// Polls the ckSOL ledger until `account`'s balance reaches `expected`.
+async fn wait_for_cksol_balance(setup: &Setup, account: Account, expected: Lamport) {
+    for _ in 0..120 {
+        if setup.ledger().balance_of(account).await == expected {
+            return;
+        }
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+    panic!("ckSOL balance of {account:?} did not reach {expected} within timeout");
 }
 
 fn rpc_client() -> RpcClient {

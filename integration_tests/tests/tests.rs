@@ -5,9 +5,9 @@ use cksol_int_tests::{
     CkSolMinter, Setup, SetupBuilder,
     fixtures::{
         DEFAULT_CALLER_ACCOUNT, DEFAULT_CALLER_DEPOSIT_ADDRESS, DEPOSIT_AMOUNT,
-        EXPECTED_AUTOMATED_MINT_AMOUNT, EXPECTED_MINT_AMOUNT, MockBuilder, SharedMockHttpOutcalls,
-        default_process_deposit_args, default_update_balance_args, deposit_signature_status_json,
-        deposit_transaction_signature,
+        DEPOSIT_TRANSACTION_SIGNATURE, EXPECTED_AUTOMATED_MINT_AMOUNT, EXPECTED_MINT_AMOUNT,
+        MockBuilder, SharedMockHttpOutcalls, default_process_deposit_args,
+        default_update_balance_args, deposit_transaction_signature,
     },
 };
 use cksol_types::{
@@ -1312,7 +1312,7 @@ mod automated_deposit_flow_tests {
         setup
             .execute_http_mocks(
                 MockBuilder::with_start_id(0)
-                    .get_signatures_for_address(vec![deposit_signature_status_json()])
+                    .get_signatures_for_address(vec![(DEPOSIT_TRANSACTION_SIGNATURE, 444797867)])
                     .build(),
             )
             .await;
@@ -1345,14 +1345,7 @@ mod automated_deposit_flow_tests {
         let setup = SetupBuilder::new().build().await;
         let minter = setup.minter();
 
-        // Initialize the minter public key and register the account for monitoring.
-        assert_eq!(
-            minter
-                .get_deposit_address(default_get_deposit_address_args())
-                .await
-                .to_string(),
-            DEFAULT_CALLER_DEPOSIT_ADDRESS,
-        );
+        // Register the account for monitoring.
         minter
             .update_balance(default_update_balance_args())
             .await
@@ -1363,7 +1356,7 @@ mod automated_deposit_flow_tests {
         setup
             .execute_http_mocks(
                 MockBuilder::with_start_id(0)
-                    .get_signatures_for_address(vec![deposit_signature_status_json()])
+                    .get_signatures_for_address(vec![(DEPOSIT_TRANSACTION_SIGNATURE, 444797867)])
                     .build(),
             )
             .await;
