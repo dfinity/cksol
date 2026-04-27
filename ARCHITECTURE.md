@@ -1,6 +1,6 @@
 # Chain-Key SOL (ckSOL) - Architecture
 
-## 1\. Overview
+## 1. Overview
 
 Chain-key SOL (**ckSOL**) is an ICRC-2 (and ICRC-3) compliant token on the Internet Computer  that is backed 1:1 by SOL, the primary token on the Solana blockchain. Users can convert their SOL tokens to ckSOL and vice versa.
 
@@ -11,7 +11,7 @@ The ckSOL minter is the canister responsible for managing deposited SOL and mint
 * **Mint**: If a user transfers SOL to a specific account under the ckSOL minter’s control, the ckSOL minter can instruct the ckSOL ledger to mint ckSOL for the user, owned by a given ICRC account (principal ID-subaccount pair).  
 * **Burn**: After granting the ckSOL minter access to some of the user’s funds, the user can request a withdrawal of SOL to be sent to a user-provided destination address. The funds are sent out after instructing the ckSOL ledger to burn the requested amount of ckSOL tokens.
 
-Both operations, as well as the transfer of ckSOL, incur a fee as specified in Section 3.3.
+Both operations, as well as the transfer of ckSOL, incur a fee as specified in Section 2.3.
 
 The general model is that the ckSOL minter needs to receive SOL *before* it mints ckSOL and it burns ckSOL *before* it transfers SOL back to the users in order to ensure that the total supply of ckSOL is always upper bounded by the amount of SOL held by the ckSOL minter.
 
@@ -46,13 +46,13 @@ This list is then used to derive the transferred amounts to and from each of the
 
 #### 2.1.2. Automated Flow
 
-When a user calls the endpoint `update_balance`, the ckSOL minter will check transfers to the deposit address derived for the caller’s principal ID and the provided subaccount (if any) on a timer by calling the `getSignaturesForAddress` endpoint on the SOL RPC canister, filtering out failed transactions (based on the `err` field in the response). If previously unknown (finalized) signatures are returned, the ckSOL minter will call the `getTransaction` endpoint for the newly obtained signatures. The transaction data contains information about the transferred amount, which will then be minted, minus a certain fee (defined in Section 3.3.2.), on the ckSOL ledger using an `icrc1_transfer` call, crediting the user’s account.
+When a user calls the endpoint `update_balance`, the ckSOL minter will check transfers to the deposit address derived for the caller’s principal ID and the provided subaccount (if any) on a timer by calling the `getSignaturesForAddress` endpoint on the SOL RPC canister, filtering out failed transactions (based on the `err` field in the response). If previously unknown (finalized) signatures are returned, the ckSOL minter will call the `getTransaction` endpoint for the newly obtained signatures. The transaction data contains information about the transferred amount, which will then be minted, minus a certain fee (defined in Section 2.3.2.), on the ckSOL ledger using an `icrc1_transfer` call, crediting the user’s account.
 
-The user must transfer at least the **minimum deposit amount**, defined in Section 3.3.3. Any deposit below this amount is ignored.
+The user must transfer at least the **minimum deposit amount**, defined in Section 2.3.3. Any deposit below this amount is ignored.
 
 The returned transaction can contain SOL transfers as *top-level instructions*, i.e., the transaction (message) instructions contain instructions of type “transfer” for program “system”. Alternatively, SOL transfers can be made via *inner instructions*, i.e., the transfer happens through a cross-program invocation (CPI). Such transfers can be extracted from the “meta” data of the transaction. The implementation must capture transfers of both types.
 
-**Note**: Some transfers are not captured, e.g., transfers via the [CloseAccount](https://solana.com/docs/tokens/basics/close-account) instruction. The fact that there are corner cases where no mint occurs is accepted for now and will be addressed at a later stage.
+> **_NOTE:_** Some transfers are not captured, e.g., transfers via the [CloseAccount](https://solana.com/docs/tokens/basics/close-account) instruction. The fact that there are corner cases where no mint occurs is accepted for now and will be addressed at a later stage.
 
 The flow is depicted in the following figure (`fee` refers to the deposit fee).  
 
@@ -129,19 +129,19 @@ process(s_1,...,s_n)
 
 The idea is to cover the whole range since genesis. Assuming that the latest transaction signature that has ever been returned in previous calls is `max`, if reading from the current block returns `MAX_RETRIEVED_TRANSACTIONS` transactions, it is unclear whether there are more transaction signatures between the oldest returned transaction and `max`. In subsequent calls, the algorithm above closes this gap before requesting transaction signatures that are more recent than `max`.
 
-**Note**: It is possible that an address appears in many transactions that do not change the balance of the account. If there are more than `MAX_RETRIEVED_TRANSACTIONS` such transactions, the quota can be exhausted before a valid deposit is discovered. Deposits can always be processed using the manual flow but the automatic flow may not work until all past transactions for this address have been processed. This risk is currently accepted.
+> **_NOTE:_** It is possible that an address appears in many transactions that do not change the balance of the account. If there are more than `MAX_RETRIEVED_TRANSACTIONS` such transactions, the quota can be exhausted before a valid deposit is discovered. Deposits can always be processed using the manual flow but the automatic flow may not work until all past transactions for this address have been processed. This risk is currently accepted.
 
-**Note**: There may be only one active timer per deposit address at any time across all endpoints that interact with the deposit address.
+> **_NOTE:_** There may be only one active timer per deposit address at any time across all endpoints that interact with the deposit address.
 
 Since tracking stops when a deposit is discovered, the question is how transaction signatures are treated that have been obtained via `getSignaturesForAddress` calls but have not been requested and processed. A related question is how `getTransaction` calls are scheduled if there are multiple tracked addresses with outstanding `getTransaction` calls. The ckSOL minter treats the problem of deciding which transactions to query and which transactions to request next separately. The mechanism outlined above decides which transactions are to be queried next. These are put into a map with the account as the key and the value being a queue of transaction signatures, corresponding to the transactions to be obtained and checked next. Whereas the mechanism above adds transaction signatures to the map, the ckSOL minter iterates over the monitored accounts in insertion order and collects signatures to check in a round-robin fashion. Once tracking of an account stops, the corresponding entry in the map is removed.
 
-HTTPS outcalls are a scarce resource. Therefore, the number of in-flight requests should be bounded. Concretely, there should never be more than `MAX_IN_FLIGHT_HTTPS_OUTCALLS` outcalls being processed at the same time. Requests on a timer are only scheduled if there is capacity for outcalls.
+HTTPS outcalls are a scarce resource. Therefore, the number of in-flight requests should be bounded, never having more than `MAX_IN_FLIGHT_SOL_RPC_CANISTER_CALLS` open calls to the SOL RPC canister at any time. Requests on a timer are only scheduled if there is capacity for another call.
 
 Proposed values for the parameters are provided in this list:
 
 * `MAX_RETRIEVED_TRANSACTIONS`: This constant is the product of the number of transaction requests that can be packed into a JSON batch request and the maximum number of `getTransaction` calls that the ckSOL minter may make for a single `get_deposit_address` call. Batching is not yet available, so currently the only parameter is the number of transaction requests, which can initially be set to **50**.  
 * `MAX_MONITORED_ADDRESSES`: The number of monitored addresses must be upper bounded as well. Since HTTPS outcalls are protected by imposing an upper bound on the number of in-flight outcalls and an address does not take up too much space, a fairly large number of addresses could be monitored. The reason to keep this number on the small side is that a cycle drainage attack could be launched by having the ckSOL minter spend many cycles monitoring a large number of addresses. A compromise would be to set the parameter to a conservatively low value of **100** initially.  
-* `MAX_IN_FLIGHT_HTTPS_OUTCALLS`: The maximum number of in-flight HTTPS outcalls. The suggested parameter is **56** as used in the [exchange rate canister](https://github.com/dfinity/exchange-rate-canister/blob/62f286325b6ce49233572a77479c8ca649f21e0a/src/xrc/src/rate_limiting.rs#L7).
+* `MAX_IN_FLIGHT_SOL_RPC_CANISTER_CALLS`: The maximum number of in-flight calls to the SOL RPC canister. The suggested parameter is **10**.
 
 #### 2.1.3. Manual Flow
    
@@ -173,9 +173,9 @@ sequenceDiagram
     Minter-->>User: ok(amount-fee, block index)
 ```
 
-The manual flow is triggered by calling `process_deposit` with the user’s account (principal ID and subaccount) and the signature identifying the transaction as parameters. This endpoint requires cycles to be attached. As specified in Section 3.3.2., **1T cycles** must be attached to the call.
+The manual flow is triggered by calling `process_deposit` with the user’s account (principal ID and subaccount) and the signature identifying the transaction as parameters. This endpoint requires cycles to be attached. As specified in Section 2.3.2., **1T cycles** must be attached to the call.
 
-After accepting the cycles, the ckSOL minter first checks if it already stores the corresponding transaction information: the amount to be minted, i.e., the sum of amounts minus the *manual deposit fee* (defined in Section 3.3.2.), the transaction signature, and the user’s account, and the boolean flag `completed`. If `completed`, nothing remains to be done and the call returns. If there is a record of this transaction but `completed=false`, then the call to the SOL RPC canister is skipped. Otherwise, the call is made to obtain the transaction details. If the obtained transaction details indicate that a transfer has been made to the user’s deposit address, the transaction information is recorded with the flag `completed=false`. The ckSOL minter then triggers the minting by calling the `icrc1_transfer` endpoint on the ckSOL ledger. When the mint operation is complete, the ckSOL minter updates the corresponding flag to `completed:=true` and returns the amount minted plus the block index corresponding to the mint operation on the ckSOL ledger.
+After accepting the cycles, the ckSOL minter first checks if it already stores the corresponding transaction information: the amount to be minted, i.e., the sum of amounts minus the *manual deposit fee* (defined in Section 2.3.2.), the transaction signature, and the user’s account, and the boolean flag `completed`. If `completed`, nothing remains to be done and the call returns. If there is a record of this transaction but `completed=false`, then the call to the SOL RPC canister is skipped. Otherwise, the call is made to obtain the transaction details. If the obtained transaction details indicate that a transfer has been made to the user’s deposit address, the transaction information is recorded with the flag `completed=false`. The ckSOL minter then triggers the minting by calling the `icrc1_transfer` endpoint on the ckSOL ledger. When the mint operation is complete, the ckSOL minter updates the corresponding flag to `completed:=true` and returns the amount minted plus the block index corresponding to the mint operation on the ckSOL ledger.
 
 Inter-canister calls may fail, specifically the calls to the SOL RPC canister and the ckSOL ledger.  In either case, an error is returned and no further action is taken.
 
@@ -184,7 +184,7 @@ The cycles are mainly intended to pay for the calls to the SOL RPC canister, inc
 1. **26.2B cycles** are deducted if there was a mint operation, which is the cost of obtaining a [threshold signature on a 34-node subnet](https://docs.internetcomputer.org/references/t-sigs-how-it-works/). These cycles are used to pay for the consolidation process described in the next section.  
 2.  **100M cycles** are subtracted otherwise for the work carried out by the ckSOL minter.
 
-Let `x`T cycles denote the left-over cycles. As shown in Section 3.3.2., depleting the quotas consumes roughly 0.44T cycles. Given that `x` is at least 0.9738, there are enough cycles to replenish both quotas, i.e., after this operation, both quotas are again at their respective maximum values.  
+Let `x`T cycles denote the left-over cycles. As shown in Section 2.3.2., depleting the quotas consumes roughly 0.44T cycles. Given that `x` is at least 0.9738, there are enough cycles to replenish both quotas, i.e., after this operation, both quotas are again at their respective maximum values.  
 The cost of replenishing the number of allowed `getSignaturesForAddress` calls from `y` to `MAX_GET_SIGNATURES_CALLS` is `(MAX_GET_SIGNATURES_CALLS-y)*5` G cycles (rounding up the derived cost of 4.3G). Similarly, the cost of replenishing the number of allowed `getTransaction` calls from `z` to `MAX_RETRIEVED_SIGNATURES` is `(MAX_RETRIEVED_SIGNATURES-z)*8` G cycles (rounding up the derived cost of 7.5G).  
 Given the suggested parameters, the cost is at most 0.45T cycles. Thus, at least 0.5238T cycles are refunded.
 
@@ -210,7 +210,6 @@ sequenceDiagram
     SN-->>RPC: block(block_hash)
     RPC-->>Minter: block(block_hash)
 
-    Note over Minter: Build transaction
     Minter->>TS: sign_with_schnorr(tx_hash, derivation_path)
     TS-->>Minter: ok(signature)
 
@@ -255,12 +254,12 @@ sequenceDiagram
     Ledger-->>Minter: block index
     Minter-->>User: block index
 
-    Note over SN,Minter: timer — Transaction submission flow
+    Note over SN,Minter: Transaction submission flow
 ```
 
 Since Solana has a high block rate, the timer should execute more frequently compared to ckBTC. The proposed interval is **10 seconds**. A shorter interval between calls implies that there is a lower chance of retrieval requests being batched together; however, it is preferable to have smaller batches as transactions are cheap and it provides a better user experience.
 
-There is a **minimum withdrawal amount** , which is defined in Section 2.3.2.
+There is a **minimum withdrawal amount**, which is defined in Section 2.3.2.
 
 The funds for each withdrawal are taken from the main account. It is possible that the main account does not have sufficient funds because there are large deposits that have not been consolidated yet. If the ckSOL minter does not have sufficient funds to carry out a withdrawal, it triggers the consolidation process so that the withdrawal(s) can go through as soon as the consolidation transaction has been finalized.
 
@@ -392,7 +391,7 @@ The following constraints regarding the parameters introduced in this section mu
 
 ### 2.4 OFAC Checks
 
-As the [OFAC SDN list](https://sanctionslist.ofac.treas.gov/Home/SdnList) also considers transactions on Solana, the ckSOL minter ensures that transfers from and to Solana addresses on this list are rejected.
+As the [OFAC SDN list](https://sanctionslist.ofac.treas.gov/Home/SdnList) also considers transactions on Solana, the ckSOL minter ensures that deposits from and withdrawals to Solana addresses on this list are rejected.
 
 ### 2.5. API
 
