@@ -38,8 +38,10 @@ pub const GET_SIGNATURES_FOR_ADDRESS_LIMIT: u32 = 100;
 /// Registers the given account for automated deposit monitoring.
 ///
 /// - If the account is already actively monitored (has a scheduled poll), returns `Ok(())`.
-/// - If the account's RPC quota is exhausted, returns `Err(MonitoringQuotaExhausted)`.
-/// - If the account has remaining quota but is not scheduled (e.g. was stopped), reschedules it.
+/// - If the account's `getSignaturesForAddress` quota is exhausted, returns
+///   `Err(MonitoringQuotaExhausted)`.
+/// - If the account has remaining quota but is not scheduled (e.g. was stopped after a
+///   successful deposit), reschedules it with a fresh backoff delay.
 /// - If the account is unknown, allocates a fresh quota and schedules the first poll.
 /// - Returns `Err(QueueFull)` if the monitored account limit has been reached.
 pub fn update_balance<R: CanisterRuntime>(
@@ -74,7 +76,8 @@ pub fn update_balance<R: CanisterRuntime>(
 
     let new_entry = match cached_entry {
         Some(entry) => AutomaticDepositCacheEntry {
-            rpc_quota_left: entry.rpc_quota_left,
+            sig_calls_remaining: entry.sig_calls_remaining,
+            tx_calls_remaining: entry.tx_calls_remaining,
             next_backoff_delay_mins: INITIAL_BACKOFF_DELAY_MINS,
         },
         None => AutomaticDepositCacheEntry::default(),
@@ -91,7 +94,7 @@ pub fn update_balance<R: CanisterRuntime>(
 ///
 /// For each due address, calls `getSignaturesForAddress` on the Solana RPC.
 /// After each call, reschedules the account with exponential backoff, or marks it
-/// as stopped (index `u64::MAX`) if the RPC quota has been exhausted.
+/// as exhausted (poll time `u64::MAX`, quota at zero) once the quota is depleted.
 pub async fn poll_monitored_addresses<R: CanisterRuntime>(runtime: R) {
     let _guard = match TimerGuard::new(TaskType::PollMonitoredAddresses) {
         Ok(guard) => guard,
@@ -154,7 +157,7 @@ async fn poll_account<R: CanisterRuntime>(
         until: None,
     };
 
-    let rpc_quota_left = entry.rpc_quota_left.saturating_sub(1);
+    let sig_calls_remaining = entry.sig_calls_remaining.saturating_sub(1);
 
     match get_signatures_for_address(runtime, params).await {
         Err(e) => {
@@ -168,14 +171,16 @@ async fn poll_account<R: CanisterRuntime>(
         }
     }
 
-    if rpc_quota_left == 0 {
-        // Use u64::MAX so the entry is retained but never scheduled for another poll.
+    if sig_calls_remaining == 0 {
+        // Retain the entry with u64::MAX so it is never rescheduled, but quota info
+        // is preserved for display and for replenishment via the manual flow.
         with_automatic_deposit_cache_mut(|cache| {
             cache.insert(
                 account,
                 u64::MAX,
                 AutomaticDepositCacheEntry {
-                    rpc_quota_left,
+                    sig_calls_remaining,
+                    tx_calls_remaining: entry.tx_calls_remaining,
                     next_backoff_delay_mins: entry.next_backoff_delay_mins,
                 },
             );
@@ -190,7 +195,7 @@ async fn poll_account<R: CanisterRuntime>(
         });
         log!(
             Priority::Info,
-            "Stopped monitoring {deposit_address}: RPC quota exhausted"
+            "Stopped monitoring {deposit_address}: getSignaturesForAddress quota exhausted"
         );
     } else {
         let delay_mins = entry.next_backoff_delay_mins;
@@ -202,7 +207,8 @@ async fn poll_account<R: CanisterRuntime>(
                 account,
                 next_poll_at,
                 AutomaticDepositCacheEntry {
-                    rpc_quota_left,
+                    sig_calls_remaining,
+                    tx_calls_remaining: entry.tx_calls_remaining,
                     next_backoff_delay_mins: delay_mins.saturating_mul(2),
                 },
             );

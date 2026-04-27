@@ -1,14 +1,11 @@
-use crate::utils::stable_sort_key_map::StableSortKeyMap;
-use ic_stable_structures::{Storable, storable::Bound};
 use icrc_ledger_types::icrc1::account::Account;
-use minicbor::{Decode, Encode};
-use std::borrow::Cow;
+use std::collections::BTreeMap;
 
-#[cfg(test)]
-mod tests;
+/// Maximum number of `getSignaturesForAddress` calls allowed per monitored account.
+pub const MAX_GET_SIGNATURES_CALLS: u32 = 10;
 
-/// Initial RPC call quota granted to each monitored account.
-pub const INITIAL_RPC_QUOTA: u64 = 50;
+/// Maximum number of `getTransaction` calls allowed per monitored account.
+pub const MAX_RETRIEVED_TRANSACTIONS: u32 = 50;
 
 /// Initial backoff delay in minutes before the first poll.
 pub const INITIAL_BACKOFF_DELAY_MINS: u64 = 1;
@@ -16,55 +13,86 @@ pub const INITIAL_BACKOFF_DELAY_MINS: u64 = 1;
 /// Per-account state for automated deposit discovery.
 ///
 /// This cache is intentionally separate from the event log: it can be fully
-/// reconstructed by redoing the `getSignaturesForAddress` HTTP outcalls, so
-/// there is no need to replay events to restore it.
-#[derive(Clone, Debug, PartialEq, Encode, Decode)]
+/// reconstructed by redoing the RPC calls, so there is no need to replay events
+/// to restore it. It lives in unstable heap memory and is reset on canister upgrade.
+#[derive(Clone, Debug, PartialEq)]
 pub struct AutomaticDepositCacheEntry {
-    /// The number of RPC calls remaining for this account.
-    #[n(0)]
-    pub rpc_quota_left: u64,
+    /// Remaining quota for `getSignaturesForAddress` calls.
+    pub sig_calls_remaining: u32,
+    /// Remaining quota for `getTransaction` calls.
+    pub tx_calls_remaining: u32,
     /// The delay in minutes before the next poll. Doubles after each poll.
-    #[n(1)]
     pub next_backoff_delay_mins: u64,
 }
 
 impl Default for AutomaticDepositCacheEntry {
     fn default() -> Self {
         Self {
-            rpc_quota_left: INITIAL_RPC_QUOTA,
+            sig_calls_remaining: MAX_GET_SIGNATURES_CALLS,
+            tx_calls_remaining: MAX_RETRIEVED_TRANSACTIONS,
             next_backoff_delay_mins: INITIAL_BACKOFF_DELAY_MINS,
         }
     }
 }
 
-impl Storable for AutomaticDepositCacheEntry {
-    fn to_bytes(&self) -> Cow<'_, [u8]> {
-        let mut buf = vec![];
-        minicbor::encode(self, &mut buf)
-            .expect("AutomaticDepositCacheEntry encoding should succeed");
-        Cow::Owned(buf)
+/// Heap-memory cache storing per-account automated deposit discovery state,
+/// ordered by next poll time for efficient scheduling.
+///
+/// Two `BTreeMap`s are kept in sync, mirroring the stable-memory `StableSortKeyMap`
+/// pattern but without the stable-structures overhead:
+/// - `by_account`: primary store, always contains every entry.
+/// - `by_poll_time`: drives [`iter`] in ascending poll-time order.
+///
+/// Accounts that have been stopped are stored with `next_poll_at = u64::MAX`
+/// so they are never picked up by the poll loop, but their quota is retained
+/// for future `update_balance` calls.
+///
+/// [`iter`]: AutomaticDepositCache::iter
+#[derive(Default)]
+pub struct AutomaticDepositCache {
+    by_account: BTreeMap<Account, (u64, AutomaticDepositCacheEntry)>,
+    by_poll_time: BTreeMap<(u64, Account), ()>,
+}
+
+impl AutomaticDepositCache {
+    /// Returns the current poll time and entry for the given account.
+    pub fn get_with_index(&self, account: &Account) -> Option<(u64, AutomaticDepositCacheEntry)> {
+        self.by_account.get(account).map(|(t, e)| (*t, e.clone()))
     }
 
-    fn from_bytes(bytes: Cow<[u8]>) -> Self {
-        minicbor::decode(bytes.as_ref()).unwrap_or_else(|e| {
-            panic!(
-                "failed to decode AutomaticDepositCacheEntry: {e} (bytes: {})",
-                hex::encode(bytes)
-            )
+    /// Inserts or updates an entry, updating the poll-time index atomically.
+    pub fn insert(
+        &mut self,
+        account: Account,
+        next_poll_at: u64,
+        entry: AutomaticDepositCacheEntry,
+    ) {
+        if let Some((old_t, _)) = self.by_account.get(&account) {
+            self.by_poll_time.remove(&(*old_t, account));
+        }
+        self.by_poll_time.insert((next_poll_at, account), ());
+        self.by_account.insert(account, (next_poll_at, entry));
+    }
+
+    /// Iterates all `(next_poll_at, account, entry)` triples in ascending poll-time order.
+    pub fn iter(&self) -> impl Iterator<Item = (u64, Account, AutomaticDepositCacheEntry)> + '_ {
+        self.by_poll_time.keys().map(|(t, account)| {
+            let (_, entry) = self
+                .by_account
+                .get(account)
+                .expect("poll-time index and by_account map must be in sync");
+            (*t, *account, entry.clone())
         })
     }
 
-    const BOUND: Bound = Bound::Unbounded;
-}
+    pub fn len(&self) -> usize {
+        self.by_account.len()
+    }
 
-/// Map from `Account` to `AutomaticDepositCacheEntry`, indexed by `next_poll_at`
-/// timestamp for ordered iteration. The poll time is stored alongside the cache entry
-/// inside the map (not in `AutomaticDepositCacheEntry` itself), analogous to how
-/// `InsertionOrderedMap` stores the sequence number alongside the value.
-///
-/// Accounts that have been stopped from monitoring are stored with index `u64::MAX`
-/// so they are never scheduled for another poll.
-pub type AutomaticDepositCache = StableSortKeyMap<Account, u64, AutomaticDepositCacheEntry>;
+    pub fn is_empty(&self) -> bool {
+        self.by_account.is_empty()
+    }
+}
 
 /// The monitoring lifecycle state of an account, as derived from the cache.
 pub enum AccountMonitoringState {
@@ -77,12 +105,12 @@ pub enum AccountMonitoringState {
         #[allow(dead_code)]
         entry: AutomaticDepositCacheEntry,
     },
-    /// Polling was stopped after the quota was exhausted, but a subsequent deposit
-    /// reset the quota. The account can be rescheduled via `update_balance`.
+    /// Polling was stopped after a successful deposit was found. The account
+    /// can be rescheduled via `update_balance`.
     Stopped { entry: AutomaticDepositCacheEntry },
-    /// The RPC quota for this account has been exhausted and no deposit has reset it.
-    /// `update_balance` will return `MonitoringQuotaExhausted` until a deposit resets
-    /// the quota.
+    /// The `getSignaturesForAddress` quota for this account has been exhausted.
+    /// `update_balance` will return `MonitoringQuotaExhausted` until the manual
+    /// flow replenishes the quota.
     Exhausted {
         #[allow(dead_code)]
         entry: AutomaticDepositCacheEntry,
@@ -102,7 +130,7 @@ impl AutomaticDepositCacheExt for AutomaticDepositCache {
                 next_poll_at: t,
                 entry,
             },
-            Some((_, entry)) if entry.rpc_quota_left == 0 => {
+            Some((_, entry)) if entry.sig_calls_remaining == 0 => {
                 AccountMonitoringState::Exhausted { entry }
             }
             Some((_, entry)) => AccountMonitoringState::Stopped { entry },

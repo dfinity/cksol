@@ -11,8 +11,6 @@ use std::cell::RefCell;
 
 const EVENT_LOG_INDEX_MEMORY_ID: MemoryId = MemoryId::new(0);
 const EVENT_LOG_DATA_MEMORY_ID: MemoryId = MemoryId::new(1);
-const AUTOMATIC_DEPOSIT_CACHE_BY_ACCOUNT_MEMORY_ID: MemoryId = MemoryId::new(2);
-const AUTOMATIC_DEPOSIT_CACHE_BY_POLL_TIME_MEMORY_ID: MemoryId = MemoryId::new(3);
 
 type VMem = VirtualMemory<DefaultMemoryImpl>;
 type EventLog = StableLog<Event, VMem, VMem>;
@@ -33,13 +31,11 @@ thread_local! {
               )
         );
 
-    /// Stable-memory cache for per-account automated deposit discovery state.
-    static AUTOMATIC_DEPOSIT_CACHE: RefCell<AutomaticDepositCache> = MEMORY_MANAGER.with(|m| {
-        RefCell::new(AutomaticDepositCache::init(
-            m.borrow().get(AUTOMATIC_DEPOSIT_CACHE_BY_ACCOUNT_MEMORY_ID),
-            m.borrow().get(AUTOMATIC_DEPOSIT_CACHE_BY_POLL_TIME_MEMORY_ID),
-        ))
-    });
+    /// Heap-memory cache for per-account automated deposit discovery state.
+    /// Reset on canister upgrade; does not need to survive upgrades since it can
+    /// be reconstructed by replaying the RPC calls.
+    static AUTOMATIC_DEPOSIT_CACHE: RefCell<AutomaticDepositCache> =
+        RefCell::new(AutomaticDepositCache::default());
 
     static UNSTABLE_METRICS: RefCell<Metrics> = const { RefCell::new(Metrics::new()) };
 }
@@ -123,13 +119,7 @@ pub(crate) fn reset_events() {
 
 #[cfg(test)]
 pub fn reset_automatic_deposit_cache() {
-    MEMORY_MANAGER.with(|m| {
-        AUTOMATIC_DEPOSIT_CACHE.with(|cache| {
-            *cache.borrow_mut() = AutomaticDepositCache::new(
-                m.borrow().get(AUTOMATIC_DEPOSIT_CACHE_BY_ACCOUNT_MEMORY_ID),
-                m.borrow()
-                    .get(AUTOMATIC_DEPOSIT_CACHE_BY_POLL_TIME_MEMORY_ID),
-            );
-        });
+    AUTOMATIC_DEPOSIT_CACHE.with(|cache| {
+        *cache.borrow_mut() = AutomaticDepositCache::default();
     });
 }

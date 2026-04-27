@@ -7,7 +7,7 @@ use crate::{
         EventsAssert, account, init_schnorr_master_key, init_state, runtime::TestCanisterRuntime,
     },
 };
-use cache::{INITIAL_BACKOFF_DELAY_MINS, INITIAL_RPC_QUOTA};
+use cache::{INITIAL_BACKOFF_DELAY_MINS, MAX_GET_SIGNATURES_CALLS, MAX_RETRIEVED_TRANSACTIONS};
 use candid::Principal;
 use sol_rpc_types::{ConfirmedTransactionStatusWithSignature, MultiRpcResult};
 use std::iter;
@@ -30,10 +30,11 @@ mod update_balance_tests {
         let result = update_balance(&runtime, ACCOUNT);
         assert_eq!(result, Ok(()));
 
-        // Start monitoring the account and add a cache entry with a fresh quota and backoff delay
+        // Fresh cache entry with full quotas and initial backoff delay.
         CacheAssert::for_account(ACCOUNT)
             .next_poll_at_mins(INITIAL_BACKOFF_DELAY_MINS)
-            .quota(INITIAL_RPC_QUOTA)
+            .sig_calls(MAX_GET_SIGNATURES_CALLS)
+            .tx_calls(MAX_RETRIEVED_TRANSACTIONS)
             .backoff_mins(INITIAL_BACKOFF_DELAY_MINS);
         EventsAssert::from_recorded()
             .expect_event_eq(EventType::StartedMonitoringAccount { account: ACCOUNT })
@@ -55,7 +56,7 @@ mod update_balance_tests {
         let result2 = update_balance(&runtime, ACCOUNT);
         assert_eq!(result2, Ok(()));
 
-        // Does not modify the cache or events
+        // Does not modify the cache or events.
         assert_eq!(cache_before, CacheAssert::for_account(ACCOUNT));
         assert_eq!(events_before, EventsAssert::from_recorded());
     }
@@ -70,10 +71,10 @@ mod update_balance_tests {
         let result = update_balance(&runtime, ACCOUNT);
         assert_eq!(result, Ok(()));
 
-        // Does not modify the quota but resets the backoff delay and starts monitoring
+        // Preserves the existing quota but resets the backoff delay and reschedules.
         CacheAssert::for_account(ACCOUNT)
             .next_poll_at_mins(INITIAL_BACKOFF_DELAY_MINS)
-            .quota(5)
+            .sig_calls(5)
             .backoff_mins(INITIAL_BACKOFF_DELAY_MINS);
         EventsAssert::from_recorded()
             .expect_event_eq(EventType::StartedMonitoringAccount { account: ACCOUNT })
@@ -92,7 +93,7 @@ mod update_balance_tests {
         let result = update_balance(&runtime, ACCOUNT);
         assert_eq!(result, Err(UpdateBalanceError::MonitoringQuotaExhausted));
 
-        // Does not modify the cache or events
+        // Does not modify the cache or events.
         assert_eq!(cache_before, CacheAssert::for_account(ACCOUNT));
         assert_eq!(events_before, EventsAssert::from_recorded());
     }
@@ -103,11 +104,11 @@ mod update_balance_tests {
         start_monitoring_max_number_of_accounts();
         let runtime = TestCanisterRuntime::new().add_times(iter::repeat(0));
 
-        // Account is not being monitored, return error
+        // Account is not being monitored, return error.
         let result1 = update_balance(&runtime, account(MAX_MONITORED_ACCOUNTS + 1));
         assert_eq!(result1, Err(UpdateBalanceError::QueueFull));
 
-        // Account is already being monitored, return ok
+        // Account is already being monitored, return ok.
         let result2 = update_balance(&runtime, account(0));
         assert_eq!(result2, Ok(()));
     }
@@ -125,7 +126,12 @@ mod poll_monitored_addresses_tests {
         let runtime = TestCanisterRuntime::new().add_times(0..);
         for i in 0..num_accounts {
             update_balance(&runtime, account(i)).unwrap();
-            set_cache_entry(account(i), 0, INITIAL_RPC_QUOTA, INITIAL_BACKOFF_DELAY_MINS);
+            set_cache_entry(
+                account(i),
+                0,
+                MAX_GET_SIGNATURES_CALLS,
+                INITIAL_BACKOFF_DELAY_MINS,
+            );
         }
 
         // Round 1: processes MAX_CONCURRENT_RPC_CALLS accounts (rescheduled into the future),
@@ -158,14 +164,15 @@ mod poll_monitored_addresses_tests {
         let runtime = TestCanisterRuntime::new().add_times([t0, t0, t0]);
         update_balance(&runtime, account).unwrap();
 
-        for _ in 0..INITIAL_RPC_QUOTA {
+        // MAX_GET_SIGNATURES_CALLS polls: 1, 2, 4, 8, ..., 512 minutes apart.
+        for _ in 0..MAX_GET_SIGNATURES_CALLS {
             let next_poll_at = CacheAssert::for_account(account).scheduled_at();
 
             EventsAssert::from_recorded()
                 .expect_event_eq(EventType::StartedMonitoringAccount { account })
                 .assert_no_more_events();
 
-            // Just before next scheduled time: no JSON-RPC calls.
+            // Just before the scheduled time: no RPC call.
             let runtime = TestCanisterRuntime::new().add_times([next_poll_at - 1]);
             poll_monitored_addresses(runtime).await;
 
@@ -206,13 +213,16 @@ fn start_monitoring_max_number_of_accounts() {
     }
 }
 
-fn set_cache_entry(account: Account, next_poll_at: u64, quota: u64, backoff_mins: u64) {
+/// Sets a cache entry with the given `next_poll_at`, `sig_calls_remaining`, and
+/// `next_backoff_delay_mins`. `tx_calls_remaining` is set to `MAX_RETRIEVED_TRANSACTIONS`.
+fn set_cache_entry(account: Account, next_poll_at: u64, sig_calls: u32, backoff_mins: u64) {
     with_automatic_deposit_cache_mut(|cache| {
         cache.insert(
             account,
             next_poll_at,
             AutomaticDepositCacheEntry {
-                rpc_quota_left: quota,
+                sig_calls_remaining: sig_calls,
+                tx_calls_remaining: MAX_RETRIEVED_TRANSACTIONS,
                 next_backoff_delay_mins: backoff_mins,
             },
         );
@@ -242,11 +252,11 @@ impl CacheAssert {
         }
     }
 
-    /// Returns the scheduled poll time, panicking if the account is stopped.
+    /// Returns the scheduled poll time, panicking if the account is stopped/exhausted.
     fn scheduled_at(self) -> u64 {
         self.next_poll_at.unwrap_or_else(|| {
             panic!(
-                "Account {:?} is stopped (no scheduled poll time)",
+                "Account {:?} is stopped/exhausted (no scheduled poll time)",
                 self.account
             )
         })
@@ -264,10 +274,19 @@ impl CacheAssert {
         self
     }
 
-    fn quota(self, expected: u64) -> Self {
+    fn sig_calls(self, expected: u32) -> Self {
         assert_eq!(
-            self.entry.rpc_quota_left, expected,
-            "rpc_quota_left mismatch for account {:?}",
+            self.entry.sig_calls_remaining, expected,
+            "sig_calls_remaining mismatch for account {:?}",
+            self.account
+        );
+        self
+    }
+
+    fn tx_calls(self, expected: u32) -> Self {
+        assert_eq!(
+            self.entry.tx_calls_remaining, expected,
+            "tx_calls_remaining mismatch for account {:?}",
             self.account
         );
         self
