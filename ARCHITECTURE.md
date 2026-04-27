@@ -356,8 +356,8 @@ Using the [cost estimation endpoints](https://dashboard.internetcomputer.org/can
 * `getSignaturesForAddress`: 4.3B cycles  
 * `getTransaction`: 7.5B cycles  
 * `sendTransaction`: 2.2B cycles  
-* `getSlot`: 2.1B bytes  
-* `getBlock`: 2.2B bytes  
+* `getSlot`: 2.1B cycles  
+* `getBlock`: 2.2B cycles  
 * `getSignatureStatuses`: 2.1B (1 sig.), 2.3B (10 sig.), 4.3B (100 sig.) cycles
 
 As far as the **automatic deposit fee** is concerned, if we assume a total cost of 0.418T cycles (10\*4.3B for the maximum 10 `getSignaturesForAddress` calls plus 50 \* 7.5B for the `getTransaction` calls), the cost in SOL is 0.418 XDR \= 0.602 USD \= 0.00602 SOL at 1 SOL \= 100 USD. A threshold signature costs 26.2B cycles, which is later required for the consolidation transaction. The cost is 0.0262 XDR \= 0.0377 USD \= 0.000377 SOL. Additionally, there is a fee of 5000 lamports for the consolidation transaction on Solana. The total cost is therefore 0.006402 SOL. Overcharging slightly, a reasonable choice for the fee is **0.01 SOL**.
