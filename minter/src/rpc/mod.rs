@@ -1,5 +1,7 @@
 use crate::{
-    constants::{GET_SIGNATURE_STATUSES_CYCLES, MAX_HTTP_OUTCALL_RESPONSE_BYTES},
+    constants::{
+        GET_SIGNATURE_STATUSES_CYCLES, GET_TRANSACTION_CYCLES, MAX_HTTP_OUTCALL_RESPONSE_BYTES,
+    },
     runtime::CanisterRuntime,
     state::read_state,
 };
@@ -22,7 +24,6 @@ mod tests;
 pub async fn get_transaction<R: CanisterRuntime>(
     runtime: &R,
     signature: Signature,
-    cycles_to_attach: u128,
 ) -> Result<Option<EncodedConfirmedTransactionWithStatusMeta>, GetTransactionError> {
     let result = read_state(|state| state.sol_rpc_client(runtime.inter_canister_call_runtime()))
         .get_transaction(signature)
@@ -30,7 +31,7 @@ pub async fn get_transaction<R: CanisterRuntime>(
         .with_commitment(CommitmentLevel::Finalized)
         .with_max_supported_transaction_version(0)
         .with_response_size_estimate(MAX_HTTP_OUTCALL_RESPONSE_BYTES)
-        .with_cycles(cycles_to_attach)
+        .with_cycles(GET_TRANSACTION_CYCLES)
         .try_send()
         .await;
     match result? {
