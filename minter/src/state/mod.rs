@@ -109,6 +109,22 @@ pub struct State {
     consolidation_transactions: InsertionOrderedMap<Signature, ConsolidationTransaction>,
     active_tasks: BTreeSet<TaskType>,
     balance: Lamport,
+    /// Last observed difference (`real_balance - tracked_balance`) between the
+    /// real on-chain balance of the minter's main account and the value
+    /// tracked by the minter's state, together with the timestamp
+    /// (nanoseconds since the Unix epoch) at which it was computed.
+    ///
+    /// Both sides of the difference are sampled at the same time so that the
+    /// stored value remains meaningful even though `tracked_balance` keeps
+    /// changing afterwards. Refreshed once per day by a timer; `None` until
+    /// the first refresh succeeds.
+    last_balance_discrepancy: Option<BalanceDiscrepancyObservation>,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct BalanceDiscrepancyObservation {
+    pub diff_lamports: i128,
+    pub observed_at: u64,
 }
 
 impl State {
@@ -244,6 +260,20 @@ impl State {
 
     pub fn balance(&self) -> Lamport {
         self.balance
+    }
+
+    pub fn last_balance_discrepancy(&self) -> Option<BalanceDiscrepancyObservation> {
+        self.last_balance_discrepancy
+    }
+
+    /// Records the difference between `real_balance` (just observed on-chain)
+    /// and the tracked balance, sampled at `observed_at`.
+    pub fn record_balance_discrepancy(&mut self, real_balance: Lamport, observed_at: u64) {
+        let diff_lamports = real_balance as i128 - self.balance as i128;
+        self.last_balance_discrepancy = Some(BalanceDiscrepancyObservation {
+            diff_lamports,
+            observed_at,
+        });
     }
 
     pub fn monitored_accounts(&self) -> &InsertionOrderedSet<Account> {
@@ -796,6 +826,7 @@ impl TryFrom<InitArgs> for State {
             consolidation_transactions: InsertionOrderedMap::new(),
             active_tasks: BTreeSet::new(),
             balance: 0,
+            last_balance_discrepancy: None,
         };
         state.validate()?;
         Ok(state)
@@ -843,6 +874,7 @@ pub enum TaskType {
     ResubmitTransactions,
     WithdrawalProcessing,
     PollMonitoredAddresses,
+    RefreshRealBalance,
 }
 
 /// Details about a consolidation transaction, capturing the individual

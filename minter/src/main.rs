@@ -2,6 +2,7 @@ use candid::Principal;
 use canlog::{Log, Sort};
 use cksol_minter::{
     address::lazy_get_schnorr_master_key,
+    balance_check::{REFRESH_REAL_BALANCE_DELAY, refresh_real_balance},
     consolidate::{DEPOSIT_CONSOLIDATION_DELAY, consolidate_deposits},
     deposit::automatic::{POLL_MONITORED_ADDRESSES_DELAY, poll_monitored_addresses},
     monitor::{
@@ -369,6 +370,9 @@ fn setup_timers() {
     });
     ic_cdk_timers::set_timer_interval(POLL_MONITORED_ADDRESSES_DELAY, async || {
         poll_monitored_addresses(IcCanisterRuntime::new()).await;
+    });
+    ic_cdk_timers::set_timer_interval(REFRESH_REAL_BALANCE_DELAY, async || {
+        refresh_real_balance(IcCanisterRuntime::new()).await;
     });
 }
 
