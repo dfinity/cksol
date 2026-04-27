@@ -4,12 +4,34 @@ use crate::{
     state::{event::EventType, read_state},
     test_fixtures::{
         EventsAssert, account, events::start_monitoring_account, init_schnorr_master_key,
-        init_state, runtime::TestCanisterRuntime,
+        init_state, runtime::TestCanisterRuntime, signature,
     },
 };
-use sol_rpc_types::{ConfirmedTransactionStatusWithSignature, MultiRpcResult};
+use sol_rpc_types::{ConfirmedTransactionStatusWithSignature, MultiRpcResult, TransactionError};
 
 type SignaturesResult = MultiRpcResult<Vec<ConfirmedTransactionStatusWithSignature>>;
+
+fn confirmed_tx(signature: Signature) -> ConfirmedTransactionStatusWithSignature {
+    ConfirmedTransactionStatusWithSignature {
+        signature: signature.into(),
+        slot: 12345,
+        err: None,
+        memo: None,
+        block_time: None,
+        confirmation_status: None,
+    }
+}
+
+fn failed_tx(signature: Signature) -> ConfirmedTransactionStatusWithSignature {
+    ConfirmedTransactionStatusWithSignature {
+        signature: signature.into(),
+        slot: 12345,
+        err: Some(TransactionError::AccountNotFound),
+        memo: None,
+        block_time: None,
+        confirmation_status: None,
+    }
+}
 
 fn monitored_accounts_count() -> usize {
     read_state(|s| s.monitored_accounts().len())
@@ -129,6 +151,69 @@ mod poll_monitored_addresses {
                     account: account(i),
                 });
         }
+    }
+
+    #[tokio::test]
+    async fn should_queue_discovered_signatures() {
+        setup();
+        reset_pending_signatures();
+
+        let acc = account(1);
+        start_monitoring_account(acc);
+
+        let s1 = signature(1);
+        let s2 = signature(2);
+        let runtime = TestCanisterRuntime::new()
+            .with_increasing_time()
+            .add_stub_response(SignaturesResult::Consistent(Ok(vec![
+                confirmed_tx(s1),
+                confirmed_tx(s2),
+            ])));
+
+        poll_monitored_addresses(runtime).await;
+
+        assert_eq!(pending_signatures_for(&acc), vec![s1, s2]);
+    }
+
+    #[tokio::test]
+    async fn should_not_queue_failed_transactions() {
+        setup();
+        reset_pending_signatures();
+
+        let acc = account(1);
+        start_monitoring_account(acc);
+
+        let s_ok = signature(1);
+        let s_fail = signature(2);
+        let runtime = TestCanisterRuntime::new()
+            .with_increasing_time()
+            .add_stub_response(SignaturesResult::Consistent(Ok(vec![
+                confirmed_tx(s_ok),
+                failed_tx(s_fail),
+            ])));
+
+        poll_monitored_addresses(runtime).await;
+
+        assert_eq!(pending_signatures_for(&acc), vec![s_ok]);
+    }
+
+    #[tokio::test]
+    async fn should_not_queue_signatures_if_rpc_call_fails() {
+        setup();
+        reset_pending_signatures();
+
+        let acc = account(1);
+        start_monitoring_account(acc);
+
+        let runtime = TestCanisterRuntime::new()
+            .with_increasing_time()
+            .add_stub_response(SignaturesResult::Consistent(Err(
+                sol_rpc_types::RpcError::ValidationError("RPC error".to_string()),
+            )));
+
+        poll_monitored_addresses(runtime).await;
+
+        assert_eq!(pending_signatures_for(&acc), vec![]);
     }
 
     fn setup() {

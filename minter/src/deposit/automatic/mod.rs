@@ -14,7 +14,17 @@ use cksol_types::UpdateBalanceError;
 use cksol_types_internal::log::Priority;
 use icrc_ledger_types::icrc1::account::Account;
 use sol_rpc_types::{CommitmentLevel, GetSignaturesForAddressParams};
-use std::time::Duration;
+use solana_signature::Signature;
+use std::{
+    cell::RefCell,
+    collections::{BTreeMap, VecDeque},
+    time::Duration,
+};
+
+thread_local! {
+    static PENDING_SIGNATURES: RefCell<BTreeMap<Account, VecDeque<Signature>>> =
+        RefCell::default();
+}
 
 #[cfg(test)]
 mod tests;
@@ -123,8 +133,21 @@ async fn poll_account<R: CanisterRuntime>(
                 "Failed to get signatures for address {deposit_address}: {e}"
             );
         }
-        Ok(_signatures) => {
-            // TODO(DEFI-2780): Process discovered deposit signatures.
+        Ok(signatures) => {
+            let new_sigs: Vec<Signature> = signatures
+                .into_iter()
+                .filter(|s| s.err.is_none())
+                .map(|s| s.signature.into())
+                .collect();
+            if !new_sigs.is_empty() {
+                PENDING_SIGNATURES.with(|pending| {
+                    pending
+                        .borrow_mut()
+                        .entry(account)
+                        .or_default()
+                        .extend(new_sigs);
+                });
+            }
         }
     }
 
@@ -135,4 +158,19 @@ async fn poll_account<R: CanisterRuntime>(
             runtime,
         );
     });
+}
+
+#[cfg(any(test, feature = "canbench-rs"))]
+pub fn pending_signatures_for(account: &Account) -> Vec<Signature> {
+    PENDING_SIGNATURES.with(|p| {
+        p.borrow()
+            .get(account)
+            .map(|q| q.iter().copied().collect())
+            .unwrap_or_default()
+    })
+}
+
+#[cfg(any(test, feature = "canbench-rs"))]
+pub fn reset_pending_signatures() {
+    PENDING_SIGNATURES.with(|p| p.borrow_mut().clear());
 }
