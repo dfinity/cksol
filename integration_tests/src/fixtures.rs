@@ -213,6 +213,11 @@ impl MockBuilder {
             get_signatures_for_address_response(signatures),
         )
     }
+
+    /// Mock for `getBalance` returning the given lamport balance.
+    pub fn get_balance(self, balance: Lamport) -> Self {
+        self.expect(get_balance_request(), get_balance_response(balance))
+    }
 }
 
 // ── JSON-RPC request matchers and response builders ─────────────────────────
@@ -384,6 +389,21 @@ fn get_signatures_for_address_response(signatures: Vec<serde_json::Value>) -> Js
     JsonRpcResponse::from(json!({
         "jsonrpc": "2.0",
         "result": signatures,
+        "id": 1
+    }))
+}
+
+fn get_balance_request() -> JsonRpcRequestMatcher {
+    JsonRpcRequestMatcher::with_method("getBalance")
+}
+
+fn get_balance_response(balance: Lamport) -> JsonRpcResponse {
+    JsonRpcResponse::from(json!({
+        "jsonrpc": "2.0",
+        "result": {
+            "context": { "slot": 350_000_000_u64, "apiVersion": "2.1.9" },
+            "value": balance,
+        },
         "id": 1
     }))
 }
