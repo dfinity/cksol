@@ -1,5 +1,5 @@
+use crate::utils::sorted_key_map::SortedKeyMap;
 use icrc_ledger_types::icrc1::account::Account;
-use std::collections::BTreeMap;
 
 /// Maximum number of `getSignaturesForAddress` calls allowed per monitored account.
 pub const MAX_GET_SIGNATURES_CALLS: u32 = 10;
@@ -38,26 +38,19 @@ impl Default for AutomaticDepositCacheEntry {
 /// Heap-memory cache storing per-account automated deposit discovery state,
 /// ordered by next poll time for efficient scheduling.
 ///
-/// Two `BTreeMap`s are kept in sync, mirroring the stable-memory `StableSortKeyMap`
-/// pattern but without the stable-structures overhead:
-/// - `by_account`: primary store, always contains every entry.
-/// - `by_poll_time`: drives [`iter`] in ascending poll-time order.
+/// Backed by a [`SortedKeyMap`] with `Account` as key and `u64` (nanosecond timestamp)
+/// as the sort index.
 ///
 /// Accounts that have been stopped are stored with `next_poll_at = u64::MAX`
 /// so they are never picked up by the poll loop, but their quota is retained
 /// for future `update_balance` calls.
-///
-/// [`iter`]: AutomaticDepositCache::iter
 #[derive(Default)]
-pub struct AutomaticDepositCache {
-    by_account: BTreeMap<Account, (u64, AutomaticDepositCacheEntry)>,
-    by_poll_time: BTreeMap<(u64, Account), ()>,
-}
+pub struct AutomaticDepositCache(SortedKeyMap<Account, u64, AutomaticDepositCacheEntry>);
 
 impl AutomaticDepositCache {
     /// Returns the current poll time and entry for the given account.
     pub fn get_with_index(&self, account: &Account) -> Option<(u64, AutomaticDepositCacheEntry)> {
-        self.by_account.get(account).map(|(t, e)| (*t, e.clone()))
+        self.0.get_with_index(account).map(|(t, e)| (*t, e.clone()))
     }
 
     /// Inserts or updates an entry, updating the poll-time index atomically.
@@ -67,30 +60,22 @@ impl AutomaticDepositCache {
         next_poll_at: u64,
         entry: AutomaticDepositCacheEntry,
     ) {
-        if let Some((old_t, _)) = self.by_account.get(&account) {
-            self.by_poll_time.remove(&(*old_t, account));
-        }
-        self.by_poll_time.insert((next_poll_at, account), ());
-        self.by_account.insert(account, (next_poll_at, entry));
+        self.0.insert(account, next_poll_at, entry);
     }
 
     /// Iterates all `(next_poll_at, account, entry)` triples in ascending poll-time order.
     pub fn iter(&self) -> impl Iterator<Item = (u64, Account, AutomaticDepositCacheEntry)> + '_ {
-        self.by_poll_time.keys().map(|(t, account)| {
-            let (_, entry) = self
-                .by_account
-                .get(account)
-                .expect("poll-time index and by_account map must be in sync");
-            (*t, *account, entry.clone())
-        })
+        self.0
+            .iter()
+            .map(|(t, account, entry)| (*t, *account, entry.clone()))
     }
 
     pub fn len(&self) -> usize {
-        self.by_account.len()
+        self.0.len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.by_account.is_empty()
+        self.0.is_empty()
     }
 }
 
