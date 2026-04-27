@@ -1317,7 +1317,7 @@ mod metrics_tests {
         let setup = setup
             .check_metrics()
             .await
-            .assert_contains_metric_matching(&format!(
+            .assert_contains_metric_matching(format!(
                 r"minter_balance_discrepancy_lamports {INITIAL_BALANCE} \d+"
             ))
             .assert_contains_metric_matching(
@@ -1338,7 +1338,7 @@ mod metrics_tests {
         setup
             .check_metrics()
             .await
-            .assert_contains_metric_matching(&format!(
+            .assert_contains_metric_matching(format!(
                 r"minter_balance_discrepancy_lamports {NEXT_BALANCE} \d+"
             ))
             .into()
