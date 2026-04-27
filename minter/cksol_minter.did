@@ -467,7 +467,7 @@ service : (MinterArg) -> {
     //
     // If the owner is not set, it defaults to the caller's principal.
     // The resolved owner must be a non-anonymous principal.
-    get_deposit_address: (GetDepositAddressArgs) -> (Address) query;
+    get_deposit_address: (GetDepositAddressArgs) -> (Address);
 
     // Register an account for automated deposit monitoring.
     //

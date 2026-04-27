@@ -376,7 +376,7 @@ impl CkSolMinter<'_> {
         &self,
         args: impl Into<GetDepositAddressArgs>,
     ) -> Result<Address, String> {
-        self.try_query_call("get_deposit_address", (args.into(),))
+        self.try_update_call("get_deposit_address", (args.into(),), 0)
             .await
     }
 
