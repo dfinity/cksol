@@ -65,8 +65,7 @@ async fn should_return_error_if_get_transaction_fails() {
     init_state();
     init_schnorr_master_key();
 
-    let runtime =
-        runtime_with_time_and_cycles_no_deposit().add_stub_error(IcError::CallPerformFailed);
+    let runtime = process_deposit_runtime(0).add_stub_error(IcError::CallPerformFailed);
 
     let result = process_deposit(
         runtime,
@@ -87,8 +86,8 @@ async fn should_return_error_if_transaction_not_found() {
     init_state();
     init_schnorr_master_key();
 
-    let runtime = runtime_with_time_and_cycles_no_deposit()
-        .add_stub_response(GetTransactionResult::Consistent(Ok(None)));
+    let runtime =
+        process_deposit_runtime(0).add_stub_response(GetTransactionResult::Consistent(Ok(None)));
 
     let result = process_deposit(
         runtime,
@@ -109,8 +108,7 @@ async fn should_return_error_if_transaction_not_valid_deposit() {
     let get_transaction_response = GetTransactionResult::Consistent(Ok(Some(
         deposit_transaction_to_wrong_address().try_into().unwrap(),
     )));
-    let runtime =
-        runtime_with_time_and_cycles_no_deposit().add_stub_response(get_transaction_response);
+    let runtime = process_deposit_runtime(0).add_stub_response(get_transaction_response);
 
     let result = process_deposit(
         runtime,
@@ -138,8 +136,7 @@ async fn should_fail_if_deposit_amount_is_below_minimum() {
     let get_transaction_response = GetTransactionResult::Consistent(Ok(Some(
         legacy_deposit_transaction().try_into().unwrap(),
     )));
-    let runtime =
-        runtime_with_time_and_cycles_no_deposit().add_stub_response(get_transaction_response);
+    let runtime = process_deposit_runtime(0).add_stub_response(get_transaction_response);
 
     let result = process_deposit(
         runtime,
@@ -166,7 +163,7 @@ async fn should_return_processing_if_mint_fails() {
     let get_transaction_response = GetTransactionResult::Consistent(Ok(Some(
         legacy_deposit_transaction().try_into().unwrap(),
     )));
-    let runtime = runtime_with_time_and_cycles()
+    let runtime = process_deposit_runtime(DEPOSIT_CONSOLIDATION_FEE)
         .add_stub_response(get_transaction_response)
         .add_stub_response(Err::<BlockIndex, TransferError>(
             TransferError::TemporarilyUnavailable,
@@ -195,7 +192,7 @@ async fn should_successfully_mint_on_second_call() {
     let get_transaction_response = GetTransactionResult::Consistent(Ok(Some(
         legacy_deposit_transaction().try_into().unwrap(),
     )));
-    let runtime = runtime_with_time_and_cycles()
+    let runtime = process_deposit_runtime(DEPOSIT_CONSOLIDATION_FEE)
         .add_stub_response(get_transaction_response)
         .add_stub_response(Err::<BlockIndex, TransferError>(
             TransferError::TemporarilyUnavailable,
@@ -248,7 +245,7 @@ async fn should_succeed_with_valid_deposit_transaction() {
 
         let get_transaction_response =
             GetTransactionResult::Consistent(Ok(Some(transaction.try_into().unwrap())));
-        let runtime = runtime_with_time_and_cycles()
+        let runtime = process_deposit_runtime(DEPOSIT_CONSOLIDATION_FEE)
             .add_stub_response(get_transaction_response)
             .add_stub_response(Ok::<BlockIndex, TransferError>(block_index.into()));
 
@@ -295,7 +292,7 @@ async fn should_not_double_mint() {
     let get_transaction_response = GetTransactionResult::Consistent(Ok(Some(
         legacy_deposit_transaction().try_into().unwrap(),
     )));
-    let runtime = runtime_with_time_and_cycles()
+    let runtime = process_deposit_runtime(DEPOSIT_CONSOLIDATION_FEE)
         .add_stub_response(get_transaction_response)
         .add_stub_response(Ok::<BlockIndex, TransferError>(BLOCK_INDEX.into()));
     let result = process_deposit(
@@ -332,7 +329,10 @@ async fn should_quarantine_deposit() {
     let get_transaction_response = GetTransactionResult::Consistent(Ok(Some(
         legacy_deposit_transaction().try_into().unwrap(),
     )));
-    let runtime = || runtime_with_time_and_cycles().add_stub_response(get_transaction_response);
+    let runtime = || {
+        process_deposit_runtime(DEPOSIT_CONSOLIDATION_FEE)
+            .add_stub_response(get_transaction_response)
+    };
     let first_result = tokio::spawn(async move {
         process_deposit(
             runtime(),
@@ -404,7 +404,7 @@ async fn should_allow_deposits_to_multiple_accounts_with_single_transaction() {
     )));
 
     for i in 0..3 {
-        let runtime = runtime_with_time_and_cycles()
+        let runtime = process_deposit_runtime(DEPOSIT_CONSOLIDATION_FEE)
             .add_stub_response(get_transaction_response.clone())
             .add_stub_response(Ok::<BlockIndex, TransferError>(BLOCK_INDEXES[i].into()));
         let result = process_deposit(
@@ -446,22 +446,17 @@ async fn should_allow_deposits_to_multiple_accounts_with_single_transaction() {
     events_assert.assert_no_more_events();
 }
 
-fn runtime_with_time_and_cycles() -> TestCanisterRuntime {
-    let rpc_cost = 25_000_000_000u128;
-    let refunded = GET_TRANSACTION_CYCLES - rpc_cost;
+/// Returns a `TestCanisterRuntime` pre-configured to simulate a `process_deposit` call
+/// where `consolidation_fee` cycles are charged on top of the RPC cost.
+///
+/// Pass `DEPOSIT_CONSOLIDATION_FEE` when the deposit is expected to be accepted,
+/// or `0` when it is expected to be rejected (transaction not found, invalid, etc.).
+fn process_deposit_runtime(consolidation_fee: u128) -> TestCanisterRuntime {
+    // Simulate the RPC canister consuming half of the attached GET_TRANSACTION_CYCLES budget.
+    let rpc_cost = GET_TRANSACTION_CYCLES / 2;
     TestCanisterRuntime::new()
         .with_increasing_time()
         .add_msg_cycles_available(PROCESS_DEPOSIT_REQUIRED_CYCLES)
-        .add_msg_cycles_refunded(refunded)
-        .add_msg_cycles_accept(rpc_cost + DEPOSIT_CONSOLIDATION_FEE)
-}
-
-fn runtime_with_time_and_cycles_no_deposit() -> TestCanisterRuntime {
-    let rpc_cost = 25_000_000_000u128;
-    let refunded = GET_TRANSACTION_CYCLES - rpc_cost;
-    TestCanisterRuntime::new()
-        .with_increasing_time()
-        .add_msg_cycles_available(PROCESS_DEPOSIT_REQUIRED_CYCLES)
-        .add_msg_cycles_refunded(refunded)
-        .add_msg_cycles_accept(rpc_cost)
+        .add_msg_cycles_refunded(GET_TRANSACTION_CYCLES - rpc_cost)
+        .add_msg_cycles_accept(rpc_cost + consolidation_fee)
 }
