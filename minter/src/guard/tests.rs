@@ -2,7 +2,7 @@ use crate::{
     constants::MAX_CONCURRENT_HTTP_OUTCALLS,
     guard::{
         GuardError, HttpOutcallGuard, HttpOutcallGuardError, MAX_CONCURRENT, TimerGuard,
-        TimerGuardError, process_deposit_guard, too_many_http_outcalls,
+        TimerGuardError, process_deposit_guard,
     },
     state::{TaskType, read_state},
     test_fixtures::init_state,
@@ -142,10 +142,8 @@ mod http_outcall_guard {
             read_state(|s| s.active_http_outcalls()),
             MAX_CONCURRENT_HTTP_OUTCALLS
         );
-        assert!(too_many_http_outcalls());
         drop(guards);
         assert_eq!(read_state(|s| s.active_http_outcalls()), 0);
-        assert!(!too_many_http_outcalls());
     }
 
     #[test]

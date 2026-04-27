@@ -1,6 +1,6 @@
 use crate::{
     constants::MAX_CONCURRENT_RPC_CALLS,
-    guard::{TimerGuard, too_many_http_outcalls},
+    guard::TimerGuard,
     numeric::LedgerMintIndex,
     rpc::{SubmitTransactionError, get_recent_slot_and_blockhash, submit_transaction},
     runtime::CanisterRuntime,
@@ -57,14 +57,6 @@ pub async fn consolidate_deposits<R: CanisterRuntime>(runtime: R) {
         return;
     }
 
-    if too_many_http_outcalls() {
-        log!(
-            Priority::Info,
-            "Too many concurrent HTTP outcalls, rescheduling consolidate_deposits"
-        );
-        return;
-    }
-
     let (slot, recent_blockhash) = match get_recent_slot_and_blockhash(&runtime).await {
         Ok(result) => result,
         Err(e) => {
@@ -73,8 +65,23 @@ pub async fn consolidate_deposits<R: CanisterRuntime>(runtime: R) {
         }
     };
 
-    futures::future::join_all(batches.into_iter().map(async |funds| {
-        match submit_consolidation_transaction(&runtime, funds, slot, recent_blockhash).await {
+    let results: Vec<Result<Signature, ConsolidationError>> =
+        futures::future::join_all(batches.into_iter().map(|funds| {
+            submit_consolidation_transaction(&runtime, funds, slot, recent_blockhash)
+        }))
+        .await;
+
+    let had_too_many_outcalls = results.iter().any(|r| {
+        matches!(
+            r,
+            Err(ConsolidationError::SubmitTransactionFailed(
+                SubmitTransactionError::TooManyOutcalls
+            ))
+        )
+    });
+
+    for result in results {
+        match result {
             Ok(sig) => log!(Priority::Info, "Submitted consolidation transaction {sig}"),
             Err(ConsolidationError::CreateTransactionFailed(e)) => log!(
                 Priority::Error,
@@ -85,10 +92,9 @@ pub async fn consolidate_deposits<R: CanisterRuntime>(runtime: R) {
                 "Failed to submit deposit consolidation transaction (will retry): {e}"
             ),
         }
-    }))
-    .await;
+    }
 
-    if !more_to_process {
+    if !more_to_process && !had_too_many_outcalls {
         // All work fits in this round
         scopeguard::ScopeGuard::into_inner(reschedule);
     }

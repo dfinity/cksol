@@ -1,6 +1,6 @@
 use crate::{
     constants::MAX_CONCURRENT_HTTP_OUTCALLS,
-    state::{State, TaskType, mutate_state, read_state},
+    state::{State, TaskType, mutate_state},
 };
 use cksol_types::{ProcessDepositError, WithdrawalError};
 use icrc_ledger_types::icrc1::account::Account;
@@ -169,13 +169,4 @@ impl Drop for HttpOutcallGuard {
                 .expect("BUG: HTTP outcall counter underflow");
         });
     }
-}
-
-/// Returns `true` when the number of in-flight HTTP outcalls has reached the
-/// configured limit.
-///
-/// Timer functions should check this at startup and reschedule rather than
-/// starting new work when the system is already at capacity.
-pub fn too_many_http_outcalls() -> bool {
-    read_state(|s| s.active_http_outcalls() >= MAX_CONCURRENT_HTTP_OUTCALLS)
 }
