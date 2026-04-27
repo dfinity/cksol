@@ -15,7 +15,7 @@ use solana_hash::Hash;
 use crate::{
     consolidate::consolidate_deposits,
     constants::MAX_CONCURRENT_RPC_CALLS,
-    guard::{TimerGuard, withdrawal_guard},
+    guard::{HttpOutcallGuardError, TimerGuard, withdrawal_guard},
     ledger::{BurnError, burn},
     rpc::{SubmitTransactionError, get_recent_slot_and_blockhash, submit_transaction},
     runtime::CanisterRuntime,
@@ -149,7 +149,6 @@ pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: R) {
         .collect();
 
     if batches.is_empty() {
-        // Nothing to process
         scopeguard::ScopeGuard::into_inner(reschedule);
         return;
     }
@@ -162,30 +161,26 @@ pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: R) {
         }
     };
 
-    let results: Vec<bool> = futures::future::join_all(
+    let results: Vec<Result<(), HttpOutcallGuardError>> = futures::future::join_all(
         batches
             .into_iter()
             .map(|batch| submit_withdrawal_transaction(&runtime, batch, slot, recent_blockhash)),
     )
     .await;
 
-    let had_too_many_outcalls = results.iter().any(|&b| b);
+    let had_too_many_outcalls = results.iter().any(Result::is_err);
 
     if !more_to_process && !had_too_many_outcalls {
-        // All work fits in this round
         scopeguard::ScopeGuard::into_inner(reschedule);
     }
 }
 
-/// Submit a batch withdrawal transaction. Returns `true` if the submission was
-/// rejected due to [`SubmitTransactionError::TooManyOutcalls`], which the
-/// caller uses to decide whether to reschedule immediately.
 async fn submit_withdrawal_transaction<R: CanisterRuntime>(
     runtime: &R,
     requests: Vec<WithdrawalRequest>,
     slot: Slot,
     recent_blockhash: Hash,
-) -> bool {
+) -> Result<(), HttpOutcallGuardError> {
     let targets: Vec<_> = requests
         .iter()
         .map(|request| {
@@ -208,7 +203,7 @@ async fn submit_withdrawal_transaction<R: CanisterRuntime>(
                 Priority::Error,
                 "Failed to create batch withdrawal transaction for burn indices {burn_indices:?}: {e}"
             );
-            return false;
+            return Ok(());
         }
     };
 
@@ -238,14 +233,15 @@ async fn submit_withdrawal_transaction<R: CanisterRuntime>(
                 Priority::Info,
                 "Submitted withdrawal transaction {signature} for burn indices {burn_indices:?}"
             );
-            false
+            Ok(())
         }
+        Err(SubmitTransactionError::TooManyOutcalls) => Err(HttpOutcallGuardError::TooManyOutcalls),
         Err(e) => {
             log!(
                 Priority::Info,
                 "Failed to send withdrawal transaction {signature} (will be resubmitted): {e}"
             );
-            matches!(e, SubmitTransactionError::TooManyOutcalls)
+            Ok(())
         }
     }
 }

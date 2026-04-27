@@ -52,7 +52,6 @@ pub async fn consolidate_deposits<R: CanisterRuntime>(runtime: R) {
         .collect();
 
     if batches.is_empty() {
-        // Nothing to process
         scopeguard::ScopeGuard::into_inner(reschedule);
         return;
     }
@@ -95,7 +94,6 @@ pub async fn consolidate_deposits<R: CanisterRuntime>(runtime: R) {
     }
 
     if !more_to_process && !had_too_many_outcalls {
-        // All work fits in this round
         scopeguard::ScopeGuard::into_inner(reschedule);
     }
 }

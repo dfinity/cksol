@@ -1,7 +1,7 @@
 use crate::{
     address::derivation_path,
     constants::MAX_CONCURRENT_RPC_CALLS,
-    guard::TimerGuard,
+    guard::{HttpOutcallGuardError, TimerGuard},
     rpc::{
         GetSignatureStatusesError, SubmitTransactionError, get_recent_slot_and_blockhash,
         get_signature_statuses, submit_transaction,
@@ -125,7 +125,6 @@ pub async fn finalize_transactions<R: CanisterRuntime>(runtime: R) {
     }
 
     if !more_to_process && !statuses.had_too_many_outcalls {
-        // All work fits in this round
         scopeguard::ScopeGuard::into_inner(reschedule);
     }
 }
@@ -154,10 +153,11 @@ pub async fn resubmit_transactions<R: CanisterRuntime>(runtime: R) {
         runtime.set_timer(Duration::ZERO, resubmit_transactions);
     });
 
-    let had_too_many_outcalls = resubmit_expired_transactions(&runtime, to_resubmit).await;
+    let had_too_many_outcalls = resubmit_expired_transactions(&runtime, to_resubmit)
+        .await
+        .is_err();
 
     if !more_to_process && !had_too_many_outcalls {
-        // All work fits in this round
         scopeguard::ScopeGuard::into_inner(reschedule);
     }
 }
@@ -237,18 +237,15 @@ async fn check_transaction_statuses<R: CanisterRuntime>(
     result
 }
 
-/// Resubmit expired transactions. Returns `true` if any call was rejected due
-/// to [`HttpOutcallGuardError::TooManyOutcalls`], which the caller uses to decide
-/// whether to reschedule immediately.
 async fn resubmit_expired_transactions<R: CanisterRuntime>(
     runtime: &R,
     to_resubmit: Vec<(Signature, VersionedMessage, Vec<Account>)>,
-) -> bool {
+) -> Result<(), HttpOutcallGuardError> {
     let (new_slot, new_blockhash) = match get_recent_slot_and_blockhash(runtime).await {
         Ok(result) => result,
         Err(e) => {
             log!(Priority::Info, "Failed to get recent blockhash: {e}");
-            return false;
+            return Ok(());
         }
     };
 
@@ -291,7 +288,11 @@ async fn resubmit_expired_transactions<R: CanisterRuntime>(
         }
     }
 
-    had_too_many_outcalls
+    if had_too_many_outcalls {
+        Err(HttpOutcallGuardError::TooManyOutcalls)
+    } else {
+        Ok(())
+    }
 }
 
 async fn try_resubmit_transaction<R: CanisterRuntime>(
