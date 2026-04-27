@@ -5,7 +5,7 @@ use crate::{
         get_transaction, submit_transaction,
     },
     test_fixtures::{
-        PROCESS_DEPOSIT_REQUIRED_CYCLES, confirmed_block,
+        confirmed_block,
         deposit::{legacy_deposit_transaction, legacy_deposit_transaction_signature},
         init_state,
         runtime::TestCanisterRuntime,
@@ -28,16 +28,9 @@ mod get_transaction_tests {
     async fn should_fail_if_get_transaction_fails() {
         init_state();
 
-        let runtime = TestCanisterRuntime::new()
-            .add_msg_cycles_available(PROCESS_DEPOSIT_REQUIRED_CYCLES)
-            .add_stub_error(IcError::CallPerformFailed);
+        let runtime = TestCanisterRuntime::new().add_stub_error(IcError::CallPerformFailed);
 
-        let result = get_transaction(
-            &runtime,
-            legacy_deposit_transaction_signature(),
-            PROCESS_DEPOSIT_REQUIRED_CYCLES,
-        )
-        .await;
+        let result = get_transaction(&runtime, legacy_deposit_transaction_signature()).await;
 
         assert_eq!(
             result,
@@ -56,15 +49,9 @@ mod get_transaction_tests {
         });
 
         let runtime = TestCanisterRuntime::new()
-            .add_msg_cycles_available(PROCESS_DEPOSIT_REQUIRED_CYCLES)
             .add_stub_response(MultiRpcResult::Consistent(Err(rpc_error.clone())));
 
-        let result = get_transaction(
-            &runtime,
-            legacy_deposit_transaction_signature(),
-            PROCESS_DEPOSIT_REQUIRED_CYCLES,
-        )
-        .await;
+        let result = get_transaction(&runtime, legacy_deposit_transaction_signature()).await;
 
         assert_eq!(result, Err(GetTransactionError::RpcError(rpc_error)));
     }
@@ -84,16 +71,10 @@ mod get_transaction_tests {
             ),
         ];
 
-        let runtime = TestCanisterRuntime::new()
-            .add_msg_cycles_available(PROCESS_DEPOSIT_REQUIRED_CYCLES)
-            .add_stub_response(MultiRpcResult::Inconsistent(results));
+        let runtime =
+            TestCanisterRuntime::new().add_stub_response(MultiRpcResult::Inconsistent(results));
 
-        let result = get_transaction(
-            &runtime,
-            legacy_deposit_transaction_signature(),
-            PROCESS_DEPOSIT_REQUIRED_CYCLES,
-        )
-        .await;
+        let result = get_transaction(&runtime, legacy_deposit_transaction_signature()).await;
 
         assert_eq!(result, Err(GetTransactionError::InconsistentRpcResults));
     }
@@ -102,16 +83,10 @@ mod get_transaction_tests {
     async fn should_return_empty_if_transaction_not_found() {
         init_state();
 
-        let runtime = TestCanisterRuntime::new()
-            .add_msg_cycles_available(PROCESS_DEPOSIT_REQUIRED_CYCLES)
-            .add_stub_response(MultiRpcResult::Consistent(Ok(None)));
+        let runtime =
+            TestCanisterRuntime::new().add_stub_response(MultiRpcResult::Consistent(Ok(None)));
 
-        let result = get_transaction(
-            &runtime,
-            legacy_deposit_transaction_signature(),
-            PROCESS_DEPOSIT_REQUIRED_CYCLES,
-        )
-        .await;
+        let result = get_transaction(&runtime, legacy_deposit_transaction_signature()).await;
 
         assert_eq!(result, Ok(None))
     }
@@ -120,18 +95,11 @@ mod get_transaction_tests {
     async fn should_return_transaction() {
         init_state();
 
-        let runtime = TestCanisterRuntime::new()
-            .add_msg_cycles_available(PROCESS_DEPOSIT_REQUIRED_CYCLES)
-            .add_stub_response(MultiRpcResult::Consistent(Ok(Some(
-                legacy_deposit_transaction().try_into().unwrap(),
-            ))));
+        let runtime = TestCanisterRuntime::new().add_stub_response(MultiRpcResult::Consistent(Ok(
+            Some(legacy_deposit_transaction().try_into().unwrap()),
+        )));
 
-        let result = get_transaction(
-            &runtime,
-            legacy_deposit_transaction_signature(),
-            PROCESS_DEPOSIT_REQUIRED_CYCLES,
-        )
-        .await;
+        let result = get_transaction(&runtime, legacy_deposit_transaction_signature()).await;
 
         assert_eq!(result, Ok(Some(legacy_deposit_transaction())))
     }

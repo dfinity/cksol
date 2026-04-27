@@ -1,5 +1,16 @@
+use crate::{
+    address::{account_address, lazy_get_schnorr_master_key},
+    rpc::get_transaction,
+    runtime::CanisterRuntime,
+    state::{event::DepositId, read_state},
+};
+use canlog::log;
+use cksol_types::ProcessDepositError;
+use cksol_types_internal::log::Priority;
+use icrc_ledger_types::icrc1::account::Account;
 use sol_rpc_types::Lamport;
 use solana_address::Address;
+use solana_signature::Signature;
 use solana_transaction_status_client_types::{
     EncodedConfirmedTransactionWithStatusMeta, UiTransactionError,
 };
@@ -10,6 +21,53 @@ mod tests;
 
 pub mod automatic;
 pub mod manual;
+
+pub async fn fetch_and_validate_deposit<R: CanisterRuntime>(
+    runtime: &R,
+    account: Account,
+    signature: Signature,
+    fee: Lamport,
+) -> Result<(DepositId, Lamport, Lamport), ProcessDepositError> {
+    let deposit_id = DepositId { account, signature };
+    let master_key = lazy_get_schnorr_master_key(runtime).await;
+    let deposit_address = account_address(&master_key, &account);
+
+    let maybe_transaction = get_transaction(runtime, signature).await.map_err(|e| {
+        log!(
+            Priority::Info,
+            "Error fetching transaction for deposit {deposit_id:?}: {e}"
+        );
+        ProcessDepositError::from(e)
+    })?;
+
+    let transaction = match maybe_transaction {
+        Some(t) => t,
+        None => return Err(ProcessDepositError::TransactionNotFound),
+    };
+
+    let deposit_amount =
+        get_deposit_amount_to_address(transaction, deposit_address).map_err(|e| {
+            log!(
+                Priority::Info,
+                "Error parsing deposit transaction with signature {signature}: {e}"
+            );
+            ProcessDepositError::InvalidDepositTransaction(e.to_string())
+        })?;
+
+    let minimum_deposit_amount = read_state(|s| s.minimum_deposit_amount());
+    if deposit_amount < minimum_deposit_amount {
+        return Err(ProcessDepositError::ValueTooSmall {
+            minimum_deposit_amount,
+            deposit_amount,
+        });
+    }
+
+    let amount_to_mint = deposit_amount
+        .checked_sub(fee)
+        .expect("BUG: deposit amount is less than fee");
+
+    Ok((deposit_id, deposit_amount, amount_to_mint))
+}
 
 pub fn get_deposit_amount_to_address(
     transaction: EncodedConfirmedTransactionWithStatusMeta,

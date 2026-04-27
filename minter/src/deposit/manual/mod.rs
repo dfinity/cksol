@@ -1,10 +1,9 @@
 use crate::{
-    address::{account_address, lazy_get_schnorr_master_key},
+    constants::GET_TRANSACTION_CYCLES,
     cycles::{charge_caller_cycles, check_caller_available_cycles},
-    deposit::get_deposit_amount_to_address,
+    deposit::fetch_and_validate_deposit,
     guard::process_deposit_guard,
     ledger::mint,
-    rpc::get_transaction,
     runtime::CanisterRuntime,
     state::{
         Deposit,
@@ -35,7 +34,7 @@ pub async fn process_deposit<R: CanisterRuntime>(
         deposit_amount,
         amount_to_mint,
     } = match read_state(|state| state.deposit_status(&deposit_id)) {
-        None => try_accept_deposit(&runtime, account, signature, deposit_id).await?,
+        None => try_accept_deposit(&runtime, account, signature).await?,
         Some(DepositStatus::Processing {
             deposit_amount,
             amount_to_mint,
@@ -70,57 +69,29 @@ async fn try_accept_deposit<R: CanisterRuntime>(
     runtime: &R,
     account: Account,
     signature: Signature,
-    deposit_id: DepositId,
 ) -> Result<Deposit, ProcessDepositError> {
-    let (cycles_to_attach, deposit_consolidation_fee) = read_state(|state| {
+    let (cycles_to_attach, deposit_consolidation_fee, fee) = read_state(|state| {
         (
             state.process_deposit_required_cycles(),
             state.deposit_consolidation_fee(),
+            state.manual_deposit_fee(),
         )
     });
     check_caller_available_cycles(runtime, cycles_to_attach)?;
 
-    // Reserve the consolidation fee and forward the rest to the HTTP outcall
-    let cycles_for_rpc = cycles_to_attach.saturating_sub(deposit_consolidation_fee);
-    let maybe_transaction = get_transaction(runtime, signature, cycles_for_rpc)
-        .await
-        .map_err(|e| {
-            log!(
-                Priority::Info,
-                "Error fetching transaction for deposit {deposit_id:?}: {e}"
-            );
-            ProcessDepositError::from(e)
-        })?;
+    let result = fetch_and_validate_deposit(runtime, account, signature, fee).await;
 
-    // Charge the actual RPC cost plus the consolidation fee
-    let rpc_cost = cycles_for_rpc.saturating_sub(runtime.msg_cycles_refunded());
-    charge_caller_cycles(runtime, rpc_cost + deposit_consolidation_fee);
+    // Always charge for the RPC call; additionally charge the consolidation fee if a deposit is found
+    let rpc_cost = GET_TRANSACTION_CYCLES.saturating_sub(runtime.msg_cycles_refunded());
+    let cycles_to_charge = rpc_cost
+        + if result.is_ok() {
+            deposit_consolidation_fee
+        } else {
+            0
+        };
+    charge_caller_cycles(runtime, cycles_to_charge);
 
-    let transaction = match maybe_transaction {
-        Some(transaction) => Ok(transaction),
-        None => Err(ProcessDepositError::TransactionNotFound),
-    }?;
-
-    let master_key = lazy_get_schnorr_master_key(runtime).await;
-    let deposit_address = account_address(&master_key, &account);
-    let deposit_amount =
-        get_deposit_amount_to_address(transaction, deposit_address).map_err(|e| {
-            log!(
-                Priority::Info,
-                "Error parsing deposit transaction with signature {signature}: {e}"
-            );
-            ProcessDepositError::InvalidDepositTransaction(e.to_string())
-        })?;
-    let minimum_deposit_amount = read_state(|state| state.minimum_deposit_amount());
-    if deposit_amount < minimum_deposit_amount {
-        return Err(ProcessDepositError::ValueTooSmall {
-            minimum_deposit_amount,
-            deposit_amount,
-        });
-    }
-    let amount_to_mint = deposit_amount
-        .checked_sub(read_state(|state| state.manual_deposit_fee()))
-        .expect("BUG: deposit amount is less than manual deposit fee");
+    let (deposit_id, deposit_amount, amount_to_mint) = result?;
 
     mutate_state(|state| {
         process_event(

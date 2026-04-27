@@ -6,6 +6,9 @@ pub const MAX_CONCURRENT_RPC_CALLS: usize = 10;
 /// https://docs.internetcomputer.org/references/ic-interface-spec#ic-http_request
 pub const MAX_HTTP_OUTCALL_RESPONSE_BYTES: u64 = 2_000_000;
 
+/// Cycles to attach for `getTransaction` RPC calls.
+pub const GET_TRANSACTION_CYCLES: u128 = 50_000_000_000;
+
 /// Cycles to attach for `getSignatureStatuses` RPC calls.
 pub const GET_SIGNATURE_STATUSES_CYCLES: u128 = 1_000_000_000_000;
 
