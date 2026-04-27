@@ -1292,12 +1292,13 @@ mod metrics_tests {
     }
 
     #[tokio::test]
-    async fn should_report_balance_discrepancy_after_daily_refresh() {
-        const REAL_BALANCE: Lamport = 12_345_678;
+    async fn should_report_balance_discrepancy_on_install_and_after_daily_refresh() {
+        const INITIAL_BALANCE: Lamport = 12_345_678;
+        const NEXT_BALANCE: Lamport = 99_999_999;
 
         let setup = SetupBuilder::new().build().await;
 
-        // Before the first refresh, both gauges should report zero.
+        // Until the install-time refresh completes, both gauges report zero.
         let setup = setup
             .check_metrics()
             .await
@@ -1307,22 +1308,39 @@ mod metrics_tests {
             )
             .into();
 
-        // Trigger the daily refresh and respond to the resulting `getBalance` outcall.
-        // The tracked balance is still 0, so the recorded discrepancy equals REAL_BALANCE.
+        // The minter schedules an immediate refresh on install. Respond to the
+        // resulting `getBalance` outcall and check the gauges update.
+        setup
+            .execute_http_mocks(MockBuilder::new().get_balance(INITIAL_BALANCE).build())
+            .await;
+
+        let setup = setup
+            .check_metrics()
+            .await
+            .assert_contains_metric_matching(&format!(
+                r"minter_balance_discrepancy_lamports {INITIAL_BALANCE} \d+"
+            ))
+            .assert_contains_metric_matching(
+                r"minter_balance_discrepancy_last_refresh_timestamp_seconds [1-9]\d* \d+",
+            )
+            .into();
+
+        // Advance time past the daily interval; the periodic refresh runs again.
         setup.advance_time(REFRESH_REAL_BALANCE_DELAY).await;
         setup
-            .execute_http_mocks(MockBuilder::new().get_balance(REAL_BALANCE).build())
+            .execute_http_mocks(
+                MockBuilder::with_start_id(4)
+                    .get_balance(NEXT_BALANCE)
+                    .build(),
+            )
             .await;
 
         setup
             .check_metrics()
             .await
             .assert_contains_metric_matching(&format!(
-                r"minter_balance_discrepancy_lamports {REAL_BALANCE} \d+"
+                r"minter_balance_discrepancy_lamports {NEXT_BALANCE} \d+"
             ))
-            .assert_contains_metric_matching(
-                r"minter_balance_discrepancy_last_refresh_timestamp_seconds [1-9]\d* \d+",
-            )
             .into()
             .drop()
             .await;

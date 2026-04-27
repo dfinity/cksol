@@ -352,9 +352,13 @@ fn assert_non_anonymous_account(
 
 fn setup_timers() {
     ic_cdk_timers::set_timer(Duration::from_secs(0), async {
-        // Initialize the minter's Ed25519 public key
+        // Initialize the minter's Ed25519 public key, then run the first balance
+        // refresh so the discrepancy metric is populated without waiting for the
+        // daily interval. Sequencing them in a single timer avoids racing
+        // `set_once_minter_public_key`.
         let runtime = IcCanisterRuntime::new();
         let _ = lazy_get_schnorr_master_key(&runtime).await;
+        refresh_real_balance(runtime).await;
     });
     ic_cdk_timers::set_timer_interval(DEPOSIT_CONSOLIDATION_DELAY, async || {
         consolidate_deposits(IcCanisterRuntime::new()).await;
