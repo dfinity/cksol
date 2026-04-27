@@ -23,9 +23,9 @@ pub enum EventType {
     Init(InitArgs),
     /// The minter upgraded with the specified arguments.
     Upgrade(UpgradeArgs),
-    /// A user manually submitted a valid ckSOL deposit transaction via
-    /// `process_deposit`. ckSOL tokens have not yet been minted for this deposit.
-    AcceptedManualDeposit {
+    /// A valid ckSOL deposit was discovered. ckSOL tokens have not yet been
+    /// minted for this deposit.
+    AcceptedDeposit {
         /// The signature of the Solana deposit transaction.
         signature: Signature,
         /// The account to which the minter should mint ckSOL.
@@ -36,6 +36,8 @@ pub enum EventType {
         /// This amount is generally lower than `deposit_amount` due
         /// to the deposit fee.
         amount_to_mint: Lamport,
+        /// The source of the deposit — manual or automatic.
+        source: DepositSource,
     },
     /// The minter discovered a Solana transaction that is a valid ckSOL
     /// deposit, but it is unknown whether ckSOL tokens were minted for
@@ -121,6 +123,15 @@ pub enum EventType {
         /// The account that is no longer being monitored.
         account: Account,
     },
+}
+
+/// The source of an accepted deposit.
+#[derive(Clone, Copy, Debug, PartialEq, CandidType, Deserialize)]
+pub enum DepositSource {
+    /// The deposit was submitted manually via `process_deposit`.
+    Manual,
+    /// The deposit was discovered automatically by the minter's polling mechanism.
+    Automatic,
 }
 
 /// The purpose of a submitted Solana transaction.

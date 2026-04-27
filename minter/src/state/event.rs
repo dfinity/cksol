@@ -42,16 +42,18 @@ pub enum EventType {
     /// The minter upgraded with the specified arguments.
     #[n(1)]
     Upgrade(#[n(0)] UpgradeArgs),
-    /// A user manually submitted a valid ckSOL deposit transaction via
-    /// `process_deposit`. ckSOL tokens have not yet been minted for this deposit.
+    /// A valid ckSOL deposit was discovered. ckSOL tokens have not yet been
+    /// minted for this deposit.
     #[n(2)]
-    AcceptedManualDeposit {
+    AcceptedDeposit {
         #[n(0)]
         deposit_id: DepositId,
         #[n(1)]
         deposit_amount: Lamport,
         #[n(2)]
         amount_to_mint: Lamport,
+        #[n(3)]
+        source: DepositSource,
     },
     /// The minter discovered a Solana transaction that is a valid ckSOL
     /// deposit, but it is unknown whether ckSOL tokens were minted for
@@ -142,6 +144,16 @@ pub enum EventType {
         #[n(0)]
         account: Account,
     },
+}
+
+/// The source of an accepted deposit — whether it was submitted manually or
+/// discovered automatically by the minter's polling mechanism.
+#[derive(Clone, Copy, Eq, PartialEq, Debug, Decode, Encode)]
+pub enum DepositSource {
+    #[n(0)]
+    Manual,
+    #[n(1)]
+    Automatic,
 }
 
 /// Payload of the `AcceptedWithdrawalRequest` event.
