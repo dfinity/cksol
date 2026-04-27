@@ -30,9 +30,9 @@ use icrc_ledger_types::icrc1::{
     transfer::{BlockIndex, TransferError},
 };
 use sol_rpc_types::{EncodedConfirmedTransactionWithStatusMeta, Lamport, MultiRpcResult};
-use std::panic;
 
 type GetTransactionResult = MultiRpcResult<Option<EncodedConfirmedTransactionWithStatusMeta>>;
+type MintResult = Result<BlockIndex, TransferError>;
 
 mod process_deposit_tests {
     use super::*;
@@ -68,7 +68,7 @@ mod process_deposit_tests {
         init_state();
         init_schnorr_master_key();
 
-        let runtime = process_deposit_runtime(0).add_stub_error(IcError::CallPerformFailed);
+        let runtime = rejected_runtime().add_stub_error(IcError::CallPerformFailed);
 
         let result = process_deposit(
             runtime,
@@ -89,8 +89,7 @@ mod process_deposit_tests {
         init_state();
         init_schnorr_master_key();
 
-        let runtime = process_deposit_runtime(0)
-            .add_stub_response(GetTransactionResult::Consistent(Ok(None)));
+        let runtime = rejected_runtime().add_get_transaction_not_found_response();
 
         let result = process_deposit(
             runtime,
@@ -108,10 +107,8 @@ mod process_deposit_tests {
         init_state();
         init_schnorr_master_key();
 
-        let get_transaction_response = GetTransactionResult::Consistent(Ok(Some(
-            deposit_transaction_to_wrong_address().try_into().unwrap(),
-        )));
-        let runtime = process_deposit_runtime(0).add_stub_response(get_transaction_response);
+        let runtime =
+            rejected_runtime().add_get_transaction_response(deposit_transaction_to_wrong_address());
 
         let result = process_deposit(
             runtime,
@@ -136,10 +133,7 @@ mod process_deposit_tests {
         });
         init_schnorr_master_key();
 
-        let get_transaction_response = GetTransactionResult::Consistent(Ok(Some(
-            legacy_deposit_transaction().try_into().unwrap(),
-        )));
-        let runtime = process_deposit_runtime(0).add_stub_response(get_transaction_response);
+        let runtime = rejected_runtime().add_get_transaction_response(legacy_deposit_transaction());
 
         let result = process_deposit(
             runtime,
@@ -163,14 +157,8 @@ mod process_deposit_tests {
         init_state();
         init_schnorr_master_key();
 
-        let get_transaction_response = GetTransactionResult::Consistent(Ok(Some(
-            legacy_deposit_transaction().try_into().unwrap(),
-        )));
-        let runtime = process_deposit_runtime(DEPOSIT_CONSOLIDATION_FEE)
-            .add_stub_response(get_transaction_response)
-            .add_stub_response(Err::<BlockIndex, TransferError>(
-                TransferError::TemporarilyUnavailable,
-            ));
+        let runtime = runtime(legacy_deposit_transaction())
+            .add_mint_response(Err(TransferError::TemporarilyUnavailable));
 
         let result = process_deposit(
             runtime,
@@ -192,14 +180,8 @@ mod process_deposit_tests {
         init_schnorr_master_key();
 
         // First call: makes JSON-RPC call and attempts to mint
-        let get_transaction_response = GetTransactionResult::Consistent(Ok(Some(
-            legacy_deposit_transaction().try_into().unwrap(),
-        )));
-        let runtime = process_deposit_runtime(DEPOSIT_CONSOLIDATION_FEE)
-            .add_stub_response(get_transaction_response)
-            .add_stub_response(Err::<BlockIndex, TransferError>(
-                TransferError::TemporarilyUnavailable,
-            ));
+        let runtime = runtime(legacy_deposit_transaction())
+            .add_mint_response(Err(TransferError::TemporarilyUnavailable));
         let result = process_deposit(
             runtime,
             DEPOSITOR_ACCOUNT,
@@ -212,7 +194,7 @@ mod process_deposit_tests {
         // additional JSON-RPC calls
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
-            .add_stub_response(Ok::<BlockIndex, TransferError>(BLOCK_INDEX.into()));
+            .add_mint_response(Ok(BLOCK_INDEX.into()));
         let result = process_deposit(
             runtime,
             DEPOSITOR_ACCOUNT,
@@ -246,11 +228,7 @@ mod process_deposit_tests {
         ] {
             reset_events();
 
-            let get_transaction_response =
-                GetTransactionResult::Consistent(Ok(Some(transaction.try_into().unwrap())));
-            let runtime = process_deposit_runtime(DEPOSIT_CONSOLIDATION_FEE)
-                .add_stub_response(get_transaction_response)
-                .add_stub_response(Ok::<BlockIndex, TransferError>(block_index.into()));
+            let runtime = runtime(transaction).add_mint_response(Ok(block_index.into()));
 
             let result = process_deposit(runtime, DEPOSITOR_ACCOUNT, signature).await;
 
@@ -292,12 +270,8 @@ mod process_deposit_tests {
         init_schnorr_master_key();
 
         // Successful mint
-        let get_transaction_response = GetTransactionResult::Consistent(Ok(Some(
-            legacy_deposit_transaction().try_into().unwrap(),
-        )));
-        let runtime = process_deposit_runtime(DEPOSIT_CONSOLIDATION_FEE)
-            .add_stub_response(get_transaction_response)
-            .add_stub_response(Ok::<BlockIndex, TransferError>(BLOCK_INDEX.into()));
+        let runtime =
+            runtime(legacy_deposit_transaction()).add_mint_response(Ok(BLOCK_INDEX.into()));
         let result = process_deposit(
             runtime,
             DEPOSITOR_ACCOUNT,
@@ -329,16 +303,10 @@ mod process_deposit_tests {
         init_schnorr_master_key();
 
         // Don't mock the ledger response so the runtime panics when calling it to mint
-        let get_transaction_response = GetTransactionResult::Consistent(Ok(Some(
-            legacy_deposit_transaction().try_into().unwrap(),
-        )));
-        let runtime = || {
-            process_deposit_runtime(DEPOSIT_CONSOLIDATION_FEE)
-                .add_stub_response(get_transaction_response)
-        };
+        let runtime = runtime(legacy_deposit_transaction());
         let first_result = tokio::spawn(async move {
             process_deposit(
-                runtime(),
+                runtime,
                 DEPOSITOR_ACCOUNT,
                 legacy_deposit_transaction_signature(),
             )
@@ -400,16 +368,9 @@ mod process_deposit_tests {
         init_state();
         init_schnorr_master_key();
 
-        let get_transaction_response = GetTransactionResult::Consistent(Ok(Some(
-            deposit_transaction_to_multiple_accounts()
-                .try_into()
-                .unwrap(),
-        )));
-
         for i in 0..3 {
-            let runtime = process_deposit_runtime(DEPOSIT_CONSOLIDATION_FEE)
-                .add_stub_response(get_transaction_response.clone())
-                .add_stub_response(Ok::<BlockIndex, TransferError>(BLOCK_INDEXES[i].into()));
+            let runtime = runtime(deposit_transaction_to_multiple_accounts())
+                .add_mint_response(Ok(BLOCK_INDEXES[i].into()));
             let result = process_deposit(
                 runtime,
                 ACCOUNTS[i],
@@ -449,13 +410,60 @@ mod process_deposit_tests {
         events_assert.assert_no_more_events();
     }
 
-    fn process_deposit_runtime(consolidation_fee: u128) -> TestCanisterRuntime {
-        // Simulate the RPC canister consuming half of the attached GET_TRANSACTION_CYCLES budget.
-        let rpc_cost = GET_TRANSACTION_CYCLES / 2;
+    /// Half the `getTransaction` RPC budget; the other half is refunded by the RPC provider.
+    const RPC_COST: u128 = GET_TRANSACTION_CYCLES / 2;
+
+    /// Runtime for a `process_deposit` call that accepts the given transaction.
+    /// Charges the RPC cost + consolidation fee and bakes in the transaction as the `getTransaction` stub.
+    fn runtime(
+        get_transaction_result: impl TryInto<EncodedConfirmedTransactionWithStatusMeta>,
+    ) -> TestCanisterRuntime {
+        base_runtime(DEPOSIT_CONSOLIDATION_FEE).add_get_transaction_response(get_transaction_result)
+    }
+
+    /// Runtime for a `process_deposit` call that does not accept a deposit.
+    /// Charges only the RPC cost; caller chains the stub response or error.
+    fn rejected_runtime() -> TestCanisterRuntime {
+        base_runtime(0)
+    }
+
+    /// Shared cycles setup used by both `runtime` and `rejected_runtime`.
+    fn base_runtime(consolidation_fee: u128) -> TestCanisterRuntime {
         TestCanisterRuntime::new()
             .with_increasing_time()
             .add_msg_cycles_available(PROCESS_DEPOSIT_REQUIRED_CYCLES)
-            .add_msg_cycles_refunded(GET_TRANSACTION_CYCLES - rpc_cost)
-            .add_msg_cycles_accept(rpc_cost + consolidation_fee)
+            .add_msg_cycles_refunded(GET_TRANSACTION_CYCLES - RPC_COST)
+            .add_msg_cycles_accept(RPC_COST + consolidation_fee)
+    }
+
+    trait DepositRuntimeExt: Sized {
+        fn add_get_transaction_response(
+            self,
+            tx: impl TryInto<EncodedConfirmedTransactionWithStatusMeta>,
+        ) -> Self;
+        fn add_get_transaction_not_found_response(self) -> Self;
+        fn add_mint_response(self, result: MintResult) -> Self;
+    }
+
+    impl DepositRuntimeExt for TestCanisterRuntime {
+        fn add_get_transaction_response(
+            self,
+            response: impl TryInto<EncodedConfirmedTransactionWithStatusMeta>,
+        ) -> Self {
+            self.add_stub_response(GetTransactionResult::Consistent(Ok(Some(
+                response
+                    .try_into()
+                    .ok()
+                    .expect("failed to convert transaction"),
+            ))))
+        }
+
+        fn add_get_transaction_not_found_response(self) -> Self {
+            self.add_stub_response(GetTransactionResult::Consistent(Ok(None)))
+        }
+
+        fn add_mint_response(self, result: MintResult) -> Self {
+            self.add_stub_response(result)
+        }
     }
 }
