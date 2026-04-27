@@ -98,12 +98,12 @@ The user’s account is cached, together with the derived Solana address, so tha
 
 The following scheme is proposed to bound the number of timer invocations per deposit address. At most `MAX_GET_SIGNATURES_CALLS` **= 10 calls** are made with the interval between calls doubling from **1, 2, 4, 8, 16, 32, 64, 128, 256, up to 512 minutes** for a total of **1023 minutes**, i.e., slightly more than 17 hours. The timer is not set anymore whenever a call returns at least one new signature that results in a mint operation.
 
-In order to mitigate the risk of a denial-of-service attack, each account has a certain **quota** for the automatic flow, which consists of a quota for `getSignaturesForAddress` calls and a quota for `getTransaction` calls. Initially, the quotas are `MAX_GET_SIGNATURES_CALLS` and `MAX_RETRIEVED_TRANSACTIONS`, respectively. Calls of either type are only made if there is a positive remaining quota.
+In order to mitigate the risk of a denial-of-service attack, each account has a certain **quota** for the automatic flow, which consists of a quota for `getSignaturesForAddress` calls and a quota for `getTransaction` calls. Initially, the quotas are `MAX_GET_SIGNATURES_CALLS` and `MAX_TRANSACTIONS_PER_ACCOUNT`, respectively. Calls of either type are only made if there is a positive remaining quota.
 
-Since each IC account gets a newly derived deposit address, these addresses are likely involved in deposits only, i.e., there should not be many `getTransaction` calls in vain in the common case. Whenever there is a successful call that results in a mint, both quotas are increased by 2 for the following reason: They are both bumped by 1 so that calls that result in a mint do not count against the quotas. The additional bump of each quota serves to ensure that an occasional call that does not result in a mint operation does not slowly drain the free quota. Note that RPC calls may sporadically fail for various reasons such as network issues or RPC providers being unavailable. There is a ceiling of `MAX_GET_SIGNATURES_CALLS` and `MAX_RETRIEVED_TRANSACTIONS` for the `getSignaturesForAddress` quota and the `getTransaction` quota, respectively.  
+Since each IC account gets a newly derived deposit address, these addresses are likely involved in deposits only, i.e., there should not be many `getTransaction` calls in vain in the common case. Whenever there is a successful call that results in a mint, both quotas are increased by 2 for the following reason: They are both bumped by 1 so that calls that result in a mint do not count against the quotas. The additional bump of each quota serves to ensure that an occasional call that does not result in a mint operation does not slowly drain the free quota. Note that RPC calls may sporadically fail for various reasons such as network issues or RPC providers being unavailable. There is a ceiling of `MAX_GET_SIGNATURES_CALLS` and `MAX_TRANSACTIONS_PER_ACCOUNT` for the `getSignaturesForAddress` quota and the `getTransaction` quota, respectively.  
 The mechanism to replenish a depleted quota is discussed in the next section.
 
-The quota is meant as a deterrent but does not stop an attacker from triggering many `getTransaction` calls for different addresses. In order to limit the impact of such an attack, the constant `MAX_MONITORED_ADDRESSES` specifies the global limit on the number of addresses for which automatic deposits are allowed at any given time. This constant also limits the memory consumption. Furthermore, `update_balance` only takes a subaccount parameter, i.e., it is not possible to call the function for other principals, preventing drainage attacks against the quotas of other users.
+The quota is meant as a deterrent but does not stop an attacker from triggering many `getTransaction` calls for different addresses. In order to limit the impact of such an attack, the constant `MAX_MONITORED_ACCOUNTS` specifies the global limit on the number of addresses for which automatic deposits are allowed at any given time. This constant also limits the memory consumption. Furthermore, `update_balance` only takes a subaccount parameter, i.e., it is not possible to call the function for other principals, preventing drainage attacks against the quotas of other users.
 
 If a returned transaction contains one or more transfers to the user’s deposit address, the sum of the transferred amounts, minus a fee, is minted in a *single* `icrc1_transfer` call to the ckSOL ledger. As mentioned before, no ckSOL is minted if the amount is below the minimum deposit amount.
 
@@ -111,7 +111,7 @@ The ckSOL minter must keep track of the covered range for each address for the s
 
 ```
 // Initially max_parsed = ⊥, gap_upper = gap_lower = genesis_sig
-// limit = MAX_RETRIEVED_TRANSACTIONS
+// limit = MAX_TRANSACTIONS_PER_ACCOUNT
 if gap_upper = gap_lower:
     [s_1,...,s_n] := getSignaturesForAddress(limit, until=gap_upper)
     if n < limit:    // All signatures have been returned in the range
@@ -127,9 +127,9 @@ else:    // The gap between gap_upper and gap_lower must be closed
 process(s_1,...,s_n)
 ```
 
-The idea is to cover the whole range since genesis. Assuming that the latest transaction signature that has ever been returned in previous calls is `max`, if reading from the current block returns `MAX_RETRIEVED_TRANSACTIONS` transactions, it is unclear whether there are more transaction signatures between the oldest returned transaction and `max`. In subsequent calls, the algorithm above closes this gap before requesting transaction signatures that are more recent than `max`.
+The idea is to cover the whole range since genesis. Assuming that the latest transaction signature that has ever been returned in previous calls is `max`, if reading from the current block returns `MAX_TRANSACTIONS_PER_ACCOUNT` transactions, it is unclear whether there are more transaction signatures between the oldest returned transaction and `max`. In subsequent calls, the algorithm above closes this gap before requesting transaction signatures that are more recent than `max`.
 
-> **_NOTE:_** It is possible that an address appears in many transactions that do not change the balance of the account. If there are more than `MAX_RETRIEVED_TRANSACTIONS` such transactions, the quota can be exhausted before a valid deposit is discovered. Deposits can always be processed using the manual flow but the automatic flow may not work until all past transactions for this address have been processed. This risk is currently accepted.
+> **_NOTE:_** It is possible that an address appears in many transactions that do not change the balance of the account. If there are more than `MAX_TRANSACTIONS_PER_ACCOUNT` such transactions, the quota can be exhausted before a valid deposit is discovered. Deposits can always be processed using the manual flow but the automatic flow may not work until all past transactions for this address have been processed. This risk is currently accepted.
 
 > **_NOTE:_** There may be only one active timer per deposit address at any time across all endpoints that interact with the deposit address.
 
@@ -139,8 +139,8 @@ HTTPS outcalls are a scarce resource. Therefore, the number of in-flight request
 
 Proposed values for the parameters are provided in this list:
 
-* `MAX_RETRIEVED_TRANSACTIONS`: This constant is the product of the number of transaction requests that can be packed into a JSON batch request and the maximum number of `getTransaction` calls that the ckSOL minter may make for a single `get_deposit_address` call. Batching is not yet available, so currently the only parameter is the number of transaction requests, which can initially be set to **50**.  
-* `MAX_MONITORED_ADDRESSES`: The number of monitored addresses must be upper bounded as well. Since HTTPS outcalls are protected by imposing an upper bound on the number of in-flight outcalls and an address does not take up too much space, a fairly large number of addresses could be monitored. The reason to keep this number on the small side is that a cycle drainage attack could be launched by having the ckSOL minter spend many cycles monitoring a large number of addresses. A compromise would be to set the parameter to a conservatively low value of **100** initially.  
+* `MAX_TRANSACTIONS_PER_ACCOUNT`: This constant is the product of the number of transaction requests that can be packed into a JSON batch request and the maximum number of `getTransaction` calls that the ckSOL minter may make for a single `get_deposit_address` call. Batching is not yet available, so currently the only parameter is the number of transaction requests, which can initially be set to **50**.  
+* `MAX_MONITORED_ACCOUNTS`: The number of monitored addresses must be upper bounded as well. Since HTTPS outcalls are protected by imposing an upper bound on the number of in-flight outcalls and an address does not take up too much space, a fairly large number of addresses could be monitored. The reason to keep this number on the small side is that a cycle drainage attack could be launched by having the ckSOL minter spend many cycles monitoring a large number of addresses. A compromise would be to set the parameter to a conservatively low value of **100** initially.  
 * `MAX_IN_FLIGHT_SOL_RPC_CANISTER_CALLS`: The maximum number of in-flight calls to the SOL RPC canister. The suggested parameter is **10**.
 
 #### 2.1.3. Manual Flow
@@ -185,7 +185,7 @@ The cycles are mainly intended to pay for the calls to the SOL RPC canister, inc
 2.  **100M cycles** are subtracted otherwise for the work carried out by the ckSOL minter.
 
 Let `x`T cycles denote the left-over cycles. As shown in Section 2.3.2., depleting the quotas consumes roughly 0.44T cycles. Given that `x` is at least 0.9738, there are enough cycles to replenish both quotas, i.e., after this operation, both quotas are again at their respective maximum values.  
-The cost of replenishing the number of allowed `getSignaturesForAddress` calls from `y` to `MAX_GET_SIGNATURES_CALLS` is `(MAX_GET_SIGNATURES_CALLS-y)*5` G cycles (rounding up the derived cost of 4.3G). Similarly, the cost of replenishing the number of allowed `getTransaction` calls from `z` to `MAX_RETRIEVED_SIGNATURES` is `(MAX_RETRIEVED_SIGNATURES-z)*8` G cycles (rounding up the derived cost of 7.5G).  
+The cost of replenishing the number of allowed `getSignaturesForAddress` calls from `y` to `MAX_GET_SIGNATURES_CALLS` is `(MAX_GET_SIGNATURES_CALLS-y)*5` G cycles (rounding up the derived cost of 4.3G). Similarly, the cost of replenishing the number of allowed `getTransaction` calls from `z` to `MAX_TRANSACTIONS_PER_ACCOUNT` is `(MAX_TRANSACTIONS_PER_ACCOUNT-z)*8` G cycles (rounding up the derived cost of 7.5G).  
 Given the suggested parameters, the cost is at most 0.45T cycles. Thus, at least 0.5238T cycles are refunded.
 
 #### 2.1.4. Consolidation
