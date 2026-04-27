@@ -1,7 +1,7 @@
 use crate::{
     address::derivation_path,
     constants::MAX_CONCURRENT_RPC_CALLS,
-    guard::TimerGuard,
+    guard::{TimerGuard, too_many_http_outcalls},
     rpc::{
         SubmitTransactionError, get_recent_slot_and_blockhash, get_signature_statuses,
         submit_transaction,
@@ -62,6 +62,14 @@ pub async fn finalize_transactions<R: CanisterRuntime>(runtime: R) {
     let reschedule = scopeguard::guard(runtime.clone(), |runtime| {
         runtime.set_timer(Duration::ZERO, finalize_transactions);
     });
+
+    if too_many_http_outcalls() {
+        log!(
+            Priority::Info,
+            "Too many concurrent HTTP outcalls, rescheduling finalize_transactions"
+        );
+        return;
+    }
 
     // Fetch the current slot before checking statuses: if a transaction finalizes
     // after we snapshot the slot, the status check will see it as finalized rather
@@ -153,6 +161,14 @@ pub async fn resubmit_transactions<R: CanisterRuntime>(runtime: R) {
     let reschedule = scopeguard::guard(runtime.clone(), |runtime| {
         runtime.set_timer(Duration::ZERO, resubmit_transactions);
     });
+
+    if too_many_http_outcalls() {
+        log!(
+            Priority::Info,
+            "Too many concurrent HTTP outcalls, rescheduling resubmit_transactions"
+        );
+        return;
+    }
 
     resubmit_expired_transactions(&runtime, to_resubmit).await;
 

@@ -1,6 +1,12 @@
 /// Maximum number of concurrent calls to the SOL RPC canister.
 pub const MAX_CONCURRENT_RPC_CALLS: usize = 10;
 
+/// Maximum number of concurrent HTTP outcalls the minter may have in flight at once.
+///
+/// Each call to the SOL RPC canister triggers one or more HTTPS outcalls on the IC.
+/// Limiting the number of in-flight outcalls prevents resource exhaustion.
+pub const MAX_CONCURRENT_HTTP_OUTCALLS: u32 = 50;
+
 /// Matches the ICP HTTPS outcall response limit for variable-length RPC calls
 /// such as `getTransaction` and `getSignatureStatuses`:
 /// https://docs.internetcomputer.org/references/ic-interface-spec#ic-http_request

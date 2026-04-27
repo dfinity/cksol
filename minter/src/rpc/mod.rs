@@ -1,5 +1,6 @@
 use crate::{
     constants::{GET_SIGNATURE_STATUSES_CYCLES, MAX_HTTP_OUTCALL_RESPONSE_BYTES},
+    guard::{HttpOutcallGuard, HttpOutcallGuardError},
     runtime::CanisterRuntime,
     state::read_state,
 };
@@ -24,6 +25,8 @@ pub async fn get_transaction<R: CanisterRuntime>(
     signature: Signature,
     cycles_to_attach: u128,
 ) -> Result<Option<EncodedConfirmedTransactionWithStatusMeta>, GetTransactionError> {
+    let _guard = HttpOutcallGuard::new()
+        .map_err(|_: HttpOutcallGuardError| GetTransactionError::TooManyOutcalls)?;
     let result = read_state(|state| state.sol_rpc_client(runtime.inter_canister_call_runtime()))
         .get_transaction(signature)
         .with_encoding(GetTransactionEncoding::Base64)
@@ -48,6 +51,8 @@ pub enum GetTransactionError {
     RpcError(RpcError),
     #[error("Inconsistent RPC results for transaction")]
     InconsistentRpcResults,
+    #[error("Too many concurrent HTTP outcalls")]
+    TooManyOutcalls,
 }
 
 impl From<GetTransactionError> for ProcessDepositError {
@@ -60,6 +65,8 @@ pub async fn submit_transaction<R: CanisterRuntime>(
     runtime: &R,
     transaction: Transaction,
 ) -> Result<Signature, SubmitTransactionError> {
+    let _guard = HttpOutcallGuard::new()
+        .map_err(|_: HttpOutcallGuardError| SubmitTransactionError::TooManyOutcalls)?;
     let client = read_state(|state| state.sol_rpc_client(runtime.inter_canister_call_runtime()));
     match client.send_transaction(transaction).try_send().await {
         Ok(MultiRpcResult::Consistent(Ok(signature))) => Ok(signature),
@@ -77,11 +84,15 @@ pub enum SubmitTransactionError {
     RpcError(RpcError),
     #[error("Inconsistent RPC results for sendTransaction")]
     InconsistentRpcResults,
+    #[error("Too many concurrent HTTP outcalls")]
+    TooManyOutcalls,
 }
 
 pub async fn get_recent_slot_and_blockhash<R: CanisterRuntime>(
     runtime: &R,
 ) -> Result<(Slot, Hash), GetRecentBlockhashError> {
+    let _guard = HttpOutcallGuard::new()
+        .map_err(|_: HttpOutcallGuardError| GetRecentBlockhashError::TooManyOutcalls)?;
     let client = read_state(|state| state.sol_rpc_client(runtime.inter_canister_call_runtime()));
     match client.get_recent_block().try_send().await {
         Ok((slot, block)) => {
@@ -104,6 +115,8 @@ pub async fn get_recent_slot_and_blockhash<R: CanisterRuntime>(
 pub enum GetRecentBlockhashError {
     #[error("Failed to get recent block: {0:?}")]
     Failed(Vec<String>),
+    #[error("Too many concurrent HTTP outcalls")]
+    TooManyOutcalls,
 }
 
 pub async fn get_signature_statuses<R: CanisterRuntime>(
@@ -113,6 +126,8 @@ pub async fn get_signature_statuses<R: CanisterRuntime>(
     Vec<Option<solana_transaction_status_client_types::TransactionStatus>>,
     GetSignatureStatusesError,
 > {
+    let _guard = HttpOutcallGuard::new()
+        .map_err(|_: HttpOutcallGuardError| GetSignatureStatusesError::TooManyOutcalls)?;
     let client = read_state(|state| state.sol_rpc_client(runtime.inter_canister_call_runtime()));
     let result = client
         .get_signature_statuses(signatures)
@@ -136,12 +151,16 @@ pub enum GetSignatureStatusesError {
     RpcError(RpcError),
     #[error("Inconsistent RPC results for getSignatureStatuses")]
     InconsistentRpcResults,
+    #[error("Too many concurrent HTTP outcalls")]
+    TooManyOutcalls,
 }
 
 pub async fn get_signatures_for_address<R: CanisterRuntime>(
     runtime: &R,
     params: GetSignaturesForAddressParams,
 ) -> Result<Vec<ConfirmedTransactionStatusWithSignature>, GetSignaturesForAddressError> {
+    let _guard = HttpOutcallGuard::new()
+        .map_err(|_: HttpOutcallGuardError| GetSignaturesForAddressError::TooManyOutcalls)?;
     let client = read_state(|state| state.sol_rpc_client(runtime.inter_canister_call_runtime()));
     let result = client.get_signatures_for_address(params).try_send().await;
     match result? {
@@ -161,4 +180,6 @@ pub enum GetSignaturesForAddressError {
     RpcError(RpcError),
     #[error("Inconsistent RPC results for getSignaturesForAddress")]
     InconsistentRpcResults,
+    #[error("Too many concurrent HTTP outcalls")]
+    TooManyOutcalls,
 }

@@ -1,4 +1,7 @@
-use crate::state::{State, TaskType, mutate_state};
+use crate::{
+    constants::MAX_CONCURRENT_HTTP_OUTCALLS,
+    state::{State, TaskType, mutate_state, read_state},
+};
 use cksol_types::{ProcessDepositError, WithdrawalError};
 use icrc_ledger_types::icrc1::account::Account;
 use std::{collections::BTreeSet, marker::PhantomData};
@@ -129,4 +132,50 @@ impl Drop for TimerGuard {
             s.active_tasks_mut().remove(&self.task);
         });
     }
+}
+
+#[derive(Debug, Eq, PartialEq)]
+pub enum HttpOutcallGuardError {
+    TooManyOutcalls,
+}
+
+/// Guards a single HTTP outcall to the SOL RPC canister.
+///
+/// Acquiring this guard increments the active-outcall counter in canister state;
+/// dropping it decrements the counter. [`HttpOutcallGuard::new`] fails with
+/// [`HttpOutcallGuardError::TooManyOutcalls`] when
+/// [`MAX_CONCURRENT_HTTP_OUTCALLS`] guards are already held.
+#[must_use]
+pub struct HttpOutcallGuard;
+
+impl HttpOutcallGuard {
+    pub fn new() -> Result<Self, HttpOutcallGuardError> {
+        mutate_state(|s| {
+            if s.active_http_outcalls() >= MAX_CONCURRENT_HTTP_OUTCALLS {
+                return Err(HttpOutcallGuardError::TooManyOutcalls);
+            }
+            *s.active_http_outcalls_mut() += 1;
+            Ok(Self)
+        })
+    }
+}
+
+impl Drop for HttpOutcallGuard {
+    fn drop(&mut self) {
+        mutate_state(|s| {
+            let count = s.active_http_outcalls_mut();
+            *count = count
+                .checked_sub(1)
+                .expect("BUG: HTTP outcall counter underflow");
+        });
+    }
+}
+
+/// Returns `true` when the number of in-flight HTTP outcalls has reached the
+/// configured limit.
+///
+/// Timer functions should check this at startup and reschedule rather than
+/// starting new work when the system is already at capacity.
+pub fn too_many_http_outcalls() -> bool {
+    read_state(|s| s.active_http_outcalls() >= MAX_CONCURRENT_HTTP_OUTCALLS)
 }

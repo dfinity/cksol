@@ -1,7 +1,7 @@
 use crate::{
     address::{account_address, lazy_get_schnorr_master_key},
     constants::MAX_CONCURRENT_RPC_CALLS,
-    guard::TimerGuard,
+    guard::{TimerGuard, too_many_http_outcalls},
     rpc::get_signatures_for_address,
     runtime::CanisterRuntime,
     state::{
@@ -88,6 +88,14 @@ pub async fn poll_monitored_addresses<R: CanisterRuntime>(runtime: R) {
     let reschedule = scopeguard::guard(runtime.clone(), |runtime| {
         runtime.set_timer(Duration::ZERO, poll_monitored_addresses);
     });
+
+    if too_many_http_outcalls() {
+        log!(
+            Priority::Info,
+            "Too many concurrent HTTP outcalls, rescheduling poll_monitored_addresses"
+        );
+        return;
+    }
 
     let master_key = lazy_get_schnorr_master_key(&runtime).await;
 

@@ -1,6 +1,6 @@
 use crate::{
     constants::MAX_CONCURRENT_RPC_CALLS,
-    guard::TimerGuard,
+    guard::{TimerGuard, too_many_http_outcalls},
     numeric::LedgerMintIndex,
     rpc::{SubmitTransactionError, get_recent_slot_and_blockhash, submit_transaction},
     runtime::CanisterRuntime,
@@ -54,6 +54,14 @@ pub async fn consolidate_deposits<R: CanisterRuntime>(runtime: R) {
     if batches.is_empty() {
         // Nothing to process
         scopeguard::ScopeGuard::into_inner(reschedule);
+        return;
+    }
+
+    if too_many_http_outcalls() {
+        log!(
+            Priority::Info,
+            "Too many concurrent HTTP outcalls, rescheduling consolidate_deposits"
+        );
         return;
     }
 

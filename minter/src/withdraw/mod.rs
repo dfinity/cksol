@@ -15,7 +15,7 @@ use solana_hash::Hash;
 use crate::{
     consolidate::consolidate_deposits,
     constants::MAX_CONCURRENT_RPC_CALLS,
-    guard::{TimerGuard, withdrawal_guard},
+    guard::{TimerGuard, too_many_http_outcalls, withdrawal_guard},
     ledger::{BurnError, burn},
     rpc::{get_recent_slot_and_blockhash, submit_transaction},
     runtime::CanisterRuntime,
@@ -151,6 +151,14 @@ pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: R) {
     if batches.is_empty() {
         // Nothing to process
         scopeguard::ScopeGuard::into_inner(reschedule);
+        return;
+    }
+
+    if too_many_http_outcalls() {
+        log!(
+            Priority::Info,
+            "Too many concurrent HTTP outcalls, rescheduling process_pending_withdrawals"
+        );
         return;
     }
 
