@@ -245,6 +245,7 @@ mod state_from_init_args {
                 failed_transactions: InsertionOrderedMap::new(),
                 consolidation_transactions: InsertionOrderedMap::new(),
                 active_tasks: BTreeSet::new(),
+                active_http_outcalls: 0,
                 balance: 0,
             }
         );

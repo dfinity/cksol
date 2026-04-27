@@ -3,8 +3,8 @@ use crate::{
     constants::MAX_CONCURRENT_RPC_CALLS,
     guard::TimerGuard,
     rpc::{
-        SubmitTransactionError, get_recent_slot_and_blockhash, get_signature_statuses,
-        submit_transaction,
+        GetSignatureStatusesError, SubmitTransactionError, get_recent_slot_and_blockhash,
+        get_signature_statuses, submit_transaction,
     },
     runtime::CanisterRuntime,
     signer::sign_bytes,
@@ -124,7 +124,7 @@ pub async fn finalize_transactions<R: CanisterRuntime>(runtime: R) {
         }
     }
 
-    if !more_to_process {
+    if !more_to_process && !statuses.had_too_many_outcalls {
         // All work fits in this round
         scopeguard::ScopeGuard::into_inner(reschedule);
     }
@@ -154,9 +154,9 @@ pub async fn resubmit_transactions<R: CanisterRuntime>(runtime: R) {
         runtime.set_timer(Duration::ZERO, resubmit_transactions);
     });
 
-    resubmit_expired_transactions(&runtime, to_resubmit).await;
+    let had_too_many_outcalls = resubmit_expired_transactions(&runtime, to_resubmit).await;
 
-    if !more_to_process {
+    if !more_to_process && !had_too_many_outcalls {
         // All work fits in this round
         scopeguard::ScopeGuard::into_inner(reschedule);
     }
@@ -172,6 +172,8 @@ struct TransactionStatuses {
     errored: BTreeMap<Signature, String>,
     /// Transactions with no on-chain status (safe to resubmit if expired).
     not_found: BTreeSet<Signature>,
+    /// `true` if any batch returned [`GetSignatureStatusesError::TooManyOutcalls`].
+    had_too_many_outcalls: bool,
 }
 
 async fn check_transaction_statuses<R: CanisterRuntime>(
@@ -190,20 +192,29 @@ async fn check_transaction_statuses<R: CanisterRuntime>(
         succeeded: BTreeSet::new(),
         errored: BTreeMap::new(),
         not_found: BTreeSet::new(),
+        had_too_many_outcalls: false,
     };
 
-    let batch_results: Vec<_> = futures::future::join_all(batches.into_iter().map(async |batch| {
-        match get_signature_statuses(runtime, &batch).await {
-            Ok(statuses) => Some((batch, statuses)),
+    let batch_results: Vec<Result<_, GetSignatureStatusesError>> =
+        futures::future::join_all(batches.into_iter().map(async |batch| {
+            get_signature_statuses(runtime, &batch)
+                .await
+                .map(|statuses| (batch, statuses))
+        }))
+        .await;
+
+    for batch_result in batch_results {
+        let (sigs, statuses) = match batch_result {
+            Ok(data) => data,
+            Err(GetSignatureStatusesError::TooManyOutcalls) => {
+                result.had_too_many_outcalls = true;
+                continue;
+            }
             Err(e) => {
                 log!(Priority::Info, "Failed to check transaction statuses: {e}");
-                None
+                continue;
             }
-        }
-    }))
-    .await;
-
-    for (sigs, statuses) in batch_results.into_iter().flatten() {
+        };
         for (signature, status) in sigs.iter().zip(statuses) {
             match status {
                 Some(s)
@@ -226,42 +237,61 @@ async fn check_transaction_statuses<R: CanisterRuntime>(
     result
 }
 
+/// Resubmit expired transactions. Returns `true` if any call was rejected due
+/// to [`HttpOutcallGuardError::TooManyOutcalls`], which the caller uses to decide
+/// whether to reschedule immediately.
 async fn resubmit_expired_transactions<R: CanisterRuntime>(
     runtime: &R,
     to_resubmit: Vec<(Signature, VersionedMessage, Vec<Account>)>,
-) {
+) -> bool {
     let (new_slot, new_blockhash) = match get_recent_slot_and_blockhash(runtime).await {
         Ok(result) => result,
         Err(e) => {
             log!(Priority::Info, "Failed to get recent blockhash: {e}");
-            return;
+            return false;
         }
     };
 
-    futures::future::join_all(to_resubmit.into_iter().take(MAX_CONCURRENT_RPC_CALLS).map(
-        async |(old_signature, message, signers)| {
-            match try_resubmit_transaction(
-                runtime,
-                old_signature,
-                message,
-                signers,
-                new_slot,
-                new_blockhash,
-            )
-            .await
-            {
-                Ok(new_sig) => log!(
-                    Priority::Info,
-                    "Resubmitted transaction {old_signature} as {new_sig}"
-                ),
-                Err(e) => log!(
-                    Priority::Info,
-                    "Failed to resubmit transaction {old_signature}: {e}"
-                ),
-            }
-        },
-    ))
-    .await;
+    let results: Vec<(Signature, Result<Signature, ResubmitError>)> =
+        futures::future::join_all(to_resubmit.into_iter().take(MAX_CONCURRENT_RPC_CALLS).map(
+            async |(old_signature, message, signers)| {
+                let result = try_resubmit_transaction(
+                    runtime,
+                    old_signature,
+                    message,
+                    signers,
+                    new_slot,
+                    new_blockhash,
+                )
+                .await;
+                (old_signature, result)
+            },
+        ))
+        .await;
+
+    let had_too_many_outcalls = results.iter().any(|(_, r)| {
+        matches!(
+            r,
+            Err(ResubmitError::Submit(
+                SubmitTransactionError::TooManyOutcalls
+            ))
+        )
+    });
+
+    for (old_signature, result) in results {
+        match result {
+            Ok(new_sig) => log!(
+                Priority::Info,
+                "Resubmitted transaction {old_signature} as {new_sig}"
+            ),
+            Err(e) => log!(
+                Priority::Info,
+                "Failed to resubmit transaction {old_signature}: {e}"
+            ),
+        }
+    }
+
+    had_too_many_outcalls
 }
 
 async fn try_resubmit_transaction<R: CanisterRuntime>(

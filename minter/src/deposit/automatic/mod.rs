@@ -2,7 +2,7 @@ use crate::{
     address::{account_address, lazy_get_schnorr_master_key},
     constants::MAX_CONCURRENT_RPC_CALLS,
     guard::TimerGuard,
-    rpc::get_signatures_for_address,
+    rpc::{GetSignaturesForAddressError, get_signatures_for_address},
     runtime::CanisterRuntime,
     state::{
         SchnorrPublicKey, TaskType, audit::process_event, event::EventType, mutate_state,
@@ -91,7 +91,7 @@ pub async fn poll_monitored_addresses<R: CanisterRuntime>(runtime: R) {
 
     let master_key = lazy_get_schnorr_master_key(&runtime).await;
 
-    futures::future::join_all(
+    let results: Vec<bool> = futures::future::join_all(
         all_accounts
             .into_iter()
             .take(MAX_CONCURRENT_RPC_CALLS)
@@ -99,17 +99,22 @@ pub async fn poll_monitored_addresses<R: CanisterRuntime>(runtime: R) {
     )
     .await;
 
-    if !more_to_process {
+    let had_too_many_outcalls = results.iter().any(|&b| b);
+
+    if !more_to_process && !had_too_many_outcalls {
         // All work fits in this round
         scopeguard::ScopeGuard::into_inner(reschedule);
     }
 }
 
+/// Poll a single monitored account for new deposit signatures. Returns `true`
+/// if the RPC call was rejected due to [`GetSignaturesForAddressError::TooManyOutcalls`],
+/// which the caller uses to decide whether to reschedule immediately.
 async fn poll_account<R: CanisterRuntime>(
     runtime: &R,
     master_key: &SchnorrPublicKey,
     account: Account,
-) {
+) -> bool {
     let deposit_address = account_address(master_key, &account);
 
     let params = GetSignaturesForAddressParams {
@@ -126,12 +131,13 @@ async fn poll_account<R: CanisterRuntime>(
         until: None,
     };
 
-    match get_signatures_for_address(runtime, params).await {
+    let had_too_many_outcalls = match get_signatures_for_address(runtime, params).await {
         Err(e) => {
             log!(
                 Priority::Info,
                 "Failed to get signatures for address {deposit_address}: {e}"
             );
+            matches!(e, GetSignaturesForAddressError::TooManyOutcalls)
         }
         Ok(signatures) => {
             let new_sigs: Vec<Signature> = signatures
@@ -148,8 +154,9 @@ async fn poll_account<R: CanisterRuntime>(
                         .extend(new_sigs);
                 });
             }
+            false
         }
-    }
+    };
 
     mutate_state(|state| {
         process_event(
@@ -158,6 +165,8 @@ async fn poll_account<R: CanisterRuntime>(
             runtime,
         );
     });
+
+    had_too_many_outcalls
 }
 
 #[cfg(any(test, feature = "canbench-rs"))]

@@ -108,6 +108,7 @@ pub struct State {
     failed_transactions: InsertionOrderedMap<Signature, SolanaTransaction>,
     consolidation_transactions: InsertionOrderedMap<Signature, ConsolidationTransaction>,
     active_tasks: BTreeSet<TaskType>,
+    active_http_outcalls: u32,
     balance: Lamport,
 }
 
@@ -319,6 +320,14 @@ impl State {
 
     pub fn active_tasks_mut(&mut self) -> &mut BTreeSet<TaskType> {
         &mut self.active_tasks
+    }
+
+    pub fn active_http_outcalls(&self) -> u32 {
+        self.active_http_outcalls
+    }
+
+    pub fn active_http_outcalls_mut(&mut self) -> &mut u32 {
+        &mut self.active_http_outcalls
     }
 
     fn transaction_fee(&self, message: &VersionedMessage) -> Lamport {
@@ -795,6 +804,7 @@ impl TryFrom<InitArgs> for State {
             failed_transactions: InsertionOrderedMap::new(),
             consolidation_transactions: InsertionOrderedMap::new(),
             active_tasks: BTreeSet::new(),
+            active_http_outcalls: 0,
             balance: 0,
         };
         state.validate()?;
