@@ -2,7 +2,7 @@
 
 ## 1. Overview
 
-Chain-key SOL (**ckSOL**) is an ICRC-2 (and ICRC-3) compliant token on the Internet Computer  that is backed 1:1 by SOL, the primary token on the Solana blockchain. Users can convert their SOL tokens to ckSOL and vice versa.
+Chain-key SOL (**ckSOL**) is an ICRC-2 (and ICRC-3) compliant token on the Internet Computer that is backed 1:1 by SOL, the primary token on the Solana blockchain. Users can convert their SOL tokens to ckSOL and vice versa.
 
 The ckSOL functionality is provided through a new canister (**ckSOL minter**) together with an instance of the ICRC ledger suite, in particular a ledger canister (**ckSOL ledger**), and an index canister. The ckSOL minter *default account* is the *minting account* of the ckSOL ledger.
 
