@@ -404,4 +404,4 @@ The ckSOL minter exposes the following endpoints:
 3. `process_deposit(opt principal, opt subaccount, signature)`: Processes the transaction for the given signature. If the transaction is processed successfully, the deposit status is returned. Otherwise, an error is returned.  
 4. `withdraw(opt subaccount, amount, address)`: Burns the given amount of ckSOL from the user’s account and transfers the same amount minus a fee in SOL to the given user address. Returns the block index of the burn operation on the ckSOL ledger in case of success. Otherwise, an error is returned.  
 5. `withdrawal_status(block_index)`: Returns the withdrawal status (`NotFound`, `Pending`, `TxSent`, `TxFinalized`) for the withdrawal identified by the given block index.  
-6. `get_minter_info`: Returns information about the ckSOL minter, specifically the various fees, the minimum depot and withdrawal amounts, and the current balance of the ckSOL minter.
+6. `get_minter_info`: Returns information about the ckSOL minter, specifically the various fees, the minimum deposit and withdrawal amounts, and the current balance of the ckSOL minter.
