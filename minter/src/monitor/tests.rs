@@ -12,14 +12,9 @@ use crate::{
     },
 };
 use sol_rpc_types::{
-    ConfirmedBlock, MultiRpcResult, RpcError, Signature, Slot, TransactionConfirmationStatus,
-    TransactionError, TransactionStatus,
+    MultiRpcResult, RpcError, Signature, Slot, TransactionConfirmationStatus, TransactionError,
+    TransactionStatus,
 };
-
-type SlotResult = MultiRpcResult<Slot>;
-type BlockResult = MultiRpcResult<ConfirmedBlock>;
-type SendTransactionResult = MultiRpcResult<Signature>;
-type SignatureStatusesResult = MultiRpcResult<Vec<Option<TransactionStatus>>>;
 
 const CURRENT_SLOT: Slot = 408_807_102;
 const RECENT_SLOT: Slot = CURRENT_SLOT - 10;
@@ -62,11 +57,8 @@ mod finalization {
 
         let events_before = EventsAssert::from_recorded();
 
-        let error = SlotResult::Consistent(Err(RpcError::ValidationError("Error".to_string())));
         let runtime = TestCanisterRuntime::new()
-            .add_stub_response(error.clone())
-            .add_stub_response(error.clone())
-            .add_stub_response(error);
+            .add_n_get_slot_error(RpcError::ValidationError("Error".to_string()), 3);
 
         finalize_transactions(runtime).await;
 
@@ -86,12 +78,14 @@ mod finalization {
         // Round 1: finalizes MAX_CONCURRENT_RPC_CALLS batches, 1 transaction unchecked → reschedule
         let mut runtime = TestCanisterRuntime::new()
             .with_increasing_time()
-            .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
-            .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())));
+            .add_get_slot_response(CURRENT_SLOT)
+            .add_get_block_response(confirmed_block());
         for _ in 0..MAX_CONCURRENT_RPC_CALLS {
-            runtime = runtime.add_stub_response(SignatureStatusesResult::Consistent(Ok(
-                vec![Some(finalized_status()); MAX_SIGNATURES_PER_STATUS_CHECK],
-            )));
+            runtime =
+                runtime.add_get_signature_statuses_response(vec![
+                    Some(finalized_status());
+                    MAX_SIGNATURES_PER_STATUS_CHECK
+                ]);
         }
 
         finalize_transactions(runtime.clone()).await;
@@ -102,11 +96,9 @@ mod finalization {
         // Round 2: finalizes the remaining 1 transaction → no reschedule
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
-            .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
-            .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())))
-            .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![Some(
-                finalized_status(),
-            )])));
+            .add_get_slot_response(CURRENT_SLOT)
+            .add_get_block_response(confirmed_block())
+            .add_get_signature_statuses_response(vec![Some(finalized_status())]);
 
         finalize_transactions(runtime.clone()).await;
 
@@ -122,11 +114,9 @@ mod finalization {
 
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
-            .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
-            .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())))
-            .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![Some(
-                finalized_status(),
-            )])));
+            .add_get_slot_response(CURRENT_SLOT)
+            .add_get_block_response(confirmed_block())
+            .add_get_signature_statuses_response(vec![Some(finalized_status())]);
 
         finalize_transactions(runtime).await;
 
@@ -162,11 +152,9 @@ mod finalization {
 
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
-            .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
-            .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())))
-            .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![
-                status.clone(),
-            ])));
+            .add_get_slot_response(CURRENT_SLOT)
+            .add_get_block_response(confirmed_block())
+            .add_get_signature_statuses_response(vec![status.clone()]);
 
         let _ = status; // suppress unused warning
 
@@ -188,16 +176,14 @@ mod finalization {
 
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
-            .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
-            .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())))
-            .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![Some(
-                TransactionStatus {
-                    slot: RECENT_SLOT,
-                    status: Err(TransactionError::InsufficientFundsForFee),
-                    err: Some(TransactionError::InsufficientFundsForFee),
-                    confirmation_status: Some(TransactionConfirmationStatus::Finalized),
-                },
-            )])));
+            .add_get_slot_response(CURRENT_SLOT)
+            .add_get_block_response(confirmed_block())
+            .add_get_signature_statuses_response(vec![Some(TransactionStatus {
+                slot: RECENT_SLOT,
+                status: Err(TransactionError::InsufficientFundsForFee),
+                err: Some(TransactionError::InsufficientFundsForFee),
+                confirmation_status: Some(TransactionConfirmationStatus::Finalized),
+            })]);
 
         finalize_transactions(runtime).await;
 
@@ -224,13 +210,13 @@ mod finalization {
 
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
-            .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
-            .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())))
-            .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![
+            .add_get_slot_response(CURRENT_SLOT)
+            .add_get_block_response(confirmed_block())
+            .add_get_signature_statuses_response(vec![
                 Some(finalized_status()),
                 None,
                 Some(finalized_status()),
-            ])));
+            ]);
         // sig_b is not_found but RECENT_SLOT is not expired, so no resubmission.
 
         finalize_transactions(runtime).await;
@@ -323,9 +309,9 @@ mod resubmission {
 
         let resubmit_runtime = TestCanisterRuntime::new()
             .with_increasing_time()
-            .add_stub_response(SlotResult::Consistent(Ok(RESUBMISSION_SLOT)))
-            .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())))
-            .add_stub_response(SendTransactionResult::Consistent(Ok(new_signature.into())))
+            .add_get_slot_response(RESUBMISSION_SLOT)
+            .add_get_block_response(confirmed_block())
+            .add_send_transaction_response(new_signature)
             .add_signature(new_signature.into());
 
         resubmit_transactions(resubmit_runtime).await;
@@ -356,11 +342,9 @@ mod resubmission {
 
         let finalize_runtime = TestCanisterRuntime::new()
             .with_increasing_time()
-            .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
-            .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())))
-            .add_stub_response(SignatureStatusesResult::Consistent(Err(
-                RpcError::ValidationError("Error".to_string()),
-            )));
+            .add_get_slot_response(CURRENT_SLOT)
+            .add_get_block_response(confirmed_block())
+            .add_get_signature_statuses_error(RpcError::ValidationError("Error".to_string()));
 
         finalize_transactions(finalize_runtime).await;
 
@@ -383,9 +367,9 @@ mod resubmission {
 
         let resubmit_runtime = TestCanisterRuntime::new()
             .with_increasing_time()
-            .add_stub_response(SlotResult::Consistent(Ok(RESUBMISSION_SLOT)))
-            .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())))
-            .add_stub_response(SendTransactionResult::Inconsistent(vec![]))
+            .add_get_slot_response(RESUBMISSION_SLOT)
+            .add_get_block_response(confirmed_block())
+            .add_stub_response(MultiRpcResult::<Signature>::Inconsistent(vec![]))
             .add_signature(new_signature.into());
 
         resubmit_transactions(resubmit_runtime).await;
@@ -414,13 +398,11 @@ mod resubmission {
         // Round 1: resubmits MAX_CONCURRENT_RPC_CALLS transactions, 1 remain → reschedule
         let mut runtime = TestCanisterRuntime::new()
             .with_increasing_time()
-            .add_stub_response(SlotResult::Consistent(Ok(RESUBMISSION_SLOT)))
-            .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())));
+            .add_get_slot_response(RESUBMISSION_SLOT)
+            .add_get_block_response(confirmed_block());
         for i in 0..MAX_CONCURRENT_RPC_CALLS {
             runtime = runtime
-                .add_stub_response(SendTransactionResult::Consistent(Ok(
-                    signature(0xA0 + i).into()
-                )))
+                .add_send_transaction_response(signature(0xA0 + i))
                 .add_signature(signature(0xA0 + i).into());
         }
 
@@ -438,13 +420,11 @@ mod resubmission {
         // Round 2: resubmits remaining transaction → no reschedule
         let mut runtime = TestCanisterRuntime::new()
             .with_increasing_time()
-            .add_stub_response(SlotResult::Consistent(Ok(RESUBMISSION_SLOT)))
-            .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())));
+            .add_get_slot_response(RESUBMISSION_SLOT)
+            .add_get_block_response(confirmed_block());
         for i in 0..(num_transactions - MAX_CONCURRENT_RPC_CALLS) {
             runtime = runtime
-                .add_stub_response(SendTransactionResult::Consistent(Ok(
-                    signature(0xB0 + i).into()
-                )))
+                .add_send_transaction_response(signature(0xB0 + i))
                 .add_signature(signature(0xB0 + i).into());
         }
 
