@@ -4,7 +4,8 @@ use cksol_minter::{
     address::lazy_get_schnorr_master_key,
     consolidate::{DEPOSIT_CONSOLIDATION_DELAY, consolidate_deposits},
     deposit::automatic::{
-        POLL_MONITORED_ADDRESSES_DELAY, PROCESS_PENDING_SIGNATURES_DELAY, poll_monitored_addresses,
+        MINT_AUTOMATIC_DEPOSITS_DELAY, POLL_MONITORED_ADDRESSES_DELAY,
+        PROCESS_PENDING_SIGNATURES_DELAY, mint_automatic_deposits, poll_monitored_addresses,
         process_pending_signatures,
     },
     monitor::{
@@ -382,6 +383,9 @@ fn setup_timers() {
     });
     ic_cdk_timers::set_timer_interval(PROCESS_PENDING_SIGNATURES_DELAY, async || {
         process_pending_signatures(IcCanisterRuntime::new()).await;
+    });
+    ic_cdk_timers::set_timer_interval(MINT_AUTOMATIC_DEPOSITS_DELAY, async || {
+        mint_automatic_deposits(IcCanisterRuntime::new()).await;
     });
 }
 
