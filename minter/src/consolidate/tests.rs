@@ -16,11 +16,7 @@ use crate::{
     },
 };
 use assert_matches::assert_matches;
-use sol_rpc_types::{ConfirmedBlock, MultiRpcResult, RpcError, Signature, Slot};
-
-type SlotResult = MultiRpcResult<Slot>;
-type BlockResult = MultiRpcResult<ConfirmedBlock>;
-type SendTransactionResult = MultiRpcResult<Signature>;
+use sol_rpc_types::{MultiRpcResult, RpcError, Signature};
 
 #[tokio::test]
 async fn should_return_early_if_no_deposits_to_consolidate() {
@@ -55,11 +51,8 @@ async fn should_return_early_if_fetching_blockhash_fails() {
 
     add_funds_to_consolidate(&[(deposit_id(0), 1_000_000_000)]);
 
-    let error = SlotResult::Consistent(Err(RpcError::ValidationError("Error".to_string())));
     let runtime = TestCanisterRuntime::new()
-        .add_stub_response(error.clone())
-        .add_stub_response(error.clone())
-        .add_stub_response(error);
+        .add_n_get_slot_error(RpcError::ValidationError("Error".to_string()), 3);
 
     consolidate_deposits(runtime).await;
 
@@ -81,11 +74,9 @@ async fn should_submit_single_consolidation_request() {
     let runtime = TestCanisterRuntime::new()
         .with_increasing_time()
         // get_recent_slot_and_blockhash calls (get_recent_block internally calls getSlot then getBlock)
-        .add_stub_response(SlotResult::Consistent(Ok(slot)))
-        .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())))
-        .add_stub_response(SendTransactionResult::Consistent(Ok(
-            fee_payer_signature.into()
-        )))
+        .add_get_slot_response(slot)
+        .add_get_block_response(confirmed_block())
+        .add_send_transaction_response(fee_payer_signature)
         .add_signature(fee_payer_signature.into());
 
     consolidate_deposits(runtime).await;
@@ -118,10 +109,10 @@ async fn should_record_events_even_if_transaction_submission_fails() {
     let runtime = TestCanisterRuntime::new()
         .with_increasing_time()
         // get_recent_slot_and_blockhash calls
-        .add_stub_response(SlotResult::Consistent(Ok(slot)))
-        .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())))
+        .add_get_slot_response(slot)
+        .add_get_block_response(confirmed_block())
         // Transaction submission fails
-        .add_stub_response(SendTransactionResult::Inconsistent(vec![]))
+        .add_stub_response(MultiRpcResult::<Signature>::Inconsistent(vec![]))
         .add_signature(fee_payer_signature.into());
 
     consolidate_deposits(runtime).await;
@@ -158,14 +149,10 @@ async fn should_submit_multiple_consolidation_batches() {
     let mut runtime = TestCanisterRuntime::new()
         .with_increasing_time()
         // get_recent_slot_and_blockhash calls
-        .add_stub_response(SlotResult::Consistent(Ok(slot)))
-        .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())))
-        .add_stub_response(SendTransactionResult::Consistent(Ok(
-            fee_payer_signature_1.into()
-        )))
-        .add_stub_response(SendTransactionResult::Consistent(Ok(
-            fee_payer_signature_2.into()
-        )));
+        .add_get_slot_response(slot)
+        .add_get_block_response(confirmed_block())
+        .add_send_transaction_response(fee_payer_signature_1)
+        .add_send_transaction_response(fee_payer_signature_2);
 
     for i in 0..(2 + NUM_DEPOSITS) {
         runtime = runtime.add_signature(signature(i).into());
@@ -229,11 +216,9 @@ async fn should_consolidate_multiple_deposits_to_same_account_in_single_transfer
     let slot = 100;
     let runtime = TestCanisterRuntime::new()
         .with_increasing_time()
-        .add_stub_response(SlotResult::Consistent(Ok(slot)))
-        .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())))
-        .add_stub_response(SendTransactionResult::Consistent(Ok(
-            fee_payer_signature.into()
-        )))
+        .add_get_slot_response(slot)
+        .add_get_block_response(confirmed_block())
+        .add_send_transaction_response(fee_payer_signature)
         .add_signature(fee_payer_signature.into());
 
     consolidate_deposits(runtime).await;
@@ -271,11 +256,10 @@ async fn should_reschedule_until_all_deposits_consolidated() {
     // Round 1: processes MAX_CONCURRENT_RPC_CALLS batches, 1 deposit remains → reschedule
     let mut runtime = TestCanisterRuntime::new()
         .with_increasing_time()
-        .add_stub_response(SlotResult::Consistent(Ok(slot)))
-        .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())));
+        .add_get_slot_response(slot)
+        .add_get_block_response(confirmed_block());
     for i in 0..MAX_CONCURRENT_RPC_CALLS {
-        runtime =
-            runtime.add_stub_response(SendTransactionResult::Consistent(Ok(signature(i).into())));
+        runtime = runtime.add_send_transaction_response(signature(i));
     }
     for i in 0..(MAX_CONCURRENT_RPC_CALLS + num_deposits) {
         runtime = runtime.add_signature(signature(i).into());
@@ -293,9 +277,9 @@ async fn should_reschedule_until_all_deposits_consolidated() {
     let last_sig = signature(num_deposits);
     let runtime = TestCanisterRuntime::new()
         .with_increasing_time()
-        .add_stub_response(SlotResult::Consistent(Ok(slot)))
-        .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())))
-        .add_stub_response(SendTransactionResult::Consistent(Ok(last_sig.into())))
+        .add_get_slot_response(slot)
+        .add_get_block_response(confirmed_block())
+        .add_send_transaction_response(last_sig)
         .add_signature(last_sig.into());
 
     consolidate_deposits(runtime.clone()).await;

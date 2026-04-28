@@ -17,14 +17,7 @@ use crate::{
         signature,
     },
 };
-use sol_rpc_types::{
-    ConfirmedTransactionStatusWithSignature, EncodedConfirmedTransactionWithStatusMeta,
-    MultiRpcResult, TransactionError,
-};
-
-type GetTransactionResult = MultiRpcResult<Option<EncodedConfirmedTransactionWithStatusMeta>>;
-
-type SignaturesResult = MultiRpcResult<Vec<ConfirmedTransactionStatusWithSignature>>;
+use sol_rpc_types::{ConfirmedTransactionStatusWithSignature, RpcError, TransactionError};
 
 fn confirmed_tx(signature: Signature) -> ConfirmedTransactionStatusWithSignature {
     ConfirmedTransactionStatusWithSignature {
@@ -56,6 +49,13 @@ fn start_monitoring_max_number_of_accounts() {
     for i in 0..MAX_MONITORED_ACCOUNTS {
         start_monitoring_account(account(i));
     }
+}
+
+/// Pushes signatures into the pending queue for the given account.
+fn queue_pending_signatures(account: Account, sigs: impl IntoIterator<Item = Signature>) {
+    PENDING_SIGNATURES.with(|p| {
+        p.borrow_mut().entry(account).or_default().extend(sigs);
+    });
 }
 
 mod update_balance {
@@ -142,7 +142,7 @@ mod poll_monitored_addresses {
         // Round 1: polls MAX_CONCURRENT_RPC_CALLS accounts, 1 remains → reschedule.
         let mut runtime = TestCanisterRuntime::new().with_increasing_time();
         for _ in 0..MAX_CONCURRENT_RPC_CALLS {
-            runtime = runtime.add_stub_response(SignaturesResult::Consistent(Ok(vec![])));
+            runtime = runtime.add_get_signatures_for_address_response(vec![]);
         }
         poll_monitored_addresses(runtime.clone()).await;
 
@@ -152,7 +152,7 @@ mod poll_monitored_addresses {
         // Round 2: polls the remaining 1 account → no reschedule, queue empty.
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
-            .add_stub_response(SignaturesResult::Consistent(Ok(vec![])));
+            .add_get_signatures_for_address_response(vec![]);
         poll_monitored_addresses(runtime.clone()).await;
 
         assert_eq!(monitored_accounts_count(), 0);
@@ -180,10 +180,7 @@ mod poll_monitored_addresses {
         let s2 = signature(2);
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
-            .add_stub_response(SignaturesResult::Consistent(Ok(vec![
-                confirmed_tx(s1),
-                confirmed_tx(s2),
-            ])));
+            .add_get_signatures_for_address_response(vec![confirmed_tx(s1), confirmed_tx(s2)]);
 
         poll_monitored_addresses(runtime).await;
 
@@ -202,10 +199,7 @@ mod poll_monitored_addresses {
         let s_fail = signature(2);
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
-            .add_stub_response(SignaturesResult::Consistent(Ok(vec![
-                confirmed_tx(s_ok),
-                failed_tx(s_fail),
-            ])));
+            .add_get_signatures_for_address_response(vec![confirmed_tx(s_ok), failed_tx(s_fail)]);
 
         poll_monitored_addresses(runtime).await;
 
@@ -222,9 +216,9 @@ mod poll_monitored_addresses {
 
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
-            .add_stub_response(SignaturesResult::Consistent(Err(
-                sol_rpc_types::RpcError::ValidationError("RPC error".to_string()),
-            )));
+            .add_get_signatures_for_address_error(RpcError::ValidationError(
+                "RPC error".to_string(),
+            ));
 
         poll_monitored_addresses(runtime).await;
 
@@ -245,20 +239,12 @@ mod process_pending_signatures_tests {
         setup();
         reset_pending_signatures();
 
-        let signature = legacy_deposit_transaction_signature();
-        PENDING_SIGNATURES.with(|p| {
-            p.borrow_mut()
-                .entry(DEPOSITOR_ACCOUNT)
-                .or_default()
-                .push_back(signature);
-        });
+        let sig = legacy_deposit_transaction_signature();
+        queue_pending_signatures(DEPOSITOR_ACCOUNT, [sig]);
 
-        let get_tx_response = GetTransactionResult::Consistent(Ok(Some(
-            legacy_deposit_transaction().try_into().unwrap(),
-        )));
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
-            .add_stub_response(get_tx_response);
+            .add_get_transaction_response(legacy_deposit_transaction());
 
         process_pending_signatures(runtime).await;
 
@@ -269,7 +255,7 @@ mod process_pending_signatures_tests {
 
         let deposit_id = DepositId {
             account: DEPOSITOR_ACCOUNT,
-            signature,
+            signature: sig,
         };
         EventsAssert::from_recorded()
             .expect_event_eq(EventType::AcceptedDeposit {
@@ -286,18 +272,13 @@ mod process_pending_signatures_tests {
         setup();
         reset_pending_signatures();
 
-        let signature = legacy_deposit_transaction_signature();
-        PENDING_SIGNATURES.with(|p| {
-            p.borrow_mut()
-                .entry(DEPOSITOR_ACCOUNT)
-                .or_default()
-                .push_back(signature);
-        });
+        let sig = legacy_deposit_transaction_signature();
+        queue_pending_signatures(DEPOSITOR_ACCOUNT, [sig]);
 
         // getTransaction returns None (tx not found)
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
-            .add_stub_response(GetTransactionResult::Consistent(Ok(None)));
+            .add_get_transaction_not_found();
 
         process_pending_signatures(runtime).await;
 
@@ -310,23 +291,18 @@ mod process_pending_signatures_tests {
         setup();
         reset_pending_signatures();
 
-        let signature = legacy_deposit_transaction_signature();
+        let sig = legacy_deposit_transaction_signature();
 
         // Pre-populate state as if this deposit was already accepted manually.
         crate::test_fixtures::events::accept_deposit(
             DepositId {
                 account: DEPOSITOR_ACCOUNT,
-                signature,
+                signature: sig,
             },
             DEPOSIT_AMOUNT,
         );
 
-        PENDING_SIGNATURES.with(|p| {
-            p.borrow_mut()
-                .entry(DEPOSITOR_ACCOUNT)
-                .or_default()
-                .push_back(signature);
-        });
+        queue_pending_signatures(DEPOSITOR_ACCOUNT, [sig]);
 
         // No getTransaction stub — if called it would panic.
         let runtime = TestCanisterRuntime::new().with_increasing_time();
@@ -339,7 +315,7 @@ mod process_pending_signatures_tests {
             .expect_event_eq(EventType::AcceptedDeposit {
                 deposit_id: DepositId {
                     account: DEPOSITOR_ACCOUNT,
-                    signature,
+                    signature: sig,
                 },
                 deposit_amount: DEPOSIT_AMOUNT,
                 amount_to_mint: DEPOSIT_AMOUNT - MANUAL_DEPOSIT_FEE,
@@ -358,17 +334,13 @@ mod process_pending_signatures_tests {
         let acc2 = account(2);
         let sigs: Vec<_> = (1..=4).map(signature).collect();
 
-        PENDING_SIGNATURES.with(|p| {
-            let mut p = p.borrow_mut();
-            p.entry(acc1).or_default().extend([sigs[0], sigs[1]]);
-            p.entry(acc2).or_default().extend([sigs[2], sigs[3]]);
-        });
+        queue_pending_signatures(acc1, [sigs[0], sigs[1]]);
+        queue_pending_signatures(acc2, [sigs[2], sigs[3]]);
 
         // All four getTransaction calls return None (invalid deposit — just discard).
-        let mut runtime = TestCanisterRuntime::new().with_increasing_time();
-        for _ in 0..4 {
-            runtime = runtime.add_stub_response(GetTransactionResult::Consistent(Ok(None)));
-        }
+        let runtime = TestCanisterRuntime::new()
+            .with_increasing_time()
+            .add_n_get_transaction_not_found(4);
 
         process_pending_signatures(runtime.clone()).await;
 
@@ -386,17 +358,11 @@ mod process_pending_signatures_tests {
 
         // MAX_CONCURRENT_RPC_CALLS + 1 signatures → only MAX fit in one round.
         let sigs: Vec<_> = (0..=MAX_CONCURRENT_RPC_CALLS).map(signature).collect();
-        PENDING_SIGNATURES.with(|p| {
-            p.borrow_mut()
-                .entry(DEPOSITOR_ACCOUNT)
-                .or_default()
-                .extend(sigs.iter().copied());
-        });
+        queue_pending_signatures(DEPOSITOR_ACCOUNT, sigs.iter().copied());
 
-        let mut runtime = TestCanisterRuntime::new().with_increasing_time();
-        for _ in 0..MAX_CONCURRENT_RPC_CALLS {
-            runtime = runtime.add_stub_response(GetTransactionResult::Consistent(Ok(None)));
-        }
+        let runtime = TestCanisterRuntime::new()
+            .with_increasing_time()
+            .add_n_get_transaction_not_found(MAX_CONCURRENT_RPC_CALLS);
 
         process_pending_signatures(runtime.clone()).await;
 
