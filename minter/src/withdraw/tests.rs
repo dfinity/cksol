@@ -1,6 +1,7 @@
 use crate::{
     constants::MAX_CONCURRENT_RPC_CALLS,
     guard::{TimerGuard, withdrawal_guard},
+    rpc_executor::execute_rpc_queue,
     sol_transfer::MAX_WITHDRAWALS_PER_TX,
     state::{TaskType, read_state},
     test_fixtures::{
@@ -319,7 +320,8 @@ mod process_pending_withdrawals_tests {
             .add_stub_response(SendTransactionResult::Consistent(Ok(tx_signature.into())))
             .with_increasing_time();
 
-        process_pending_withdrawals(runtime).await;
+        process_pending_withdrawals(runtime.clone()).await;
+        execute_rpc_queue(runtime).await;
 
         // First two withdrawals should be submitted, third should remain pending
         assert_matches!(withdrawal_status(0), WithdrawalStatus::TxSent { .. });
@@ -348,7 +350,8 @@ mod process_pending_withdrawals_tests {
             .add_signature(tx_signature.into())
             .add_stub_response(SendTransactionResult::Consistent(Ok(tx_signature.into())));
 
-        process_pending_withdrawals(runtime).await;
+        process_pending_withdrawals(runtime.clone()).await;
+        execute_rpc_queue(runtime).await;
 
         assert_matches!(withdrawal_status(1), WithdrawalStatus::TxSent { .. });
     }
@@ -374,7 +377,8 @@ mod process_pending_withdrawals_tests {
                 "slot unavailable".to_string(),
             ))));
 
-        process_pending_withdrawals(runtime).await;
+        process_pending_withdrawals(runtime.clone()).await;
+        execute_rpc_queue(runtime).await;
 
         // No withdrawal transaction event should be recorded
         let events_after = EventsAssert::from_recorded();
@@ -385,7 +389,7 @@ mod process_pending_withdrawals_tests {
         assert!(
             log.entries
                 .iter()
-                .any(|e| e.message.contains("Failed to fetch recent blockhash")),
+                .any(|e| e.message.contains("failed to fetch slot and blockhash")),
             "Expected info log about blockhash failure, got: {:?}",
             log.entries
         );
@@ -413,7 +417,8 @@ mod process_pending_withdrawals_tests {
                 CallRejected::with_rejection(4, "signing service unavailable".to_string()).into(),
             ));
 
-        process_pending_withdrawals(runtime).await;
+        process_pending_withdrawals(runtime.clone()).await;
+        execute_rpc_queue(runtime).await;
 
         // No transaction event should be recorded (signing failed)
         let events_after = EventsAssert::from_recorded();
@@ -457,7 +462,8 @@ mod process_pending_withdrawals_tests {
             .add_signature(signature(2).into())
             .add_stub_response(SendTransactionResult::Consistent(Ok(signature(2).into())));
 
-        process_pending_withdrawals(runtime).await;
+        process_pending_withdrawals(runtime.clone()).await;
+        execute_rpc_queue(runtime).await;
 
         // All withdrawals should be processed in a single invocation
         // (2 batches in 1 round, both within MAX_CONCURRENT_RPC_CALLS)
@@ -496,14 +502,16 @@ mod process_pending_withdrawals_tests {
         }
 
         process_pending_withdrawals(runtime.clone()).await;
+        execute_rpc_queue(runtime.clone()).await;
 
         read_state(|s| {
             assert_eq!(s.submitted_transactions().len(), MAX_CONCURRENT_RPC_CALLS);
             assert_eq!(s.pending_withdrawal_requests().len(), 1);
         });
-        assert_eq!(runtime.set_timer_call_count(), 1);
+        // process_pending_withdrawals called set_timer once; execute_rpc_queue called set_timer once
+        assert_eq!(runtime.set_timer_call_count(), 2);
 
-        // Round 2: processes the remaining 1 request → no reschedule
+        // Round 2: process the remaining request (already in queue from executor's reschedule).
         let last_sig = signature(num_requests);
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
@@ -512,7 +520,7 @@ mod process_pending_withdrawals_tests {
             .add_signature(last_sig.into())
             .add_stub_response(SendTransactionResult::Consistent(Ok(last_sig.into())));
 
-        process_pending_withdrawals(runtime.clone()).await;
+        execute_rpc_queue(runtime.clone()).await;
 
         assert!(read_state(|s| s.pending_withdrawal_requests().is_empty()));
         assert_eq!(runtime.set_timer_call_count(), 0);
