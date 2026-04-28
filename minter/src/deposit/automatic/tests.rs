@@ -1,6 +1,7 @@
 use super::*;
 use crate::{
     constants::MAX_CONCURRENT_RPC_CALLS,
+    rpc_executor::execute_rpc_queue,
     state::{event::EventType, read_state},
     test_fixtures::{
         EventsAssert, account, events::start_monitoring_account, init_schnorr_master_key,
@@ -8,6 +9,7 @@ use crate::{
     },
 };
 use sol_rpc_types::{ConfirmedTransactionStatusWithSignature, MultiRpcResult, TransactionError};
+use solana_signature::Signature;
 
 type SignaturesResult = MultiRpcResult<Vec<ConfirmedTransactionStatusWithSignature>>;
 
@@ -124,21 +126,24 @@ mod poll_monitored_addresses {
         }
         assert_eq!(monitored_accounts_count(), num_accounts);
 
-        // Round 1: polls MAX_CONCURRENT_RPC_CALLS accounts, 1 remains → reschedule.
+        // Round 1: poll_monitored_addresses enqueues MAX_CONCURRENT_RPC_CALLS+1 items.
+        // execute_rpc_queue processes MAX_CONCURRENT_RPC_CALLS items, 1 remains → reschedule.
         let mut runtime = TestCanisterRuntime::new().with_increasing_time();
         for _ in 0..MAX_CONCURRENT_RPC_CALLS {
             runtime = runtime.add_stub_response(SignaturesResult::Consistent(Ok(vec![])));
         }
         poll_monitored_addresses(runtime.clone()).await;
+        execute_rpc_queue(runtime.clone()).await;
 
         assert_eq!(monitored_accounts_count(), 1);
-        assert_eq!(runtime.set_timer_call_count(), 1);
+        // poll_monitored_addresses called set_timer once; execute_rpc_queue called set_timer once
+        assert_eq!(runtime.set_timer_call_count(), 2);
 
-        // Round 2: polls the remaining 1 account → no reschedule, queue empty.
+        // Round 2: process the remaining account (already in queue from executor's reschedule).
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
             .add_stub_response(SignaturesResult::Consistent(Ok(vec![])));
-        poll_monitored_addresses(runtime.clone()).await;
+        execute_rpc_queue(runtime.clone()).await;
 
         assert_eq!(monitored_accounts_count(), 0);
         assert_eq!(runtime.set_timer_call_count(), 0);
@@ -170,7 +175,8 @@ mod poll_monitored_addresses {
                 confirmed_tx(s2),
             ])));
 
-        poll_monitored_addresses(runtime).await;
+        poll_monitored_addresses(runtime.clone()).await;
+        execute_rpc_queue(runtime).await;
 
         assert_eq!(pending_signatures_for(&acc), vec![s1, s2]);
     }
@@ -192,7 +198,8 @@ mod poll_monitored_addresses {
                 failed_tx(s_fail),
             ])));
 
-        poll_monitored_addresses(runtime).await;
+        poll_monitored_addresses(runtime.clone()).await;
+        execute_rpc_queue(runtime).await;
 
         assert_eq!(pending_signatures_for(&acc), vec![s_ok]);
     }

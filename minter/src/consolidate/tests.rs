@@ -1,4 +1,5 @@
 use super::{MAX_TRANSFERS_PER_CONSOLIDATION, consolidate_deposits};
+use crate::rpc_executor::execute_rpc_queue;
 use crate::{
     constants::MAX_CONCURRENT_RPC_CALLS,
     numeric::LedgerMintIndex,
@@ -88,7 +89,8 @@ async fn should_submit_single_consolidation_request() {
         )))
         .add_signature(fee_payer_signature.into());
 
-    consolidate_deposits(runtime).await;
+    consolidate_deposits(runtime.clone()).await;
+    execute_rpc_queue(runtime).await;
 
     EventsAssert::from_recorded()
         .expect_event(|e| assert_matches!(e, EventType::AcceptedManualDeposit { .. }))
@@ -124,7 +126,8 @@ async fn should_record_events_even_if_transaction_submission_fails() {
         .add_stub_response(SendTransactionResult::Inconsistent(vec![]))
         .add_signature(fee_payer_signature.into());
 
-    consolidate_deposits(runtime).await;
+    consolidate_deposits(runtime.clone()).await;
+    execute_rpc_queue(runtime).await;
 
     EventsAssert::from_recorded()
         .expect_event(|e| assert_matches!(e, EventType::AcceptedManualDeposit { .. }))
@@ -171,7 +174,8 @@ async fn should_submit_multiple_consolidation_batches() {
         runtime = runtime.add_signature(signature(i).into());
     }
 
-    consolidate_deposits(runtime).await;
+    consolidate_deposits(runtime.clone()).await;
+    execute_rpc_queue(runtime).await;
 
     let mut events_assert = EventsAssert::from_recorded();
     // Events from setup
@@ -236,7 +240,8 @@ async fn should_consolidate_multiple_deposits_to_same_account_in_single_transfer
         )))
         .add_signature(fee_payer_signature.into());
 
-    consolidate_deposits(runtime).await;
+    consolidate_deposits(runtime.clone()).await;
+    execute_rpc_queue(runtime).await;
 
     EventsAssert::from_recorded()
         .expect_event(|e| assert_matches!(e, EventType::AcceptedManualDeposit { .. }))
@@ -282,14 +287,16 @@ async fn should_reschedule_until_all_deposits_consolidated() {
     }
 
     consolidate_deposits(runtime.clone()).await;
+    execute_rpc_queue(runtime.clone()).await;
 
     read_state(|s| {
         assert_eq!(s.submitted_transactions().len(), MAX_CONCURRENT_RPC_CALLS);
         assert_eq!(s.deposits_to_consolidate().len(), 1);
     });
-    assert_eq!(runtime.set_timer_call_count(), 1);
+    // consolidate_deposits called set_timer once; execute_rpc_queue called set_timer once
+    assert_eq!(runtime.set_timer_call_count(), 2);
 
-    // Round 2: processes the remaining 1 deposit → no reschedule
+    // Round 2: process the remaining batch (already in queue from executor's reschedule).
     let last_sig = signature(num_deposits);
     let runtime = TestCanisterRuntime::new()
         .with_increasing_time()
@@ -298,7 +305,7 @@ async fn should_reschedule_until_all_deposits_consolidated() {
         .add_stub_response(SendTransactionResult::Consistent(Ok(last_sig.into())))
         .add_signature(last_sig.into());
 
-    consolidate_deposits(runtime.clone()).await;
+    execute_rpc_queue(runtime.clone()).await;
 
     read_state(|s| {
         assert_eq!(

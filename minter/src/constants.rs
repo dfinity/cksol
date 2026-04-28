@@ -1,5 +1,12 @@
-/// Maximum number of concurrent calls to the SOL RPC canister.
+/// Maximum number of work items the executor processes in a single batch.
 pub const MAX_CONCURRENT_RPC_CALLS: usize = 10;
+
+/// Maximum number of concurrent SOL RPC calls from user-facing endpoints
+/// (e.g. `process_deposit`) that run outside of the timer-driven executor.
+pub const MAX_CONCURRENT_USER_RPC_CALLS: u32 = 10;
+
+/// Maximum number of `getSignaturesForAddress` results to request per polled account.
+pub const MAX_TRANSACTIONS_PER_ACCOUNT: usize = 10;
 
 /// Matches the ICP HTTPS outcall response limit for variable-length RPC calls
 /// such as `getTransaction` and `getSignatureStatuses`:

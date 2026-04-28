@@ -108,6 +108,7 @@ pub struct State {
     failed_transactions: InsertionOrderedMap<Signature, SolanaTransaction>,
     consolidation_transactions: InsertionOrderedMap<Signature, ConsolidationTransaction>,
     active_tasks: BTreeSet<TaskType>,
+    active_user_rpc_calls: u32,
     balance: Lamport,
 }
 
@@ -319,6 +320,14 @@ impl State {
 
     pub fn active_tasks_mut(&mut self) -> &mut BTreeSet<TaskType> {
         &mut self.active_tasks
+    }
+
+    pub fn active_user_rpc_calls(&self) -> u32 {
+        self.active_user_rpc_calls
+    }
+
+    pub fn active_user_rpc_calls_mut(&mut self) -> &mut u32 {
+        &mut self.active_user_rpc_calls
     }
 
     fn transaction_fee(&self, message: &VersionedMessage) -> Lamport {
@@ -795,6 +804,7 @@ impl TryFrom<InitArgs> for State {
             failed_transactions: InsertionOrderedMap::new(),
             consolidation_transactions: InsertionOrderedMap::new(),
             active_tasks: BTreeSet::new(),
+            active_user_rpc_calls: 0,
             balance: 0,
         };
         state.validate()?;
@@ -843,6 +853,7 @@ pub enum TaskType {
     ResubmitTransactions,
     WithdrawalProcessing,
     PollMonitoredAddresses,
+    ExecuteRpcQueue,
 }
 
 /// Details about a consolidation transaction, capturing the individual

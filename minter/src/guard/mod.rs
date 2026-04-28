@@ -1,4 +1,7 @@
-use crate::state::{State, TaskType, mutate_state};
+use crate::{
+    constants::MAX_CONCURRENT_USER_RPC_CALLS,
+    state::{State, TaskType, mutate_state},
+};
 use cksol_types::{ProcessDepositError, WithdrawalError};
 use icrc_ledger_types::icrc1::account::Account;
 use std::{collections::BTreeSet, marker::PhantomData};
@@ -127,6 +130,50 @@ impl Drop for TimerGuard {
     fn drop(&mut self) {
         mutate_state(|s| {
             s.active_tasks_mut().remove(&self.task);
+        });
+    }
+}
+
+/// Error returned when the per-endpoint RPC quota is exhausted.
+#[derive(Debug, Eq, PartialEq)]
+pub enum UserRpcQuotaError {
+    TooManyConcurrentRequests,
+}
+
+impl From<UserRpcQuotaError> for ProcessDepositError {
+    fn from(_: UserRpcQuotaError) -> Self {
+        Self::TemporarilyUnavailable("too many concurrent requests".to_string())
+    }
+}
+
+/// Guards a single SOL RPC call made from a user-facing endpoint (e.g. `process_deposit`).
+///
+/// Acquiring this guard increments the active-user-RPC-call counter in canister state;
+/// dropping it decrements the counter. [`UserRpcQuotaGuard::new`] fails with
+/// [`UserRpcQuotaError::TooManyConcurrentRequests`] when
+/// [`MAX_CONCURRENT_USER_RPC_CALLS`] guards are already held.
+#[must_use]
+pub struct UserRpcQuotaGuard;
+
+impl UserRpcQuotaGuard {
+    pub fn new() -> Result<Self, UserRpcQuotaError> {
+        mutate_state(|s| {
+            if s.active_user_rpc_calls() >= MAX_CONCURRENT_USER_RPC_CALLS {
+                return Err(UserRpcQuotaError::TooManyConcurrentRequests);
+            }
+            *s.active_user_rpc_calls_mut() += 1;
+            Ok(Self)
+        })
+    }
+}
+
+impl Drop for UserRpcQuotaGuard {
+    fn drop(&mut self) {
+        mutate_state(|s| {
+            let count = s.active_user_rpc_calls_mut();
+            *count = count
+                .checked_sub(1)
+                .expect("BUG: user RPC call counter underflow");
         });
     }
 }
