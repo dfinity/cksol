@@ -183,21 +183,28 @@ pub async fn process_pending_signatures<R: CanisterRuntime>(runtime: R) {
     // Round-robin across accounts, refilling capacity with additional passes until exhausted.
     let to_process: Vec<(Account, Signature)> = PENDING_SIGNATURES.with(|pending| {
         let mut pending = pending.borrow_mut();
-        let mut to_process = Vec::with_capacity(MAX_CONCURRENT_RPC_CALLS);
-        let mut capacity = MAX_CONCURRENT_RPC_CALLS;
-        loop {
-            let before = to_process.len();
-            for (account, queue) in pending.iter_mut() {
-                if capacity == 0 {
-                    break;
-                }
-                if let Some(sig) = queue.pop_front() {
-                    to_process.push((*account, sig));
-                    capacity -= 1;
-                }
-            }
-            if to_process.len() == before || capacity == 0 {
-                break;
+
+        // Interleave queues round-robin by iterating column-by-column: round 0 yields
+        // one item from each account, then round 1, and so on. `take` stops early
+        // without advancing past the capacity limit.
+        let max_round = pending.values().map(VecDeque::len).max().unwrap_or(0);
+        let to_process: Vec<(Account, Signature)> = (0..max_round)
+            .flat_map(|round| {
+                pending.iter().filter_map(move |(&account, queue)| {
+                    queue.get(round).map(|&sig| (account, sig))
+                })
+            })
+            .take(MAX_CONCURRENT_RPC_CALLS)
+            .collect();
+
+        // Drain the taken items from each account's queue.
+        let mut counts: BTreeMap<Account, usize> = BTreeMap::new();
+        for &(account, _) in &to_process {
+            *counts.entry(account).or_default() += 1;
+        }
+        for (account, count) in counts {
+            if let Some(queue) = pending.get_mut(&account) {
+                queue.drain(..count);
             }
         }
         pending.retain(|_, queue| !queue.is_empty());
