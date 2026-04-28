@@ -33,6 +33,7 @@ pub async fn process_deposit<R: CanisterRuntime>(
     let Deposit {
         deposit_amount,
         amount_to_mint,
+        source: _,
     } = match read_state(|state| state.deposit_status(&deposit_id)) {
         None => try_accept_deposit(&runtime, account, signature).await?,
         Some(DepositStatus::Processing {
@@ -42,6 +43,7 @@ pub async fn process_deposit<R: CanisterRuntime>(
         }) => Deposit {
             deposit_amount,
             amount_to_mint,
+            source: DepositSource::Manual,
         },
         // Deposit is already fully processed, nothing more to do
         Some(status @ (DepositStatus::Quarantined(_) | DepositStatus::Minted { .. })) => {
@@ -112,5 +114,6 @@ async fn try_accept_deposit<R: CanisterRuntime>(
     Ok(Deposit {
         deposit_amount,
         amount_to_mint,
+        source: DepositSource::Manual,
     })
 }

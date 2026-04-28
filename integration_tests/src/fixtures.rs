@@ -206,8 +206,8 @@ impl MockBuilder {
             )
     }
 
-    /// Mock for `getSignaturesForAddress` returning the given list of signature objects.
-    pub fn get_signatures_for_address(self, signatures: Vec<serde_json::Value>) -> Self {
+    /// Mock for `getSignaturesForAddress` returning the given list of `(signature, slot)` pairs.
+    pub fn get_signatures_for_address(self, signatures: Vec<(&str, u64)>) -> Self {
         self.expect(
             get_signatures_for_address_request(),
             get_signatures_for_address_response(signatures),
@@ -380,10 +380,23 @@ fn get_signatures_for_address_request() -> JsonRpcRequestMatcher {
     JsonRpcRequestMatcher::with_method("getSignaturesForAddress")
 }
 
-fn get_signatures_for_address_response(signatures: Vec<serde_json::Value>) -> JsonRpcResponse {
+fn get_signatures_for_address_response(signatures: Vec<(&str, u64)>) -> JsonRpcResponse {
+    let entries: Vec<serde_json::Value> = signatures
+        .into_iter()
+        .map(|(signature, slot)| {
+            json!({
+                "signature": signature,
+                "slot": slot,
+                "err": null,
+                "memo": null,
+                "blockTime": null,
+                "confirmationStatus": null
+            })
+        })
+        .collect();
     JsonRpcResponse::from(json!({
         "jsonrpc": "2.0",
-        "result": signatures,
+        "result": entries,
         "id": 1
     }))
 }
