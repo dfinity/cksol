@@ -7,7 +7,7 @@ use cksol_int_tests::{
         DEFAULT_CALLER_ACCOUNT, DEFAULT_CALLER_DEPOSIT_ADDRESS, DEPOSIT_AMOUNT,
         EXPECTED_MINT_AMOUNT, MockBuilder, SharedMockHttpOutcalls,
         default_get_deposit_address_args, default_process_deposit_args,
-        default_update_balance_args, deposit_transaction_signature,
+        deposit_transaction_signature,
     },
 };
 use cksol_types::{
@@ -1022,47 +1022,29 @@ mod update_balance_tests {
         let setup = SetupBuilder::new().build().await;
         let minter = setup.minter();
 
-        // Register the same accounts as used in get_deposit_address_tests
-        let accounts = vec![
-            Account {
-                owner: Setup::DEFAULT_CALLER,
-                subaccount: None,
-            },
-            Account {
-                owner: Principal::from_slice(&[1]),
-                subaccount: None,
-            },
-            Account {
-                owner: Setup::DEFAULT_CALLER,
-                subaccount: Some([1; 32]),
-            },
-            Account {
-                owner: Setup::DEFAULT_CALLER,
-                subaccount: Some([2; 32]),
-            },
-        ];
+        let subaccounts: Vec<Option<Subaccount>> = vec![None, Some([1; 32]), Some([2; 32])];
 
-        for account in &accounts {
+        for subaccount in &subaccounts {
             let result = minter
                 .update_balance(UpdateBalanceArgs {
-                    owner: Some(account.owner),
-                    subaccount: account.subaccount,
+                    subaccount: *subaccount,
                 })
                 .await;
             assert_eq!(result, Ok(()));
         }
 
         // Calling again for an already-monitored account is idempotent — no new event
-        let result = minter
-            .update_balance(UpdateBalanceArgs {
-                owner: None,
-                subaccount: None,
-            })
-            .await;
+        let result = minter.update_balance(UpdateBalanceArgs::default()).await;
         assert_eq!(result, Ok(()));
 
-        // Exactly one StartedMonitoringAccount event per account, no duplicates
-        let expected_accounts = accounts.clone();
+        // Exactly one StartedMonitoringAccount event per subaccount, no duplicates
+        let expected_accounts: Vec<Account> = subaccounts
+            .iter()
+            .map(|subaccount| Account {
+                owner: Setup::DEFAULT_CALLER,
+                subaccount: *subaccount,
+            })
+            .collect();
         minter.assert_that_events().await.satisfy(|events| {
             let monitoring_events: Vec<&Account> = events
                 .iter()
@@ -1105,15 +1087,6 @@ mod anonymous_caller_tests {
                 .await;
             assert_matches!(result, Err(s) => s.contains("the owner must be non-anonymous"));
 
-            // `update_balance` endpoint
-            let result = minter
-                .try_update_balance(UpdateBalanceArgs {
-                    owner,
-                    subaccount: None,
-                })
-                .await;
-            assert_matches!(result, Err(s) => s.contains("the owner must be non-anonymous"));
-
             // `process_deposit` endpoint
             let result = minter
                 .try_process_deposit(ProcessDepositArgs {
@@ -1124,6 +1097,13 @@ mod anonymous_caller_tests {
                 .await;
             assert_matches!(result, Err(s) => s.contains("the owner must be non-anonymous"));
         }
+
+        // `update_balance` endpoint (no `owner` field, only anonymous caller applies)
+        let minter = setup.minter_with_caller(Principal::anonymous());
+        let result = minter
+            .try_update_balance(UpdateBalanceArgs::default())
+            .await;
+        assert_matches!(result, Err(s) => s.contains("the owner must be non-anonymous"));
 
         // `withdraw` endpoint (no `owner` field, only anonymous caller applies)
         let minter = setup.minter_with_caller(Principal::anonymous());
@@ -1308,7 +1288,7 @@ mod automated_deposit_flow_tests {
             DEFAULT_CALLER_DEPOSIT_ADDRESS
         );
         minter
-            .update_balance(default_update_balance_args())
+            .update_balance(UpdateBalanceArgs::default())
             .await
             .expect("update_balance should succeed");
 
