@@ -2,6 +2,7 @@ use candid::Principal;
 use canlog::{Log, Sort};
 use cksol_minter::{
     address::lazy_get_schnorr_master_key,
+    balance_check::{REFRESH_REAL_BALANCE_DELAY, refresh_real_balance},
     consolidate::{DEPOSIT_CONSOLIDATION_DELAY, consolidate_deposits},
     deposit::automatic::{POLL_MONITORED_ADDRESSES_DELAY, poll_monitored_addresses},
     monitor::{
@@ -351,9 +352,13 @@ fn assert_non_anonymous_account(
 
 fn setup_timers() {
     ic_cdk_timers::set_timer(Duration::from_secs(0), async {
-        // Initialize the minter's Ed25519 public key
+        // Initialize the minter's Ed25519 public key, then run the first balance
+        // refresh so the discrepancy metric is populated without waiting for the
+        // daily interval. Sequencing them in a single timer avoids racing
+        // `set_once_minter_public_key`.
         let runtime = IcCanisterRuntime::new();
         let _ = lazy_get_schnorr_master_key(&runtime).await;
+        refresh_real_balance(runtime).await;
     });
     ic_cdk_timers::set_timer_interval(DEPOSIT_CONSOLIDATION_DELAY, async || {
         consolidate_deposits(IcCanisterRuntime::new()).await;
@@ -369,6 +374,9 @@ fn setup_timers() {
     });
     ic_cdk_timers::set_timer_interval(POLL_MONITORED_ADDRESSES_DELAY, async || {
         poll_monitored_addresses(IcCanisterRuntime::new()).await;
+    });
+    ic_cdk_timers::set_timer_interval(REFRESH_REAL_BALANCE_DELAY, async || {
+        refresh_real_balance(IcCanisterRuntime::new()).await;
     });
 }
 
