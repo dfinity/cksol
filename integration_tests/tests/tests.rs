@@ -5,8 +5,9 @@ use cksol_int_tests::{
     CkSolMinter, Setup, SetupBuilder,
     fixtures::{
         DEFAULT_CALLER_ACCOUNT, DEFAULT_CALLER_DEPOSIT_ADDRESS, DEPOSIT_AMOUNT,
-        EXPECTED_MINT_AMOUNT, MockBuilder, SharedMockHttpOutcalls, default_process_deposit_args,
-        default_update_balance_args, deposit_signature_status_json, deposit_transaction_signature,
+        EXPECTED_AUTOMATED_MINT_AMOUNT, EXPECTED_MINT_AMOUNT, MockBuilder, SharedMockHttpOutcalls,
+        default_process_deposit_args, default_update_balance_args, deposit_signature_status_json,
+        deposit_transaction_signature,
     },
 };
 use cksol_types::{
@@ -32,6 +33,7 @@ const RESUBMIT_TRANSACTIONS_DELAY: Duration = Duration::from_mins(3);
 const DEPOSIT_CONSOLIDATION_DELAY: Duration = Duration::from_mins(10);
 const POLL_MONITORED_ADDRESSES_DELAY: Duration = Duration::from_mins(1);
 const PROCESS_PENDING_SIGNATURES_DELAY: Duration = Duration::from_secs(5);
+const MINT_AUTOMATIC_DEPOSITS_DELAY: Duration = Duration::from_secs(5);
 
 /// Deposits funds into the minter via `process_deposit`, consolidates them,
 /// and finalizes the consolidation so the minter's internal balance is credited.
@@ -1334,6 +1336,57 @@ mod automated_deposit_flow_tests {
                 }
             )));
         });
+
+        setup.drop().await;
+    }
+
+    #[tokio::test]
+    async fn should_automatically_mint_deposit() {
+        let setup = SetupBuilder::new().build().await;
+        let minter = setup.minter();
+
+        // Initialize the minter public key and register the account for monitoring.
+        assert_eq!(
+            minter
+                .get_deposit_address(default_get_deposit_address_args())
+                .await
+                .to_string(),
+            DEFAULT_CALLER_DEPOSIT_ADDRESS,
+        );
+        minter
+            .update_balance(default_update_balance_args())
+            .await
+            .expect("update_balance should succeed");
+
+        // Poll phase: minter calls getSignaturesForAddress and discovers the deposit.
+        setup.advance_time(POLL_MONITORED_ADDRESSES_DELAY).await;
+        setup
+            .execute_http_mocks(
+                MockBuilder::with_start_id(0)
+                    .get_signatures_for_address(vec![deposit_signature_status_json()])
+                    .build(),
+            )
+            .await;
+
+        // Process phase: minter calls getTransaction and accepts the deposit.
+        setup.advance_time(PROCESS_PENDING_SIGNATURES_DELAY).await;
+        setup
+            .execute_http_mocks(
+                MockBuilder::with_start_id(4)
+                    .get_deposit_transaction()
+                    .build(),
+            )
+            .await;
+
+        // Mint phase: minter mints ckSOL for the accepted deposit (no HTTP mocks needed —
+        // the ledger mint is a canister-to-canister call).
+        setup.advance_time(MINT_AUTOMATIC_DEPOSITS_DELAY).await;
+        for _ in 0..30 {
+            setup.tick().await;
+        }
+
+        let balance = setup.ledger().balance_of(DEFAULT_CALLER_ACCOUNT).await;
+        assert_eq!(balance, EXPECTED_AUTOMATED_MINT_AMOUNT);
 
         setup.drop().await;
     }

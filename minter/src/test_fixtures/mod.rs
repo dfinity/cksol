@@ -184,6 +184,25 @@ pub mod events {
         });
     }
 
+    pub fn accept_automatic_deposit(
+        deposit_id: DepositId,
+        deposit_amount: Lamport,
+        amount_to_mint: Lamport,
+    ) {
+        mutate_state(|state| {
+            process_event(
+                state,
+                EventType::AcceptedDeposit {
+                    deposit_id,
+                    deposit_amount,
+                    amount_to_mint,
+                    source: DepositSource::Automatic,
+                },
+                &runtime(),
+            )
+        });
+    }
+
     pub fn quarantine_deposit(deposit_id: DepositId) {
         mutate_state(|state| {
             process_event(state, EventType::QuarantinedDeposit(deposit_id), &runtime())
