@@ -1,0 +1,4 @@
+[tools]
+rust = { version = "1.93.0", components = "rustfmt,clippy", targets = "wasm32-unknown-unknown" }
+"cargo:cargo-sort" = "2.0.1"
+"cargo:canbench" = "0.4.1"

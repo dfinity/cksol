@@ -243,16 +243,21 @@ icp canister call -e prod cksol_minter withdrawal_status \
 
 ### Prerequisites
 
-- [Rust](https://rustup.rs/) — the correct toolchain version is pinned in `rust-toolchain.toml`.
-- [`ic-wasm`](https://github.com/dfinity/ic-wasm) version 0.3.5 — used for Wasm post-processing.
-- `jq` — used by `./scripts/build` to generate Wasm metadata.
-- `gzip` — used by `./scripts/build` to compress the output Wasm.
-
-Install the Rust toolchain and `ic-wasm` by running:
+Install [`mise`](https://mise.jdx.dev/) and then provision the pinned toolchain
+(Rust 1.93.0 with the `wasm32-unknown-unknown` target, `cargo-sort`, `canbench`):
 
 ```sh
-./scripts/bootstrap
+mise install
 ```
+
+Tool versions are defined in [`mise.toml`](./mise.toml) so local and CI
+environments stay in sync.
+
+Additionally:
+
+- [`ic-wasm`](https://github.com/dfinity/ic-wasm) version 0.3.5 — used for Wasm post-processing. Install via `./scripts/bootstrap`.
+- `jq` — used by `./scripts/build` to generate Wasm metadata.
+- `gzip` — used by `./scripts/build` to compress the output Wasm.
 
 ### Building
 
