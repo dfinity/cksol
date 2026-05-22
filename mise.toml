@@ -1,0 +1,6 @@
+[tools]
+"cargo:cargo-sort" = "2.0.1"
+"cargo:canbench" = "0.4.1"
+
+[settings]
+idiomatic_version_file_enable_tools = ["rust"]
