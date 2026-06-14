@@ -225,3 +225,111 @@ impl Storable for Event {
 
     const BOUND: Bound = Bound::Unbounded;
 }
+
+/// Legacy event type matching the CBOR encoding of events written before `AcceptedDeposit`
+/// was introduced. Used only by the one-time migration in `post_upgrade`.
+/// Remove after the migration has run.
+#[derive(Decode, Encode)]
+pub(crate) enum LegacyEventType {
+    #[n(0)]
+    Init(#[n(0)] InitArgs),
+    #[n(1)]
+    Upgrade(#[n(0)] UpgradeArgs),
+    /// Old form of `AcceptedDeposit` — no `source` field.
+    #[n(2)]
+    AcceptedManualDeposit {
+        #[n(0)]
+        deposit_id: DepositId,
+        #[n(1)]
+        deposit_amount: Lamport,
+        #[n(2)]
+        amount_to_mint: Lamport,
+    },
+    #[n(3)]
+    QuarantinedDeposit(#[n(0)] DepositId),
+    #[n(4)]
+    Minted {
+        #[n(0)]
+        deposit_id: DepositId,
+        #[cbor(n(1), with = "cbor::id")]
+        mint_block_index: LedgerMintIndex,
+    },
+    #[n(5)]
+    AcceptedWithdrawalRequest(#[n(0)] WithdrawalRequest),
+    #[n(6)]
+    SubmittedTransaction {
+        #[cbor(n(0), with = "cbor::signature")]
+        signature: Signature,
+        #[n(1)]
+        message: VersionedMessage,
+        #[n(2)]
+        signers: Vec<Account>,
+        #[n(3)]
+        slot: Slot,
+        #[n(4)]
+        purpose: TransactionPurpose,
+    },
+    #[n(7)]
+    ResubmittedTransaction {
+        #[cbor(n(0), with = "cbor::signature")]
+        old_signature: Signature,
+        #[cbor(n(1), with = "cbor::signature")]
+        new_signature: Signature,
+        #[n(2)]
+        new_slot: Slot,
+    },
+    #[n(8)]
+    SucceededTransaction {
+        #[cbor(n(0), with = "cbor::signature")]
+        signature: Signature,
+    },
+    #[n(9)]
+    FailedTransaction {
+        #[cbor(n(0), with = "cbor::signature")]
+        signature: Signature,
+    },
+    #[n(10)]
+    ExpiredTransaction {
+        #[cbor(n(0), with = "cbor::signature")]
+        signature: Signature,
+    },
+    #[n(11)]
+    StartedMonitoringAccount {
+        #[n(0)]
+        account: Account,
+    },
+    #[n(12)]
+    StoppedMonitoringAccount {
+        #[n(0)]
+        account: Account,
+    },
+}
+
+/// Legacy event wrapper for migration. See `LegacyEventType`.
+/// Remove after the migration has run.
+#[derive(Decode, Encode)]
+pub(crate) struct LegacyEvent {
+    #[n(0)]
+    pub timestamp: u64,
+    #[n(1)]
+    pub payload: LegacyEventType,
+}
+
+impl Storable for LegacyEvent {
+    fn to_bytes(&self) -> Cow<'_, [u8]> {
+        let mut buf = vec![];
+        minicbor::encode(self, &mut buf).expect("event encoding should always succeed");
+        Cow::Owned(buf)
+    }
+
+    fn from_bytes(bytes: Cow<[u8]>) -> Self {
+        minicbor::decode(bytes.as_ref()).unwrap_or_else(|e| {
+            panic!(
+                "failed to decode legacy event bytes {}: {e}",
+                hex::encode(bytes)
+            )
+        })
+    }
+
+    const BOUND: Bound = Bound::Unbounded;
+}

@@ -6,10 +6,21 @@ use crate::{
         event::EventType,
         init_once_state, mutate_state,
     },
-    storage::{record_event, total_event_count, with_event_iter, with_unstable_metrics_mut},
+    storage::{
+        migrate_event_log, record_event, total_event_count, with_event_iter,
+        with_unstable_metrics_mut,
+    },
 };
 use canlog::log;
 use cksol_types_internal::{InitArgs, UpgradeArgs, log::Priority};
+
+/// One-time migration: converts legacy `AcceptedManualDeposit` events (CBOR index 2,
+/// no `source` field) to `AcceptedDeposit { source: Manual }` (same CBOR index).
+///
+/// Safe to call multiple times. Remove after the migration has been confirmed.
+fn migrate_accepted_manual_deposit_events() {
+    migrate_event_log();
+}
 
 pub fn init<R: CanisterRuntime>(init_args: InitArgs, runtime: R) {
     log!(
@@ -23,6 +34,7 @@ pub fn init<R: CanisterRuntime>(init_args: InitArgs, runtime: R) {
 pub fn post_upgrade<R: CanisterRuntime>(upgrade_args: Option<UpgradeArgs>, runtime: R) {
     let start = runtime.instruction_counter();
 
+    migrate_accepted_manual_deposit_events();
     init_once_state(with_event_iter(|events| replay_events(events)));
     if let Some(args) = upgrade_args {
         log!(
