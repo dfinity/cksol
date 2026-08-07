@@ -1,4 +1,5 @@
 pub mod address;
+pub mod balance_check;
 pub mod consolidate;
 mod constants;
 mod cycles;

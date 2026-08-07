@@ -92,6 +92,23 @@ pub fn encode_metrics(w: &mut MetricsEncoder<Vec<u8>>, s: &State) -> std::io::Re
         s.balance().metric_value(),
         "Minter balance in Lamports.",
     )?;
+    let (discrepancy_lamports, discrepancy_refresh_seconds) = match s.last_balance_discrepancy() {
+        Some(observation) => (
+            observation.diff_lamports as f64,
+            (observation.observed_at / 1_000_000_000) as f64,
+        ),
+        None => (0.0, 0.0),
+    };
+    w.encode_gauge(
+        "minter_balance_discrepancy_lamports",
+        discrepancy_lamports,
+        "Difference (real on-chain balance minus tracked balance) of the minter's main account at the time of the last successful refresh, in lamports. Both sides are sampled together; refreshed once per day. Reports 0 until the first refresh succeeds.",
+    )?;
+    w.encode_gauge(
+        "minter_balance_discrepancy_last_refresh_timestamp_seconds",
+        discrepancy_refresh_seconds,
+        "Unix timestamp (seconds) of the last successful computation of `minter_balance_discrepancy_lamports`. Reports 0 until the first refresh succeeds.",
+    )?;
     w.encode_gauge(
         "post_upgrade_instructions_consumed",
         storage::with_unstable_metrics(|m| m.post_upgrade_instructions_consumed).metric_value(),

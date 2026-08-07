@@ -246,6 +246,7 @@ mod state_from_init_args {
                 consolidation_transactions: InsertionOrderedMap::new(),
                 active_tasks: BTreeSet::new(),
                 balance: 0,
+                last_balance_discrepancy: None,
             }
         );
     }
