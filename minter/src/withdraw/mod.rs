@@ -1,32 +1,24 @@
-use std::str::FromStr;
-use std::time::Duration;
-
-use cksol_types::{WithdrawalError, WithdrawalOk, WithdrawalStatus};
-use icrc_ledger_types::icrc1::account::Account;
-use solana_address::Address;
-
-use canlog::log;
-use cksol_types_internal::log::Priority;
-
-use itertools::Itertools;
-use sol_rpc_types::Slot;
-use solana_hash::Hash;
-
 use crate::{
     consolidate::consolidate_deposits,
-    constants::MAX_CONCURRENT_RPC_CALLS,
     guard::{TimerGuard, withdrawal_guard},
     ledger::{BurnError, burn},
-    rpc::{get_recent_slot_and_blockhash, submit_transaction},
+    rpc_executor::{WorkItem, enqueue, execute_rpc_queue},
     runtime::CanisterRuntime,
-    sol_transfer::{MAX_WITHDRAWALS_PER_TX, create_signed_batch_withdrawal_transaction},
+    sol_transfer::MAX_WITHDRAWALS_PER_TX,
     state::{
         TaskType,
         audit::process_event,
-        event::{EventType, TransactionPurpose, VersionedMessage, WithdrawalRequest},
+        event::{EventType, WithdrawalRequest},
         mutate_state, read_state,
     },
 };
+use canlog::log;
+use cksol_types::{WithdrawalError, WithdrawalOk, WithdrawalStatus};
+use cksol_types_internal::log::Priority;
+use icrc_ledger_types::icrc1::account::Account;
+use itertools::Itertools;
+use solana_address::Address;
+use std::{str::FromStr, time::Duration};
 
 pub const WITHDRAWAL_PROCESSING_DELAY: Duration = Duration::from_mins(1);
 
@@ -134,111 +126,19 @@ pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: R) {
         runtime.set_timer(Duration::ZERO, consolidate_deposits);
     }
 
-    let more_to_process =
-        affordable_requests.len() > MAX_CONCURRENT_RPC_CALLS * MAX_WITHDRAWALS_PER_TX;
-    let reschedule = scopeguard::guard(runtime.clone(), |runtime| {
-        runtime.set_timer(Duration::ZERO, process_pending_withdrawals);
-    });
-
-    let batches: Vec<Vec<_>> = affordable_requests
-        .into_iter()
-        .chunks(MAX_WITHDRAWALS_PER_TX)
-        .into_iter()
-        .take(MAX_CONCURRENT_RPC_CALLS)
-        .map(Iterator::collect)
-        .collect();
-
-    if batches.is_empty() {
-        // Nothing to process
-        scopeguard::ScopeGuard::into_inner(reschedule);
+    if affordable_requests.is_empty() {
         return;
     }
 
-    let (slot, recent_blockhash) = match get_recent_slot_and_blockhash(&runtime).await {
-        Ok(result) => result,
-        Err(e) => {
-            log!(Priority::Info, "Failed to fetch recent blockhash: {e}");
-            return;
-        }
-    };
-
-    futures::future::join_all(batches.into_iter().map(async |batch| {
-        submit_withdrawal_transaction(&runtime, batch, slot, recent_blockhash).await
-    }))
-    .await;
-
-    if !more_to_process {
-        // All work fits in this round
-        scopeguard::ScopeGuard::into_inner(reschedule);
-    }
-}
-
-async fn submit_withdrawal_transaction<R: CanisterRuntime>(
-    runtime: &R,
-    requests: Vec<WithdrawalRequest>,
-    slot: Slot,
-    recent_blockhash: Hash,
-) {
-    let targets: Vec<_> = requests
-        .iter()
-        .map(|request| {
-            let destination = Address::from(request.solana_address);
-            (destination, request.amount_to_transfer)
-        })
-        .collect();
-
-    let (signed_tx, signers) = match create_signed_batch_withdrawal_transaction(
-        runtime,
-        &targets,
-        recent_blockhash,
-    )
-    .await
+    for batch in affordable_requests
+        .into_iter()
+        .chunks(MAX_WITHDRAWALS_PER_TX)
+        .into_iter()
     {
-        Ok(tx) => tx,
-        Err(e) => {
-            let burn_indices: Vec<_> = requests.iter().map(|r| r.burn_block_index).collect();
-            log!(
-                Priority::Error,
-                "Failed to create batch withdrawal transaction for burn indices {burn_indices:?}: {e}"
-            );
-            return;
-        }
-    };
-
-    let signature = signed_tx.signatures[0];
-    let message = VersionedMessage::Legacy(signed_tx.message.clone());
-    let burn_indices: Vec<_> = requests.iter().map(|r| r.burn_block_index).collect();
-
-    mutate_state(|state| {
-        process_event(
-            state,
-            EventType::SubmittedTransaction {
-                signature,
-                message,
-                signers,
-                slot,
-                purpose: TransactionPurpose::WithdrawSol {
-                    burn_indices: burn_indices.clone(),
-                },
-            },
-            runtime,
-        )
-    });
-
-    match submit_transaction(runtime, signed_tx).await {
-        Ok(_) => {
-            log!(
-                Priority::Info,
-                "Submitted withdrawal transaction {signature} for burn indices {burn_indices:?}"
-            );
-        }
-        Err(e) => {
-            log!(
-                Priority::Info,
-                "Failed to send withdrawal transaction {signature} (will be resubmitted): {e}"
-            );
-        }
+        enqueue(WorkItem::SubmitWithdrawalBatch(batch.collect()));
     }
+
+    runtime.set_timer(Duration::ZERO, execute_rpc_queue);
 }
 
 pub fn withdrawal_status(block_index: u64) -> WithdrawalStatus {

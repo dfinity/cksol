@@ -1,7 +1,5 @@
-use super::{
-    MAX_BLOCKHASH_AGE, MAX_SIGNATURES_PER_STATUS_CHECK, finalize_transactions,
-    resubmit_transactions,
-};
+use super::{finalize_transactions, resubmit_transactions};
+use crate::rpc_executor::{MAX_BLOCKHASH_AGE, MAX_SIGNATURES_PER_STATUS_CHECK, execute_rpc_queue};
 use crate::{
     constants::MAX_CONCURRENT_RPC_CALLS,
     state::{TaskType, event::EventType, mutate_state, read_state, reset_state},
@@ -83,7 +81,8 @@ mod finalization {
             submit_consolidation_transaction_with_signature(i, RECENT_SLOT);
         }
 
-        // Round 1: finalizes MAX_CONCURRENT_RPC_CALLS batches, 1 transaction unchecked → reschedule
+        // Round 1: finalize_transactions enqueues MAX_CONCURRENT_RPC_CALLS+1 batches.
+        // execute_rpc_queue processes MAX_CONCURRENT_RPC_CALLS batches, 1 batch remains → reschedule.
         let mut runtime = TestCanisterRuntime::new()
             .with_increasing_time()
             .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
@@ -95,11 +94,13 @@ mod finalization {
         }
 
         finalize_transactions(runtime.clone()).await;
+        execute_rpc_queue(runtime.clone()).await;
 
         assert_eq!(read_state(|s| s.submitted_transactions().len()), 1);
-        assert_eq!(runtime.set_timer_call_count(), 1);
+        // finalize_transactions called set_timer once; execute_rpc_queue called set_timer once
+        assert_eq!(runtime.set_timer_call_count(), 2);
 
-        // Round 2: finalizes the remaining 1 transaction → no reschedule
+        // Round 2: process the remaining batch (already in queue from the executor's reschedule).
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
             .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
@@ -108,7 +109,7 @@ mod finalization {
                 finalized_status(),
             )])));
 
-        finalize_transactions(runtime.clone()).await;
+        execute_rpc_queue(runtime.clone()).await;
 
         assert!(read_state(|s| s.submitted_transactions().is_empty()));
         assert_eq!(runtime.set_timer_call_count(), 0);
@@ -128,7 +129,8 @@ mod finalization {
                 finalized_status(),
             )])));
 
-        finalize_transactions(runtime).await;
+        finalize_transactions(runtime.clone()).await;
+        execute_rpc_queue(runtime).await;
 
         EventsAssert::from_recorded()
             .expect_contains_event_eq(EventType::SucceededTransaction { signature });
@@ -199,7 +201,8 @@ mod finalization {
                 },
             )])));
 
-        finalize_transactions(runtime).await;
+        finalize_transactions(runtime.clone()).await;
+        execute_rpc_queue(runtime).await;
 
         EventsAssert::from_recorded()
             .expect_contains_event_eq(EventType::FailedTransaction { signature });
@@ -233,7 +236,8 @@ mod finalization {
             ])));
         // sig_b is not_found but RECENT_SLOT is not expired, so no resubmission.
 
-        finalize_transactions(runtime).await;
+        finalize_transactions(runtime.clone()).await;
+        execute_rpc_queue(runtime).await;
 
         EventsAssert::from_recorded()
             .expect_contains_event_eq(EventType::SucceededTransaction {
@@ -328,7 +332,8 @@ mod resubmission {
             .add_stub_response(SendTransactionResult::Consistent(Ok(new_signature.into())))
             .add_signature(new_signature.into());
 
-        resubmit_transactions(resubmit_runtime).await;
+        resubmit_transactions(resubmit_runtime.clone()).await;
+        execute_rpc_queue(resubmit_runtime).await;
 
         EventsAssert::from_recorded()
             .expect_contains_event_eq(EventType::ExpiredTransaction {
@@ -388,7 +393,8 @@ mod resubmission {
             .add_stub_response(SendTransactionResult::Inconsistent(vec![]))
             .add_signature(new_signature.into());
 
-        resubmit_transactions(resubmit_runtime).await;
+        resubmit_transactions(resubmit_runtime.clone()).await;
+        execute_rpc_queue(resubmit_runtime).await;
 
         EventsAssert::from_recorded()
             .expect_contains_event_eq(EventType::ExpiredTransaction {
@@ -411,7 +417,8 @@ mod resubmission {
             events::expire_transaction(sig);
         }
 
-        // Round 1: resubmits MAX_CONCURRENT_RPC_CALLS transactions, 1 remain → reschedule
+        // Round 1: resubmit_transactions enqueues MAX_CONCURRENT_RPC_CALLS+1 items.
+        // execute_rpc_queue processes MAX_CONCURRENT_RPC_CALLS items, 1 remains → reschedule.
         let mut runtime = TestCanisterRuntime::new()
             .with_increasing_time()
             .add_stub_response(SlotResult::Consistent(Ok(RESUBMISSION_SLOT)))
@@ -425,6 +432,7 @@ mod resubmission {
         }
 
         resubmit_transactions(runtime.clone()).await;
+        execute_rpc_queue(runtime.clone()).await;
 
         read_state(|s| {
             assert_eq!(s.submitted_transactions().len(), MAX_CONCURRENT_RPC_CALLS);
@@ -433,9 +441,10 @@ mod resubmission {
                 num_transactions - MAX_CONCURRENT_RPC_CALLS
             );
         });
-        assert_eq!(runtime.set_timer_call_count(), 1);
+        // resubmit_transactions called set_timer once; execute_rpc_queue called set_timer once
+        assert_eq!(runtime.set_timer_call_count(), 2);
 
-        // Round 2: resubmits remaining transaction → no reschedule
+        // Round 2: process the remaining item (already in queue from executor's reschedule).
         let mut runtime = TestCanisterRuntime::new()
             .with_increasing_time()
             .add_stub_response(SlotResult::Consistent(Ok(RESUBMISSION_SLOT)))
@@ -448,7 +457,7 @@ mod resubmission {
                 .add_signature(signature(0xB0 + i).into());
         }
 
-        resubmit_transactions(runtime.clone()).await;
+        execute_rpc_queue(runtime.clone()).await;
 
         assert!(read_state(|s| s.transactions_to_resubmit().is_empty()));
         assert_eq!(runtime.set_timer_call_count(), 0);

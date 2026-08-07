@@ -2,7 +2,7 @@ use crate::{
     constants::GET_TRANSACTION_CYCLES,
     cycles::{charge_caller_cycles, check_caller_available_cycles},
     deposit::fetch_and_validate_deposit,
-    guard::process_deposit_guard,
+    guard::{UserRpcQuotaGuard, process_deposit_guard},
     ledger::mint,
     runtime::CanisterRuntime,
     state::{
@@ -27,6 +27,7 @@ pub async fn process_deposit<R: CanisterRuntime>(
     signature: Signature,
 ) -> Result<DepositStatus, ProcessDepositError> {
     let _guard = process_deposit_guard(account)?;
+    let _rpc_quota = UserRpcQuotaGuard::new().map_err(|e| ProcessDepositError::from(e))?;
 
     let deposit_id = DepositId { account, signature };
 

@@ -11,6 +11,7 @@ pub mod metrics;
 pub mod monitor;
 mod numeric;
 mod rpc;
+pub mod rpc_executor;
 pub mod runtime;
 mod signer;
 mod sol_transfer;
