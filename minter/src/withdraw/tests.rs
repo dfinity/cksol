@@ -21,7 +21,7 @@ use ic_canister_runtime::IcError;
 use ic_cdk::call::CallRejected;
 use ic_cdk_management_canister::SignCallError;
 use icrc_ledger_types::{icrc1::account::Account, icrc2::transfer_from::TransferFromError};
-use sol_rpc_types::{MultiRpcResult, RpcError, Slot};
+use sol_rpc_types::RpcError;
 use solana_signature::Signature;
 
 const VALID_ADDRESS: &str = "E4MpwNnMWs2XtW5gVrxZvyS7fMq31QD5HvbxmwP45Tz3";
@@ -54,9 +54,8 @@ async fn should_return_error_if_calling_ledger_fails() {
 async fn should_return_error_if_ledger_unavailable() {
     init_state();
 
-    let runtime = TestCanisterRuntime::new().add_stub_response(Err::<Nat, TransferFromError>(
-        TransferFromError::TemporarilyUnavailable,
-    ));
+    let runtime = TestCanisterRuntime::new()
+        .add_icrc2_transfer_from_response(Err(TransferFromError::TemporarilyUnavailable));
 
     let result = withdraw(
         &runtime,
@@ -78,7 +77,7 @@ async fn should_return_error_if_ledger_unavailable() {
 async fn should_return_error_if_insufficient_allowance() {
     init_state();
 
-    let runtime = TestCanisterRuntime::new().add_stub_response(Err::<Nat, TransferFromError>(
+    let runtime = TestCanisterRuntime::new().add_icrc2_transfer_from_response(Err(
         TransferFromError::InsufficientAllowance {
             allowance: Nat::from(123u64),
         },
@@ -102,7 +101,7 @@ async fn should_return_error_if_insufficient_allowance() {
 async fn should_return_error_if_insufficient_funds() {
     init_state();
 
-    let runtime = TestCanisterRuntime::new().add_stub_response(Err::<Nat, TransferFromError>(
+    let runtime = TestCanisterRuntime::new().add_icrc2_transfer_from_response(Err(
         TransferFromError::InsufficientFunds {
             balance: Nat::from(123u64),
         },
@@ -126,7 +125,7 @@ async fn should_return_error_if_insufficient_funds() {
 async fn should_return_temporarily_unavailable_on_generic_error() {
     init_state();
 
-    let runtime = TestCanisterRuntime::new().add_stub_response(Err::<Nat, TransferFromError>(
+    let runtime = TestCanisterRuntime::new().add_icrc2_transfer_from_response(Err(
         TransferFromError::GenericError {
             error_code: Nat::from(123u64),
             message: "msg".to_string(),
@@ -154,7 +153,7 @@ async fn should_return_ok_if_burn_succeeds() {
     init_state();
 
     let runtime = TestCanisterRuntime::new()
-        .add_stub_response(Ok::<Nat, TransferFromError>(Nat::from(123u64)))
+        .add_icrc2_transfer_from_response(Ok(Nat::from(123u64)))
         .with_increasing_time();
 
     let result = withdraw(
@@ -236,10 +235,6 @@ async fn should_return_error_if_already_processing() {
 mod process_pending_withdrawals_tests {
     use super::*;
 
-    type GetSlotResult = MultiRpcResult<Slot>;
-    type GetBlockResult = MultiRpcResult<sol_rpc_types::ConfirmedBlock>;
-    type SendTransactionResult = MultiRpcResult<sol_rpc_types::Signature>;
-
     #[tokio::test]
     async fn should_do_nothing_if_no_pending_withdrawals() {
         init_state();
@@ -313,10 +308,10 @@ mod process_pending_withdrawals_tests {
         let events_before = EventsAssert::from_recorded();
 
         let runtime = TestCanisterRuntime::new()
-            .add_stub_response(GetSlotResult::Consistent(Ok(slot)))
-            .add_stub_response(GetBlockResult::Consistent(Ok(confirmed_block())))
+            .add_get_slot_response(slot)
+            .add_get_block_response(confirmed_block())
             .add_signature(tx_signature.into())
-            .add_stub_response(SendTransactionResult::Consistent(Ok(tx_signature.into())))
+            .add_send_transaction_response(tx_signature)
             .with_increasing_time();
 
         process_pending_withdrawals(runtime).await;
@@ -343,10 +338,10 @@ mod process_pending_withdrawals_tests {
 
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
-            .add_stub_response(GetSlotResult::Consistent(Ok(slot)))
-            .add_stub_response(GetBlockResult::Consistent(Ok(confirmed_block())))
+            .add_get_slot_response(slot)
+            .add_get_block_response(confirmed_block())
             .add_signature(tx_signature.into())
-            .add_stub_response(SendTransactionResult::Consistent(Ok(tx_signature.into())));
+            .add_send_transaction_response(tx_signature);
 
         process_pending_withdrawals(runtime).await;
 
@@ -364,15 +359,7 @@ mod process_pending_withdrawals_tests {
 
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
-            .add_stub_response(GetSlotResult::Consistent(Err(RpcError::ValidationError(
-                "slot unavailable".to_string(),
-            ))))
-            .add_stub_response(GetSlotResult::Consistent(Err(RpcError::ValidationError(
-                "slot unavailable".to_string(),
-            ))))
-            .add_stub_response(GetSlotResult::Consistent(Err(RpcError::ValidationError(
-                "slot unavailable".to_string(),
-            ))));
+            .add_n_get_slot_error(RpcError::ValidationError("slot unavailable".to_string()), 3);
 
         process_pending_withdrawals(runtime).await;
 
@@ -407,8 +394,8 @@ mod process_pending_withdrawals_tests {
 
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
-            .add_stub_response(GetSlotResult::Consistent(Ok(slot)))
-            .add_stub_response(GetBlockResult::Consistent(Ok(confirmed_block())))
+            .add_get_slot_response(slot)
+            .add_get_block_response(confirmed_block())
             .add_schnorr_signing_error(SignCallError::CallFailed(
                 CallRejected::with_rejection(4, "signing service unavailable".to_string()).into(),
             ));
@@ -450,12 +437,12 @@ mod process_pending_withdrawals_tests {
 
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
-            .add_stub_response(GetSlotResult::Consistent(Ok(slot)))
-            .add_stub_response(GetBlockResult::Consistent(Ok(confirmed_block())))
+            .add_get_slot_response(slot)
+            .add_get_block_response(confirmed_block())
             .add_signature(signature(1).into())
-            .add_stub_response(SendTransactionResult::Consistent(Ok(signature(1).into())))
+            .add_send_transaction_response(signature(1))
             .add_signature(signature(2).into())
-            .add_stub_response(SendTransactionResult::Consistent(Ok(signature(2).into())));
+            .add_send_transaction_response(signature(2));
 
         process_pending_withdrawals(runtime).await;
 
@@ -485,14 +472,12 @@ mod process_pending_withdrawals_tests {
         // Round 1: processes MAX_CONCURRENT_RPC_CALLS batches, 1 request remains → reschedule
         let mut runtime = TestCanisterRuntime::new()
             .with_increasing_time()
-            .add_stub_response(GetSlotResult::Consistent(Ok(slot)))
-            .add_stub_response(GetBlockResult::Consistent(Ok(confirmed_block())));
+            .add_get_slot_response(slot)
+            .add_get_block_response(confirmed_block());
         for i in 0..MAX_CONCURRENT_RPC_CALLS {
             runtime = runtime
                 .add_signature(signature(i + 1).into())
-                .add_stub_response(SendTransactionResult::Consistent(Ok(
-                    signature(i + 1).into()
-                )));
+                .add_send_transaction_response(signature(i + 1));
         }
 
         process_pending_withdrawals(runtime.clone()).await;
@@ -507,10 +492,10 @@ mod process_pending_withdrawals_tests {
         let last_sig = signature(num_requests);
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
-            .add_stub_response(GetSlotResult::Consistent(Ok(slot)))
-            .add_stub_response(GetBlockResult::Consistent(Ok(confirmed_block())))
+            .add_get_slot_response(slot)
+            .add_get_block_response(confirmed_block())
             .add_signature(last_sig.into())
-            .add_stub_response(SendTransactionResult::Consistent(Ok(last_sig.into())));
+            .add_send_transaction_response(last_sig);
 
         process_pending_withdrawals(runtime.clone()).await;
 

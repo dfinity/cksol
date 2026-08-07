@@ -1,8 +1,15 @@
 use super::{signer::MockSchnorrSigner, stubs::Stubs};
 use crate::{runtime::CanisterRuntime, signer::SchnorrSigner};
-use candid::{CandidType, Principal};
+use candid::{CandidType, Nat, Principal};
 use ic_canister_runtime::{IcError, Runtime, StubRuntime};
 use ic_cdk_management_canister::{SchnorrPublicKeyArgs, SchnorrPublicKeyResult, SignCallError};
+use icrc_ledger_types::icrc1::transfer::{BlockIndex, TransferError};
+use icrc_ledger_types::icrc2::transfer_from::TransferFromError;
+use sol_rpc_types::{
+    ConfirmedBlock, ConfirmedTransactionStatusWithSignature,
+    EncodedConfirmedTransactionWithStatusMeta, MultiRpcResult, RpcError,
+    Signature as SolRpcSignature, Slot, TransactionStatus,
+};
 use std::{
     future::Future,
     sync::{Arc, Mutex},
@@ -88,6 +95,115 @@ impl TestCanisterRuntime {
     pub fn with_schnorr_public_key(mut self, result: SchnorrPublicKeyResult) -> Self {
         self.schnorr_public_key_results = self.schnorr_public_key_results.add(result);
         self
+    }
+
+    // ── getTransaction ────────────────────────────────────────────────────────
+
+    /// Stubs the next `getTransaction` JSON-RPC call to return the given transaction.
+    pub fn add_get_transaction_response(
+        self,
+        tx: impl TryInto<EncodedConfirmedTransactionWithStatusMeta>,
+    ) -> Self {
+        self.add_stub_response(MultiRpcResult::<
+            Option<EncodedConfirmedTransactionWithStatusMeta>,
+        >::Consistent(Ok(Some(
+            tx.try_into().ok().expect("failed to convert transaction"),
+        ))))
+    }
+
+    /// Stubs the next `getTransaction` JSON-RPC call to return `None` (transaction not found).
+    pub fn add_get_transaction_not_found(self) -> Self {
+        self.add_stub_response(MultiRpcResult::<
+            Option<EncodedConfirmedTransactionWithStatusMeta>,
+        >::Consistent(Ok(None)))
+    }
+
+    /// Stubs `n` consecutive `getTransaction` calls to return `None`.
+    pub fn add_n_get_transaction_not_found(self, n: usize) -> Self {
+        (0..n).fold(self, |rt, _| rt.add_get_transaction_not_found())
+    }
+
+    // ── getSignaturesForAddress ───────────────────────────────────────────────
+
+    /// Stubs the next `getSignaturesForAddress` JSON-RPC call to return the given signatures.
+    pub fn add_get_signatures_for_address_response(
+        self,
+        sigs: Vec<ConfirmedTransactionStatusWithSignature>,
+    ) -> Self {
+        self.add_stub_response(
+            MultiRpcResult::<Vec<ConfirmedTransactionStatusWithSignature>>::Consistent(Ok(sigs)),
+        )
+    }
+
+    /// Stubs the next `getSignaturesForAddress` JSON-RPC call to return an error.
+    pub fn add_get_signatures_for_address_error(self, err: RpcError) -> Self {
+        self.add_stub_response(
+            MultiRpcResult::<Vec<ConfirmedTransactionStatusWithSignature>>::Consistent(Err(err)),
+        )
+    }
+
+    // ── getSlot ───────────────────────────────────────────────────────────────
+
+    /// Stubs the next `getSlot` JSON-RPC call to return the given slot.
+    pub fn add_get_slot_response(self, slot: Slot) -> Self {
+        self.add_stub_response(MultiRpcResult::<Slot>::Consistent(Ok(slot)))
+    }
+
+    /// Stubs the next `getSlot` JSON-RPC call to return an error.
+    pub fn add_get_slot_error(self, err: RpcError) -> Self {
+        self.add_stub_response(MultiRpcResult::<Slot>::Consistent(Err(err)))
+    }
+
+    /// Stubs `n` consecutive `getSlot` JSON-RPC calls to return the given error.
+    pub fn add_n_get_slot_error(self, err: RpcError, n: usize) -> Self {
+        (0..n).fold(self, |rt, _| rt.add_get_slot_error(err.clone()))
+    }
+
+    // ── getBlock ──────────────────────────────────────────────────────────────
+
+    /// Stubs the next `getBlock` JSON-RPC call to return the given block.
+    pub fn add_get_block_response(self, block: ConfirmedBlock) -> Self {
+        self.add_stub_response(MultiRpcResult::<ConfirmedBlock>::Consistent(Ok(block)))
+    }
+
+    // ── sendTransaction ───────────────────────────────────────────────────────
+
+    /// Stubs the next `sendTransaction` JSON-RPC call to return the given signature.
+    pub fn add_send_transaction_response(self, sig: impl Into<SolRpcSignature>) -> Self {
+        self.add_stub_response(MultiRpcResult::<SolRpcSignature>::Consistent(
+            Ok(sig.into()),
+        ))
+    }
+
+    // ── getSignatureStatuses ──────────────────────────────────────────────────
+
+    /// Stubs the next `getSignatureStatuses` JSON-RPC call to return the given statuses.
+    pub fn add_get_signature_statuses_response(
+        self,
+        statuses: Vec<Option<TransactionStatus>>,
+    ) -> Self {
+        self.add_stub_response(
+            MultiRpcResult::<Vec<Option<TransactionStatus>>>::Consistent(Ok(statuses)),
+        )
+    }
+
+    /// Stubs the next `getSignatureStatuses` JSON-RPC call to return an error.
+    pub fn add_get_signature_statuses_error(self, err: RpcError) -> Self {
+        self.add_stub_response(
+            MultiRpcResult::<Vec<Option<TransactionStatus>>>::Consistent(Err(err)),
+        )
+    }
+
+    // ── Ledger ────────────────────────────────────────────────────────────────
+
+    /// Stubs the next `icrc1_transfer` ledger call (used to mint ckSOL).
+    pub fn add_icrc1_transfer_response(self, result: Result<BlockIndex, TransferError>) -> Self {
+        self.add_stub_response(result)
+    }
+
+    /// Stubs the next `icrc2_transfer_from` ledger call (used to burn ckSOL when withdrawing).
+    pub fn add_icrc2_transfer_from_response(self, result: Result<Nat, TransferFromError>) -> Self {
+        self.add_stub_response(result)
     }
 
     #[cfg(any(test, not(feature = "canbench-rs")))]
