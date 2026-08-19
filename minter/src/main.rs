@@ -59,10 +59,12 @@ fn post_upgrade(args: Option<MinterArg>) {
     setup_timers();
 }
 
-#[ic_cdk::query]
-fn get_deposit_address(args: GetDepositAddressArgs) -> Address {
+#[ic_cdk::update]
+async fn get_deposit_address(args: GetDepositAddressArgs) -> Address {
     let account = assert_non_anonymous_account(args.owner, args.subaccount);
-    cksol_minter::address::get_deposit_address(&account).into()
+    cksol_minter::address::get_deposit_address(&IcCanisterRuntime::new(), &account)
+        .await
+        .into()
 }
 
 #[ic_cdk::update]

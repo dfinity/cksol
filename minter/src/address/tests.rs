@@ -84,24 +84,30 @@ mod lazy_schnorr_master_key {
 mod get_deposit_address_tests {
     use super::*;
 
-    #[test]
-    fn returns_address_when_key_is_cached() {
+    #[tokio::test]
+    async fn returns_address_when_key_is_cached() {
         init_state();
         init_schnorr_master_key();
+        let runtime = TestCanisterRuntime::new();
         let master_key = read_state(|s| s.minter_public_key().cloned().unwrap());
         let acc = account(1);
 
         assert_eq!(
-            get_deposit_address(&acc),
+            get_deposit_address(&runtime, &acc).await,
             account_address(&master_key, &acc),
         );
     }
 
-    #[test]
-    #[should_panic]
-    fn traps_when_key_is_not_cached() {
+    #[tokio::test]
+    async fn fetches_key_when_not_cached() {
         init_state();
-        get_deposit_address(&account(1));
+        let runtime = TestCanisterRuntime::new().with_schnorr_public_key(test_key_result());
+        let acc = account(1);
+
+        assert_eq!(
+            get_deposit_address(&runtime, &acc).await,
+            account_address(&test_key(), &acc),
+        );
     }
 }
 
