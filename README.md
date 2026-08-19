@@ -18,7 +18,8 @@ Each ckSOL is backed by exactly 1 SOL held by the ckSOL minter canister. ckSOL c
 ## Table of Contents
 
 - [How It Works](#how-it-works)
-  - [Deposit: SOL → ckSOL](#deposit-sol--cksol)
+  - [Deposit: SOL → ckSOL (Manual)](#deposit-sol--cksol-manual)
+  - [Deposit: SOL → ckSOL (Automatic)](#deposit-sol--cksol-automatic)
   - [Withdrawal: ckSOL → SOL](#withdrawal-cksol--sol)
 - [Architecture](#architecture)
 - [Deployment](#deployment)
@@ -41,7 +42,7 @@ The ckSOL token itself is implemented as an [ICRC-1/ICRC-2](https://github.com/d
 
 The minter controls one or more Solana addresses derived from a [threshold Schnorr over Ed25519](https://internetcomputer.org/docs/references/ic-interface-spec#ic-sign-with-schnorr) public key and a per-account derivation path. No private key ever exists in plaintext — Solana transactions are signed via the IC management canister's `sign_with_schnorr` API (`SchnorrAlgorithm::Ed25519`).
 
-### Deposit: SOL → ckSOL
+### Deposit: SOL → ckSOL (Manual)
 
 1. **Get a deposit address.** Call `get_deposit_address` on the minter with your ICP principal (and an optional subaccount). The minter returns a Solana address derived specifically for your account.
 
@@ -72,6 +73,42 @@ sequenceDiagram
     Minter->>Ledger: mint with icrc1_transfer(to=user, amount - deposit_fee)
     Ledger-->>Minter: block_index
     Minter-->>User: Minted { block_index, minted_amount }
+```
+
+### Deposit: SOL → ckSOL (Automatic)
+
+> [!WARNING]
+> The automatic deposit flow is a work in progress and not yet available on mainnet.
+
+The automatic deposit flow removes the need to call `process_deposit` manually. Instead, you register your account once and the minter monitors your deposit address and mints ckSOL automatically when SOL arrives.
+
+1. **Get a deposit address.** Call `get_deposit_address` as in the manual flow to obtain your personal Solana deposit address.
+
+2. **Register for monitoring.** Call `update_balance` on the minter with an optional subaccount. This registers your account (caller + subaccount) for automated deposit monitoring.
+
+3. **Send SOL.** Transfer SOL to your deposit address from any Solana wallet.
+
+4. **Automatic minting.** The minter periodically polls for new transactions on all monitored deposit addresses. When a valid deposit is found, it verifies the transaction and mints the corresponding ckSOL (minus the automated deposit fee) to your ICRC-1 account — no further action required on your part.
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant Minter as ckSOL Minter
+    participant Ledger as ckSOL Ledger
+    participant Solana
+
+    User->>Minter: get_deposit_address(subaccount)
+    Minter-->>User: deposit_address
+
+    User->>Minter: update_balance(subaccount)
+    Note over Minter: account registered for monitoring
+
+    User->>Solana: transfer SOL to deposit_address
+
+    Note over Minter,Solana: (minter polls automatically)
+    Minter->>Solana: poll for new transactions
+    Minter->>Ledger: mint with icrc1_transfer(to=user, amount - automated_deposit_fee)
+    Ledger-->>Minter: block_index
 ```
 
 ### Withdrawal: ckSOL → SOL
@@ -169,6 +206,18 @@ icp canister call -e prod cksol_minter get_deposit_address \
   '(record { owner = null; subaccount = null })' --query
 ```
 
+### Register for automatic deposit monitoring
+
+> [!WARNING]
+> The automatic deposit flow is a work in progress and not yet available on mainnet.
+
+Register your account (the calling principal and an optional subaccount) so the minter automatically monitors your deposit address and mints ckSOL when SOL arrives:
+
+```sh
+icp canister call -e prod cksol_minter update_balance \
+  '(record { subaccount = null })'
+```
+
 ### Notify the minter of a deposit
 
 After sending SOL to your deposit address, call `process_deposit` with the Solana transaction signature to trigger minting. Pass the same `owner`/`subaccount` used when calling `get_deposit_address` — when `owner` is `null`, it defaults to your calling identity's principal. Replace `<SIGNATURE>` with the base-58 encoded transaction signature.
@@ -221,11 +270,13 @@ icp canister call -e prod cksol_minter withdrawal_status \
 │   │   ├── address/         # Deposit address derivation
 │   │   ├── consolidate/     # Deposit consolidation logic
 │   │   ├── dashboard/       # HTTP dashboard
+│   │   ├── deposit/
+│   │   │   ├── manual/      # Manual deposit processing
+│   │   │   └── automatic/   # Automatic deposit processing (WIP)
 │   │   ├── lifecycle.rs     # Canister init/upgrade and event log
 │   │   ├── metrics.rs       # Prometheus metrics
 │   │   ├── monitor/         # Transaction monitoring
 │   │   ├── state/           # Minter state and event sourcing
-│   │   ├── deposit/manual/  # Manual deposit processing
 │   │   ├── withdraw/        # Withdrawal processing
 │   │   └── ...
 │   └── cksol_minter.did     # Candid interface
