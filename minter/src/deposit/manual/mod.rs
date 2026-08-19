@@ -8,7 +8,7 @@ use crate::{
     state::{
         Deposit,
         audit::process_event,
-        event::{DepositId, EventType},
+        event::{DepositId, DepositSource, EventType},
         mutate_state, read_state,
     },
 };
@@ -96,10 +96,11 @@ async fn try_accept_deposit<R: CanisterRuntime>(
     mutate_state(|state| {
         process_event(
             state,
-            EventType::AcceptedManualDeposit {
+            EventType::AcceptedDeposit {
                 deposit_id,
                 deposit_amount,
                 amount_to_mint,
+                source: DepositSource::Manual,
             },
             runtime,
         )

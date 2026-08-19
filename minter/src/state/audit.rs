@@ -27,10 +27,11 @@ fn apply_state_transition(state: &mut State, payload: &EventType, timestamp: u64
         EventType::AcceptedWithdrawalRequest(request) => {
             state.process_accepted_withdrawal(request, timestamp);
         }
-        EventType::AcceptedManualDeposit {
+        EventType::AcceptedDeposit {
             deposit_id,
             deposit_amount,
             amount_to_mint,
+            source: _,
         } => {
             state.process_accepted_deposit(deposit_id, deposit_amount, amount_to_mint);
         }

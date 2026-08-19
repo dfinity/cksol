@@ -2,7 +2,7 @@ use crate::{
     numeric::LedgerMintIndex,
     state::{
         SchnorrPublicKey, State,
-        event::{DepositId, Event, EventType},
+        event::{DepositId, DepositSource, Event, EventType},
         init_once_state, mutate_state,
     },
     storage::with_event_iter,
@@ -146,7 +146,7 @@ pub mod events {
         numeric::{LedgerBurnIndex, LedgerMintIndex},
         state::{
             audit::process_event,
-            event::{DepositId, EventType, TransactionPurpose, WithdrawalRequest},
+            event::{DepositId, DepositSource, EventType, TransactionPurpose, WithdrawalRequest},
             mutate_state,
         },
     };
@@ -173,10 +173,11 @@ pub mod events {
         mutate_state(|state| {
             process_event(
                 state,
-                EventType::AcceptedManualDeposit {
+                EventType::AcceptedDeposit {
                     deposit_id,
                     deposit_amount: amount,
                     amount_to_mint: amount - MANUAL_DEPOSIT_FEE,
+                    source: DepositSource::Manual,
                 },
                 &runtime(),
             )
@@ -342,7 +343,9 @@ pub mod events {
 pub mod arb {
     use crate::{
         numeric::{LedgerBurnIndex, LedgerMintIndex},
-        state::event::{DepositId, Event, EventType, TransactionPurpose, WithdrawalRequest},
+        state::event::{
+            DepositId, DepositSource, Event, EventType, TransactionPurpose, WithdrawalRequest,
+        },
     };
     use candid::Principal;
     use cksol_types_internal::{Ed25519KeyName, InitArgs, SolanaNetwork, UpgradeArgs};
@@ -541,15 +544,20 @@ pub mod arb {
             arb_init_args().prop_map(EventType::Init),
             arb_upgrade_args().prop_map(EventType::Upgrade),
             arb_withdrawal_request().prop_map(EventType::AcceptedWithdrawalRequest),
-            (arb_deposit_id(), any::<u64>(), any::<u64>()).prop_map(
-                |(deposit_id, deposit_amount, amount_to_mint)| {
-                    EventType::AcceptedManualDeposit {
+            (
+                arb_deposit_id(),
+                any::<u64>(),
+                any::<u64>(),
+                prop_oneof![Just(DepositSource::Manual), Just(DepositSource::Automatic),]
+            )
+                .prop_map(|(deposit_id, deposit_amount, amount_to_mint, source)| {
+                    EventType::AcceptedDeposit {
                         deposit_id,
                         deposit_amount,
                         amount_to_mint,
+                        source,
                     }
-                }
-            ),
+                }),
             arb_deposit_id().prop_map(EventType::QuarantinedDeposit),
             (arb_deposit_id(), arb_ledger_mint_index()).prop_map(
                 |(deposit_id, mint_block_index)| EventType::Minted {
@@ -632,10 +640,11 @@ pub mod deposit {
     }
 
     pub fn accepted_deposit_event() -> EventType {
-        EventType::AcceptedManualDeposit {
+        EventType::AcceptedDeposit {
             deposit_id: deposit_id(),
             deposit_amount: DEPOSIT_AMOUNT,
             amount_to_mint: DEPOSIT_AMOUNT - MANUAL_DEPOSIT_FEE,
+            source: DepositSource::Manual,
         }
     }
 

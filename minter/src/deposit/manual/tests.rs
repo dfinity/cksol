@@ -1,7 +1,7 @@
 use crate::{
     constants::GET_TRANSACTION_CYCLES,
     deposit::manual::process_deposit,
-    state::event::{DepositId, EventType},
+    state::event::{DepositId, DepositSource, EventType},
     storage::reset_events,
     test_fixtures::{
         BLOCK_INDEX, DEPOSIT_CONSOLIDATION_FEE, EventsAssert, MANUAL_DEPOSIT_FEE,
@@ -245,13 +245,14 @@ mod process_deposit_tests {
             );
 
             EventsAssert::from_recorded()
-                .expect_event_eq(EventType::AcceptedManualDeposit {
+                .expect_event_eq(EventType::AcceptedDeposit {
                     deposit_id: DepositId {
                         signature,
                         account: DEPOSITOR_ACCOUNT,
                     },
                     deposit_amount: DEPOSIT_AMOUNT,
                     amount_to_mint: DEPOSIT_AMOUNT - MANUAL_DEPOSIT_FEE,
+                    source: DepositSource::Manual,
                 })
                 .expect_event_eq(EventType::Minted {
                     deposit_id: DepositId {
@@ -397,10 +398,11 @@ mod process_deposit_tests {
                 account: ACCOUNTS[i],
             };
             events_assert = events_assert
-                .expect_event_eq(EventType::AcceptedManualDeposit {
+                .expect_event_eq(EventType::AcceptedDeposit {
                     deposit_id,
                     deposit_amount: DEPOSIT_AMOUNTS[i],
                     amount_to_mint: DEPOSIT_AMOUNTS[i] - MANUAL_DEPOSIT_FEE,
+                    source: DepositSource::Manual,
                 })
                 .expect_event_eq(EventType::Minted {
                     deposit_id,

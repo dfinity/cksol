@@ -104,7 +104,9 @@ fn withdrawal_status(args: WithdrawalStatusArgs) -> WithdrawalStatus {
 fn get_events(
     args: cksol_types_internal::event::GetEventsArgs,
 ) -> cksol_types_internal::event::GetEventsResult {
-    use cksol_minter::state::event::{Event, EventType, TransactionPurpose, VersionedMessage};
+    use cksol_minter::state::event::{
+        DepositSource, Event, EventType, TransactionPurpose, VersionedMessage,
+    };
     use cksol_types_internal::event;
 
     const MAX_EVENTS_PER_RESPONSE: u64 = 2_000;
@@ -129,15 +131,20 @@ fn get_events(
                     amount_to_transfer: request.amount_to_transfer,
                 }
             }
-            EventType::AcceptedManualDeposit {
+            EventType::AcceptedDeposit {
                 deposit_id,
                 deposit_amount,
                 amount_to_mint,
-            } => event::EventType::AcceptedManualDeposit {
+                source,
+            } => event::EventType::AcceptedDeposit {
                 signature: deposit_id.signature.into(),
                 account: deposit_id.account,
                 deposit_amount,
                 amount_to_mint,
+                source: match source {
+                    DepositSource::Manual => event::DepositSource::Manual,
+                    DepositSource::Automatic => event::DepositSource::Automatic,
+                },
             },
             EventType::Minted {
                 deposit_id,
