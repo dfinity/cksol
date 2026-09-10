@@ -206,27 +206,31 @@ The flow is depicted in the following figure (fee refers to the deposit fee).
 ```mermaid
 sequenceDiagram
     actor User
-    participant Minter as ckSOL minter
+    participant Solana as Solana Network
     participant RPC as SOL RPC canister
-    participant Ledger as ckSOL ledger
+    participant Minter as ckSOL Minter
+    participant Ledger as ckSOL Ledger
 
-    User->>Minter: update_balance(subaccount)
-    Minter-->>User: Ok
-    Note over Minter: Cache account and derived deposit address,<br/>start timer
+    User->>+Minter: get_deposit_address(principal, subaccount)
+    Minter-->>-User: sol_address
+    User->>+Solana: transfer(sol_address, amount)
+    Solana-->>-User: signature
+    User->>+Minter: update_balance(subaccount)
+    Minter-->>-User: Ok
 
-    loop Timer, with exponential back-off (at most MAX_GET_SIGNATURES_CALLS)
-        Minter->>RPC: getSignaturesForAddress(deposit address)
-        RPC-->>Minter: signatures
-        Note over Minter: Filter out failed and known signatures
-        opt New signatures found
-            Minter->>RPC: getTransaction(signature)
-            RPC-->>Minter: transaction
-            Note over Minter: Sum transfers to deposit address
-            Minter->>Ledger: icrc1_transfer(to: user account, amount - fee)
-            Ledger-->>Minter: block index
-            Note over Minter: Stop timer
-        end
-    end
+    Note over Minter: ⏱️ Timer, with exponential back-off
+    activate Minter
+    Minter->>+RPC: getSignaturesForAddress(sol_address)
+    RPC->>+Solana: getSignaturesForAddress(sol_address)
+    Solana-->>-RPC: [signature]
+    RPC-->>-Minter: [signature]
+    Minter->>+RPC: getTransaction(signature)
+    RPC->>+Solana: getTransaction(signature)
+    Solana-->>-RPC: transaction
+    RPC-->>-Minter: transaction
+    Minter->>+Ledger: icrc1_transfer(cksol_minter, principal, subaccount, amount - fee)
+    Ledger-->>-Minter: block index
+    deactivate Minter
 ```
 
 The user's account is cached, together with the derived Solana address, so that the function called on a timer to check for newly arrived funds can access the required information. The timer mechanism works as follows. After an initial waiting time, the timer executes for the first time.
