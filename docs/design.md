@@ -386,30 +386,14 @@ sequenceDiagram
 
     User->>+Ledger: icrc2_approve(cksol_minter, amount)
     Ledger-->>-User: block index
-    User->>+Minter: withdraw(subaccount, address, amount)
+    User->>+Minter: withdraw(subaccount, dest_addr, amount)
     Minter->>+Ledger: icrc2_transfer_from(user account, cksol_minter, amount)
     Note over Ledger: Burn (cksol_minter is the minting account)
     Ledger-->>-Minter: burn block index
     Note over Minter: Queue retrieval request
     Minter-->>-User: burn block index
 
-    Note over Minter: Timer fires (every 10 seconds)
-    activate Minter
-    Note over Minter: Batch up to 10 retrieval requests
-    Minter->>+RPC: getSlot
-    RPC->>+Solana: getSlot
-    Solana-->>-RPC: slot
-    RPC-->>-Minter: slot
-    Minter->>+RPC: getBlock(slot)
-    RPC->>+Solana: getBlock(slot)
-    Solana-->>-RPC: block hash
-    RPC-->>-Minter: block hash
-    Note over Minter: Build and sign transaction
-    Minter->>+RPC: sendTransaction(transaction)
-    RPC->>+Solana: sendTransaction(transaction)
-    Solana-->>-RPC: signature
-    RPC-->>-Minter: signature
-    deactivate Minter
+    Note over Solana,Minter: ⏱️ Transaction submission flow
 ```
 
 Since Solana has a high block rate, the timer should execute more frequently compared to ckBTC. The proposed interval is **10 seconds**. A shorter interval between calls implies that there is a lower chance of retrieval requests being batched together; however, it is preferable to have smaller batches, as transactions are cheap and it provides a better user experience.
