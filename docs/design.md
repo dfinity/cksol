@@ -428,16 +428,18 @@ If there are transactions that are not found after 150 blocks, i.e., they did no
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Submitted: transaction sent
-    Submitted --> Succeeded: finalized without error
-    Submitted --> Failed: finalized with error
-    Submitted --> PendingResubmission: expired
-    PendingResubmission --> Submitted: resubmitted
-    Succeeded: Succeeded (transaction ID stored)
-    Failed: Failed (whole transaction stored)
-    PendingResubmission: Pending resubmission (not found after 150 blocks)
-    Succeeded --> [*]
-    Failed --> [*]
+    Withdrawal --> Submitted
+    Consolidation --> Submitted
+    Submission --> Submitted
+    Submitted --> Succeeded: confirmation_status = finalized and err = null
+    Submitted --> Failed: confirmation_status = finalized and err != null
+    Submitted --> PendingResubmission: transaction expired
+    PendingResubmission --> Submission
+
+    Submission: ⏱️ Transaction submission flow
+    Succeeded: Succeeded (store transaction_id)
+    Failed: Failed (store whole transaction)
+    PendingResubmission: Pending resubmission
 ```
 
 The withdrawal and consolidation flows result in the submission of a transaction, which is then in the `Submitted` state. The status of submitted transactions is checked on a timer as outlined above. If a transaction reaches the confirmation status `finalized`, there are two cases: If the transaction was finalized successfully, i.e., without errors, the transaction transitions to the state `Succeeded` and its ID is stored permanently. If there was an error, the transaction transitions to the state `Failed` and is stored in its entirety so that it can be analyzed what happened. Ideally, no transaction ever ends up in this state. However, it is possible for transactions to fail, for example by attempting to withdraw SOL to a program account, which is not allowed. As there is no reimbursement flow, the user's funds would be stuck in this case. Storing the whole failed transaction ensures that the funds are not lost and appropriate actions may be taken when such transactions are encountered.
