@@ -288,25 +288,21 @@ The manual flow is depicted in the following figure.
 ```mermaid
 sequenceDiagram
     actor User
-    participant Minter as ckSOL minter
+    participant Solana as Solana Network
     participant RPC as SOL RPC canister
-    participant Ledger as ckSOL ledger
+    participant Minter as ckSOL Minter
+    participant Ledger as ckSOL Ledger
 
-    User->>Minter: process_deposit(owner, subaccount, signature) + 1T cycles
-    Note over Minter: Accept cycles
-    alt Deposit already known and completed
-        Minter-->>User: Minted { block_index, minted_amount }
-    else Deposit already known but not completed
-        Note over Minter: Skip SOL RPC call
-    else Deposit unknown
-        Minter->>RPC: getTransaction(signature) + cycles
-        RPC-->>Minter: transaction + refunded cycles
-        Note over Minter: Validate transfer to deposit address,<br/>record deposit with completed = false
-    end
-    Minter->>Ledger: icrc1_transfer(to: user account, amount - manual deposit fee)
+    User->>Solana: transfer(sol_address, amount)
+    Solana-->>User: signature
+    User->>Minter: process_deposit(principal, subaccount, signature) + cycles
+    Minter->>RPC: getTransaction(signature)
+    RPC->>Solana: getTransaction(signature)
+    Solana-->>RPC: transaction
+    RPC-->>Minter: transaction
+    Minter->>Ledger: icrc1_transfer(cksol_minter, principal, subaccount, amount - fee)
     Ledger-->>Minter: block index
-    Note over Minter: Set completed = true,<br/>refund unused cycles
-    Minter-->>User: Minted { block_index, minted_amount }
+    Minter-->>User: Ok(amount - fee, block index)
 ```
 
 The manual flow is triggered by calling `process_deposit` with the user's account (principal ID and subaccount) and the signature identifying the transaction as parameters. This endpoint requires cycles to be attached. As specified in [Section 3.3.2](#332-cksol-minter-fees), **1T cycles** must be attached to the call.
