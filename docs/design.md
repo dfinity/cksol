@@ -378,24 +378,37 @@ When the timer strikes, up to 10 retrieval requests are batched into a single tr
 
 ```mermaid
 sequenceDiagram
-    actor User
-    participant Ledger as ckSOL ledger
-    participant Minter as ckSOL minter
+    participant Solana as Solana Network
     participant RPC as SOL RPC canister
+    participant Minter as ckSOL Minter
+    participant Ledger as ckSOL Ledger
 
-    User->>Ledger: icrc2_approve(spender: minter, amount)
-    Ledger-->>User: block index
-    User->>Minter: withdraw(subaccount, address, amount)
-    Minter->>Ledger: icrc2_transfer_from(from: user account, to: minter account, amount)
-    Note over Ledger: Burn (minter account is the minting account)
-    Ledger-->>Minter: burn block index
-    Note over Minter: Queue retrieval request
-    Minter-->>User: burn block index
+    Note over Ledger: User approved the ckSOL Minter via icrc2_approve
+    Note over Minter: User calls withdraw(subaccount, address, amount)
+    activate Minter
+    Minter->>+Ledger: icrc2_transfer_from(user account, cksol_minter, amount)
+    Note over Ledger: Burn (cksol_minter is the minting account)
+    Ledger-->>-Minter: burn block index
+    Note over Minter: Queue retrieval request,<br/>return burn block index to the user
+    deactivate Minter
 
     Note over Minter: Timer fires (every 10 seconds)
+    activate Minter
     Note over Minter: Batch up to 10 retrieval requests
-    Minter->>RPC: Transaction submission flow (getSlot, getBlock, sign, sendTransaction)
-    RPC-->>Minter: signature
+    Minter->>+RPC: getSlot
+    RPC->>+Solana: getSlot
+    Solana-->>-RPC: slot
+    RPC-->>-Minter: slot
+    Minter->>+RPC: getBlock(slot)
+    RPC->>+Solana: getBlock(slot)
+    Solana-->>-RPC: block hash
+    RPC-->>-Minter: block hash
+    Note over Minter: Build and sign transaction
+    Minter->>+RPC: sendTransaction(transaction)
+    RPC->>+Solana: sendTransaction(transaction)
+    Solana-->>-RPC: signature
+    RPC-->>-Minter: signature
+    deactivate Minter
 ```
 
 Since Solana has a high block rate, the timer should execute more frequently compared to ckBTC. The proposed interval is **10 seconds**. A shorter interval between calls implies that there is a lower chance of retrieval requests being batched together; however, it is preferable to have smaller batches, as transactions are cheap and it provides a better user experience.
