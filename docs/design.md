@@ -408,15 +408,18 @@ The statuses of (consolidation or withdrawal) transactions are checked on a time
 
 ```mermaid
 sequenceDiagram
-    participant Minter as ckSOL minter
+    participant Solana as Solana Network
     participant RPC as SOL RPC canister
+    participant Minter as ckSOL Minter
 
-    Note over Minter: Timer fires
-    Minter->>RPC: getSlot
-    RPC-->>Minter: current slot
-    Minter->>RPC: getSignatureStatuses(submitted transaction signatures)
-    RPC-->>Minter: status per signature (null, processed, confirmed, finalized)
-    Note over Minter: finalized without error → Succeeded<br/>finalized with error → Failed<br/>null and block hash older than 150 blocks → Pending resubmission
+    Note over Minter: ⏱️ Timer
+    activate Minter
+    Minter->>+RPC: getSignatureStatuses([signature])
+    RPC->>+Solana: getSignatureStatuses([signature])
+    Solana-->>-RPC: [confirmation_status]
+    RPC-->>-Minter: [confirmation_status]
+    Note over Minter: confirmation_status ∈ {processed, confirmed, finalized}
+    deactivate Minter
 ```
 
 It is possible that a transaction is not accepted, i.e., it is not found in any of the statuses listed above. Since ckSOL tokens are not reimbursed, the transaction must be resubmitted until it is confirmed; however, care has to be taken to ensure that there is no double spending. Solana transactions refer to a recent block hash. The block hash may not be more than 150 blocks in the past, which corresponds to roughly 90 seconds.
