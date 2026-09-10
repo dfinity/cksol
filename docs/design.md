@@ -213,12 +213,22 @@ sequenceDiagram
 
     User->>+Minter: get_deposit_address(principal, subaccount)
     Minter-->>-User: sol_address
-    User->>+Solana: transfer(sol_address, amount)
-    Solana-->>-User: signature
     User->>+Minter: update_balance(subaccount)
     Minter-->>-User: Ok
 
-    Note over Minter: ⏱️ Timer, with exponential back-off
+    Note over Minter: ⏱️ Timer
+    activate Minter
+    Minter->>+RPC: getSignaturesForAddress(sol_address)
+    RPC->>+Solana: getSignaturesForAddress(sol_address)
+    Solana-->>-RPC: []
+    RPC-->>-Minter: []
+    Note over Minter: No new signature, reschedule timer<br/>with exponential back-off
+    deactivate Minter
+
+    User->>+Solana: transfer(sol_address, amount)
+    Solana-->>-User: signature
+
+    Note over Minter: ⏱️ Timer
     activate Minter
     Minter->>+RPC: getSignaturesForAddress(sol_address)
     RPC->>+Solana: getSignaturesForAddress(sol_address)
