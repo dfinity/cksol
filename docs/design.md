@@ -587,7 +587,7 @@ None of the entries in the list correspond to a Solana address. Therefore, imple
 
 ### 3.5. Events
 
-The ckETH minter captures all internal state changes in [events](https://github.com/dfinity/ic/blob/master/rs/ethereum/cketh/minter/src/state/event.rs). The ckSOL minter also follows this [event-based design](https://github.com/dfinity/cksol/blob/main/minter/src/state/event.rs). Since Solana has a much shorter block time than Ethereum, the potentially faster growth of the event log must be considered. In particular, the following critical questions need to be addressed: Is there a risk that the ckSOL minter cannot be upgraded anymore because the full event log can no longer be replayed? Is there a risk that the event log will not fit into stable memory anymore?
+The ckETH minter captures all internal state changes in [events](https://github.com/dfinity/ic/blob/master/rs/ethereum/cketh/minter/src/state/event.rs). The ckSOL minter also follows this [event-based design](../minter/src/state/event.rs). Since Solana has a much shorter block time than Ethereum, the potentially faster growth of the event log must be considered. In particular, the following critical questions need to be addressed: Is there a risk that the ckSOL minter cannot be upgraded anymore because the full event log can no longer be replayed? Is there a risk that the event log will not fit into stable memory anymore?
 
 The event types of ckETH and ckSOL are quite similar. Due to this similarity, and the lack of concrete numbers for ckSOL, we conjecture that the size of the events and the number of instructions required to process them is roughly the same. The ckETH minter was launched about 800 days ago and has since produced 49,263 recorded events, i.e., there were roughly **2.6 events per hour** since launch. The total size of the event log is 16 MiB, i.e., the average event size is **342 bytes**. On average, executing an event costs about **20,000 instructions**.
 
@@ -620,9 +620,9 @@ The authoritative interface is the Candid file [`minter/cksol_minter.did`](../mi
 In addition to the product-security review of the design and the code, the team will also conduct extensive testing of the ckSOL minter. The different test scenarios are collected here:
 
 1. Withdraw SOL to a Solana program that always fails.
-    1. ✅ Attempts to send SOL to a Solana program always fail (no ckSOL is minted).
+    1. ✅ Attempts to send SOL to a Solana program always fail (no SOL is transferred).
 2. Mint ckSOL using multiple transfers all to the same destination account.
     1. ✅ [Sample transaction](https://explorer.solana.com/tx/3AfVrhtTMZqkWPUktYjsVuzpCc2T15doU6S6UPGMJhBgjj4Gp5qNyM2F4H52vb3SDvGXBEfhUTGnDuKVGKKAtKyG?cluster=devnet) sending the same amount from different accounts to a ckSOL minter controlled address. The mint happened at block index 19.
     2. ✅ [Sample transaction](https://explorer.solana.com/tx/4Er3GnXCJvesEmQLB24AKxY8ZUR2JzRVvZhPgYj7ygW1wNXEKDudZ4hNL9MP1tMNuRicMqeQqgdiqHJ23yekw4wU?cluster=devnet) sending different amounts to the same recipient. The mint happened at block index 20.
-    3. ✅ [Sample transaction](https://explorer.solana.com/tx/qo9AnFCRdAPr4dZjiJ7CVpSKa3APVgGGLQ8bPVhRr4dqsCsQCvHsUnVbRad2vHTLtUvKDyxfWkoFFAxZKrtSsDE?cluster=devnet) sending half of the minimum deposit amount in two separate transfers each, resulting in a total amount of exactly the minimum deposit fee. The mint happened at block index 54.
+    3. ✅ [Sample transaction](https://explorer.solana.com/tx/qo9AnFCRdAPr4dZjiJ7CVpSKa3APVgGGLQ8bPVhRr4dqsCsQCvHsUnVbRad2vHTLtUvKDyxfWkoFFAxZKrtSsDE?cluster=devnet) sending half of the minimum deposit amount in two separate transfers each, resulting in a total amount of exactly the minimum deposit amount. The mint happened at block index 54.
 3. Mint ckSOL using inner instructions.
