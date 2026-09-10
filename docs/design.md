@@ -293,16 +293,16 @@ sequenceDiagram
     participant Minter as ckSOL Minter
     participant Ledger as ckSOL Ledger
 
-    User->>Solana: transfer(sol_address, amount)
-    Solana-->>User: signature
-    User->>Minter: process_deposit(principal, subaccount, signature) + cycles
-    Minter->>RPC: getTransaction(signature)
-    RPC->>Solana: getTransaction(signature)
-    Solana-->>RPC: transaction
-    RPC-->>Minter: transaction
-    Minter->>Ledger: icrc1_transfer(cksol_minter, principal, subaccount, amount - fee)
-    Ledger-->>Minter: block index
-    Minter-->>User: Ok(amount - fee, block index)
+    User->>+Solana: transfer(sol_address, amount)
+    Solana-->>-User: signature
+    User->>+Minter: process_deposit(principal, subaccount, signature) + cycles
+    Minter->>+RPC: getTransaction(signature)
+    RPC->>+Solana: getTransaction(signature)
+    Solana-->>-RPC: transaction
+    RPC-->>-Minter: transaction
+    Minter->>+Ledger: icrc1_transfer(cksol_minter, principal, subaccount, amount - fee)
+    Ledger-->>-Minter: block index
+    Minter-->>-User: Ok(amount - fee, block index)
 ```
 
 The manual flow is triggered by calling `process_deposit` with the user's account (principal ID and subaccount) and the signature identifying the transaction as parameters. This endpoint requires cycles to be attached. As specified in [Section 3.3.2](#332-cksol-minter-fees), **1T cycles** must be attached to the call.
