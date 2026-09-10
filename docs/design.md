@@ -328,23 +328,32 @@ Since users deposit funds in dedicated deposit addresses, the ckSOL minter's fun
 
 ```mermaid
 sequenceDiagram
-    participant Minter as ckSOL minter
+    participant Solana as Solana Network
     participant RPC as SOL RPC canister
-    participant Mgmt as IC management canister
+    participant Minter as ckSOL Minter
+    participant Signer as Threshold Signing
 
     Note over Minter: Timer fires
-    Minter->>RPC: getSlot
-    RPC-->>Minter: slot
-    Minter->>RPC: getBlock(slot, transactionDetails = null)
-    RPC-->>Minter: block hash
+    activate Minter
+    Minter->>+RPC: getSlot
+    RPC->>+Solana: getSlot
+    Solana-->>-RPC: slot
+    RPC-->>-Minter: slot
+    Minter->>+RPC: getBlock(slot)
+    RPC->>+Solana: getBlock(slot)
+    Solana-->>-RPC: block hash
+    RPC-->>-Minter: block hash
     Note over Minter: Build transaction with recent block hash
     loop For each transfer in the transaction
-        Minter->>Mgmt: sign_with_schnorr(Ed25519, derivation path)
-        Mgmt-->>Minter: signature
+        Minter->>+Signer: sign_with_schnorr(Ed25519, derivation path, message)
+        Signer-->>-Minter: signature
     end
     Note over Minter: Serialize signed transaction
-    Minter->>RPC: sendTransaction(transaction)
-    RPC-->>Minter: signature
+    Minter->>+RPC: sendTransaction(transaction)
+    RPC->>+Solana: sendTransaction(transaction)
+    Solana-->>-RPC: signature
+    RPC-->>-Minter: signature
+    deactivate Minter
 ```
 
 All transactions are created on a timer. Since a transaction must contain a recent block hash, such a block hash must be obtained first: A `getSlot` call is used to get a recent slot, followed by a `getBlock` call to retrieve block details, in particular the block hash, for the slot received in the first step. Note that it is possible that there is no block for a certain slot, in which case `getSlot` needs to be called again, followed by another call to `getBlock`. The figure only shows the happy path of one call each. Given a recent block hash, the transaction is built, obtaining an EdDSA signature for each transfer to be made within that transaction. Once the transaction is signed and serialized, it is sent to the SOL RPC canister, which forwards it to the RPC providers.
