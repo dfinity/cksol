@@ -21,6 +21,26 @@ The general model is that the ckSOL minter needs to receive SOL *before* it mint
 
 In addition to performing the mint and burn transactions, the ckSOL ledger is responsible for keeping account balances and for transferring ckSOL between accounts. As mentioned before, the ckSOL ledger must be ICRC-1, ICRC-2, and ICRC-3 compliant. As the ckSOL ledger is a standard ICRC ledger, the following sections are concerned with the design of the ckSOL minter.
 
+The following figure summarizes how the user, the ckSOL minter, the ckSOL ledger, and the SOL RPC canister interact. Each interaction is described in detail in [Section 3](#3-technical-details).
+
+```mermaid
+graph LR
+    User((User))
+    subgraph IC["Internet Computer"]
+        Minter["ckSOL minter"]
+        Ledger["ckSOL ledger suite<br/>(ledger, index, archives)"]
+        RPC["SOL RPC canister"]
+    end
+    Solana["Solana"]
+
+    User -- "get_deposit_address / process_deposit / withdraw" --> Minter
+    User -- "icrc1_transfer / icrc2_approve" --> Ledger
+    Minter -- "icrc1_transfer (mint)<br/>icrc2_transfer_from (burn)" --> Ledger
+    Minter -- "JSON-RPC requests" --> RPC
+    RPC -- "HTTPS outcalls" --> Solana
+    User -- "transfer SOL" --> Solana
+```
+
 ## 3. Technical Details
 
 The ckSOL minter interacts with the Solana blockchain via the [SOL RPC canister](https://github.com/dfinity/sol-rpc-canister). The ckSOL minter uses the following subset of endpoints:
