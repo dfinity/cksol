@@ -283,10 +283,16 @@ cargo build
 
 The test suite has two parts:
 
-**Unit tests and PocketIC integration tests** — no external dependencies:
+**Unit tests** — no external dependencies:
 
 ```sh
 cargo test --lib
+```
+
+**PocketIC integration tests** — require the minter Wasm, which is read from `wasms/cksol_minter.wasm.gz` (written by `./scripts/docker-build`), then from `cksol_minter.wasm.gz` in the repository root (written by `./scripts/build --cksol_minter`), unless the `CKSOL_MINTER_WASM_PATH` environment variable points to it:
+
+```sh
+./scripts/build --cksol_minter
 cargo test -p cksol-int-tests --test tests
 ```
 

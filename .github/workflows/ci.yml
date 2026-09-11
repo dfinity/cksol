@@ -96,7 +96,7 @@ jobs:
         with:
           name: cksol_minter.wasm.gz
 
-      - name: 'Set CKSOL_MINTER_WASM_PATH for load_wasm'
+      - name: 'Set CKSOL_MINTER_WASM_PATH'
         run: |
           echo "CKSOL_MINTER_WASM_PATH=$GITHUB_WORKSPACE/cksol_minter.wasm.gz" >> "$GITHUB_ENV"
 
