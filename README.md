@@ -260,7 +260,6 @@ environments stay in sync.
 Additionally:
 
 - [`ic-wasm`](https://github.com/dfinity/ic-wasm) version 0.3.5 — used for Wasm post-processing. Install via `./scripts/bootstrap`.
-- `jq` — used by `./scripts/build` to generate Wasm metadata.
 - `gzip` — used by `./scripts/build` to compress the output Wasm.
 
 ### Building
