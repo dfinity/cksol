@@ -260,7 +260,6 @@ environments stay in sync.
 Additionally:
 
 - [`ic-wasm`](https://github.com/dfinity/ic-wasm) version 0.3.5 — used for Wasm post-processing. Install via `./scripts/bootstrap`.
-- `jq` — used by `./scripts/build` to generate Wasm metadata.
 - `gzip` — used by `./scripts/build` to compress the output Wasm.
 
 ### Building
@@ -283,10 +282,16 @@ cargo build
 
 The test suite has two parts:
 
-**Unit tests and PocketIC integration tests** — no external dependencies:
+**Unit tests** — no external dependencies:
 
 ```sh
 cargo test --lib
+```
+
+**PocketIC integration tests** — require the minter Wasm, which is read from `wasms/cksol_minter.wasm.gz` (written by `./scripts/docker-build`), then from `cksol_minter.wasm.gz` in the repository root (written by `./scripts/build --cksol_minter`), unless the `CKSOL_MINTER_WASM_PATH` environment variable points to it:
+
+```sh
+./scripts/build --cksol_minter
 cargo test -p cksol-int-tests --test tests
 ```
 
