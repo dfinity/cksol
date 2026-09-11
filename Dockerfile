@@ -11,9 +11,20 @@ FROM --platform=linux/amd64 rust:1.93.0-bookworm@sha256:d0a4aa3ca2e1088ac0c81690
 
 ENV TZ=UTC
 
+# Pin apt to the Debian snapshot that the base image was built from (the
+# timestamp is documented in the image's /etc/apt/sources.list.d/debian.sources),
+# so that the installed packages do not drift with the live mirrors.
+# Bump DEBIAN_SNAPSHOT together with the base image.
+ARG DEBIAN_SNAPSHOT=20260202T000000Z
 # clang is needed to compile the C sources of zstd-sys for the wasm32 target.
 RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone && \
-    apt-get -yq update && \
+    sed -i \
+        -e "s|^URIs: http://deb.debian.org/debian-security$|URIs: https://snapshot.debian.org/archive/debian-security/${DEBIAN_SNAPSHOT}|" \
+        -e "s|^URIs: http://deb.debian.org/debian$|URIs: https://snapshot.debian.org/archive/debian/${DEBIAN_SNAPSHOT}|" \
+        /etc/apt/sources.list.d/debian.sources && \
+    grep -q "snapshot.debian.org/archive/debian/" /etc/apt/sources.list.d/debian.sources && \
+    grep -q "snapshot.debian.org/archive/debian-security/" /etc/apt/sources.list.d/debian.sources && \
+    apt-get -yq -o Acquire::Check-Valid-Until=false update && \
     apt-get -yqq install --no-install-recommends clang && \
     rm -rf /var/lib/apt/lists/*
 
