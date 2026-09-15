@@ -131,11 +131,14 @@ pub enum ProcessDepositError {
 }
 
 /// Arguments for a request to the `update_balance` ckSOL minter endpoint.
-#[derive(Clone, Eq, PartialEq, Debug, Default, CandidType, Deserialize, Serialize)]
+#[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize, Serialize)]
 pub struct UpdateBalanceArgs {
-    /// The subaccount to register for automated deposit monitoring.
+    /// The principal to register for automated deposit monitoring.
     ///
-    /// The owner is always the caller.
+    /// If not set, defaults to the caller's principal.
+    /// The resolved owner must be a non-anonymous principal.
+    pub owner: Option<Principal>,
+    /// The subaccount to register for automated deposit monitoring.
     pub subaccount: Option<Subaccount>,
 }
 
