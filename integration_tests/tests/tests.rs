@@ -579,10 +579,19 @@ mod withdrawal_tests {
         let first_call = minter.submit_withdraw(args.clone()).await;
         let second_call = minter.submit_withdraw(args).await;
 
-        assert_matches!(first_call.await_response().await, Ok(WithdrawalOk { .. }));
-        assert_matches!(
+        let outcomes = (
+            first_call.await_response().await,
             second_call.await_response().await,
-            Err(WithdrawalError::AlreadyProcessing)
+        );
+        assert_matches!(
+            outcomes,
+            (
+                Ok(WithdrawalOk { .. }),
+                Err(WithdrawalError::AlreadyProcessing)
+            ) | (
+                Err(WithdrawalError::AlreadyProcessing),
+                Ok(WithdrawalOk { .. })
+            )
         );
 
         setup.drop().await;
@@ -811,13 +820,19 @@ mod process_deposit_tests {
             .execute_http_mocks(MockBuilder::new().get_deposit_transaction().build())
             .await;
 
-        assert_matches!(
+        let outcomes = (
             first_call.await_response().await,
-            Ok(DepositStatus::Minted { .. })
+            second_call.await_response().await,
         );
         assert_matches!(
-            second_call.await_response().await,
-            Err(ProcessDepositError::AlreadyProcessing)
+            outcomes,
+            (
+                Ok(DepositStatus::Minted { .. }),
+                Err(ProcessDepositError::AlreadyProcessing)
+            ) | (
+                Err(ProcessDepositError::AlreadyProcessing),
+                Ok(DepositStatus::Minted { .. })
+            )
         );
 
         setup.drop().await;

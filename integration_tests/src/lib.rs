@@ -600,7 +600,8 @@ pub struct Canister<'a> {
 /// An update call whose ingress message has been submitted but not yet executed.
 ///
 /// Submitting several calls before awaiting any of them puts all of their ingress
-/// messages into the same round, so they execute in submission order.
+/// messages into the same round, so they are guaranteed to execute concurrently.
+/// Their order within that round is unspecified.
 pub struct PendingCall<'a, Out> {
     env: &'a PocketIc,
     message_id: RawMessageId,
