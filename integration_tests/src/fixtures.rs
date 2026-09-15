@@ -1,20 +1,16 @@
 use crate::Setup;
-use async_trait::async_trait;
 use cksol_types::{GetDepositAddressArgs, ProcessDepositArgs, Signature};
 use ic_pocket_canister_runtime::{
-    ExecuteHttpOutcallMocks, JsonRpcRequestMatcher, JsonRpcResponse, MockHttpOutcalls,
-    MockHttpOutcallsBuilder,
+    JsonRpcRequestMatcher, JsonRpcResponse, MockHttpOutcalls, MockHttpOutcallsBuilder,
 };
 use icrc_ledger_types::{
     icrc::generic_value::{ICRC3Value, Value},
     icrc1::account::Account,
 };
-use pocket_ic::nonblocking::PocketIc;
 use serde_json::json;
 use sol_rpc_types::Lamport;
 use solana_address::{Address, address};
-use std::{str::FromStr, sync::Arc};
-use tokio::sync::Mutex;
+use std::str::FromStr;
 
 pub const DEFAULT_CALLER_ACCOUNT: Account = Account {
     owner: Setup::DEFAULT_CALLER,
@@ -62,31 +58,6 @@ pub fn get_memo(block: ICRC3Value) -> Vec<u8> {
     let memo = tx_map.get("memo").expect("should have a memo");
     let memo_blob = memo.clone().as_blob().expect("memo should be a blob");
     memo_blob.into_vec()
-}
-
-/// This wrapper around [`MockHttpOutcalls`] allows different instances of [`PocketIcRuntime`]
-/// to share the same mocks. This is useful in tests where several requests are made concurrently,
-/// but only one of them results in HTTP outcalls being executed.
-///
-/// [`PocketIcRuntime`]: ic_pocket_canister_runtime::PocketIcRuntime
-#[derive(Clone)]
-pub struct SharedMockHttpOutcalls(Arc<Mutex<MockHttpOutcalls>>);
-
-impl SharedMockHttpOutcalls {
-    pub fn new(mocks: MockHttpOutcalls) -> Self {
-        Self(Arc::new(Mutex::new(mocks)))
-    }
-}
-
-#[async_trait]
-impl ExecuteHttpOutcallMocks for SharedMockHttpOutcalls {
-    async fn execute_http_outcall_mocks(&mut self, runtime: &PocketIc) -> () {
-        self.0
-            .lock()
-            .await
-            .execute_http_outcall_mocks(runtime)
-            .await
-    }
 }
 
 /// Thin wrapper around [`MockHttpOutcallsBuilder`] that auto-increments JSON-RPC IDs

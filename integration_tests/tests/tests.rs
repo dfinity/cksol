@@ -5,9 +5,8 @@ use cksol_int_tests::{
     CkSolMinter, Setup, SetupBuilder,
     fixtures::{
         DEFAULT_CALLER_ACCOUNT, DEFAULT_CALLER_DEPOSIT_ADDRESS, DEPOSIT_AMOUNT,
-        EXPECTED_MINT_AMOUNT, MockBuilder, SharedMockHttpOutcalls,
-        default_get_deposit_address_args, default_process_deposit_args,
-        deposit_transaction_signature,
+        EXPECTED_MINT_AMOUNT, MockBuilder, default_get_deposit_address_args,
+        default_process_deposit_args, deposit_transaction_signature,
     },
 };
 use cksol_types::{
@@ -25,7 +24,6 @@ use icrc_ledger_types::icrc1::account::{Account, Subaccount};
 use serde_json::json;
 use sol_rpc_types::{CommitmentLevel, ConsensusStrategy, GetTransactionEncoding, RpcConfig, Slot};
 use std::time::Duration;
-use tokio::join;
 
 const WITHDRAWAL_PROCESSING_DELAY: Duration = Duration::from_mins(1);
 const FINALIZE_TRANSACTIONS_DELAY: Duration = Duration::from_mins(2);
@@ -577,35 +575,14 @@ mod withdrawal_tests {
             address: WITHDRAWAL_ADDRESS.to_string(),
         };
 
-        let minter1 = setup.minter();
-        let minter2 = setup.minter();
+        let minter = setup.minter();
+        let first_call = minter.submit_withdraw(args.clone()).await;
+        let second_call = minter.submit_withdraw(args).await;
 
-        let (result1, result2) = join!(
-            minter1.withdraw(args.clone()),
-            minter2.withdraw(args.clone()),
-        );
-
-        let (result1, result2) = match (&result1, &result2) {
-            (Ok(_), Err(_)) => (result1, result2),
-            (Err(_), Ok(_)) => (result2, result1),
-            _ => panic!("Expected one success and one error, but got: {result1:?} and {result2:?}"),
-        };
-
-        // One should succeed, one should fail with AlreadyProcessing (order is non-deterministic)
-        let results = [&result1, &result2];
-        assert!(
-            results
-                .iter()
-                .any(|r| matches!(r, Ok(WithdrawalOk { block_index: _ }))),
-            "Expected one Minted result, got: {:?}",
-            results
-        );
-        assert!(
-            results
-                .iter()
-                .any(|r| matches!(r, Err(WithdrawalError::AlreadyProcessing))),
-            "Expected one AlreadyProcessing result, got: {:?}",
-            results
+        assert_matches!(first_call.await_response().await, Ok(WithdrawalOk { .. }));
+        assert_matches!(
+            second_call.await_response().await,
+            Err(WithdrawalError::AlreadyProcessing)
         );
 
         setup.drop().await;
@@ -822,40 +799,25 @@ mod process_deposit_tests {
     #[tokio::test]
     async fn should_fail_for_concurrent_access() {
         let setup = SetupBuilder::new().with_proxy_canister().build().await;
+        let minter = setup.minter();
 
-        // Both minters use the same mocks, whichever gets the guard first will consume them
-        let mocks =
-            SharedMockHttpOutcalls::new(MockBuilder::new().get_deposit_transaction().build());
+        let first_call = minter
+            .submit_process_deposit(default_process_deposit_args())
+            .await;
+        let second_call = minter
+            .submit_process_deposit(default_process_deposit_args())
+            .await;
+        setup
+            .execute_http_mocks(MockBuilder::new().get_deposit_transaction().build())
+            .await;
 
-        let minter1 = setup.minter().with_http_mocks(mocks.clone());
-        let minter2 = setup.minter().with_http_mocks(mocks.clone());
-
-        let (result1, result2) = join!(
-            minter1.process_deposit(default_process_deposit_args()),
-            minter2.process_deposit(default_process_deposit_args())
+        assert_matches!(
+            first_call.await_response().await,
+            Ok(DepositStatus::Minted { .. })
         );
-
-        let (result1, result2) = match (&result1, &result2) {
-            (Ok(_), Err(_)) => (result1, result2),
-            (Err(_), Ok(_)) => (result2, result1),
-            _ => panic!("Expected one success and one error, but got: {result1:?} and {result2:?}"),
-        };
-
-        // One should succeed, one should fail with `AlreadyProcessing` (order is non-deterministic)
-        let results = [&result1, &result2];
-        assert!(
-            results
-                .iter()
-                .any(|r| matches!(r, Ok(DepositStatus::Minted { .. }))),
-            "Expected one Minted result, got: {:?}",
-            results
-        );
-        assert!(
-            results
-                .iter()
-                .any(|r| matches!(r, Err(ProcessDepositError::AlreadyProcessing))),
-            "Expected one AlreadyProcessing result, got: {:?}",
-            results
+        assert_matches!(
+            second_call.await_response().await,
+            Err(ProcessDepositError::AlreadyProcessing)
         );
 
         setup.drop().await;

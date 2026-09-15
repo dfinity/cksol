@@ -24,15 +24,21 @@ use num_traits::cast::ToPrimitive;
 pub use pocket_ic::common::rest::{
     CanisterHttpReply, CanisterHttpRequest, CanisterHttpResponse, MockCanisterHttpResponse,
 };
-use pocket_ic::{PocketIcBuilder, RejectResponse, nonblocking::PocketIc};
+use pocket_ic::{
+    PocketIcBuilder, RejectResponse, common::rest::RawMessageId, nonblocking::PocketIc,
+};
 use serde::de::DeserializeOwned;
 use sol_rpc_client::SolRpcClient;
 use sol_rpc_types::{Lamport, RpcAccess};
-use std::{default::Default, env::var, fs, ops::Deref, path::PathBuf, time::Duration, vec};
+use std::{
+    default::Default, env::var, fs, marker::PhantomData, ops::Deref, path::PathBuf, time::Duration,
+    vec,
+};
 
 pub mod events;
 pub mod fixtures;
 pub mod ledger_init_args;
+mod proxy;
 
 #[derive(Default)]
 pub enum PocketIcMode {
@@ -264,10 +270,16 @@ impl Setup {
     }
 
     pub fn minter_with_caller(&self, caller: Principal) -> CkSolMinter<'_> {
-        CkSolMinter(Canister {
+        CkSolMinter(self.canister(self.minter_canister_id, caller))
+    }
+
+    fn canister(&self, id: CanisterId, caller: Principal) -> Canister<'_> {
+        Canister {
             runtime: self.runtime(caller),
-            id: self.minter_canister_id,
-        })
+            id,
+            caller,
+            proxy_canister_id: self.proxy_canister_id,
+        }
     }
 
     pub fn minter_canister_id(&self) -> Principal {
@@ -282,19 +294,14 @@ impl Setup {
     }
 
     pub fn ledger(&self) -> Ledger<'_> {
-        Ledger(Canister {
-            runtime: self.runtime(Setup::DEFAULT_CALLER),
-            id: self.ledger_canister_id,
-        })
+        Ledger(self.canister(self.ledger_canister_id, Setup::DEFAULT_CALLER))
     }
 
     pub fn proxy(&self) -> Canister<'_> {
-        Canister {
-            runtime: self.runtime(Setup::DEFAULT_CALLER),
-            id: self
-                .proxy_canister_id
-                .expect("Proxy canister not installed"),
-        }
+        let proxy_canister_id = self
+            .proxy_canister_id
+            .expect("Proxy canister not installed");
+        self.canister(proxy_canister_id, Setup::DEFAULT_CALLER)
     }
 
     pub fn sol_rpc(&self) -> SolRpcClient<PocketIcRuntime<'_>> {
@@ -416,6 +423,18 @@ impl CkSolMinter<'_> {
             .await
     }
 
+    pub async fn submit_process_deposit(
+        &self,
+        args: ProcessDepositArgs,
+    ) -> PendingCall<'_, Result<DepositStatus, ProcessDepositError>> {
+        self.submit_update_call(
+            "process_deposit",
+            (args,),
+            Setup::DEFAULT_PROCESS_DEPOSIT_REQUIRED_CYCLES,
+        )
+        .await
+    }
+
     pub async fn update_balance(&self, args: UpdateBalanceArgs) -> Result<(), UpdateBalanceError> {
         self.try_update_balance(args)
             .await
@@ -438,6 +457,13 @@ impl CkSolMinter<'_> {
         args: WithdrawalArgs,
     ) -> Result<Result<WithdrawalOk, WithdrawalError>, String> {
         self.try_update_call("withdraw", (args,), 0).await
+    }
+
+    pub async fn submit_withdraw(
+        &self,
+        args: WithdrawalArgs,
+    ) -> PendingCall<'_, Result<WithdrawalOk, WithdrawalError>> {
+        self.submit_update_call("withdraw", (args,), 0).await
     }
 
     pub async fn withdrawal_status(&self, block_index: u64) -> WithdrawalStatus {
@@ -567,6 +593,81 @@ impl Ledger<'_> {
 pub struct Canister<'a> {
     runtime: PocketIcRuntime<'a>,
     id: CanisterId,
+    caller: Principal,
+    proxy_canister_id: Option<Principal>,
+}
+
+/// An update call whose ingress message has been submitted but not yet executed.
+///
+/// Submitting several calls before awaiting any of them puts all of their ingress
+/// messages into the same round, so they execute in submission order.
+pub struct PendingCall<'a, Out> {
+    env: &'a PocketIc,
+    message_id: RawMessageId,
+    route: CallRoute,
+    response: PhantomData<Out>,
+}
+
+enum CallRoute {
+    Direct,
+    ViaProxy,
+}
+
+impl<Out> PendingCall<'_, Out>
+where
+    Out: CandidType + DeserializeOwned,
+{
+    pub async fn await_response(self) -> Out {
+        let reply = self
+            .env
+            .await_call(self.message_id)
+            .await
+            .unwrap_or_else(|e| panic!("Update call failed: {e:?}"));
+        let reply = match self.route {
+            CallRoute::Direct => reply,
+            CallRoute::ViaProxy => proxy::unwrap_reply(reply),
+        };
+        Decode!(&reply, Out).unwrap_or_else(|e| panic!("Failed to decode response: {e}"))
+    }
+}
+
+impl Canister<'_> {
+    async fn submit_update_call<In, Out>(
+        &self,
+        method: &str,
+        args: In,
+        cycles: u128,
+    ) -> PendingCall<'_, Out>
+    where
+        In: ArgumentEncoder + Send,
+        Out: CandidType + DeserializeOwned,
+    {
+        let (target, method, payload, route) = match self.proxy_canister_id {
+            Some(proxy_canister_id) => (
+                proxy_canister_id,
+                "proxy",
+                proxy::encode_call(self.id, method, args, cycles),
+                CallRoute::ViaProxy,
+            ),
+            None => (
+                self.id,
+                method,
+                candid::encode_args(args).expect("Failed to encode arguments"),
+                CallRoute::Direct,
+            ),
+        };
+        let env = self.runtime.as_ref();
+        let message_id = env
+            .submit_call(target, self.caller, method, payload)
+            .await
+            .unwrap_or_else(|e| panic!("Failed to submit update call: {e:?}"));
+        PendingCall {
+            env,
+            message_id,
+            route,
+            response: PhantomData,
+        }
+    }
 }
 
 impl Canister<'_> {
