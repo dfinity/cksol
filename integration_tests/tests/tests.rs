@@ -5,14 +5,14 @@ use cksol_int_tests::{
     CkSolMinter, Setup, SetupBuilder,
     fixtures::{
         DEFAULT_CALLER_ACCOUNT, DEFAULT_CALLER_DEPOSIT_ADDRESS, DEPOSIT_AMOUNT,
-        EXPECTED_MINT_AMOUNT, MockBuilder, default_get_deposit_address_args,
-        default_process_deposit_args, deposit_transaction_signature,
+        EXPECTED_MINT_AMOUNT, MockBuilder, default_process_deposit_args,
+        deposit_transaction_signature,
     },
 };
 use cksol_types::{
     DepositId, DepositStatus, GetDepositAddressArgs, InsufficientCyclesError, Lamport, MinterInfo,
-    ProcessDepositArgs, ProcessDepositError, TxFinalizedStatus, UpdateBalanceArgs, WithdrawalArgs,
-    WithdrawalError, WithdrawalStatus,
+    ProcessDepositArgs, ProcessDepositError, TxFinalizedStatus, WithdrawalArgs, WithdrawalError,
+    WithdrawalStatus,
 };
 use cksol_types_internal::{
     UpgradeArgs,
@@ -29,7 +29,6 @@ const WITHDRAWAL_PROCESSING_DELAY: Duration = Duration::from_mins(1);
 const FINALIZE_TRANSACTIONS_DELAY: Duration = Duration::from_mins(2);
 const RESUBMIT_TRANSACTIONS_DELAY: Duration = Duration::from_mins(3);
 const DEPOSIT_CONSOLIDATION_DELAY: Duration = Duration::from_mins(10);
-const POLL_MONITORED_ADDRESSES_DELAY: Duration = Duration::from_mins(1);
 
 /// Deposits funds into the minter via `process_deposit`, consolidates them,
 /// and finalizes the consolidation so the minter's internal balance is credited.
@@ -991,55 +990,6 @@ mod process_deposit_tests {
     }
 }
 
-mod update_balance_tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn should_register_accounts_and_be_idempotent() {
-        let setup = SetupBuilder::new().build().await;
-        let minter = setup.minter();
-
-        let subaccounts: Vec<Option<Subaccount>> = vec![None, Some([1; 32]), Some([2; 32])];
-
-        for subaccount in &subaccounts {
-            let result = minter
-                .update_balance(UpdateBalanceArgs {
-                    subaccount: *subaccount,
-                })
-                .await;
-            assert_eq!(result, Ok(()));
-        }
-
-        // Calling again for an already-monitored account is idempotent — no new event
-        let result = minter.update_balance(UpdateBalanceArgs::default()).await;
-        assert_eq!(result, Ok(()));
-
-        // Exactly one StartedMonitoringAccount event per subaccount, no duplicates
-        let expected_accounts: Vec<Account> = subaccounts
-            .iter()
-            .map(|subaccount| Account {
-                owner: Setup::DEFAULT_CALLER,
-                subaccount: *subaccount,
-            })
-            .collect();
-        minter.assert_that_events().await.satisfy(|events| {
-            let monitoring_events: Vec<&Account> = events
-                .iter()
-                .filter_map(|e| match e {
-                    EventType::StartedMonitoringAccount { account } => Some(account),
-                    _ => None,
-                })
-                .collect();
-            check!(monitoring_events.len() == expected_accounts.len());
-            for account in &expected_accounts {
-                check!(monitoring_events.contains(&account));
-            }
-        });
-
-        setup.drop().await;
-    }
-}
-
 mod anonymous_caller_tests {
     use super::*;
 
@@ -1074,13 +1024,6 @@ mod anonymous_caller_tests {
                 .await;
             assert_matches!(result, Err(s) => s.contains("the owner must be non-anonymous"));
         }
-
-        // `update_balance` endpoint (no `owner` field, only anonymous caller applies)
-        let minter = setup.minter_with_caller(Principal::anonymous());
-        let result = minter
-            .try_update_balance(UpdateBalanceArgs::default())
-            .await;
-        assert_matches!(result, Err(s) => s.contains("the owner must be non-anonymous"));
 
         // `withdraw` endpoint (no `owner` field, only anonymous caller applies)
         let minter = setup.minter_with_caller(Principal::anonymous());
@@ -1245,56 +1188,5 @@ mod metrics_tests {
             .into()
             .drop()
             .await;
-    }
-}
-
-mod automated_deposit_flow_tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn should_poll_monitored_address() {
-        let setup = SetupBuilder::new().build().await;
-        let minter = setup.minter();
-
-        // Initialize the minter public key and register the account for monitoring.
-        assert_eq!(
-            minter
-                .get_deposit_address(default_get_deposit_address_args())
-                .await
-                .to_string(),
-            DEFAULT_CALLER_DEPOSIT_ADDRESS
-        );
-        minter
-            .update_balance(UpdateBalanceArgs::default())
-            .await
-            .expect("update_balance should succeed");
-
-        minter.assert_that_events().await.satisfy(|events| {
-            check!(events.iter().any(|e| {
-                e == &EventType::StartedMonitoringAccount {
-                    account: DEFAULT_CALLER_ACCOUNT,
-                }
-            }));
-        });
-
-        // Advance time: the minter should poll getSignaturesForAddress once, then remove the account.
-        setup.advance_time(POLL_MONITORED_ADDRESSES_DELAY).await;
-        setup
-            .execute_http_mocks(
-                MockBuilder::with_start_id(0)
-                    .get_signatures_for_address(vec![])
-                    .build(),
-            )
-            .await;
-
-        minter.assert_that_events().await.satisfy(|events| {
-            check!(events.iter().any(|e| {
-                e == &EventType::StoppedMonitoringAccount {
-                    account: DEFAULT_CALLER_ACCOUNT,
-                }
-            }));
-        });
-
-        setup.drop().await;
     }
 }

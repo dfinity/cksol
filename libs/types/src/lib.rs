@@ -130,23 +130,6 @@ pub enum ProcessDepositError {
     },
 }
 
-/// Arguments for a request to the `update_balance` ckSOL minter endpoint.
-#[derive(Clone, Eq, PartialEq, Debug, Default, CandidType, Deserialize, Serialize)]
-pub struct UpdateBalanceArgs {
-    /// The subaccount to register for automated deposit monitoring.
-    ///
-    /// The owner is always the caller.
-    pub subaccount: Option<Subaccount>,
-}
-
-/// An error from the `update_balance` ckSOL minter endpoint.
-#[derive(Debug, Clone, PartialEq, CandidType, Deserialize, Error)]
-pub enum UpdateBalanceError {
-    /// The monitored account queue is at capacity.
-    #[error("The monitored account queue is at capacity")]
-    QueueFull,
-}
-
 /// Insufficient cycles attached by the caller to complete the call.
 #[derive(Debug, Clone, PartialEq, CandidType, Deserialize, Error)]
 #[error("Insufficient cycles attached, expected {expected} but got {received}")]

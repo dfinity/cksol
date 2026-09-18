@@ -19,7 +19,6 @@ use thiserror::Error;
 #[cfg(test)]
 mod tests;
 
-pub mod automatic;
 pub mod manual;
 
 pub async fn fetch_and_validate_deposit<R: CanisterRuntime>(

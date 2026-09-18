@@ -3,7 +3,6 @@ use canlog::{Log, Sort};
 use cksol_minter::{
     address::lazy_get_schnorr_master_key,
     consolidate::{DEPOSIT_CONSOLIDATION_DELAY, consolidate_deposits},
-    deposit::automatic::{POLL_MONITORED_ADDRESSES_DELAY, poll_monitored_addresses},
     monitor::{
         FINALIZE_TRANSACTIONS_DELAY, RESUBMIT_TRANSACTIONS_DELAY, finalize_transactions,
         resubmit_transactions,
@@ -14,8 +13,8 @@ use cksol_minter::{
 };
 use cksol_types::{
     Address, DepositStatus, GetDepositAddressArgs, MinterInfo, ProcessDepositArgs,
-    ProcessDepositError, UpdateBalanceArgs, UpdateBalanceError, WithdrawalArgs, WithdrawalError,
-    WithdrawalOk, WithdrawalStatus, WithdrawalStatusArgs,
+    ProcessDepositError, WithdrawalArgs, WithdrawalError, WithdrawalOk, WithdrawalStatus,
+    WithdrawalStatusArgs,
 };
 use cksol_types_internal::{MinterArg, log::Priority};
 use ic_http_types::{HttpRequest, HttpResponse, HttpResponseBuilder};
@@ -63,12 +62,6 @@ fn post_upgrade(args: Option<MinterArg>) {
 fn get_deposit_address(args: GetDepositAddressArgs) -> Address {
     let account = assert_non_anonymous_account(args.owner, args.subaccount);
     cksol_minter::address::get_deposit_address(&account).into()
-}
-
-#[ic_cdk::update]
-fn update_balance(args: UpdateBalanceArgs) -> Result<(), UpdateBalanceError> {
-    let account = assert_non_anonymous_account(None, args.subaccount);
-    cksol_minter::deposit::automatic::update_balance(&IcCanisterRuntime::new(), account)
 }
 
 #[ic_cdk::update]
@@ -205,12 +198,6 @@ fn get_events(
             EventType::ExpiredTransaction { signature } => event::EventType::ExpiredTransaction {
                 signature: signature.into(),
             },
-            EventType::StartedMonitoringAccount { account } => {
-                event::EventType::StartedMonitoringAccount { account }
-            }
-            EventType::StoppedMonitoringAccount { account } => {
-                event::EventType::StoppedMonitoringAccount { account }
-            }
         }
     }
 
@@ -366,9 +353,6 @@ fn setup_timers() {
     });
     ic_cdk_timers::set_timer_interval(RESUBMIT_TRANSACTIONS_DELAY, async || {
         resubmit_transactions(IcCanisterRuntime::new()).await;
-    });
-    ic_cdk_timers::set_timer_interval(POLL_MONITORED_ADDRESSES_DELAY, async || {
-        poll_monitored_addresses(IcCanisterRuntime::new()).await;
     });
 }
 
