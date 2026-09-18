@@ -992,31 +992,51 @@ mod process_deposit_tests {
 
 mod pending_call_tests {
     use super::*;
+    use futures::FutureExt;
+    use std::{any::Any, panic::AssertUnwindSafe};
 
     #[tokio::test]
-    #[should_panic(expected = "requires a proxy canister")]
     async fn should_reject_submitting_process_deposit_without_proxy_canister() {
         let setup = SetupBuilder::new().build().await;
         let minter = setup.minter();
 
-        minter
-            .submit_process_deposit(default_process_deposit_args())
-            .await;
+        let panic = AssertUnwindSafe(async {
+            minter
+                .submit_process_deposit(default_process_deposit_args())
+                .await;
+        })
+        .catch_unwind()
+        .await
+        .expect_err("submitting with cycles but without a proxy canister should panic");
+        assert!(panic_message(&*panic).contains("requires a proxy canister"));
 
         setup.drop().await;
     }
 
     #[tokio::test]
-    #[should_panic(expected = "not served for submitted calls")]
     async fn should_reject_submitting_with_installed_http_mocks() {
         let setup = SetupBuilder::new().with_proxy_canister().build().await;
         let minter = setup.minter().with_http_mocks(MockBuilder::new().build());
 
-        minter
-            .submit_process_deposit(default_process_deposit_args())
-            .await;
+        let panic = AssertUnwindSafe(async {
+            minter
+                .submit_process_deposit(default_process_deposit_args())
+                .await;
+        })
+        .catch_unwind()
+        .await
+        .expect_err("submitting with installed HTTP mocks should panic");
+        assert!(panic_message(&*panic).contains("not served for submitted calls"));
 
         setup.drop().await;
+    }
+
+    fn panic_message(panic: &(dyn Any + Send)) -> &str {
+        panic
+            .downcast_ref::<String>()
+            .map(String::as_str)
+            .or_else(|| panic.downcast_ref::<&str>().copied())
+            .unwrap_or_default()
     }
 }
 

@@ -31,8 +31,8 @@ use serde::de::DeserializeOwned;
 use sol_rpc_client::SolRpcClient;
 use sol_rpc_types::{Lamport, RpcAccess};
 use std::{
-    default::Default, env::var, fs, marker::PhantomData, ops::Deref, path::PathBuf, thread,
-    time::Duration, vec,
+    default::Default, env::var, fs, marker::PhantomData, ops::Deref, path::PathBuf, time::Duration,
+    vec,
 };
 
 pub mod events;
@@ -357,7 +357,7 @@ impl ic_metrics_assert::PocketIcAsyncHttpQuery for Setup {
 
 impl Drop for Setup {
     fn drop(&mut self) {
-        if self.env.is_some() && !thread::panicking() {
+        if self.env.is_some() {
             panic!("Setup was not dropped properly. Call Setup::drop().await to clean up.");
         }
     }
