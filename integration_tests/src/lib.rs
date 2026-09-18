@@ -31,8 +31,8 @@ use serde::de::DeserializeOwned;
 use sol_rpc_client::SolRpcClient;
 use sol_rpc_types::{Lamport, RpcAccess};
 use std::{
-    default::Default, env::var, fs, marker::PhantomData, ops::Deref, path::PathBuf, time::Duration,
-    vec,
+    default::Default, env::var, fs, marker::PhantomData, ops::Deref, path::PathBuf, thread,
+    time::Duration, vec,
 };
 
 pub mod events;
@@ -279,6 +279,7 @@ impl Setup {
             id,
             caller,
             proxy_canister_id: self.proxy_canister_id,
+            http_mocks: HttpMocks::NotInstalled,
         }
     }
 
@@ -356,7 +357,7 @@ impl ic_metrics_assert::PocketIcAsyncHttpQuery for Setup {
 
 impl Drop for Setup {
     fn drop(&mut self) {
-        if self.env.is_some() {
+        if self.env.is_some() && !thread::panicking() {
             panic!("Setup was not dropped properly. Call Setup::drop().await to clean up.");
         }
     }
@@ -581,6 +582,12 @@ pub struct Canister<'a> {
     id: CanisterId,
     caller: Principal,
     proxy_canister_id: Option<Principal>,
+    http_mocks: HttpMocks,
+}
+
+enum HttpMocks {
+    NotInstalled,
+    Installed,
 }
 
 /// An update call whose ingress message has been submitted but not yet executed.
@@ -588,6 +595,11 @@ pub struct Canister<'a> {
 /// Submitting several calls before awaiting any of them puts all of their ingress
 /// messages into the same round, so they are guaranteed to execute concurrently.
 /// Their order within that round is unspecified.
+///
+/// HTTP outcalls made by a pending call are not served automatically. Mocks installed with
+/// [`Canister::with_http_mocks`] are rejected at submission; instead, serve them explicitly
+/// with [`Setup::execute_http_mocks`] after submitting and before calling
+/// [`PendingCall::await_response`]. One mock set serves every call pending in that round.
 pub struct PendingCall<'a, Out> {
     env: &'a PocketIc,
     message_id: RawMessageId,
@@ -629,18 +641,23 @@ impl Canister<'_> {
         In: ArgumentEncoder + Send,
         Out: CandidType + DeserializeOwned,
     {
-        let (target, method, payload, route) = match self.proxy_canister_id {
-            Some(proxy_canister_id) => (
+        self.reject_unserved_http_mocks();
+        let (target, method, payload, route) = match (self.proxy_canister_id, cycles) {
+            (Some(proxy_canister_id), _) => (
                 proxy_canister_id,
                 "proxy",
                 proxy::encode_call(self.id, method, args, cycles),
                 CallRoute::ViaProxy,
             ),
-            None => (
+            (None, 0) => (
                 self.id,
                 method,
                 candid::encode_args(args).expect("Failed to encode arguments"),
                 CallRoute::Direct,
+            ),
+            (None, cycles) => panic!(
+                "Submitting `{method}` with {cycles} cycles requires a proxy canister: \
+                 build the setup with `SetupBuilder::with_proxy_canister()`"
             ),
         };
         let env = self.runtime.as_ref();
@@ -653,6 +670,15 @@ impl Canister<'_> {
             message_id,
             route,
             response: PhantomData,
+        }
+    }
+
+    fn reject_unserved_http_mocks(&self) {
+        if let HttpMocks::Installed = self.http_mocks {
+            panic!(
+                "HTTP mocks installed with `with_http_mocks` are not served for submitted calls: \
+                 serve them with `Setup::execute_http_mocks` after submitting instead"
+            );
         }
     }
 }
@@ -738,6 +764,7 @@ impl Canister<'_> {
 
     pub fn with_http_mocks(mut self, mocks: impl ExecuteHttpOutcallMocks + 'static) -> Self {
         self.runtime = self.runtime.with_http_mocks(mocks);
+        self.http_mocks = HttpMocks::Installed;
         self
     }
 

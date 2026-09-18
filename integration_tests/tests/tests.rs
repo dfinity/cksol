@@ -990,6 +990,36 @@ mod process_deposit_tests {
     }
 }
 
+mod pending_call_tests {
+    use super::*;
+
+    #[tokio::test]
+    #[should_panic(expected = "requires a proxy canister")]
+    async fn should_reject_submitting_process_deposit_without_proxy_canister() {
+        let setup = SetupBuilder::new().build().await;
+        let minter = setup.minter();
+
+        minter
+            .submit_process_deposit(default_process_deposit_args())
+            .await;
+
+        setup.drop().await;
+    }
+
+    #[tokio::test]
+    #[should_panic(expected = "not served for submitted calls")]
+    async fn should_reject_submitting_with_installed_http_mocks() {
+        let setup = SetupBuilder::new().with_proxy_canister().build().await;
+        let minter = setup.minter().with_http_mocks(MockBuilder::new().build());
+
+        minter
+            .submit_process_deposit(default_process_deposit_args())
+            .await;
+
+        setup.drop().await;
+    }
+}
+
 mod anonymous_caller_tests {
     use super::*;
 
