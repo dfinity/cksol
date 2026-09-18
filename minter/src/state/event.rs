@@ -128,13 +128,6 @@ pub enum EventType {
         #[cbor(n(0), with = "cbor::signature")]
         signature: Signature,
     },
-    /// The minter started monitoring a new account for automated deposits.
-    #[n(11)]
-    StartedMonitoringAccount {
-        /// The account to monitor for incoming deposits.
-        #[n(0)]
-        account: Account,
-    },
 }
 
 /// Payload of the `AcceptedWithdrawalRequest` event.

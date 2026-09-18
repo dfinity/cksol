@@ -111,11 +111,6 @@ pub enum EventType {
         /// The signature of the expired Solana transaction.
         signature: Signature,
     },
-    /// The minter started monitoring a new account for automated deposits.
-    StartedMonitoringAccount {
-        /// The account to monitor for incoming deposits.
-        account: Account,
-    },
 }
 
 /// The purpose of a submitted Solana transaction.
