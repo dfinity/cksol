@@ -1,5 +1,5 @@
 use crate::{
-    constants::MAX_CONCURRENT_RPC_CALLS,
+    constants::{FEE_PER_SIGNATURE, MAX_CONCURRENT_RPC_CALLS},
     guard::{TimerGuard, withdrawal_guard},
     sol_transfer::MAX_WITHDRAWALS_PER_TX,
     state::{TaskType, read_state},
@@ -294,6 +294,60 @@ mod process_pending_withdrawals_tests {
 
         // Withdrawal should remain pending (not submitted)
         assert_eq!(withdrawal_status(0), WithdrawalStatus::Pending);
+    }
+
+    #[tokio::test]
+    async fn should_not_panic_when_withdrawing_exactly_the_minter_balance() {
+        init_state();
+        init_balance_to(12_500_000);
+        init_schnorr_master_key();
+
+        let minter_balance = read_state(|s| s.balance());
+        events::accept_withdrawal(account(1), 0, minter_balance + WITHDRAWAL_FEE);
+
+        let events_before = EventsAssert::from_recorded();
+
+        let tx_signature = signature(0x42);
+        let runtime = TestCanisterRuntime::new()
+            .add_stub_response(GetSlotResult::Consistent(Ok(1)))
+            .add_stub_response(GetBlockResult::Consistent(Ok(confirmed_block())))
+            .add_signature(tx_signature.into())
+            .add_stub_response(SendTransactionResult::Consistent(Ok(tx_signature.into())))
+            .with_increasing_time();
+
+        process_pending_withdrawals(runtime).await;
+
+        assert_eq!(withdrawal_status(0), WithdrawalStatus::Pending);
+        assert_eq!(EventsAssert::from_recorded(), events_before);
+        assert_eq!(read_state(|s| s.balance()), minter_balance);
+        let _guard = TimerGuard::new(TaskType::WithdrawalProcessing).unwrap();
+    }
+
+    #[tokio::test]
+    async fn should_process_withdrawal_leaving_exactly_one_transaction_fee() {
+        init_state();
+        init_balance_to(12_500_000);
+        init_schnorr_master_key();
+
+        let minter_balance = read_state(|s| s.balance());
+        let amount_to_transfer = minter_balance - FEE_PER_SIGNATURE;
+        events::accept_withdrawal(account(1), 0, amount_to_transfer + WITHDRAWAL_FEE);
+
+        let events_before = EventsAssert::from_recorded();
+
+        let tx_signature = signature(0x42);
+        let runtime = TestCanisterRuntime::new()
+            .add_stub_response(GetSlotResult::Consistent(Ok(1)))
+            .add_stub_response(GetBlockResult::Consistent(Ok(confirmed_block())))
+            .add_signature(tx_signature.into())
+            .add_stub_response(SendTransactionResult::Consistent(Ok(tx_signature.into())))
+            .with_increasing_time();
+
+        process_pending_withdrawals(runtime).await;
+
+        assert_matches!(withdrawal_status(0), WithdrawalStatus::TxSent { .. });
+        assert_eq!(EventsAssert::from_recorded().len(), events_before.len() + 1);
+        assert_eq!(read_state(|s| s.balance()), 0);
     }
 
     #[tokio::test]
