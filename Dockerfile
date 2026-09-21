@@ -79,7 +79,7 @@ COPY . .
 RUN touch minter/src/main.rs minter/src/lib.rs libs/types/src/lib.rs libs/types-internal/src/lib.rs
 
 RUN ./scripts/build --cksol_minter
-RUN sha256sum cksol_minter.wasm.gz
+RUN sha256sum wasms/cksol_minter.wasm.gz
 
 FROM scratch AS scratch_cksol_minter
-COPY --from=build /cksol/cksol_minter.wasm.gz /
+COPY --from=build /cksol/wasms/cksol_minter.wasm.gz /

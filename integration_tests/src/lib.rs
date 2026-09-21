@@ -660,27 +660,19 @@ impl Canister<'_> {
 
 fn cksol_minter_wasm() -> Vec<u8> {
     const WASM_PATH_ENV: &str = "CKSOL_MINTER_WASM_PATH";
-    const DEFAULT_WASM_PATHS: [&str; 2] =
-        ["../wasms/cksol_minter.wasm.gz", "../cksol_minter.wasm.gz"];
+    const DEFAULT_WASM_PATH: &str = "../wasms/cksol_minter.wasm.gz";
 
-    let manifest_dir = PathBuf::from(var("CARGO_MANIFEST_DIR").unwrap());
-    let candidates: Vec<PathBuf> = match var(WASM_PATH_ENV) {
-        Ok(path) => vec![PathBuf::from(path)],
-        Err(_) => DEFAULT_WASM_PATHS
-            .iter()
-            .map(|path| manifest_dir.join(path))
-            .collect(),
+    let path = match var(WASM_PATH_ENV) {
+        Ok(path) => PathBuf::from(path),
+        Err(_) => PathBuf::from(var("CARGO_MANIFEST_DIR").unwrap()).join(DEFAULT_WASM_PATH),
     };
-    candidates
-        .iter()
-        .find_map(|path| fs::read(path).ok())
-        .unwrap_or_else(|| {
-            panic!(
-                "Failed to read the ckSOL minter Wasm from any of {candidates:?}. \
-                 Build it with `./scripts/docker-build` or `./scripts/build --cksol_minter`, \
-                 or point {WASM_PATH_ENV} to it."
-            )
-        })
+    fs::read(&path).unwrap_or_else(|error| {
+        panic!(
+            "Failed to read the ckSOL minter Wasm from {path:?}: {error}. \
+             Build it with `./scripts/docker-build` or `./scripts/build --cksol_minter`, \
+             or point {WASM_PATH_ENV} to it."
+        )
+    })
 }
 
 fn cksol_minter_init_args(

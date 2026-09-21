@@ -270,7 +270,7 @@ Build the minter Wasm:
 ./scripts/build --cksol_minter
 ```
 
-The resulting `cksol_minter.wasm.gz` will be written to the repository root.
+The resulting `cksol_minter.wasm.gz` will be written to the `wasms/` directory.
 
 You can also build the Rust workspace directly (without Wasm post-processing):
 
@@ -288,7 +288,7 @@ The test suite has two parts:
 cargo test --lib
 ```
 
-**PocketIC integration tests** — require the minter Wasm, which is read from `wasms/cksol_minter.wasm.gz` (written by `./scripts/docker-build`), then from `cksol_minter.wasm.gz` in the repository root (written by `./scripts/build --cksol_minter`), unless the `CKSOL_MINTER_WASM_PATH` environment variable points to it:
+**PocketIC integration tests** — require the minter Wasm, which is read from `wasms/cksol_minter.wasm.gz` (written by both `./scripts/docker-build` and `./scripts/build --cksol_minter`), unless the `CKSOL_MINTER_WASM_PATH` environment variable points to it:
 
 ```sh
 ./scripts/build --cksol_minter
