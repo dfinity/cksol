@@ -29,6 +29,9 @@ const BYTES_PER_SIGNATURE: usize = 64;
 /// Solana transaction when the fee-payer is the only signer.
 pub const MAX_WITHDRAWALS_PER_TX: usize = 20;
 
+/// Fee charged for a batch withdrawal transaction, which is signed by the fee payer only.
+pub const BATCH_WITHDRAWAL_TX_FEE: Lamport = FEE_PER_SIGNATURE;
+
 #[derive(Debug, Error, From)]
 pub enum CreateTransferError {
     #[error("transaction size {got} exceeds maximum of {max} bytes")]

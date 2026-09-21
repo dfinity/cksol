@@ -19,9 +19,11 @@ use crate::{
     ledger::{BurnError, burn},
     rpc::{get_recent_slot_and_blockhash, submit_transaction},
     runtime::CanisterRuntime,
-    sol_transfer::{MAX_WITHDRAWALS_PER_TX, create_signed_batch_withdrawal_transaction},
+    sol_transfer::{
+        BATCH_WITHDRAWAL_TX_FEE, MAX_WITHDRAWALS_PER_TX, create_signed_batch_withdrawal_transaction,
+    },
     state::{
-        TaskType,
+        State, TaskType,
         audit::process_event,
         event::{EventType, TransactionPurpose, VersionedMessage, WithdrawalRequest},
         mutate_state, read_state,
@@ -107,23 +109,10 @@ pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: R) {
     };
 
     let (affordable_requests, num_pending_withdrawals) = read_state(|state| {
-        let mut available_balance = state.balance();
-        let pending = state.pending_withdrawal_requests();
-
-        let affordable: Vec<_> = pending
-            .values()
-            .take_while(|r| {
-                if available_balance >= r.request.amount_to_transfer {
-                    available_balance -= r.request.amount_to_transfer;
-                    true
-                } else {
-                    false
-                }
-            })
-            .map(|t| t.request.clone())
-            .collect();
-
-        (affordable, pending.len())
+        (
+            affordable_withdrawal_requests(state),
+            state.pending_withdrawal_requests().len(),
+        )
     });
 
     if affordable_requests.len() < num_pending_withdrawals {
@@ -171,6 +160,35 @@ pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: R) {
         // All work fits in this round
         scopeguard::ScopeGuard::into_inner(reschedule);
     }
+}
+
+fn affordable_withdrawal_requests(state: &State) -> Vec<WithdrawalRequest> {
+    let mut available_balance = state.balance();
+    state
+        .pending_withdrawal_requests()
+        .values()
+        .enumerate()
+        .take_while(|(index, pending)| {
+            let starts_new_batch = index % MAX_WITHDRAWALS_PER_TX == 0;
+            let reserved_fee = if starts_new_batch {
+                BATCH_WITHDRAWAL_TX_FEE
+            } else {
+                0
+            };
+            let cost = pending
+                .request
+                .amount_to_transfer
+                .saturating_add(reserved_fee);
+            match available_balance.checked_sub(cost) {
+                Some(remaining_balance) => {
+                    available_balance = remaining_balance;
+                    true
+                }
+                None => false,
+            }
+        })
+        .map(|(_, pending)| pending.request.clone())
+        .collect()
 }
 
 async fn submit_withdrawal_transaction<R: CanisterRuntime>(
