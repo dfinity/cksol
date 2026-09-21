@@ -72,12 +72,17 @@ do
 done
 
 # Checking for dependencies
-if [[ ! "$(command -v ic-wasm)" || "$(ic-wasm --version)" != "ic-wasm 0.3.5" ]]
+REPRODUCIBLE_IC_WASM_VERSION="ic-wasm 0.3.5"
+if ! command -v ic-wasm > /dev/null
 then
-    echo "could not find ic-wasm 0.3.5"
-    echo "ic-wasm version 0.3.5 is needed, please run the following command:"
-    echo "  cargo install ic-wasm --version 0.3.5"
+    echo "could not find ic-wasm, please run the following command:"
+    echo "  cargo install --locked ic-wasm --version 0.3.5"
     exit 1
+fi
+if [[ "$(ic-wasm --version)" != "$REPRODUCIBLE_IC_WASM_VERSION" ]]
+then
+    echo "WARNING: found $(ic-wasm --version) but the reproducible build uses $REPRODUCIBLE_IC_WASM_VERSION."
+    echo "The resulting Wasm may differ from the one produced by ./scripts/docker-build."
 fi
 
 function build_canister() {
@@ -116,22 +121,22 @@ function build_canister() {
 
     if [ "$ONLY_DEPS" != "1" ]
     then
+        local wasm_out="wasms/$canister.wasm"
+        mkdir -p wasms
         ic-wasm \
             "./target/$TARGET/release/$canister.wasm" \
-            -o "./$canister.wasm" \
+            -o "$wasm_out" \
             shrink
-        ic-wasm "$canister.wasm" -o "$canister.wasm" metadata candid:service -f "minter/$canister.did" -v public
-        ic-wasm "$canister.wasm" -o "$canister.wasm" metadata candid:args -d "(MinterArg)" -v public
+        ic-wasm "$wasm_out" -o "$wasm_out" metadata candid:service -f "minter/$canister.did" -v public
+        ic-wasm "$wasm_out" -o "$wasm_out" metadata candid:args -d "(MinterArg)" -v public
 
         # Write metadata for dfx
         wasm_url="https://github.com/dfinity/cksol/releases/latest/download/$canister.wasm.gz"
         # TODO: add init_guide once documentation is available
-        metadata_json=$(echo '{}' | jq -cMr \
-            --arg wasm_url "$wasm_url" \
-            '. | .pullable = { wasm_url: $wasm_url, dependencies: []} ')
-        ic-wasm "$canister.wasm" -o "$canister.wasm" metadata dfx -d "$metadata_json" -v public
+        metadata_json="{\"pullable\":{\"wasm_url\":\"$wasm_url\",\"dependencies\":[]}}"
+        ic-wasm "$wasm_out" -o "$wasm_out" metadata dfx -d "$metadata_json" -v public
 
-        gzip --no-name --force "$canister.wasm"
+        gzip --no-name --force "$wasm_out"
     fi
 }
 
