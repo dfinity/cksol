@@ -43,13 +43,14 @@ RUN rustup target add wasm32-unknown-unknown && \
 
 # Install ic-wasm as a pinned binary with SHA-256 verification.
 # Bump IC_WASM_VERSION and IC_WASM_SHA256 together when upgrading.
-ARG IC_WASM_VERSION=0.3.5
-ARG IC_WASM_SHA256=2debd76da946b4f74b6796caa62459d58c4dfef947a1f2614b56267baabf5c2d
+ARG IC_WASM_VERSION=0.11.1
+ARG IC_WASM_SHA256=099776a745c4d4495761da18f2fe2216759a4166beacd05453bf031d61631746
 RUN curl --proto '=https' --tlsv1.2 -fsSL --retry 5 --retry-delay 5 \
-        "https://github.com/dfinity/ic-wasm/releases/download/${IC_WASM_VERSION}/ic-wasm-linux64" \
-        -o /usr/local/bin/ic-wasm && \
-    echo "${IC_WASM_SHA256}  /usr/local/bin/ic-wasm" | sha256sum -c - && \
-    chmod +x /usr/local/bin/ic-wasm && \
+        "https://github.com/dfinity/ic-wasm/releases/download/${IC_WASM_VERSION}/ic-wasm-x86_64-unknown-linux-gnu.tar.xz" \
+        -o /tmp/ic-wasm.tar.xz && \
+    echo "${IC_WASM_SHA256}  /tmp/ic-wasm.tar.xz" | sha256sum -c - && \
+    tar -xJf /tmp/ic-wasm.tar.xz --strip-components=1 -C /usr/local/bin ic-wasm-x86_64-unknown-linux-gnu/ic-wasm && \
+    rm /tmp/ic-wasm.tar.xz && \
     ic-wasm --version
 
 # Pre-build all cargo dependencies. Because cargo doesn't have a build option

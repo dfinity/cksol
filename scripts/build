@@ -72,17 +72,11 @@ do
 done
 
 # Checking for dependencies
-REPRODUCIBLE_IC_WASM_VERSION="ic-wasm 0.3.5"
 if ! command -v ic-wasm > /dev/null
 then
     echo "could not find ic-wasm, please run the following command:"
-    echo "  cargo install --locked ic-wasm --version 0.3.5"
+    echo "  mise install"
     exit 1
-fi
-if [[ "$(ic-wasm --version)" != "$REPRODUCIBLE_IC_WASM_VERSION" ]]
-then
-    echo "WARNING: found $(ic-wasm --version) but the reproducible build uses $REPRODUCIBLE_IC_WASM_VERSION."
-    echo "The resulting Wasm may differ from the one produced by ./scripts/docker-build."
 fi
 
 function build_canister() {

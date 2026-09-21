@@ -248,7 +248,8 @@ icp canister call -e prod cksol_minter withdrawal_status \
 ### Prerequisites
 
 Install [`mise`](https://mise.jdx.dev/) and then provision the pinned toolchain
-(Rust 1.93.0 with the `wasm32-unknown-unknown` target, `cargo-sort`, `canbench`):
+(Rust 1.93.0 with the `wasm32-unknown-unknown` target, `cargo-sort`, `canbench`,
+[`ic-wasm`](https://github.com/dfinity/ic-wasm) 0.11.1):
 
 ```sh
 mise install
@@ -259,7 +260,6 @@ environments stay in sync.
 
 Additionally:
 
-- [`ic-wasm`](https://github.com/dfinity/ic-wasm) version 0.3.5 — used for Wasm post-processing. Install via `./scripts/bootstrap`.
 - `gzip` — used by `./scripts/build` to compress the output Wasm.
 
 ### Building

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# install build dependencies (rustup + ic-wasm)
+# install rustup (ic-wasm and the other tools come from mise.toml via `mise install`)
 
 set -euo pipefail
 
@@ -21,13 +21,6 @@ echo "using rust version '$rust_version'"
 
 # here we set the toolchain to 'none' and rustup will pick up on ./rust-toolchain.toml
 run curl --fail https://sh.rustup.rs -sSf | run sh -s -- -y --default-toolchain "none" --no-modify-path
-
-echo "looking for ic-wasm"
-if ! command -v ic-wasm > /dev/null
-then
-    echo "installing ic-wasm 0.3.5"
-    run cargo install --locked ic-wasm --version 0.3.5
-fi
 
 # make sure the packages are actually installed (rustup waits for the first invoke to lazyload)
 cargo --version
