@@ -239,7 +239,7 @@ icp canister call -e prod cksol_minter withdrawal_status \
 │   └── design.md            # Design document
 └── scripts/
     ├── build                # Build script for the minter Wasm
-    └── bootstrap            # Install build dependencies
+    └── bootstrap            # Install rustup (used by the Docker build)
 ```
 
 <a id="development"></a>
