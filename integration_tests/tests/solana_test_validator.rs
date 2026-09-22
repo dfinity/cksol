@@ -230,12 +230,11 @@ async fn should_withdraw_exactly_the_consolidated_balance() {
 }
 
 async fn wait_for_minter_balance(setup: &Setup, expected_balance: Lamport) {
-    for _ in 0..60 {
+    for _ in 0..30 {
         if setup.minter().get_minter_info().await.balance == expected_balance {
             return;
         }
-        setup.advance_time(Duration::from_mins(1)).await;
-        tokio::time::sleep(Duration::from_secs(1)).await;
+        setup.advance_time_and_settle(Duration::from_mins(1)).await;
     }
     panic!("Minter balance did not reach {expected_balance} within timeout");
 }
