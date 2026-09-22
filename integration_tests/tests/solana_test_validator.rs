@@ -1,16 +1,14 @@
-use assert_matches::assert_matches;
 use candid::Principal;
 use cksol_int_tests::{
-    Setup, SetupBuilder,
+    Setup,
     fixtures::MINTER_ADDRESS,
     ledger_init_args::LEDGER_TRANSFER_FEE,
-    validator::{FEE_PER_SIGNATURE, SolanaTestValidator},
+    validator::{FEE_PER_SIGNATURE, SolanaTestValidator, wait_for_withdrawal_finalized},
 };
-use cksol_types::{DepositStatus, ProcessDepositArgs, WithdrawalArgs, WithdrawalStatus};
+use cksol_types::WithdrawalArgs;
 use icrc_ledger_types::icrc1::account::Account;
 use itertools::Itertools;
-use sol_rpc_types::{InstallArgs, Lamport, OverrideProvider, RegexSubstitution};
-use solana_address::Address;
+use sol_rpc_types::Lamport;
 use solana_keypair::{Keypair, Signer};
 use solana_native_token::LAMPORTS_PER_SOL;
 use std::time::Duration;
@@ -24,7 +22,7 @@ const DEPOSITOR: Principal = Setup::DEFAULT_CALLER;
 #[tokio::test(flavor = "multi_thread")]
 async fn should_deposit_consolidate_and_withdraw() {
     let validator = SolanaTestValidator::start().await;
-    let setup = setup_with_solana_validator(&validator).await;
+    let setup = validator.setup().await;
 
     let withdrawal_destination = Keypair::new();
     let withdrawal_address = withdrawal_destination.pubkey();
@@ -48,8 +46,9 @@ async fn should_deposit_consolidate_and_withdraw() {
         let (deposit_addresses, deposit_amounts, minted_amounts): (Vec<_>, Vec<_>, Vec<_>) =
             futures::future::join_all(accounts.iter().enumerate().map(async |(j, account)| {
                 let deposit_amount = ((j as u64 + 1) * LAMPORTS_PER_SOL) / 10;
-                let (deposit_address, minted_amount) =
-                    deposit_to_account(&setup, &validator, *account, deposit_amount).await;
+                let (deposit_address, minted_amount) = validator
+                    .deposit_to_account(&setup, *account, deposit_amount)
+                    .await;
                 (deposit_address, deposit_amount, minted_amount)
             }))
             .await
@@ -155,76 +154,4 @@ async fn should_deposit_consolidate_and_withdraw() {
     }
 
     setup.drop().await;
-}
-
-/// Creates a test setup connected to the given Solana test validator.
-async fn setup_with_solana_validator(validator: &SolanaTestValidator) -> Setup {
-    SetupBuilder::new()
-        .with_proxy_canister()
-        .with_pocket_ic_live_mode()
-        .with_sol_rpc_install_args(InstallArgs {
-            override_provider: Some(OverrideProvider {
-                override_url: Some(RegexSubstitution {
-                    pattern: ".*".into(),
-                    replacement: validator.rpc_url().to_string(),
-                }),
-            }),
-            ..InstallArgs::default()
-        })
-        .build()
-        .await
-}
-
-async fn deposit_to_account(
-    setup: &Setup,
-    validator: &SolanaTestValidator,
-    account: Account,
-    amount: Lamport,
-) -> (Address, Lamport) {
-    let expected_mint_amount = amount - Setup::DEFAULT_MANUAL_DEPOSIT_FEE;
-    let deposit_address = setup.minter().get_deposit_address(account).await.into();
-
-    println!("Depositing {amount} Lamport to address {deposit_address}");
-
-    let balance_before = setup.ledger().balance_of(account).await;
-    assert_eq!(balance_before, 0);
-
-    let deposit_signature = validator.transfer_to(deposit_address, amount).await;
-
-    let result = setup
-        .minter()
-        .process_deposit(ProcessDepositArgs {
-            owner: Some(account.owner),
-            subaccount: account.subaccount,
-            signature: deposit_signature.into(),
-        })
-        .await;
-    assert_matches!(result, Ok(DepositStatus::Minted {
-        minted_amount,
-        deposit_id,
-        block_index: _,
-    }) if minted_amount == expected_mint_amount
-        && deposit_id.signature == deposit_signature.into()
-        && deposit_id.account == account);
-
-    let balance_after = setup.ledger().balance_of(account).await;
-    assert_eq!(balance_after, expected_mint_amount);
-
-    (deposit_address, expected_mint_amount)
-}
-
-/// Polls the minter until the given withdrawal is finalized, advancing time
-/// between polls by enough for both the withdrawal and the finalization timer
-/// to fire, without waiting for wall-clock minutes.
-async fn wait_for_withdrawal_finalized(setup: &Setup, burn_index: u64) {
-    for _ in 0..15 {
-        if matches!(
-            setup.minter().withdrawal_status(burn_index).await,
-            WithdrawalStatus::TxFinalized(_)
-        ) {
-            return;
-        }
-        setup.advance_time_and_settle(Duration::from_mins(2)).await;
-    }
-    panic!("Withdrawal {burn_index} did not finalize within timeout");
 }

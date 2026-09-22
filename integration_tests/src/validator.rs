@@ -1,4 +1,8 @@
-use sol_rpc_types::{Lamport, RoundingError};
+use crate::{Setup, SetupBuilder};
+use assert_matches::assert_matches;
+use cksol_types::{DepositStatus, ProcessDepositArgs, WithdrawalStatus};
+use icrc_ledger_types::icrc1::account::Account;
+use sol_rpc_types::{InstallArgs, Lamport, OverrideProvider, RegexSubstitution, RoundingError};
 use solana_address::Address;
 use solana_client::{
     nonblocking::rpc_client::RpcClient,
@@ -119,6 +123,64 @@ impl SolanaTestValidator {
         rpc.get_fee_for_message(&transfer.message).await.ok()
     }
 
+    /// Creates a test setup whose SOL RPC canister talks to this validator.
+    pub async fn setup(&self) -> Setup {
+        SetupBuilder::new()
+            .with_proxy_canister()
+            .with_pocket_ic_live_mode()
+            .with_sol_rpc_install_args(InstallArgs {
+                override_provider: Some(OverrideProvider {
+                    override_url: Some(RegexSubstitution {
+                        pattern: ".*".into(),
+                        replacement: self.rpc_url().to_string(),
+                    }),
+                }),
+                ..InstallArgs::default()
+            })
+            .build()
+            .await
+    }
+
+    /// Deposits `amount` to the deposit address of `account`, has the minter
+    /// process it, and returns the deposit address and the minted amount.
+    pub async fn deposit_to_account(
+        &self,
+        setup: &Setup,
+        account: Account,
+        amount: Lamport,
+    ) -> (Address, Lamport) {
+        let expected_mint_amount = amount - Setup::DEFAULT_MANUAL_DEPOSIT_FEE;
+        let deposit_address = setup.minter().get_deposit_address(account).await.into();
+
+        println!("Depositing {amount} Lamport to address {deposit_address}");
+
+        let balance_before = setup.ledger().balance_of(account).await;
+        assert_eq!(balance_before, 0);
+
+        let deposit_signature = self.transfer_to(deposit_address, amount).await;
+
+        let result = setup
+            .minter()
+            .process_deposit(ProcessDepositArgs {
+                owner: Some(account.owner),
+                subaccount: account.subaccount,
+                signature: deposit_signature.into(),
+            })
+            .await;
+        assert_matches!(result, Ok(DepositStatus::Minted {
+            minted_amount,
+            deposit_id,
+            block_index: _,
+        }) if minted_amount == expected_mint_amount
+            && deposit_id.signature == deposit_signature.into()
+            && deposit_id.account == account);
+
+        let balance_after = setup.ledger().balance_of(account).await;
+        assert_eq!(balance_after, expected_mint_amount);
+
+        (deposit_address, expected_mint_amount)
+    }
+
     /// The JSON-RPC URL of this validator.
     pub fn rpc_url(&self) -> &str {
         &self.rpc_url
@@ -221,6 +283,22 @@ impl SolanaTestValidator {
             "Balance of {address} did not increase beyond {previous_balance} at finalized commitment"
         );
     }
+}
+
+/// Polls the minter until the given withdrawal is finalized, advancing time
+/// between polls by enough for both the withdrawal and the finalization timer
+/// to fire, without waiting for wall-clock minutes.
+pub async fn wait_for_withdrawal_finalized(setup: &Setup, burn_index: u64) {
+    for _ in 0..15 {
+        if matches!(
+            setup.minter().withdrawal_status(burn_index).await,
+            WithdrawalStatus::TxFinalized(_)
+        ) {
+            return;
+        }
+        setup.advance_time_and_settle(Duration::from_mins(2)).await;
+    }
+    panic!("Withdrawal {burn_index} did not finalize within timeout");
 }
 
 impl Drop for SolanaTestValidator {
