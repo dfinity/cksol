@@ -641,6 +641,7 @@ mod withdrawal_batches {
     use super::*;
     use crate::sol_transfer::{BATCH_WITHDRAWAL_TX_FEE, MAX_WITHDRAWALS_PER_TX};
 
+    const MAX_AMOUNT_TO_TRANSFER: Lamport = u64::MAX - WITHDRAWAL_FEE - BATCH_WITHDRAWAL_TX_FEE;
     const NUM_REQUESTS_FOR_TWO_BATCHES: usize = MAX_WITHDRAWALS_PER_TX + 1;
     const COST_OF_TWO_BATCHES: Lamport = NUM_REQUESTS_FOR_TWO_BATCHES as u64
         * MINIMUM_WITHDRAWAL_AMOUNT
@@ -656,7 +657,7 @@ mod withdrawal_batches {
     proptest! {
         #[test]
         fn should_batch_single_request_when_balance_covers_amount_and_fee(
-            amount_to_transfer in MINIMUM_WITHDRAWAL_AMOUNT..=u64::MAX - WITHDRAWAL_FEE
+            amount_to_transfer in MINIMUM_WITHDRAWAL_AMOUNT..=MAX_AMOUNT_TO_TRANSFER
         ) {
             let mut state = state();
             state.balance = amount_to_transfer + BATCH_WITHDRAWAL_TX_FEE;
@@ -670,7 +671,7 @@ mod withdrawal_batches {
 
         #[test]
         fn should_be_empty_when_balance_does_not_cover_amount_and_fee(
-            amount_to_transfer in MINIMUM_WITHDRAWAL_AMOUNT..=u64::MAX - WITHDRAWAL_FEE,
+            amount_to_transfer in MINIMUM_WITHDRAWAL_AMOUNT..=MAX_AMOUNT_TO_TRANSFER,
             shortfall in 1..=MINIMUM_WITHDRAWAL_AMOUNT + BATCH_WITHDRAWAL_TX_FEE
         ) {
             let mut state = state();
@@ -714,6 +715,20 @@ mod withdrawal_batches {
 
             prop_assert_eq!(batches, vec![requests[..MAX_WITHDRAWALS_PER_TX].to_vec()]);
         }
+    }
+
+    #[test]
+    fn should_be_empty_when_cost_overflows() {
+        let mut state = state();
+        state.balance = u64::MAX;
+        let request = WithdrawalRequest {
+            amount_to_transfer: u64::MAX,
+            burned_amount: u64::MAX,
+            ..withdrawal_request(0, MINIMUM_WITHDRAWAL_AMOUNT)
+        };
+        accept_withdrawal_requests(&mut state, [request]);
+
+        assert_eq!(state.withdrawal_batches().next(), None);
     }
 
     #[test]
