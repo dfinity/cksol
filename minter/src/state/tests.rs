@@ -636,3 +636,114 @@ mod oldest_incomplete_withdrawal_created_at {
         );
     }
 }
+
+mod withdrawal_batches {
+    use super::*;
+    use crate::sol_transfer::{BATCH_WITHDRAWAL_TX_FEE, MAX_WITHDRAWALS_PER_TX};
+
+    fn state_with(
+        balance: Lamport,
+        amounts_to_transfer: impl IntoIterator<Item = Lamport>,
+    ) -> State {
+        let mut state = State::try_from(valid_init_args()).unwrap();
+        state.balance = balance;
+        for (burn_index, amount_to_transfer) in amounts_to_transfer.into_iter().enumerate() {
+            let request = WithdrawalRequest {
+                account: account(burn_index),
+                solana_address: [0u8; 32],
+                burn_block_index: LedgerBurnIndex::from(burn_index as u64),
+                amount_to_transfer,
+                burned_amount: amount_to_transfer + WITHDRAWAL_FEE,
+            };
+            state.process_accepted_withdrawal(&request, 0);
+        }
+        state
+    }
+
+    fn burn_indices(state: &State) -> Vec<Vec<u64>> {
+        state
+            .withdrawal_batches()
+            .map(|batch| {
+                batch
+                    .iter()
+                    .map(|request| *request.burn_block_index.get())
+                    .collect()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn should_be_empty_when_no_pending_withdrawals() {
+        let state = state_with(u64::MAX, []);
+
+        assert_eq!(burn_indices(&state), Vec::<Vec<u64>>::new());
+    }
+
+    #[test]
+    fn should_batch_single_request_when_balance_covers_amount_and_fee() {
+        let state = state_with(
+            MINIMUM_WITHDRAWAL_AMOUNT + BATCH_WITHDRAWAL_TX_FEE,
+            [MINIMUM_WITHDRAWAL_AMOUNT],
+        );
+
+        assert_eq!(burn_indices(&state), vec![vec![0]]);
+    }
+
+    #[test]
+    fn should_be_empty_when_balance_covers_amount_but_not_fee() {
+        let state = state_with(
+            MINIMUM_WITHDRAWAL_AMOUNT + BATCH_WITHDRAWAL_TX_FEE - 1,
+            [MINIMUM_WITHDRAWAL_AMOUNT],
+        );
+
+        assert_eq!(burn_indices(&state), Vec::<Vec<u64>>::new());
+    }
+
+    #[test]
+    fn should_stop_at_first_unaffordable_request_without_skipping_it() {
+        let amount = MINIMUM_WITHDRAWAL_AMOUNT;
+        let state = state_with(
+            2 * amount + BATCH_WITHDRAWAL_TX_FEE,
+            [amount, 2 * amount, amount],
+        );
+
+        assert_eq!(burn_indices(&state), vec![vec![0]]);
+    }
+
+    #[test]
+    fn should_split_requests_into_batches_of_max_size() {
+        let num_requests = MAX_WITHDRAWALS_PER_TX + 1;
+        let state = state_with(
+            u64::MAX,
+            std::iter::repeat_n(MINIMUM_WITHDRAWAL_AMOUNT, num_requests),
+        );
+
+        let last_index = num_requests as u64 - 1;
+        assert_eq!(
+            burn_indices(&state),
+            vec![(0..last_index).collect(), vec![last_index]]
+        );
+    }
+
+    #[test]
+    fn should_start_second_batch_when_balance_covers_its_fee() {
+        let num_requests = MAX_WITHDRAWALS_PER_TX + 1;
+        let state = state_with(
+            num_requests as u64 * MINIMUM_WITHDRAWAL_AMOUNT + 2 * BATCH_WITHDRAWAL_TX_FEE,
+            std::iter::repeat_n(MINIMUM_WITHDRAWAL_AMOUNT, num_requests),
+        );
+
+        assert_eq!(burn_indices(&state).len(), 2);
+    }
+
+    #[test]
+    fn should_not_start_second_batch_when_balance_cannot_cover_its_fee() {
+        let num_requests = MAX_WITHDRAWALS_PER_TX + 1;
+        let state = state_with(
+            num_requests as u64 * MINIMUM_WITHDRAWAL_AMOUNT + 2 * BATCH_WITHDRAWAL_TX_FEE - 1,
+            std::iter::repeat_n(MINIMUM_WITHDRAWAL_AMOUNT, num_requests),
+        );
+
+        assert_eq!(burn_indices(&state).len(), 1);
+    }
+}
