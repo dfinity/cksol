@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# install rustup (ic-wasm and the other tools come from mise.toml via `mise install`)
+# install rustup only; ic-wasm and the other build tools are provisioned separately with `mise install`
 
 set -euo pipefail
 
