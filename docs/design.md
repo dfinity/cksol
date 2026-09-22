@@ -33,7 +33,7 @@ graph LR
     end
     Solana["Solana"]
 
-    User -- "get_deposit_address / process_deposit / withdraw" --> Minter
+    User -- "get_deposit_address / deposit_sol / withdraw" --> Minter
     User -- "icrc1_transfer / icrc2_approve" --> Ledger
     Minter -- "icrc1_transfer (mint)<br/>icrc2_transfer_from (burn)" --> Ledger
     Minter -- "JSON-RPC requests" --> RPC
@@ -295,9 +295,9 @@ Proposed values for the parameters are provided in this list:
 
 #### 3.1.3. Manual Flow
 
-A user may issue a request to retrieve a particular transaction and mint ckSOL based on that transaction manually. This manual flow serves two purposes: First, it enables a user to get ckSOL more quickly, as there is no initial waiting time. Second, if the `update_balance` call exhausted the quota, the manual flow can be used to retrieve the transaction corresponding to a SOL transfer to the deposit address, which will then result in the minting of ckSOL, and replenish the quota of the deposit address for future automatic lookups.
+A user who has transferred SOL to their deposit address asks the ckSOL minter to *sweep* that address. The user does not identify individual Solana transactions: the ckSOL minter reads the balance of the deposit address, moves it to its main account, and mints ckSOL once that sweep is finalized. As a consequence, several transfers that are each below the minimum deposit amount are credited together once their sum exceeds it, and deposits from centralized exchanges, which typically do not show the transaction signature to the user, need nothing but the deposit address.
 
-The manual flow is depicted in the following figure.
+The manual flow is depicted in the following figure. The sweep reuses the transaction submission flow and the finalization flow described in [Section 3.1.4](#314-consolidation) and [Section 3.2.2](#322-finalization-and-resubmissions).
 
 ```mermaid
 sequenceDiagram
@@ -307,38 +307,71 @@ sequenceDiagram
     participant Minter as ckSOL Minter
     participant Ledger as ckSOL Ledger
 
-    User->>+Solana: transfer(sol_address, amount)
+    User->>+Solana: transfer(deposit_address, amount)
     Solana-->>-User: signature
-    User->>+Minter: process_deposit(principal, subaccount, signature) + cycles
+    User->>+Minter: deposit_sol(principal, subaccount) + cycles
+    Minter->>+RPC: getBalance(deposit_address, finalized)
+    RPC->>+Solana: getBalance(deposit_address)
+    Solana-->>-RPC: balance
+    RPC-->>-Minter: balance
+    Note over Minter: sweepable := balance - rent exemption threshold<br/>queue the deposit if sweepable ≥ minimum deposit amount
+    Minter-->>-User: Ok(Queued { sweepable })
+
+    Note over Minter: ⏱️ Sweep timer
+    activate Minter
+    Note over Solana,Minter: Transaction submission flow (Section 3.1.4)<br/>one transfer per queued deposit address, largest deposit pays the fee
+    Minter->>+RPC: sendTransaction(sweep)
+    RPC-->>-Minter: signature
+    deactivate Minter
+
+    Note over Minter: ⏱️ Finalization timer (Section 3.2.2)
+    activate Minter
+    Minter->>+RPC: getSignatureStatuses([signature])
+    RPC-->>-Minter: finalized
     Minter->>+RPC: getTransaction(signature)
-    RPC->>+Solana: getTransaction(signature)
-    Solana-->>-RPC: transaction
-    RPC-->>-Minter: transaction
-    Minter->>+Ledger: icrc1_transfer(cksol_minter, principal, subaccount, amount - fee)
+    RPC-->>-Minter: transaction (fee paid, balances)
+    Minter->>+Ledger: icrc1_transfer(cksol_minter, principal, subaccount, sweepable - fee share)
     Ledger-->>-Minter: block index
-    Minter-->>-User: Ok(amount - fee, block index)
+    deactivate Minter
+
+    User->>+Minter: deposit_status(principal, subaccount)
+    Minter-->>-User: Minted { block index, amount }
 ```
 
-The manual flow is triggered by calling `process_deposit` with the user's account (principal ID and subaccount) and the signature identifying the transaction as parameters. This endpoint requires cycles to be attached. As specified in [Section 3.3.2](#332-cksol-minter-fees), **1T cycles** must be attached to the call.
+**Request.** The flow is triggered by calling `deposit_sol` with the user's account (principal ID and subaccount) as parameters. The principal may differ from the caller's, so that a frontend or another canister can pay for a user's deposit, but it must not be the anonymous principal. The endpoint requires cycles to be attached; the required amount is exposed as `process_deposit_required_cycles` in `get_minter_info` and, as explained below, most of it is refunded. At most one deposit per account can be in flight: if a deposit for the given account is already queued or swept but not yet finalized, the call returns the current status and refunds all attached cycles without contacting the SOL RPC canister.
 
-After accepting the cycles, the ckSOL minter first checks if it already stores the corresponding transaction information: the amount to be minted, i.e., the sum of amounts minus the *manual deposit fee* (defined in [Section 3.3.2](#332-cksol-minter-fees)), the transaction signature, the user's account, and the boolean flag `completed`. If completed, nothing remains to be done and the call returns. If there is a record of this transaction but `completed=false`, then the call to the SOL RPC canister is skipped. Otherwise, the call is made to obtain the transaction details. If the obtained transaction details indicate that a transfer has been made to the user's deposit address, the transaction information is recorded with the flag `completed=false`. The ckSOL minter then triggers the minting by calling the `icrc1_transfer` endpoint on the ckSOL ledger. When the mint operation is complete, the ckSOL minter updates the corresponding flag to `completed:=true` and returns the amount minted plus the block index corresponding to the mint operation on the ckSOL ledger.
+**Balance check.** The ckSOL minter calls the `getBalance` endpoint of the SOL RPC canister for the deposit address at the `finalized` commitment level. The `minContextSlot` parameter is set to the slot at which the previous sweep of this address was finalized, so that a lagging RPC provider cannot report a balance that still includes funds already swept. The *sweepable amount* is the balance minus the **rent exemption threshold** (890,880 lamports for an account without data). This threshold is deliberately left on the deposit address: Solana rejects any transaction that would leave an account with a nonzero balance below the threshold, so sweeping the whole balance would fail as soon as a small transfer arrived between the balance check and the execution of the sweep. Keeping the threshold on the address makes the sweep independent of concurrent transfers. The threshold is paid once per deposit address, since later sweeps find it already in place.
 
-Inter-canister calls may fail, specifically the calls to the SOL RPC canister and the ckSOL ledger. In either case, an error is returned and no further action is taken.
+If the sweepable amount is below the **minimum deposit amount** defined in [Section 3.3.3](#333-minimum-swap-amounts), the call fails with `ValueTooSmall`, reporting the sweepable amount and the minimum, so that the user knows how much to top up. Only the cost of the `getBalance` call is charged in this case. Otherwise the deposit is recorded as *queued* with the account, the deposit address, and the sweepable amount, and the call returns `Queued`. The cycles charged are the cost of the `getBalance` call plus the **deposit consolidation fee**, which covers the threshold signature of the sweep and the deposit's share of the RPC calls made by the sweep and finalization timers, as detailed in [Section 3.3.2](#332-cksol-minter-fees). The remaining cycles are refunded.
 
-The cycles are mainly intended to pay for the calls to the SOL RPC canister, including any calls due to the automatic deposit flow. The 1T cycles are sent to the SOL RPC canister to obtain the transaction whose hash is specified in the `process_deposit` call. From the returned amount of cycles, additional cycles are deducted:
+**Sweep.** A timer, running at the same frequency as withdrawal processing, takes up to 10 queued deposits and submits one Solana transaction for them following the transaction submission flow of [Section 3.1.4](#314-consolidation). Each deposit address signs a transfer of its sweepable amount to the main account of the ckSOL minter. The deposit address with the largest sweepable amount is the fee payer; it is listed first in the transaction and its transfer is reduced by the transaction fee of `5000 * k` lamports for `k` signatures. Since the minimum deposit amount is larger than the fee of a full batch (see [Section 3.3.4](#334-parameter-constraints)), the fee payer always has enough funds, and every deposit address is left with exactly the rent exemption threshold. The deposits are recorded as *swept* together with the transaction signature. No ckSOL is minted yet.
 
-1. **26.2B cycles** are deducted if there was a mint operation, which is the cost of obtaining a [threshold signature on a 34-node subnet](https://docs.internetcomputer.org/references/t-sigs-how-it-works/). These cycles are used to pay for the consolidation process described in the next section.
-2. **100M cycles** are subtracted otherwise for the work carried out by the ckSOL minter.
+**Finalization.** The sweep transaction is monitored like any other transaction, as described in [Section 3.2.2](#322-finalization-and-resubmissions). Once the transaction is finalized successfully, the ckSOL minter fetches it with `getTransaction` and reads the fee that was actually charged from the transaction metadata, rather than assuming it, so that a change in the fee schedule of Solana can never cause the ckSOL minter to mint more than it received. The pre- and post-balances in the metadata are used as a sanity check: every deposit address must end at the rent exemption threshold. The balance of the main account is increased by the sum of the sweepable amounts minus the fee. Then, for each deposit in the transaction, the ckSOL minter mints the sweepable amount minus the deposit's share of the fee, `ceil(fee / k)`, to the user's account with a single `icrc1_transfer` call whose memo contains the sweep signature. The total minted amount is therefore never larger than the amount received on the main account. A user can follow the progress with `deposit_status`, which reports `Queued`, `Swept`, `Minted`, or `Dropped`.
 
-Let xT cycles denote the left-over cycles. As shown in [Section 3.3.2](#332-cksol-minter-fees), depleting the quotas consumes roughly 0.44T cycles. Given that x is at least 0.9738, there are enough cycles to replenish both quotas, i.e., after this operation, both quotas are again at their respective maximum values.
+Two failure cases exist, and neither is retried by the ckSOL minter:
 
-The cost of replenishing the number of allowed `getSignaturesForAddress` calls from y to `MAX_GET_SIGNATURES_CALLS` is `(MAX_GET_SIGNATURES_CALLS - y) * 5G` cycles (rounding up the derived cost of 4.3G). Similarly, the cost of replenishing the number of allowed `getTransaction` calls from z to `MAX_RETRIEVED_TRANSACTIONS` is `(MAX_RETRIEVED_TRANSACTIONS - z) * 8G` cycles (rounding up the derived cost of 7.5G).
+1. The transaction is finalized with an error. The funds are still on the deposit addresses, minus the fee paid by the fee payer. This should never happen with the invariants above, so it is reported as an error in the logs and in the metrics.
+2. The transaction expires, i.e., its blockhash is no longer valid and it has no on-chain status. Contrary to withdrawals, the sweep is *not* resubmitted. Expiry must be determined by comparing the block height at which the blockhash stops being valid with the current block height, not by counting slots, since slots can be skipped; otherwise a transaction declared expired could still land, and the funds would reach the main account without being credited.
 
-Given the suggested parameters, the cost is at most 0.45T cycles. Thus, at least 0.5238T cycles are refunded.
+In both cases the queued deposits are marked as *dropped*, and the number of dropped deposits is exposed as a metric. Since nothing was minted, no user is owed anything, and the user simply calls `deposit_sol` again to queue a new sweep of the balance that is still on the deposit address. In other words, the retry is triggered and paid for by the caller.
+
+**Example.** The following example uses the parameters of [Section 3.3](#33-fees--minimum-swap-amounts), a price of 1 SOL = 100 USD, and 1T cycles = 1 XDR = 1.44 USD. Alice deposits 1 SOL and Bob deposits 0.05 SOL, each to their own deposit address, which was empty before, and both deposits are swept in the same transaction.
+
+| Stage | Alice | Bob | Paid by | Notes |
+| --- | --- | --- | --- | --- |
+| 1. Transfer to the deposit address | 1,000,000,000 lamports (1 SOL) | 50,000,000 lamports (0.05 SOL) | User's wallet | The Solana fee of 5,000 lamports for this transfer is paid by the sender on top of the amount and is not visible to the ckSOL minter. |
+| 2. `deposit_sol` with 1T cycles attached | charged 47.1B cycles (0.068 USD) | charged 47.1B cycles (0.068 USD) | Caller, in cycles | 2.1B cycles for `getBalance` plus the deposit consolidation fee of 45B cycles. 952.9B cycles are refunded. |
+| 3. Sweepable amount | 999,109,120 lamports | 49,109,120 lamports | | Balance minus the rent exemption threshold of 890,880 lamports (0.089 USD), which stays on the deposit address. |
+| 4. Sweep transaction fee | 10,000 lamports paid on-chain | 0 | Fee payer (Alice) | Two signatures at 5,000 lamports each. Alice transfers 999,099,120 lamports, Bob transfers 49,109,120 lamports. Both deposit addresses end at 890,880 lamports; the main account receives 1,048,208,240 lamports. |
+| 5. Mint | 999,104,120 lamports (0.99910412 ckSOL) | 49,104,120 lamports (0.04910412 ckSOL) | | Sweepable amount minus the fee share of `ceil(10,000 / 2) = 5,000` lamports. The total of 1,048,208,240 equals the amount received on the main account. |
+
+For Alice, converting 1 SOL to ckSOL costs 895,880 lamports (0.0896 USD) on Solana, of which 890,880 lamports remain on her deposit address and are not charged again for her next deposit, plus 47.1B cycles (0.068 USD). Bob pays the same, so smaller deposits pay a proportionally larger share; a deposit whose sweepable amount is exactly the minimum deposit amount of 0.02 SOL would be credited 19,995,000 lamports, i.e., 99.975% of the amount swept.
+
+If Bob then withdraws everything, he first approves the ckSOL minter, which costs the ledger transfer fee of 500 lamports, and then withdraws the remaining 49,103,620 lamports. After the withdrawal fee of 1,000,000 lamports, the destination address receives 48,103,620 lamports (0.04810362 SOL). The whole round trip from 0.05 SOL to 0.04810362 SOL costs 1,896,380 lamports (0.19 USD), of which 890,880 lamports are still under the control of the ckSOL minter on Bob's deposit address, plus the cycles attached to `deposit_sol`.
 
 #### 3.1.4. Consolidation
 
-Since users deposit funds in dedicated deposit addresses, the ckSOL minter's funds are spread across multiple addresses, making withdrawals inconvenient. Therefore, a consolidation mechanism is introduced that transfers the funds from deposit addresses to the main address of the ckSOL minter. The general flow for submitting a transaction is shown in the following figure.
+Since users deposit funds in dedicated deposit addresses, the ckSOL minter's funds are spread across multiple addresses, making withdrawals inconvenient. Therefore, a consolidation mechanism is introduced that transfers the funds from deposit addresses to the main address of the ckSOL minter. In the manual flow of [Section 3.1.3](#313-manual-flow), the consolidation is the sweep itself: ckSOL is minted only once the consolidation transaction is finalized. The general flow for submitting a transaction is shown in the following figure.
 
 ```mermaid
 sequenceDiagram
@@ -376,7 +409,7 @@ A timer is run periodically, triggering the consolidation. It is likely sufficie
 
 A concrete mainnet example of a transaction that makes two transfers to the same destination address can be viewed [here](https://solscan.io/tx/5CzNKyQsSfAtCQAxnj6acuhQZEh5J4B8aZzV1ArvvM8vodUr4vcQu7Co8wzbHrSYMW4h8ikg67bqCZSU4AHiL1D9).
 
-Note that the default compute unit (CU) limits are [200,000 CUs per instruction and 1,400,000 per transaction](https://solana.com/hi/docs/core/fees/compute-budget). A standard transfer consumes around [300 CUs](https://research.topledger.xyz/blogs/compute-units-and-transaction-bytes-on-solana), well below the instruction limit. Moreover, 10 transfers together is still clearly below the transaction limit. In short, there is no need to bump the *compute allocation* for such transactions. The transaction fee only depends on the number of signatures. If there are k ≤ 10 signatures, one signature for each consolidation transfer, where the first signer is the fee payer, the fee is `5000 * k` lamports. The address whose funds are moved in the first transfer instruction pays the transaction fee.
+Note that the default compute unit (CU) limits are [200,000 CUs per instruction and 1,400,000 per transaction](https://solana.com/hi/docs/core/fees/compute-budget). A standard transfer consumes around [300 CUs](https://research.topledger.xyz/blogs/compute-units-and-transaction-bytes-on-solana), well below the instruction limit. Moreover, 10 transfers together is still clearly below the transaction limit. In short, there is no need to bump the *compute allocation* for such transactions. The transaction fee only depends on the number of signatures. If there are k ≤ 10 signatures, one signature for each consolidation transfer, where the first signer is the fee payer, the fee is `5000 * k` lamports. The deposit address with the largest amount to consolidate is listed first and pays the transaction fee; its transfer is reduced by the fee, so that every deposit address is left with exactly the rent exemption threshold.
 
 ### 3.2. Converting ckSOL to SOL
 
@@ -519,9 +552,9 @@ Using the [cost estimation endpoints](https://dashboard.internetcomputer.org/can
 
 As far as the **automatic deposit fee** is concerned, if we assume a total cost of 0.418T cycles (10 × 4.3B for the maximum 10 `getSignaturesForAddress` calls plus 50 × 7.5B for the `getTransaction` calls), the cost in SOL is 0.418 XDR = 0.602 USD = 0.00602 SOL at 1 SOL = 100 USD. A threshold signature costs 26.2B cycles, which is later required for the consolidation transaction. The cost is 0.0262 XDR = 0.0377 USD = 0.000377 SOL. Additionally, there is a fee of 5000 lamports for the consolidation transaction on Solana. The total cost is therefore 0.006402 SOL. Overcharging slightly, a reasonable choice for the fee is **0.01 SOL**.
 
-The **manual deposit fee** must only cover the cost of the signature in the consolidation transaction where the funds are transferred to the main account. This cost is 5000 lamports. Adding again a safety margin, the manual deposit fee could be set to 10,000 lamports, i.e., **0.00001 SOL**.
+The **manual deposit fee** is not a parameter but the depositor's share of the fee of the sweep transaction that consolidates the deposit, i.e., `ceil(5000 * k / k) = 5000` lamports, read from the finalized transaction as described in [Section 3.1.3](#313-manual-flow). In addition, the depositor leaves the rent exemption threshold of 890,880 lamports on the deposit address the first time it is swept. The cycles consumed by the manual flow are charged to the caller of `deposit_sol`: the cost of the `getBalance` call, roughly 2.1B cycles given its small response, plus the **deposit consolidation fee**. The latter must cover the threshold signature of 26.2B cycles and, in the worst case of a sweep containing a single deposit, all the RPC calls of the sweep and finalization timers, i.e., `getSlot`, `getBlock`, `sendTransaction`, `getSignatureStatuses`, and `getTransaction`, for about 16.3B cycles. A deposit consolidation fee of **45B cycles** covers this worst case.
 
-For either deposit flow, when x SOL are deposited in a deposit address, the user receives x SOL minus the (automatic or manual) deposit fee in their account.
+When x SOL are swept from a deposit address, the user receives x SOL minus the deposit fee in their account.
 
 The **withdrawal fee** can be lower, as it only requires the execution of the message submission flow, i.e., making one `getSlot`, `getBlock`, and `sendTransaction` call, followed by a `getSignatureStatuses` call, for a total cost of 8.6B cycles, which corresponds to 0.0086 XDR = 0.012384 USD = 0.00012384 SOL. Adding the threshold signature cost of 0.000377 SOL, the total cost is 0.00050084 SOL. Rounding up, the withdrawal fee could be set to **0.001 SOL**.
 
@@ -544,7 +577,7 @@ The following constraints regarding the parameters introduced in this section mu
 
 1. **automatic deposit fee ≥ manual deposit fee**: More work is required for the automatic deposit flow and no cycles are charged, so the fee should not be lower.
 2. **minimum deposit amount ≥ automatic deposit fee**: The minimum deposit amount must at least cover the deposit fee. Due to the first constraint, the minimum deposit amount is at least the fee of either deposit flow.
-3. **minimum deposit amount ≥ Solana transfer fee + rent exemption threshold**: The minimum deposit amount must be large enough so that at least the rent exemption threshold is transferred when consolidating the deposit. This condition covers the corner case when the ckSOL minter does not have any funds in its account and there is a single deposit that is consolidated.
+3. **minimum deposit amount ≥ 10 × Solana transfer fee + rent exemption threshold**: The minimum deposit amount applies to the sweepable amount, which excludes the rent exemption threshold left on the deposit address. It must cover the fee of a full sweep transaction of 10 signatures, since the largest deposit of a batch pays the whole fee, and the rent exemption threshold, so that a single consolidated deposit brings the main account above the threshold even when it was empty before.
 
 ### 3.4. OFAC Checks
 
@@ -608,10 +641,11 @@ The ckSOL minter exposes the following endpoints:
 
 1. `get_deposit_address(opt principal, opt subaccount)`: Returns the Solana address derived from the provided principal ID and subaccount. If no principal ID is provided, the principal ID of the caller is used.
 2. `update_balance(opt subaccount)`: Returns `ok` if the address derived from the caller's principal ID and the provided subaccount, if any, is being tracked.
-3. `process_deposit(opt principal, opt subaccount, signature)`: Processes the transaction for the given signature. If the transaction is processed successfully, the deposit status is returned. Otherwise, an error is returned.
-4. `withdraw(opt subaccount, amount, address)`: Burns the given amount of ckSOL from the user's account and transfers the same amount minus a fee in SOL to the given user address. Returns the block index of the burn operation on the ckSOL ledger in case of success. Otherwise, an error is returned.
-5. `withdrawal_status(block_index)`: Returns the withdrawal status (`NotFound`, `Pending`, `TxSent`, `TxFinalized`) for the withdrawal identified by the given block index.
-6. `get_minter_info`: Returns information about the ckSOL minter, specifically the various fees, the minimum deposit and withdrawal amounts, and the current balance of the ckSOL minter.
+3. `deposit_sol(opt principal, opt subaccount)`: Reads the balance of the deposit address derived from the given account and queues it for a sweep if the sweepable amount is at least the minimum deposit amount. Returns the deposit status. Otherwise, an error is returned.
+4. `deposit_status(opt principal, opt subaccount)`: Returns the status (`Queued`, `Swept`, `Minted`, `Dropped`) of the latest deposit for the given account.
+5. `withdraw(opt subaccount, amount, address)`: Burns the given amount of ckSOL from the user's account and transfers the same amount minus a fee in SOL to the given user address. Returns the block index of the burn operation on the ckSOL ledger in case of success. Otherwise, an error is returned.
+6. `withdrawal_status(block_index)`: Returns the withdrawal status (`NotFound`, `Pending`, `TxSent`, `TxFinalized`) for the withdrawal identified by the given block index.
+7. `get_minter_info`: Returns information about the ckSOL minter, specifically the various fees, the minimum deposit and withdrawal amounts, and the current balance of the ckSOL minter.
 
 The authoritative interface is the Candid file [`minter/cksol_minter.did`](../minter/cksol_minter.did).
 
