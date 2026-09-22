@@ -333,6 +333,11 @@ sequenceDiagram
     RPC-->>-Minter: finalized
     Minter->>+RPC: getTransaction(signature)
     RPC-->>-Minter: transaction (fee paid, balances)
+    Note over Minter: enqueue pending mint of sweepable - fee share
+    deactivate Minter
+
+    Note over Minter: ⏱️ Mint timer
+    activate Minter
     Minter->>+Ledger: icrc1_transfer(cksol_minter, principal, subaccount, sweepable - fee share)
     Ledger-->>-Minter: block index
     deactivate Minter
@@ -349,7 +354,7 @@ If the sweepable amount is below the **minimum deposit amount** defined in [Sect
 
 **Sweep.** A timer, running at the same frequency as withdrawal processing, takes up to 10 queued deposits and submits one Solana transaction for them following the transaction submission flow of [Section 3.1.4](#314-consolidation). Each deposit address signs a transfer of its sweepable amount to the main account of the ckSOL minter. The deposit address with the largest sweepable amount is the fee payer; it is listed first in the transaction and its transfer is reduced by the transaction fee of `5000 * k` lamports for `k` signatures. Since the minimum deposit amount is larger than the fee of a full batch (see [Section 3.3.4](#334-parameter-constraints)), the fee payer always has enough funds, and every deposit address is left with exactly the rent exemption threshold. The deposits are recorded as *swept* together with the transaction signature. No ckSOL is minted yet.
 
-**Finalization.** The sweep transaction is monitored like any other transaction, as described in [Section 3.2.2](#322-finalization-and-resubmissions). Once the transaction is finalized successfully, the ckSOL minter fetches it with `getTransaction` and reads the fee that was actually charged from the transaction metadata, rather than assuming it, so that a change in the fee schedule of Solana can never cause the ckSOL minter to mint more than it received. The pre- and post-balances in the metadata are used as a sanity check: every deposit address must end at the rent exemption threshold. The balance of the main account is increased by the sum of the sweepable amounts minus the fee. Then, for each deposit in the transaction, the ckSOL minter mints the sweepable amount minus the deposit's share of the fee, `ceil(fee / k)`, to the user's account with a single `icrc1_transfer` call whose memo contains the sweep signature. The total minted amount is therefore never larger than the amount received on the main account. A user can follow the progress with `deposit_status`, which reports `Queued`, `Swept`, `Minted`, or `Dropped`.
+**Finalization.** The sweep transaction is monitored like any other transaction, as described in [Section 3.2.2](#322-finalization-and-resubmissions). Once the transaction is finalized successfully, the ckSOL minter fetches it with `getTransaction` and reads the fee that was actually charged from the transaction metadata, rather than assuming it, so that a change in the fee schedule of Solana can never cause the ckSOL minter to mint more than it received. The pre- and post-balances in the metadata are used as a sanity check: every deposit address must end at the rent exemption threshold. The balance of the main account is increased by the sum of the sweepable amounts minus the fee. Then, for each deposit in the transaction, the ckSOL minter enqueues a *pending mint* of the sweepable amount minus the deposit's share of the fee, `ceil(fee / k)`, to the user's account. The total of the pending mints is therefore never larger than the amount received on the main account. Pending mints are processed on a timer: each one is a single `icrc1_transfer` call whose memo contains the sweep signature, and a mint whose ledger call fails stays in the queue and is retried on the next run with the same amount and memo. The sweep transaction itself is never resubmitted once it is finalized. A user can follow the progress with `deposit_status`, which reports `Queued`, `Swept`, `Minted`, or `Dropped`.
 
 Two failure cases exist, and neither is retried by the ckSOL minter:
 
