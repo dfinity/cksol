@@ -571,7 +571,7 @@ When the user withdraws x SOL, the user receives x SOL minus the withdrawal fee 
 - Minimum deposit amount: 0.02 SOL
 - Minimum withdrawal amount: 0.002 SOL
 
-The **minimum deposit amount** should be at least the deposit fee, which is 0.01 SOL and 0.00001 SOL for the automatic flow and the manual flow, respectively. A simple approach to ensure that the user gets at least half of the transferred amount is to set the minimum deposit amount to double the deposit fee. Thus, the minimum deposit amount is **0.02 SOL**.
+The **minimum deposit amount** applies to the sweepable amount of a deposit address. Following the constraints of [Section 3.3.4](#334-parameter-constraints), it must cover the fee of a full sweep transaction of 10 signatures, i.e., 50,000 lamports, plus the rent exemption threshold of 890,880 lamports, for a total of 940,880 lamports. The minimum deposit amount is set to **0.02 SOL**, more than 20 times that lower bound, so that a deposit of exactly the minimum is credited 19,995,000 lamports, i.e., 99.975% of the amount swept, and the cycles attached to `deposit_sol` remain small compared to the deposit.
 
 A similar principle can be applied for the **minimum withdrawal amount**. Given the withdrawal fee of 0.001 SOL, the minimum withdrawal amount can be set to 0.002 SOL. The user will thus receive at least 0.001 SOL, which is strictly above the rent exemption threshold of 0.00089088 SOL (890,880 lamports).
 
