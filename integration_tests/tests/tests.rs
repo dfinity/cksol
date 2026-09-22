@@ -5,7 +5,7 @@ use cksol_int_tests::{
     CkSolMinter, Setup, SetupBuilder,
     fixtures::{
         DEFAULT_CALLER_ACCOUNT, DEFAULT_CALLER_DEPOSIT_ADDRESS, DEPOSIT_AMOUNT,
-        EXPECTED_MINT_AMOUNT, MockBuilder, SharedMockHttpOutcalls, default_process_deposit_args,
+        EXPECTED_MINT_AMOUNT, MockBuilder, default_process_deposit_args,
         deposit_transaction_signature,
     },
 };
@@ -24,7 +24,6 @@ use icrc_ledger_types::icrc1::account::{Account, Subaccount};
 use serde_json::json;
 use sol_rpc_types::{CommitmentLevel, ConsensusStrategy, GetTransactionEncoding, RpcConfig, Slot};
 use std::time::Duration;
-use tokio::join;
 
 const WITHDRAWAL_PROCESSING_DELAY: Duration = Duration::from_mins(1);
 const FINALIZE_TRANSACTIONS_DELAY: Duration = Duration::from_mins(2);
@@ -575,35 +574,23 @@ mod withdrawal_tests {
             address: WITHDRAWAL_ADDRESS.to_string(),
         };
 
-        let minter1 = setup.minter();
-        let minter2 = setup.minter();
+        let minter = setup.minter();
+        let first_call = minter.submit_withdraw(args.clone()).await;
+        let second_call = minter.submit_withdraw(args).await;
 
-        let (result1, result2) = join!(
-            minter1.withdraw(args.clone()),
-            minter2.withdraw(args.clone()),
+        let outcomes = (
+            first_call.await_response().await,
+            second_call.await_response().await,
         );
-
-        let (result1, result2) = match (&result1, &result2) {
-            (Ok(_), Err(_)) => (result1, result2),
-            (Err(_), Ok(_)) => (result2, result1),
-            _ => panic!("Expected one success and one error, but got: {result1:?} and {result2:?}"),
-        };
-
-        // One should succeed, one should fail with AlreadyProcessing (order is non-deterministic)
-        let results = [&result1, &result2];
-        assert!(
-            results
-                .iter()
-                .any(|r| matches!(r, Ok(WithdrawalOk { block_index: _ }))),
-            "Expected one Minted result, got: {:?}",
-            results
-        );
-        assert!(
-            results
-                .iter()
-                .any(|r| matches!(r, Err(WithdrawalError::AlreadyProcessing))),
-            "Expected one AlreadyProcessing result, got: {:?}",
-            results
+        assert_matches!(
+            outcomes,
+            (
+                Ok(WithdrawalOk { .. }),
+                Err(WithdrawalError::AlreadyProcessing)
+            ) | (
+                Err(WithdrawalError::AlreadyProcessing),
+                Ok(WithdrawalOk { .. })
+            )
         );
 
         setup.drop().await;
@@ -820,40 +807,31 @@ mod process_deposit_tests {
     #[tokio::test]
     async fn should_fail_for_concurrent_access() {
         let setup = SetupBuilder::new().with_proxy_canister().build().await;
+        let minter = setup.minter();
 
-        // Both minters use the same mocks, whichever gets the guard first will consume them
-        let mocks =
-            SharedMockHttpOutcalls::new(MockBuilder::new().get_deposit_transaction().build());
+        let first_call = minter
+            .submit_process_deposit(default_process_deposit_args())
+            .await;
+        let second_call = minter
+            .submit_process_deposit(default_process_deposit_args())
+            .await;
+        setup
+            .execute_http_mocks(MockBuilder::new().get_deposit_transaction().build())
+            .await;
 
-        let minter1 = setup.minter().with_http_mocks(mocks.clone());
-        let minter2 = setup.minter().with_http_mocks(mocks.clone());
-
-        let (result1, result2) = join!(
-            minter1.process_deposit(default_process_deposit_args()),
-            minter2.process_deposit(default_process_deposit_args())
+        let outcomes = (
+            first_call.await_response().await,
+            second_call.await_response().await,
         );
-
-        let (result1, result2) = match (&result1, &result2) {
-            (Ok(_), Err(_)) => (result1, result2),
-            (Err(_), Ok(_)) => (result2, result1),
-            _ => panic!("Expected one success and one error, but got: {result1:?} and {result2:?}"),
-        };
-
-        // One should succeed, one should fail with `AlreadyProcessing` (order is non-deterministic)
-        let results = [&result1, &result2];
-        assert!(
-            results
-                .iter()
-                .any(|r| matches!(r, Ok(DepositStatus::Minted { .. }))),
-            "Expected one Minted result, got: {:?}",
-            results
-        );
-        assert!(
-            results
-                .iter()
-                .any(|r| matches!(r, Err(ProcessDepositError::AlreadyProcessing))),
-            "Expected one AlreadyProcessing result, got: {:?}",
-            results
+        assert_matches!(
+            outcomes,
+            (
+                Ok(DepositStatus::Minted { .. }),
+                Err(ProcessDepositError::AlreadyProcessing)
+            ) | (
+                Err(ProcessDepositError::AlreadyProcessing),
+                Ok(DepositStatus::Minted { .. })
+            )
         );
 
         setup.drop().await;
@@ -1009,6 +987,56 @@ mod process_deposit_tests {
             .send()
             .await
             .expect("Failed to get cycles cost for `getTransaction` request")
+    }
+}
+
+mod pending_call_tests {
+    use super::*;
+    use futures::FutureExt;
+    use std::{any::Any, panic::AssertUnwindSafe};
+
+    #[tokio::test]
+    async fn should_reject_submitting_process_deposit_without_proxy_canister() {
+        let setup = SetupBuilder::new().build().await;
+        let minter = setup.minter();
+
+        let panic = AssertUnwindSafe(async {
+            minter
+                .submit_process_deposit(default_process_deposit_args())
+                .await;
+        })
+        .catch_unwind()
+        .await
+        .expect_err("submitting with cycles but without a proxy canister should panic");
+        assert!(panic_message(&*panic).contains("requires a proxy canister"));
+
+        setup.drop().await;
+    }
+
+    #[tokio::test]
+    async fn should_reject_submitting_with_installed_http_mocks() {
+        let setup = SetupBuilder::new().with_proxy_canister().build().await;
+        let minter = setup.minter().with_http_mocks(MockBuilder::new().build());
+
+        let panic = AssertUnwindSafe(async {
+            minter
+                .submit_process_deposit(default_process_deposit_args())
+                .await;
+        })
+        .catch_unwind()
+        .await
+        .expect_err("submitting with installed HTTP mocks should panic");
+        assert!(panic_message(&*panic).contains("not served for submitted calls"));
+
+        setup.drop().await;
+    }
+
+    fn panic_message(panic: &(dyn Any + Send)) -> &str {
+        panic
+            .downcast_ref::<String>()
+            .map(String::as_str)
+            .or_else(|| panic.downcast_ref::<&str>().copied())
+            .unwrap_or_default()
     }
 }
 
