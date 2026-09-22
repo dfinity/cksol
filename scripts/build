@@ -72,9 +72,9 @@ do
 done
 
 # Checking for dependencies
-if ! command -v ic-wasm > /dev/null
+if ! ic-wasm --version > /dev/null 2>&1
 then
-    echo "could not find ic-wasm, please run the following command:"
+    echo "could not run ic-wasm, please run the following command:"
     echo "  mise install"
     exit 1
 fi
