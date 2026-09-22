@@ -5,8 +5,8 @@ use crate::{
     state::{TaskType, read_state},
     test_fixtures::{
         EventsAssert, MINIMUM_WITHDRAWAL_AMOUNT, MINTER_ACCOUNT, WITHDRAWAL_FEE, account,
-        confirmed_block, events, init_balance, init_balance_to, init_schnorr_master_key,
-        init_state, runtime::TestCanisterRuntime, signature,
+        confirmed_block, deposit_id, events, init_balance, init_balance_to,
+        init_schnorr_master_key, init_state, runtime::TestCanisterRuntime, signature,
     },
     withdraw::{process_pending_withdrawals, withdraw, withdrawal_status},
 };
@@ -299,11 +299,49 @@ mod process_pending_withdrawals_tests {
     #[tokio::test]
     async fn should_not_panic_when_withdrawing_exactly_the_minter_balance() {
         init_state();
-        init_balance_to(12_500_000);
         init_schnorr_master_key();
 
+        let consolidated_deposit = deposit_id(1);
+        let consolidated_deposit_amount = 12_500_000;
+        let consolidated_mint_index = 1_u64;
+        let consolidation_signature = signature(0x10);
+        events::accept_deposit(consolidated_deposit, consolidated_deposit_amount);
+        events::mint_deposit(consolidated_deposit, consolidated_mint_index);
+        events::submit_consolidation(
+            consolidation_signature,
+            MINTER_ACCOUNT,
+            0,
+            vec![consolidated_mint_index],
+        );
+        events::succeed_transaction(consolidation_signature);
+
+        let unconsolidated_deposit = deposit_id(2);
+        let unconsolidated_mint_index = 2_u64;
+        events::accept_deposit(unconsolidated_deposit, 12_500_000);
+        events::mint_deposit(unconsolidated_deposit, unconsolidated_mint_index);
+
         let minter_balance = read_state(|s| s.balance());
-        events::accept_withdrawal(account(1), 0, minter_balance + WITHDRAWAL_FEE);
+        assert_eq!(
+            minter_balance,
+            consolidated_deposit_amount - FEE_PER_SIGNATURE
+        );
+
+        let burn_block_index = 3_u64;
+        let result = withdraw(
+            &TestCanisterRuntime::new()
+                .add_successful_burn(burn_block_index)
+                .with_increasing_time(),
+            test_caller(),
+            minter_balance + WITHDRAWAL_FEE,
+            VALID_ADDRESS.to_string(),
+        )
+        .await;
+        assert_eq!(
+            result,
+            Ok(WithdrawalOk {
+                block_index: burn_block_index
+            })
+        );
 
         let events_before = EventsAssert::from_recorded();
 
@@ -317,7 +355,10 @@ mod process_pending_withdrawals_tests {
 
         process_pending_withdrawals(runtime).await;
 
-        assert_eq!(withdrawal_status(0), WithdrawalStatus::Pending);
+        assert_eq!(
+            withdrawal_status(burn_block_index),
+            WithdrawalStatus::Pending
+        );
         assert_eq!(EventsAssert::from_recorded(), events_before);
         assert_eq!(read_state(|s| s.balance()), minter_balance);
         let _guard = TimerGuard::new(TaskType::WithdrawalProcessing).unwrap();
@@ -326,12 +367,50 @@ mod process_pending_withdrawals_tests {
     #[tokio::test]
     async fn should_process_withdrawal_leaving_exactly_one_transaction_fee() {
         init_state();
-        init_balance_to(12_500_000);
         init_schnorr_master_key();
 
+        let consolidated_deposit = deposit_id(1);
+        let consolidated_deposit_amount = 12_500_000;
+        let consolidated_mint_index = 1_u64;
+        let consolidation_signature = signature(0x10);
+        events::accept_deposit(consolidated_deposit, consolidated_deposit_amount);
+        events::mint_deposit(consolidated_deposit, consolidated_mint_index);
+        events::submit_consolidation(
+            consolidation_signature,
+            MINTER_ACCOUNT,
+            0,
+            vec![consolidated_mint_index],
+        );
+        events::succeed_transaction(consolidation_signature);
+
+        let unconsolidated_deposit = deposit_id(2);
+        let unconsolidated_mint_index = 2_u64;
+        events::accept_deposit(unconsolidated_deposit, 12_500_000);
+        events::mint_deposit(unconsolidated_deposit, unconsolidated_mint_index);
+
         let minter_balance = read_state(|s| s.balance());
+        assert_eq!(
+            minter_balance,
+            consolidated_deposit_amount - FEE_PER_SIGNATURE
+        );
+
         let amount_to_transfer = minter_balance - FEE_PER_SIGNATURE;
-        events::accept_withdrawal(account(1), 0, amount_to_transfer + WITHDRAWAL_FEE);
+        let burn_block_index = 3_u64;
+        let result = withdraw(
+            &TestCanisterRuntime::new()
+                .add_successful_burn(burn_block_index)
+                .with_increasing_time(),
+            test_caller(),
+            amount_to_transfer + WITHDRAWAL_FEE,
+            VALID_ADDRESS.to_string(),
+        )
+        .await;
+        assert_eq!(
+            result,
+            Ok(WithdrawalOk {
+                block_index: burn_block_index
+            })
+        );
 
         let events_before = EventsAssert::from_recorded();
 
@@ -345,7 +424,10 @@ mod process_pending_withdrawals_tests {
 
         process_pending_withdrawals(runtime).await;
 
-        assert_matches!(withdrawal_status(0), WithdrawalStatus::TxSent { .. });
+        assert_matches!(
+            withdrawal_status(burn_block_index),
+            WithdrawalStatus::TxSent { .. }
+        );
         assert_eq!(EventsAssert::from_recorded().len(), events_before.len() + 1);
         assert_eq!(read_state(|s| s.balance()), 0);
     }
