@@ -36,11 +36,17 @@ impl SolanaTestValidator {
     /// Starts a new validator and waits until it accepts transactions at the
     /// regular fee.
     ///
+    /// Slots are shortened to 16 ticks so that a transaction is
+    /// finalized within a few seconds, while a blockhash still stays valid for
+    /// about 17 seconds, long enough for the minter to build and submit a
+    /// transaction on it.
+    ///
     /// # Panics
     ///
     /// Panics if `solana-test-validator` cannot be spawned or does not become
     /// ready within a minute.
     pub async fn start() -> Self {
+        const TICKS_PER_SLOT: u16 = 16;
         let ports = ValidatorPorts::reserve();
         let ledger_dir =
             std::env::temp_dir().join(format!("cksol-solana-test-validator-{}", ports.rpc));
@@ -50,6 +56,7 @@ impl SolanaTestValidator {
             .arg("--reset")
             .arg("--quiet")
             .args(["--bind-address", "127.0.0.1"])
+            .args(["--ticks-per-slot", &TICKS_PER_SLOT.to_string()])
             .args(["--rpc-port", &ports.rpc.to_string()])
             .args(["--faucet-port", &ports.faucet.to_string()])
             .args(["--gossip-port", &ports.gossip.to_string()])

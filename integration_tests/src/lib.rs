@@ -318,7 +318,7 @@ impl Setup {
     /// HTTP outcalls. An outcall still in flight when time is advanced again
     /// times out, and a timer needs several sequential outcalls per round.
     pub async fn advance_time_and_settle(&self, duration: Duration) {
-        const OUTCALL_SETTLE_DELAY: Duration = Duration::from_secs(10);
+        const OUTCALL_SETTLE_DELAY: Duration = Duration::from_secs(2);
         self.advance_time(duration).await;
         tokio::time::sleep(OUTCALL_SETTLE_DELAY).await;
     }

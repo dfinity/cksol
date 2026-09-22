@@ -214,17 +214,17 @@ async fn deposit_to_account(
 }
 
 /// Polls the minter until the given withdrawal is finalized, advancing time
-/// between polls so that the withdrawal and finalization timers fire without
-/// waiting for wall-clock minutes.
+/// between polls by enough for both the withdrawal and the finalization timer
+/// to fire, without waiting for wall-clock minutes.
 async fn wait_for_withdrawal_finalized(setup: &Setup, burn_index: u64) {
-    for _ in 0..30 {
+    for _ in 0..15 {
         if matches!(
             setup.minter().withdrawal_status(burn_index).await,
             WithdrawalStatus::TxFinalized(_)
         ) {
             return;
         }
-        setup.advance_time_and_settle(Duration::from_mins(1)).await;
+        setup.advance_time_and_settle(Duration::from_mins(2)).await;
     }
     panic!("Withdrawal {burn_index} did not finalize within timeout");
 }
