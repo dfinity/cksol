@@ -7,11 +7,14 @@ use solana_client::{
 use solana_keypair::{Keypair, Signer};
 use solana_signature::Signature;
 use std::{
-    net::TcpListener,
+    net::{TcpListener, UdpSocket},
     ops::RangeInclusive,
     path::PathBuf,
     process::{Child, Command, Stdio},
-    sync::atomic::{AtomicU16, Ordering},
+    sync::{
+        OnceLock,
+        atomic::{AtomicU16, Ordering},
+    },
     time::Duration,
 };
 
@@ -224,6 +227,10 @@ impl Drop for SolanaTestValidator {
 /// The ports a `solana-test-validator` binds: the JSON-RPC port together with
 /// the WebSocket port right after it, the faucet, gossip, and a dynamic range
 /// for the remaining services.
+///
+/// Blocks are handed out from a process-specific starting point so that test
+/// binaries running at the same time start from different ports, and every
+/// port of a block is probed before the block is used.
 struct ValidatorPorts {
     rpc: u16,
     faucet: u16,
@@ -235,11 +242,13 @@ impl ValidatorPorts {
     const BLOCK_SIZE: u16 = 32;
     const FIRST_BLOCK: u16 = 20_000;
     const LAST_BLOCK: u16 = 60_000;
+    const NUM_PROCESS_OFFSETS: u32 = 1_000;
 
     fn reserve() -> Self {
-        static NEXT_BLOCK: AtomicU16 = AtomicU16::new(ValidatorPorts::FIRST_BLOCK);
+        static NEXT_BLOCK: OnceLock<AtomicU16> = OnceLock::new();
+        let next_block = NEXT_BLOCK.get_or_init(|| AtomicU16::new(Self::first_block_of_process()));
         loop {
-            let first = NEXT_BLOCK.fetch_add(Self::BLOCK_SIZE, Ordering::SeqCst);
+            let first = next_block.fetch_add(Self::BLOCK_SIZE, Ordering::SeqCst);
             assert!(
                 first + Self::BLOCK_SIZE <= Self::LAST_BLOCK,
                 "no free port block left for solana-test-validator"
@@ -254,8 +263,13 @@ impl ValidatorPorts {
             }
         }
     }
+
+    fn first_block_of_process() -> u16 {
+        let offset = (std::process::id() % Self::NUM_PROCESS_OFFSETS) as u16;
+        Self::FIRST_BLOCK + offset * Self::BLOCK_SIZE
+    }
 }
 
 fn is_free_port(port: u16) -> bool {
-    TcpListener::bind(("127.0.0.1", port)).is_ok()
+    TcpListener::bind(("127.0.0.1", port)).is_ok() && UdpSocket::bind(("127.0.0.1", port)).is_ok()
 }

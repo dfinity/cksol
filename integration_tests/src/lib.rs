@@ -314,6 +314,15 @@ impl Setup {
         self.env.as_ref().unwrap().advance_time(duration).await
     }
 
+    /// Advances time and then lets the timers that became due complete their
+    /// HTTP outcalls. An outcall still in flight when time is advanced again
+    /// times out, and a timer needs several sequential outcalls per round.
+    pub async fn advance_time_and_settle(&self, duration: Duration) {
+        const OUTCALL_SETTLE_DELAY: Duration = Duration::from_secs(10);
+        self.advance_time(duration).await;
+        tokio::time::sleep(OUTCALL_SETTLE_DELAY).await;
+    }
+
     pub async fn execute_http_mocks(&self, mut mocks: impl ExecuteHttpOutcallMocks) {
         const MAX_ITERATIONS: usize = 30;
         let env = self.env.as_ref().unwrap();
@@ -350,7 +359,7 @@ impl ic_metrics_assert::PocketIcAsyncHttpQuery for Setup {
 
 impl Drop for Setup {
     fn drop(&mut self) {
-        if self.env.is_some() {
+        if self.env.is_some() && !std::thread::panicking() {
             panic!("Setup was not dropped properly. Call Setup::drop().await to clean up.");
         }
     }
