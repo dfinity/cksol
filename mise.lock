@@ -35,3 +35,7 @@ url_api = "https://api.github.com/repos/dfinity/ic-wasm/releases/assets/50008702
 [[tools.rust]]
 version = "1.93.0"
 backend = "core:rust"
+
+[tools.rust.options]
+components = "clippy,rustfmt"
+targets = "wasm32-unknown-unknown"
