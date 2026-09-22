@@ -42,7 +42,8 @@ RUN rustup target add wasm32-unknown-unknown && \
     rustup component add rustfmt clippy
 
 # Install ic-wasm from the release asset that mise.lock pins for linux-x64
-# (URL and SHA-256), so that the Docker build cannot drift from mise.toml.
+# (URL and SHA-256), the same lockfile that `mise install` uses, so that the
+# Docker build and local installs resolve to the same binary.
 # To upgrade, bump the version in mise.toml and run `mise lock`.
 COPY mise.lock .
 RUN section='[tools."github:dfinity/ic-wasm"."platforms.linux-x64"]' && \
