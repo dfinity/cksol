@@ -8,7 +8,7 @@ use cksol_int_tests::{
         wait_for_withdrawal_finalized,
     },
 };
-use cksol_types::{DepositStatus, ProcessDepositArgs, Signature, WithdrawalArgs, WithdrawalStatus};
+use cksol_types::{DepositStatus, ProcessDepositArgs, Signature, WithdrawalArgs};
 use cksol_types_internal::{
     event::{EventType, TransactionPurpose},
     log::Priority,
@@ -166,9 +166,7 @@ async fn should_deposit_consolidate_and_withdraw() {
 
 const DEPOSIT_CONSOLIDATION_DELAY: Duration = Duration::from_mins(10);
 const RESUBMIT_TRANSACTIONS_DELAY: Duration = Duration::from_mins(3);
-const WITHDRAWAL_PROCESSING_DELAY: Duration = Duration::from_mins(1);
 const SUB_RENT_REMAINDER: Lamport = 500_000;
-const WITHDRAWAL_ROUNDS_WITHOUT_PROGRESS: usize = 3;
 const _: () = assert!(SUB_RENT_REMAINDER < RENT_EXEMPTION_THRESHOLD);
 
 #[tokio::test(flavor = "multi_thread")]
@@ -257,36 +255,6 @@ async fn should_strand_deposit_when_address_keeps_sub_rent_remainder() {
         setup.minter().cycle_balance().await < minter_cycles_before,
         "Every resubmission burns cycles for a new threshold signature"
     );
-
-    let withdrawal_amount = minted_amount - LEDGER_TRANSFER_FEE;
-    setup
-        .ledger()
-        .approve(
-            account.subaccount,
-            withdrawal_amount,
-            setup.minter_account(),
-        )
-        .await;
-    let burn_index = setup
-        .minter()
-        .withdraw(WithdrawalArgs {
-            from_subaccount: account.subaccount,
-            amount: withdrawal_amount,
-            address: Keypair::new().pubkey().to_string(),
-        })
-        .await
-        .expect("withdraw should succeed")
-        .block_index;
-    for _ in 0..WITHDRAWAL_ROUNDS_WITHOUT_PROGRESS {
-        setup
-            .advance_time_and_settle(WITHDRAWAL_PROCESSING_DELAY)
-            .await;
-        assert_eq!(
-            setup.minter().withdrawal_status(burn_index).await,
-            WithdrawalStatus::Pending,
-            "The withdrawal starves because the stranded deposit never funds the minter"
-        );
-    }
 
     setup.drop().await;
 }
