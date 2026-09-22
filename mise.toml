@@ -4,4 +4,5 @@
 "github:dfinity/ic-wasm" = "0.11.1"
 
 [settings]
+lockfile = true
 idiomatic_version_file_enable_tools = ["rust"]
