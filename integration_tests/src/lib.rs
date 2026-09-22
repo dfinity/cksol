@@ -33,6 +33,7 @@ use std::{default::Default, env::var, fs, ops::Deref, path::PathBuf, time::Durat
 pub mod events;
 pub mod fixtures;
 pub mod ledger_init_args;
+pub mod validator;
 
 #[derive(Default)]
 pub enum PocketIcMode {

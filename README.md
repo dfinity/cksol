@@ -295,15 +295,14 @@ cargo test --lib
 cargo test -p cksol-int-tests --test tests
 ```
 
-**Solana validator integration tests** — require a running [`solana-test-validator`](https://solana.com/docs/intro/installation) at `http://localhost:8899`:
+**Solana validator integration tests** — require the [Solana CLI](https://solana.com/docs/intro/installation) to be installed, so that each test can start its own `solana-test-validator`:
 
 ```sh
-solana-test-validator &
 cargo test -p cksol-int-tests --test solana_test_validator
 ```
 
 > [!CAUTION]
-> Running `cargo test` without arguments will attempt all tests, including the Solana validator suite, and will fail if no validator is running.
+> Running `cargo test` without arguments will attempt all tests, including the Solana validator suite, and will fail if the Solana CLI is not installed.
 
 <a id="related-projects"></a>
 ## 🔗 Related Projects
