@@ -25,6 +25,10 @@ use std::{
 /// Solana base fee per signature included in a transaction.
 pub const FEE_PER_SIGNATURE: Lamport = 5_000;
 
+/// Minimum balance a zero-data Solana account must keep to stay rent-exempt.
+/// A transfer that leaves an account with a smaller nonzero balance is rejected.
+pub const RENT_EXEMPTION_THRESHOLD: Lamport = 890_880;
+
 /// A `solana-test-validator` process owned by a single test.
 ///
 /// Every validator listens on its own block of ports and writes to its own
@@ -198,6 +202,16 @@ impl SolanaTestValidator {
             .expect("Failed to get Solana balance")
     }
 
+    /// Whether the validator has ever processed the transaction, at any
+    /// commitment level and with any outcome.
+    pub async fn has_seen_transaction(&self, signature: &Signature) -> bool {
+        self.rpc_client()
+            .get_signature_status_with_commitment(signature, CommitmentConfig::processed())
+            .await
+            .expect("Failed to get signature status")
+            .is_some()
+    }
+
     pub async fn get_balances(&self, addresses: &[Address]) -> Vec<Lamport> {
         let mut balances = Vec::with_capacity(addresses.len());
         for address in addresses {
@@ -210,7 +224,9 @@ impl SolanaTestValidator {
     /// waits for the transfer to be finalized.
     pub async fn transfer_to(&self, address: Address, amount: Lamport) -> Signature {
         let sender = Keypair::new();
-        self.airdrop_and_confirm(sender.pubkey(), 2 * amount).await;
+        let sender_funds = amount + FEE_PER_SIGNATURE + RENT_EXEMPTION_THRESHOLD;
+        self.airdrop_and_confirm(sender.pubkey(), sender_funds)
+            .await;
 
         let rpc = self.rpc_client();
         let recent_blockhash = rpc.get_latest_blockhash().await.unwrap();
