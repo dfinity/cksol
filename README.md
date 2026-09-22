@@ -238,8 +238,7 @@ icp canister call -e prod cksol_minter withdrawal_status \
 ├── docs/
 │   └── design.md            # Design document
 └── scripts/
-    ├── build                # Build script for the minter Wasm
-    └── bootstrap            # Install build dependencies
+    └── build                # Build script for the minter Wasm
 ```
 
 <a id="development"></a>
@@ -248,18 +247,19 @@ icp canister call -e prod cksol_minter withdrawal_status \
 ### Prerequisites
 
 Install [`mise`](https://mise.jdx.dev/) and then provision the pinned toolchain
-(Rust 1.93.0 with the `wasm32-unknown-unknown` target, `cargo-sort`, `canbench`):
+(Rust with the `wasm32-unknown-unknown` target, `cargo-sort`, `canbench` and
+[`ic-wasm`](https://github.com/dfinity/ic-wasm)):
 
 ```sh
 mise install
 ```
 
-Tool versions are defined in [`mise.toml`](./mise.toml) so local and CI
-environments stay in sync.
+Tool versions are defined in [`mise.toml`](./mise.toml) and their download
+checksums in [`mise.lock`](./mise.lock), so local, CI and the reproducible
+Docker build stay in sync.
 
 Additionally:
 
-- [`ic-wasm`](https://github.com/dfinity/ic-wasm) version 0.3.5 — used for Wasm post-processing. Install via `./scripts/bootstrap`.
 - `gzip` — used by `./scripts/build` to compress the output Wasm.
 
 ### Building

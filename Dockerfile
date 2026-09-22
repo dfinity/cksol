@@ -41,15 +41,19 @@ RUN expected="$(awk -F'"' '/^channel/ {print $2}' rust-toolchain.toml)" && \
 RUN rustup target add wasm32-unknown-unknown && \
     rustup component add rustfmt clippy
 
-# Install ic-wasm as a pinned binary with SHA-256 verification.
-# Bump IC_WASM_VERSION and IC_WASM_SHA256 together when upgrading.
-ARG IC_WASM_VERSION=0.3.5
-ARG IC_WASM_SHA256=2debd76da946b4f74b6796caa62459d58c4dfef947a1f2614b56267baabf5c2d
-RUN curl --proto '=https' --tlsv1.2 -fsSL --retry 5 --retry-delay 5 \
-        "https://github.com/dfinity/ic-wasm/releases/download/${IC_WASM_VERSION}/ic-wasm-linux64" \
-        -o /usr/local/bin/ic-wasm && \
-    echo "${IC_WASM_SHA256}  /usr/local/bin/ic-wasm" | sha256sum -c - && \
-    chmod +x /usr/local/bin/ic-wasm && \
+# Install ic-wasm from the release asset that mise.lock pins for linux-x64
+# (URL and SHA-256), the same lockfile that `mise install` uses, so that the
+# Docker build and local installs resolve to the same binary.
+# To upgrade, bump the version in mise.toml and run `mise lock`.
+COPY mise.lock .
+RUN section='[tools."github:dfinity/ic-wasm"."platforms.linux-x64"]' && \
+    url="$(awk -v s="$section" '$0 == s {f=1; next} /^\[/ {f=0} f && $1 == "url" {gsub(/"/, "", $3); print $3}' mise.lock)" && \
+    sha256="$(awk -v s="$section" '$0 == s {f=1; next} /^\[/ {f=0} f && $1 == "checksum" {gsub(/"|sha256:/, "", $3); print $3}' mise.lock)" && \
+    { [ -n "$url" ] && [ -n "$sha256" ]; } || { echo "ic-wasm linux-x64 entry missing from mise.lock" >&2; exit 1; } && \
+    curl --proto '=https' --tlsv1.2 -fsSL --retry 5 --retry-delay 5 "$url" -o /tmp/ic-wasm.tar.xz && \
+    echo "${sha256}  /tmp/ic-wasm.tar.xz" | sha256sum -c - && \
+    tar -xJf /tmp/ic-wasm.tar.xz --strip-components=1 -C /usr/local/bin "$(basename "$url" .tar.xz)/ic-wasm" && \
+    rm /tmp/ic-wasm.tar.xz && \
     ic-wasm --version
 
 # Pre-build all cargo dependencies. Because cargo doesn't have a build option

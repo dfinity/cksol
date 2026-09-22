@@ -24,6 +24,8 @@ jobs:
 
       - name: 'Setup mise'
         uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3
+        env:
+          MISE_LOCKED: 1
         with:
           # Disable cache to avoid issues with wasm32 target
           # See https://github.com/jdx/mise-action/issues/215
@@ -76,6 +78,8 @@ jobs:
 
       - name: 'Setup mise'
         uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3
+        env:
+          MISE_LOCKED: 1
         with:
           # Disable cache to avoid issues with wasm32 target
           # See https://github.com/jdx/mise-action/issues/215
