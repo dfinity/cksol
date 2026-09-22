@@ -1,9 +1,8 @@
 use super::{signer::MockSchnorrSigner, stubs::Stubs};
 use crate::{runtime::CanisterRuntime, signer::SchnorrSigner};
-use candid::{CandidType, Nat, Principal};
+use candid::{CandidType, Principal};
 use ic_canister_runtime::{IcError, Runtime, StubRuntime};
 use ic_cdk_management_canister::{SchnorrPublicKeyArgs, SchnorrPublicKeyResult, SignCallError};
-use icrc_ledger_types::icrc2::transfer_from::TransferFromError;
 use std::{
     future::Future,
     sync::{Arc, Mutex},
@@ -34,10 +33,6 @@ impl TestCanisterRuntime {
         self.inter_canister_call_runtime =
             self.inter_canister_call_runtime.add_stub_response(response);
         self
-    }
-
-    pub fn add_successful_burn(self, burn_block_index: u64) -> Self {
-        self.add_stub_response(Ok::<Nat, TransferFromError>(Nat::from(burn_block_index)))
     }
 
     pub fn add_stub_error(mut self, error: IcError) -> Self {
