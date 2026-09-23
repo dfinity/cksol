@@ -310,6 +310,8 @@ sequenceDiagram
     participant Minter as ckSOL Minter
     participant Ledger as ckSOL Ledger
 
+    User->>+Minter: get_deposit_address(principal, subaccount)
+    Minter-->>-User: deposit_address
     User->>+Solana: transfer(deposit_address, amount)
     Solana-->>-User: signature
     User->>+Minter: deposit_sol(principal, subaccount) + cycles
