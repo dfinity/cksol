@@ -1,6 +1,6 @@
 use crate::{
     constants::GET_TRANSACTION_CYCLES,
-    cycles::{charge_caller_cycles, check_caller_available_cycles},
+    cycles::{RpcCallCharge, charge_rpc_call, check_caller_available_cycles},
     deposit::fetch_and_validate_deposit,
     guard::process_deposit_guard,
     ledger::mint,
@@ -80,16 +80,14 @@ async fn try_accept_deposit<R: CanisterRuntime>(
     check_caller_available_cycles(runtime, cycles_to_attach)?;
 
     let result = fetch_and_validate_deposit(runtime, account, signature, fee).await;
-
-    // Always charge for the RPC call; additionally charge the consolidation fee if a deposit is found
-    let rpc_cost = GET_TRANSACTION_CYCLES.saturating_sub(runtime.msg_cycles_refunded());
-    let cycles_to_charge = rpc_cost
-        + if result.is_ok() {
-            deposit_consolidation_fee
-        } else {
-            0
-        };
-    charge_caller_cycles(runtime, cycles_to_charge);
+    charge_rpc_call(
+        runtime,
+        RpcCallCharge {
+            attached_cycles: GET_TRANSACTION_CYCLES,
+            fee_on_success: deposit_consolidation_fee,
+        },
+        &result,
+    );
 
     let (deposit_id, deposit_amount, amount_to_mint) = result?;
 

@@ -17,7 +17,7 @@ pub struct TestCanisterRuntime {
     signer: MockSchnorrSigner,
     times: Stubs<u64>,
     instruction_counts: Stubs<u64>,
-    msg_cycles_accept: Stubs<u128>,
+    msg_cycles_accepted: Arc<Mutex<Vec<u128>>>,
     msg_cycles_available: Stubs<u128>,
     msg_cycles_refunded: Stubs<u128>,
     set_timer_call_count: Arc<Mutex<usize>>,
@@ -60,9 +60,8 @@ impl TestCanisterRuntime {
         self
     }
 
-    pub fn add_msg_cycles_accept(mut self, value: u128) -> Self {
-        self.msg_cycles_accept = self.msg_cycles_accept.add(value);
-        self
+    pub fn msg_cycles_accepted(&self) -> Vec<u128> {
+        self.msg_cycles_accepted.lock().unwrap().clone()
     }
 
     pub fn add_msg_cycles_available(mut self, value: u128) -> Self {
@@ -119,7 +118,7 @@ impl CanisterRuntime for TestCanisterRuntime {
     }
 
     fn msg_cycles_accept(&self, amount: u128) -> u128 {
-        assert_eq!(self.msg_cycles_accept.next(), amount);
+        self.msg_cycles_accepted.lock().unwrap().push(amount);
         amount
     }
 

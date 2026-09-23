@@ -45,7 +45,7 @@ mod process_deposit_tests {
             .add_msg_cycles_available(PROCESS_DEPOSIT_REQUIRED_CYCLES - 1);
 
         let result = process_deposit(
-            runtime,
+            runtime.clone(),
             DEPOSITOR_ACCOUNT,
             legacy_deposit_transaction_signature(),
         )
@@ -60,6 +60,7 @@ mod process_deposit_tests {
                 }
             ))
         );
+        assert!(runtime.msg_cycles_accepted().is_empty());
         EventsAssert::assert_no_events_recorded();
     }
 
@@ -71,7 +72,7 @@ mod process_deposit_tests {
         let runtime = rejected_runtime().add_stub_error(IcError::CallPerformFailed);
 
         let result = process_deposit(
-            runtime,
+            runtime.clone(),
             DEPOSITOR_ACCOUNT,
             legacy_deposit_transaction_signature(),
         )
@@ -81,6 +82,7 @@ mod process_deposit_tests {
             result,
             Err(ProcessDepositError::TemporarilyUnavailable(e)) => assert!(e.contains("Inter-canister call perform failed"))
         );
+        assert_eq!(runtime.msg_cycles_accepted(), ACCEPTED_ON_REJECTION);
         EventsAssert::assert_no_events_recorded();
     }
 
@@ -92,13 +94,14 @@ mod process_deposit_tests {
         let runtime = rejected_runtime().add_get_transaction_not_found_response();
 
         let result = process_deposit(
-            runtime,
+            runtime.clone(),
             DEPOSITOR_ACCOUNT,
             legacy_deposit_transaction_signature(),
         )
         .await;
 
         assert_eq!(result, Err(ProcessDepositError::TransactionNotFound));
+        assert_eq!(runtime.msg_cycles_accepted(), ACCEPTED_ON_REJECTION);
         EventsAssert::assert_no_events_recorded();
     }
 
@@ -111,7 +114,7 @@ mod process_deposit_tests {
             rejected_runtime().add_get_transaction_response(deposit_transaction_to_wrong_address());
 
         let result = process_deposit(
-            runtime,
+            runtime.clone(),
             DEPOSITOR_ACCOUNT,
             deposit_transaction_to_wrong_address_signature(),
         )
@@ -121,6 +124,7 @@ mod process_deposit_tests {
             result,
             Err(ProcessDepositError::InvalidDepositTransaction(e)) => assert!(e.contains("Transaction must target deposit address"))
         );
+        assert_eq!(runtime.msg_cycles_accepted(), ACCEPTED_ON_REJECTION);
         EventsAssert::assert_no_events_recorded();
     }
 
@@ -136,7 +140,7 @@ mod process_deposit_tests {
         let runtime = rejected_runtime().add_get_transaction_response(legacy_deposit_transaction());
 
         let result = process_deposit(
-            runtime,
+            runtime.clone(),
             DEPOSITOR_ACCOUNT,
             legacy_deposit_transaction_signature(),
         )
@@ -149,6 +153,7 @@ mod process_deposit_tests {
                 minimum_deposit_amount: MINIMUM_DEPOSIT_AMOUNT,
             })
         );
+        assert_eq!(runtime.msg_cycles_accepted(), ACCEPTED_ON_REJECTION);
         EventsAssert::assert_no_events_recorded();
     }
 
@@ -161,7 +166,7 @@ mod process_deposit_tests {
             .add_mint_response(Err(TransferError::TemporarilyUnavailable));
 
         let result = process_deposit(
-            runtime,
+            runtime.clone(),
             DEPOSITOR_ACCOUNT,
             legacy_deposit_transaction_signature(),
         )
@@ -169,6 +174,7 @@ mod process_deposit_tests {
 
         assert_eq!(result, Ok(deposit_status_processing()));
 
+        assert_eq!(runtime.msg_cycles_accepted(), ACCEPTED_ON_ACCEPTANCE);
         EventsAssert::from_recorded()
             .expect_event_eq(accepted_deposit_event())
             .assert_no_more_events();
@@ -183,12 +189,13 @@ mod process_deposit_tests {
         let runtime = runtime(legacy_deposit_transaction())
             .add_mint_response(Err(TransferError::TemporarilyUnavailable));
         let result = process_deposit(
-            runtime,
+            runtime.clone(),
             DEPOSITOR_ACCOUNT,
             legacy_deposit_transaction_signature(),
         )
         .await;
         assert_eq!(result, Ok(deposit_status_processing()));
+        assert_eq!(runtime.msg_cycles_accepted(), ACCEPTED_ON_ACCEPTANCE);
 
         // Second call: fetches status from minter state, and mints successfully without making any
         // additional JSON-RPC calls
@@ -230,7 +237,7 @@ mod process_deposit_tests {
 
             let runtime = runtime(transaction).add_mint_response(Ok(block_index.into()));
 
-            let result = process_deposit(runtime, DEPOSITOR_ACCOUNT, signature).await;
+            let result = process_deposit(runtime.clone(), DEPOSITOR_ACCOUNT, signature).await;
 
             assert_eq!(
                 result,
@@ -244,6 +251,7 @@ mod process_deposit_tests {
                 })
             );
 
+            assert_eq!(runtime.msg_cycles_accepted(), ACCEPTED_ON_ACCEPTANCE);
             EventsAssert::from_recorded()
                 .expect_event_eq(EventType::AcceptedManualDeposit {
                     deposit_id: DepositId {
@@ -273,12 +281,13 @@ mod process_deposit_tests {
         let runtime =
             runtime(legacy_deposit_transaction()).add_mint_response(Ok(BLOCK_INDEX.into()));
         let result = process_deposit(
-            runtime,
+            runtime.clone(),
             DEPOSITOR_ACCOUNT,
             legacy_deposit_transaction_signature(),
         )
         .await;
         assert_eq!(result, Ok(deposit_status_minted()));
+        assert_eq!(runtime.msg_cycles_accepted(), ACCEPTED_ON_ACCEPTANCE);
 
         // Second call: returns the same status
         let runtime = TestCanisterRuntime::new();
@@ -412,28 +421,23 @@ mod process_deposit_tests {
 
     /// Half the `getTransaction` RPC budget; the other half is refunded by the RPC provider.
     const RPC_COST: u128 = GET_TRANSACTION_CYCLES / 2;
+    const ACCEPTED_ON_REJECTION: [u128; 1] = [RPC_COST];
+    const ACCEPTED_ON_ACCEPTANCE: [u128; 1] = [RPC_COST + DEPOSIT_CONSOLIDATION_FEE];
 
     /// Runtime for a `process_deposit` call that accepts the given transaction.
-    /// Charges the RPC cost + consolidation fee and bakes in the transaction as the `getTransaction` stub.
     fn runtime(
         get_transaction_result: impl TryInto<EncodedConfirmedTransactionWithStatusMeta>,
     ) -> TestCanisterRuntime {
-        base_runtime(DEPOSIT_CONSOLIDATION_FEE).add_get_transaction_response(get_transaction_result)
+        rejected_runtime().add_get_transaction_response(get_transaction_result)
     }
 
-    /// Runtime for a `process_deposit` call that does not accept a deposit.
-    /// Charges only the RPC cost; caller chains the stub response or error.
+    /// Runtime for a `process_deposit` call that makes a `getTransaction` call
+    /// whose stub response or error the caller chains.
     fn rejected_runtime() -> TestCanisterRuntime {
-        base_runtime(0)
-    }
-
-    /// Shared cycles setup used by both `runtime` and `rejected_runtime`.
-    fn base_runtime(consolidation_fee: u128) -> TestCanisterRuntime {
         TestCanisterRuntime::new()
             .with_increasing_time()
             .add_msg_cycles_available(PROCESS_DEPOSIT_REQUIRED_CYCLES)
             .add_msg_cycles_refunded(GET_TRANSACTION_CYCLES - RPC_COST)
-            .add_msg_cycles_accept(RPC_COST + consolidation_fee)
     }
 
     trait DepositRuntimeExt: Sized {
