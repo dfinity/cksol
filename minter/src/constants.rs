@@ -9,6 +9,9 @@ pub const MAX_HTTP_OUTCALL_RESPONSE_BYTES: u64 = 2_000_000;
 /// Cycles to attach for `getTransaction` RPC calls.
 pub const GET_TRANSACTION_CYCLES: u128 = 50_000_000_000;
 
+/// Cycles to attach for `getBalance` RPC calls.
+pub const GET_BALANCE_CYCLES: u128 = 10_000_000_000;
+
 /// Cycles to attach for `getSignatureStatuses` RPC calls.
 pub const GET_SIGNATURE_STATUSES_CYCLES: u128 = 1_000_000_000_000;
 

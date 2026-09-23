@@ -1,32 +1,196 @@
 use crate::{
-    deposit::sweep::{deposit_sol, deposit_status},
-    test_fixtures::deposit::DEPOSITOR_ACCOUNT,
+    constants::{GET_BALANCE_CYCLES, RENT_EXEMPTION_THRESHOLD},
+    deposit::sweep::{deposit_sol, deposit_status, sweepable_amount},
+    state::event::EventType,
+    test_fixtures::{
+        DEPOSIT_CONSOLIDATION_FEE, EventsAssert, MINIMUM_DEPOSIT_AMOUNT,
+        PROCESS_DEPOSIT_REQUIRED_CYCLES, account, deposit::DEPOSITOR_ACCOUNT,
+        init_schnorr_master_key, init_state, runtime::TestCanisterRuntime,
+    },
 };
+use assert_matches::assert_matches;
 use candid::Principal;
-use cksol_types::DepositSolStatus;
+use cksol_types::{DepositSolError, DepositSolStatus, InsufficientCyclesError, Lamport};
+use ic_canister_runtime::IcError;
+use ic_cdk::call::RejectCode;
 use icrc_ledger_types::icrc1::account::Account;
+use sol_rpc_types::MultiRpcResult;
+
+const BALANCE_AT_MINIMUM: Lamport = MINIMUM_DEPOSIT_AMOUNT + RENT_EXEMPTION_THRESHOLD;
+const RPC_COST: u128 = GET_BALANCE_CYCLES / 2;
+const ACCEPTED_ON_REJECTION: [u128; 1] = [RPC_COST];
+const ACCEPTED_ON_QUEUEING: [u128; 1] = [RPC_COST + DEPOSIT_CONSOLIDATION_FEE];
 
 #[test]
-fn should_queue_deposit_with_nothing_to_sweep() {
-    let deposit_id = deposit_sol(DEPOSITOR_ACCOUNT).expect("deposit_sol should queue a sweep");
-
-    let status = deposit_status(deposit_id);
-
-    assert_eq!(
-        status,
-        DepositSolStatus::Queued {
-            sweepable_amount: 0
-        }
-    );
+fn should_compute_sweepable_amount_above_rent_exemption_threshold() {
+    for (balance, expected) in [
+        (0, 0),
+        (RENT_EXEMPTION_THRESHOLD - 1, 0),
+        (RENT_EXEMPTION_THRESHOLD, 0),
+        (RENT_EXEMPTION_THRESHOLD + 1, 1),
+        (Lamport::MAX, Lamport::MAX - RENT_EXEMPTION_THRESHOLD),
+    ] {
+        assert_eq!(sweepable_amount(balance), expected, "balance {balance}");
+    }
 }
 
-#[test]
+#[tokio::test]
+async fn should_fail_if_insufficient_cycles_attached() {
+    init_state();
+    let runtime =
+        TestCanisterRuntime::new().add_msg_cycles_available(PROCESS_DEPOSIT_REQUIRED_CYCLES - 1);
+
+    let result = deposit_sol(&runtime, DEPOSITOR_ACCOUNT).await;
+
+    assert_eq!(
+        result,
+        Err(DepositSolError::InsufficientCycles(
+            InsufficientCyclesError {
+                expected: PROCESS_DEPOSIT_REQUIRED_CYCLES,
+                received: PROCESS_DEPOSIT_REQUIRED_CYCLES - 1,
+            }
+        ))
+    );
+    assert!(runtime.msg_cycles_accepted().is_empty());
+    EventsAssert::assert_no_events_recorded();
+}
+
+#[tokio::test]
+async fn should_fail_and_charge_balance_read_if_get_balance_is_rejected() {
+    init_state();
+    init_schnorr_master_key();
+    let runtime = runtime().add_stub_error(IcError::CallRejected {
+        code: RejectCode::SysTransient,
+        message: "SOL RPC canister is stopped".to_string(),
+    });
+
+    let result = deposit_sol(&runtime, DEPOSITOR_ACCOUNT).await;
+
+    assert_matches!(
+        result,
+        Err(DepositSolError::TemporarilyUnavailable(e)) => assert!(e.contains("Inter-canister call rejected"))
+    );
+    assert_eq!(runtime.msg_cycles_accepted(), ACCEPTED_ON_REJECTION);
+    EventsAssert::assert_no_events_recorded();
+}
+
+#[tokio::test]
+async fn should_fail_and_charge_balance_read_if_sweepable_amount_below_minimum() {
+    init_state();
+    init_schnorr_master_key();
+    let runtime = runtime().add_get_balance_response(BALANCE_AT_MINIMUM - 1);
+
+    let result = deposit_sol(&runtime, DEPOSITOR_ACCOUNT).await;
+
+    assert_eq!(
+        result,
+        Err(DepositSolError::ValueTooSmall {
+            sweepable_amount: MINIMUM_DEPOSIT_AMOUNT - 1,
+            minimum_deposit_amount: MINIMUM_DEPOSIT_AMOUNT,
+        })
+    );
+    assert_eq!(runtime.msg_cycles_accepted(), ACCEPTED_ON_REJECTION);
+    EventsAssert::assert_no_events_recorded();
+}
+
+#[tokio::test]
+async fn should_queue_deposits_from_minimum_with_sequential_ids() {
+    init_state();
+    init_schnorr_master_key();
+    let other_account = account(7);
+
+    for (expected_id, depositor, balance) in [
+        (0, DEPOSITOR_ACCOUNT, BALANCE_AT_MINIMUM),
+        (1, other_account, BALANCE_AT_MINIMUM + 1),
+    ] {
+        let runtime = runtime().add_get_balance_response(balance);
+
+        let deposit_id = deposit_sol(&runtime, depositor).await;
+
+        assert_eq!(deposit_id, Ok(expected_id));
+        assert_eq!(
+            deposit_status(expected_id),
+            Some(DepositSolStatus::Queued {
+                sweepable_amount: sweepable_amount(balance)
+            })
+        );
+        assert_eq!(runtime.msg_cycles_accepted(), ACCEPTED_ON_QUEUEING);
+    }
+    assert_eq!(deposit_status(2), None);
+    EventsAssert::from_recorded()
+        .expect_event_eq(queued_deposit_event(
+            0,
+            DEPOSITOR_ACCOUNT,
+            MINIMUM_DEPOSIT_AMOUNT,
+        ))
+        .expect_event_eq(queued_deposit_event(
+            1,
+            other_account,
+            MINIMUM_DEPOSIT_AMOUNT + 1,
+        ))
+        .assert_no_more_events();
+}
+
+#[tokio::test]
+async fn should_reject_deposit_in_flight_without_reading_balance() {
+    init_state();
+    init_schnorr_master_key();
+    let deposit_id = deposit_sol(
+        &runtime().add_get_balance_response(BALANCE_AT_MINIMUM),
+        DEPOSITOR_ACCOUNT,
+    )
+    .await
+    .expect("first deposit should be queued");
+
+    let runtime =
+        TestCanisterRuntime::new().add_msg_cycles_available(PROCESS_DEPOSIT_REQUIRED_CYCLES);
+    let result = deposit_sol(&runtime, DEPOSITOR_ACCOUNT).await;
+
+    assert_eq!(result, Err(DepositSolError::DepositInFlight { deposit_id }));
+    assert!(runtime.msg_cycles_accepted().is_empty());
+    EventsAssert::from_recorded()
+        .expect_event_eq(queued_deposit_event(
+            deposit_id,
+            DEPOSITOR_ACCOUNT,
+            MINIMUM_DEPOSIT_AMOUNT,
+        ))
+        .assert_no_more_events();
+}
+
+#[tokio::test]
 #[should_panic(expected = "the owner must be non-anonymous")]
-fn should_reject_anonymous_owner() {
+async fn should_reject_anonymous_owner() {
     let anonymous_account = Account {
         owner: Principal::anonymous(),
         subaccount: None,
     };
 
-    let _ = deposit_sol(anonymous_account);
+    let _ = deposit_sol(&TestCanisterRuntime::new(), anonymous_account).await;
+}
+
+fn queued_deposit_event(deposit_id: u64, account: Account, sweepable_amount: Lamport) -> EventType {
+    EventType::QueuedDeposit {
+        deposit_id,
+        account,
+        sweepable_amount,
+    }
+}
+
+/// Runtime for a `deposit_sol` call that makes a `getBalance` call
+/// whose stub response or error the caller chains.
+fn runtime() -> TestCanisterRuntime {
+    TestCanisterRuntime::new()
+        .with_increasing_time()
+        .add_msg_cycles_available(PROCESS_DEPOSIT_REQUIRED_CYCLES)
+        .add_msg_cycles_refunded(GET_BALANCE_CYCLES - RPC_COST)
+}
+
+trait GetBalanceRuntimeExt: Sized {
+    fn add_get_balance_response(self, balance: Lamport) -> Self;
+}
+
+impl GetBalanceRuntimeExt for TestCanisterRuntime {
+    fn add_get_balance_response(self, balance: Lamport) -> Self {
+        self.add_stub_response(MultiRpcResult::<Lamport>::Consistent(Ok(balance)))
+    }
 }

@@ -76,9 +76,9 @@ async fn process_deposit(args: ProcessDepositArgs) -> Result<DepositStatus, Proc
 }
 
 #[ic_cdk::update]
-fn deposit_sol(args: DepositSolArgs) -> Result<DepositSolId, DepositSolError> {
+async fn deposit_sol(args: DepositSolArgs) -> Result<DepositSolId, DepositSolError> {
     let account = resolve_account(args.owner, args.subaccount);
-    cksol_minter::deposit::sweep::deposit_sol(account)
+    cksol_minter::deposit::sweep::deposit_sol(&IcCanisterRuntime::new(), account).await
 }
 
 #[ic_cdk::query]
