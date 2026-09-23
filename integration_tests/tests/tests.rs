@@ -1060,6 +1060,56 @@ mod deposit_sol_tests {
 
         setup.drop().await;
     }
+
+    #[tokio::test]
+    async fn should_use_explicit_owner_when_caller_is_anonymous() {
+        let setup = SetupBuilder::new().build().await;
+        let minter = setup.minter_with_caller(Principal::anonymous());
+        let args = DepositSolArgs {
+            owner: Some(Setup::DEFAULT_CALLER),
+            subaccount: Some([2; 32]),
+        };
+        let expected_status = DepositSolStatus::Queued {
+            account: Account {
+                owner: Setup::DEFAULT_CALLER,
+                subaccount: Some([2; 32]),
+            },
+            sweepable_amount: 0,
+        };
+
+        let result = minter.deposit_sol(args.clone()).await;
+        assert_eq!(result, Ok(expected_status.clone()));
+
+        let status = minter.deposit_status(args).await;
+        assert_eq!(status, Some(expected_status));
+
+        setup.drop().await;
+    }
+
+    #[tokio::test]
+    async fn should_accept_owner_different_from_caller() {
+        let setup = SetupBuilder::new().build().await;
+        let minter = setup.minter_with_caller(Principal::from_slice(&[1]));
+        let args = DepositSolArgs {
+            owner: Some(Setup::DEFAULT_CALLER),
+            subaccount: Some([3; 32]),
+        };
+        let expected_status = DepositSolStatus::Queued {
+            account: Account {
+                owner: Setup::DEFAULT_CALLER,
+                subaccount: Some([3; 32]),
+            },
+            sweepable_amount: 0,
+        };
+
+        let result = minter.deposit_sol(args.clone()).await;
+        assert_eq!(result, Ok(expected_status.clone()));
+
+        let status = minter.deposit_status(args).await;
+        assert_eq!(status, Some(expected_status));
+
+        setup.drop().await;
+    }
 }
 
 mod anonymous_caller_tests {

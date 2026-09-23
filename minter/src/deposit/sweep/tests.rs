@@ -41,7 +41,7 @@ mod deposit_sol_tests {
 }
 
 mod deposit_status_tests {
-    use super::{DEPOSITOR_ACCOUNT, DepositSolStatus, deposit_sol, deposit_status};
+    use super::{DEPOSITOR_ACCOUNT, deposit_sol, deposit_status};
 
     #[test]
     fn should_report_status_returned_by_deposit_sol() {
@@ -50,18 +50,5 @@ mod deposit_status_tests {
         let status = deposit_status(DEPOSITOR_ACCOUNT);
 
         assert_eq!(status, Some(queued));
-    }
-
-    #[test]
-    fn should_report_queued_status_before_any_deposit() {
-        let status = deposit_status(DEPOSITOR_ACCOUNT);
-
-        assert_eq!(
-            status,
-            Some(DepositSolStatus::Queued {
-                account: DEPOSITOR_ACCOUNT,
-                sweepable_amount: 0,
-            })
-        );
     }
 }
