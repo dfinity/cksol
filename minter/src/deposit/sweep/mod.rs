@@ -5,7 +5,7 @@ use crate::{
     guard::deposit_sol_guard,
     rpc::get_balance,
     runtime::CanisterRuntime,
-    state::{QueuedDeposit, audit::queue_deposit, mutate_state, read_state},
+    state::{audit::process_event, event::EventType, mutate_state, read_state},
     utils::assert_non_anonymous_account,
 };
 use canlog::log;
@@ -54,14 +54,17 @@ pub async fn deposit_sol<R: CanisterRuntime>(
     let sweepable_amount = result?;
 
     let deposit_id = mutate_state(|state| {
-        queue_deposit(
+        let deposit_id = state.next_deposit_sol_id();
+        process_event(
             state,
-            QueuedDeposit {
+            EventType::QueuedDeposit {
+                deposit_id,
                 account,
                 sweepable_amount,
             },
             runtime,
-        )
+        );
+        deposit_id
     });
     log!(
         Priority::Info,
