@@ -115,9 +115,5 @@ jobs:
           echo "/home/runner/.local/share/solana/install/active_release/bin" >> $GITHUB_PATH
         shell: bash
 
-      - name: 'Start Solana test validator'
-        run: |
-          solana-test-validator &
-
       - name: 'Cargo test'
         run: cargo test --package cksol-int-tests -- --test-threads 2 --nocapture
