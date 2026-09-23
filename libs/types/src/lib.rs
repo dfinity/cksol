@@ -142,9 +142,33 @@ pub enum DepositSolStatus {
 /// Further variants will follow as the sweep flow is implemented.
 #[derive(Debug, Clone, PartialEq, CandidType, Deserialize, Error)]
 pub enum DepositSolError {
+    /// Insufficient cycles attached by the caller to complete the `deposit_sol` call.
+    #[error(transparent)]
+    InsufficientCycles(#[from] InsufficientCyclesError),
     /// The minter experiences temporary issues, try the call again later.
     #[error("Transient error, try the call again later: {0}")]
     TemporarilyUnavailable(String),
+    /// There is already a concurrent `deposit_sol` invocation for the same account.
+    #[error("There is already a concurrent `deposit_sol` invocation for the same account")]
+    AlreadyProcessing,
+    /// A deposit for the same account is already in flight and must be minted or dropped
+    /// before the account can be swept again.
+    #[error("A deposit for this account is already in flight: {deposit_id}")]
+    DepositInFlight {
+        /// The identifier of the in-flight deposit.
+        deposit_id: DepositSolId,
+    },
+    /// The sweepable amount, i.e. the balance of the deposit address minus the rent exemption
+    /// threshold, is below the minimum deposit amount.
+    #[error(
+        "Insufficient sweepable amount: expected at least {minimum_deposit_amount} lamports, but got {sweepable_amount} lamports"
+    )]
+    ValueTooSmall {
+        /// The amount that would be swept from the deposit address.
+        sweepable_amount: Lamport,
+        /// The minimum deposit amount for the deposit to be queued.
+        minimum_deposit_amount: Lamport,
+    },
 }
 
 /// An error from the `process_deposit` ckSOL minter endpoint.

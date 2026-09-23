@@ -111,6 +111,15 @@ pub enum EventType {
         /// The signature of the expired Solana transaction.
         signature: Signature,
     },
+    /// A user queued the deposit address of an account for a sweep via `deposit_sol`.
+    QueuedDeposit {
+        /// The identifier of the queued deposit.
+        deposit_id: u64,
+        /// The account to which the minter should mint ckSOL once the sweep is finalized.
+        account: Account,
+        /// The amount that will be swept from the deposit address.
+        sweepable_amount: Lamport,
+    },
 }
 
 /// The purpose of a submitted Solana transaction.

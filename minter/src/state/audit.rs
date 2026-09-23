@@ -1,16 +1,36 @@
 use crate::{
     runtime::CanisterRuntime,
     state::{
-        State,
+        QueuedDeposit, State,
         event::{Event, EventType},
     },
     storage,
 };
+use cksol_types::DepositSolId;
 
 /// Records the given event payload in the event log and updates the state to reflect the change.
 pub fn process_event<R: CanisterRuntime>(state: &mut State, payload: EventType, runtime: &R) {
     apply_state_transition(state, &payload, runtime.time());
     storage::record_event(payload, runtime);
+}
+
+/// Queues the given deposit under the next deposit id and returns that id.
+pub fn queue_deposit<R: CanisterRuntime>(
+    state: &mut State,
+    deposit: QueuedDeposit,
+    runtime: &R,
+) -> DepositSolId {
+    let deposit_id = state.next_deposit_sol_id();
+    process_event(
+        state,
+        EventType::QueuedDeposit {
+            deposit_id,
+            account: deposit.account,
+            sweepable_amount: deposit.sweepable_amount,
+        },
+        runtime,
+    );
+    deposit_id
 }
 
 /// Updates the state to reflect the given state transition.
@@ -71,6 +91,13 @@ fn apply_state_transition(state: &mut State, payload: &EventType, timestamp: u64
         }
         EventType::ExpiredTransaction { signature } => {
             state.process_transaction_expired(signature);
+        }
+        EventType::QueuedDeposit {
+            deposit_id,
+            account,
+            sweepable_amount,
+        } => {
+            state.process_queued_deposit(*deposit_id, account, *sweepable_amount);
         }
     }
 }

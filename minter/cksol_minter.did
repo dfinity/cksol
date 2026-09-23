@@ -158,8 +158,26 @@ type DepositSolStatus = variant {
 //
 // Further variants will follow as the sweep flow is implemented.
 type DepositSolError = variant {
+    // Insufficient cycles attached by the caller to complete the `deposit_sol` call.
+    InsufficientCycles : InsufficientCyclesError;
     // The minter experiences temporary issues, try the call again later.
     TemporarilyUnavailable : text;
+    // There is already a concurrent `deposit_sol` invocation for the same account.
+    AlreadyProcessing;
+    // A deposit for the same account is already in flight and must be minted
+    // or dropped before the account can be swept again.
+    DepositInFlight : record {
+        // The identifier of the in-flight deposit.
+        deposit_id: DepositSolId;
+    };
+    // The sweepable amount, i.e. the balance of the deposit address minus
+    // the rent exemption threshold, is below the minimum deposit amount.
+    ValueTooSmall : record {
+        // The amount that would be swept from the deposit address.
+        sweepable_amount: Lamport;
+        // The minimum deposit amount for the deposit to be queued.
+        minimum_deposit_amount: Lamport;
+    };
 };
 
 // Represents the result of a call to the `deposit_sol` endpoint.
@@ -431,6 +449,15 @@ type EventType = variant {
     ExpiredTransaction : record {
         // The signature of the expired Solana transaction.
         signature: Signature;
+    };
+    // A user queued the deposit address of an account for a sweep via `deposit_sol`.
+    QueuedDeposit : record {
+        // The identifier of the queued deposit.
+        deposit_id: DepositSolId;
+        // The account to which the minter should mint ckSOL once the sweep is finalized.
+        account: Account;
+        // The amount that will be swept from the deposit address.
+        sweepable_amount: Lamport;
     };
 };
 

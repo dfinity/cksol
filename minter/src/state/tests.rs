@@ -11,7 +11,7 @@ use crate::{
         deposit_id,
         events::{
             accept_deposit, accept_withdrawal, accept_withdrawal_at, expire_transaction,
-            fail_transaction, mint_deposit, resubmit_transaction, submit_withdrawal,
+            fail_transaction, mint_deposit, queue_deposit, resubmit_transaction, submit_withdrawal,
             succeed_transaction,
         },
         init_balance, init_state, ledger_canister_id,
@@ -32,6 +32,71 @@ proptest! {
         let bytes = event.to_bytes();
         let decoded = Event::from_bytes(Cow::Borrowed(&bytes));
         assert_eq!(event, decoded);
+    }
+}
+
+mod queued_deposits {
+    use super::*;
+    use crate::state::audit::replay_events;
+    use cksol_types::DepositSolStatus;
+
+    #[test]
+    fn should_assign_sequential_ids_and_report_status() {
+        init_state();
+
+        let first_id = queue_deposit(account(1), 100);
+        let second_id = queue_deposit(account(2), 200);
+
+        assert_eq!((first_id, second_id), (0, 1));
+        read_state(|s| {
+            assert_eq!(s.next_deposit_sol_id(), 2);
+            assert_eq!(s.in_flight_deposit_id(&account(2)), Some(1));
+            assert_eq!(s.in_flight_deposit_id(&account(3)), None);
+            assert_eq!(
+                s.deposit_sol_status(1),
+                Some(DepositSolStatus::Queued {
+                    sweepable_amount: 200
+                })
+            );
+            assert_eq!(s.deposit_sol_status(2), None);
+        });
+    }
+
+    #[test]
+    fn should_replay_queued_deposits_with_same_ids() {
+        let queued = |deposit_id, i| Event {
+            timestamp: 0,
+            payload: EventType::QueuedDeposit {
+                deposit_id,
+                account: account(i),
+                sweepable_amount: 100 * deposit_id,
+            },
+        };
+        let init = Event {
+            timestamp: 0,
+            payload: EventType::Init(valid_init_args()),
+        };
+
+        let state = replay_events([init, queued(0, 1), queued(1, 2)]);
+
+        assert_eq!(state.next_deposit_sol_id(), 2);
+        assert_eq!(state.in_flight_deposit_id(&account(1)), Some(0));
+        assert_eq!(state.in_flight_deposit_id(&account(2)), Some(1));
+    }
+
+    #[test]
+    #[should_panic(expected = "out of sequence")]
+    fn should_panic_if_deposit_id_out_of_sequence() {
+        init_state();
+        mutate_state(|s| s.process_queued_deposit(1, &account(1), 100));
+    }
+
+    #[test]
+    #[should_panic(expected = "already has one in flight")]
+    fn should_panic_if_account_already_queued() {
+        init_state();
+        queue_deposit(account(1), 100);
+        queue_deposit(account(1), 200);
     }
 }
 
@@ -228,7 +293,11 @@ mod state_from_init_args {
                 minimum_deposit_amount: MINIMUM_DEPOSIT_AMOUNT,
                 process_deposit_required_cycles: PROCESS_DEPOSIT_REQUIRED_CYCLES,
                 pending_process_deposit_request_guards: BTreeSet::new(),
+                pending_deposit_sol_request_guards: BTreeSet::new(),
                 pending_withdrawal_request_guards: BTreeSet::new(),
+                next_deposit_sol_id: 0,
+                queued_deposits: BTreeMap::new(),
+                in_flight_deposit_ids: BTreeMap::new(),
                 accepted_deposits: InsertionOrderedMap::new(),
                 quarantined_deposits: InsertionOrderedMap::new(),
                 minted_deposits: InsertionOrderedMap::new(),
