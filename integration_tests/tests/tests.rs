@@ -5,14 +5,14 @@ use cksol_int_tests::{
     CkSolMinter, Setup, SetupBuilder,
     fixtures::{
         DEFAULT_CALLER_ACCOUNT, DEFAULT_CALLER_DEPOSIT_ADDRESS, DEPOSIT_AMOUNT,
-        EXPECTED_MINT_AMOUNT, MockBuilder, SharedMockHttpOutcalls, default_process_deposit_args,
-        deposit_transaction_signature,
+        EXPECTED_MINT_AMOUNT, MockBuilder, RENT_EXEMPTION_THRESHOLD, SharedMockHttpOutcalls,
+        default_process_deposit_args, deposit_transaction_signature,
     },
 };
 use cksol_types::{
-    DepositId, DepositSolArgs, DepositSolStatus, DepositStatus, GetDepositAddressArgs,
-    InsufficientCyclesError, Lamport, MinterInfo, ProcessDepositArgs, ProcessDepositError,
-    TxFinalizedStatus, WithdrawalArgs, WithdrawalError, WithdrawalStatus,
+    DepositId, DepositSolArgs, DepositSolError, DepositSolStatus, DepositStatus,
+    GetDepositAddressArgs, InsufficientCyclesError, Lamport, MinterInfo, ProcessDepositArgs,
+    ProcessDepositError, TxFinalizedStatus, WithdrawalArgs, WithdrawalError, WithdrawalStatus,
 };
 use cksol_types_internal::{
     UpgradeArgs,
@@ -1018,41 +1018,231 @@ mod process_deposit_tests {
 mod deposit_sol_tests {
     use super::*;
 
-    #[tokio::test]
-    async fn should_queue_deposit_for_non_anonymous_owner() {
-        let setup = SetupBuilder::new().build().await;
-        let user_1 = Setup::DEFAULT_CALLER;
-        let user_2 = Principal::from_slice(&[1]);
+    const BALANCE_AT_MINIMUM: Lamport =
+        Setup::DEFAULT_MINIMUM_DEPOSIT_AMOUNT + RENT_EXEMPTION_THRESHOLD;
+    const BALANCE_ABOVE_MINIMUM: Lamport = BALANCE_AT_MINIMUM + 1;
 
-        for (caller, owner) in [
-            (user_1, None),
-            (user_1, Some(user_1)),
-            (user_2, Some(user_1)),
-            (Principal::anonymous(), Some(user_1)),
-        ] {
-            let minter = setup.minter_with_caller(caller);
+    #[tokio::test]
+    async fn should_queue_deposits_from_minimum_with_sequential_ids() {
+        let setup = SetupBuilder::new().with_proxy_canister().build().await;
+        let user_2 = Principal::from_slice(&[1]);
+        let deposits = [
+            (0, None, BALANCE_AT_MINIMUM),
+            (1, Some(Setup::DEFAULT_CALLER), BALANCE_ABOVE_MINIMUM),
+            (2, Some(user_2), BALANCE_ABOVE_MINIMUM),
+        ];
+        let mocks = SharedMockHttpOutcalls::new(
+            deposits
+                .iter()
+                .fold(MockBuilder::new(), |mocks, (_, _, balance)| {
+                    mocks.get_balance(*balance)
+                })
+                .build(),
+        );
+
+        for (expected_id, owner, balance) in deposits {
+            let minter = setup.minter().with_http_mocks(mocks.clone());
+            let args = DepositSolArgs {
+                owner,
+                subaccount: Some([expected_id as u8; 32]),
+            };
 
             let deposit_id = minter
-                .deposit_sol(DepositSolArgs {
-                    owner,
-                    subaccount: None,
-                })
+                .deposit_sol(args)
                 .await
-                .unwrap_or_else(|e| {
-                    panic!("deposit_sol by {caller} for {owner:?} should queue a sweep: {e}")
-                });
+                .unwrap_or_else(|e| panic!("deposit_sol for {owner:?} should queue a sweep: {e}"));
             let status = minter.deposit_status(deposit_id).await;
 
+            assert_eq!(deposit_id, expected_id, "deposit for {owner:?}");
             assert_eq!(
                 status,
-                DepositSolStatus::Queued {
-                    sweepable_amount: 0
-                },
-                "deposit by {caller} for {owner:?}"
+                Some(DepositSolStatus::Queued {
+                    sweepable_amount: balance - RENT_EXEMPTION_THRESHOLD
+                }),
+                "deposit for {owner:?}"
             );
         }
+        let proxy = setup.proxy_canister_id();
+        setup.minter().assert_that_events().await.satisfy(|events| {
+            let queued: Vec<_> = deposits
+                .iter()
+                .map(|(deposit_id, owner, balance)| EventType::QueuedDeposit {
+                    deposit_id: *deposit_id,
+                    account: Account {
+                        owner: owner.unwrap_or(proxy),
+                        subaccount: Some([*deposit_id as u8; 32]),
+                    },
+                    sweepable_amount: balance - RENT_EXEMPTION_THRESHOLD,
+                })
+                .collect();
+            check!(events[1..] == queued);
+        });
 
         setup.drop().await;
+    }
+
+    #[tokio::test]
+    async fn should_charge_balance_read_and_consolidation_fee() {
+        let setup = SetupBuilder::new().with_proxy_canister().build().await;
+        let get_balance_cycles_cost = get_balance_cycles_cost(&setup).await;
+        assert!(get_balance_cycles_cost > 0);
+        let caller_cycles_before = setup.proxy().cycle_balance().await;
+        let minter_cycles_before = setup.minter().cycle_balance().await;
+
+        let result = setup
+            .minter()
+            .with_http_mocks(
+                MockBuilder::new()
+                    .get_balance(BALANCE_ABOVE_MINIMUM)
+                    .build(),
+            )
+            .deposit_sol(DEFAULT_CALLER_ACCOUNT)
+            .await;
+
+        assert_eq!(result, Ok(0));
+        let caller_cycles_after = setup.proxy().cycle_balance().await;
+        let minter_cycles_after = setup.minter().cycle_balance().await;
+        assert_eq!(
+            caller_cycles_before - caller_cycles_after,
+            get_balance_cycles_cost + Setup::DEFAULT_DEPOSIT_CONSOLIDATION_FEE
+        );
+        assert_eq!(
+            minter_cycles_after - minter_cycles_before,
+            Setup::DEFAULT_DEPOSIT_CONSOLIDATION_FEE
+        );
+
+        setup.drop().await;
+    }
+
+    #[tokio::test]
+    async fn should_fail_and_charge_only_balance_read_if_sweepable_amount_below_minimum() {
+        let setup = SetupBuilder::new().with_proxy_canister().build().await;
+        let get_balance_cycles_cost = get_balance_cycles_cost(&setup).await;
+        let caller_cycles_before = setup.proxy().cycle_balance().await;
+        let minter_cycles_before = setup.minter().cycle_balance().await;
+
+        let result = setup
+            .minter()
+            .with_http_mocks(
+                MockBuilder::new()
+                    .get_balance(BALANCE_AT_MINIMUM - 1)
+                    .build(),
+            )
+            .deposit_sol(DEFAULT_CALLER_ACCOUNT)
+            .await;
+
+        assert_eq!(
+            result,
+            Err(DepositSolError::ValueTooSmall {
+                sweepable_amount: Setup::DEFAULT_MINIMUM_DEPOSIT_AMOUNT - 1,
+                minimum_deposit_amount: Setup::DEFAULT_MINIMUM_DEPOSIT_AMOUNT,
+            })
+        );
+        let caller_cycles_after = setup.proxy().cycle_balance().await;
+        let minter_cycles_after = setup.minter().cycle_balance().await;
+        assert_eq!(
+            caller_cycles_before - caller_cycles_after,
+            get_balance_cycles_cost
+        );
+        assert_eq!(minter_cycles_after, minter_cycles_before);
+
+        setup.drop().await;
+    }
+
+    #[tokio::test]
+    async fn should_fail_and_refund_all_cycles_if_deposit_in_flight() {
+        let setup = SetupBuilder::new().with_proxy_canister().build().await;
+        let deposit_id = setup
+            .minter()
+            .with_http_mocks(
+                MockBuilder::new()
+                    .get_balance(BALANCE_ABOVE_MINIMUM)
+                    .build(),
+            )
+            .deposit_sol(DEFAULT_CALLER_ACCOUNT)
+            .await
+            .expect("first deposit should be queued");
+        let caller_cycles_before = setup.proxy().cycle_balance().await;
+
+        let result = setup.minter().deposit_sol(DEFAULT_CALLER_ACCOUNT).await;
+
+        assert_eq!(result, Err(DepositSolError::DepositInFlight { deposit_id }));
+        assert_eq!(setup.proxy().cycle_balance().await, caller_cycles_before);
+
+        setup.drop().await;
+    }
+
+    #[tokio::test]
+    async fn should_fail_with_insufficient_cycles() {
+        let setup = SetupBuilder::new().with_proxy_canister().build().await;
+
+        let result = setup
+            .minter()
+            .deposit_sol_with_cycles(
+                DEFAULT_CALLER_ACCOUNT,
+                Setup::DEFAULT_PROCESS_DEPOSIT_REQUIRED_CYCLES - 1,
+            )
+            .await;
+
+        assert_eq!(
+            result,
+            Err(DepositSolError::InsufficientCycles(
+                InsufficientCyclesError {
+                    expected: Setup::DEFAULT_PROCESS_DEPOSIT_REQUIRED_CYCLES,
+                    received: Setup::DEFAULT_PROCESS_DEPOSIT_REQUIRED_CYCLES - 1,
+                }
+            ))
+        );
+
+        setup.drop().await;
+    }
+
+    #[tokio::test]
+    async fn should_fail_for_concurrent_access() {
+        let setup = SetupBuilder::new().with_proxy_canister().build().await;
+        let mocks = SharedMockHttpOutcalls::new(
+            MockBuilder::new()
+                .get_balance(BALANCE_ABOVE_MINIMUM)
+                .build(),
+        );
+        let minter1 = setup.minter().with_http_mocks(mocks.clone());
+        let minter2 = setup.minter().with_http_mocks(mocks.clone());
+
+        let results = join!(
+            minter1.deposit_sol(DEFAULT_CALLER_ACCOUNT),
+            minter2.deposit_sol(DEFAULT_CALLER_ACCOUNT)
+        );
+
+        assert!(
+            matches!(
+                results,
+                (Ok(0), Err(DepositSolError::AlreadyProcessing))
+                    | (Err(DepositSolError::AlreadyProcessing), Ok(0))
+            ),
+            "Expected one queued deposit and one AlreadyProcessing error, got: {results:?}"
+        );
+
+        setup.drop().await;
+    }
+
+    async fn get_balance_cycles_cost(setup: &Setup) -> u128 {
+        let deposit_address: solana_address::Address =
+            DEFAULT_CALLER_DEPOSIT_ADDRESS.parse().unwrap();
+        setup
+            .sol_rpc()
+            .get_balance(deposit_address)
+            .with_rpc_config(RpcConfig {
+                response_size_estimate: None,
+                response_consensus: Some(ConsensusStrategy::Threshold {
+                    min: 3,
+                    total: Some(4),
+                }),
+            })
+            .with_commitment(CommitmentLevel::Finalized)
+            .request_cost()
+            .send()
+            .await
+            .expect("Failed to get cycles cost for `getBalance` request")
     }
 }
 
