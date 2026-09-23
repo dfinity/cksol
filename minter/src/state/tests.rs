@@ -142,7 +142,7 @@ mod state_validation {
             |e| {
                 e == &InvalidStateError::ProcessDepositRequiredCyclesTooLow {
                     required_cycles: minimum_required - 1,
-                    rpc_cost: GET_TRANSACTION_CYCLES,
+                    get_transaction_cycles: GET_TRANSACTION_CYCLES,
                     consolidation_fee: DEPOSIT_CONSOLIDATION_FEE,
                 }
             },
@@ -160,7 +160,7 @@ mod state_validation {
             |e| {
                 e == &InvalidStateError::ProcessDepositRequiredCyclesTooLow {
                     required_cycles: PROCESS_DEPOSIT_REQUIRED_CYCLES,
-                    rpc_cost: GET_TRANSACTION_CYCLES,
+                    get_transaction_cycles: GET_TRANSACTION_CYCLES,
                     consolidation_fee: maximum_fee + 1,
                 }
             },

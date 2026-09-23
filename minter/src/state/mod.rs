@@ -353,7 +353,7 @@ impl State {
         {
             return Err(InvalidStateError::ProcessDepositRequiredCyclesTooLow {
                 required_cycles: self.process_deposit_required_cycles,
-                rpc_cost: GET_TRANSACTION_CYCLES,
+                get_transaction_cycles: GET_TRANSACTION_CYCLES,
                 consolidation_fee: self.deposit_consolidation_fee,
             });
         }
@@ -745,7 +745,7 @@ pub enum InvalidStateError {
     },
     ProcessDepositRequiredCyclesTooLow {
         required_cycles: u128,
-        rpc_cost: u128,
+        get_transaction_cycles: u128,
         consolidation_fee: u128,
     },
 }
