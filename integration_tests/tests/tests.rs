@@ -1018,81 +1018,39 @@ mod process_deposit_tests {
 mod deposit_sol_tests {
     use super::*;
 
-    const QUEUED_WITH_NOTHING_TO_SWEEP: DepositSolStatus = DepositSolStatus::Queued {
-        sweepable_amount: 0,
-    };
-
-    async fn deposit_sol_and_check_status(
-        minter: &CkSolMinter<'_>,
-        args: impl Into<DepositSolArgs>,
-    ) {
-        let deposit_id = minter
-            .deposit_sol(args)
-            .await
-            .expect("deposit_sol should queue a sweep");
-
-        let status = minter.deposit_status(deposit_id).await;
-
-        assert_eq!(status, Some(QUEUED_WITH_NOTHING_TO_SWEEP));
-    }
-
     #[tokio::test]
-    async fn should_queue_deposit_and_report_its_status() {
+    async fn should_queue_deposit_for_non_anonymous_owner() {
         let setup = SetupBuilder::new().build().await;
-        let minter = setup.minter();
+        let user_1 = Setup::DEFAULT_CALLER;
+        let user_2 = Principal::from_slice(&[1]);
 
-        deposit_sol_and_check_status(&minter, DEFAULT_CALLER_ACCOUNT).await;
+        for (caller, owner) in [
+            (user_1, None),
+            (user_1, Some(user_1)),
+            (user_2, Some(user_1)),
+            (Principal::anonymous(), Some(user_1)),
+        ] {
+            let minter = setup.minter_with_caller(caller);
 
-        setup.drop().await;
-    }
+            let deposit_id = minter
+                .deposit_sol(DepositSolArgs {
+                    owner,
+                    subaccount: None,
+                })
+                .await
+                .unwrap_or_else(|e| {
+                    panic!("deposit_sol by {caller} for {owner:?} should queue a sweep: {e}")
+                });
+            let status = minter.deposit_status(deposit_id).await;
 
-    #[tokio::test]
-    async fn should_default_owner_to_caller() {
-        let setup = SetupBuilder::new().build().await;
-        let minter = setup.minter();
-
-        deposit_sol_and_check_status(
-            &minter,
-            DepositSolArgs {
-                owner: None,
-                subaccount: Some([1; 32]),
-            },
-        )
-        .await;
-
-        setup.drop().await;
-    }
-
-    #[tokio::test]
-    async fn should_use_explicit_owner_when_caller_is_anonymous() {
-        let setup = SetupBuilder::new().build().await;
-        let minter = setup.minter_with_caller(Principal::anonymous());
-
-        deposit_sol_and_check_status(
-            &minter,
-            DepositSolArgs {
-                owner: Some(Setup::DEFAULT_CALLER),
-                subaccount: Some([2; 32]),
-            },
-        )
-        .await;
-
-        setup.drop().await;
-    }
-
-    #[tokio::test]
-    async fn should_accept_owner_different_from_caller() {
-        let setup = SetupBuilder::new().build().await;
-        let minter = setup.minter_with_caller(Principal::from_slice(&[1]));
-
-        deposit_sol_and_check_status(
-            &minter,
-            DepositSolArgs {
-                owner: Some(Setup::DEFAULT_CALLER),
-                subaccount: Some([3; 32]),
-            },
-        )
-        .await;
+            assert_eq!(
+                status,
+                Some(DepositSolStatus::Queued {
+                    sweepable_amount: 0
+                }),
+                "deposit by {caller} for {owner:?}"
+            );
+        }
 
         setup.drop().await;
     }
