@@ -95,7 +95,6 @@ pub struct State {
     process_deposit_required_cycles: u128,
     deposit_consolidation_fee: u128,
     pending_process_deposit_request_guards: BTreeSet<Account>,
-    pending_deposit_sol_request_guards: BTreeSet<Account>,
     pending_withdrawal_request_guards: BTreeSet<Account>,
     next_deposit_sol_id: DepositSolId,
     queued_deposits: BTreeMap<DepositSolId, QueuedDeposit>,
@@ -183,7 +182,7 @@ impl State {
         &self.accepted_deposits
     }
 
-    fn next_deposit_sol_id(&self) -> DepositSolId {
+    pub fn next_deposit_sol_id(&self) -> DepositSolId {
         self.next_deposit_sol_id
     }
 
@@ -321,10 +320,6 @@ impl State {
 
     pub fn pending_process_deposit_request_guards_mut(&mut self) -> &mut BTreeSet<Account> {
         &mut self.pending_process_deposit_request_guards
-    }
-
-    pub fn pending_deposit_sol_request_guards_mut(&mut self) -> &mut BTreeSet<Account> {
-        &mut self.pending_deposit_sol_request_guards
     }
 
     pub fn pending_withdrawal_request_guards_mut(&mut self) -> &mut BTreeSet<Account> {
@@ -822,7 +817,6 @@ impl TryFrom<InitArgs> for State {
             process_deposit_required_cycles: process_deposit_required_cycles as u128,
             deposit_consolidation_fee: deposit_consolidation_fee as u128,
             pending_process_deposit_request_guards: BTreeSet::new(),
-            pending_deposit_sol_request_guards: BTreeSet::new(),
             pending_withdrawal_request_guards: BTreeSet::new(),
             next_deposit_sol_id: 0,
             queued_deposits: BTreeMap::new(),

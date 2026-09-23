@@ -158,13 +158,11 @@ pub mod events {
         numeric::{LedgerBurnIndex, LedgerMintIndex},
         rpc::BlockHeight,
         state::{
-            QueuedDeposit, audit,
             audit::process_event,
             event::{DepositId, EventType, TransactionPurpose, WithdrawalRequest},
             mutate_state,
         },
     };
-    use cksol_types::DepositSolId;
     use icrc_ledger_types::icrc1::account::Account;
     use sol_rpc_types::Lamport;
     use solana_signature::Signature;
@@ -196,19 +194,6 @@ pub mod events {
                 &runtime(),
             )
         });
-    }
-
-    pub fn queue_deposit(account: Account, sweepable_amount: Lamport) -> DepositSolId {
-        mutate_state(|state| {
-            audit::queue_deposit(
-                state,
-                QueuedDeposit {
-                    account,
-                    sweepable_amount,
-                },
-                &runtime(),
-            )
-        })
     }
 
     pub fn quarantine_deposit(deposit_id: DepositId) {
