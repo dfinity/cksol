@@ -3,10 +3,7 @@
 #![forbid(unsafe_code)]
 #![forbid(missing_docs)]
 
-use candid::{
-    CandidType, Nat, Principal,
-    types::{Serializer, Type},
-};
+use candid::{CandidType, Nat, Principal};
 use icrc_ledger_types::icrc1::account::{Account, Subaccount};
 pub use memo::{BurnMemo, MAX_SERIALIZED_MEMO_BYTES, Memo, MintMemo};
 use serde::{Deserialize, Serialize};
@@ -99,7 +96,7 @@ pub struct ProcessDepositArgs {
     pub signature: Signature,
 }
 
-/// Arguments for a request to the `deposit_sol` and `deposit_status` ckSOL minter endpoints.
+/// Arguments for a request to the `deposit_sol` ckSOL minter endpoint.
 #[derive(Clone, Eq, PartialEq, Debug, Default, CandidType, Deserialize, Serialize)]
 pub struct DepositSolArgs {
     /// The principal to credit with the deposit.
@@ -123,26 +120,7 @@ impl From<Account> for DepositSolArgs {
 /// Identifies a deposit queued by the `deposit_sol` ckSOL minter endpoint.
 ///
 /// A sequence number assigned when the deposit is queued.
-#[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Deserialize, Serialize)]
-#[serde(transparent)]
-pub struct DepositSolId(u64);
-
-impl DepositSolId {
-    /// Wraps the sequence number of a queued deposit.
-    pub const fn new(sequence_number: u64) -> Self {
-        Self(sequence_number)
-    }
-}
-
-impl CandidType for DepositSolId {
-    fn _ty() -> Type {
-        u64::_ty()
-    }
-
-    fn idl_serialize<S: Serializer>(&self, serializer: S) -> Result<(), S::Error> {
-        self.0.idl_serialize(serializer)
-    }
-}
+pub type DepositSolId = u64;
 
 /// The status of a deposit queued by the `deposit_sol` ckSOL minter endpoint.
 ///

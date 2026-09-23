@@ -4,7 +4,7 @@ use icrc_ledger_types::icrc1::account::Account;
 #[cfg(test)]
 mod tests;
 
-const PLACEHOLDER_DEPOSIT_ID: DepositSolId = DepositSolId::new(0);
+const PLACEHOLDER_DEPOSIT_ID: DepositSolId = 0;
 
 pub fn deposit_sol(_account: Account) -> Result<DepositSolId, DepositSolError> {
     Ok(PLACEHOLDER_DEPOSIT_ID)
