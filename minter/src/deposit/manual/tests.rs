@@ -218,6 +218,34 @@ mod process_deposit_tests {
     }
 
     #[tokio::test]
+    async fn should_charge_exactly_the_required_cycles_when_nothing_is_refunded() {
+        let required_cycles = GET_TRANSACTION_CYCLES + DEPOSIT_CONSOLIDATION_FEE;
+        init_state_with_args(InitArgs {
+            process_deposit_required_cycles: required_cycles as u64,
+            ..valid_init_args()
+        });
+        init_schnorr_master_key();
+
+        let runtime = TestCanisterRuntime::new()
+            .with_increasing_time()
+            .expecting_charges()
+            .add_msg_cycles_available(required_cycles)
+            .add_msg_cycles_refunded(0)
+            .add_get_transaction_response(legacy_deposit_transaction())
+            .add_mint_response(Ok(BLOCK_INDEX.into()));
+
+        let result = process_deposit(
+            runtime.clone(),
+            DEPOSITOR_ACCOUNT,
+            legacy_deposit_transaction_signature(),
+        )
+        .await;
+
+        assert_eq!(result, Ok(deposit_status_minted()));
+        assert_eq!(runtime.msg_cycles_accepted(), vec![required_cycles]);
+    }
+
+    #[tokio::test]
     async fn should_succeed_with_valid_deposit_transaction() {
         init_state();
         init_schnorr_master_key();

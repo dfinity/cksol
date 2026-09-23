@@ -1,5 +1,5 @@
 use crate::{
-    constants::{FEE_PER_SIGNATURE, RENT_EXEMPTION_THRESHOLD},
+    constants::{FEE_PER_SIGNATURE, GET_TRANSACTION_CYCLES, RENT_EXEMPTION_THRESHOLD},
     ledger::client::LedgerClient,
     numeric::{LedgerBurnIndex, LedgerMintIndex},
     rpc::BlockHeight,
@@ -380,6 +380,15 @@ impl State {
                 minimum_withdrawal_amount: self.minimum_withdrawal_amount,
                 withdrawal_fee: self.withdrawal_fee,
                 rent_exemption_threshold: RENT_EXEMPTION_THRESHOLD,
+            });
+        }
+        if self.process_deposit_required_cycles
+            < GET_TRANSACTION_CYCLES + self.deposit_consolidation_fee
+        {
+            return Err(InvalidStateError::ProcessDepositRequiredCyclesTooLow {
+                required_cycles: self.process_deposit_required_cycles,
+                rpc_cost: GET_TRANSACTION_CYCLES,
+                consolidation_fee: self.deposit_consolidation_fee,
             });
         }
         Ok(())
@@ -794,6 +803,11 @@ pub enum InvalidStateError {
         minimum_withdrawal_amount: u64,
         withdrawal_fee: u64,
         rent_exemption_threshold: u64,
+    },
+    ProcessDepositRequiredCyclesTooLow {
+        required_cycles: u128,
+        rpc_cost: u128,
+        consolidation_fee: u128,
     },
 }
 
