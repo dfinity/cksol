@@ -1,6 +1,6 @@
 use super::{event::*, *};
 use crate::{
-    constants::{FEE_PER_SIGNATURE, RENT_EXEMPTION_THRESHOLD},
+    constants::{FEE_PER_SIGNATURE, GET_TRANSACTION_CYCLES, RENT_EXEMPTION_THRESHOLD},
     state::{audit::process_event, read_state},
     test_fixtures::{
         AUTOMATED_DEPOSIT_FEE, DEPOSIT_CONSOLIDATION_FEE, MANUAL_DEPOSIT_FEE,
@@ -129,6 +129,42 @@ mod state_validation {
             },
             |e| matches!(e, InvalidStateError::InvalidMinimumWithdrawalAmount { .. }),
         );
+        let minimum_required = GET_TRANSACTION_CYCLES + DEPOSIT_CONSOLIDATION_FEE;
+        assert_fails_both(
+            InitArgs {
+                process_deposit_required_cycles: (minimum_required - 1) as u64,
+                ..valid_init_args()
+            },
+            UpgradeArgs {
+                process_deposit_required_cycles: Some((minimum_required - 1) as u64),
+                ..Default::default()
+            },
+            |e| {
+                e == &InvalidStateError::ProcessDepositRequiredCyclesTooLow {
+                    required_cycles: minimum_required - 1,
+                    rpc_cost: GET_TRANSACTION_CYCLES,
+                    consolidation_fee: DEPOSIT_CONSOLIDATION_FEE,
+                }
+            },
+        );
+        let maximum_fee = PROCESS_DEPOSIT_REQUIRED_CYCLES - GET_TRANSACTION_CYCLES;
+        assert_fails_both(
+            InitArgs {
+                deposit_consolidation_fee: (maximum_fee + 1) as u64,
+                ..valid_init_args()
+            },
+            UpgradeArgs {
+                deposit_consolidation_fee: Some((maximum_fee + 1) as u64),
+                ..Default::default()
+            },
+            |e| {
+                e == &InvalidStateError::ProcessDepositRequiredCyclesTooLow {
+                    required_cycles: PROCESS_DEPOSIT_REQUIRED_CYCLES,
+                    rpc_cost: GET_TRANSACTION_CYCLES,
+                    consolidation_fee: maximum_fee + 1,
+                }
+            },
+        );
     }
 
     #[test]
@@ -180,6 +216,28 @@ mod state_validation {
             },
             UpgradeArgs {
                 minimum_withdrawal_amount: Some(minimum_required),
+                ..Default::default()
+            },
+        );
+        let minimum_required = GET_TRANSACTION_CYCLES + DEPOSIT_CONSOLIDATION_FEE;
+        assert_succeeds_both(
+            InitArgs {
+                process_deposit_required_cycles: minimum_required as u64,
+                ..valid_init_args()
+            },
+            UpgradeArgs {
+                process_deposit_required_cycles: Some(minimum_required as u64),
+                ..Default::default()
+            },
+        );
+        let maximum_fee = PROCESS_DEPOSIT_REQUIRED_CYCLES - GET_TRANSACTION_CYCLES;
+        assert_succeeds_both(
+            InitArgs {
+                deposit_consolidation_fee: maximum_fee as u64,
+                ..valid_init_args()
+            },
+            UpgradeArgs {
+                deposit_consolidation_fee: Some(maximum_fee as u64),
                 ..Default::default()
             },
         );

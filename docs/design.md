@@ -545,6 +545,7 @@ The following constraints regarding the parameters introduced in this section mu
 1. **automatic deposit fee ≥ manual deposit fee**: More work is required for the automatic deposit flow and no cycles are charged, so the fee should not be lower.
 2. **minimum deposit amount ≥ automatic deposit fee**: The minimum deposit amount must at least cover the deposit fee. Due to the first constraint, the minimum deposit amount is at least the fee of either deposit flow.
 3. **minimum deposit amount ≥ Solana transfer fee + rent exemption threshold**: The minimum deposit amount must be large enough so that at least the rent exemption threshold is transferred when consolidating the deposit. This condition covers the corner case when the ckSOL minter does not have any funds in its account and there is a single deposit that is consolidated.
+4. **process deposit required cycles ≥ `getTransaction` RPC cost + deposit consolidation fee**: The cycles attached to a `process_deposit` call are charged after the RPC call for the cost of that call plus, on success, the consolidation fee. The required cycles must cover both, otherwise the charge would exceed the attached cycles and trap.
 
 ### 3.4. OFAC Checks
 
