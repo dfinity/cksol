@@ -20,6 +20,7 @@ use thiserror::Error;
 mod tests;
 
 pub mod manual;
+pub mod sweep;
 
 pub async fn fetch_and_validate_deposit<R: CanisterRuntime>(
     runtime: &R,

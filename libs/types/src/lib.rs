@@ -96,6 +96,52 @@ pub struct ProcessDepositArgs {
     pub signature: Signature,
 }
 
+/// Arguments for a request to the `deposit_sol` and `deposit_status` ckSOL minter endpoints.
+#[derive(Clone, Eq, PartialEq, Debug, Default, CandidType, Deserialize, Serialize)]
+pub struct DepositSolArgs {
+    /// The principal to credit with the deposit.
+    ///
+    /// If not set, defaults to the caller's principal.
+    /// The resolved owner must be a non-anonymous principal.
+    pub owner: Option<Principal>,
+    /// The subaccount to credit with the deposit.
+    pub subaccount: Option<Subaccount>,
+}
+
+impl From<Account> for DepositSolArgs {
+    fn from(account: Account) -> Self {
+        Self {
+            owner: Some(account.owner),
+            subaccount: account.subaccount,
+        }
+    }
+}
+
+/// The status of the latest deposit of an account made through the `deposit_sol` ckSOL minter endpoint.
+///
+/// Further variants (`Swept`, `Finalized`, `Minted`, `Dropped`, `Quarantined`) will follow
+/// as the sweep flow is implemented.
+#[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize, Serialize)]
+pub enum DepositSolStatus {
+    /// The deposit address is queued for a sweep to the minter's main account.
+    Queued {
+        /// The account to credit once the sweep is finalized.
+        account: Account,
+        /// The amount that will be swept from the deposit address.
+        sweepable_amount: Lamport,
+    },
+}
+
+/// An error from the `deposit_sol` ckSOL minter endpoint.
+///
+/// Further variants will follow as the sweep flow is implemented.
+#[derive(Debug, Clone, PartialEq, CandidType, Deserialize, Error)]
+pub enum DepositSolError {
+    /// The minter experiences temporary issues, try the call again later.
+    #[error("Transient error, try the call again later: {0}")]
+    TemporarilyUnavailable(String),
+}
+
 /// An error from the `process_deposit` ckSOL minter endpoint.
 #[derive(Debug, Clone, PartialEq, CandidType, Deserialize, Error)]
 pub enum ProcessDepositError {

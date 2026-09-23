@@ -10,9 +10,9 @@ use cksol_int_tests::{
     },
 };
 use cksol_types::{
-    DepositId, DepositStatus, GetDepositAddressArgs, InsufficientCyclesError, Lamport, MinterInfo,
-    ProcessDepositArgs, ProcessDepositError, TxFinalizedStatus, WithdrawalArgs, WithdrawalError,
-    WithdrawalStatus,
+    DepositId, DepositSolArgs, DepositSolStatus, DepositStatus, GetDepositAddressArgs,
+    InsufficientCyclesError, Lamport, MinterInfo, ProcessDepositArgs, ProcessDepositError,
+    TxFinalizedStatus, WithdrawalArgs, WithdrawalError, WithdrawalStatus,
 };
 use cksol_types_internal::{
     UpgradeArgs,
@@ -1015,6 +1015,53 @@ mod process_deposit_tests {
     }
 }
 
+mod deposit_sol_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn should_queue_deposit_and_report_its_status() {
+        let setup = SetupBuilder::new().build().await;
+        let minter = setup.minter();
+        let expected_status = DepositSolStatus::Queued {
+            account: DEFAULT_CALLER_ACCOUNT,
+            sweepable_amount: 0,
+        };
+
+        let result = minter.deposit_sol(DEFAULT_CALLER_ACCOUNT).await;
+        assert_eq!(result, Ok(expected_status.clone()));
+
+        let status = minter.deposit_status(DEFAULT_CALLER_ACCOUNT).await;
+        assert_eq!(status, Some(expected_status));
+
+        setup.drop().await;
+    }
+
+    #[tokio::test]
+    async fn should_default_owner_to_caller() {
+        let setup = SetupBuilder::new().build().await;
+        let minter = setup.minter();
+        let args = DepositSolArgs {
+            owner: None,
+            subaccount: Some([1; 32]),
+        };
+        let expected_status = DepositSolStatus::Queued {
+            account: Account {
+                owner: Setup::DEFAULT_CALLER,
+                subaccount: Some([1; 32]),
+            },
+            sweepable_amount: 0,
+        };
+
+        let result = minter.deposit_sol(args.clone()).await;
+        assert_eq!(result, Ok(expected_status.clone()));
+
+        let status = minter.deposit_status(args).await;
+        assert_eq!(status, Some(expected_status));
+
+        setup.drop().await;
+    }
+}
+
 mod anonymous_caller_tests {
     use super::*;
 
@@ -1045,6 +1092,22 @@ mod anonymous_caller_tests {
                     owner,
                     subaccount: None,
                     signature: deposit_transaction_signature(),
+                })
+                .await;
+            assert_matches!(result, Err(s) => s.contains("the owner must be non-anonymous"));
+
+            let result = minter
+                .try_deposit_sol(DepositSolArgs {
+                    owner,
+                    subaccount: None,
+                })
+                .await;
+            assert_matches!(result, Err(s) => s.contains("the owner must be non-anonymous"));
+
+            let result = minter
+                .try_deposit_status(DepositSolArgs {
+                    owner,
+                    subaccount: None,
                 })
                 .await;
             assert_matches!(result, Err(s) => s.contains("the owner must be non-anonymous"));
