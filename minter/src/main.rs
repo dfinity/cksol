@@ -12,7 +12,7 @@ use cksol_minter::{
     withdraw::{WITHDRAWAL_PROCESSING_DELAY, process_pending_withdrawals},
 };
 use cksol_types::{
-    Address, DepositSolArgs, DepositSolError, DepositSolStatus, DepositStatus,
+    Address, DepositSolArgs, DepositSolError, DepositSolId, DepositSolStatus, DepositStatus,
     GetDepositAddressArgs, MinterInfo, ProcessDepositArgs, ProcessDepositError, WithdrawalArgs,
     WithdrawalError, WithdrawalOk, WithdrawalStatus, WithdrawalStatusArgs,
 };
@@ -76,15 +76,14 @@ async fn process_deposit(args: ProcessDepositArgs) -> Result<DepositStatus, Proc
 }
 
 #[ic_cdk::update]
-fn deposit_sol(args: DepositSolArgs) -> Result<DepositSolStatus, DepositSolError> {
+fn deposit_sol(args: DepositSolArgs) -> Result<DepositSolId, DepositSolError> {
     let account = assert_non_anonymous_account(args.owner, args.subaccount);
     cksol_minter::deposit::sweep::deposit_sol(account)
 }
 
 #[ic_cdk::query]
-fn deposit_status(args: DepositSolArgs) -> Option<DepositSolStatus> {
-    let account = assert_non_anonymous_account(args.owner, args.subaccount);
-    cksol_minter::deposit::sweep::deposit_status(account)
+fn deposit_status(deposit_id: DepositSolId) -> Option<DepositSolStatus> {
+    cksol_minter::deposit::sweep::deposit_status(deposit_id)
 }
 
 #[ic_cdk::update]

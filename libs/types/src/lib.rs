@@ -3,7 +3,10 @@
 #![forbid(unsafe_code)]
 #![forbid(missing_docs)]
 
-use candid::{CandidType, Nat, Principal};
+use candid::{
+    CandidType, Nat, Principal,
+    types::{Serializer, Type},
+};
 use icrc_ledger_types::icrc1::account::{Account, Subaccount};
 pub use memo::{BurnMemo, MAX_SERIALIZED_MEMO_BYTES, Memo, MintMemo};
 use serde::{Deserialize, Serialize};
@@ -117,7 +120,31 @@ impl From<Account> for DepositSolArgs {
     }
 }
 
-/// The status of the latest deposit of an account made through the `deposit_sol` ckSOL minter endpoint.
+/// Identifies a deposit queued by the `deposit_sol` ckSOL minter endpoint.
+///
+/// A sequence number assigned when the deposit is queued.
+#[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Deserialize, Serialize)]
+#[serde(transparent)]
+pub struct DepositSolId(u64);
+
+impl DepositSolId {
+    /// Wraps the sequence number of a queued deposit.
+    pub const fn new(sequence_number: u64) -> Self {
+        Self(sequence_number)
+    }
+}
+
+impl CandidType for DepositSolId {
+    fn _ty() -> Type {
+        u64::_ty()
+    }
+
+    fn idl_serialize<S: Serializer>(&self, serializer: S) -> Result<(), S::Error> {
+        self.0.idl_serialize(serializer)
+    }
+}
+
+/// The status of a deposit queued by the `deposit_sol` ckSOL minter endpoint.
 ///
 /// Further variants (`Swept`, `Finalized`, `Minted`, `Dropped`, `Quarantined`) will follow
 /// as the sweep flow is implemented.
@@ -125,8 +152,6 @@ impl From<Account> for DepositSolArgs {
 pub enum DepositSolStatus {
     /// The deposit address is queued for a sweep to the minter's main account.
     Queued {
-        /// The account to credit once the sweep is finalized.
-        account: Account,
         /// The amount that will be swept from the deposit address.
         sweepable_amount: Lamport,
     },

@@ -2,7 +2,7 @@ use crate::{events::MinterEventAssert, ledger_init_args::ledger_init_args};
 use candid::{CandidType, Decode, Encode, Nat, Principal, utils::ArgumentEncoder};
 use canlog::{Log, LogEntry};
 use cksol_types::{
-    Address, DepositSolArgs, DepositSolError, DepositSolStatus, DepositStatus,
+    Address, DepositSolArgs, DepositSolError, DepositSolId, DepositSolStatus, DepositStatus,
     GetDepositAddressArgs, MinterInfo, ProcessDepositArgs, ProcessDepositError, WithdrawalArgs,
     WithdrawalError, WithdrawalOk, WithdrawalStatus, WithdrawalStatusArgs,
 };
@@ -429,7 +429,7 @@ impl CkSolMinter<'_> {
     pub async fn deposit_sol(
         &self,
         args: impl Into<DepositSolArgs>,
-    ) -> Result<DepositSolStatus, DepositSolError> {
+    ) -> Result<DepositSolId, DepositSolError> {
         self.try_deposit_sol(args)
             .await
             .expect("deposit_sol failed")
@@ -438,24 +438,12 @@ impl CkSolMinter<'_> {
     pub async fn try_deposit_sol(
         &self,
         args: impl Into<DepositSolArgs>,
-    ) -> Result<Result<DepositSolStatus, DepositSolError>, String> {
+    ) -> Result<Result<DepositSolId, DepositSolError>, String> {
         self.try_update_call("deposit_sol", (args.into(),), 0).await
     }
 
-    pub async fn deposit_status(
-        &self,
-        args: impl Into<DepositSolArgs>,
-    ) -> Option<DepositSolStatus> {
-        self.try_deposit_status(args)
-            .await
-            .expect("deposit_status failed")
-    }
-
-    pub async fn try_deposit_status(
-        &self,
-        args: impl Into<DepositSolArgs>,
-    ) -> Result<Option<DepositSolStatus>, String> {
-        self.try_query_call("deposit_status", (args.into(),)).await
+    pub async fn deposit_status(&self, deposit_id: DepositSolId) -> Option<DepositSolStatus> {
+        self.query_call("deposit_status", (deposit_id,)).await
     }
 
     pub async fn withdraw(&self, args: WithdrawalArgs) -> Result<WithdrawalOk, WithdrawalError> {
