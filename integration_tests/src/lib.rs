@@ -549,7 +549,7 @@ impl Ledger<'_> {
             .unwrap()
     }
 
-    pub async fn get_recent_block(&self, block_index: u64) -> ICRC3GenericBlock {
+    pub async fn get_block(&self, block_index: u64) -> ICRC3GenericBlock {
         let args = vec![GetBlocksRequest {
             start: Nat::from(block_index),
             length: Nat::from(1u64),
