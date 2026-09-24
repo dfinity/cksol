@@ -10,6 +10,12 @@ pub const MAX_HTTP_OUTCALL_RESPONSE_BYTES: u64 = 2_000_000;
 pub const GET_TRANSACTION_CYCLES: u128 = 50_000_000_000;
 
 /// Cycles to attach for `getBalance` RPC calls.
+///
+/// The SOL RPC canister charges about 2.1B cycles for a `getBalance` request
+/// with the default 3-out-of-4 provider consensus, comparable to `getSlot`
+/// given the similarly small response (see section 3.3.2 of the design). The
+/// attached amount leaves a wide margin for provider or price changes; the
+/// unused part is refunded and never charged to the caller of `deposit_sol`.
 pub const GET_BALANCE_CYCLES: u128 = 10_000_000_000;
 
 /// Cycles to attach for `getSignatureStatuses` RPC calls.

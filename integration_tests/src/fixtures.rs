@@ -25,7 +25,6 @@ pub const DEFAULT_CALLER_DEPOSIT_ADDRESS: &str = "Cybe9JqZKtmhBoVGNHBxRVMUndZno5
 pub const MINTER_ADDRESS: Address = address!("5G64DcCfSFRTwZWSTjub1qGRYrJFLeNMkYjfgCfKi1fi");
 
 pub const DEPOSIT_AMOUNT: Lamport = 500_000_000;
-/// Solana base fee per signature included in a transaction.
 /// Minimum balance left on a deposit address to keep it rent-exempt.
 pub const RENT_EXEMPTION_THRESHOLD: Lamport = 890_880;
 
