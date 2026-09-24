@@ -1,3 +1,4 @@
+use assert_matches::assert_matches;
 use candid::Principal;
 use cksol_int_tests::{
     Setup,
@@ -246,7 +247,7 @@ async fn wait_for_minter_balance(setup: &Setup, expected_balance: Lamport) {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn should_queue_deposit_after_transfer_to_deposit_address() {
+async fn should_sweep_deposit_address_after_deposit_sol() {
     let validator = SolanaTestValidator::start().await;
     let setup = validator.setup().await;
     let account = Account {
@@ -254,11 +255,13 @@ async fn should_queue_deposit_after_transfer_to_deposit_address() {
         subaccount: Some([0xAB; 32]),
     };
     let deposit_amount = LAMPORTS_PER_SOL / 10;
+    let sweepable_amount = deposit_amount - RENT_EXEMPTION_THRESHOLD;
     let deposit_address: Address = setup.minter().get_deposit_address(account).await.into();
     validator.transfer_to(deposit_address, deposit_amount).await;
     validator
         .wait_for_finalized_balance(&deposit_address, 0)
         .await;
+    let minter_sol_before = validator.get_balance(&MINTER_ADDRESS).await;
 
     let deposit_id = setup
         .minter()
@@ -268,9 +271,25 @@ async fn should_queue_deposit_after_transfer_to_deposit_address() {
 
     assert_eq!(
         setup.minter().deposit_status(deposit_id).await,
-        DepositSolStatus::Queued {
-            sweepable_amount: deposit_amount - RENT_EXEMPTION_THRESHOLD
-        }
+        DepositSolStatus::Queued { sweepable_amount }
+    );
+
+    setup.advance_time(Duration::from_mins(1)).await;
+    validator
+        .wait_for_finalized_balance(&MINTER_ADDRESS, minter_sol_before)
+        .await;
+
+    assert_eq!(
+        validator.get_balance(&deposit_address).await,
+        RENT_EXEMPTION_THRESHOLD
+    );
+    assert_eq!(
+        validator.get_balance(&MINTER_ADDRESS).await,
+        minter_sol_before + sweepable_amount - FEE_PER_SIGNATURE
+    );
+    assert_matches!(
+        setup.minter().deposit_status(deposit_id).await,
+        DepositSolStatus::Swept { .. }
     );
 
     setup.drop().await;

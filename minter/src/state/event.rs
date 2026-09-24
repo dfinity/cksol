@@ -190,6 +190,13 @@ pub enum TransactionPurpose {
         #[cbor(n(0), with = "cbor::id_vec")]
         burn_indices: Vec<LedgerBurnIndex>,
     },
+    /// Sweep the deposit addresses of deposits queued by `deposit_sol` into the minter's main account.
+    #[n(2)]
+    SweepDeposits {
+        /// The ids of the swept deposits, the fee payer first.
+        #[n(0)]
+        deposit_ids: Vec<DepositSolId>,
+    },
 }
 
 #[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd, Debug, Decode, Encode)]

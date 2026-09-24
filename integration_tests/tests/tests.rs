@@ -30,6 +30,7 @@ const WITHDRAWAL_PROCESSING_DELAY: Duration = Duration::from_mins(1);
 const FINALIZE_TRANSACTIONS_DELAY: Duration = Duration::from_mins(2);
 const RESUBMIT_TRANSACTIONS_DELAY: Duration = Duration::from_mins(3);
 const DEPOSIT_CONSOLIDATION_DELAY: Duration = Duration::from_mins(10);
+const SWEEP_DEPOSITS_DELAY: Duration = Duration::from_mins(1);
 
 /// Deposits funds into the minter via `process_deposit`, consolidates them,
 /// and finalizes the consolidation so the minter's internal balance is credited.
@@ -1176,6 +1177,52 @@ mod deposit_sol_tests {
             .await;
 
         assert_eq!(deposit_id, Ok(0));
+
+        setup.drop().await;
+    }
+
+    #[tokio::test]
+    async fn should_sweep_queued_deposit_after_timer() {
+        const SLOT: Slot = 100_000_000;
+        let setup = SetupBuilder::new().with_proxy_canister().build().await;
+        let deposit_id = setup
+            .minter()
+            .with_http_mocks(
+                MockBuilder::new()
+                    .get_balance(BALANCE_ABOVE_MINIMUM)
+                    .build(),
+            )
+            .deposit_sol(DEFAULT_CALLER_ACCOUNT)
+            .await
+            .expect("deposit_sol should queue a sweep");
+
+        setup.advance_time(SWEEP_DEPOSITS_DELAY).await;
+        setup
+            .execute_http_mocks(
+                MockBuilder::with_start_id(4)
+                    .submit_transaction(
+                        SLOT,
+                        "4sGjMW1sUnHzSxGspuhpqLDx6wiyjNtZAMdL4VZHirAn",
+                        "5VERv8NMvzbJMEkV8xnrLkEaWRtSz9CosKDYjCJjBRnbJLgp8uirBgmQpjKhoR4tjF3ZpRzrFmBV6UjKdiSZkQUW",
+                    )
+                    .build(),
+            )
+            .await;
+
+        let sweep_signature = assert_matches!(
+            setup.minter().deposit_status(deposit_id).await,
+            DepositSolStatus::Swept { signature } => signature
+        );
+        setup.minter().assert_that_events().await.satisfy(|events| {
+            check!(events.iter().any(|e| matches!(
+                e,
+                EventType::SubmittedTransaction {
+                    signature,
+                    purpose: TransactionPurpose::SweepDeposits { deposit_ids },
+                    ..
+                } if *signature == sweep_signature && deposit_ids == &[deposit_id]
+            )));
+        });
 
         setup.drop().await;
     }

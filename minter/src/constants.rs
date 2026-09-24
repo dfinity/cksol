@@ -1,5 +1,10 @@
+use std::time::Duration;
+
 /// Maximum number of concurrent calls to the SOL RPC canister.
 pub const MAX_CONCURRENT_RPC_CALLS: usize = 10;
+
+/// Interval of the timer sweeping queued deposits, the same as withdrawal processing.
+pub const SWEEP_DEPOSITS_DELAY: Duration = Duration::from_mins(1);
 
 /// Matches the ICP HTTPS outcall response limit for variable-length RPC calls
 /// such as `getTransaction` and `getSignatureStatuses`:

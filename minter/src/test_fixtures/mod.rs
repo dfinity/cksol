@@ -175,9 +175,10 @@ pub mod events {
         state::{
             audit::process_event,
             event::{DepositId, EventType, TransactionPurpose, WithdrawalRequest},
-            mutate_state,
+            mutate_state, read_state,
         },
     };
+    use cksol_types::DepositSolId;
     use icrc_ledger_types::icrc1::account::Account;
     use sol_rpc_types::Lamport;
     use solana_signature::Signature;
@@ -254,6 +255,44 @@ pub mod events {
                             .collect(),
                     },
                     block_height,
+                },
+                &runtime(),
+            )
+        });
+    }
+
+    pub fn queue_deposit(deposit_id: DepositSolId, account: Account, sweepable_amount: Lamport) {
+        mutate_state(|state| {
+            process_event(
+                state,
+                EventType::QueuedDeposit {
+                    deposit_id,
+                    account,
+                    sweepable_amount,
+                },
+                &runtime(),
+            )
+        });
+    }
+
+    /// Submits a sweep of the given queued deposits, signed by their accounts in the given order.
+    pub fn submit_sweep(signature: Signature, deposit_ids: Vec<DepositSolId>) {
+        let signers = read_state(|state| {
+            deposit_ids
+                .iter()
+                .filter_map(|deposit_id| state.queued_deposits().get(deposit_id))
+                .map(|deposit| deposit.account)
+                .collect()
+        });
+        mutate_state(|state| {
+            process_event(
+                state,
+                EventType::SubmittedTransaction {
+                    signature,
+                    message: message().into(),
+                    signers,
+                    purpose: TransactionPurpose::SweepDeposits { deposit_ids },
+                    block_height: DEFAULT_BLOCK_HEIGHT,
                 },
                 &runtime(),
             )
@@ -584,6 +623,8 @@ pub mod arb {
                     ),
                     prop::collection::vec(arb_ledger_burn_index(), 1..10)
                         .prop_map(|burn_indices| TransactionPurpose::WithdrawSol { burn_indices }),
+                    prop::collection::vec(any::<u64>(), 1..10)
+                        .prop_map(|deposit_ids| TransactionPurpose::SweepDeposits { deposit_ids }),
                 ],
                 arb_block_height(),
             )
