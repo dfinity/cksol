@@ -636,3 +636,143 @@ mod oldest_incomplete_withdrawal_created_at {
         );
     }
 }
+
+mod withdrawal_batches {
+    use super::*;
+    use crate::sol_transfer::{BATCH_WITHDRAWAL_TX_FEE, MAX_WITHDRAWALS_PER_TX};
+
+    const MAX_AMOUNT_TO_TRANSFER: Lamport = u64::MAX - WITHDRAWAL_FEE - BATCH_WITHDRAWAL_TX_FEE;
+    const NUM_REQUESTS_FOR_TWO_BATCHES: usize = MAX_WITHDRAWALS_PER_TX + 1;
+    const COST_OF_TWO_BATCHES: Lamport = NUM_REQUESTS_FOR_TWO_BATCHES as u64
+        * MINIMUM_WITHDRAWAL_AMOUNT
+        + 2 * BATCH_WITHDRAWAL_TX_FEE;
+
+    #[test]
+    fn should_be_empty_when_no_pending_withdrawals() {
+        let state = state();
+
+        assert_eq!(state.withdrawal_batches().next(), None);
+    }
+
+    proptest! {
+        #[test]
+        fn should_batch_single_request_when_balance_covers_amount_and_fee(
+            amount_to_transfer in MINIMUM_WITHDRAWAL_AMOUNT..=MAX_AMOUNT_TO_TRANSFER
+        ) {
+            let mut state = state();
+            state.balance = amount_to_transfer + BATCH_WITHDRAWAL_TX_FEE;
+            let requests = [withdrawal_request(0, amount_to_transfer)];
+            accept_withdrawal_requests(&mut state, requests.clone());
+
+            let batches: Vec<_> = state.withdrawal_batches().collect();
+
+            prop_assert_eq!(batches, vec![vec![requests[0].clone()]]);
+        }
+
+        #[test]
+        fn should_be_empty_when_balance_does_not_cover_amount_and_fee(
+            amount_to_transfer in MINIMUM_WITHDRAWAL_AMOUNT..=MAX_AMOUNT_TO_TRANSFER,
+            shortfall in 1..=MINIMUM_WITHDRAWAL_AMOUNT + BATCH_WITHDRAWAL_TX_FEE
+        ) {
+            let mut state = state();
+            state.balance = amount_to_transfer + BATCH_WITHDRAWAL_TX_FEE - shortfall;
+            let requests = [withdrawal_request(0, amount_to_transfer)];
+            accept_withdrawal_requests(&mut state, requests);
+
+            prop_assert_eq!(state.withdrawal_batches().next(), None);
+        }
+
+        #[test]
+        fn should_split_requests_into_batches_of_max_size_when_balance_covers_both_fees(
+            balance in COST_OF_TWO_BATCHES..=u64::MAX
+        ) {
+            let mut state = state();
+            state.balance = balance;
+            let requests = withdrawal_requests(NUM_REQUESTS_FOR_TWO_BATCHES);
+            accept_withdrawal_requests(&mut state, requests.clone());
+
+            let batches: Vec<_> = state.withdrawal_batches().collect();
+
+            prop_assert_eq!(
+                batches,
+                vec![
+                    requests[..MAX_WITHDRAWALS_PER_TX].to_vec(),
+                    requests[MAX_WITHDRAWALS_PER_TX..].to_vec()
+                ]
+            );
+        }
+
+        #[test]
+        fn should_not_start_second_batch_when_balance_does_not_cover_its_amount_and_fee(
+            shortfall in 1..=MINIMUM_WITHDRAWAL_AMOUNT + BATCH_WITHDRAWAL_TX_FEE
+        ) {
+            let mut state = state();
+            state.balance = COST_OF_TWO_BATCHES - shortfall;
+            let requests = withdrawal_requests(NUM_REQUESTS_FOR_TWO_BATCHES);
+            accept_withdrawal_requests(&mut state, requests.clone());
+
+            let batches: Vec<_> = state.withdrawal_batches().collect();
+
+            prop_assert_eq!(batches, vec![requests[..MAX_WITHDRAWALS_PER_TX].to_vec()]);
+        }
+    }
+
+    #[test]
+    fn should_be_empty_when_cost_overflows() {
+        let mut state = state();
+        state.balance = u64::MAX;
+        let request = WithdrawalRequest {
+            amount_to_transfer: u64::MAX,
+            burned_amount: u64::MAX,
+            ..withdrawal_request(0, MINIMUM_WITHDRAWAL_AMOUNT)
+        };
+        accept_withdrawal_requests(&mut state, [request]);
+
+        assert_eq!(state.withdrawal_batches().next(), None);
+    }
+
+    #[test]
+    fn should_stop_at_first_unaffordable_request_without_skipping_it() {
+        let mut state = state();
+        state.balance = 2 * MINIMUM_WITHDRAWAL_AMOUNT + BATCH_WITHDRAWAL_TX_FEE;
+        let requests = [
+            withdrawal_request(0, MINIMUM_WITHDRAWAL_AMOUNT),
+            withdrawal_request(1, 2 * MINIMUM_WITHDRAWAL_AMOUNT),
+            withdrawal_request(2, MINIMUM_WITHDRAWAL_AMOUNT),
+        ];
+        accept_withdrawal_requests(&mut state, requests.clone());
+
+        let batches: Vec<_> = state.withdrawal_batches().collect();
+
+        assert_eq!(batches, vec![vec![requests[0].clone()]]);
+    }
+
+    fn state() -> State {
+        State::try_from(valid_init_args()).unwrap()
+    }
+
+    fn accept_withdrawal_requests<I: IntoIterator<Item = WithdrawalRequest>>(
+        state: &mut State,
+        requests: I,
+    ) {
+        for (index, request) in requests.into_iter().enumerate() {
+            state.process_accepted_withdrawal(&request, index as u64);
+        }
+    }
+
+    fn withdrawal_requests(count: usize) -> Vec<WithdrawalRequest> {
+        (0..count)
+            .map(|burn_index| withdrawal_request(burn_index, MINIMUM_WITHDRAWAL_AMOUNT))
+            .collect()
+    }
+
+    fn withdrawal_request(burn_index: usize, amount_to_transfer: Lamport) -> WithdrawalRequest {
+        WithdrawalRequest {
+            account: account(burn_index),
+            solana_address: [0u8; 32],
+            burn_block_index: LedgerBurnIndex::from(burn_index as u64),
+            amount_to_transfer,
+            burned_amount: amount_to_transfer + WITHDRAWAL_FEE,
+        }
+    }
+}

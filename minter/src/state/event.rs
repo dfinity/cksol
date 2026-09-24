@@ -1,4 +1,7 @@
-use crate::numeric::{LedgerBurnIndex, LedgerMintIndex};
+use crate::{
+    constants::FEE_PER_SIGNATURE,
+    numeric::{LedgerBurnIndex, LedgerMintIndex},
+};
 use cksol_types_internal::{InitArgs, UpgradeArgs};
 use derive_more::From;
 use ic_stable_structures::{Storable, storable::Bound};
@@ -19,6 +22,13 @@ pub enum VersionedMessage {
         #[cbor(with = "cbor::message")]
         Message,
     ),
+}
+
+impl VersionedMessage {
+    pub fn transaction_fee(&self) -> Lamport {
+        let VersionedMessage::Legacy(message) = self;
+        FEE_PER_SIGNATURE * message.header.num_required_signatures as u64
+    }
 }
 
 mod cbor;

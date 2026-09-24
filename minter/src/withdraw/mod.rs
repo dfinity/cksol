@@ -8,7 +8,6 @@ use solana_address::Address;
 use canlog::log;
 use cksol_types_internal::log::Priority;
 
-use itertools::Itertools;
 use sol_rpc_types::Slot;
 use solana_hash::Hash;
 
@@ -19,7 +18,7 @@ use crate::{
     ledger::{BurnError, burn},
     rpc::{get_recent_slot_and_blockhash, submit_transaction},
     runtime::CanisterRuntime,
-    sol_transfer::{MAX_WITHDRAWALS_PER_TX, create_signed_batch_withdrawal_transaction},
+    sol_transfer::create_signed_batch_withdrawal_transaction,
     state::{
         TaskType,
         audit::process_event,
@@ -106,27 +105,21 @@ pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: R) {
         }
     };
 
-    let (affordable_requests, num_pending_withdrawals) = read_state(|state| {
-        let mut available_balance = state.balance();
-        let pending = state.pending_withdrawal_requests();
-
-        let affordable: Vec<_> = pending
-            .values()
-            .take_while(|r| {
-                if available_balance >= r.request.amount_to_transfer {
-                    available_balance -= r.request.amount_to_transfer;
-                    true
-                } else {
-                    false
-                }
-            })
-            .map(|t| t.request.clone())
+    let (batches, more_to_process, num_pending_withdrawals) = read_state(|state| {
+        let mut affordable_batches = state.withdrawal_batches().peekable();
+        let batches: Vec<Vec<_>> = affordable_batches
+            .by_ref()
+            .take(MAX_CONCURRENT_RPC_CALLS)
             .collect();
-
-        (affordable, pending.len())
+        (
+            batches,
+            affordable_batches.peek().is_some(),
+            state.pending_withdrawal_requests().len(),
+        )
     });
 
-    if affordable_requests.len() < num_pending_withdrawals {
+    let num_affordable_withdrawals: usize = batches.iter().map(Vec::len).sum();
+    if !more_to_process && num_affordable_withdrawals < num_pending_withdrawals {
         log!(
             Priority::Info,
             "Insufficient minter balance for some withdrawal requests, scheduling consolidation"
@@ -134,19 +127,9 @@ pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: R) {
         runtime.set_timer(Duration::ZERO, consolidate_deposits);
     }
 
-    let more_to_process =
-        affordable_requests.len() > MAX_CONCURRENT_RPC_CALLS * MAX_WITHDRAWALS_PER_TX;
     let reschedule = scopeguard::guard(runtime.clone(), |runtime| {
         runtime.set_timer(Duration::ZERO, process_pending_withdrawals);
     });
-
-    let batches: Vec<Vec<_>> = affordable_requests
-        .into_iter()
-        .chunks(MAX_WITHDRAWALS_PER_TX)
-        .into_iter()
-        .take(MAX_CONCURRENT_RPC_CALLS)
-        .map(Iterator::collect)
-        .collect();
 
     if batches.is_empty() {
         // Nothing to process

@@ -155,3 +155,91 @@ async fn should_deposit_consolidate_and_withdraw() {
 
     setup.drop().await;
 }
+#[tokio::test(flavor = "multi_thread")]
+async fn should_withdraw_exactly_the_consolidated_balance() {
+    let validator = SolanaTestValidator::start().await;
+    let setup = validator.setup().await;
+    let withdrawal_address = Keypair::new().pubkey();
+    let consolidated_depositor = Account {
+        owner: DEPOSITOR,
+        subaccount: Some([0xC0; 32]),
+    };
+    let unconsolidated_depositor = Account {
+        owner: DEPOSITOR,
+        subaccount: Some([0xC1; 32]),
+    };
+
+    let minter_sol_before = validator.get_balance(&MINTER_ADDRESS).await;
+    let consolidated_deposit_amount = LAMPORTS_PER_SOL / 10;
+    validator
+        .deposit_to_account(&setup, consolidated_depositor, consolidated_deposit_amount)
+        .await;
+    setup.advance_time(Duration::from_mins(10)).await;
+    validator
+        .wait_for_finalized_balance(&MINTER_ADDRESS, minter_sol_before)
+        .await;
+    let consolidated_balance = consolidated_deposit_amount - FEE_PER_SIGNATURE;
+    wait_for_minter_balance(&setup, consolidated_balance).await;
+
+    let (_, unconsolidated_minted_amount) = validator
+        .deposit_to_account(
+            &setup,
+            unconsolidated_depositor,
+            3 * consolidated_deposit_amount,
+        )
+        .await;
+    assert_eq!(
+        setup.minter().get_minter_info().await.balance,
+        consolidated_balance
+    );
+
+    let withdrawal_amount = consolidated_balance + Setup::DEFAULT_WITHDRAWAL_FEE;
+    assert!(withdrawal_amount + LEDGER_TRANSFER_FEE <= unconsolidated_minted_amount);
+    setup
+        .ledger()
+        .approve(
+            unconsolidated_depositor.subaccount,
+            withdrawal_amount,
+            setup.minter_account(),
+        )
+        .await;
+    let minter_sol_before_withdrawal = validator.get_balance(&MINTER_ADDRESS).await;
+    let burn_index = setup
+        .minter()
+        .withdraw(WithdrawalArgs {
+            from_subaccount: unconsolidated_depositor.subaccount,
+            amount: withdrawal_amount,
+            address: withdrawal_address.to_string(),
+        })
+        .await
+        .expect("withdraw should succeed")
+        .block_index;
+
+    setup.advance_time(Duration::from_mins(1)).await;
+    validator
+        .wait_for_finalized_balance(&MINTER_ADDRESS, minter_sol_before_withdrawal)
+        .await;
+    wait_for_withdrawal_finalized(&setup, burn_index).await;
+
+    assert_eq!(
+        validator.get_balance(&withdrawal_address).await,
+        consolidated_balance
+    );
+    let unconsolidated_balance = 3 * consolidated_deposit_amount - FEE_PER_SIGNATURE;
+    assert_eq!(
+        setup.minter().get_minter_info().await.balance,
+        unconsolidated_balance - FEE_PER_SIGNATURE
+    );
+
+    setup.drop().await;
+}
+
+async fn wait_for_minter_balance(setup: &Setup, expected_balance: Lamport) {
+    for _ in 0..30 {
+        if setup.minter().get_minter_info().await.balance == expected_balance {
+            return;
+        }
+        setup.advance_time_and_settle(Duration::from_mins(1)).await;
+    }
+    panic!("Minter balance did not reach {expected_balance} within timeout");
+}

@@ -2,6 +2,7 @@ use crate::{
     constants::{FEE_PER_SIGNATURE, RENT_EXEMPTION_THRESHOLD},
     ledger::client::LedgerClient,
     numeric::{LedgerBurnIndex, LedgerMintIndex},
+    sol_transfer::{BATCH_WITHDRAWAL_TX_FEE, MAX_WITHDRAWALS_PER_TX},
     state::event::{DepositId, TransactionPurpose, VersionedMessage, WithdrawalRequest},
     utils::insertion_ordered_map::InsertionOrderedMap,
 };
@@ -17,7 +18,8 @@ use sol_rpc_types::{ConsensusStrategy, Lamport, RpcSources, Slot, SolanaCluster}
 use solana_signature::Signature;
 use std::{
     cell::RefCell,
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, btree_map},
+    iter::Peekable,
 };
 
 #[cfg(test)]
@@ -306,11 +308,6 @@ impl State {
         &mut self.active_tasks
     }
 
-    fn transaction_fee(&self, message: &VersionedMessage) -> Lamport {
-        let VersionedMessage::Legacy(msg) = message;
-        FEE_PER_SIGNATURE * msg.header.num_required_signatures as u64
-    }
-
     fn validate(&self) -> Result<(), InvalidStateError> {
         let canister_ids: BTreeSet<_> = [self.sol_rpc_canister_id, self.ledger_canister_id]
             .into_iter()
@@ -470,6 +467,13 @@ impl State {
         &self.pending_withdrawal_requests
     }
 
+    pub fn withdrawal_batches(&self) -> WithdrawalBatches<'_> {
+        WithdrawalBatches {
+            pending_requests: self.pending_withdrawal_requests.values().peekable(),
+            available_balance: self.balance,
+        }
+    }
+
     /// Returns the creation timestamp (in nanoseconds) of the oldest incomplete withdrawal request.
     /// An incomplete withdrawal is one that has not yet been finalized (succeeded or failed).
     pub fn oldest_incomplete_withdrawal_created_at(&self) -> Option<u64> {
@@ -585,7 +589,7 @@ impl State {
                         "Attempted to send transaction for already sent withdrawal request: {burn_index:?}"
                     );
                 }
-                let tx_fee = self.transaction_fee(transaction);
+                let tx_fee = transaction.transaction_fee();
                 self.balance = self
                     .balance
                     .checked_sub(total + tx_fee)
@@ -664,7 +668,7 @@ impl State {
             transaction.purpose,
             TransactionPurpose::ConsolidateDeposits { .. }
         ) {
-            let tx_fee = self.transaction_fee(&transaction.message);
+            let tx_fee = transaction.message.transaction_fee();
             self.balance += transaction
                 .amount
                 .checked_sub(tx_fee)
@@ -791,6 +795,46 @@ impl TryFrom<InitArgs> for State {
 pub struct PendingWithdrawalRequest {
     pub request: WithdrawalRequest,
     pub created_at: u64,
+}
+
+/// Groups pending withdrawal requests, oldest first, into batches that the
+/// minter balance can pay for, including one transaction fee per batch.
+///
+/// Iteration stops at the first request the remaining balance cannot cover,
+/// so requests are never reordered or skipped.
+pub struct WithdrawalBatches<'a> {
+    pending_requests: Peekable<btree_map::Values<'a, LedgerBurnIndex, PendingWithdrawalRequest>>,
+    available_balance: Lamport,
+}
+
+impl Iterator for WithdrawalBatches<'_> {
+    type Item = Vec<WithdrawalRequest>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let mut batch = Vec::new();
+        while batch.len() < MAX_WITHDRAWALS_PER_TX {
+            let reserved_fee = if batch.is_empty() {
+                BATCH_WITHDRAWAL_TX_FEE
+            } else {
+                0
+            };
+            let Some(pending) = self.pending_requests.peek() else {
+                break;
+            };
+            let Some(remaining_balance) = pending
+                .request
+                .amount_to_transfer
+                .checked_add(reserved_fee)
+                .and_then(|cost| self.available_balance.checked_sub(cost))
+            else {
+                break;
+            };
+            self.available_balance = remaining_balance;
+            batch.push(pending.request.clone());
+            self.pending_requests.next();
+        }
+        if batch.is_empty() { None } else { Some(batch) }
+    }
 }
 
 /// A withdrawal request that has been submitted in a Solana transaction.
