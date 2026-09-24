@@ -131,7 +131,7 @@ pub async fn finalize_transactions<R: CanisterRuntime>(runtime: R) {
 }
 
 fn is_blockhash_expired(transaction_block_height: u64, current_block_height: u64) -> bool {
-    transaction_block_height + MAX_BLOCKHASH_AGE_IN_BLOCKS < current_block_height
+    current_block_height.saturating_sub(transaction_block_height) > MAX_BLOCKHASH_AGE_IN_BLOCKS
 }
 
 /// Resubmit transactions that have been marked for resubmission by

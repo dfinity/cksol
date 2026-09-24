@@ -268,6 +268,11 @@ mod finalization {
                 transaction_block_height: OLDEST_VALID_BLOCK_HEIGHT - 1,
                 should_expire: true,
             },
+            ExpiryCase {
+                name: "ahead of the current block height",
+                transaction_block_height: u64::MAX,
+                should_expire: false,
+            },
         ];
 
         for case in cases {
