@@ -225,6 +225,11 @@ async fn should_withdraw_exactly_the_consolidated_balance() {
         validator.get_balance(&withdrawal_address).await,
         consolidated_balance
     );
+    let unconsolidated_balance = 3 * consolidated_deposit_amount - FEE_PER_SIGNATURE;
+    assert_eq!(
+        setup.minter().get_minter_info().await.balance,
+        unconsolidated_balance - FEE_PER_SIGNATURE
+    );
 
     setup.drop().await;
 }
