@@ -113,6 +113,29 @@ mod state_validation {
                 }
             },
         );
+        // minimum_deposit_amount leaves an empty main address below the rent exemption threshold
+        let minimum_funding_main_address = 2 * RENT_EXEMPTION_THRESHOLD + FEE_PER_SIGNATURE;
+        assert_fails_both(
+            InitArgs {
+                automated_deposit_fee: 1,
+                manual_deposit_fee: 1,
+                minimum_deposit_amount: minimum_funding_main_address - 1,
+                ..valid_init_args()
+            },
+            UpgradeArgs {
+                automated_deposit_fee: Some(1),
+                manual_deposit_fee: Some(1),
+                minimum_deposit_amount: Some(minimum_funding_main_address - 1),
+                ..Default::default()
+            },
+            |e| {
+                e == &InvalidStateError::MinimumDepositAmountLeavesMainAddressBelowRent {
+                    minimum_deposit_amount: minimum_funding_main_address - 1,
+                    rent_exemption_threshold: RENT_EXEMPTION_THRESHOLD,
+                    fee_per_signature: FEE_PER_SIGNATURE,
+                }
+            },
+        );
         // withdrawal_fee exceeds minimum_withdrawal_amount - rent exemption threshold
         assert_fails_both(
             InitArgs {
@@ -199,8 +222,8 @@ mod state_validation {
                 ..Default::default()
             },
         );
-        // minimum_deposit_amount can equal the fee of a full sweep + rent exemption threshold
-        let minimum_required = MAX_SIGNATURES * FEE_PER_SIGNATURE + RENT_EXEMPTION_THRESHOLD;
+        // minimum_deposit_amount can equal twice the rent exemption threshold + one signature fee
+        let minimum_required = 2 * RENT_EXEMPTION_THRESHOLD + FEE_PER_SIGNATURE;
         assert_succeeds_both(
             InitArgs {
                 automated_deposit_fee: 1,

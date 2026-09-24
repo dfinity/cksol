@@ -342,6 +342,15 @@ impl State {
                 rent_exemption_threshold: RENT_EXEMPTION_THRESHOLD,
             });
         }
+        if self.minimum_deposit_amount < 2 * RENT_EXEMPTION_THRESHOLD + FEE_PER_SIGNATURE {
+            return Err(
+                InvalidStateError::MinimumDepositAmountLeavesMainAddressBelowRent {
+                    minimum_deposit_amount: self.minimum_deposit_amount,
+                    rent_exemption_threshold: RENT_EXEMPTION_THRESHOLD,
+                    fee_per_signature: FEE_PER_SIGNATURE,
+                },
+            );
+        }
         if self.minimum_withdrawal_amount < self.withdrawal_fee + RENT_EXEMPTION_THRESHOLD {
             return Err(InvalidStateError::InvalidMinimumWithdrawalAmount {
                 minimum_withdrawal_amount: self.minimum_withdrawal_amount,
@@ -738,6 +747,11 @@ pub enum InvalidStateError {
         minimum_deposit_amount: u64,
         maximum_sweep_fee: u64,
         rent_exemption_threshold: u64,
+    },
+    MinimumDepositAmountLeavesMainAddressBelowRent {
+        minimum_deposit_amount: u64,
+        rent_exemption_threshold: u64,
+        fee_per_signature: u64,
     },
     InvalidMinimumWithdrawalAmount {
         minimum_withdrawal_amount: u64,
