@@ -1,7 +1,7 @@
 use super::*;
 use crate::{
     constants::FEE_PER_SIGNATURE,
-    state::read_state,
+    state::{event::VersionedMessage, read_state},
     test_fixtures::{
         MINTER_ACCOUNT, MINTER_ADDRESS, init_schnorr_master_key, init_state,
         runtime::TestCanisterRuntime,
@@ -494,6 +494,32 @@ mod batch_withdrawal_tests {
         assert_eq!(signers, vec![MINTER_ACCOUNT]);
         assert_eq!(tx.signatures.len(), 1);
         assert_eq!(tx.message.instructions.len(), MAX_WITHDRAWALS_PER_TX);
+    }
+
+    #[tokio::test]
+    async fn should_charge_the_fee_reserved_per_batch() {
+        setup();
+        let blockhash = Hash::new_from_array([0xDD; 32]);
+        let sig = [0x42u8; 64];
+        let targets: Vec<(Address, Lamport)> = (0..MAX_WITHDRAWALS_PER_TX)
+            .map(|i| {
+                let mut addr = [0u8; 32];
+                addr[0] = i as u8;
+                addr[1] = (i >> 8) as u8;
+                (Address::new_from_array(addr), 1_000_000)
+            })
+            .collect();
+
+        let runtime = TestCanisterRuntime::new().add_signature(sig);
+        let (tx, _signers) =
+            create_signed_batch_withdrawal_transaction(&runtime, &targets, blockhash)
+                .await
+                .expect("transaction creation should succeed at max capacity");
+
+        assert_eq!(
+            VersionedMessage::Legacy(tx.message).transaction_fee(),
+            BATCH_WITHDRAWAL_TX_FEE
+        );
     }
 
     #[tokio::test]
