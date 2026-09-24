@@ -8,7 +8,7 @@ use crate::{
         mutate_state, read_state,
     },
     test_fixtures::{
-        EventsAssert, account, confirmed_block, deposit_id,
+        EventsAssert, account, confirmed_block, confirmed_block_at_height, deposit_id,
         events::{accept_deposit, mint_deposit},
         init_schnorr_master_key, init_state,
         runtime::TestCanisterRuntime,
@@ -78,11 +78,14 @@ async fn should_submit_single_consolidation_request() {
 
     let fee_payer_signature = signature(0x11);
     let slot = 100;
+    let block_height = 90;
     let runtime = TestCanisterRuntime::new()
         .with_increasing_time()
-        // get_recent_slot_and_blockhash calls (get_recent_block internally calls getSlot then getBlock)
+        // get_recent_block calls (getSlot then getBlock)
         .add_stub_response(SlotResult::Consistent(Ok(slot)))
-        .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())))
+        .add_stub_response(BlockResult::Consistent(Ok(confirmed_block_at_height(
+            block_height,
+        ))))
         .add_stub_response(SendTransactionResult::Consistent(Ok(
             fee_payer_signature.into()
         )))
@@ -97,10 +100,12 @@ async fn should_submit_single_consolidation_request() {
             assert_matches!(e, EventType::SubmittedTransaction {
                 signature,
                 slot: event_slot,
+                block_height: event_block_height,
                 purpose: TransactionPurpose::ConsolidateDeposits { mint_indices },
                 ..
             } if signature == fee_payer_signature
               && event_slot == slot
+              && event_block_height == Some(block_height)
               && mint_indices == vec![LedgerMintIndex::from(0_u64)]
             )
         })
@@ -117,7 +122,7 @@ async fn should_record_events_even_if_transaction_submission_fails() {
     let slot = 100;
     let runtime = TestCanisterRuntime::new()
         .with_increasing_time()
-        // get_recent_slot_and_blockhash calls
+        // get_recent_block calls
         .add_stub_response(SlotResult::Consistent(Ok(slot)))
         .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())))
         // Transaction submission fails
@@ -157,7 +162,7 @@ async fn should_submit_multiple_consolidation_batches() {
 
     let mut runtime = TestCanisterRuntime::new()
         .with_increasing_time()
-        // get_recent_slot_and_blockhash calls
+        // get_recent_block calls
         .add_stub_response(SlotResult::Consistent(Ok(slot)))
         .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())))
         .add_stub_response(SendTransactionResult::Consistent(Ok(

@@ -150,6 +150,7 @@ fn get_events(
                 signers,
                 slot,
                 purpose,
+                block_height,
             } => {
                 let purpose = match purpose {
                     TransactionPurpose::ConsolidateDeposits { mint_indices } => {
@@ -176,16 +177,19 @@ fn get_events(
                     signers,
                     slot,
                     purpose,
+                    block_height,
                 }
             }
             EventType::ResubmittedTransaction {
                 old_signature,
                 new_signature,
                 new_slot,
+                new_block_height,
             } => event::EventType::ResubmittedTransaction {
                 old_signature: old_signature.into(),
                 new_signature: new_signature.into(),
                 new_slot,
+                new_block_height,
             },
             EventType::SucceededTransaction { signature } => {
                 event::EventType::SucceededTransaction {

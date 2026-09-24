@@ -126,6 +126,7 @@ fn setup_10k_events() {
                     purpose: TransactionPurpose::ConsolidateDeposits {
                         mint_indices: vec![mint_index],
                     },
+                    block_height: None,
                 },
                 &runtime,
             )
@@ -188,6 +189,7 @@ fn setup_10k_events() {
                     purpose: TransactionPurpose::WithdrawSol {
                         burn_indices: vec![burn_index],
                     },
+                    block_height: None,
                 },
                 &runtime,
             )
@@ -240,6 +242,7 @@ fn setup_10k_events() {
                     purpose: TransactionPurpose::ConsolidateDeposits {
                         mint_indices: vec![mint_index],
                     },
+                    block_height: None,
                 },
                 &runtime,
             )
@@ -289,6 +292,7 @@ fn setup_10k_events() {
                     purpose: TransactionPurpose::ConsolidateDeposits {
                         mint_indices: vec![mint_index],
                     },
+                    block_height: None,
                 },
                 &runtime,
             )
@@ -307,6 +311,7 @@ fn setup_10k_events() {
                     old_signature: old_sig,
                     new_signature: new_sig,
                     new_slot: 1,
+                    new_block_height: None,
                 },
                 &runtime,
             )

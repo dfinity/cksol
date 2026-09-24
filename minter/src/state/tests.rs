@@ -34,6 +34,80 @@ proptest! {
     }
 }
 
+mod transaction_event_encoding {
+    use super::*;
+
+    /// A `SubmittedTransaction` event as encoded before the `block_height` field existed.
+    const SUBMITTED_ENCODED_WITHOUT_BLOCK_HEIGHT: &str = "821a6553f10082068558400100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000082008158450100000142424242424242424242424242424242424242424242424242424242424242420000000000000000000000000000000000000000000000000000000000000000008181581d0100000000000000000000000000000000000000000000000000000000182a8200818107";
+
+    /// A `ResubmittedTransaction` event as encoded before the `new_block_height` field existed.
+    const RESUBMITTED_ENCODED_WITHOUT_BLOCK_HEIGHT: &str = "821a6553f1008207835840aa0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000005840bb000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000182a";
+
+    #[test]
+    fn should_decode_submitted_transaction_recorded_without_block_height() {
+        let bytes = hex::decode(SUBMITTED_ENCODED_WITHOUT_BLOCK_HEIGHT).unwrap();
+
+        let decoded = Event::from_bytes(Cow::Owned(bytes));
+
+        assert_eq!(decoded, submitted_transaction_event(None));
+    }
+
+    #[test]
+    fn should_decode_resubmitted_transaction_recorded_without_block_height() {
+        let bytes = hex::decode(RESUBMITTED_ENCODED_WITHOUT_BLOCK_HEIGHT).unwrap();
+
+        let decoded = Event::from_bytes(Cow::Owned(bytes));
+
+        assert_eq!(decoded, resubmitted_transaction_event(None));
+    }
+
+    #[test]
+    fn should_roundtrip_block_height() {
+        for event in [
+            submitted_transaction_event(Some(300_000_000)),
+            resubmitted_transaction_event(Some(300_000_000)),
+        ] {
+            let decoded = Event::from_bytes(event.to_bytes());
+
+            assert_eq!(decoded, event);
+        }
+    }
+
+    fn resubmitted_transaction_event(new_block_height: Option<u64>) -> Event {
+        Event {
+            timestamp: 1_700_000_000,
+            payload: EventType::ResubmittedTransaction {
+                old_signature: signature(0xAA),
+                new_signature: signature(0xBB),
+                new_slot: 42,
+                new_block_height,
+            },
+        }
+    }
+
+    fn submitted_transaction_event(block_height: Option<u64>) -> Event {
+        let fee_payer = solana_address::Address::from([0x42; 32]);
+        let message = solana_message::Message::new_with_blockhash(
+            &[],
+            Some(&fee_payer),
+            &solana_message::Hash::default(),
+        );
+        Event {
+            timestamp: 1_700_000_000,
+            payload: EventType::SubmittedTransaction {
+                signature: signature(1),
+                message: message.into(),
+                signers: vec![account(1)],
+                slot: 42,
+                purpose: TransactionPurpose::ConsolidateDeposits {
+                    mint_indices: vec![LedgerMintIndex::from(7_u64)],
+                },
+                block_height,
+            },
+        }
+    }
+}
+
 mod state_validation {
     use super::*;
 
@@ -434,6 +508,7 @@ fn should_track_balance_through_deposits_withdrawals_and_failures() {
                     signers,
                     slot: 0,
                     purpose,
+                    block_height: None,
                 },
                 &TestCanisterRuntime::new().add_times([0, 0]),
             )

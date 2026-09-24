@@ -8,15 +8,12 @@ use solana_address::Address;
 use canlog::log;
 use cksol_types_internal::log::Priority;
 
-use sol_rpc_types::Slot;
-use solana_hash::Hash;
-
 use crate::{
     consolidate::consolidate_deposits,
     constants::MAX_CONCURRENT_RPC_CALLS,
     guard::{TimerGuard, withdrawal_guard},
     ledger::{BurnError, burn},
-    rpc::{get_recent_slot_and_blockhash, submit_transaction},
+    rpc::{RecentBlock, get_recent_block, submit_transaction},
     runtime::CanisterRuntime,
     sol_transfer::create_signed_batch_withdrawal_transaction,
     state::{
@@ -137,17 +134,19 @@ pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: R) {
         return;
     }
 
-    let (slot, recent_blockhash) = match get_recent_slot_and_blockhash(&runtime).await {
-        Ok(result) => result,
+    let recent_block = match get_recent_block(&runtime).await {
+        Ok(block) => block,
         Err(e) => {
             log!(Priority::Info, "Failed to fetch recent blockhash: {e}");
             return;
         }
     };
 
-    futures::future::join_all(batches.into_iter().map(async |batch| {
-        submit_withdrawal_transaction(&runtime, batch, slot, recent_blockhash).await
-    }))
+    futures::future::join_all(
+        batches
+            .into_iter()
+            .map(async |batch| submit_withdrawal_transaction(&runtime, batch, recent_block).await),
+    )
     .await;
 
     if !more_to_process {
@@ -159,8 +158,7 @@ pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: R) {
 async fn submit_withdrawal_transaction<R: CanisterRuntime>(
     runtime: &R,
     requests: Vec<WithdrawalRequest>,
-    slot: Slot,
-    recent_blockhash: Hash,
+    recent_block: RecentBlock,
 ) {
     let targets: Vec<_> = requests
         .iter()
@@ -173,7 +171,7 @@ async fn submit_withdrawal_transaction<R: CanisterRuntime>(
     let (signed_tx, signers) = match create_signed_batch_withdrawal_transaction(
         runtime,
         &targets,
-        recent_blockhash,
+        recent_block.blockhash,
     )
     .await
     {
@@ -199,10 +197,11 @@ async fn submit_withdrawal_transaction<R: CanisterRuntime>(
                 signature,
                 message,
                 signers,
-                slot,
+                slot: recent_block.slot,
                 purpose: TransactionPurpose::WithdrawSol {
                     burn_indices: burn_indices.clone(),
                 },
+                block_height: recent_block.block_height,
             },
             runtime,
         )

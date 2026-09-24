@@ -3,7 +3,7 @@ use crate::{
     constants::MAX_CONCURRENT_RPC_CALLS,
     guard::TimerGuard,
     rpc::{
-        SubmitTransactionError, get_recent_slot_and_blockhash, get_signature_statuses,
+        RecentBlock, SubmitTransactionError, get_recent_block, get_signature_statuses,
         submit_transaction,
     },
     runtime::CanisterRuntime,
@@ -66,8 +66,8 @@ pub async fn finalize_transactions<R: CanisterRuntime>(runtime: R) {
     // Fetch the current slot before checking statuses: if a transaction finalizes
     // after we snapshot the slot, the status check will see it as finalized rather
     // than missing, so it will never be incorrectly marked as expired.
-    let (current_slot, _) = match get_recent_slot_and_blockhash(&runtime).await {
-        Ok(result) => result,
+    let current_slot = match get_recent_block(&runtime).await {
+        Ok(block) => block.slot,
         Err(e) => {
             log!(Priority::Info, "Failed to get current slot: {e}");
             return;
@@ -230,8 +230,8 @@ async fn resubmit_expired_transactions<R: CanisterRuntime>(
     runtime: &R,
     to_resubmit: Vec<(Signature, VersionedMessage, Vec<Account>)>,
 ) {
-    let (new_slot, new_blockhash) = match get_recent_slot_and_blockhash(runtime).await {
-        Ok(result) => result,
+    let recent_block = match get_recent_block(runtime).await {
+        Ok(block) => block,
         Err(e) => {
             log!(Priority::Info, "Failed to get recent blockhash: {e}");
             return;
@@ -240,15 +240,8 @@ async fn resubmit_expired_transactions<R: CanisterRuntime>(
 
     futures::future::join_all(to_resubmit.into_iter().take(MAX_CONCURRENT_RPC_CALLS).map(
         async |(old_signature, message, signers)| {
-            match try_resubmit_transaction(
-                runtime,
-                old_signature,
-                message,
-                signers,
-                new_slot,
-                new_blockhash,
-            )
-            .await
+            match try_resubmit_transaction(runtime, old_signature, message, signers, recent_block)
+                .await
             {
                 Ok(new_sig) => log!(
                     Priority::Info,
@@ -269,11 +262,10 @@ async fn try_resubmit_transaction<R: CanisterRuntime>(
     old_signature: Signature,
     versioned_message: VersionedMessage,
     signers: Vec<Account>,
-    new_slot: Slot,
-    new_blockhash: solana_hash::Hash,
+    recent_block: RecentBlock,
 ) -> Result<Signature, ResubmitError> {
     let VersionedMessage::Legacy(mut message) = versioned_message;
-    message.recent_blockhash = new_blockhash;
+    message.recent_blockhash = recent_block.blockhash;
 
     let mut transaction = Transaction::new_unsigned(message);
     transaction.signatures = sign_bytes(
@@ -291,7 +283,8 @@ async fn try_resubmit_transaction<R: CanisterRuntime>(
             EventType::ResubmittedTransaction {
                 old_signature,
                 new_signature,
-                new_slot,
+                new_slot: recent_block.slot,
+                new_block_height: recent_block.block_height,
             },
             runtime,
         )

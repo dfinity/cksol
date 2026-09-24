@@ -254,7 +254,10 @@ mod withdrawal_tests {
     use std::str::FromStr;
 
     use candid::Nat;
-    use cksol_int_tests::{fixtures::get_memo, ledger_init_args::LEDGER_TRANSFER_FEE};
+    use cksol_int_tests::{
+        fixtures::{SOL_RPC_SLOT_ROUNDING, get_memo, mock_block_height},
+        ledger_init_args::LEDGER_TRANSFER_FEE,
+    };
     use cksol_types::{BurnMemo, Memo, WithdrawalOk};
     use cksol_types_internal::UpgradeArgs;
     use icrc_ledger_types::icrc1::account::Account;
@@ -263,9 +266,6 @@ mod withdrawal_tests {
     use super::*;
 
     const MAX_BLOCKHASH_AGE: Slot = 150;
-    /// The SOL RPC canister rounds the slot returned by getSlot down to the nearest multiple
-    /// of this value before querying getBlock and returning the slot to callers.
-    const SOL_RPC_SLOT_ROUNDING: u64 = 20;
 
     #[tokio::test]
     async fn should_validate_solana_address() {
@@ -660,8 +660,10 @@ mod withdrawal_tests {
                 e,
                 EventType::SubmittedTransaction {
                     purpose: TransactionPurpose::WithdrawSol { burn_indices },
+                    block_height,
                     ..
                 } if burn_indices == &[block_index]
+                  && block_height == &Some(mock_block_height(INITIAL_SLOT))
             )));
         });
 

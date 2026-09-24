@@ -7,8 +7,8 @@ use crate::{
     state::{TaskType, event::EventType, mutate_state, read_state, reset_state},
     storage::reset_events,
     test_fixtures::{
-        EventsAssert, MINTER_ACCOUNT, confirmed_block, deposit_id, events, init_schnorr_master_key,
-        init_state, runtime::TestCanisterRuntime, signature,
+        EventsAssert, MINTER_ACCOUNT, confirmed_block, confirmed_block_at_height, deposit_id,
+        events, init_schnorr_master_key, init_state, runtime::TestCanisterRuntime, signature,
     },
 };
 use sol_rpc_types::{
@@ -25,6 +25,7 @@ const CURRENT_SLOT: Slot = 408_807_102;
 const RECENT_SLOT: Slot = CURRENT_SLOT - 10;
 const EXPIRED_SLOT: Slot = CURRENT_SLOT - MAX_BLOCKHASH_AGE - 1;
 const RESUBMISSION_SLOT: Slot = CURRENT_SLOT + 5;
+const RESUBMISSION_BLOCK_HEIGHT: u64 = RESUBMISSION_SLOT - 1_000;
 
 mod finalization {
     use super::*;
@@ -324,7 +325,9 @@ mod resubmission {
         let resubmit_runtime = TestCanisterRuntime::new()
             .with_increasing_time()
             .add_stub_response(SlotResult::Consistent(Ok(RESUBMISSION_SLOT)))
-            .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())))
+            .add_stub_response(BlockResult::Consistent(Ok(confirmed_block_at_height(
+                RESUBMISSION_BLOCK_HEIGHT,
+            ))))
             .add_stub_response(SendTransactionResult::Consistent(Ok(new_signature.into())))
             .add_signature(new_signature.into());
 
@@ -338,11 +341,14 @@ mod resubmission {
                 old_signature,
                 new_signature,
                 new_slot: RESUBMISSION_SLOT,
+                new_block_height: Some(RESUBMISSION_BLOCK_HEIGHT),
             });
 
         read_state(|s| {
             assert_eq!(s.submitted_transactions().len(), 1);
-            assert!(s.submitted_transactions().contains_key(&new_signature));
+            let resubmitted = s.submitted_transactions().get(&new_signature).unwrap();
+            assert_eq!(resubmitted.slot, RESUBMISSION_SLOT);
+            assert_eq!(resubmitted.block_height, Some(RESUBMISSION_BLOCK_HEIGHT));
         });
     }
 
@@ -398,6 +404,7 @@ mod resubmission {
                 old_signature,
                 new_signature,
                 new_slot: RESUBMISSION_SLOT,
+                new_block_height: None,
             });
     }
 

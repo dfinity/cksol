@@ -539,6 +539,7 @@ impl State {
         signers: &[Account],
         slot: Slot,
         purpose: &TransactionPurpose,
+        block_height: Option<u64>,
     ) {
         assert!(
             !self.succeeded_transactions.contains(signature),
@@ -604,6 +605,7 @@ impl State {
                     message: transaction.clone(),
                     signers: signers.to_vec(),
                     slot,
+                    block_height,
                     purpose: purpose.clone(),
                     amount,
                 }
@@ -618,6 +620,7 @@ impl State {
         old_signature: &Signature,
         new_signature: &Signature,
         new_slot: Slot,
+        new_block_height: Option<u64>,
     ) {
         let old_transaction = self
             .transactions_to_resubmit
@@ -635,6 +638,7 @@ impl State {
         );
         let new_transaction = SolanaTransaction {
             slot: new_slot,
+            block_height: new_block_height,
             ..old_transaction
         };
         assert_eq!(
@@ -890,6 +894,8 @@ pub struct SolanaTransaction {
     pub message: VersionedMessage,
     pub signers: Vec<Account>,
     pub slot: Slot,
+    /// The block height of the blockhash used, when the RPC provider reported it.
+    pub block_height: Option<u64>,
     pub purpose: TransactionPurpose,
     /// Total transfer amount in lamports (excluding fees).
     pub amount: Lamport,

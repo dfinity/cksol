@@ -77,9 +77,9 @@ pub enum SubmitTransactionError {
     InconsistentRpcResults,
 }
 
-pub async fn get_recent_slot_and_blockhash<R: CanisterRuntime>(
+pub async fn get_recent_block<R: CanisterRuntime>(
     runtime: &R,
-) -> Result<(Slot, Hash), GetRecentBlockhashError> {
+) -> Result<RecentBlock, GetRecentBlockError> {
     let client = read_state(|state| state.sol_rpc_client(runtime.inter_canister_call_runtime()));
     match client.get_recent_block().try_send().await {
         Ok((slot, block)) => {
@@ -88,18 +88,33 @@ pub async fn get_recent_slot_and_blockhash<R: CanisterRuntime>(
                     .blockhash
                     .parse()
                     .map_err(|e: solana_hash::ParseHashError| {
-                        GetRecentBlockhashError::Failed(vec![e.to_string()])
+                        GetRecentBlockError::Failed(vec![e.to_string()])
                     })?;
-            Ok((slot, blockhash))
+            Ok(RecentBlock {
+                slot,
+                blockhash,
+                block_height: block.block_height,
+            })
         }
-        Err(errors) => Err(GetRecentBlockhashError::Failed(
+        Err(errors) => Err(GetRecentBlockError::Failed(
             errors.into_iter().map(|e| e.to_string()).collect(),
         )),
     }
 }
 
+/// A recent block whose blockhash a new transaction can use.
+///
+/// The blockhash stays valid for 150 blocks after `block_height`, which
+/// some RPC providers omit from their `getBlock` response.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RecentBlock {
+    pub slot: Slot,
+    pub blockhash: Hash,
+    pub block_height: Option<u64>,
+}
+
 #[derive(Debug, PartialEq, Error)]
-pub enum GetRecentBlockhashError {
+pub enum GetRecentBlockError {
     #[error("Failed to get recent block: {0:?}")]
     Failed(Vec<String>),
 }

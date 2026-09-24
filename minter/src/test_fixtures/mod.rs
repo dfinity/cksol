@@ -104,7 +104,8 @@ pub fn signature(i: usize) -> solana_signature::Signature {
     solana_signature::Signature::from(bytes)
 }
 
-/// Returns a [`ConfirmedBlock`] with a deterministic blockhash for use in RPC mock stubs.
+/// Returns a [`ConfirmedBlock`] with a deterministic blockhash and no block height,
+/// as reported by RPC providers that omit it, for use in RPC mock stubs.
 pub fn confirmed_block() -> sol_rpc_types::ConfirmedBlock {
     sol_rpc_types::ConfirmedBlock {
         previous_blockhash: Default::default(),
@@ -116,6 +117,14 @@ pub fn confirmed_block() -> sol_rpc_types::ConfirmedBlock {
         rewards: None,
         num_reward_partitions: None,
         transactions: None,
+    }
+}
+
+/// Returns [`confirmed_block`] reporting the given block height.
+pub fn confirmed_block_at_height(block_height: u64) -> sol_rpc_types::ConfirmedBlock {
+    sol_rpc_types::ConfirmedBlock {
+        block_height: Some(block_height),
+        ..confirmed_block()
     }
 }
 
@@ -222,6 +231,7 @@ pub mod events {
                             .map(LedgerMintIndex::from)
                             .collect(),
                     },
+                    block_height: None,
                 },
                 &runtime(),
             )
@@ -273,6 +283,7 @@ pub mod events {
                             .map(LedgerBurnIndex::from)
                             .collect(),
                     },
+                    block_height: None,
                 },
                 &runtime(),
             )
@@ -321,6 +332,7 @@ pub mod events {
                     old_signature,
                     new_signature,
                     new_slot,
+                    new_block_height: None,
                 },
                 &runtime(),
             )
@@ -559,25 +571,36 @@ pub mod arb {
                     prop::collection::vec(arb_ledger_burn_index(), 1..10)
                         .prop_map(|burn_indices| TransactionPurpose::WithdrawSol { burn_indices }),
                 ],
+                prop::option::of(any::<u64>()),
             )
-                .prop_map(|(signature, message, signers, slot, purpose)| {
-                    EventType::SubmittedTransaction {
-                        signature,
-                        message: message.into(),
-                        signers,
-                        slot,
-                        purpose,
+                .prop_map(
+                    |(signature, message, signers, slot, purpose, block_height)| {
+                        EventType::SubmittedTransaction {
+                            signature,
+                            message: message.into(),
+                            signers,
+                            slot,
+                            purpose,
+                            block_height,
+                        }
                     }
-                }),
-            (arb_signature(), arb_signature(), any::<Slot>()).prop_map(
-                |(old_signature, new_signature, new_slot)| {
-                    EventType::ResubmittedTransaction {
-                        old_signature,
-                        new_signature,
-                        new_slot,
+                ),
+            (
+                arb_signature(),
+                arb_signature(),
+                any::<Slot>(),
+                prop::option::of(any::<u64>()),
+            )
+                .prop_map(
+                    |(old_signature, new_signature, new_slot, new_block_height)| {
+                        EventType::ResubmittedTransaction {
+                            old_signature,
+                            new_signature,
+                            new_slot,
+                            new_block_height,
+                        }
                     }
-                },
-            ),
+                ),
             arb_signature().prop_map(|signature| EventType::SucceededTransaction { signature }),
             arb_signature().prop_map(|signature| EventType::FailedTransaction { signature }),
             arb_signature().prop_map(|signature| EventType::ExpiredTransaction { signature }),

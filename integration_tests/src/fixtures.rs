@@ -25,6 +25,23 @@ pub const DEFAULT_CALLER_DEPOSIT_ADDRESS: &str = "Cybe9JqZKtmhBoVGNHBxRVMUndZno5
 pub const MINTER_ADDRESS: Address = address!("5G64DcCfSFRTwZWSTjub1qGRYrJFLeNMkYjfgCfKi1fi");
 
 pub const DEPOSIT_AMOUNT: Lamport = 500_000_000;
+
+/// The SOL RPC canister rounds the slot returned by `getSlot` down to the nearest
+/// multiple of this value before querying `getBlock`.
+pub const SOL_RPC_SLOT_ROUNDING: u64 = 20;
+/// Slots without a block before any block the mocked `getBlock` reports, so that
+/// the block height it reports stays below the slot.
+const MOCK_SKIPPED_SLOTS: u64 = 1_000;
+
+/// The block height the mocked `getBlock` reports for the block fetched after `getSlot`
+/// returned `slot`.
+pub fn mock_block_height(slot: u64) -> u64 {
+    sol_rpc_rounded_slot(slot) - MOCK_SKIPPED_SLOTS
+}
+
+fn sol_rpc_rounded_slot(slot: u64) -> u64 {
+    slot / SOL_RPC_SLOT_ROUNDING * SOL_RPC_SLOT_ROUNDING
+}
 pub const EXPECTED_MINT_AMOUNT: Lamport = DEPOSIT_AMOUNT - Setup::DEFAULT_MANUAL_DEPOSIT_FEE;
 
 /// Signature for a Solana transaction depositing [`DEPOSIT_AMOUNT`] lamports to
@@ -150,13 +167,13 @@ impl MockBuilder {
     /// Mocks for `getSlot` → `getBlock`.
     pub fn get_slot_and_block(self, slot: u64, blockhash: &str) -> Self {
         self.expect(get_slot_request(), get_slot_response(slot))
-            .expect(get_block_request(slot), get_block_response(blockhash))
+            .expect(get_block_request(slot), get_block_response(slot, blockhash))
     }
 
     /// Mocks for `getSlot` → `getBlock` → `sendTransaction`.
     pub fn submit_transaction(self, slot: u64, blockhash: &str, tx_signature: &str) -> Self {
         self.expect(get_slot_request(), get_slot_response(slot))
-            .expect(get_block_request(slot), get_block_response(blockhash))
+            .expect(get_block_request(slot), get_block_response(slot, blockhash))
             .expect(
                 send_transaction_request(),
                 send_transaction_response(tx_signature),
@@ -182,17 +199,17 @@ impl MockBuilder {
     /// Mocks for `getSlot` → `getBlock`, used by the monitor timer to snapshot the current slot.
     pub fn get_current_slot(self, slot: u64, blockhash: &str) -> Self {
         self.expect(get_slot_request(), get_slot_response(slot))
-            .expect(get_block_request(slot), get_block_response(blockhash))
+            .expect(get_block_request(slot), get_block_response(slot, blockhash))
     }
 
     /// Mocks for resubmitting an expired transaction:
     /// `getSlot` → `getBlock` → `getSignatureStatuses`(not found) → `getSlot` → `getBlock` → `sendTransaction`.
     pub fn resubmit_transaction(self, slot: u64, blockhash: &str, tx_signature: &str) -> Self {
         self.expect(get_slot_request(), get_slot_response(slot))
-            .expect(get_block_request(slot), get_block_response(blockhash))
+            .expect(get_block_request(slot), get_block_response(slot, blockhash))
             .check_signature_statuses_not_found(1)
             .expect(get_slot_request(), get_slot_response(slot))
-            .expect(get_block_request(slot), get_block_response(blockhash))
+            .expect(get_block_request(slot), get_block_response(slot, blockhash))
             .expect(
                 send_transaction_request(),
                 send_transaction_response(tx_signature),
@@ -285,11 +302,8 @@ fn get_slot_response(slot: u64) -> JsonRpcResponse {
 }
 
 fn get_block_request(slot: u64) -> JsonRpcRequestMatcher {
-    // The SOL RPC canister rounds the slot down to the nearest multiple of 20
-    // before making getBlock requests, so we match that behavior here.
-    let slot = slot / 20 * 20;
     JsonRpcRequestMatcher::with_method("getBlock").with_params(json!([
-        slot,
+        sol_rpc_rounded_slot(slot),
         {
             "transactionDetails": "none",
             "rewards": false,
@@ -298,7 +312,7 @@ fn get_block_request(slot: u64) -> JsonRpcRequestMatcher {
     ]))
 }
 
-fn get_block_response(blockhash: &str) -> JsonRpcResponse {
+fn get_block_response(slot: u64, blockhash: &str) -> JsonRpcResponse {
     JsonRpcResponse::from(json!({
         "jsonrpc": "2.0",
         "result": {
@@ -306,7 +320,7 @@ fn get_block_response(blockhash: &str) -> JsonRpcResponse {
             "previousBlockhash": "CzBVNFJkh7WkQDfJUiDjLc7kPrJd8kR2yiCvwBUhSe7Y",
             "parentSlot": 449819444,
             "blockTime": 1700000000_i64,
-            "blockHeight": 449819444
+            "blockHeight": mock_block_height(slot)
         },
         "id": 1
     }))

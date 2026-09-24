@@ -84,6 +84,9 @@ pub enum EventType {
         slot: Slot,
         /// The purpose of this transaction.
         purpose: TransactionPurpose,
+        /// The block height of the block whose blockhash the transaction uses,
+        /// when the RPC provider reported it.
+        block_height: Option<u64>,
     },
     /// A previously submitted transaction was resubmitted with a new signature.
     ResubmittedTransaction {
@@ -93,6 +96,9 @@ pub enum EventType {
         new_signature: Signature,
         /// The slot of the new blockhash used in the resubmitted transaction.
         new_slot: Slot,
+        /// The block height of the new blockhash used in the resubmitted
+        /// transaction, when the RPC provider reported it.
+        new_block_height: Option<u64>,
     },
     /// A previously submitted Solana transaction has been finalized successfully.
     SucceededTransaction {

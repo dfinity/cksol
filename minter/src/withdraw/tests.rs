@@ -2,11 +2,12 @@ use crate::{
     constants::{FEE_PER_SIGNATURE, MAX_CONCURRENT_RPC_CALLS},
     guard::{TimerGuard, withdrawal_guard},
     sol_transfer::MAX_WITHDRAWALS_PER_TX,
-    state::{TaskType, read_state},
+    state::{TaskType, event::TransactionPurpose, read_state},
     test_fixtures::{
         EventsAssert, MINIMUM_WITHDRAWAL_AMOUNT, MINTER_ACCOUNT, WITHDRAWAL_FEE, account,
-        confirmed_block, deposit_id, events, init_balance, init_balance_to,
-        init_schnorr_master_key, init_state, runtime::TestCanisterRuntime, signature,
+        confirmed_block, confirmed_block_at_height, deposit_id, events, init_balance,
+        init_balance_to, init_schnorr_master_key, init_state, runtime::TestCanisterRuntime,
+        signature,
     },
     withdraw::{process_pending_withdrawals, withdraw, withdrawal_status},
 };
@@ -419,6 +420,41 @@ mod process_pending_withdrawals_tests {
         process_pending_withdrawals(runtime).await;
 
         assert_matches!(withdrawal_status(1), WithdrawalStatus::TxSent { .. });
+    }
+
+    #[tokio::test]
+    async fn should_record_slot_and_block_height_of_submitted_transaction() {
+        init_state();
+        init_balance();
+        init_schnorr_master_key();
+
+        let tx_signature = signature(0x42);
+        let slot = 100;
+        let block_height = 90;
+        events::accept_withdrawal(account(1), 1, MINIMUM_WITHDRAWAL_AMOUNT);
+
+        let runtime = TestCanisterRuntime::new()
+            .with_increasing_time()
+            .add_stub_response(GetSlotResult::Consistent(Ok(slot)))
+            .add_stub_response(GetBlockResult::Consistent(Ok(confirmed_block_at_height(
+                block_height,
+            ))))
+            .add_signature(tx_signature.into())
+            .add_stub_response(SendTransactionResult::Consistent(Ok(tx_signature.into())));
+
+        process_pending_withdrawals(runtime).await;
+
+        read_state(|s| {
+            let submitted = s.submitted_transactions().get(&tx_signature).unwrap();
+            assert_eq!(submitted.slot, slot);
+            assert_eq!(submitted.block_height, Some(block_height));
+            assert_eq!(
+                submitted.purpose,
+                TransactionPurpose::WithdrawSol {
+                    burn_indices: vec![1_u64.into()]
+                }
+            );
+        });
     }
 
     #[tokio::test]
