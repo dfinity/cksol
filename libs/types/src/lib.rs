@@ -124,7 +124,7 @@ pub type DepositSolId = u64;
 
 /// The status of a deposit queued by the `deposit_sol` ckSOL minter endpoint.
 ///
-/// Further variants (`Swept`, `Finalized`, `Minted`, `Dropped`, `Quarantined`) will follow
+/// Further variants (`Finalized`, `Minted`, `Dropped`, `Quarantined`) will follow
 /// as the sweep flow is implemented.
 #[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize, Serialize)]
 pub enum DepositSolStatus {
@@ -134,6 +134,12 @@ pub enum DepositSolStatus {
     Queued {
         /// The amount that will be swept from the deposit address.
         sweepable_amount: Lamport,
+    },
+    /// A Solana transaction sweeping the deposit address to the minter's main account
+    /// has been submitted but is not yet finalized.
+    Swept {
+        /// The signature of the sweep transaction.
+        signature: Signature,
     },
 }
 
