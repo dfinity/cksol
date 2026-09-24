@@ -13,7 +13,7 @@ use crate::{
     constants::MAX_CONCURRENT_RPC_CALLS,
     guard::{TimerGuard, withdrawal_guard},
     ledger::{BurnError, burn},
-    rpc::{RecentBlock, get_recent_block, submit_transaction},
+    rpc::{Block, get_recent_block, submit_transaction},
     runtime::CanisterRuntime,
     sol_transfer::create_signed_batch_withdrawal_transaction,
     state::{
@@ -134,7 +134,7 @@ pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: R) {
         return;
     }
 
-    let recent_block = match get_recent_block(&runtime).await {
+    let block = match get_recent_block(&runtime).await {
         Ok(block) => block,
         Err(e) => {
             log!(Priority::Info, "Failed to fetch recent blockhash: {e}");
@@ -145,7 +145,7 @@ pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: R) {
     futures::future::join_all(
         batches
             .into_iter()
-            .map(async |batch| submit_withdrawal_transaction(&runtime, batch, recent_block).await),
+            .map(async |batch| submit_withdrawal_transaction(&runtime, batch, block).await),
     )
     .await;
 
@@ -158,7 +158,7 @@ pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: R) {
 async fn submit_withdrawal_transaction<R: CanisterRuntime>(
     runtime: &R,
     requests: Vec<WithdrawalRequest>,
-    recent_block: RecentBlock,
+    block: Block,
 ) {
     let targets: Vec<_> = requests
         .iter()
@@ -171,7 +171,7 @@ async fn submit_withdrawal_transaction<R: CanisterRuntime>(
     let (signed_tx, signers) = match create_signed_batch_withdrawal_transaction(
         runtime,
         &targets,
-        recent_block.blockhash,
+        block.blockhash,
     )
     .await
     {
@@ -197,11 +197,11 @@ async fn submit_withdrawal_transaction<R: CanisterRuntime>(
                 signature,
                 message,
                 signers,
-                slot: recent_block.slot,
+                slot: block.slot,
                 purpose: TransactionPurpose::WithdrawSol {
                     burn_indices: burn_indices.clone(),
                 },
-                block_height: recent_block.block_height,
+                block_height: block.block_height,
             },
             runtime,
         )

@@ -3,8 +3,7 @@ use crate::{
     constants::MAX_CONCURRENT_RPC_CALLS,
     guard::TimerGuard,
     rpc::{
-        RecentBlock, SubmitTransactionError, get_recent_block, get_signature_statuses,
-        submit_transaction,
+        Block, SubmitTransactionError, get_recent_block, get_signature_statuses, submit_transaction,
     },
     runtime::CanisterRuntime,
     signer::sign_bytes,
@@ -235,7 +234,7 @@ async fn resubmit_expired_transactions<R: CanisterRuntime>(
     runtime: &R,
     to_resubmit: Vec<(Signature, VersionedMessage, Vec<Account>)>,
 ) {
-    let recent_block = match get_recent_block(runtime).await {
+    let block = match get_recent_block(runtime).await {
         Ok(block) => block,
         Err(e) => {
             log!(Priority::Info, "Failed to get recent blockhash: {e}");
@@ -245,9 +244,7 @@ async fn resubmit_expired_transactions<R: CanisterRuntime>(
 
     futures::future::join_all(to_resubmit.into_iter().take(MAX_CONCURRENT_RPC_CALLS).map(
         async |(old_signature, message, signers)| {
-            match try_resubmit_transaction(runtime, old_signature, message, signers, recent_block)
-                .await
-            {
+            match try_resubmit_transaction(runtime, old_signature, message, signers, block).await {
                 Ok(new_sig) => log!(
                     Priority::Info,
                     "Resubmitted transaction {old_signature} as {new_sig}"
@@ -267,10 +264,10 @@ async fn try_resubmit_transaction<R: CanisterRuntime>(
     old_signature: Signature,
     versioned_message: VersionedMessage,
     signers: Vec<Account>,
-    recent_block: RecentBlock,
+    block: Block,
 ) -> Result<Signature, ResubmitError> {
     let VersionedMessage::Legacy(mut message) = versioned_message;
-    message.recent_blockhash = recent_block.blockhash;
+    message.recent_blockhash = block.blockhash;
 
     let mut transaction = Transaction::new_unsigned(message);
     transaction.signatures = sign_bytes(
@@ -288,8 +285,8 @@ async fn try_resubmit_transaction<R: CanisterRuntime>(
             EventType::ResubmittedTransaction {
                 old_signature,
                 new_signature,
-                new_slot: recent_block.slot,
-                new_block_height: recent_block.block_height,
+                new_slot: block.slot,
+                new_block_height: block.block_height,
             },
             runtime,
         )

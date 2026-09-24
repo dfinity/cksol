@@ -474,7 +474,7 @@ mod withdrawal_tests {
 
         let block_index = result.expect("burn should succeed").block_index;
 
-        let block = setup.ledger().get_block(block_index).await;
+        let block = setup.ledger().get_recent_block(block_index).await;
         let memo_blob = get_memo(block);
         let memo = minicbor::decode::<Memo>(&memo_blob).expect("failed to decode memo");
         let expected_memo = BurnMemo::Convert {

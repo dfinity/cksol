@@ -1,7 +1,7 @@
 use crate::{
     rpc::{
-        GetRecentBlockError, GetTransactionError, RecentBlock, SubmitTransactionError,
-        get_recent_block, get_transaction, submit_transaction,
+        Block, GetRecentBlockError, GetTransactionError, SubmitTransactionError, get_recent_block,
+        get_transaction, submit_transaction,
     },
     test_fixtures::{
         confirmed_block, confirmed_block_at_height,
@@ -213,7 +213,7 @@ mod get_recent_block_tests {
 
         assert_eq!(
             result,
-            Ok(RecentBlock {
+            Ok(Block {
                 slot: SLOT,
                 blockhash: blockhash().into(),
                 block_height,

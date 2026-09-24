@@ -2,7 +2,7 @@ use crate::{
     constants::MAX_CONCURRENT_RPC_CALLS,
     guard::TimerGuard,
     numeric::LedgerMintIndex,
-    rpc::{RecentBlock, SubmitTransactionError, get_recent_block, submit_transaction},
+    rpc::{Block, SubmitTransactionError, get_recent_block, submit_transaction},
     runtime::CanisterRuntime,
     sol_transfer::{CreateTransferError, MAX_SIGNATURES, create_signed_consolidation_transaction},
     state::{
@@ -56,7 +56,7 @@ pub async fn consolidate_deposits<R: CanisterRuntime>(runtime: R) {
         return;
     }
 
-    let recent_block = match get_recent_block(&runtime).await {
+    let block = match get_recent_block(&runtime).await {
         Ok(block) => block,
         Err(e) => {
             log!(Priority::Info, "Failed to fetch recent blockhash: {e}");
@@ -65,7 +65,7 @@ pub async fn consolidate_deposits<R: CanisterRuntime>(runtime: R) {
     };
 
     futures::future::join_all(batches.into_iter().map(async |funds| {
-        match submit_consolidation_transaction(&runtime, funds, recent_block).await {
+        match submit_consolidation_transaction(&runtime, funds, block).await {
             Ok(sig) => log!(Priority::Info, "Submitted consolidation transaction {sig}"),
             Err(ConsolidationError::CreateTransactionFailed(e)) => log!(
                 Priority::Error,
@@ -108,14 +108,14 @@ enum ConsolidationError {
 async fn submit_consolidation_transaction<R: CanisterRuntime>(
     runtime: &R,
     funds_to_consolidate: Vec<(Account, (Lamport, Vec<LedgerMintIndex>))>,
-    recent_block: RecentBlock,
+    block: Block,
 ) -> Result<Signature, ConsolidationError> {
     let (sources, mint_indices): (Vec<_>, Vec<_>) = funds_to_consolidate
         .into_iter()
         .map(|(account, (lamport, indices))| ((account, lamport), indices))
         .unzip();
     let (transaction, signers) =
-        create_signed_consolidation_transaction(runtime, sources, recent_block.blockhash).await?;
+        create_signed_consolidation_transaction(runtime, sources, block.blockhash).await?;
 
     let signature = transaction.signatures[0];
     let message = transaction.message.clone();
@@ -127,11 +127,11 @@ async fn submit_consolidation_transaction<R: CanisterRuntime>(
                 signature,
                 message: message.into(),
                 signers,
-                slot: recent_block.slot,
+                slot: block.slot,
                 purpose: TransactionPurpose::ConsolidateDeposits {
                     mint_indices: mint_indices.into_iter().flatten().collect(),
                 },
-                block_height: recent_block.block_height,
+                block_height: block.block_height,
             },
             runtime,
         )

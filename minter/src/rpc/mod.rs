@@ -79,7 +79,7 @@ pub enum SubmitTransactionError {
 
 pub async fn get_recent_block<R: CanisterRuntime>(
     runtime: &R,
-) -> Result<RecentBlock, GetRecentBlockError> {
+) -> Result<Block, GetRecentBlockError> {
     let client = read_state(|state| state.sol_rpc_client(runtime.inter_canister_call_runtime()));
     match client.get_recent_block().try_send().await {
         Ok((slot, block)) => {
@@ -93,7 +93,7 @@ pub async fn get_recent_block<R: CanisterRuntime>(
             let block_height = block
                 .block_height
                 .ok_or(GetRecentBlockError::MissingBlockHeight { slot })?;
-            Ok(RecentBlock {
+            Ok(Block {
                 slot,
                 blockhash,
                 block_height,
@@ -105,11 +105,11 @@ pub async fn get_recent_block<R: CanisterRuntime>(
     }
 }
 
-/// A recent block whose blockhash a new transaction can use.
+/// A block whose blockhash a new transaction can use.
 ///
 /// The blockhash stays valid for 150 blocks after `block_height`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct RecentBlock {
+pub struct Block {
     pub slot: Slot,
     pub blockhash: Hash,
     pub block_height: u64,
