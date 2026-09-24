@@ -240,10 +240,22 @@ impl State {
         &self.deposits_to_consolidate
     }
 
-    pub fn has_deposit_awaiting_consolidation(&self, account: &Account) -> bool {
-        self.deposits_to_consolidate
-            .values()
-            .any(|(depositor, _)| depositor == account)
+    pub fn has_process_deposit_in_progress(&self, account: &Account) -> bool {
+        self.pending_process_deposit_request_guards
+            .contains(account)
+            || self
+                .accepted_deposits
+                .keys()
+                .any(|deposit_id| &deposit_id.account == account)
+            || self
+                .deposits_to_consolidate
+                .values()
+                .any(|(depositor, _)| depositor == account)
+    }
+
+    pub fn has_deposit_sol_in_progress(&self, account: &Account) -> bool {
+        self.pending_deposit_sol_request_guards.contains(account)
+            || self.in_flight_deposit_ids.contains_key(account)
     }
 
     pub fn submitted_transactions(&self) -> &InsertionOrderedMap<Signature, SolanaTransaction> {
