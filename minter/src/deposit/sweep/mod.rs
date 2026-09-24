@@ -73,7 +73,7 @@ pub async fn deposit_sol<R: CanisterRuntime>(
     Ok(deposit_id)
 }
 
-pub fn deposit_status(deposit_id: DepositSolId) -> Option<DepositSolStatus> {
+pub fn deposit_status(deposit_id: DepositSolId) -> DepositSolStatus {
     read_state(|state| state.deposit_sol_status(deposit_id))
 }
 

@@ -1041,9 +1041,9 @@ mod deposit_sol_tests {
         assert_eq!(deposit_id, 0);
         assert_eq!(
             minter.deposit_status(deposit_id).await,
-            Some(DepositSolStatus::Queued {
+            DepositSolStatus::Queued {
                 sweepable_amount: BALANCE_ABOVE_MINIMUM - RENT_EXEMPTION_THRESHOLD
-            })
+            }
         );
         let proxy = setup.proxy_canister_id();
         setup.minter().assert_that_events().await.satisfy(|events| {

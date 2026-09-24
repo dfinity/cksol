@@ -268,9 +268,9 @@ async fn should_queue_deposit_after_transfer_to_deposit_address() {
 
     assert_eq!(
         setup.minter().deposit_status(deposit_id).await,
-        Some(DepositSolStatus::Queued {
+        DepositSolStatus::Queued {
             sweepable_amount: deposit_amount - RENT_EXEMPTION_THRESHOLD
-        })
+        }
     );
 
     setup.drop().await;

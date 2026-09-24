@@ -36,6 +36,13 @@ fn should_compute_sweepable_amount_above_rent_exemption_threshold() {
     }
 }
 
+#[test]
+fn should_report_unknown_deposit_as_not_found() {
+    init_state();
+
+    assert_eq!(deposit_status(0), DepositSolStatus::NotFound);
+}
+
 #[tokio::test]
 async fn should_fail_if_insufficient_cycles_attached() {
     init_state();
@@ -118,16 +125,16 @@ async fn should_queue_deposits_from_minimum_with_sequential_ids() {
         assert_eq!(deposit_id, Ok(expected_id));
         assert_eq!(
             deposit_status(expected_id),
-            Some(DepositSolStatus::Queued {
+            DepositSolStatus::Queued {
                 sweepable_amount: balance - RENT_EXEMPTION_THRESHOLD
-            })
+            }
         );
         assert_eq!(
             runtime.msg_cycles_accepted(),
             [GET_BALANCE_CYCLES - GET_BALANCE_REFUND + DEPOSIT_CONSOLIDATION_FEE]
         );
     }
-    assert_eq!(deposit_status(2), None);
+    assert_eq!(deposit_status(2), DepositSolStatus::NotFound);
     EventsAssert::from_recorded()
         .expect_event_eq(queued_deposit_event(
             0,
