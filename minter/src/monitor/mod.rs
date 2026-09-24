@@ -32,8 +32,14 @@ mod tests;
 
 pub const FINALIZE_TRANSACTIONS_DELAY: Duration = Duration::from_mins(2);
 pub const RESUBMIT_TRANSACTIONS_DELAY: Duration = Duration::from_mins(3);
-/// A blockhash is valid for 150 blocks after the height of its block.
-/// See https://solana.com/docs/core/transactions#recent-blockhash
+/// A leader accepts a transaction while its blockhash is still among the last
+/// `MAX_PROCESSING_AGE` entries of the recent-blockhash queue, which holds one
+/// entry per non-skipped slot. The public documentation describes this window
+/// as 150 slots, but the validator counts blocks: in the `solana-clock` crate,
+/// `MAX_PROCESSING_AGE = MAX_RECENT_BLOCKHASHES / 2` and
+/// `MAX_RECENT_BLOCKHASHES = MAX_HASH_AGE_IN_SECONDS * DEFAULT_TICKS_PER_SECOND
+/// / DEFAULT_TICKS_PER_SLOT`, asserted to be 150 and 300 respectively.
+/// See https://github.com/anza-xyz/agave/blob/master/sdk/clock/src/lib.rs
 const MAX_BLOCKHASH_AGE_IN_BLOCKS: BlockHeight = BlockHeight::new(150);
 /// Maximum number of signatures per `getSignatureStatuses` RPC call.
 /// See https://solana.com/docs/rpc/http/getsignaturestatuses
