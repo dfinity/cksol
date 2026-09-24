@@ -1,7 +1,7 @@
 use crate::{
     constants::{
-        GET_BALANCE_CYCLES, GET_SIGNATURE_STATUSES_CYCLES, GET_TRANSACTION_CYCLES,
-        MAX_HTTP_OUTCALL_RESPONSE_BYTES,
+        GET_BALANCE_CYCLES, GET_RECENT_BLOCK_MAX_TRIES, GET_SIGNATURE_STATUSES_CYCLES,
+        GET_TRANSACTION_CYCLES, MAX_HTTP_OUTCALL_RESPONSE_BYTES,
     },
     runtime::CanisterRuntime,
     state::read_state,
@@ -119,7 +119,12 @@ pub async fn get_recent_block<R: CanisterRuntime>(
     runtime: &R,
 ) -> Result<Block, GetRecentBlockError> {
     let client = read_state(|state| state.sol_rpc_client(runtime.inter_canister_call_runtime()));
-    match client.get_recent_block().try_send().await {
+    match client
+        .get_recent_block()
+        .with_num_tries(GET_RECENT_BLOCK_MAX_TRIES)
+        .try_send()
+        .await
+    {
         Ok((slot, block)) => {
             let blockhash: Hash =
                 block
