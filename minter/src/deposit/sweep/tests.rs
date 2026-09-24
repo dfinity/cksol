@@ -2,6 +2,7 @@ use crate::{
     constants::{GET_BALANCE_CYCLES, RENT_EXEMPTION_THRESHOLD},
     deposit::sweep::{deposit_sol, deposit_status, sweepable_amount},
     state::{event::EventType, read_state},
+    storage::with_event_iter,
     test_fixtures::{
         DEPOSIT_CONSOLIDATION_FEE, EventsAssert, MINIMUM_DEPOSIT_AMOUNT,
         PROCESS_DEPOSIT_REQUIRED_CYCLES, account, deposit::DEPOSITOR_ACCOUNT,
@@ -176,6 +177,14 @@ async fn assert_second_call_returns_same_deposit(first: Account, second: Account
     )
     .await
     .expect("first deposit should be queued");
+    EventsAssert::from_recorded()
+        .expect_event_eq(queued_deposit_event(
+            deposit_id,
+            first,
+            MINIMUM_DEPOSIT_AMOUNT - RENT_EXEMPTION_THRESHOLD,
+        ))
+        .assert_no_more_events();
+    let num_events_after_first_call = with_event_iter(|events| events.count());
 
     let runtime =
         TestCanisterRuntime::new().add_msg_cycles_available(PROCESS_DEPOSIT_REQUIRED_CYCLES);
@@ -187,13 +196,10 @@ async fn assert_second_call_returns_same_deposit(first: Account, second: Account
         read_state(|state| state.in_flight_deposit_id(&second)),
         Some(deposit_id)
     );
-    EventsAssert::from_recorded()
-        .expect_event_eq(queued_deposit_event(
-            deposit_id,
-            first,
-            MINIMUM_DEPOSIT_AMOUNT - RENT_EXEMPTION_THRESHOLD,
-        ))
-        .assert_no_more_events();
+    assert_eq!(
+        with_event_iter(|events| events.count()),
+        num_events_after_first_call
+    );
 }
 
 fn queued_deposit_event(deposit_id: u64, account: Account, sweepable_amount: Lamport) -> EventType {
