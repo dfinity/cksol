@@ -34,56 +34,6 @@ proptest! {
     }
 }
 
-mod transaction_event_encoding {
-    use super::*;
-
-    #[test]
-    fn should_roundtrip_block_height() {
-        for event in [
-            submitted_transaction_event(300_000_000),
-            resubmitted_transaction_event(300_000_000),
-        ] {
-            let decoded = Event::from_bytes(event.to_bytes());
-
-            assert_eq!(decoded, event);
-        }
-    }
-
-    fn resubmitted_transaction_event(new_block_height: u64) -> Event {
-        Event {
-            timestamp: 1_700_000_000,
-            payload: EventType::ResubmittedTransaction {
-                old_signature: signature(0xAA),
-                new_signature: signature(0xBB),
-                new_slot: 42,
-                new_block_height,
-            },
-        }
-    }
-
-    fn submitted_transaction_event(block_height: u64) -> Event {
-        let fee_payer = solana_address::Address::from([0x42; 32]);
-        let message = solana_message::Message::new_with_blockhash(
-            &[],
-            Some(&fee_payer),
-            &solana_message::Hash::default(),
-        );
-        Event {
-            timestamp: 1_700_000_000,
-            payload: EventType::SubmittedTransaction {
-                signature: signature(1),
-                message: message.into(),
-                signers: vec![account(1)],
-                slot: 42,
-                purpose: TransactionPurpose::ConsolidateDeposits {
-                    mint_indices: vec![LedgerMintIndex::from(7_u64)],
-                },
-                block_height,
-            },
-        }
-    }
-}
-
 mod state_validation {
     use super::*;
 

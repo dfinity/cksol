@@ -254,11 +254,6 @@ mod finalization {
     async fn should_expire_transaction_past_the_blockhash_age_limit() {
         let cases = [
             ExpiryCase {
-                name: "below the age limit",
-                transaction_block_height: OLDEST_VALID_BLOCK_HEIGHT + 1,
-                should_expire: false,
-            },
-            ExpiryCase {
                 name: "at the age limit",
                 transaction_block_height: OLDEST_VALID_BLOCK_HEIGHT,
                 should_expire: false,

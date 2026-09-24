@@ -407,28 +407,6 @@ mod process_pending_withdrawals_tests {
         init_schnorr_master_key();
 
         let tx_signature = signature(0x42);
-        let slot = 1;
-        events::accept_withdrawal(account(1), 1, MINIMUM_WITHDRAWAL_AMOUNT);
-
-        let runtime = TestCanisterRuntime::new()
-            .with_increasing_time()
-            .add_stub_response(GetSlotResult::Consistent(Ok(slot)))
-            .add_stub_response(GetBlockResult::Consistent(Ok(confirmed_block())))
-            .add_signature(tx_signature.into())
-            .add_stub_response(SendTransactionResult::Consistent(Ok(tx_signature.into())));
-
-        process_pending_withdrawals(runtime).await;
-
-        assert_matches!(withdrawal_status(1), WithdrawalStatus::TxSent { .. });
-    }
-
-    #[tokio::test]
-    async fn should_record_slot_and_block_height_of_submitted_transaction() {
-        init_state();
-        init_balance();
-        init_schnorr_master_key();
-
-        let tx_signature = signature(0x42);
         let slot = 100;
         let block_height = 90;
         events::accept_withdrawal(account(1), 1, MINIMUM_WITHDRAWAL_AMOUNT);
@@ -444,6 +422,7 @@ mod process_pending_withdrawals_tests {
 
         process_pending_withdrawals(runtime).await;
 
+        assert_matches!(withdrawal_status(1), WithdrawalStatus::TxSent { .. });
         read_state(|s| {
             let submitted = s.submitted_transactions().get(&tx_signature).unwrap();
             assert_eq!(submitted.slot, slot);
