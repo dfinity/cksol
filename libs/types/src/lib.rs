@@ -151,21 +151,16 @@ pub enum DepositSolError {
     /// There is already a concurrent `deposit_sol` invocation for the same account.
     #[error("There is already a concurrent `deposit_sol` invocation for the same account")]
     AlreadyProcessing,
-    /// A deposit for the same account is already in flight and must be minted or dropped
-    /// before the account can be swept again.
-    #[error("A deposit for this account is already in flight: {deposit_id}")]
-    DepositInFlight {
-        /// The identifier of the in-flight deposit.
-        deposit_id: DepositSolId,
-    },
-    /// The sweepable amount, i.e. the balance of the deposit address minus the rent exemption
-    /// threshold, is below the minimum deposit amount.
+    /// The balance of the deposit address is below the minimum deposit amount.
+    ///
+    /// The minimum deposit amount applies to the balance of the deposit address and includes
+    /// the rent exemption threshold, so a deposit of exactly the minimum is accepted.
     #[error(
-        "Insufficient sweepable amount: expected at least {minimum_deposit_amount} lamports, but got {sweepable_amount} lamports"
+        "Insufficient deposit address balance: expected at least {minimum_deposit_amount} lamports, but got {balance} lamports"
     )]
     ValueTooSmall {
-        /// The amount that would be swept from the deposit address.
-        sweepable_amount: Lamport,
+        /// The balance of the deposit address.
+        balance: Lamport,
         /// The minimum deposit amount for the deposit to be queued.
         minimum_deposit_amount: Lamport,
     },
