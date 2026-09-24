@@ -68,11 +68,8 @@ mod finalization {
 
         let events_before = EventsAssert::from_recorded();
 
-        let error = SlotResult::Consistent(Err(RpcError::ValidationError("Error".to_string())));
         let runtime = TestCanisterRuntime::new()
-            .add_stub_response(error.clone())
-            .add_stub_response(error.clone())
-            .add_stub_response(error);
+            .add_recent_block(Err(RpcError::ValidationError("Error".to_string())));
 
         finalize_transactions(runtime).await;
 

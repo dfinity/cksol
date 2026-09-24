@@ -1,11 +1,15 @@
 use super::{
+    confirmed_block,
     signer::{MockSchnorrSigner, SignerExpectation},
     stubs::Stubs,
 };
-use crate::{runtime::CanisterRuntime, signer::SchnorrSigner};
+use crate::{
+    constants::GET_RECENT_BLOCK_MAX_TRIES, runtime::CanisterRuntime, signer::SchnorrSigner,
+};
 use candid::{CandidType, Principal};
 use ic_canister_runtime::{IcError, Runtime, StubRuntime};
 use ic_cdk_management_canister::{SchnorrPublicKeyArgs, SchnorrPublicKeyResult};
+use sol_rpc_types::{MultiRpcResult, RpcResult, Slot};
 use std::{
     future::Future,
     sync::{Arc, Mutex},
@@ -41,6 +45,21 @@ impl TestCanisterRuntime {
     pub fn add_stub_error(mut self, error: IcError) -> Self {
         self.inter_canister_call_runtime = self.inter_canister_call_runtime.add_stub_error(error);
         self
+    }
+
+    pub fn add_recent_block(mut self, result: RpcResult<Slot>) -> Self {
+        match result {
+            Ok(slot) => self
+                .add_stub_response(MultiRpcResult::Consistent(Ok(slot)))
+                .add_stub_response(MultiRpcResult::Consistent(Ok(confirmed_block()))),
+            Err(error) => {
+                for _ in 0..GET_RECENT_BLOCK_MAX_TRIES.get() {
+                    self = self
+                        .add_stub_response(MultiRpcResult::<Slot>::Consistent(Err(error.clone())));
+                }
+                self
+            }
+        }
     }
 
     pub fn add_times<I>(mut self, times: I) -> Self

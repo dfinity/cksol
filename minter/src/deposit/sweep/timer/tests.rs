@@ -9,19 +9,17 @@ use crate::{
     },
     test_fixtures::{
         DEFAULT_BLOCK_HEIGHT, EventsAssert, MINIMUM_DEPOSIT_AMOUNT, MINTER_ADDRESS, account,
-        account_signature, confirmed_block, events::queue_deposit, init_schnorr_master_key,
-        init_state, runtime::TestCanisterRuntime, signer::sign_for,
+        account_signature, events::queue_deposit, init_schnorr_master_key, init_state,
+        runtime::TestCanisterRuntime, signer::sign_for,
     },
 };
 use assert_matches::assert_matches;
 use cksol_types::{DepositSolId, DepositSolStatus};
 use icrc_ledger_types::icrc1::account::Account;
-use sol_rpc_types::{ConfirmedBlock, Lamport, MultiRpcResult, RpcError, Signature, Slot};
+use sol_rpc_types::{Lamport, MultiRpcResult, RpcError, Signature, Slot};
 use solana_address::Address;
 use solana_system_interface::instruction::SystemInstruction;
 
-type SlotResult = MultiRpcResult<Slot>;
-type BlockResult = MultiRpcResult<ConfirmedBlock>;
 type SendTransactionResult = MultiRpcResult<Signature>;
 
 const SLOT: Slot = 300_000_000;
@@ -54,11 +52,8 @@ async fn should_return_early_if_task_already_active() {
 async fn should_not_submit_if_fetching_blockhash_fails() {
     setup();
     queue_deposit(0, account(1), MINIMUM_DEPOSIT_AMOUNT);
-    let error = SlotResult::Consistent(Err(RpcError::ValidationError("Error".to_string())));
     let runtime = TestCanisterRuntime::new()
-        .add_stub_response(error.clone())
-        .add_stub_response(error.clone())
-        .add_stub_response(error);
+        .add_recent_block(Err(RpcError::ValidationError("Error".to_string())));
 
     sweep_queued_deposits(runtime.clone()).await;
 
@@ -137,8 +132,7 @@ async fn should_record_event_even_if_transaction_submission_fails() {
     let fee_payer_signature = account_signature(&account(1));
     let runtime = TestCanisterRuntime::new()
         .with_increasing_time()
-        .add_stub_response(SlotResult::Consistent(Ok(SLOT)))
-        .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())))
+        .add_recent_block(Ok(SLOT))
         .add_stub_response(SendTransactionResult::Inconsistent(vec![]))
         .add_signer(sign_for(&account(1)));
 
@@ -266,8 +260,7 @@ fn runtime_submitting_sweeps(
 ) -> TestCanisterRuntime {
     let mut runtime = TestCanisterRuntime::new()
         .with_increasing_time()
-        .add_stub_response(SlotResult::Consistent(Ok(SLOT)))
-        .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())));
+        .add_recent_block(Ok(SLOT));
     for transaction_signature in transaction_signatures {
         runtime = runtime.add_stub_response(SendTransactionResult::Consistent(Ok(
             (*transaction_signature).into(),
