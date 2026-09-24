@@ -818,19 +818,20 @@ impl Iterator for WithdrawalBatches<'_> {
             } else {
                 0
             };
-            let Some(remaining_balance) = self
-                .pending_requests
-                .peek()
-                .and_then(|pending| pending.request.amount_to_transfer.checked_add(reserved_fee))
+            let Some(pending) = self.pending_requests.peek() else {
+                break;
+            };
+            let Some(remaining_balance) = pending
+                .request
+                .amount_to_transfer
+                .checked_add(reserved_fee)
                 .and_then(|cost| self.available_balance.checked_sub(cost))
             else {
                 break;
             };
-            let Some(affordable) = self.pending_requests.next() else {
-                break;
-            };
             self.available_balance = remaining_balance;
-            batch.push(affordable.request.clone());
+            batch.push(pending.request.clone());
+            self.pending_requests.next();
         }
         if batch.is_empty() { None } else { Some(batch) }
     }
