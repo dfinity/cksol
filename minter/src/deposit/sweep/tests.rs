@@ -16,10 +16,11 @@ use ic_cdk::call::RejectCode;
 use icrc_ledger_types::icrc1::account::Account;
 use sol_rpc_types::MultiRpcResult;
 
-const BALANCE_AT_MINIMUM: Lamport = MINIMUM_DEPOSIT_AMOUNT + RENT_EXEMPTION_THRESHOLD;
-const RPC_COST: u128 = GET_BALANCE_CYCLES / 2;
-const ACCEPTED_ON_REJECTION: [u128; 1] = [RPC_COST];
-const ACCEPTED_ON_QUEUEING: [u128; 1] = [RPC_COST + DEPOSIT_CONSOLIDATION_FEE];
+const GET_BALANCE_REFUND: u128 = GET_BALANCE_CYCLES / 2;
+const EXPLICIT_DEFAULT_SUBACCOUNT: Account = Account {
+    subaccount: Some([0; 32]),
+    ..DEPOSITOR_ACCOUNT
+};
 
 #[test]
 fn should_compute_sweepable_amount_above_rent_exemption_threshold() {
@@ -70,26 +71,32 @@ async fn should_fail_and_charge_balance_read_if_get_balance_is_rejected() {
         result,
         Err(DepositSolError::TemporarilyUnavailable(e)) => assert!(e.contains("Inter-canister call rejected"))
     );
-    assert_eq!(runtime.msg_cycles_accepted(), ACCEPTED_ON_REJECTION);
+    assert_eq!(
+        runtime.msg_cycles_accepted(),
+        [GET_BALANCE_CYCLES - GET_BALANCE_REFUND]
+    );
     EventsAssert::assert_no_events_recorded();
 }
 
 #[tokio::test]
-async fn should_fail_and_charge_balance_read_if_sweepable_amount_below_minimum() {
+async fn should_fail_and_charge_balance_read_if_balance_below_minimum() {
     init_state();
     init_schnorr_master_key();
-    let runtime = runtime().add_get_balance_response(BALANCE_AT_MINIMUM - 1);
+    let runtime = runtime().add_get_balance_response(MINIMUM_DEPOSIT_AMOUNT - 1);
 
     let result = deposit_sol(&runtime, DEPOSITOR_ACCOUNT).await;
 
     assert_eq!(
         result,
         Err(DepositSolError::ValueTooSmall {
-            sweepable_amount: MINIMUM_DEPOSIT_AMOUNT - 1,
+            balance: MINIMUM_DEPOSIT_AMOUNT - 1,
             minimum_deposit_amount: MINIMUM_DEPOSIT_AMOUNT,
         })
     );
-    assert_eq!(runtime.msg_cycles_accepted(), ACCEPTED_ON_REJECTION);
+    assert_eq!(
+        runtime.msg_cycles_accepted(),
+        [GET_BALANCE_CYCLES - GET_BALANCE_REFUND]
+    );
     EventsAssert::assert_no_events_recorded();
 }
 
@@ -100,8 +107,8 @@ async fn should_queue_deposits_from_minimum_with_sequential_ids() {
     let other_account = account(7);
 
     for (expected_id, depositor, balance) in [
-        (0, DEPOSITOR_ACCOUNT, BALANCE_AT_MINIMUM),
-        (1, other_account, BALANCE_AT_MINIMUM + 1),
+        (0, DEPOSITOR_ACCOUNT, MINIMUM_DEPOSIT_AMOUNT),
+        (1, other_account, MINIMUM_DEPOSIT_AMOUNT + 1),
     ] {
         let runtime = runtime().add_get_balance_response(balance);
 
@@ -111,60 +118,42 @@ async fn should_queue_deposits_from_minimum_with_sequential_ids() {
         assert_eq!(
             deposit_status(expected_id),
             Some(DepositSolStatus::Queued {
-                sweepable_amount: sweepable_amount(balance)
+                sweepable_amount: balance - RENT_EXEMPTION_THRESHOLD
             })
         );
-        assert_eq!(runtime.msg_cycles_accepted(), ACCEPTED_ON_QUEUEING);
+        assert_eq!(
+            runtime.msg_cycles_accepted(),
+            [GET_BALANCE_CYCLES - GET_BALANCE_REFUND + DEPOSIT_CONSOLIDATION_FEE]
+        );
     }
     assert_eq!(deposit_status(2), None);
     EventsAssert::from_recorded()
         .expect_event_eq(queued_deposit_event(
             0,
             DEPOSITOR_ACCOUNT,
-            MINIMUM_DEPOSIT_AMOUNT,
+            MINIMUM_DEPOSIT_AMOUNT - RENT_EXEMPTION_THRESHOLD,
         ))
         .expect_event_eq(queued_deposit_event(
             1,
             other_account,
-            MINIMUM_DEPOSIT_AMOUNT + 1,
+            MINIMUM_DEPOSIT_AMOUNT + 1 - RENT_EXEMPTION_THRESHOLD,
         ))
         .assert_no_more_events();
 }
 
 #[tokio::test]
-async fn should_reject_deposit_in_flight_without_reading_balance() {
-    init_state();
-    init_schnorr_master_key();
-    let deposit_id = deposit_sol(
-        &runtime().add_get_balance_response(BALANCE_AT_MINIMUM),
-        DEPOSITOR_ACCOUNT,
-    )
-    .await
-    .expect("first deposit should be queued");
-
-    let runtime =
-        TestCanisterRuntime::new().add_msg_cycles_available(PROCESS_DEPOSIT_REQUIRED_CYCLES);
-    let result = deposit_sol(&runtime, DEPOSITOR_ACCOUNT).await;
-
-    assert_eq!(result, Err(DepositSolError::DepositInFlight { deposit_id }));
-    assert!(runtime.msg_cycles_accepted().is_empty());
-    EventsAssert::from_recorded()
-        .expect_event_eq(queued_deposit_event(
-            deposit_id,
-            DEPOSITOR_ACCOUNT,
-            MINIMUM_DEPOSIT_AMOUNT,
-        ))
-        .assert_no_more_events();
+async fn should_return_existing_deposit_id_without_reading_balance() {
+    assert_second_call_returns_same_deposit(DEPOSITOR_ACCOUNT, DEPOSITOR_ACCOUNT).await;
 }
 
 #[tokio::test]
-async fn should_reject_explicit_default_subaccount_as_deposit_in_flight() {
-    assert_second_spelling_is_in_flight(DEPOSITOR_ACCOUNT, EXPLICIT_DEFAULT_SUBACCOUNT).await;
+async fn should_return_same_deposit_for_explicit_default_subaccount() {
+    assert_second_call_returns_same_deposit(DEPOSITOR_ACCOUNT, EXPLICIT_DEFAULT_SUBACCOUNT).await;
 }
 
 #[tokio::test]
-async fn should_reject_omitted_default_subaccount_as_deposit_in_flight() {
-    assert_second_spelling_is_in_flight(EXPLICIT_DEFAULT_SUBACCOUNT, DEPOSITOR_ACCOUNT).await;
+async fn should_return_same_deposit_for_omitted_default_subaccount() {
+    assert_second_call_returns_same_deposit(EXPLICIT_DEFAULT_SUBACCOUNT, DEPOSITOR_ACCOUNT).await;
 }
 
 #[tokio::test]
@@ -178,28 +167,22 @@ async fn should_reject_anonymous_owner() {
     let _ = deposit_sol(&TestCanisterRuntime::new(), anonymous_account).await;
 }
 
-const EXPLICIT_DEFAULT_SUBACCOUNT: Account = Account {
-    subaccount: Some([0; 32]),
-    ..DEPOSITOR_ACCOUNT
-};
-
-async fn assert_second_spelling_is_in_flight(first: Account, second: Account) {
+async fn assert_second_call_returns_same_deposit(first: Account, second: Account) {
     init_state();
     init_schnorr_master_key();
     let deposit_id = deposit_sol(
-        &runtime().add_get_balance_response(BALANCE_AT_MINIMUM),
+        &runtime().add_get_balance_response(MINIMUM_DEPOSIT_AMOUNT),
         first,
     )
     .await
     .expect("first deposit should be queued");
 
-    let result = deposit_sol(
-        &TestCanisterRuntime::new().add_msg_cycles_available(PROCESS_DEPOSIT_REQUIRED_CYCLES),
-        second,
-    )
-    .await;
+    let runtime =
+        TestCanisterRuntime::new().add_msg_cycles_available(PROCESS_DEPOSIT_REQUIRED_CYCLES);
+    let result = deposit_sol(&runtime, second).await;
 
-    assert_eq!(result, Err(DepositSolError::DepositInFlight { deposit_id }));
+    assert_eq!(result, Ok(deposit_id));
+    assert!(runtime.msg_cycles_accepted().is_empty());
     assert_eq!(
         read_state(|state| state.in_flight_deposit_id(&second)),
         Some(deposit_id)
@@ -208,7 +191,7 @@ async fn assert_second_spelling_is_in_flight(first: Account, second: Account) {
         .expect_event_eq(queued_deposit_event(
             deposit_id,
             first,
-            MINIMUM_DEPOSIT_AMOUNT,
+            MINIMUM_DEPOSIT_AMOUNT - RENT_EXEMPTION_THRESHOLD,
         ))
         .assert_no_more_events();
 }
@@ -227,7 +210,7 @@ fn runtime() -> TestCanisterRuntime {
     TestCanisterRuntime::new()
         .with_increasing_time()
         .add_msg_cycles_available(PROCESS_DEPOSIT_REQUIRED_CYCLES)
-        .add_msg_cycles_refunded(GET_BALANCE_CYCLES - RPC_COST)
+        .add_msg_cycles_refunded(GET_BALANCE_REFUND)
 }
 
 trait GetBalanceRuntimeExt: Sized {

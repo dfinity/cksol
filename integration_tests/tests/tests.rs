@@ -1018,8 +1018,7 @@ mod process_deposit_tests {
 mod deposit_sol_tests {
     use super::*;
 
-    const BALANCE_AT_MINIMUM: Lamport =
-        Setup::DEFAULT_MINIMUM_DEPOSIT_AMOUNT + RENT_EXEMPTION_THRESHOLD;
+    const BALANCE_AT_MINIMUM: Lamport = Setup::DEFAULT_MINIMUM_DEPOSIT_AMOUNT;
     const BALANCE_ABOVE_MINIMUM: Lamport = BALANCE_AT_MINIMUM + 1;
 
     #[tokio::test]
@@ -1115,7 +1114,7 @@ mod deposit_sol_tests {
     }
 
     #[tokio::test]
-    async fn should_fail_and_charge_only_balance_read_if_sweepable_amount_below_minimum() {
+    async fn should_fail_and_charge_only_balance_read_if_balance_below_minimum() {
         let setup = SetupBuilder::new().with_proxy_canister().build().await;
         let get_balance_cycles_cost = get_balance_cycles_cost(&setup).await;
         let caller_cycles_before = setup.proxy().cycle_balance().await;
@@ -1134,7 +1133,7 @@ mod deposit_sol_tests {
         assert_eq!(
             result,
             Err(DepositSolError::ValueTooSmall {
-                sweepable_amount: Setup::DEFAULT_MINIMUM_DEPOSIT_AMOUNT - 1,
+                balance: Setup::DEFAULT_MINIMUM_DEPOSIT_AMOUNT - 1,
                 minimum_deposit_amount: Setup::DEFAULT_MINIMUM_DEPOSIT_AMOUNT,
             })
         );
@@ -1150,7 +1149,7 @@ mod deposit_sol_tests {
     }
 
     #[tokio::test]
-    async fn should_fail_and_refund_all_cycles_if_deposit_in_flight() {
+    async fn should_return_existing_deposit_id_and_refund_all_cycles() {
         let setup = SetupBuilder::new().with_proxy_canister().build().await;
         let deposit_id = setup
             .minter()
@@ -1166,7 +1165,7 @@ mod deposit_sol_tests {
 
         let result = setup.minter().deposit_sol(DEFAULT_CALLER_ACCOUNT).await;
 
-        assert_eq!(result, Err(DepositSolError::DepositInFlight { deposit_id }));
+        assert_eq!(result, Ok(deposit_id));
         assert_eq!(setup.proxy().cycle_balance().await, caller_cycles_before);
 
         setup.drop().await;
@@ -1195,7 +1194,7 @@ mod deposit_sol_tests {
             .deposit_sol(explicit_default_subaccount)
             .await;
 
-        assert_eq!(result, Err(DepositSolError::DepositInFlight { deposit_id }));
+        assert_eq!(result, Ok(deposit_id));
         setup.minter().assert_that_events().await.satisfy(|events| {
             check!(
                 events[1..]

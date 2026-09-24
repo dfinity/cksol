@@ -34,7 +34,7 @@ pub async fn deposit_sol<R: CanisterRuntime>(
     check_caller_available_cycles(runtime, required_cycles)?;
 
     if let Some(deposit_id) = read_state(|state| state.in_flight_deposit_id(&account)) {
-        return Err(DepositSolError::DepositInFlight { deposit_id });
+        return Ok(deposit_id);
     }
 
     let master_key = lazy_get_schnorr_master_key(runtime).await;
@@ -42,7 +42,7 @@ pub async fn deposit_sol<R: CanisterRuntime>(
     let result = get_balance(runtime, deposit_address)
         .await
         .map_err(DepositSolError::from)
-        .and_then(|balance| check_sweepable_amount(balance, minimum_deposit_amount));
+        .and_then(|balance| sweepable_amount_above_minimum(balance, minimum_deposit_amount));
     charge_rpc_call(
         runtime,
         RpcCallCharge {
@@ -77,18 +77,17 @@ pub fn deposit_status(deposit_id: DepositSolId) -> Option<DepositSolStatus> {
     read_state(|state| state.deposit_sol_status(deposit_id))
 }
 
-fn check_sweepable_amount(
+fn sweepable_amount_above_minimum(
     balance: Lamport,
     minimum_deposit_amount: Lamport,
 ) -> Result<Lamport, DepositSolError> {
-    let sweepable_amount = sweepable_amount(balance);
-    if sweepable_amount < minimum_deposit_amount {
+    if balance < minimum_deposit_amount {
         return Err(DepositSolError::ValueTooSmall {
-            sweepable_amount,
+            balance,
             minimum_deposit_amount,
         });
     }
-    Ok(sweepable_amount)
+    Ok(sweepable_amount(balance))
 }
 
 fn sweepable_amount(balance: Lamport) -> Lamport {
