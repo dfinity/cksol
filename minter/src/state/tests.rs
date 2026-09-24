@@ -1,6 +1,7 @@
 use super::{event::*, *};
 use crate::{
-    constants::{FEE_PER_SIGNATURE, RENT_EXEMPTION_THRESHOLD},
+    constants::{FEE_PER_SIGNATURE, GET_TRANSACTION_CYCLES, RENT_EXEMPTION_THRESHOLD},
+    sol_transfer::MAX_SIGNATURES,
     state::{audit::process_event, read_state},
     test_fixtures::{
         AUTOMATED_DEPOSIT_FEE, DEPOSIT_CONSOLIDATION_FEE, MANUAL_DEPOSIT_FEE,
@@ -87,9 +88,10 @@ mod state_validation {
             },
             |e| matches!(e, InvalidStateError::InvalidDepositFees { .. }),
         );
-        // minimum_deposit_amount below sol_transfer_fee + rent exemption threshold
+        // minimum_deposit_amount below the fee of a full sweep + rent exemption threshold
         // (automated_deposit_fee and manual_deposit_fee set to 1 to isolate this condition)
-        let minimum_required = FEE_PER_SIGNATURE + RENT_EXEMPTION_THRESHOLD;
+        let maximum_sweep_fee = MAX_SIGNATURES * FEE_PER_SIGNATURE;
+        let minimum_required = maximum_sweep_fee + RENT_EXEMPTION_THRESHOLD;
         assert_fails_both(
             InitArgs {
                 automated_deposit_fee: 1,
@@ -103,7 +105,36 @@ mod state_validation {
                 minimum_deposit_amount: Some(minimum_required - 1),
                 ..Default::default()
             },
-            |e| matches!(e, InvalidStateError::InvalidMinimumDepositAmount { .. }),
+            |e| {
+                e == &InvalidStateError::InvalidMinimumDepositAmount {
+                    minimum_deposit_amount: minimum_required - 1,
+                    maximum_sweep_fee,
+                    rent_exemption_threshold: RENT_EXEMPTION_THRESHOLD,
+                }
+            },
+        );
+        // minimum_deposit_amount leaves an empty main address below the rent exemption threshold
+        let minimum_funding_main_address = 2 * RENT_EXEMPTION_THRESHOLD + FEE_PER_SIGNATURE;
+        assert_fails_both(
+            InitArgs {
+                automated_deposit_fee: 1,
+                manual_deposit_fee: 1,
+                minimum_deposit_amount: minimum_funding_main_address - 1,
+                ..valid_init_args()
+            },
+            UpgradeArgs {
+                automated_deposit_fee: Some(1),
+                manual_deposit_fee: Some(1),
+                minimum_deposit_amount: Some(minimum_funding_main_address - 1),
+                ..Default::default()
+            },
+            |e| {
+                e == &InvalidStateError::MinimumDepositAmountLeavesMainAddressBelowRent {
+                    minimum_deposit_amount: minimum_funding_main_address - 1,
+                    rent_exemption_threshold: RENT_EXEMPTION_THRESHOLD,
+                    fee_per_signature: FEE_PER_SIGNATURE,
+                }
+            },
         );
         // withdrawal_fee exceeds minimum_withdrawal_amount - rent exemption threshold
         assert_fails_both(
@@ -128,6 +159,42 @@ mod state_validation {
                 ..Default::default()
             },
             |e| matches!(e, InvalidStateError::InvalidMinimumWithdrawalAmount { .. }),
+        );
+        let minimum_required = GET_TRANSACTION_CYCLES + DEPOSIT_CONSOLIDATION_FEE;
+        assert_fails_both(
+            InitArgs {
+                process_deposit_required_cycles: (minimum_required - 1) as u64,
+                ..valid_init_args()
+            },
+            UpgradeArgs {
+                process_deposit_required_cycles: Some((minimum_required - 1) as u64),
+                ..Default::default()
+            },
+            |e| {
+                e == &InvalidStateError::ProcessDepositRequiredCyclesTooLow {
+                    required_cycles: minimum_required - 1,
+                    get_transaction_cycles: GET_TRANSACTION_CYCLES,
+                    consolidation_fee: DEPOSIT_CONSOLIDATION_FEE,
+                }
+            },
+        );
+        let maximum_fee = PROCESS_DEPOSIT_REQUIRED_CYCLES - GET_TRANSACTION_CYCLES;
+        assert_fails_both(
+            InitArgs {
+                deposit_consolidation_fee: (maximum_fee + 1) as u64,
+                ..valid_init_args()
+            },
+            UpgradeArgs {
+                deposit_consolidation_fee: Some((maximum_fee + 1) as u64),
+                ..Default::default()
+            },
+            |e| {
+                e == &InvalidStateError::ProcessDepositRequiredCyclesTooLow {
+                    required_cycles: PROCESS_DEPOSIT_REQUIRED_CYCLES,
+                    get_transaction_cycles: GET_TRANSACTION_CYCLES,
+                    consolidation_fee: maximum_fee + 1,
+                }
+            },
         );
     }
 
@@ -155,8 +222,8 @@ mod state_validation {
                 ..Default::default()
             },
         );
-        // minimum_deposit_amount can equal sol_transfer_fee + rent exemption threshold
-        let minimum_required = FEE_PER_SIGNATURE + RENT_EXEMPTION_THRESHOLD;
+        // minimum_deposit_amount can equal twice the rent exemption threshold + one signature fee
+        let minimum_required = 2 * RENT_EXEMPTION_THRESHOLD + FEE_PER_SIGNATURE;
         assert_succeeds_both(
             InitArgs {
                 automated_deposit_fee: 1,
@@ -180,6 +247,28 @@ mod state_validation {
             },
             UpgradeArgs {
                 minimum_withdrawal_amount: Some(minimum_required),
+                ..Default::default()
+            },
+        );
+        let minimum_required = GET_TRANSACTION_CYCLES + DEPOSIT_CONSOLIDATION_FEE;
+        assert_succeeds_both(
+            InitArgs {
+                process_deposit_required_cycles: minimum_required as u64,
+                ..valid_init_args()
+            },
+            UpgradeArgs {
+                process_deposit_required_cycles: Some(minimum_required as u64),
+                ..Default::default()
+            },
+        );
+        let maximum_fee = PROCESS_DEPOSIT_REQUIRED_CYCLES - GET_TRANSACTION_CYCLES;
+        assert_succeeds_both(
+            InitArgs {
+                deposit_consolidation_fee: maximum_fee as u64,
+                ..valid_init_args()
+            },
+            UpgradeArgs {
+                deposit_consolidation_fee: Some(maximum_fee as u64),
                 ..Default::default()
             },
         );

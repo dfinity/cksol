@@ -162,7 +162,7 @@ mod lifecycle {
     async fn should_get_minter_info_and_upgrade() {
         const NEW_MANUAL_DEPOSIT_FEE: Lamport = 10;
         const NEW_AUTOMATED_DEPOSIT_FEE: Lamport = 20;
-        const NEW_MINIMUM_DEPOSIT_AMOUNT: Lamport = 1_000_000;
+        const NEW_MINIMUM_DEPOSIT_AMOUNT: Lamport = 2_000_000;
         const NEW_WITHDRAWAL_FEE: Lamport = 100_000;
         const NEW_MINIMUM_WITHDRAWAL_AMOUNT: Lamport = 1_000_000;
         const NEW_PROCESS_DEPOSIT_REQUIRED_CYCLES: u128 = 500_000_000_000;

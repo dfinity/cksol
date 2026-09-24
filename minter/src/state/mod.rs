@@ -1,8 +1,8 @@
 use crate::{
-    constants::{FEE_PER_SIGNATURE, RENT_EXEMPTION_THRESHOLD},
+    constants::{FEE_PER_SIGNATURE, GET_TRANSACTION_CYCLES, RENT_EXEMPTION_THRESHOLD},
     ledger::client::LedgerClient,
     numeric::{LedgerBurnIndex, LedgerMintIndex},
-    sol_transfer::{BATCH_WITHDRAWAL_TX_FEE, MAX_WITHDRAWALS_PER_TX},
+    sol_transfer::{BATCH_WITHDRAWAL_TX_FEE, MAX_SIGNATURES, MAX_WITHDRAWALS_PER_TX},
     state::event::{DepositId, TransactionPurpose, VersionedMessage, WithdrawalRequest},
     utils::insertion_ordered_map::InsertionOrderedMap,
 };
@@ -334,18 +334,37 @@ impl State {
                 manual_deposit_fee: self.manual_deposit_fee,
             });
         }
-        if self.minimum_deposit_amount < FEE_PER_SIGNATURE + RENT_EXEMPTION_THRESHOLD {
+        let maximum_sweep_fee = MAX_SIGNATURES * FEE_PER_SIGNATURE;
+        if self.minimum_deposit_amount < maximum_sweep_fee + RENT_EXEMPTION_THRESHOLD {
             return Err(InvalidStateError::InvalidMinimumDepositAmount {
                 minimum_deposit_amount: self.minimum_deposit_amount,
-                fee_per_signature: FEE_PER_SIGNATURE,
+                maximum_sweep_fee,
                 rent_exemption_threshold: RENT_EXEMPTION_THRESHOLD,
             });
+        }
+        if self.minimum_deposit_amount < 2 * RENT_EXEMPTION_THRESHOLD + FEE_PER_SIGNATURE {
+            return Err(
+                InvalidStateError::MinimumDepositAmountLeavesMainAddressBelowRent {
+                    minimum_deposit_amount: self.minimum_deposit_amount,
+                    rent_exemption_threshold: RENT_EXEMPTION_THRESHOLD,
+                    fee_per_signature: FEE_PER_SIGNATURE,
+                },
+            );
         }
         if self.minimum_withdrawal_amount < self.withdrawal_fee + RENT_EXEMPTION_THRESHOLD {
             return Err(InvalidStateError::InvalidMinimumWithdrawalAmount {
                 minimum_withdrawal_amount: self.minimum_withdrawal_amount,
                 withdrawal_fee: self.withdrawal_fee,
                 rent_exemption_threshold: RENT_EXEMPTION_THRESHOLD,
+            });
+        }
+        if self.process_deposit_required_cycles
+            < GET_TRANSACTION_CYCLES + self.deposit_consolidation_fee
+        {
+            return Err(InvalidStateError::ProcessDepositRequiredCyclesTooLow {
+                required_cycles: self.process_deposit_required_cycles,
+                get_transaction_cycles: GET_TRANSACTION_CYCLES,
+                consolidation_fee: self.deposit_consolidation_fee,
             });
         }
         Ok(())
@@ -726,13 +745,23 @@ pub enum InvalidStateError {
     },
     InvalidMinimumDepositAmount {
         minimum_deposit_amount: u64,
-        fee_per_signature: u64,
+        maximum_sweep_fee: u64,
         rent_exemption_threshold: u64,
+    },
+    MinimumDepositAmountLeavesMainAddressBelowRent {
+        minimum_deposit_amount: u64,
+        rent_exemption_threshold: u64,
+        fee_per_signature: u64,
     },
     InvalidMinimumWithdrawalAmount {
         minimum_withdrawal_amount: u64,
         withdrawal_fee: u64,
         rent_exemption_threshold: u64,
+    },
+    ProcessDepositRequiredCyclesTooLow {
+        required_cycles: u128,
+        get_transaction_cycles: u128,
+        consolidation_fee: u128,
     },
 }
 
