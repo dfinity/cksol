@@ -82,7 +82,7 @@ fn deposit_sol(args: DepositSolArgs) -> Result<DepositSolId, DepositSolError> {
 }
 
 #[ic_cdk::query]
-fn deposit_status(deposit_id: DepositSolId) -> Option<DepositSolStatus> {
+fn deposit_status(deposit_id: DepositSolId) -> DepositSolStatus {
     cksol_minter::deposit::sweep::deposit_status(deposit_id)
 }
 

@@ -442,7 +442,7 @@ impl CkSolMinter<'_> {
         self.try_update_call("deposit_sol", (args.into(),), 0).await
     }
 
-    pub async fn deposit_status(&self, deposit_id: DepositSolId) -> Option<DepositSolStatus> {
+    pub async fn deposit_status(&self, deposit_id: DepositSolId) -> DepositSolStatus {
         self.query_call("deposit_status", (deposit_id,)).await
     }
 

@@ -128,6 +128,8 @@ pub type DepositSolId = u64;
 /// as the sweep flow is implemented.
 #[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize, Serialize)]
 pub enum DepositSolStatus {
+    /// No deposit with this identifier was queued.
+    NotFound,
     /// The deposit address is queued for a sweep to the minter's main account.
     Queued {
         /// The amount that will be swept from the deposit address.

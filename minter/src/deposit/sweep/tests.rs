@@ -14,9 +14,9 @@ fn should_queue_deposit_with_nothing_to_sweep() {
 
     assert_eq!(
         status,
-        Some(DepositSolStatus::Queued {
+        DepositSolStatus::Queued {
             sweepable_amount: 0
-        })
+        }
     );
 }
 

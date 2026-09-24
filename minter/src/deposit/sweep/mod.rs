@@ -12,8 +12,8 @@ pub fn deposit_sol(account: Account) -> Result<DepositSolId, DepositSolError> {
     Ok(PLACEHOLDER_DEPOSIT_ID)
 }
 
-pub fn deposit_status(_deposit_id: DepositSolId) -> Option<DepositSolStatus> {
-    Some(DepositSolStatus::Queued {
+pub fn deposit_status(_deposit_id: DepositSolId) -> DepositSolStatus {
+    DepositSolStatus::Queued {
         sweepable_amount: 0,
-    })
+    }
 }

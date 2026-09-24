@@ -145,6 +145,8 @@ type DepositSolId = nat64;
 // Further variants (`Swept`, `Finalized`, `Minted`, `Dropped`, `Quarantined`)
 // will follow as the sweep flow is implemented.
 type DepositSolStatus = variant {
+    // No deposit with this identifier was queued.
+    NotFound;
     // The deposit address is queued for a sweep to the minter's main account.
     Queued : record {
         // The amount that will be swept from the deposit address.
@@ -496,8 +498,8 @@ service : (MinterArg) -> {
     deposit_sol: (DepositSolArgs) -> (DepositSolResult);
 
     // Returns the status of the deposit with the given identifier,
-    // or null if no deposit with this identifier was queued.
-    deposit_status: (DepositSolId) -> (opt DepositSolStatus) query;
+    // or `NotFound` if no deposit with this identifier was queued.
+    deposit_status: (DepositSolId) -> (DepositSolStatus) query;
 
     // Submits a request to convert ckSOL to Solana.
     withdraw : (WithdrawalArgs) -> (WithdrawalResult);

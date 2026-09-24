@@ -1045,9 +1045,9 @@ mod deposit_sol_tests {
 
             assert_eq!(
                 status,
-                Some(DepositSolStatus::Queued {
+                DepositSolStatus::Queued {
                     sweepable_amount: 0
-                }),
+                },
                 "deposit by {caller} for {owner:?}"
             );
         }
