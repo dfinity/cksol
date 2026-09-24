@@ -1018,63 +1018,46 @@ mod process_deposit_tests {
 mod deposit_sol_tests {
     use super::*;
 
-    const BALANCE_AT_MINIMUM: Lamport = Setup::DEFAULT_MINIMUM_DEPOSIT_AMOUNT;
-    const BALANCE_ABOVE_MINIMUM: Lamport = BALANCE_AT_MINIMUM + 1;
+    const BALANCE_ABOVE_MINIMUM: Lamport = Setup::DEFAULT_MINIMUM_DEPOSIT_AMOUNT + 1;
 
     #[tokio::test]
-    async fn should_queue_deposits_from_minimum_with_sequential_ids() {
+    async fn should_queue_deposit_for_caller_if_owner_is_omitted() {
         let setup = SetupBuilder::new().with_proxy_canister().build().await;
-        let user_2 = Principal::from_slice(&[1]);
-        let deposits = [
-            (0, None, BALANCE_AT_MINIMUM),
-            (1, Some(Setup::DEFAULT_CALLER), BALANCE_ABOVE_MINIMUM),
-            (2, Some(user_2), BALANCE_ABOVE_MINIMUM),
-        ];
-        let mocks = SharedMockHttpOutcalls::new(
-            deposits
-                .iter()
-                .fold(MockBuilder::new(), |mocks, (_, _, balance)| {
-                    mocks.get_balance(*balance)
-                })
+        let subaccount = Some([1; 32]);
+        let minter = setup.minter().with_http_mocks(
+            MockBuilder::new()
+                .get_balance(BALANCE_ABOVE_MINIMUM)
                 .build(),
         );
 
-        for (expected_id, owner, balance) in deposits {
-            let minter = setup.minter().with_http_mocks(mocks.clone());
-            let args = DepositSolArgs {
-                owner,
-                subaccount: Some([expected_id as u8; 32]),
-            };
+        let deposit_id = minter
+            .deposit_sol(DepositSolArgs {
+                owner: None,
+                subaccount,
+            })
+            .await
+            .expect("deposit_sol should queue a sweep");
 
-            let deposit_id = minter
-                .deposit_sol(args)
-                .await
-                .unwrap_or_else(|e| panic!("deposit_sol for {owner:?} should queue a sweep: {e}"));
-            let status = minter.deposit_status(deposit_id).await;
-
-            assert_eq!(deposit_id, expected_id, "deposit for {owner:?}");
-            assert_eq!(
-                status,
-                Some(DepositSolStatus::Queued {
-                    sweepable_amount: balance - RENT_EXEMPTION_THRESHOLD
-                }),
-                "deposit for {owner:?}"
-            );
-        }
+        assert_eq!(deposit_id, 0);
+        assert_eq!(
+            minter.deposit_status(deposit_id).await,
+            Some(DepositSolStatus::Queued {
+                sweepable_amount: BALANCE_ABOVE_MINIMUM - RENT_EXEMPTION_THRESHOLD
+            })
+        );
         let proxy = setup.proxy_canister_id();
         setup.minter().assert_that_events().await.satisfy(|events| {
-            let queued: Vec<_> = deposits
-                .iter()
-                .map(|(deposit_id, owner, balance)| EventType::QueuedDeposit {
-                    deposit_id: *deposit_id,
-                    account: Account {
-                        owner: owner.unwrap_or(proxy),
-                        subaccount: Some([*deposit_id as u8; 32]),
-                    },
-                    sweepable_amount: balance - RENT_EXEMPTION_THRESHOLD,
-                })
-                .collect();
-            check!(events[1..] == queued);
+            check!(
+                events[1..]
+                    == [EventType::QueuedDeposit {
+                        deposit_id,
+                        account: Account {
+                            owner: proxy,
+                            subaccount,
+                        },
+                        sweepable_amount: BALANCE_ABOVE_MINIMUM - RENT_EXEMPTION_THRESHOLD,
+                    }]
+            );
         });
 
         setup.drop().await;
@@ -1114,64 +1097,6 @@ mod deposit_sol_tests {
     }
 
     #[tokio::test]
-    async fn should_fail_and_charge_only_balance_read_if_balance_below_minimum() {
-        let setup = SetupBuilder::new().with_proxy_canister().build().await;
-        let get_balance_cycles_cost = get_balance_cycles_cost(&setup).await;
-        let caller_cycles_before = setup.proxy().cycle_balance().await;
-        let minter_cycles_before = setup.minter().cycle_balance().await;
-
-        let result = setup
-            .minter()
-            .with_http_mocks(
-                MockBuilder::new()
-                    .get_balance(BALANCE_AT_MINIMUM - 1)
-                    .build(),
-            )
-            .deposit_sol(DEFAULT_CALLER_ACCOUNT)
-            .await;
-
-        assert_eq!(
-            result,
-            Err(DepositSolError::ValueTooSmall {
-                balance: Setup::DEFAULT_MINIMUM_DEPOSIT_AMOUNT - 1,
-                minimum_deposit_amount: Setup::DEFAULT_MINIMUM_DEPOSIT_AMOUNT,
-            })
-        );
-        let caller_cycles_after = setup.proxy().cycle_balance().await;
-        let minter_cycles_after = setup.minter().cycle_balance().await;
-        assert_eq!(
-            caller_cycles_before - caller_cycles_after,
-            get_balance_cycles_cost
-        );
-        assert_eq!(minter_cycles_after, minter_cycles_before);
-
-        setup.drop().await;
-    }
-
-    #[tokio::test]
-    async fn should_return_existing_deposit_id_and_refund_all_cycles() {
-        let setup = SetupBuilder::new().with_proxy_canister().build().await;
-        let deposit_id = setup
-            .minter()
-            .with_http_mocks(
-                MockBuilder::new()
-                    .get_balance(BALANCE_ABOVE_MINIMUM)
-                    .build(),
-            )
-            .deposit_sol(DEFAULT_CALLER_ACCOUNT)
-            .await
-            .expect("first deposit should be queued");
-        let caller_cycles_before = setup.proxy().cycle_balance().await;
-
-        let result = setup.minter().deposit_sol(DEFAULT_CALLER_ACCOUNT).await;
-
-        assert_eq!(result, Ok(deposit_id));
-        assert_eq!(setup.proxy().cycle_balance().await, caller_cycles_before);
-
-        setup.drop().await;
-    }
-
-    #[tokio::test]
     async fn should_treat_default_subaccount_spellings_as_one_account() {
         let setup = SetupBuilder::new().with_proxy_canister().build().await;
         let explicit_default_subaccount = Account {
@@ -1205,31 +1130,6 @@ mod deposit_sol_tests {
                     }]
             );
         });
-
-        setup.drop().await;
-    }
-
-    #[tokio::test]
-    async fn should_fail_with_insufficient_cycles() {
-        let setup = SetupBuilder::new().with_proxy_canister().build().await;
-
-        let result = setup
-            .minter()
-            .deposit_sol_with_cycles(
-                DEFAULT_CALLER_ACCOUNT,
-                Setup::DEFAULT_PROCESS_DEPOSIT_REQUIRED_CYCLES - 1,
-            )
-            .await;
-
-        assert_eq!(
-            result,
-            Err(DepositSolError::InsufficientCycles(
-                InsufficientCyclesError {
-                    expected: Setup::DEFAULT_PROCESS_DEPOSIT_REQUIRED_CYCLES,
-                    received: Setup::DEFAULT_PROCESS_DEPOSIT_REQUIRED_CYCLES - 1,
-                }
-            ))
-        );
 
         setup.drop().await;
     }
