@@ -104,27 +104,27 @@ pub fn signature(i: usize) -> solana_signature::Signature {
     solana_signature::Signature::from(bytes)
 }
 
-/// Returns a [`ConfirmedBlock`] with a deterministic blockhash and no block height,
-/// as reported by RPC providers that omit it, for use in RPC mock stubs.
+/// The block height used by fixtures whose test does not care about blockhash expiry.
+pub const DEFAULT_BLOCK_HEIGHT: u64 = 400_000_000;
+
+/// Returns a [`ConfirmedBlock`] with a deterministic blockhash at
+/// [`DEFAULT_BLOCK_HEIGHT`], for use in RPC mock stubs.
 pub fn confirmed_block() -> sol_rpc_types::ConfirmedBlock {
+    confirmed_block_at_height(DEFAULT_BLOCK_HEIGHT)
+}
+
+/// Returns a [`ConfirmedBlock`] with a deterministic blockhash at the given block height.
+pub fn confirmed_block_at_height(block_height: u64) -> sol_rpc_types::ConfirmedBlock {
     sol_rpc_types::ConfirmedBlock {
         previous_blockhash: Default::default(),
         blockhash: solana_hash::Hash::from([0x42; 32]).into(),
         parent_slot: 0,
         block_time: None,
-        block_height: None,
+        block_height: Some(block_height),
         signatures: None,
         rewards: None,
         num_reward_partitions: None,
         transactions: None,
-    }
-}
-
-/// Returns [`confirmed_block`] reporting the given block height.
-pub fn confirmed_block_at_height(block_height: u64) -> sol_rpc_types::ConfirmedBlock {
-    sol_rpc_types::ConfirmedBlock {
-        block_height: Some(block_height),
-        ..confirmed_block()
     }
 }
 
@@ -150,7 +150,9 @@ pub fn account(i: usize) -> Account {
 ///
 /// All helpers operate on the global thread-local state via [`mutate_state`].
 pub mod events {
-    use super::{MANUAL_DEPOSIT_FEE, WITHDRAWAL_FEE, runtime::TestCanisterRuntime};
+    use super::{
+        DEFAULT_BLOCK_HEIGHT, MANUAL_DEPOSIT_FEE, WITHDRAWAL_FEE, runtime::TestCanisterRuntime,
+    };
     use crate::{
         numeric::{LedgerBurnIndex, LedgerMintIndex},
         state::{
@@ -217,7 +219,13 @@ pub mod events {
         slot: Slot,
         mint_indices: Vec<u64>,
     ) {
-        submit_consolidation_with_block_height(signature, fee_payer, slot, None, mint_indices);
+        submit_consolidation_at_height(
+            signature,
+            fee_payer,
+            slot,
+            DEFAULT_BLOCK_HEIGHT,
+            mint_indices,
+        );
     }
 
     pub fn submit_consolidation_at_height(
@@ -225,22 +233,6 @@ pub mod events {
         fee_payer: Account,
         slot: Slot,
         block_height: u64,
-        mint_indices: Vec<u64>,
-    ) {
-        submit_consolidation_with_block_height(
-            signature,
-            fee_payer,
-            slot,
-            Some(block_height),
-            mint_indices,
-        );
-    }
-
-    fn submit_consolidation_with_block_height(
-        signature: Signature,
-        fee_payer: Account,
-        slot: Slot,
-        block_height: Option<u64>,
         mint_indices: Vec<u64>,
     ) {
         mutate_state(|state| {
@@ -309,7 +301,7 @@ pub mod events {
                             .map(LedgerBurnIndex::from)
                             .collect(),
                     },
-                    block_height: None,
+                    block_height: DEFAULT_BLOCK_HEIGHT,
                 },
                 &runtime(),
             )
@@ -358,7 +350,7 @@ pub mod events {
                     old_signature,
                     new_signature,
                     new_slot,
-                    new_block_height: None,
+                    new_block_height: DEFAULT_BLOCK_HEIGHT,
                 },
                 &runtime(),
             )
@@ -597,7 +589,7 @@ pub mod arb {
                     prop::collection::vec(arb_ledger_burn_index(), 1..10)
                         .prop_map(|burn_indices| TransactionPurpose::WithdrawSol { burn_indices }),
                 ],
-                prop::option::of(any::<u64>()),
+                any::<u64>(),
             )
                 .prop_map(
                     |(signature, message, signers, slot, purpose, block_height)| {
@@ -615,7 +607,7 @@ pub mod arb {
                 arb_signature(),
                 arb_signature(),
                 any::<Slot>(),
-                prop::option::of(any::<u64>()),
+                any::<u64>(),
             )
                 .prop_map(
                     |(old_signature, new_signature, new_slot, new_block_height)| {

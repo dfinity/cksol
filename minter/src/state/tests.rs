@@ -36,70 +36,12 @@ proptest! {
 
 mod transaction_event_encoding {
     use super::*;
-    use crate::state::audit::replay_events;
-
-    /// A `SubmittedTransaction` event as encoded before the `block_height` field existed.
-    const SUBMITTED_ENCODED_WITHOUT_BLOCK_HEIGHT: &str = "821a6553f10082068558400100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000082008158450100000142424242424242424242424242424242424242424242424242424242424242420000000000000000000000000000000000000000000000000000000000000000008181581d0100000000000000000000000000000000000000000000000000000000182a8200818107";
-
-    /// A `ResubmittedTransaction` event as encoded before the `new_block_height` field existed.
-    const RESUBMITTED_ENCODED_WITHOUT_BLOCK_HEIGHT: &str = "821a6553f1008207835840aa0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000005840bb000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000182a";
-
-    #[test]
-    fn should_decode_submitted_transaction_recorded_without_block_height() {
-        let bytes = hex::decode(SUBMITTED_ENCODED_WITHOUT_BLOCK_HEIGHT).unwrap();
-
-        let decoded = Event::from_bytes(Cow::Owned(bytes));
-
-        assert_eq!(decoded, submitted_transaction_event(None));
-    }
-
-    #[test]
-    fn should_decode_resubmitted_transaction_recorded_without_block_height() {
-        let bytes = hex::decode(RESUBMITTED_ENCODED_WITHOUT_BLOCK_HEIGHT).unwrap();
-
-        let decoded = Event::from_bytes(Cow::Owned(bytes));
-
-        assert_eq!(decoded, resubmitted_transaction_event(None));
-    }
-
-    #[test]
-    fn should_replay_submitted_transaction_recorded_without_block_height() {
-        let init = Event {
-            timestamp: 0,
-            payload: EventType::Init(valid_init_args()),
-        };
-        let accepted = Event {
-            timestamp: 0,
-            payload: EventType::AcceptedManualDeposit {
-                deposit_id: deposit_id(1),
-                deposit_amount: 1_000_000,
-                amount_to_mint: 1_000_000 - MANUAL_DEPOSIT_FEE,
-            },
-        };
-        let minted = Event {
-            timestamp: 0,
-            payload: EventType::Minted {
-                deposit_id: deposit_id(1),
-                mint_block_index: LedgerMintIndex::from(7_u64),
-            },
-        };
-        let bytes = hex::decode(SUBMITTED_ENCODED_WITHOUT_BLOCK_HEIGHT).unwrap();
-        let submitted = Event::from_bytes(Cow::Owned(bytes));
-
-        let replayed = replay_events([init, accepted, minted, submitted]);
-
-        let transaction = replayed
-            .submitted_transactions()
-            .get(&signature(1))
-            .unwrap();
-        assert_eq!(transaction.block_height, None);
-    }
 
     #[test]
     fn should_roundtrip_block_height() {
         for event in [
-            submitted_transaction_event(Some(300_000_000)),
-            resubmitted_transaction_event(Some(300_000_000)),
+            submitted_transaction_event(300_000_000),
+            resubmitted_transaction_event(300_000_000),
         ] {
             let decoded = Event::from_bytes(event.to_bytes());
 
@@ -107,7 +49,7 @@ mod transaction_event_encoding {
         }
     }
 
-    fn resubmitted_transaction_event(new_block_height: Option<u64>) -> Event {
+    fn resubmitted_transaction_event(new_block_height: u64) -> Event {
         Event {
             timestamp: 1_700_000_000,
             payload: EventType::ResubmittedTransaction {
@@ -119,7 +61,7 @@ mod transaction_event_encoding {
         }
     }
 
-    fn submitted_transaction_event(block_height: Option<u64>) -> Event {
+    fn submitted_transaction_event(block_height: u64) -> Event {
         let fee_payer = solana_address::Address::from([0x42; 32]);
         let message = solana_message::Message::new_with_blockhash(
             &[],
@@ -542,7 +484,7 @@ fn should_track_balance_through_deposits_withdrawals_and_failures() {
                     signers,
                     slot: 0,
                     purpose,
-                    block_height: None,
+                    block_height: 0,
                 },
                 &TestCanisterRuntime::new().add_times([0, 0]),
             )

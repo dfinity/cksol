@@ -20,7 +20,6 @@ use cksol_types_internal::log::Priority;
 use ic_cdk_management_canister::SignCallError;
 use icrc_ledger_types::icrc1::account::Account;
 use itertools::Itertools;
-use sol_rpc_types::Slot;
 use solana_signature::Signature;
 use solana_transaction::Transaction;
 use solana_transaction_status_client_types::TransactionConfirmationStatus;
@@ -36,7 +35,6 @@ pub const RESUBMIT_TRANSACTIONS_DELAY: Duration = Duration::from_mins(3);
 /// A blockhash is valid for 150 blocks after the height of its block.
 /// See https://solana.com/docs/core/transactions#recent-blockhash
 const MAX_BLOCKHASH_AGE_IN_BLOCKS: u64 = 150;
-const MAX_BLOCKHASH_AGE_IN_SLOTS: Slot = 150;
 /// Maximum number of signatures per `getSignatureStatuses` RPC call.
 /// See https://solana.com/docs/rpc/http/getsignaturestatuses
 const MAX_SIGNATURES_PER_STATUS_CHECK: usize = 256;
@@ -49,19 +47,11 @@ pub async fn finalize_transactions<R: CanisterRuntime>(runtime: R) {
         Err(_) => return,
     };
 
-    let all_transactions: BTreeMap<Signature, BlockhashOrigin> = read_state(|state| {
+    let all_transactions: BTreeMap<Signature, u64> = read_state(|state| {
         state
             .submitted_transactions()
             .iter()
-            .map(|(sig, tx)| {
-                (
-                    *sig,
-                    BlockhashOrigin {
-                        slot: tx.slot,
-                        block_height: tx.block_height,
-                    },
-                )
-            })
+            .map(|(sig, tx)| (*sig, tx.block_height))
             .collect()
     });
     if all_transactions.is_empty() {
@@ -117,35 +107,22 @@ pub async fn finalize_transactions<R: CanisterRuntime>(runtime: R) {
         });
     }
 
-    let mut undetermined_count = 0_usize;
     for signature in &statuses.not_found {
-        match blockhash_validity(all_transactions[signature], current_block) {
-            BlockhashValidity::Expired => {
-                log!(
-                    Priority::Info,
-                    "Transaction {signature} expired, marking for resubmission"
-                );
-                mutate_state(|state| {
-                    process_event(
-                        state,
-                        EventType::ExpiredTransaction {
-                            signature: *signature,
-                        },
-                        &runtime,
-                    )
-                });
-            }
-            BlockhashValidity::Valid => {}
-            BlockhashValidity::Undetermined => undetermined_count += 1,
+        if is_blockhash_expired(all_transactions[signature], current_block.block_height) {
+            log!(
+                Priority::Info,
+                "Transaction {signature} expired, marking for resubmission"
+            );
+            mutate_state(|state| {
+                process_event(
+                    state,
+                    EventType::ExpiredTransaction {
+                        signature: *signature,
+                    },
+                    &runtime,
+                )
+            });
         }
-    }
-    if undetermined_count > 0 {
-        log!(
-            Priority::Info,
-            "Block at slot {} has no block height, expiry of {undetermined_count} \
-             transaction(s) will be judged in the next run",
-            current_block.slot
-        );
     }
 
     if !more_to_process {
@@ -154,35 +131,8 @@ pub async fn finalize_transactions<R: CanisterRuntime>(runtime: R) {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct BlockhashOrigin {
-    slot: Slot,
-    block_height: Option<u64>,
-}
-
-#[derive(Debug, PartialEq, Eq)]
-enum BlockhashValidity {
-    Valid,
-    Expired,
-    Undetermined,
-}
-
-fn blockhash_validity(
-    transaction: BlockhashOrigin,
-    current_block: RecentBlock,
-) -> BlockhashValidity {
-    let expired = match (transaction.block_height, current_block.block_height) {
-        (Some(transaction_height), Some(current_height)) => {
-            transaction_height + MAX_BLOCKHASH_AGE_IN_BLOCKS < current_height
-        }
-        (Some(_), None) => return BlockhashValidity::Undetermined,
-        (None, _) => transaction.slot + MAX_BLOCKHASH_AGE_IN_SLOTS < current_block.slot,
-    };
-    if expired {
-        BlockhashValidity::Expired
-    } else {
-        BlockhashValidity::Valid
-    }
+fn is_blockhash_expired(transaction_block_height: u64, current_block_height: u64) -> bool {
+    transaction_block_height + MAX_BLOCKHASH_AGE_IN_BLOCKS < current_block_height
 }
 
 /// Resubmit transactions that have been marked for resubmission by

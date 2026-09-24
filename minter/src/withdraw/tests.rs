@@ -447,7 +447,7 @@ mod process_pending_withdrawals_tests {
         read_state(|s| {
             let submitted = s.submitted_transactions().get(&tx_signature).unwrap();
             assert_eq!(submitted.slot, slot);
-            assert_eq!(submitted.block_height, Some(block_height));
+            assert_eq!(submitted.block_height, block_height);
             assert_eq!(
                 submitted.purpose,
                 TransactionPurpose::WithdrawSol {

@@ -105,7 +105,7 @@ async fn should_submit_single_consolidation_request() {
                 ..
             } if signature == fee_payer_signature
               && event_slot == slot
-              && event_block_height == Some(block_height)
+              && event_block_height == block_height
               && mint_indices == vec![LedgerMintIndex::from(0_u64)]
             )
         })

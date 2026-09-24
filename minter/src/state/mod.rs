@@ -539,7 +539,7 @@ impl State {
         signers: &[Account],
         slot: Slot,
         purpose: &TransactionPurpose,
-        block_height: Option<u64>,
+        block_height: u64,
     ) {
         assert!(
             !self.succeeded_transactions.contains(signature),
@@ -620,7 +620,7 @@ impl State {
         old_signature: &Signature,
         new_signature: &Signature,
         new_slot: Slot,
-        new_block_height: Option<u64>,
+        new_block_height: u64,
     ) {
         let old_transaction = self
             .transactions_to_resubmit
@@ -894,8 +894,8 @@ pub struct SolanaTransaction {
     pub message: VersionedMessage,
     pub signers: Vec<Account>,
     pub slot: Slot,
-    /// The block height of the blockhash used, when the RPC provider reported it.
-    pub block_height: Option<u64>,
+    /// The block height of the block whose blockhash the transaction uses.
+    pub block_height: u64,
     pub purpose: TransactionPurpose,
     /// Total transfer amount in lamports (excluding fees).
     pub amount: Lamport,

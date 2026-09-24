@@ -4,7 +4,7 @@ use crate::{
         get_recent_block, get_transaction, submit_transaction,
     },
     test_fixtures::{
-        confirmed_block,
+        confirmed_block, confirmed_block_at_height,
         deposit::{legacy_deposit_transaction, legacy_deposit_transaction_signature},
         init_state,
         runtime::TestCanisterRuntime,
@@ -197,32 +197,48 @@ mod get_recent_block_tests {
     type GetSlotResult = sol_rpc_types::MultiRpcResult<sol_rpc_types::Slot>;
     type GetBlockResult = sol_rpc_types::MultiRpcResult<Option<sol_rpc_types::ConfirmedBlock>>;
 
+    const SLOT: sol_rpc_types::Slot = 978458723;
+
     #[tokio::test]
     async fn should_return_slot_blockhash_and_block_height_on_success() {
         init_state();
-        let slot = 978458723;
+        let block_height = SLOT - 10;
+        let runtime = TestCanisterRuntime::new()
+            .add_stub_response(GetSlotResult::Consistent(Ok(SLOT)))
+            .add_stub_response(GetBlockResult::Consistent(Ok(Some(
+                confirmed_block_at_height(block_height),
+            ))));
 
-        for block_height in [None, Some(slot - 10)] {
-            let runtime = TestCanisterRuntime::new()
-                .add_stub_response(GetSlotResult::Consistent(Ok(slot)))
-                .add_stub_response(GetBlockResult::Consistent(Ok(Some(
-                    sol_rpc_types::ConfirmedBlock {
-                        block_height,
-                        ..confirmed_block()
-                    },
-                ))));
+        let result = get_recent_block(&runtime).await;
 
-            let result = get_recent_block(&runtime).await;
+        assert_eq!(
+            result,
+            Ok(RecentBlock {
+                slot: SLOT,
+                blockhash: blockhash().into(),
+                block_height,
+            })
+        );
+    }
 
-            assert_eq!(
-                result,
-                Ok(RecentBlock {
-                    slot,
-                    blockhash: blockhash().into(),
-                    block_height,
-                })
-            );
-        }
+    #[tokio::test]
+    async fn should_fail_when_block_has_no_block_height() {
+        init_state();
+        let runtime = TestCanisterRuntime::new()
+            .add_stub_response(GetSlotResult::Consistent(Ok(SLOT)))
+            .add_stub_response(GetBlockResult::Consistent(Ok(Some(
+                sol_rpc_types::ConfirmedBlock {
+                    block_height: None,
+                    ..confirmed_block()
+                },
+            ))));
+
+        let result = get_recent_block(&runtime).await;
+
+        assert_eq!(
+            result,
+            Err(GetRecentBlockError::MissingBlockHeight { slot: SLOT })
+        );
     }
 
     #[tokio::test]

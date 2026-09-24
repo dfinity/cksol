@@ -90,10 +90,13 @@ pub async fn get_recent_block<R: CanisterRuntime>(
                     .map_err(|e: solana_hash::ParseHashError| {
                         GetRecentBlockError::Failed(vec![e.to_string()])
                     })?;
+            let block_height = block
+                .block_height
+                .ok_or(GetRecentBlockError::MissingBlockHeight { slot })?;
             Ok(RecentBlock {
                 slot,
                 blockhash,
-                block_height: block.block_height,
+                block_height,
             })
         }
         Err(errors) => Err(GetRecentBlockError::Failed(
@@ -104,19 +107,20 @@ pub async fn get_recent_block<R: CanisterRuntime>(
 
 /// A recent block whose blockhash a new transaction can use.
 ///
-/// The blockhash stays valid for 150 blocks after `block_height`, which
-/// some RPC providers omit from their `getBlock` response.
+/// The blockhash stays valid for 150 blocks after `block_height`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RecentBlock {
     pub slot: Slot,
     pub blockhash: Hash,
-    pub block_height: Option<u64>,
+    pub block_height: u64,
 }
 
 #[derive(Debug, PartialEq, Error)]
 pub enum GetRecentBlockError {
     #[error("Failed to get recent block: {0:?}")]
     Failed(Vec<String>),
+    #[error("Block at slot {slot} has no block height")]
+    MissingBlockHeight { slot: Slot },
 }
 
 pub async fn get_signature_statuses<R: CanisterRuntime>(

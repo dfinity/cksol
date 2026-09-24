@@ -663,7 +663,7 @@ mod withdrawal_tests {
                     block_height,
                     ..
                 } if burn_indices == &[block_index]
-                  && block_height == &Some(mock_block_height(INITIAL_SLOT))
+                  && block_height == &mock_block_height(INITIAL_SLOT)
             )));
         });
 

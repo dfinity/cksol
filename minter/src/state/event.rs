@@ -100,11 +100,10 @@ pub enum EventType {
         /// The purpose of this transaction.
         #[n(4)]
         purpose: TransactionPurpose,
-        /// The block height of the block whose blockhash the transaction uses,
-        /// when the RPC provider reported it. The blockhash is valid for 150
-        /// blocks after that height.
+        /// The block height of the block whose blockhash the transaction uses.
+        /// The blockhash is valid for 150 blocks after that height.
         #[n(5)]
-        block_height: Option<u64>,
+        block_height: u64,
     },
     /// A previously submitted transaction was resubmitted with a new signature.
     /// The transaction message and signers remain the same.
@@ -119,10 +118,9 @@ pub enum EventType {
         /// The slot of the new blockhash used in the resubmitted transaction
         #[n(2)]
         new_slot: Slot,
-        /// The block height of the new blockhash used in the resubmitted
-        /// transaction, when the RPC provider reported it.
+        /// The block height of the new blockhash used in the resubmitted transaction.
         #[n(3)]
-        new_block_height: Option<u64>,
+        new_block_height: u64,
     },
     /// A previously submitted Solana transaction has been finalized successfully.
     #[n(8)]

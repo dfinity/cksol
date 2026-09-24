@@ -1,14 +1,14 @@
 use super::{
-    MAX_BLOCKHASH_AGE_IN_BLOCKS, MAX_BLOCKHASH_AGE_IN_SLOTS, MAX_SIGNATURES_PER_STATUS_CHECK,
-    finalize_transactions, resubmit_transactions,
+    MAX_BLOCKHASH_AGE_IN_BLOCKS, MAX_SIGNATURES_PER_STATUS_CHECK, finalize_transactions,
+    resubmit_transactions,
 };
 use crate::{
     constants::MAX_CONCURRENT_RPC_CALLS,
     state::{TaskType, event::EventType, mutate_state, read_state, reset_state},
     storage::reset_events,
     test_fixtures::{
-        EventsAssert, MINTER_ACCOUNT, confirmed_block, confirmed_block_at_height, deposit_id,
-        events, init_schnorr_master_key, init_state, runtime::TestCanisterRuntime, signature,
+        EventsAssert, MINTER_ACCOUNT, confirmed_block_at_height, deposit_id, events,
+        init_schnorr_master_key, init_state, runtime::TestCanisterRuntime, signature,
     },
 };
 use sol_rpc_types::{
@@ -22,9 +22,10 @@ type SendTransactionResult = MultiRpcResult<Signature>;
 type SignatureStatusesResult = MultiRpcResult<Vec<Option<TransactionStatus>>>;
 
 const CURRENT_SLOT: Slot = 408_807_102;
-const RECENT_SLOT: Slot = CURRENT_SLOT - 10;
-const EXPIRED_SLOT: Slot = CURRENT_SLOT - MAX_BLOCKHASH_AGE_IN_SLOTS - 1;
+const SUBMISSION_SLOT: Slot = CURRENT_SLOT - 10;
 const CURRENT_BLOCK_HEIGHT: u64 = CURRENT_SLOT - 1_000;
+const OLDEST_VALID_BLOCK_HEIGHT: u64 = CURRENT_BLOCK_HEIGHT - MAX_BLOCKHASH_AGE_IN_BLOCKS;
+const EXPIRED_BLOCK_HEIGHT: u64 = OLDEST_VALID_BLOCK_HEIGHT - 1;
 const RESUBMISSION_SLOT: Slot = CURRENT_SLOT + 5;
 const RESUBMISSION_BLOCK_HEIGHT: u64 = RESUBMISSION_SLOT - 1_000;
 
@@ -43,7 +44,7 @@ mod finalization {
     #[tokio::test]
     async fn should_return_early_if_task_already_active() {
         setup();
-        submit_consolidation_transaction(CURRENT_SLOT);
+        submit_consolidation_transaction(CURRENT_BLOCK_HEIGHT);
 
         mutate_state(|s| {
             s.active_tasks_mut().insert(TaskType::FinalizeTransactions);
@@ -60,7 +61,7 @@ mod finalization {
     #[tokio::test]
     async fn should_return_early_if_fetching_current_block_fails() {
         setup();
-        submit_consolidation_transaction(EXPIRED_SLOT);
+        submit_consolidation_transaction(EXPIRED_BLOCK_HEIGHT);
 
         let events_before = EventsAssert::from_recorded();
 
@@ -82,14 +83,14 @@ mod finalization {
 
         let num = MAX_CONCURRENT_RPC_CALLS * MAX_SIGNATURES_PER_STATUS_CHECK + 1;
         for i in 0..num {
-            submit_consolidation_transaction_with_signature(i, RECENT_SLOT);
+            submit_consolidation_transaction_with_signature(i, CURRENT_BLOCK_HEIGHT);
         }
 
         // Round 1: finalizes MAX_CONCURRENT_RPC_CALLS batches, 1 transaction unchecked → reschedule
         let mut runtime = TestCanisterRuntime::new()
             .with_increasing_time()
             .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
-            .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())));
+            .add_stub_response(BlockResult::Consistent(Ok(current_block())));
         for _ in 0..MAX_CONCURRENT_RPC_CALLS {
             runtime = runtime.add_stub_response(SignatureStatusesResult::Consistent(Ok(
                 vec![Some(finalized_status()); MAX_SIGNATURES_PER_STATUS_CHECK],
@@ -105,7 +106,7 @@ mod finalization {
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
             .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
-            .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())))
+            .add_stub_response(BlockResult::Consistent(Ok(current_block())))
             .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![Some(
                 finalized_status(),
             )])));
@@ -120,12 +121,12 @@ mod finalization {
     async fn should_finalize_transaction_with_finalized_status() {
         setup();
 
-        let signature = submit_consolidation_transaction(RECENT_SLOT);
+        let signature = submit_consolidation_transaction(CURRENT_BLOCK_HEIGHT);
 
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
             .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
-            .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())))
+            .add_stub_response(BlockResult::Consistent(Ok(current_block())))
             .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![Some(
                 finalized_status(),
             )])));
@@ -143,34 +144,26 @@ mod finalization {
 
     #[tokio::test]
     async fn should_not_finalize_transaction() {
-        // Processed status, recent slot
-        should_not_finalize(RECENT_SLOT, Some(processed_status())).await;
-        // Processed status, expired slot
-        should_not_finalize(EXPIRED_SLOT, Some(processed_status())).await;
-        // Confirmed status, recent slot
-        should_not_finalize(RECENT_SLOT, Some(confirmed_status())).await;
-        // Confirmed status, expired slot
-        should_not_finalize(EXPIRED_SLOT, Some(confirmed_status())).await;
-        // No status, blockhash not yet expired
-        should_not_finalize(RECENT_SLOT, None).await;
+        for status in [processed_status(), confirmed_status()] {
+            for block_height in [CURRENT_BLOCK_HEIGHT, EXPIRED_BLOCK_HEIGHT] {
+                should_not_finalize(block_height, Some(status.clone())).await;
+            }
+        }
+        should_not_finalize(CURRENT_BLOCK_HEIGHT, None).await;
     }
 
-    async fn should_not_finalize(slot: Slot, status: Option<TransactionStatus>) {
+    async fn should_not_finalize(block_height: u64, status: Option<TransactionStatus>) {
         reset_state();
         reset_events();
         setup();
 
-        submit_consolidation_transaction(slot);
+        submit_consolidation_transaction(block_height);
 
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
             .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
-            .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())))
-            .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![
-                status.clone(),
-            ])));
-
-        let _ = status; // suppress unused warning
+            .add_stub_response(BlockResult::Consistent(Ok(current_block())))
+            .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![status])));
 
         let events_before = EventsAssert::from_recorded();
 
@@ -186,15 +179,15 @@ mod finalization {
     async fn should_record_failed_transaction_event_on_error() {
         setup();
 
-        let signature = submit_consolidation_transaction(RECENT_SLOT);
+        let signature = submit_consolidation_transaction(CURRENT_BLOCK_HEIGHT);
 
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
             .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
-            .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())))
+            .add_stub_response(BlockResult::Consistent(Ok(current_block())))
             .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![Some(
                 TransactionStatus {
-                    slot: RECENT_SLOT,
+                    slot: SUBMISSION_SLOT,
                     status: Err(TransactionError::InsufficientFundsForFee),
                     err: Some(TransactionError::InsufficientFundsForFee),
                     confirmation_status: Some(TransactionConfirmationStatus::Finalized),
@@ -220,20 +213,19 @@ mod finalization {
         let sig_a = 0x01;
         let sig_b = 0x02;
         let sig_c = 0x03;
-        submit_consolidation_transaction_with_signature(sig_a, RECENT_SLOT);
-        submit_consolidation_transaction_with_signature(sig_b, RECENT_SLOT);
-        submit_consolidation_transaction_with_signature(sig_c, RECENT_SLOT);
+        submit_consolidation_transaction_with_signature(sig_a, CURRENT_BLOCK_HEIGHT);
+        submit_consolidation_transaction_with_signature(sig_b, CURRENT_BLOCK_HEIGHT);
+        submit_consolidation_transaction_with_signature(sig_c, CURRENT_BLOCK_HEIGHT);
 
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
             .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
-            .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())))
+            .add_stub_response(BlockResult::Consistent(Ok(current_block())))
             .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![
                 Some(finalized_status()),
                 None,
                 Some(finalized_status()),
             ])));
-        // sig_b is not_found but RECENT_SLOT is not expired, so no resubmission.
 
         finalize_transactions(runtime).await;
 
@@ -248,106 +240,32 @@ mod finalization {
         read_state(|s| {
             assert_eq!(s.submitted_transactions().len(), 1);
             assert!(s.submitted_transactions().contains_key(&signature(sig_b)));
-            // sig_b is not yet expired (RECENT_SLOT), so not marked for resubmission
             assert!(s.transactions_to_resubmit().is_empty());
         });
     }
 
     struct ExpiryCase {
         name: &'static str,
-        transaction_slot: Slot,
-        transaction_block_height: Option<u64>,
-        current_block_height: Option<u64>,
+        transaction_block_height: u64,
         should_expire: bool,
     }
 
     #[tokio::test]
-    async fn should_judge_expiry_by_block_height_when_known_and_by_slot_otherwise() {
-        let oldest_valid_block_height = CURRENT_BLOCK_HEIGHT - MAX_BLOCKHASH_AGE_IN_BLOCKS;
-        let oldest_valid_slot = CURRENT_SLOT - MAX_BLOCKHASH_AGE_IN_SLOTS;
+    async fn should_expire_transaction_past_the_blockhash_age_limit() {
         let cases = [
             ExpiryCase {
-                name: "heights known, below block limit, slot rule would expire",
-                transaction_slot: EXPIRED_SLOT,
-                transaction_block_height: Some(oldest_valid_block_height + 1),
-                current_block_height: Some(CURRENT_BLOCK_HEIGHT),
+                name: "below the age limit",
+                transaction_block_height: OLDEST_VALID_BLOCK_HEIGHT + 1,
                 should_expire: false,
             },
             ExpiryCase {
-                name: "heights known, at block limit, slot rule would expire",
-                transaction_slot: EXPIRED_SLOT,
-                transaction_block_height: Some(oldest_valid_block_height),
-                current_block_height: Some(CURRENT_BLOCK_HEIGHT),
+                name: "at the age limit",
+                transaction_block_height: OLDEST_VALID_BLOCK_HEIGHT,
                 should_expire: false,
             },
             ExpiryCase {
-                name: "heights known, above block limit, slot rule would keep",
-                transaction_slot: RECENT_SLOT,
-                transaction_block_height: Some(oldest_valid_block_height - 1),
-                current_block_height: Some(CURRENT_BLOCK_HEIGHT),
-                should_expire: true,
-            },
-            ExpiryCase {
-                name: "current height unknown, below block limit",
-                transaction_slot: EXPIRED_SLOT,
-                transaction_block_height: Some(oldest_valid_block_height + 1),
-                current_block_height: None,
-                should_expire: false,
-            },
-            ExpiryCase {
-                name: "current height unknown, at block limit",
-                transaction_slot: EXPIRED_SLOT,
-                transaction_block_height: Some(oldest_valid_block_height),
-                current_block_height: None,
-                should_expire: false,
-            },
-            ExpiryCase {
-                name: "current height unknown, above block limit",
-                transaction_slot: EXPIRED_SLOT,
-                transaction_block_height: Some(oldest_valid_block_height - 1),
-                current_block_height: None,
-                should_expire: false,
-            },
-            ExpiryCase {
-                name: "transaction height unknown, current known, below slot limit",
-                transaction_slot: oldest_valid_slot + 1,
-                transaction_block_height: None,
-                current_block_height: Some(CURRENT_BLOCK_HEIGHT),
-                should_expire: false,
-            },
-            ExpiryCase {
-                name: "transaction height unknown, current known, at slot limit",
-                transaction_slot: oldest_valid_slot,
-                transaction_block_height: None,
-                current_block_height: Some(CURRENT_BLOCK_HEIGHT),
-                should_expire: false,
-            },
-            ExpiryCase {
-                name: "transaction height unknown, current known, above slot limit",
-                transaction_slot: oldest_valid_slot - 1,
-                transaction_block_height: None,
-                current_block_height: Some(CURRENT_BLOCK_HEIGHT),
-                should_expire: true,
-            },
-            ExpiryCase {
-                name: "both heights unknown, below slot limit",
-                transaction_slot: oldest_valid_slot + 1,
-                transaction_block_height: None,
-                current_block_height: None,
-                should_expire: false,
-            },
-            ExpiryCase {
-                name: "both heights unknown, at slot limit",
-                transaction_slot: oldest_valid_slot,
-                transaction_block_height: None,
-                current_block_height: None,
-                should_expire: false,
-            },
-            ExpiryCase {
-                name: "both heights unknown, above slot limit",
-                transaction_slot: oldest_valid_slot - 1,
-                transaction_block_height: None,
-                current_block_height: None,
+                name: "past the age limit",
+                transaction_block_height: OLDEST_VALID_BLOCK_HEIGHT - 1,
                 should_expire: true,
             },
         ];
@@ -356,19 +274,11 @@ mod finalization {
             reset_state();
             reset_events();
             setup();
-            let signature = submit_consolidation_transaction_with_block_height(
-                1,
-                case.transaction_slot,
-                case.transaction_block_height,
-            );
-            let current_block = match case.current_block_height {
-                Some(block_height) => confirmed_block_at_height(block_height),
-                None => confirmed_block(),
-            };
+            let signature = submit_consolidation_transaction(case.transaction_block_height);
             let runtime = TestCanisterRuntime::new()
                 .with_increasing_time()
                 .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
-                .add_stub_response(BlockResult::Consistent(Ok(current_block)))
+                .add_stub_response(BlockResult::Consistent(Ok(current_block())))
                 .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![None])));
 
             finalize_transactions(runtime).await;
@@ -391,45 +301,6 @@ mod finalization {
                 );
             });
         }
-    }
-
-    #[tokio::test]
-    async fn should_expire_only_legacy_transaction_when_current_block_has_no_height() {
-        setup();
-        let legacy_signature = submit_consolidation_transaction_with_signature(1, EXPIRED_SLOT);
-        let height_bearing_signature = submit_consolidation_transaction_with_block_height(
-            2,
-            EXPIRED_SLOT,
-            Some(CURRENT_BLOCK_HEIGHT - 2 * MAX_BLOCKHASH_AGE_IN_BLOCKS),
-        );
-
-        let runtime = TestCanisterRuntime::new()
-            .with_increasing_time()
-            .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
-            .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())))
-            .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![None, None])));
-
-        finalize_transactions(runtime).await;
-
-        let events = EventsAssert::from_recorded();
-        assert!(events.contains_event(&EventType::ExpiredTransaction {
-            signature: legacy_signature,
-        }));
-        assert!(!events.contains_event(&EventType::ExpiredTransaction {
-            signature: height_bearing_signature,
-        }));
-        read_state(|s| {
-            assert!(s.transactions_to_resubmit().contains_key(&legacy_signature));
-            assert!(!s.submitted_transactions().contains_key(&legacy_signature));
-            assert!(
-                s.submitted_transactions()
-                    .contains_key(&height_bearing_signature)
-            );
-            assert!(
-                !s.transactions_to_resubmit()
-                    .contains_key(&height_bearing_signature)
-            );
-        });
     }
 
     fn confirmed_status() -> TransactionStatus {
@@ -475,7 +346,7 @@ mod resubmission {
     #[tokio::test]
     async fn should_return_early_if_task_already_active() {
         setup();
-        let sig = submit_consolidation_transaction(EXPIRED_SLOT);
+        let sig = submit_consolidation_transaction(EXPIRED_BLOCK_HEIGHT);
         events::expire_transaction(sig);
 
         mutate_state(|s| {
@@ -494,7 +365,7 @@ mod resubmission {
     async fn should_resubmit_expired_transaction_with_no_status() {
         setup();
 
-        let old_signature = submit_consolidation_transaction(EXPIRED_SLOT);
+        let old_signature = submit_consolidation_transaction(EXPIRED_BLOCK_HEIGHT);
         let new_signature = signature(0xAA);
         events::expire_transaction(old_signature);
 
@@ -521,14 +392,14 @@ mod resubmission {
                 old_signature,
                 new_signature,
                 new_slot: RESUBMISSION_SLOT,
-                new_block_height: Some(RESUBMISSION_BLOCK_HEIGHT),
+                new_block_height: RESUBMISSION_BLOCK_HEIGHT,
             });
 
         read_state(|s| {
             assert_eq!(s.submitted_transactions().len(), 1);
             let resubmitted = s.submitted_transactions().get(&new_signature).unwrap();
             assert_eq!(resubmitted.slot, RESUBMISSION_SLOT);
-            assert_eq!(resubmitted.block_height, Some(RESUBMISSION_BLOCK_HEIGHT));
+            assert_eq!(resubmitted.block_height, RESUBMISSION_BLOCK_HEIGHT);
         });
     }
 
@@ -536,14 +407,16 @@ mod resubmission {
     async fn should_not_resubmit_expired_transaction_if_status_check_fails() {
         setup();
 
-        submit_consolidation_transaction(EXPIRED_SLOT);
+        submit_consolidation_transaction(EXPIRED_BLOCK_HEIGHT);
 
         let events_before = EventsAssert::from_recorded();
 
         let finalize_runtime = TestCanisterRuntime::new()
             .with_increasing_time()
             .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
-            .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())))
+            .add_stub_response(BlockResult::Consistent(Ok(confirmed_block_at_height(
+                RESUBMISSION_BLOCK_HEIGHT,
+            ))))
             .add_stub_response(SignatureStatusesResult::Consistent(Err(
                 RpcError::ValidationError("Error".to_string()),
             )));
@@ -563,14 +436,16 @@ mod resubmission {
     async fn should_record_resubmission_event_even_if_submission_fails() {
         setup();
 
-        let old_signature = submit_consolidation_transaction(EXPIRED_SLOT);
+        let old_signature = submit_consolidation_transaction(EXPIRED_BLOCK_HEIGHT);
         let new_signature = signature(0xAA);
         events::expire_transaction(old_signature);
 
         let resubmit_runtime = TestCanisterRuntime::new()
             .with_increasing_time()
             .add_stub_response(SlotResult::Consistent(Ok(RESUBMISSION_SLOT)))
-            .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())))
+            .add_stub_response(BlockResult::Consistent(Ok(confirmed_block_at_height(
+                RESUBMISSION_BLOCK_HEIGHT,
+            ))))
             .add_stub_response(SendTransactionResult::Inconsistent(vec![]))
             .add_signature(new_signature.into());
 
@@ -584,7 +459,7 @@ mod resubmission {
                 old_signature,
                 new_signature,
                 new_slot: RESUBMISSION_SLOT,
-                new_block_height: None,
+                new_block_height: RESUBMISSION_BLOCK_HEIGHT,
             });
     }
 
@@ -594,7 +469,7 @@ mod resubmission {
 
         let num_transactions = MAX_CONCURRENT_RPC_CALLS + 1;
         for i in 0..num_transactions {
-            let sig = submit_consolidation_transaction_with_signature(i, EXPIRED_SLOT);
+            let sig = submit_consolidation_transaction_with_signature(i, EXPIRED_BLOCK_HEIGHT);
             events::expire_transaction(sig);
         }
 
@@ -602,7 +477,9 @@ mod resubmission {
         let mut runtime = TestCanisterRuntime::new()
             .with_increasing_time()
             .add_stub_response(SlotResult::Consistent(Ok(RESUBMISSION_SLOT)))
-            .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())));
+            .add_stub_response(BlockResult::Consistent(Ok(confirmed_block_at_height(
+                RESUBMISSION_BLOCK_HEIGHT,
+            ))));
         for i in 0..MAX_CONCURRENT_RPC_CALLS {
             runtime = runtime
                 .add_stub_response(SendTransactionResult::Consistent(Ok(
@@ -626,7 +503,9 @@ mod resubmission {
         let mut runtime = TestCanisterRuntime::new()
             .with_increasing_time()
             .add_stub_response(SlotResult::Consistent(Ok(RESUBMISSION_SLOT)))
-            .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())));
+            .add_stub_response(BlockResult::Consistent(Ok(confirmed_block_at_height(
+                RESUBMISSION_BLOCK_HEIGHT,
+            ))));
         for i in 0..(num_transactions - MAX_CONCURRENT_RPC_CALLS) {
             runtime = runtime
                 .add_stub_response(SendTransactionResult::Consistent(Ok(
@@ -647,35 +526,27 @@ fn setup() {
     init_schnorr_master_key();
 }
 
-fn submit_consolidation_transaction(slot: Slot) -> solana_signature::Signature {
-    submit_consolidation_transaction_with_signature(1, slot)
+fn current_block() -> ConfirmedBlock {
+    confirmed_block_at_height(CURRENT_BLOCK_HEIGHT)
+}
+
+fn submit_consolidation_transaction(block_height: u64) -> solana_signature::Signature {
+    submit_consolidation_transaction_with_signature(1, block_height)
 }
 
 fn submit_consolidation_transaction_with_signature(
     i: usize,
-    slot: Slot,
-) -> solana_signature::Signature {
-    submit_consolidation_transaction_with_block_height(i, slot, None)
-}
-
-fn submit_consolidation_transaction_with_block_height(
-    i: usize,
-    slot: Slot,
-    block_height: Option<u64>,
+    block_height: u64,
 ) -> solana_signature::Signature {
     let signature = signature(i);
     events::accept_deposit(deposit_id(i), 1_000_000);
     events::mint_deposit(deposit_id(i), i as u64);
-    let mint_indices = vec![i as u64];
-    match block_height {
-        Some(block_height) => events::submit_consolidation_at_height(
-            signature,
-            MINTER_ACCOUNT,
-            slot,
-            block_height,
-            mint_indices,
-        ),
-        None => events::submit_consolidation(signature, MINTER_ACCOUNT, slot, mint_indices),
-    }
+    events::submit_consolidation_at_height(
+        signature,
+        MINTER_ACCOUNT,
+        SUBMISSION_SLOT,
+        block_height,
+        vec![i as u64],
+    );
     signature
 }
