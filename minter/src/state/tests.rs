@@ -56,11 +56,11 @@ mod queued_deposits {
         assert_eq!(state.in_flight_deposit_id(&account(3)), None);
         assert_eq!(
             state.deposit_sol_status(1),
-            Some(DepositSolStatus::Queued {
+            DepositSolStatus::Queued {
                 sweepable_amount: 200
-            })
+            }
         );
-        assert_eq!(state.deposit_sol_status(2), None);
+        assert_eq!(state.deposit_sol_status(2), DepositSolStatus::NotFound);
     }
 
     #[test]

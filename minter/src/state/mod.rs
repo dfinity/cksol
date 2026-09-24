@@ -190,12 +190,13 @@ impl State {
         self.in_flight_deposit_ids.get(account).copied()
     }
 
-    pub fn deposit_sol_status(&self, deposit_id: DepositSolId) -> Option<DepositSolStatus> {
-        self.queued_deposits
-            .get(&deposit_id)
-            .map(|deposit| DepositSolStatus::Queued {
+    pub fn deposit_sol_status(&self, deposit_id: DepositSolId) -> DepositSolStatus {
+        match self.queued_deposits.get(&deposit_id) {
+            Some(deposit) => DepositSolStatus::Queued {
                 sweepable_amount: deposit.sweepable_amount,
-            })
+            },
+            None => DepositSolStatus::NotFound,
+        }
     }
 
     pub fn quarantined_deposits(&self) -> &InsertionOrderedMap<DepositId, Deposit> {
