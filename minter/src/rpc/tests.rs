@@ -1,7 +1,7 @@
 use crate::{
     rpc::{
-        Block, GetRecentBlockError, GetTransactionError, SubmitTransactionError, get_recent_block,
-        get_transaction, submit_transaction,
+        Block, BlockHeight, GetRecentBlockError, GetTransactionError, SubmitTransactionError,
+        get_recent_block, get_transaction, submit_transaction,
     },
     test_fixtures::{
         confirmed_block, confirmed_block_at_height,
@@ -202,7 +202,7 @@ mod get_recent_block_tests {
     #[tokio::test]
     async fn should_return_slot_blockhash_and_block_height_on_success() {
         init_state();
-        let block_height = SLOT - 10;
+        let block_height = BlockHeight::new(SLOT - 10);
         let runtime = TestCanisterRuntime::new()
             .add_stub_response(GetSlotResult::Consistent(Ok(SLOT)))
             .add_stub_response(GetBlockResult::Consistent(Ok(Some(

@@ -1,6 +1,7 @@
 use crate::{
     constants::FEE_PER_SIGNATURE,
     numeric::{LedgerBurnIndex, LedgerMintIndex},
+    rpc::BlockHeight,
 };
 use cksol_types_internal::{InitArgs, UpgradeArgs};
 use derive_more::From;
@@ -103,7 +104,7 @@ pub enum EventType {
         /// The block height of the block whose blockhash the transaction uses.
         /// The blockhash is valid for 150 blocks after that height.
         #[n(5)]
-        block_height: u64,
+        block_height: BlockHeight,
     },
     /// A previously submitted transaction was resubmitted with a new signature.
     /// The transaction message and signers remain the same.
@@ -120,7 +121,7 @@ pub enum EventType {
         new_slot: Slot,
         /// The block height of the new blockhash used in the resubmitted transaction.
         #[n(3)]
-        new_block_height: u64,
+        new_block_height: BlockHeight,
     },
     /// A previously submitted Solana transaction has been finalized successfully.
     #[n(8)]

@@ -3,7 +3,8 @@ use crate::{
     constants::MAX_CONCURRENT_RPC_CALLS,
     guard::TimerGuard,
     rpc::{
-        Block, SubmitTransactionError, get_recent_block, get_signature_statuses, submit_transaction,
+        Block, BlockHeight, SubmitTransactionError, get_recent_block, get_signature_statuses,
+        submit_transaction,
     },
     runtime::CanisterRuntime,
     signer::sign_bytes,
@@ -33,7 +34,7 @@ pub const FINALIZE_TRANSACTIONS_DELAY: Duration = Duration::from_mins(2);
 pub const RESUBMIT_TRANSACTIONS_DELAY: Duration = Duration::from_mins(3);
 /// A blockhash is valid for 150 blocks after the height of its block.
 /// See https://solana.com/docs/core/transactions#recent-blockhash
-const MAX_BLOCKHASH_AGE_IN_BLOCKS: u64 = 150;
+const MAX_BLOCKHASH_AGE_IN_BLOCKS: BlockHeight = BlockHeight::new(150);
 /// Maximum number of signatures per `getSignatureStatuses` RPC call.
 /// See https://solana.com/docs/rpc/http/getsignaturestatuses
 const MAX_SIGNATURES_PER_STATUS_CHECK: usize = 256;
@@ -46,7 +47,7 @@ pub async fn finalize_transactions<R: CanisterRuntime>(runtime: R) {
         Err(_) => return,
     };
 
-    let all_transactions: BTreeMap<Signature, u64> = read_state(|state| {
+    let all_transactions: BTreeMap<Signature, BlockHeight> = read_state(|state| {
         state
             .submitted_transactions()
             .iter()
@@ -130,7 +131,10 @@ pub async fn finalize_transactions<R: CanisterRuntime>(runtime: R) {
     }
 }
 
-fn is_blockhash_expired(transaction_block_height: u64, current_block_height: u64) -> bool {
+fn is_blockhash_expired(
+    transaction_block_height: BlockHeight,
+    current_block_height: BlockHeight,
+) -> bool {
     current_block_height.saturating_sub(transaction_block_height) > MAX_BLOCKHASH_AGE_IN_BLOCKS
 }
 

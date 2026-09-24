@@ -2,6 +2,7 @@ use super::{MAX_TRANSFERS_PER_CONSOLIDATION, consolidate_deposits};
 use crate::{
     constants::MAX_CONCURRENT_RPC_CALLS,
     numeric::LedgerMintIndex,
+    rpc::BlockHeight,
     state::{
         TaskType,
         event::{DepositId, EventType, TransactionPurpose},
@@ -78,7 +79,7 @@ async fn should_submit_single_consolidation_request() {
 
     let fee_payer_signature = signature(0x11);
     let slot = 100;
-    let block_height = 90;
+    let block_height = BlockHeight::new(90);
     let runtime = TestCanisterRuntime::new()
         .with_increasing_time()
         // get_recent_block calls (getSlot then getBlock)

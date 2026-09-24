@@ -1,5 +1,6 @@
 use crate::{
     numeric::LedgerMintIndex,
+    rpc::BlockHeight,
     state::{
         SchnorrPublicKey, State,
         event::{DepositId, Event, EventType},
@@ -105,7 +106,7 @@ pub fn signature(i: usize) -> solana_signature::Signature {
 }
 
 /// The block height used by fixtures whose test does not care about blockhash expiry.
-pub const DEFAULT_BLOCK_HEIGHT: u64 = 400_000_000;
+pub const DEFAULT_BLOCK_HEIGHT: BlockHeight = BlockHeight::new(400_000_000);
 
 /// Returns a [`ConfirmedBlock`] with a deterministic blockhash at
 /// [`DEFAULT_BLOCK_HEIGHT`], for use in RPC mock stubs.
@@ -114,13 +115,13 @@ pub fn confirmed_block() -> sol_rpc_types::ConfirmedBlock {
 }
 
 /// Returns a [`ConfirmedBlock`] with a deterministic blockhash at the given block height.
-pub fn confirmed_block_at_height(block_height: u64) -> sol_rpc_types::ConfirmedBlock {
+pub fn confirmed_block_at_height(block_height: BlockHeight) -> sol_rpc_types::ConfirmedBlock {
     sol_rpc_types::ConfirmedBlock {
         previous_blockhash: Default::default(),
         blockhash: solana_hash::Hash::from([0x42; 32]).into(),
         parent_slot: 0,
         block_time: None,
-        block_height: Some(block_height),
+        block_height: Some(block_height.get()),
         signatures: None,
         rewards: None,
         num_reward_partitions: None,
@@ -155,6 +156,7 @@ pub mod events {
     };
     use crate::{
         numeric::{LedgerBurnIndex, LedgerMintIndex},
+        rpc::BlockHeight,
         state::{
             audit::process_event,
             event::{DepositId, EventType, TransactionPurpose, WithdrawalRequest},
@@ -232,7 +234,7 @@ pub mod events {
         signature: Signature,
         fee_payer: Account,
         slot: Slot,
-        block_height: u64,
+        block_height: BlockHeight,
         mint_indices: Vec<u64>,
     ) {
         mutate_state(|state| {
@@ -362,6 +364,7 @@ pub mod events {
 pub mod arb {
     use crate::{
         numeric::{LedgerBurnIndex, LedgerMintIndex},
+        rpc::BlockHeight,
         state::event::{DepositId, Event, EventType, TransactionPurpose, WithdrawalRequest},
     };
     use candid::Principal;
@@ -393,6 +396,10 @@ pub mod arb {
     pub fn arb_deposit_id() -> impl Strategy<Value = DepositId> {
         (arb_signature(), arb_account())
             .prop_map(|(signature, account)| DepositId { signature, account })
+    }
+
+    pub fn arb_block_height() -> impl Strategy<Value = BlockHeight> {
+        any::<u64>().prop_map(BlockHeight::from)
     }
 
     pub fn arb_ledger_mint_index() -> impl Strategy<Value = LedgerMintIndex> {
@@ -589,7 +596,7 @@ pub mod arb {
                     prop::collection::vec(arb_ledger_burn_index(), 1..10)
                         .prop_map(|burn_indices| TransactionPurpose::WithdrawSol { burn_indices }),
                 ],
-                any::<u64>(),
+                arb_block_height(),
             )
                 .prop_map(
                     |(signature, message, signers, slot, purpose, block_height)| {
@@ -607,7 +614,7 @@ pub mod arb {
                 arb_signature(),
                 arb_signature(),
                 any::<Slot>(),
-                any::<u64>(),
+                arb_block_height(),
             )
                 .prop_map(
                     |(old_signature, new_signature, new_slot, new_block_height)| {

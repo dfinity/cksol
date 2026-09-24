@@ -4,6 +4,7 @@ use super::{
 };
 use crate::{
     constants::MAX_CONCURRENT_RPC_CALLS,
+    rpc::BlockHeight,
     state::{TaskType, event::EventType, mutate_state, read_state, reset_state},
     storage::reset_events,
     test_fixtures::{
@@ -23,11 +24,12 @@ type SignatureStatusesResult = MultiRpcResult<Vec<Option<TransactionStatus>>>;
 
 const CURRENT_SLOT: Slot = 408_807_102;
 const SUBMISSION_SLOT: Slot = CURRENT_SLOT - 10;
-const CURRENT_BLOCK_HEIGHT: u64 = CURRENT_SLOT - 1_000;
-const OLDEST_VALID_BLOCK_HEIGHT: u64 = CURRENT_BLOCK_HEIGHT - MAX_BLOCKHASH_AGE_IN_BLOCKS;
-const EXPIRED_BLOCK_HEIGHT: u64 = OLDEST_VALID_BLOCK_HEIGHT - 1;
+const CURRENT_BLOCK_HEIGHT: BlockHeight = BlockHeight::new(CURRENT_SLOT - 1_000);
+const OLDEST_VALID_BLOCK_HEIGHT: BlockHeight =
+    BlockHeight::new(CURRENT_BLOCK_HEIGHT.get() - MAX_BLOCKHASH_AGE_IN_BLOCKS.get());
+const EXPIRED_BLOCK_HEIGHT: BlockHeight = BlockHeight::new(OLDEST_VALID_BLOCK_HEIGHT.get() - 1);
 const RESUBMISSION_SLOT: Slot = CURRENT_SLOT + 5;
-const RESUBMISSION_BLOCK_HEIGHT: u64 = RESUBMISSION_SLOT - 1_000;
+const RESUBMISSION_BLOCK_HEIGHT: BlockHeight = BlockHeight::new(RESUBMISSION_SLOT - 1_000);
 
 mod finalization {
     use super::*;
@@ -152,7 +154,7 @@ mod finalization {
         should_not_finalize(CURRENT_BLOCK_HEIGHT, None).await;
     }
 
-    async fn should_not_finalize(block_height: u64, status: Option<TransactionStatus>) {
+    async fn should_not_finalize(block_height: BlockHeight, status: Option<TransactionStatus>) {
         reset_state();
         reset_events();
         setup();
@@ -246,7 +248,7 @@ mod finalization {
 
     struct ExpiryCase {
         name: &'static str,
-        transaction_block_height: u64,
+        transaction_block_height: BlockHeight,
         should_expire: bool,
     }
 
@@ -260,12 +262,12 @@ mod finalization {
             },
             ExpiryCase {
                 name: "past the age limit",
-                transaction_block_height: OLDEST_VALID_BLOCK_HEIGHT - 1,
+                transaction_block_height: BlockHeight::new(OLDEST_VALID_BLOCK_HEIGHT.get() - 1),
                 should_expire: true,
             },
             ExpiryCase {
                 name: "ahead of the current block height",
-                transaction_block_height: u64::MAX,
+                transaction_block_height: BlockHeight::new(u64::MAX),
                 should_expire: false,
             },
         ];
@@ -530,13 +532,13 @@ fn current_block() -> ConfirmedBlock {
     confirmed_block_at_height(CURRENT_BLOCK_HEIGHT)
 }
 
-fn submit_consolidation_transaction(block_height: u64) -> solana_signature::Signature {
+fn submit_consolidation_transaction(block_height: BlockHeight) -> solana_signature::Signature {
     submit_consolidation_transaction_with_signature(1, block_height)
 }
 
 fn submit_consolidation_transaction_with_signature(
     i: usize,
-    block_height: u64,
+    block_height: BlockHeight,
 ) -> solana_signature::Signature {
     let signature = signature(i);
     events::accept_deposit(deposit_id(i), 1_000_000);

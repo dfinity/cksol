@@ -1,6 +1,7 @@
 use crate::{
     constants::{FEE_PER_SIGNATURE, MAX_CONCURRENT_RPC_CALLS},
     guard::{TimerGuard, withdrawal_guard},
+    rpc::BlockHeight,
     sol_transfer::MAX_WITHDRAWALS_PER_TX,
     state::{TaskType, event::TransactionPurpose, read_state},
     test_fixtures::{
@@ -408,7 +409,7 @@ mod process_pending_withdrawals_tests {
 
         let tx_signature = signature(0x42);
         let slot = 100;
-        let block_height = 90;
+        let block_height = BlockHeight::new(90);
         events::accept_withdrawal(account(1), 1, MINIMUM_WITHDRAWAL_AMOUNT);
 
         let runtime = TestCanisterRuntime::new()

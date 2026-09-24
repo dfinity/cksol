@@ -2,6 +2,7 @@ use crate::{
     constants::{FEE_PER_SIGNATURE, RENT_EXEMPTION_THRESHOLD},
     ledger::client::LedgerClient,
     numeric::{LedgerBurnIndex, LedgerMintIndex},
+    rpc::BlockHeight,
     sol_transfer::{BATCH_WITHDRAWAL_TX_FEE, MAX_WITHDRAWALS_PER_TX},
     state::event::{DepositId, TransactionPurpose, VersionedMessage, WithdrawalRequest},
     utils::insertion_ordered_map::InsertionOrderedMap,
@@ -539,7 +540,7 @@ impl State {
         signers: &[Account],
         slot: Slot,
         purpose: &TransactionPurpose,
-        block_height: u64,
+        block_height: BlockHeight,
     ) {
         assert!(
             !self.succeeded_transactions.contains(signature),
@@ -620,7 +621,7 @@ impl State {
         old_signature: &Signature,
         new_signature: &Signature,
         new_slot: Slot,
-        new_block_height: u64,
+        new_block_height: BlockHeight,
     ) {
         let old_transaction = self
             .transactions_to_resubmit
@@ -895,7 +896,7 @@ pub struct SolanaTransaction {
     pub signers: Vec<Account>,
     pub slot: Slot,
     /// The block height of the block whose blockhash the transaction uses.
-    pub block_height: u64,
+    pub block_height: BlockHeight,
     pub purpose: TransactionPurpose,
     /// Total transfer amount in lamports (excluding fees).
     pub amount: Lamport,

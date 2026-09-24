@@ -177,7 +177,7 @@ fn get_events(
                     signers,
                     slot,
                     purpose,
-                    block_height,
+                    block_height: block_height.get(),
                 }
             }
             EventType::ResubmittedTransaction {
@@ -189,7 +189,7 @@ fn get_events(
                 old_signature: old_signature.into(),
                 new_signature: new_signature.into(),
                 new_slot,
-                new_block_height,
+                new_block_height: new_block_height.get(),
             },
             EventType::SucceededTransaction { signature } => {
                 event::EventType::SucceededTransaction {

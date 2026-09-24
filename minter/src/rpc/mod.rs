@@ -8,6 +8,7 @@ use crate::{
 use cksol_types::ProcessDepositError;
 use derive_more::From;
 use ic_canister_runtime::IcError;
+use minicbor::{Decode, Encode};
 use sol_rpc_types::{CommitmentLevel, GetTransactionEncoding, MultiRpcResult, RpcError, Slot};
 use solana_hash::Hash;
 use solana_signature::Signature;
@@ -92,6 +93,7 @@ pub async fn get_recent_block<R: CanisterRuntime>(
                     })?;
             let block_height = block
                 .block_height
+                .map(BlockHeight::from)
                 .ok_or(GetRecentBlockError::MissingBlockHeight { slot })?;
             Ok(Block {
                 slot,
@@ -112,7 +114,27 @@ pub async fn get_recent_block<R: CanisterRuntime>(
 pub struct Block {
     pub slot: Slot,
     pub blockhash: Hash,
-    pub block_height: u64,
+    pub block_height: BlockHeight,
+}
+
+/// The height of a block in the Solana ledger, i.e. the number of blocks
+/// beneath it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Decode, Encode, From)]
+#[cbor(transparent)]
+pub struct BlockHeight(#[n(0)] u64);
+
+impl BlockHeight {
+    pub const fn new(height: u64) -> Self {
+        Self(height)
+    }
+
+    pub const fn get(self) -> u64 {
+        self.0
+    }
+
+    pub fn saturating_sub(self, other: Self) -> Self {
+        Self(self.0.saturating_sub(other.0))
+    }
 }
 
 #[derive(Debug, PartialEq, Error)]

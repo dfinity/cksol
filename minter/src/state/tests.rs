@@ -1,6 +1,7 @@
 use super::{event::*, *};
 use crate::{
     constants::{FEE_PER_SIGNATURE, RENT_EXEMPTION_THRESHOLD},
+    rpc::BlockHeight,
     state::{audit::process_event, read_state},
     test_fixtures::{
         AUTOMATED_DEPOSIT_FEE, DEPOSIT_CONSOLIDATION_FEE, MANUAL_DEPOSIT_FEE,
@@ -434,7 +435,7 @@ fn should_track_balance_through_deposits_withdrawals_and_failures() {
                     signers,
                     slot: 0,
                     purpose,
-                    block_height: 0,
+                    block_height: BlockHeight::new(0),
                 },
                 &TestCanisterRuntime::new().add_times([0, 0]),
             )

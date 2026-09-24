@@ -1,6 +1,7 @@
 use crate::{
     lifecycle,
     numeric::{LedgerBurnIndex, LedgerMintIndex},
+    rpc::BlockHeight,
     runtime::IcCanisterRuntime,
     state::{
         audit::{process_event, replay_events},
@@ -126,7 +127,7 @@ fn setup_10k_events() {
                     purpose: TransactionPurpose::ConsolidateDeposits {
                         mint_indices: vec![mint_index],
                     },
-                    block_height: 0,
+                    block_height: BlockHeight::new(0),
                 },
                 &runtime,
             )
@@ -189,7 +190,7 @@ fn setup_10k_events() {
                     purpose: TransactionPurpose::WithdrawSol {
                         burn_indices: vec![burn_index],
                     },
-                    block_height: 0,
+                    block_height: BlockHeight::new(0),
                 },
                 &runtime,
             )
@@ -242,7 +243,7 @@ fn setup_10k_events() {
                     purpose: TransactionPurpose::ConsolidateDeposits {
                         mint_indices: vec![mint_index],
                     },
-                    block_height: 0,
+                    block_height: BlockHeight::new(0),
                 },
                 &runtime,
             )
@@ -292,7 +293,7 @@ fn setup_10k_events() {
                     purpose: TransactionPurpose::ConsolidateDeposits {
                         mint_indices: vec![mint_index],
                     },
-                    block_height: 0,
+                    block_height: BlockHeight::new(0),
                 },
                 &runtime,
             )
@@ -311,7 +312,7 @@ fn setup_10k_events() {
                     old_signature: old_sig,
                     new_signature: new_sig,
                     new_slot: 1,
-                    new_block_height: 1,
+                    new_block_height: BlockHeight::new(1),
                 },
                 &runtime,
             )
