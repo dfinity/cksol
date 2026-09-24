@@ -217,6 +217,32 @@ pub mod events {
         slot: Slot,
         mint_indices: Vec<u64>,
     ) {
+        submit_consolidation_with_block_height(signature, fee_payer, slot, None, mint_indices);
+    }
+
+    pub fn submit_consolidation_at_height(
+        signature: Signature,
+        fee_payer: Account,
+        slot: Slot,
+        block_height: u64,
+        mint_indices: Vec<u64>,
+    ) {
+        submit_consolidation_with_block_height(
+            signature,
+            fee_payer,
+            slot,
+            Some(block_height),
+            mint_indices,
+        );
+    }
+
+    fn submit_consolidation_with_block_height(
+        signature: Signature,
+        fee_payer: Account,
+        slot: Slot,
+        block_height: Option<u64>,
+        mint_indices: Vec<u64>,
+    ) {
         mutate_state(|state| {
             process_event(
                 state,
@@ -231,7 +257,7 @@ pub mod events {
                             .map(LedgerMintIndex::from)
                             .collect(),
                     },
-                    block_height: None,
+                    block_height,
                 },
                 &runtime(),
             )
@@ -914,6 +940,10 @@ impl EventsAssert {
             "Expected exactly 1 occurrence of {expected:?}, found more"
         );
         self
+    }
+
+    pub fn contains_event(&self, expected: &EventType) -> bool {
+        self.0.iter().any(|event| &event.payload == expected)
     }
 
     pub fn assert_no_more_events(&self) {

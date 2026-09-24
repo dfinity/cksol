@@ -1,6 +1,6 @@
 use super::{
-    MAX_BLOCKHASH_AGE, MAX_SIGNATURES_PER_STATUS_CHECK, finalize_transactions,
-    resubmit_transactions,
+    MAX_BLOCKHASH_AGE_IN_BLOCKS, MAX_BLOCKHASH_AGE_IN_SLOTS, MAX_SIGNATURES_PER_STATUS_CHECK,
+    finalize_transactions, resubmit_transactions,
 };
 use crate::{
     constants::MAX_CONCURRENT_RPC_CALLS,
@@ -23,7 +23,8 @@ type SignatureStatusesResult = MultiRpcResult<Vec<Option<TransactionStatus>>>;
 
 const CURRENT_SLOT: Slot = 408_807_102;
 const RECENT_SLOT: Slot = CURRENT_SLOT - 10;
-const EXPIRED_SLOT: Slot = CURRENT_SLOT - MAX_BLOCKHASH_AGE - 1;
+const EXPIRED_SLOT: Slot = CURRENT_SLOT - MAX_BLOCKHASH_AGE_IN_SLOTS - 1;
+const CURRENT_BLOCK_HEIGHT: u64 = CURRENT_SLOT - 1_000;
 const RESUBMISSION_SLOT: Slot = CURRENT_SLOT + 5;
 const RESUBMISSION_BLOCK_HEIGHT: u64 = RESUBMISSION_SLOT - 1_000;
 
@@ -57,7 +58,7 @@ mod finalization {
     }
 
     #[tokio::test]
-    async fn should_return_early_if_fetching_current_slot_fails() {
+    async fn should_return_early_if_fetching_current_block_fails() {
         setup();
         submit_consolidation_transaction(EXPIRED_SLOT);
 
@@ -250,6 +251,147 @@ mod finalization {
             // sig_b is not yet expired (RECENT_SLOT), so not marked for resubmission
             assert!(s.transactions_to_resubmit().is_empty());
         });
+    }
+
+    struct ExpiryCase {
+        name: &'static str,
+        transaction_slot: Slot,
+        transaction_block_height: Option<u64>,
+        current_block_height: Option<u64>,
+        should_expire: bool,
+    }
+
+    #[tokio::test]
+    async fn should_judge_expiry_by_block_height_when_known_and_by_slot_otherwise() {
+        let last_valid_block_height = CURRENT_BLOCK_HEIGHT - MAX_BLOCKHASH_AGE_IN_BLOCKS;
+        let last_valid_slot = CURRENT_SLOT - MAX_BLOCKHASH_AGE_IN_SLOTS;
+        let cases = [
+            ExpiryCase {
+                name: "heights known, below block limit, slot rule would expire",
+                transaction_slot: EXPIRED_SLOT,
+                transaction_block_height: Some(last_valid_block_height + 1),
+                current_block_height: Some(CURRENT_BLOCK_HEIGHT),
+                should_expire: false,
+            },
+            ExpiryCase {
+                name: "heights known, at block limit, slot rule would expire",
+                transaction_slot: EXPIRED_SLOT,
+                transaction_block_height: Some(last_valid_block_height),
+                current_block_height: Some(CURRENT_BLOCK_HEIGHT),
+                should_expire: false,
+            },
+            ExpiryCase {
+                name: "heights known, above block limit, slot rule would keep",
+                transaction_slot: RECENT_SLOT,
+                transaction_block_height: Some(last_valid_block_height - 1),
+                current_block_height: Some(CURRENT_BLOCK_HEIGHT),
+                should_expire: true,
+            },
+            ExpiryCase {
+                name: "current height unknown, below block limit",
+                transaction_slot: EXPIRED_SLOT,
+                transaction_block_height: Some(last_valid_block_height + 1),
+                current_block_height: None,
+                should_expire: false,
+            },
+            ExpiryCase {
+                name: "current height unknown, at block limit",
+                transaction_slot: EXPIRED_SLOT,
+                transaction_block_height: Some(last_valid_block_height),
+                current_block_height: None,
+                should_expire: false,
+            },
+            ExpiryCase {
+                name: "current height unknown, above block limit",
+                transaction_slot: EXPIRED_SLOT,
+                transaction_block_height: Some(last_valid_block_height - 1),
+                current_block_height: None,
+                should_expire: false,
+            },
+            ExpiryCase {
+                name: "transaction height unknown, current known, below slot limit",
+                transaction_slot: last_valid_slot + 1,
+                transaction_block_height: None,
+                current_block_height: Some(CURRENT_BLOCK_HEIGHT),
+                should_expire: false,
+            },
+            ExpiryCase {
+                name: "transaction height unknown, current known, at slot limit",
+                transaction_slot: last_valid_slot,
+                transaction_block_height: None,
+                current_block_height: Some(CURRENT_BLOCK_HEIGHT),
+                should_expire: false,
+            },
+            ExpiryCase {
+                name: "transaction height unknown, current known, above slot limit",
+                transaction_slot: last_valid_slot - 1,
+                transaction_block_height: None,
+                current_block_height: Some(CURRENT_BLOCK_HEIGHT),
+                should_expire: true,
+            },
+            ExpiryCase {
+                name: "both heights unknown, below slot limit",
+                transaction_slot: last_valid_slot + 1,
+                transaction_block_height: None,
+                current_block_height: None,
+                should_expire: false,
+            },
+            ExpiryCase {
+                name: "both heights unknown, at slot limit",
+                transaction_slot: last_valid_slot,
+                transaction_block_height: None,
+                current_block_height: None,
+                should_expire: false,
+            },
+            ExpiryCase {
+                name: "both heights unknown, above slot limit",
+                transaction_slot: last_valid_slot - 1,
+                transaction_block_height: None,
+                current_block_height: None,
+                should_expire: true,
+            },
+        ];
+
+        for case in cases {
+            reset_state();
+            reset_events();
+            setup();
+            let signature = match case.transaction_block_height {
+                Some(block_height) => {
+                    submit_consolidation_transaction_at_height(case.transaction_slot, block_height)
+                }
+                None => submit_consolidation_transaction(case.transaction_slot),
+            };
+            let current_block = match case.current_block_height {
+                Some(block_height) => confirmed_block_at_height(block_height),
+                None => confirmed_block(),
+            };
+            let runtime = TestCanisterRuntime::new()
+                .with_increasing_time()
+                .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
+                .add_stub_response(BlockResult::Consistent(Ok(current_block)))
+                .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![None])));
+
+            finalize_transactions(runtime).await;
+
+            let expired = EventsAssert::from_recorded()
+                .contains_event(&EventType::ExpiredTransaction { signature });
+            assert_eq!(expired, case.should_expire, "{}", case.name);
+            read_state(|s| {
+                assert_eq!(
+                    s.transactions_to_resubmit().contains_key(&signature),
+                    case.should_expire,
+                    "{}",
+                    case.name
+                );
+                assert_eq!(
+                    s.submitted_transactions().contains_key(&signature),
+                    !case.should_expire,
+                    "{}",
+                    case.name
+                );
+            });
+        }
     }
 
     fn confirmed_status() -> TransactionStatus {
@@ -469,6 +611,17 @@ fn setup() {
 
 fn submit_consolidation_transaction(slot: Slot) -> solana_signature::Signature {
     submit_consolidation_transaction_with_signature(1, slot)
+}
+
+fn submit_consolidation_transaction_at_height(
+    slot: Slot,
+    block_height: u64,
+) -> solana_signature::Signature {
+    let signature = signature(1);
+    events::accept_deposit(deposit_id(1), 1_000_000);
+    events::mint_deposit(deposit_id(1), 1);
+    events::submit_consolidation_at_height(signature, MINTER_ACCOUNT, slot, block_height, vec![1]);
+    signature
 }
 
 fn submit_consolidation_transaction_with_signature(

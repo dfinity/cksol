@@ -33,7 +33,12 @@ mod tests;
 
 pub const FINALIZE_TRANSACTIONS_DELAY: Duration = Duration::from_mins(2);
 pub const RESUBMIT_TRANSACTIONS_DELAY: Duration = Duration::from_mins(3);
-const MAX_BLOCKHASH_AGE: Slot = 150;
+/// A blockhash is valid for 150 blocks after the height of its block.
+/// See https://solana.com/docs/core/transactions#recent-blockhash
+const MAX_BLOCKHASH_AGE_IN_BLOCKS: u64 = 150;
+/// Approximates [`MAX_BLOCKHASH_AGE_IN_BLOCKS`] in slots for transactions
+/// whose block height is unknown.
+const MAX_BLOCKHASH_AGE_IN_SLOTS: Slot = 150;
 /// Maximum number of signatures per `getSignatureStatuses` RPC call.
 /// See https://solana.com/docs/rpc/http/getsignaturestatuses
 const MAX_SIGNATURES_PER_STATUS_CHECK: usize = 256;
@@ -46,11 +51,19 @@ pub async fn finalize_transactions<R: CanisterRuntime>(runtime: R) {
         Err(_) => return,
     };
 
-    let all_transactions: BTreeMap<Signature, Slot> = read_state(|state| {
+    let all_transactions: BTreeMap<Signature, BlockhashOrigin> = read_state(|state| {
         state
             .submitted_transactions()
             .iter()
-            .map(|(sig, tx)| (*sig, tx.slot))
+            .map(|(sig, tx)| {
+                (
+                    *sig,
+                    BlockhashOrigin {
+                        slot: tx.slot,
+                        block_height: tx.block_height,
+                    },
+                )
+            })
             .collect()
     });
     if all_transactions.is_empty() {
@@ -63,13 +76,13 @@ pub async fn finalize_transactions<R: CanisterRuntime>(runtime: R) {
         runtime.set_timer(Duration::ZERO, finalize_transactions);
     });
 
-    // Fetch the current slot before checking statuses: if a transaction finalizes
-    // after we snapshot the slot, the status check will see it as finalized rather
+    // Fetch the current block before checking statuses: if a transaction finalizes
+    // after we snapshot the block, the status check will see it as finalized rather
     // than missing, so it will never be incorrectly marked as expired.
-    let current_slot = match get_recent_block(&runtime).await {
-        Ok(block) => block.slot,
+    let current_block = match get_recent_block(&runtime).await {
+        Ok(block) => block,
         Err(e) => {
-            log!(Priority::Info, "Failed to get current slot: {e}");
+            log!(Priority::Info, "Failed to get current block: {e}");
             return;
         }
     };
@@ -107,26 +120,67 @@ pub async fn finalize_transactions<R: CanisterRuntime>(runtime: R) {
     }
 
     for signature in &statuses.not_found {
-        if all_transactions[signature] + MAX_BLOCKHASH_AGE < current_slot {
-            log!(
+        match blockhash_validity(all_transactions[signature], current_block) {
+            BlockhashValidity::Expired => {
+                log!(
+                    Priority::Info,
+                    "Transaction {signature} expired, marking for resubmission"
+                );
+                mutate_state(|state| {
+                    process_event(
+                        state,
+                        EventType::ExpiredTransaction {
+                            signature: *signature,
+                        },
+                        &runtime,
+                    )
+                });
+            }
+            BlockhashValidity::Valid => {}
+            BlockhashValidity::Undetermined => log!(
                 Priority::Info,
-                "Transaction {signature} expired, marking for resubmission"
-            );
-            mutate_state(|state| {
-                process_event(
-                    state,
-                    EventType::ExpiredTransaction {
-                        signature: *signature,
-                    },
-                    &runtime,
-                )
-            });
+                "Block at slot {} has no block height, expiry of transaction {signature} \
+                 will be judged in the next run",
+                current_block.slot
+            ),
         }
     }
 
     if !more_to_process {
         // All work fits in this round
         scopeguard::ScopeGuard::into_inner(reschedule);
+    }
+}
+
+/// The block whose blockhash a submitted transaction uses.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct BlockhashOrigin {
+    slot: Slot,
+    block_height: Option<u64>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum BlockhashValidity {
+    Valid,
+    Expired,
+    Undetermined,
+}
+
+fn blockhash_validity(
+    transaction: BlockhashOrigin,
+    current_block: RecentBlock,
+) -> BlockhashValidity {
+    let expired = match (transaction.block_height, current_block.block_height) {
+        (Some(transaction_height), Some(current_height)) => {
+            transaction_height + MAX_BLOCKHASH_AGE_IN_BLOCKS < current_height
+        }
+        (Some(_), None) => return BlockhashValidity::Undetermined,
+        (None, _) => transaction.slot + MAX_BLOCKHASH_AGE_IN_SLOTS < current_block.slot,
+    };
+    if expired {
+        BlockhashValidity::Expired
+    } else {
+        BlockhashValidity::Valid
     }
 }
 
