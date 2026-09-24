@@ -100,12 +100,10 @@ async fn should_submit_single_consolidation_request() {
         .expect_event(|e| {
             assert_matches!(e, EventType::SubmittedTransaction {
                 signature,
-                slot: event_slot,
                 block_height: event_block_height,
                 purpose: TransactionPurpose::ConsolidateDeposits { mint_indices },
                 ..
             } if signature == fee_payer_signature
-              && event_slot == slot
               && event_block_height == block_height
               && mint_indices == vec![LedgerMintIndex::from(0_u64)]
             )

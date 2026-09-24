@@ -85,7 +85,7 @@ pub fn init_balance_to(amount: Lamport) {
 
     events::accept_deposit(id, amount);
     events::mint_deposit(id, mint_index);
-    events::submit_consolidation(consolidation_signature, MINTER_ACCOUNT, 0, vec![mint_index]);
+    events::submit_consolidation(consolidation_signature, MINTER_ACCOUNT, vec![mint_index]);
     events::succeed_transaction(consolidation_signature);
 }
 
@@ -164,7 +164,7 @@ pub mod events {
         },
     };
     use icrc_ledger_types::icrc1::account::Account;
-    use sol_rpc_types::{Lamport, Slot};
+    use sol_rpc_types::Lamport;
     use solana_signature::Signature;
 
     fn message() -> solana_message::Message {
@@ -215,25 +215,13 @@ pub mod events {
         });
     }
 
-    pub fn submit_consolidation(
-        signature: Signature,
-        fee_payer: Account,
-        slot: Slot,
-        mint_indices: Vec<u64>,
-    ) {
-        submit_consolidation_at_height(
-            signature,
-            fee_payer,
-            slot,
-            DEFAULT_BLOCK_HEIGHT,
-            mint_indices,
-        );
+    pub fn submit_consolidation(signature: Signature, fee_payer: Account, mint_indices: Vec<u64>) {
+        submit_consolidation_at_height(signature, fee_payer, DEFAULT_BLOCK_HEIGHT, mint_indices);
     }
 
     pub fn submit_consolidation_at_height(
         signature: Signature,
         fee_payer: Account,
-        slot: Slot,
         block_height: BlockHeight,
         mint_indices: Vec<u64>,
     ) {
@@ -244,7 +232,6 @@ pub mod events {
                     signature,
                     message: message().into(),
                     signers: vec![fee_payer],
-                    slot,
                     purpose: TransactionPurpose::ConsolidateDeposits {
                         mint_indices: mint_indices
                             .into_iter()
@@ -283,12 +270,7 @@ pub mod events {
         });
     }
 
-    pub fn submit_withdrawal(
-        signature: Signature,
-        fee_payer: Account,
-        slot: Slot,
-        burn_indices: Vec<u64>,
-    ) {
+    pub fn submit_withdrawal(signature: Signature, fee_payer: Account, burn_indices: Vec<u64>) {
         mutate_state(|state| {
             process_event(
                 state,
@@ -296,7 +278,6 @@ pub mod events {
                     signature,
                     message: message().into(),
                     signers: vec![fee_payer],
-                    slot,
                     purpose: TransactionPurpose::WithdrawSol {
                         burn_indices: burn_indices
                             .into_iter()
@@ -340,18 +321,13 @@ pub mod events {
         });
     }
 
-    pub fn resubmit_transaction(
-        old_signature: Signature,
-        new_signature: Signature,
-        new_slot: Slot,
-    ) {
+    pub fn resubmit_transaction(old_signature: Signature, new_signature: Signature) {
         mutate_state(|state| {
             process_event(
                 state,
                 EventType::ResubmittedTransaction {
                     old_signature,
                     new_signature,
-                    new_slot,
                     new_block_height: DEFAULT_BLOCK_HEIGHT,
                 },
                 &runtime(),
@@ -371,7 +347,6 @@ pub mod arb {
     use cksol_types_internal::{Ed25519KeyName, InitArgs, SolanaNetwork, UpgradeArgs};
     use icrc_ledger_types::icrc1::account::Account;
     use proptest::prelude::{Just, Strategy, any, prop, prop_oneof};
-    use sol_rpc_types::Slot;
     use solana_address::Address;
     use solana_message::{Hash, Instruction, Message};
     use solana_signature::Signature;
@@ -588,7 +563,6 @@ pub mod arb {
                 arb_signature(),
                 arb_message(),
                 prop::collection::vec(arb_account(), 1..10),
-                any::<Slot>(),
                 prop_oneof![
                     prop::collection::vec(arb_ledger_mint_index(), 1..10).prop_map(
                         |mint_indices| TransactionPurpose::ConsolidateDeposits { mint_indices }
@@ -598,34 +572,24 @@ pub mod arb {
                 ],
                 arb_block_height(),
             )
-                .prop_map(
-                    |(signature, message, signers, slot, purpose, block_height)| {
-                        EventType::SubmittedTransaction {
-                            signature,
-                            message: message.into(),
-                            signers,
-                            slot,
-                            purpose,
-                            block_height,
-                        }
+                .prop_map(|(signature, message, signers, purpose, block_height)| {
+                    EventType::SubmittedTransaction {
+                        signature,
+                        message: message.into(),
+                        signers,
+                        purpose,
+                        block_height,
                     }
-                ),
-            (
-                arb_signature(),
-                arb_signature(),
-                any::<Slot>(),
-                arb_block_height(),
-            )
-                .prop_map(
-                    |(old_signature, new_signature, new_slot, new_block_height)| {
-                        EventType::ResubmittedTransaction {
-                            old_signature,
-                            new_signature,
-                            new_slot,
-                            new_block_height,
-                        }
+                }),
+            (arb_signature(), arb_signature(), arb_block_height(),).prop_map(
+                |(old_signature, new_signature, new_block_height)| {
+                    EventType::ResubmittedTransaction {
+                        old_signature,
+                        new_signature,
+                        new_block_height,
                     }
-                ),
+                }
+            ),
             arb_signature().prop_map(|signature| EventType::SucceededTransaction { signature }),
             arb_signature().prop_map(|signature| EventType::FailedTransaction { signature }),
             arb_signature().prop_map(|signature| EventType::ExpiredTransaction { signature }),

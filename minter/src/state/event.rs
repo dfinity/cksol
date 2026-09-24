@@ -8,7 +8,7 @@ use derive_more::From;
 use ic_stable_structures::{Storable, storable::Bound};
 use icrc_ledger_types::icrc1::account::Account;
 use minicbor::{Decode, Encode};
-use sol_rpc_types::{Lamport, Slot};
+use sol_rpc_types::Lamport;
 use solana_message::Message;
 use solana_signature::Signature;
 use std::borrow::Cow;
@@ -95,15 +95,12 @@ pub enum EventType {
         /// The signing accounts in signature order (fee payer first).
         #[n(2)]
         signers: Vec<Account>,
-        /// The slot of the blockhash used in the transaction.
-        #[n(3)]
-        slot: Slot,
         /// The purpose of this transaction.
-        #[n(4)]
+        #[n(3)]
         purpose: TransactionPurpose,
         /// The block height of the block whose blockhash the transaction uses.
         /// The blockhash is valid for 150 blocks after that height.
-        #[n(5)]
+        #[n(4)]
         block_height: BlockHeight,
     },
     /// A previously submitted transaction was resubmitted with a new signature.
@@ -116,11 +113,8 @@ pub enum EventType {
         /// The signature of the new transaction
         #[cbor(n(1), with = "cbor::signature")]
         new_signature: Signature,
-        /// The slot of the new blockhash used in the resubmitted transaction
-        #[n(2)]
-        new_slot: Slot,
         /// The block height of the new blockhash used in the resubmitted transaction.
-        #[n(3)]
+        #[n(2)]
         new_block_height: BlockHeight,
     },
     /// A previously submitted Solana transaction has been finalized successfully.

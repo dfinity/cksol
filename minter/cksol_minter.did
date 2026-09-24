@@ -360,8 +360,6 @@ type EventType = variant {
         transaction: VersionedTransactionMessage;
         // The signing accounts in signature order (fee payer first).
         signers: vec Account;
-        // The slot of the blockhash used in the transaction.
-        slot: nat64;
         // The purpose of this transaction.
         purpose: TransactionPurpose;
         // The block height of the block whose blockhash the transaction uses.
@@ -373,8 +371,6 @@ type EventType = variant {
         old_signature: Signature;
         // The signature of the new transaction.
         new_signature: Signature;
-        // The slot of the new blockhash used in the resubmitted transaction.
-        new_slot: nat64;
         // The block height of the new blockhash used in the resubmitted transaction.
         new_block_height: nat64;
     };

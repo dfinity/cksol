@@ -312,7 +312,6 @@ mod process_pending_withdrawals_tests {
         events::submit_consolidation(
             consolidation_signature,
             MINTER_ACCOUNT,
-            0,
             vec![consolidated_mint_index],
         );
         events::succeed_transaction(consolidation_signature);
@@ -426,7 +425,6 @@ mod process_pending_withdrawals_tests {
         assert_matches!(withdrawal_status(1), WithdrawalStatus::TxSent { .. });
         read_state(|s| {
             let submitted = s.submitted_transactions().get(&tx_signature).unwrap();
-            assert_eq!(submitted.slot, slot);
             assert_eq!(submitted.block_height, block_height);
             assert_eq!(
                 submitted.purpose,
@@ -609,7 +607,7 @@ mod withdrawal_finalization_tests {
     fn setup_sent_withdrawal(burn_block_index: u64) -> Signature {
         let tx_signature = signature(burn_block_index as usize + 1);
         events::accept_withdrawal(MINTER_ACCOUNT, burn_block_index, MINIMUM_WITHDRAWAL_AMOUNT);
-        events::submit_withdrawal(tx_signature, MINTER_ACCOUNT, 1, vec![burn_block_index]);
+        events::submit_withdrawal(tx_signature, MINTER_ACCOUNT, vec![burn_block_index]);
         tx_signature
     }
 

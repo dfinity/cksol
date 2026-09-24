@@ -433,7 +433,6 @@ fn should_track_balance_through_deposits_withdrawals_and_failures() {
                     signature: sig,
                     message: message_with_signers(num_signers).into(),
                     signers,
-                    slot: 0,
                     purpose,
                     block_height: BlockHeight::new(0),
                 },
@@ -546,7 +545,7 @@ mod oldest_incomplete_withdrawal_created_at {
         accept_withdrawal_at(account(1), 0, AMOUNT, 1_000_000_000);
         accept_withdrawal_at(account(2), 1, AMOUNT, 2_000_000_000);
 
-        submit_withdrawal(signature(0xAA), account(100), 0, vec![0, 1]);
+        submit_withdrawal(signature(0xAA), account(100), vec![0, 1]);
 
         // Both withdrawals are now sent but still incomplete
         assert_eq!(
@@ -562,8 +561,8 @@ mod oldest_incomplete_withdrawal_created_at {
         accept_withdrawal_at(account(1), 0, AMOUNT, 1_000_000_000);
         accept_withdrawal_at(account(2), 1, AMOUNT, 2_000_000_000);
 
-        submit_withdrawal(signature(0xAA), account(100), 0, vec![0]);
-        submit_withdrawal(signature(0xBB), account(100), 0, vec![1]);
+        submit_withdrawal(signature(0xAA), account(100), vec![0]);
+        submit_withdrawal(signature(0xBB), account(100), vec![1]);
         succeed_transaction(signature(0xAA));
 
         assert_eq!(
@@ -579,8 +578,8 @@ mod oldest_incomplete_withdrawal_created_at {
         accept_withdrawal_at(account(1), 0, AMOUNT, 1_000_000_000);
         accept_withdrawal_at(account(2), 1, AMOUNT, 2_000_000_000);
 
-        submit_withdrawal(signature(0xAA), account(100), 0, vec![0]);
-        submit_withdrawal(signature(0xBB), account(100), 0, vec![1]);
+        submit_withdrawal(signature(0xAA), account(100), vec![0]);
+        submit_withdrawal(signature(0xBB), account(100), vec![1]);
         fail_transaction(signature(0xAA));
 
         assert_eq!(
@@ -596,7 +595,7 @@ mod oldest_incomplete_withdrawal_created_at {
         accept_withdrawal_at(account(1), 0, AMOUNT, 1_000_000_000);
         accept_withdrawal_at(account(2), 1, AMOUNT, 2_000_000_000);
 
-        submit_withdrawal(signature(0xAA), account(100), 0, vec![0, 1]);
+        submit_withdrawal(signature(0xAA), account(100), vec![0, 1]);
         succeed_transaction(signature(0xAA));
 
         assert_eq!(
@@ -612,7 +611,7 @@ mod oldest_incomplete_withdrawal_created_at {
         accept_withdrawal_at(account(1), 0, AMOUNT, 1_000_000_000);
         accept_withdrawal_at(account(2), 1, AMOUNT, 2_000_000_000);
 
-        submit_withdrawal(signature(0xAA), account(100), 0, vec![0, 1]);
+        submit_withdrawal(signature(0xAA), account(100), vec![0, 1]);
 
         assert_eq!(
             read_state(|s| s.oldest_incomplete_withdrawal_created_at()),
@@ -621,7 +620,7 @@ mod oldest_incomplete_withdrawal_created_at {
 
         // Expire then resubmit the transaction with a new signature
         expire_transaction(signature(0xAA));
-        resubmit_transaction(signature(0xAA), signature(0xBB), 42);
+        resubmit_transaction(signature(0xAA), signature(0xBB));
 
         // created_at timestamps should be unchanged
         assert_eq!(

@@ -295,7 +295,6 @@ async fn try_resubmit_transaction<R: CanisterRuntime>(
             EventType::ResubmittedTransaction {
                 old_signature,
                 new_signature,
-                new_slot: block.slot,
                 new_block_height: block.block_height,
             },
             runtime,

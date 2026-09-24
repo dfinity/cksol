@@ -197,7 +197,6 @@ async fn submit_withdrawal_transaction<R: CanisterRuntime>(
                 signature,
                 message,
                 signers,
-                slot: block.slot,
                 purpose: TransactionPurpose::WithdrawSol {
                     burn_indices: burn_indices.clone(),
                 },

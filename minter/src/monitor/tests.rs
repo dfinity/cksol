@@ -393,14 +393,12 @@ mod resubmission {
             .expect_contains_event_eq(EventType::ResubmittedTransaction {
                 old_signature,
                 new_signature,
-                new_slot: RESUBMISSION_SLOT,
                 new_block_height: RESUBMISSION_BLOCK_HEIGHT,
             });
 
         read_state(|s| {
             assert_eq!(s.submitted_transactions().len(), 1);
             let resubmitted = s.submitted_transactions().get(&new_signature).unwrap();
-            assert_eq!(resubmitted.slot, RESUBMISSION_SLOT);
             assert_eq!(resubmitted.block_height, RESUBMISSION_BLOCK_HEIGHT);
         });
     }
@@ -460,7 +458,6 @@ mod resubmission {
             .expect_contains_event_eq(EventType::ResubmittedTransaction {
                 old_signature,
                 new_signature,
-                new_slot: RESUBMISSION_SLOT,
                 new_block_height: RESUBMISSION_BLOCK_HEIGHT,
             });
     }
@@ -543,12 +540,6 @@ fn submit_consolidation_transaction_with_signature(
     let signature = signature(i);
     events::accept_deposit(deposit_id(i), 1_000_000);
     events::mint_deposit(deposit_id(i), i as u64);
-    events::submit_consolidation_at_height(
-        signature,
-        MINTER_ACCOUNT,
-        SUBMISSION_SLOT,
-        block_height,
-        vec![i as u64],
-    );
+    events::submit_consolidation_at_height(signature, MINTER_ACCOUNT, block_height, vec![i as u64]);
     signature
 }

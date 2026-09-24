@@ -127,7 +127,6 @@ async fn submit_consolidation_transaction<R: CanisterRuntime>(
                 signature,
                 message: message.into(),
                 signers,
-                slot: block.slot,
                 purpose: TransactionPurpose::ConsolidateDeposits {
                     mint_indices: mint_indices.into_iter().flatten().collect(),
                 },
