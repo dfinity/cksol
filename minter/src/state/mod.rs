@@ -308,11 +308,6 @@ impl State {
         &mut self.active_tasks
     }
 
-    fn transaction_fee(&self, message: &VersionedMessage) -> Lamport {
-        let VersionedMessage::Legacy(msg) = message;
-        FEE_PER_SIGNATURE * msg.header.num_required_signatures as u64
-    }
-
     fn validate(&self) -> Result<(), InvalidStateError> {
         let canister_ids: BTreeSet<_> = [self.sol_rpc_canister_id, self.ledger_canister_id]
             .into_iter()
@@ -594,7 +589,7 @@ impl State {
                         "Attempted to send transaction for already sent withdrawal request: {burn_index:?}"
                     );
                 }
-                let tx_fee = self.transaction_fee(transaction);
+                let tx_fee = transaction.transaction_fee();
                 self.balance = self
                     .balance
                     .checked_sub(total + tx_fee)
@@ -673,7 +668,7 @@ impl State {
             transaction.purpose,
             TransactionPurpose::ConsolidateDeposits { .. }
         ) {
-            let tx_fee = self.transaction_fee(&transaction.message);
+            let tx_fee = transaction.message.transaction_fee();
             self.balance += transaction
                 .amount
                 .checked_sub(tx_fee)
