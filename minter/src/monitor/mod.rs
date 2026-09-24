@@ -36,8 +36,6 @@ pub const RESUBMIT_TRANSACTIONS_DELAY: Duration = Duration::from_mins(3);
 /// A blockhash is valid for 150 blocks after the height of its block.
 /// See https://solana.com/docs/core/transactions#recent-blockhash
 const MAX_BLOCKHASH_AGE_IN_BLOCKS: u64 = 150;
-/// Approximates [`MAX_BLOCKHASH_AGE_IN_BLOCKS`] in slots for transactions
-/// whose block height is unknown.
 const MAX_BLOCKHASH_AGE_IN_SLOTS: Slot = 150;
 /// Maximum number of signatures per `getSignatureStatuses` RPC call.
 /// See https://solana.com/docs/rpc/http/getsignaturestatuses
@@ -119,6 +117,7 @@ pub async fn finalize_transactions<R: CanisterRuntime>(runtime: R) {
         });
     }
 
+    let mut undetermined_count = 0_usize;
     for signature in &statuses.not_found {
         match blockhash_validity(all_transactions[signature], current_block) {
             BlockhashValidity::Expired => {
@@ -137,13 +136,16 @@ pub async fn finalize_transactions<R: CanisterRuntime>(runtime: R) {
                 });
             }
             BlockhashValidity::Valid => {}
-            BlockhashValidity::Undetermined => log!(
-                Priority::Info,
-                "Block at slot {} has no block height, expiry of transaction {signature} \
-                 will be judged in the next run",
-                current_block.slot
-            ),
+            BlockhashValidity::Undetermined => undetermined_count += 1,
         }
+    }
+    if undetermined_count > 0 {
+        log!(
+            Priority::Info,
+            "Block at slot {} has no block height, expiry of {undetermined_count} \
+             transaction(s) will be judged in the next run",
+            current_block.slot
+        );
     }
 
     if !more_to_process {
@@ -152,7 +154,6 @@ pub async fn finalize_transactions<R: CanisterRuntime>(runtime: R) {
     }
 }
 
-/// The block whose blockhash a submitted transaction uses.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct BlockhashOrigin {
     slot: Slot,

@@ -263,89 +263,89 @@ mod finalization {
 
     #[tokio::test]
     async fn should_judge_expiry_by_block_height_when_known_and_by_slot_otherwise() {
-        let last_valid_block_height = CURRENT_BLOCK_HEIGHT - MAX_BLOCKHASH_AGE_IN_BLOCKS;
-        let last_valid_slot = CURRENT_SLOT - MAX_BLOCKHASH_AGE_IN_SLOTS;
+        let oldest_valid_block_height = CURRENT_BLOCK_HEIGHT - MAX_BLOCKHASH_AGE_IN_BLOCKS;
+        let oldest_valid_slot = CURRENT_SLOT - MAX_BLOCKHASH_AGE_IN_SLOTS;
         let cases = [
             ExpiryCase {
                 name: "heights known, below block limit, slot rule would expire",
                 transaction_slot: EXPIRED_SLOT,
-                transaction_block_height: Some(last_valid_block_height + 1),
+                transaction_block_height: Some(oldest_valid_block_height + 1),
                 current_block_height: Some(CURRENT_BLOCK_HEIGHT),
                 should_expire: false,
             },
             ExpiryCase {
                 name: "heights known, at block limit, slot rule would expire",
                 transaction_slot: EXPIRED_SLOT,
-                transaction_block_height: Some(last_valid_block_height),
+                transaction_block_height: Some(oldest_valid_block_height),
                 current_block_height: Some(CURRENT_BLOCK_HEIGHT),
                 should_expire: false,
             },
             ExpiryCase {
                 name: "heights known, above block limit, slot rule would keep",
                 transaction_slot: RECENT_SLOT,
-                transaction_block_height: Some(last_valid_block_height - 1),
+                transaction_block_height: Some(oldest_valid_block_height - 1),
                 current_block_height: Some(CURRENT_BLOCK_HEIGHT),
                 should_expire: true,
             },
             ExpiryCase {
                 name: "current height unknown, below block limit",
                 transaction_slot: EXPIRED_SLOT,
-                transaction_block_height: Some(last_valid_block_height + 1),
+                transaction_block_height: Some(oldest_valid_block_height + 1),
                 current_block_height: None,
                 should_expire: false,
             },
             ExpiryCase {
                 name: "current height unknown, at block limit",
                 transaction_slot: EXPIRED_SLOT,
-                transaction_block_height: Some(last_valid_block_height),
+                transaction_block_height: Some(oldest_valid_block_height),
                 current_block_height: None,
                 should_expire: false,
             },
             ExpiryCase {
                 name: "current height unknown, above block limit",
                 transaction_slot: EXPIRED_SLOT,
-                transaction_block_height: Some(last_valid_block_height - 1),
+                transaction_block_height: Some(oldest_valid_block_height - 1),
                 current_block_height: None,
                 should_expire: false,
             },
             ExpiryCase {
                 name: "transaction height unknown, current known, below slot limit",
-                transaction_slot: last_valid_slot + 1,
+                transaction_slot: oldest_valid_slot + 1,
                 transaction_block_height: None,
                 current_block_height: Some(CURRENT_BLOCK_HEIGHT),
                 should_expire: false,
             },
             ExpiryCase {
                 name: "transaction height unknown, current known, at slot limit",
-                transaction_slot: last_valid_slot,
+                transaction_slot: oldest_valid_slot,
                 transaction_block_height: None,
                 current_block_height: Some(CURRENT_BLOCK_HEIGHT),
                 should_expire: false,
             },
             ExpiryCase {
                 name: "transaction height unknown, current known, above slot limit",
-                transaction_slot: last_valid_slot - 1,
+                transaction_slot: oldest_valid_slot - 1,
                 transaction_block_height: None,
                 current_block_height: Some(CURRENT_BLOCK_HEIGHT),
                 should_expire: true,
             },
             ExpiryCase {
                 name: "both heights unknown, below slot limit",
-                transaction_slot: last_valid_slot + 1,
+                transaction_slot: oldest_valid_slot + 1,
                 transaction_block_height: None,
                 current_block_height: None,
                 should_expire: false,
             },
             ExpiryCase {
                 name: "both heights unknown, at slot limit",
-                transaction_slot: last_valid_slot,
+                transaction_slot: oldest_valid_slot,
                 transaction_block_height: None,
                 current_block_height: None,
                 should_expire: false,
             },
             ExpiryCase {
                 name: "both heights unknown, above slot limit",
-                transaction_slot: last_valid_slot - 1,
+                transaction_slot: oldest_valid_slot - 1,
                 transaction_block_height: None,
                 current_block_height: None,
                 should_expire: true,
@@ -356,12 +356,11 @@ mod finalization {
             reset_state();
             reset_events();
             setup();
-            let signature = match case.transaction_block_height {
-                Some(block_height) => {
-                    submit_consolidation_transaction_at_height(case.transaction_slot, block_height)
-                }
-                None => submit_consolidation_transaction(case.transaction_slot),
-            };
+            let signature = submit_consolidation_transaction_with_block_height(
+                1,
+                case.transaction_slot,
+                case.transaction_block_height,
+            );
             let current_block = match case.current_block_height {
                 Some(block_height) => confirmed_block_at_height(block_height),
                 None => confirmed_block(),
@@ -392,6 +391,45 @@ mod finalization {
                 );
             });
         }
+    }
+
+    #[tokio::test]
+    async fn should_expire_only_legacy_transaction_when_current_block_has_no_height() {
+        setup();
+        let legacy_signature = submit_consolidation_transaction_with_signature(1, EXPIRED_SLOT);
+        let height_bearing_signature = submit_consolidation_transaction_with_block_height(
+            2,
+            EXPIRED_SLOT,
+            Some(CURRENT_BLOCK_HEIGHT - 2 * MAX_BLOCKHASH_AGE_IN_BLOCKS),
+        );
+
+        let runtime = TestCanisterRuntime::new()
+            .with_increasing_time()
+            .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
+            .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())))
+            .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![None, None])));
+
+        finalize_transactions(runtime).await;
+
+        let events = EventsAssert::from_recorded();
+        assert!(events.contains_event(&EventType::ExpiredTransaction {
+            signature: legacy_signature,
+        }));
+        assert!(!events.contains_event(&EventType::ExpiredTransaction {
+            signature: height_bearing_signature,
+        }));
+        read_state(|s| {
+            assert!(s.transactions_to_resubmit().contains_key(&legacy_signature));
+            assert!(!s.submitted_transactions().contains_key(&legacy_signature));
+            assert!(
+                s.submitted_transactions()
+                    .contains_key(&height_bearing_signature)
+            );
+            assert!(
+                !s.transactions_to_resubmit()
+                    .contains_key(&height_bearing_signature)
+            );
+        });
     }
 
     fn confirmed_status() -> TransactionStatus {
@@ -613,24 +651,31 @@ fn submit_consolidation_transaction(slot: Slot) -> solana_signature::Signature {
     submit_consolidation_transaction_with_signature(1, slot)
 }
 
-fn submit_consolidation_transaction_at_height(
-    slot: Slot,
-    block_height: u64,
-) -> solana_signature::Signature {
-    let signature = signature(1);
-    events::accept_deposit(deposit_id(1), 1_000_000);
-    events::mint_deposit(deposit_id(1), 1);
-    events::submit_consolidation_at_height(signature, MINTER_ACCOUNT, slot, block_height, vec![1]);
-    signature
-}
-
 fn submit_consolidation_transaction_with_signature(
     i: usize,
     slot: Slot,
 ) -> solana_signature::Signature {
+    submit_consolidation_transaction_with_block_height(i, slot, None)
+}
+
+fn submit_consolidation_transaction_with_block_height(
+    i: usize,
+    slot: Slot,
+    block_height: Option<u64>,
+) -> solana_signature::Signature {
     let signature = signature(i);
     events::accept_deposit(deposit_id(i), 1_000_000);
     events::mint_deposit(deposit_id(i), i as u64);
-    events::submit_consolidation(signature, MINTER_ACCOUNT, slot, vec![i as u64]);
+    let mint_indices = vec![i as u64];
+    match block_height {
+        Some(block_height) => events::submit_consolidation_at_height(
+            signature,
+            MINTER_ACCOUNT,
+            slot,
+            block_height,
+            mint_indices,
+        ),
+        None => events::submit_consolidation(signature, MINTER_ACCOUNT, slot, mint_indices),
+    }
     signature
 }

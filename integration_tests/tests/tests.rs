@@ -674,11 +674,12 @@ mod withdrawal_tests {
             other => panic!("Expected TxSent, got: {other:?}"),
         };
 
-        // Advance time to trigger finalize_transactions, which fetches the current slot,
+        // Advance time to trigger finalize_transactions, which fetches the current block,
         // checks statuses (not found), and marks the expired transaction for resubmission.
-        // The SOL RPC canister rounds the slot down to SOL_RPC_SLOT_ROUNDING before returning
-        // it, so we add SOL_RPC_SLOT_ROUNDING + 1 to ensure the rounded slot is strictly
-        // greater than INITIAL_SLOT + MAX_BLOCKHASH_AGE (the expiry threshold).
+        // Expiry is judged by the mocked block height, which is the slot rounded down to
+        // SOL_RPC_SLOT_ROUNDING minus a fixed offset, so the same arithmetic applies to
+        // slots: adding SOL_RPC_SLOT_ROUNDING + 1 ensures the current height is strictly
+        // greater than the submission height + MAX_BLOCKHASH_AGE (the expiry threshold).
         let resubmission_slot = INITIAL_SLOT + MAX_BLOCKHASH_AGE + SOL_RPC_SLOT_ROUNDING + 1;
         setup.advance_time(FINALIZE_TRANSACTIONS_DELAY).await;
         setup
