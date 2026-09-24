@@ -4,9 +4,14 @@ use crate::{
     state::{event::EventType, read_state},
     storage::with_event_iter,
     test_fixtures::{
-        DEPOSIT_CONSOLIDATION_FEE, EventsAssert, MINIMUM_DEPOSIT_AMOUNT,
-        PROCESS_DEPOSIT_REQUIRED_CYCLES, account, deposit::DEPOSITOR_ACCOUNT,
-        init_schnorr_master_key, init_state, runtime::TestCanisterRuntime,
+        BLOCK_INDEX, DEPOSIT_CONSOLIDATION_FEE, EventsAssert, MINIMUM_DEPOSIT_AMOUNT,
+        PROCESS_DEPOSIT_REQUIRED_CYCLES, account,
+        deposit::{
+            DEPOSIT_AMOUNT, DEPOSITOR_ACCOUNT, accepted_deposit_event,
+            deposit_id as manual_deposit_id, minted_event,
+        },
+        events, init_schnorr_master_key, init_state,
+        runtime::TestCanisterRuntime,
     },
 };
 use assert_matches::assert_matches;
@@ -146,6 +151,27 @@ async fn should_queue_deposits_from_minimum_with_sequential_ids() {
             other_account,
             MINIMUM_DEPOSIT_AMOUNT + 1 - RENT_EXEMPTION_THRESHOLD,
         ))
+        .assert_no_more_events();
+}
+
+#[tokio::test]
+async fn should_fail_while_process_deposit_deposit_awaits_consolidation() {
+    init_state();
+    events::accept_deposit(manual_deposit_id(), DEPOSIT_AMOUNT);
+    events::mint_deposit(manual_deposit_id(), BLOCK_INDEX);
+    let runtime =
+        TestCanisterRuntime::new().add_msg_cycles_available(PROCESS_DEPOSIT_REQUIRED_CYCLES);
+
+    let result = deposit_sol(&runtime, EXPLICIT_DEFAULT_SUBACCOUNT).await;
+
+    assert_matches!(
+        result,
+        Err(DepositSolError::TemporarilyUnavailable(e)) => assert!(e.contains("awaiting consolidation"))
+    );
+    assert!(runtime.msg_cycles_accepted().is_empty());
+    EventsAssert::from_recorded()
+        .expect_event_eq(accepted_deposit_event())
+        .expect_event_eq(minted_event(BLOCK_INDEX))
         .assert_no_more_events();
 }
 

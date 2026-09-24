@@ -64,6 +64,8 @@ fn get_deposit_address(args: GetDepositAddressArgs) -> Address {
     cksol_minter::address::get_deposit_address(&account).into()
 }
 
+// TODO hq-3k1.6: This endpoint is superseded by `deposit_sol` and will be removed by the last
+// PR of the stack, together with the consolidation check that `deposit_sol` needs meanwhile.
 #[ic_cdk::update]
 async fn process_deposit(args: ProcessDepositArgs) -> Result<DepositStatus, ProcessDepositError> {
     let account = assert_non_anonymous_account(args.owner, args.subaccount);

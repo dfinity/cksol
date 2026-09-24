@@ -1135,6 +1135,52 @@ mod deposit_sol_tests {
     }
 
     #[tokio::test]
+    async fn should_fail_while_process_deposit_deposit_awaits_consolidation() {
+        let setup = SetupBuilder::new().with_proxy_canister().build().await;
+        let minted = setup
+            .minter()
+            .with_http_mocks(MockBuilder::new().get_deposit_transaction().build())
+            .process_deposit(default_process_deposit_args())
+            .await;
+        assert_matches!(minted, Ok(DepositStatus::Minted { .. }));
+        let caller_cycles_before = setup.proxy().cycle_balance().await;
+
+        let result = setup.minter().deposit_sol(DEFAULT_CALLER_ACCOUNT).await;
+
+        assert_matches!(
+            result,
+            Err(DepositSolError::TemporarilyUnavailable(e)) if e.contains("awaiting consolidation")
+        );
+        assert_eq!(setup.proxy().cycle_balance().await, caller_cycles_before);
+
+        setup.advance_time(DEPOSIT_CONSOLIDATION_DELAY).await;
+        setup
+            .execute_http_mocks(
+                MockBuilder::with_start_id(4)
+                    .submit_transaction(
+                        100_000_000,
+                        "4sGjMW1sUnHzSxGspuhpqLDx6wiyjNtZAMdL4VZHirAn",
+                        "5VERv8NMvzbJMEkV8xnrLkEaWRtSz9CosKDYjCJjBRnbJLgp8uirBgmQpjKhoR4tjF3ZpRzrFmBV6UjKdiSZkQUW",
+                    )
+                    .build(),
+            )
+            .await;
+        let deposit_id = setup
+            .minter()
+            .with_http_mocks(
+                MockBuilder::with_start_id(16)
+                    .get_balance(BALANCE_ABOVE_MINIMUM)
+                    .build(),
+            )
+            .deposit_sol(DEFAULT_CALLER_ACCOUNT)
+            .await;
+
+        assert_eq!(deposit_id, Ok(0));
+
+        setup.drop().await;
+    }
+
+    #[tokio::test]
     async fn should_fail_for_concurrent_access() {
         let setup = SetupBuilder::new().with_proxy_canister().build().await;
         let mocks = SharedMockHttpOutcalls::new(

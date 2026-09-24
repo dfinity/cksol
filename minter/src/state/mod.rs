@@ -226,6 +226,12 @@ impl State {
         &self.deposits_to_consolidate
     }
 
+    pub fn has_deposit_awaiting_consolidation(&self, account: &Account) -> bool {
+        self.deposits_to_consolidate
+            .values()
+            .any(|(depositor, _)| depositor == account)
+    }
+
     pub fn submitted_transactions(&self) -> &InsertionOrderedMap<Signature, SolanaTransaction> {
         &self.submitted_transactions
     }
