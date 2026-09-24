@@ -1173,6 +1173,44 @@ mod deposit_sol_tests {
     }
 
     #[tokio::test]
+    async fn should_treat_default_subaccount_spellings_as_one_account() {
+        let setup = SetupBuilder::new().with_proxy_canister().build().await;
+        let explicit_default_subaccount = Account {
+            subaccount: Some([0; 32]),
+            ..DEFAULT_CALLER_ACCOUNT
+        };
+        let deposit_id = setup
+            .minter()
+            .with_http_mocks(
+                MockBuilder::new()
+                    .get_balance(BALANCE_ABOVE_MINIMUM)
+                    .build(),
+            )
+            .deposit_sol(DEFAULT_CALLER_ACCOUNT)
+            .await
+            .expect("first deposit should be queued");
+
+        let result = setup
+            .minter()
+            .deposit_sol(explicit_default_subaccount)
+            .await;
+
+        assert_eq!(result, Err(DepositSolError::DepositInFlight { deposit_id }));
+        setup.minter().assert_that_events().await.satisfy(|events| {
+            check!(
+                events[1..]
+                    == [EventType::QueuedDeposit {
+                        deposit_id,
+                        account: DEFAULT_CALLER_ACCOUNT,
+                        sweepable_amount: BALANCE_ABOVE_MINIMUM - RENT_EXEMPTION_THRESHOLD,
+                    }]
+            );
+        });
+
+        setup.drop().await;
+    }
+
+    #[tokio::test]
     async fn should_fail_with_insufficient_cycles() {
         let setup = SetupBuilder::new().with_proxy_canister().build().await;
 

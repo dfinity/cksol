@@ -1,7 +1,7 @@
 use crate::{
     constants::{GET_BALANCE_CYCLES, RENT_EXEMPTION_THRESHOLD},
     deposit::sweep::{deposit_sol, deposit_status, sweepable_amount},
-    state::event::EventType,
+    state::{event::EventType, read_state},
     test_fixtures::{
         DEPOSIT_CONSOLIDATION_FEE, EventsAssert, MINIMUM_DEPOSIT_AMOUNT,
         PROCESS_DEPOSIT_REQUIRED_CYCLES, account, deposit::DEPOSITOR_ACCOUNT,
@@ -158,6 +158,16 @@ async fn should_reject_deposit_in_flight_without_reading_balance() {
 }
 
 #[tokio::test]
+async fn should_reject_explicit_default_subaccount_as_deposit_in_flight() {
+    assert_second_spelling_is_in_flight(DEPOSITOR_ACCOUNT, EXPLICIT_DEFAULT_SUBACCOUNT).await;
+}
+
+#[tokio::test]
+async fn should_reject_omitted_default_subaccount_as_deposit_in_flight() {
+    assert_second_spelling_is_in_flight(EXPLICIT_DEFAULT_SUBACCOUNT, DEPOSITOR_ACCOUNT).await;
+}
+
+#[tokio::test]
 #[should_panic(expected = "the owner must be non-anonymous")]
 async fn should_reject_anonymous_owner() {
     let anonymous_account = Account {
@@ -166,6 +176,41 @@ async fn should_reject_anonymous_owner() {
     };
 
     let _ = deposit_sol(&TestCanisterRuntime::new(), anonymous_account).await;
+}
+
+const EXPLICIT_DEFAULT_SUBACCOUNT: Account = Account {
+    subaccount: Some([0; 32]),
+    ..DEPOSITOR_ACCOUNT
+};
+
+async fn assert_second_spelling_is_in_flight(first: Account, second: Account) {
+    init_state();
+    init_schnorr_master_key();
+    let deposit_id = deposit_sol(
+        &runtime().add_get_balance_response(BALANCE_AT_MINIMUM),
+        first,
+    )
+    .await
+    .expect("first deposit should be queued");
+
+    let result = deposit_sol(
+        &TestCanisterRuntime::new().add_msg_cycles_available(PROCESS_DEPOSIT_REQUIRED_CYCLES),
+        second,
+    )
+    .await;
+
+    assert_eq!(result, Err(DepositSolError::DepositInFlight { deposit_id }));
+    assert_eq!(
+        read_state(|state| state.in_flight_deposit_id(&second)),
+        Some(deposit_id)
+    );
+    EventsAssert::from_recorded()
+        .expect_event_eq(queued_deposit_event(
+            deposit_id,
+            first,
+            MINIMUM_DEPOSIT_AMOUNT,
+        ))
+        .assert_no_more_events();
 }
 
 fn queued_deposit_event(deposit_id: u64, account: Account, sweepable_amount: Lamport) -> EventType {
