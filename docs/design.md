@@ -298,7 +298,7 @@ Proposed values for the parameters are provided in this list:
 
 #### 3.1.3. Manual Flow
 
-A user who has transferred SOL to their deposit address asks the ckSOL minter to *sweep* that address. The user does not identify individual Solana transactions: the ckSOL minter reads the balance of the deposit address, moves it to its main account, and mints ckSOL once that sweep is finalized. As a consequence, several transfers that are each below the minimum deposit amount are credited together once their sum exceeds it, and deposits from centralized exchanges, which typically do not show the transaction signature to the user, need nothing but the deposit address.
+A user first obtains their deposit address with `get_deposit_address` and transfers SOL to it, as in the automated flow. The user then asks the ckSOL minter to *sweep* that address. The user does not identify individual Solana transactions: the ckSOL minter reads the balance of the deposit address, moves it to its main account, and mints ckSOL once that sweep is finalized. As a consequence, several transfers that are each below the minimum deposit amount are credited together once their sum exceeds it, and deposits from centralized exchanges, which typically do not show the transaction signature to the user, need nothing but the deposit address.
 
 The manual flow is depicted in the following figure. The sweep reuses the transaction submission flow and the finalization flow described in [Section 3.1.4](#314-consolidation) and [Section 3.2.2](#322-finalization-and-resubmissions).
 
@@ -413,9 +413,9 @@ sequenceDiagram
     deactivate Minter
 ```
 
-All transactions are created on a timer. Since a transaction must contain a recent block hash, such a block hash must be obtained first: A `getSlot` call is used to get a recent slot, followed by a `getBlock` call to retrieve block details, in particular the block hash, for the slot received in the first step. Note that it is possible that there is no block for a certain slot, in which case `getSlot` needs to be called again, followed by another call to `getBlock`. The figure only shows the happy path of one call each. Given a recent block hash, the transaction is built, obtaining an EdDSA signature for each transfer to be made within that transaction. The block height of the block whose hash is used is persisted together with the transaction: a block hash is valid for 150 blocks after that height, and this *last valid block height* is what expiry is later checked against. Once the transaction is signed and serialized, it is sent to the SOL RPC canister, which forwards it to the RPC providers.
+All transactions are created on a timer. Since a transaction must contain a recent block hash, such a block hash must be obtained first: A `getSlot` call is used to get a recent slot, followed by a `getBlock` call to retrieve block details, in particular the block hash, for the slot received in the first step. Note that it is possible that there is no block for a certain slot, in which case `getSlot` needs to be called again, followed by another call to `getBlock`. The figure only shows the happy path of one call each. Given a recent block hash, the transaction is built, obtaining an EdDSA signature for each transfer to be made within that transaction. The block height of the block whose hash is used is persisted together with the transaction. A block hash is valid for 150 blocks after that height, so the *last valid block height* of the transaction is the persisted height plus 150, and that is what expiry is later checked against. Once the transaction is signed and serialized, it is sent to the SOL RPC canister, which forwards it to the RPC providers.
 
-A timer is run periodically, triggering the consolidation. It is likely sufficient to invoke the consolidation at a low frequency, such as once every 10 minutes. A single SOL transfer requires roughly 70-90 bytes in a transaction. Since the maximum transaction size is 1232 bytes, up to approximately **10 consolidation transfers** per transaction are possible. Whenever the timer executes and there is *any* unconsolidated address, then consolidation transactions are created and issued, with up to 10 transfers per transaction, until *all* deposits have been consolidated. Multiple transactions can be batched in a single HTTPS outcall.
+A timer is run periodically, triggering the consolidation. It is likely sufficient to invoke the consolidation at a low frequency, such as once every 10 minutes. A single SOL transfer requires roughly 70-90 bytes in a transaction. Since the maximum transaction size is 1232 bytes, up to approximately **10 consolidation transfers** per transaction are possible. Whenever the timer executes and there is *any* queued deposit, i.e., a deposit queued by `deposit_sol` as described in [Section 3.1.3](#313-manual-flow), then consolidation transactions are created and issued, with up to 10 transfers per transaction, until *all* queued deposits have been swept. A deposit address that has not been queued by `deposit_sol` is never consolidated, since no record would exist to credit its owner. Multiple transactions can be batched in a single HTTPS outcall.
 
 A concrete mainnet example of a transaction that makes two transfers to the same destination address can be viewed [here](https://solscan.io/tx/5CzNKyQsSfAtCQAxnj6acuhQZEh5J4B8aZzV1ArvvM8vodUr4vcQu7Co8wzbHrSYMW4h8ikg67bqCZSU4AHiL1D9).
 
@@ -481,7 +481,7 @@ sequenceDiagram
 
 It is possible that a transaction is not accepted, i.e., it is not found in any of the statuses listed above. Since ckSOL tokens are not reimbursed, the transaction must be resubmitted until it is confirmed; however, care has to be taken to ensure that there is no double spending. Solana transactions refer to a recent block hash. The block hash may not be more than 150 blocks in the past, which corresponds to roughly 90 seconds.
 
-A transaction is expired once the current block height, obtained with a `getBlockHeight` call at the `finalized` commitment level, exceeds the last valid block height persisted with the transaction. Expiry is never determined by counting slots, since slots can be skipped and a transaction declared expired too early could still land. If there are expired transactions that are not found, i.e., they did not even reach the status `processed`, they need to be resubmitted. The different states and their transitions internal to the ckSOL minter are shown in the following figure.
+A transaction is expired once the current block height, obtained with a `getBlockHeight` call at the `finalized` commitment level, exceeds its last valid block height, i.e., the block height persisted with the transaction plus 150. Expiry is never determined by counting slots, since slots can be skipped and a transaction declared expired too early could still land. If there are expired transactions that are not found, i.e., they did not even reach the status `processed`, they need to be resubmitted. The different states and their transitions internal to the ckSOL minter are shown in the following figure.
 
 ```mermaid
 stateDiagram-v2
@@ -490,13 +490,15 @@ stateDiagram-v2
     Submission --> Submitted
     Submitted --> Succeeded: confirmation_status = finalized and err = null
     Submitted --> Failed: confirmation_status = finalized and err != null
-    Submitted --> PendingResubmission: transaction expired
+    Submitted --> PendingResubmission: withdrawal expired
+    Submitted --> Dropped: sweep expired
     PendingResubmission --> Submission
 
     Submission: ⏱️ Transaction submission flow
     Succeeded: Succeeded (store transaction_id)
     Failed: Failed (store whole transaction)
     PendingResubmission: Pending resubmission
+    Dropped: Dropped (deposits marked dropped, no resubmission)
 ```
 
 The withdrawal and consolidation flows result in the submission of a transaction, which is then in the `Submitted` state. The status of submitted transactions is checked on a timer as outlined above. If a transaction reaches the confirmation status `finalized`, there are two cases: If the transaction was finalized successfully, i.e., without errors, the transaction transitions to the state `Succeeded` and its ID is stored permanently. If there was an error, the transaction transitions to the state `Failed` and is stored in its entirety so that it can be analyzed what happened. Ideally, no transaction ever ends up in this state. However, it is possible for transactions to fail, for example by attempting to withdraw SOL to a program account, which is not allowed. As there is no reimbursement flow, the user's funds would be stuck in this case. Storing the whole failed transaction ensures that the funds are not lost and appropriate actions may be taken when such transactions are encountered.
