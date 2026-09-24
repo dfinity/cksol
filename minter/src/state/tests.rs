@@ -1,6 +1,7 @@
 use super::{event::*, *};
 use crate::{
     constants::{FEE_PER_SIGNATURE, GET_TRANSACTION_CYCLES, RENT_EXEMPTION_THRESHOLD},
+    sol_transfer::MAX_SIGNATURES,
     state::{audit::process_event, read_state},
     test_fixtures::{
         AUTOMATED_DEPOSIT_FEE, DEPOSIT_CONSOLIDATION_FEE, MANUAL_DEPOSIT_FEE,
@@ -87,9 +88,10 @@ mod state_validation {
             },
             |e| matches!(e, InvalidStateError::InvalidDepositFees { .. }),
         );
-        // minimum_deposit_amount below sol_transfer_fee + rent exemption threshold
+        // minimum_deposit_amount below the fee of a full sweep + rent exemption threshold
         // (automated_deposit_fee and manual_deposit_fee set to 1 to isolate this condition)
-        let minimum_required = FEE_PER_SIGNATURE + RENT_EXEMPTION_THRESHOLD;
+        let maximum_sweep_fee = MAX_SIGNATURES * FEE_PER_SIGNATURE;
+        let minimum_required = maximum_sweep_fee + RENT_EXEMPTION_THRESHOLD;
         assert_fails_both(
             InitArgs {
                 automated_deposit_fee: 1,
@@ -103,7 +105,13 @@ mod state_validation {
                 minimum_deposit_amount: Some(minimum_required - 1),
                 ..Default::default()
             },
-            |e| matches!(e, InvalidStateError::InvalidMinimumDepositAmount { .. }),
+            |e| {
+                e == &InvalidStateError::InvalidMinimumDepositAmount {
+                    minimum_deposit_amount: minimum_required - 1,
+                    maximum_sweep_fee,
+                    rent_exemption_threshold: RENT_EXEMPTION_THRESHOLD,
+                }
+            },
         );
         // withdrawal_fee exceeds minimum_withdrawal_amount - rent exemption threshold
         assert_fails_both(
@@ -191,8 +199,8 @@ mod state_validation {
                 ..Default::default()
             },
         );
-        // minimum_deposit_amount can equal sol_transfer_fee + rent exemption threshold
-        let minimum_required = FEE_PER_SIGNATURE + RENT_EXEMPTION_THRESHOLD;
+        // minimum_deposit_amount can equal the fee of a full sweep + rent exemption threshold
+        let minimum_required = MAX_SIGNATURES * FEE_PER_SIGNATURE + RENT_EXEMPTION_THRESHOLD;
         assert_succeeds_both(
             InitArgs {
                 automated_deposit_fee: 1,
