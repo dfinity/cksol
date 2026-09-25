@@ -1,5 +1,8 @@
 use crate::{
-    guard::{GuardError, MAX_CONCURRENT, TimerGuard, TimerGuardError, process_deposit_guard},
+    guard::{
+        GuardError, MAX_CONCURRENT, TimerGuard, TimerGuardError, deposit_sol_guard,
+        process_deposit_guard,
+    },
     state::TaskType,
     test_fixtures::init_state,
 };
@@ -44,6 +47,19 @@ mod guard {
             let _guard = process_deposit_guard(account).unwrap();
         }
         let _guard = process_deposit_guard(account).unwrap();
+    }
+
+    #[test]
+    fn should_guard_deposit_sol_independently_of_process_deposit() {
+        init_state();
+
+        let account = account(0, None);
+        let _process_deposit_guard = process_deposit_guard(account).unwrap();
+        let _deposit_sol_guard = deposit_sol_guard(account).unwrap();
+
+        let res = deposit_sol_guard(account).err();
+
+        assert_eq!(res, Some(GuardError::AlreadyProcessing));
     }
 
     #[test]

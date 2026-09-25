@@ -1,11 +1,13 @@
 use crate::{
     rpc::{
-        Block, BlockHeight, GetRecentBlockError, GetTransactionError, SubmitTransactionError,
-        get_recent_block, get_transaction, submit_transaction,
+        Block, BlockHeight, GetBalanceError, GetRecentBlockError, GetTransactionError,
+        SubmitTransactionError, get_balance, get_recent_block, get_transaction, submit_transaction,
     },
     test_fixtures::{
         confirmed_block, confirmed_block_at_height,
-        deposit::{legacy_deposit_transaction, legacy_deposit_transaction_signature},
+        deposit::{
+            DEPOSIT_ADDRESS, legacy_deposit_transaction, legacy_deposit_transaction_signature,
+        },
         init_state,
         runtime::TestCanisterRuntime,
     },
@@ -14,6 +16,55 @@ use assert_matches::assert_matches;
 use ic_canister_runtime::IcError;
 use sol_rpc_types::{HttpOutcallError, RpcError, RpcSource, SupportedRpcProviderId};
 use solana_transaction::{Message, Transaction};
+
+mod get_balance_tests {
+    use super::*;
+    use sol_rpc_types::Lamport;
+
+    type MultiRpcResult = sol_rpc_types::MultiRpcResult<Lamport>;
+
+    #[tokio::test]
+    async fn should_return_balance() {
+        init_state();
+        let runtime =
+            TestCanisterRuntime::new().add_stub_response(MultiRpcResult::Consistent(Ok(42)));
+
+        let result = get_balance(&runtime, DEPOSIT_ADDRESS).await;
+
+        assert_eq!(result, Ok(42));
+    }
+
+    #[tokio::test]
+    async fn should_fail_if_call_fails_or_results_are_wrong() {
+        init_state();
+        let rpc_error = RpcError::ValidationError("Error 1".to_string());
+        let inconsistent = vec![(
+            RpcSource::Supported(SupportedRpcProviderId::AnkrMainnet),
+            Err(rpc_error.clone()),
+        )];
+
+        for (runtime, expected) in [
+            (
+                TestCanisterRuntime::new().add_stub_error(IcError::CallPerformFailed),
+                GetBalanceError::IcError(IcError::CallPerformFailed),
+            ),
+            (
+                TestCanisterRuntime::new()
+                    .add_stub_response(MultiRpcResult::Consistent(Err(rpc_error.clone()))),
+                GetBalanceError::RpcError(rpc_error.clone()),
+            ),
+            (
+                TestCanisterRuntime::new()
+                    .add_stub_response(MultiRpcResult::Inconsistent(inconsistent.clone())),
+                GetBalanceError::InconsistentRpcResults,
+            ),
+        ] {
+            let result = get_balance(&runtime, DEPOSIT_ADDRESS).await;
+
+            assert_eq!(result, Err(expected));
+        }
+    }
+}
 
 // TODO DEFI-2643: Test behavior with cycles
 mod get_transaction_tests {

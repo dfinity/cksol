@@ -608,6 +608,13 @@ pub mod arb {
             arb_signature().prop_map(|signature| EventType::SucceededTransaction { signature }),
             arb_signature().prop_map(|signature| EventType::FailedTransaction { signature }),
             arb_signature().prop_map(|signature| EventType::ExpiredTransaction { signature }),
+            (any::<u64>(), arb_account(), any::<u64>()).prop_map(
+                |(deposit_id, account, sweepable_amount)| EventType::QueuedDeposit {
+                    deposit_id,
+                    account,
+                    sweepable_amount,
+                }
+            ),
         ]
     }
 

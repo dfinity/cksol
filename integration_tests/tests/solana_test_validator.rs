@@ -1,14 +1,15 @@
 use candid::Principal;
 use cksol_int_tests::{
     Setup,
-    fixtures::MINTER_ADDRESS,
+    fixtures::{MINTER_ADDRESS, RENT_EXEMPTION_THRESHOLD},
     ledger_init_args::LEDGER_TRANSFER_FEE,
     validator::{FEE_PER_SIGNATURE, SolanaTestValidator, wait_for_withdrawal_finalized},
 };
-use cksol_types::WithdrawalArgs;
+use cksol_types::{DepositSolStatus, WithdrawalArgs};
 use icrc_ledger_types::icrc1::account::Account;
 use itertools::Itertools;
 use sol_rpc_types::Lamport;
+use solana_address::Address;
 use solana_keypair::{Keypair, Signer};
 use solana_native_token::LAMPORTS_PER_SOL;
 use std::time::Duration;
@@ -242,4 +243,35 @@ async fn wait_for_minter_balance(setup: &Setup, expected_balance: Lamport) {
         setup.advance_time_and_settle(Duration::from_mins(1)).await;
     }
     panic!("Minter balance did not reach {expected_balance} within timeout");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn should_queue_deposit_after_transfer_to_deposit_address() {
+    let validator = SolanaTestValidator::start().await;
+    let setup = validator.setup().await;
+    let account = Account {
+        owner: DEPOSITOR,
+        subaccount: Some([0xAB; 32]),
+    };
+    let deposit_amount = LAMPORTS_PER_SOL / 10;
+    let deposit_address: Address = setup.minter().get_deposit_address(account).await.into();
+    validator.transfer_to(deposit_address, deposit_amount).await;
+    validator
+        .wait_for_finalized_balance(&deposit_address, 0)
+        .await;
+
+    let deposit_id = setup
+        .minter()
+        .deposit_sol(account)
+        .await
+        .expect("deposit_sol should queue a sweep");
+
+    assert_eq!(
+        setup.minter().deposit_status(deposit_id).await,
+        DepositSolStatus::Queued {
+            sweepable_amount: deposit_amount - RENT_EXEMPTION_THRESHOLD
+        }
+    );
+
+    setup.drop().await;
 }

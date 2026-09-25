@@ -1,15 +1,19 @@
 use crate::{
     constants::{
-        GET_SIGNATURE_STATUSES_CYCLES, GET_TRANSACTION_CYCLES, MAX_HTTP_OUTCALL_RESPONSE_BYTES,
+        GET_BALANCE_CYCLES, GET_SIGNATURE_STATUSES_CYCLES, GET_TRANSACTION_CYCLES,
+        MAX_HTTP_OUTCALL_RESPONSE_BYTES,
     },
     runtime::CanisterRuntime,
     state::read_state,
 };
-use cksol_types::ProcessDepositError;
+use cksol_types::{DepositSolError, ProcessDepositError};
 use derive_more::From;
 use ic_canister_runtime::IcError;
 use minicbor::{Decode, Encode};
-use sol_rpc_types::{CommitmentLevel, GetTransactionEncoding, MultiRpcResult, RpcError, Slot};
+use sol_rpc_types::{
+    CommitmentLevel, GetTransactionEncoding, Lamport, MultiRpcResult, RpcError, Slot,
+};
+use solana_address::Address;
 use solana_hash::Hash;
 use solana_signature::Signature;
 use solana_transaction::Transaction;
@@ -52,6 +56,39 @@ pub enum GetTransactionError {
 impl From<GetTransactionError> for ProcessDepositError {
     fn from(error: GetTransactionError) -> Self {
         ProcessDepositError::TemporarilyUnavailable(error.to_string())
+    }
+}
+
+pub async fn get_balance<R: CanisterRuntime>(
+    runtime: &R,
+    address: Address,
+) -> Result<Lamport, GetBalanceError> {
+    let result = read_state(|state| state.sol_rpc_client(runtime.inter_canister_call_runtime()))
+        .get_balance(address)
+        .with_commitment(CommitmentLevel::Finalized)
+        .with_cycles(GET_BALANCE_CYCLES)
+        .try_send()
+        .await;
+    match result? {
+        MultiRpcResult::Consistent(Ok(balance)) => Ok(balance),
+        MultiRpcResult::Consistent(Err(e)) => Err(GetBalanceError::RpcError(e)),
+        MultiRpcResult::Inconsistent(_) => Err(GetBalanceError::InconsistentRpcResults),
+    }
+}
+
+#[derive(Debug, PartialEq, Error, From)]
+pub enum GetBalanceError {
+    #[error("Error while calling SOL RPC canister: {0}")]
+    IcError(IcError),
+    #[error("RPC error while fetching balance: {0}")]
+    RpcError(RpcError),
+    #[error("Inconsistent RPC results for balance")]
+    InconsistentRpcResults,
+}
+
+impl From<GetBalanceError> for DepositSolError {
+    fn from(error: GetBalanceError) -> Self {
+        DepositSolError::TemporarilyUnavailable(error.to_string())
     }
 }
 

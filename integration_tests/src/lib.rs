@@ -2,9 +2,9 @@ use crate::{events::MinterEventAssert, ledger_init_args::ledger_init_args};
 use candid::{CandidType, Decode, Encode, Nat, Principal, utils::ArgumentEncoder};
 use canlog::{Log, LogEntry};
 use cksol_types::{
-    Address, DepositStatus, GetDepositAddressArgs, MinterInfo, ProcessDepositArgs,
-    ProcessDepositError, WithdrawalArgs, WithdrawalError, WithdrawalOk, WithdrawalStatus,
-    WithdrawalStatusArgs,
+    Address, DepositSolArgs, DepositSolError, DepositSolId, DepositSolStatus, DepositStatus,
+    GetDepositAddressArgs, MinterInfo, ProcessDepositArgs, ProcessDepositError, WithdrawalArgs,
+    WithdrawalError, WithdrawalOk, WithdrawalStatus, WithdrawalStatusArgs,
 };
 use cksol_types_internal::{
     MinterArg,
@@ -292,10 +292,13 @@ impl Setup {
     pub fn proxy(&self) -> Canister<'_> {
         Canister {
             runtime: self.runtime(Setup::DEFAULT_CALLER),
-            id: self
-                .proxy_canister_id
-                .expect("Proxy canister not installed"),
+            id: self.proxy_canister_id(),
         }
+    }
+
+    pub fn proxy_canister_id(&self) -> Principal {
+        self.proxy_canister_id
+            .expect("Proxy canister not installed")
     }
 
     pub fn sol_rpc(&self) -> SolRpcClient<PocketIcRuntime<'_>> {
@@ -424,6 +427,46 @@ impl CkSolMinter<'_> {
     ) -> Result<Result<DepositStatus, ProcessDepositError>, String> {
         self.try_update_call("process_deposit", (args,), cycles)
             .await
+    }
+
+    pub async fn deposit_sol(
+        &self,
+        args: impl Into<DepositSolArgs>,
+    ) -> Result<DepositSolId, DepositSolError> {
+        self.try_deposit_sol(args)
+            .await
+            .expect("deposit_sol failed")
+    }
+
+    pub async fn deposit_sol_with_cycles(
+        &self,
+        args: impl Into<DepositSolArgs>,
+        cycles: u128,
+    ) -> Result<DepositSolId, DepositSolError> {
+        self.try_deposit_sol_with_cycles(args, cycles)
+            .await
+            .expect("deposit_sol failed")
+    }
+
+    pub async fn try_deposit_sol(
+        &self,
+        args: impl Into<DepositSolArgs>,
+    ) -> Result<Result<DepositSolId, DepositSolError>, String> {
+        self.try_deposit_sol_with_cycles(args, Setup::DEFAULT_PROCESS_DEPOSIT_REQUIRED_CYCLES)
+            .await
+    }
+
+    pub async fn try_deposit_sol_with_cycles(
+        &self,
+        args: impl Into<DepositSolArgs>,
+        cycles: u128,
+    ) -> Result<Result<DepositSolId, DepositSolError>, String> {
+        self.try_update_call("deposit_sol", (args.into(),), cycles)
+            .await
+    }
+
+    pub async fn deposit_status(&self, deposit_id: DepositSolId) -> DepositSolStatus {
+        self.query_call("deposit_status", (deposit_id,)).await
     }
 
     pub async fn withdraw(&self, args: WithdrawalArgs) -> Result<WithdrawalOk, WithdrawalError> {

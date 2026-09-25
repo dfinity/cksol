@@ -7,7 +7,7 @@ use serde::Deserialize;
 use sol_rpc_types::{Lamport, Pubkey as Address, Signature};
 
 /// A minter event that can be serialized to Candid.
-#[derive(Clone, Debug, CandidType, Deserialize)]
+#[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]
 pub struct Event {
     /// The canister time at which the minter generated this event.
     pub timestamp: u64,
@@ -16,7 +16,7 @@ pub struct Event {
 }
 
 /// The type of a minter event.
-#[derive(Clone, Debug, CandidType, Deserialize)]
+#[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]
 pub enum EventType {
     /// The minter initialization event.
     /// Must be the first event in the log.
@@ -111,10 +111,19 @@ pub enum EventType {
         /// The signature of the expired Solana transaction.
         signature: Signature,
     },
+    /// A user queued the deposit address of an account for a sweep via `deposit_sol`.
+    QueuedDeposit {
+        /// The identifier of the queued deposit.
+        deposit_id: u64,
+        /// The account to which the minter should mint ckSOL once the sweep is finalized.
+        account: Account,
+        /// The amount that will be swept from the deposit address.
+        sweepable_amount: Lamport,
+    },
 }
 
 /// The purpose of a submitted Solana transaction.
-#[derive(Clone, Debug, CandidType, Deserialize)]
+#[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]
 pub enum TransactionPurpose {
     /// Consolidate deposited funds into the minter's main account.
     ConsolidateDeposits {
@@ -129,14 +138,14 @@ pub enum TransactionPurpose {
 }
 
 /// A versioned Solana transaction message.
-#[derive(Clone, Debug, CandidType, Deserialize)]
+#[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]
 pub enum VersionedTransactionMessage {
     /// A legacy Solana transaction message, serialized with bincode.
     Legacy(Vec<u8>),
 }
 
 /// Arguments for the `get_events` endpoint.
-#[derive(Clone, Debug, CandidType, Deserialize)]
+#[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]
 pub struct GetEventsArgs {
     /// The index of the first event to return.
     pub start: u64,
@@ -145,7 +154,7 @@ pub struct GetEventsArgs {
 }
 
 /// The result of a `get_events` call.
-#[derive(Clone, Debug, CandidType, Deserialize)]
+#[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]
 pub struct GetEventsResult {
     /// The events in the requested range.
     pub events: Vec<Event>,

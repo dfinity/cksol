@@ -5,14 +5,14 @@ use cksol_int_tests::{
     CkSolMinter, Setup, SetupBuilder,
     fixtures::{
         DEFAULT_CALLER_ACCOUNT, DEFAULT_CALLER_DEPOSIT_ADDRESS, DEPOSIT_AMOUNT,
-        EXPECTED_MINT_AMOUNT, MockBuilder, SharedMockHttpOutcalls, default_process_deposit_args,
-        deposit_transaction_signature,
+        EXPECTED_MINT_AMOUNT, MockBuilder, RENT_EXEMPTION_THRESHOLD, SharedMockHttpOutcalls,
+        default_process_deposit_args, deposit_transaction_signature,
     },
 };
 use cksol_types::{
-    DepositId, DepositStatus, GetDepositAddressArgs, InsufficientCyclesError, Lamport, MinterInfo,
-    ProcessDepositArgs, ProcessDepositError, TxFinalizedStatus, WithdrawalArgs, WithdrawalError,
-    WithdrawalStatus,
+    DepositId, DepositSolArgs, DepositSolError, DepositSolStatus, DepositStatus,
+    GetDepositAddressArgs, InsufficientCyclesError, Lamport, MinterInfo, ProcessDepositArgs,
+    ProcessDepositError, TxFinalizedStatus, WithdrawalArgs, WithdrawalError, WithdrawalStatus,
 };
 use cksol_types_internal::{
     UpgradeArgs,
@@ -1015,6 +1015,220 @@ mod process_deposit_tests {
     }
 }
 
+mod deposit_sol_tests {
+    use super::*;
+
+    const BALANCE_ABOVE_MINIMUM: Lamport = Setup::DEFAULT_MINIMUM_DEPOSIT_AMOUNT + 1;
+
+    #[tokio::test]
+    async fn should_queue_deposit_for_caller_if_owner_is_omitted() {
+        let setup = SetupBuilder::new().with_proxy_canister().build().await;
+        let subaccount = Some([1; 32]);
+        let minter = setup.minter().with_http_mocks(
+            MockBuilder::new()
+                .get_balance(BALANCE_ABOVE_MINIMUM)
+                .build(),
+        );
+
+        let deposit_id = minter
+            .deposit_sol(DepositSolArgs {
+                owner: None,
+                subaccount,
+            })
+            .await
+            .expect("deposit_sol should queue a sweep");
+
+        assert_eq!(deposit_id, 0);
+        assert_eq!(
+            minter.deposit_status(deposit_id).await,
+            DepositSolStatus::Queued {
+                sweepable_amount: BALANCE_ABOVE_MINIMUM - RENT_EXEMPTION_THRESHOLD
+            }
+        );
+        let proxy = setup.proxy_canister_id();
+        setup.minter().assert_that_events().await.satisfy(|events| {
+            check!(
+                events[1..]
+                    == [EventType::QueuedDeposit {
+                        deposit_id,
+                        account: Account {
+                            owner: proxy,
+                            subaccount,
+                        },
+                        sweepable_amount: BALANCE_ABOVE_MINIMUM - RENT_EXEMPTION_THRESHOLD,
+                    }]
+            );
+        });
+
+        setup.drop().await;
+    }
+
+    #[tokio::test]
+    async fn should_charge_balance_read_and_consolidation_fee() {
+        let setup = SetupBuilder::new().with_proxy_canister().build().await;
+        let get_balance_cycles_cost = get_balance_cycles_cost(&setup).await;
+        assert!(get_balance_cycles_cost > 0);
+        let caller_cycles_before = setup.proxy().cycle_balance().await;
+        let minter_cycles_before = setup.minter().cycle_balance().await;
+
+        let result = setup
+            .minter()
+            .with_http_mocks(
+                MockBuilder::new()
+                    .get_balance(BALANCE_ABOVE_MINIMUM)
+                    .build(),
+            )
+            .deposit_sol(DEFAULT_CALLER_ACCOUNT)
+            .await;
+
+        assert_eq!(result, Ok(0));
+        let caller_cycles_after = setup.proxy().cycle_balance().await;
+        let minter_cycles_after = setup.minter().cycle_balance().await;
+        assert_eq!(
+            caller_cycles_before - caller_cycles_after,
+            get_balance_cycles_cost + Setup::DEFAULT_DEPOSIT_CONSOLIDATION_FEE
+        );
+        assert_eq!(
+            minter_cycles_after - minter_cycles_before,
+            Setup::DEFAULT_DEPOSIT_CONSOLIDATION_FEE
+        );
+
+        setup.drop().await;
+    }
+
+    #[tokio::test]
+    async fn should_treat_default_subaccount_spellings_as_one_account() {
+        let setup = SetupBuilder::new().with_proxy_canister().build().await;
+        let explicit_default_subaccount = Account {
+            subaccount: Some([0; 32]),
+            ..DEFAULT_CALLER_ACCOUNT
+        };
+        let deposit_id = setup
+            .minter()
+            .with_http_mocks(
+                MockBuilder::new()
+                    .get_balance(BALANCE_ABOVE_MINIMUM)
+                    .build(),
+            )
+            .deposit_sol(DEFAULT_CALLER_ACCOUNT)
+            .await
+            .expect("first deposit should be queued");
+
+        let result = setup
+            .minter()
+            .deposit_sol(explicit_default_subaccount)
+            .await;
+
+        assert_eq!(result, Ok(deposit_id));
+        setup.minter().assert_that_events().await.satisfy(|events| {
+            check!(
+                events[1..]
+                    == [EventType::QueuedDeposit {
+                        deposit_id,
+                        account: DEFAULT_CALLER_ACCOUNT,
+                        sweepable_amount: BALANCE_ABOVE_MINIMUM - RENT_EXEMPTION_THRESHOLD,
+                    }]
+            );
+        });
+
+        setup.drop().await;
+    }
+
+    #[tokio::test]
+    async fn should_fail_while_process_deposit_deposit_awaits_consolidation() {
+        let setup = SetupBuilder::new().with_proxy_canister().build().await;
+        let minted = setup
+            .minter()
+            .with_http_mocks(MockBuilder::new().get_deposit_transaction().build())
+            .process_deposit(default_process_deposit_args())
+            .await;
+        assert_matches!(minted, Ok(DepositStatus::Minted { .. }));
+        let caller_cycles_before = setup.proxy().cycle_balance().await;
+
+        let result = setup.minter().deposit_sol(DEFAULT_CALLER_ACCOUNT).await;
+
+        assert_matches!(
+            result,
+            Err(DepositSolError::TemporarilyUnavailable(e)) if e.contains("awaiting consolidation")
+        );
+        assert_eq!(setup.proxy().cycle_balance().await, caller_cycles_before);
+
+        setup.advance_time(DEPOSIT_CONSOLIDATION_DELAY).await;
+        setup
+            .execute_http_mocks(
+                MockBuilder::with_start_id(4)
+                    .submit_transaction(
+                        100_000_000,
+                        "4sGjMW1sUnHzSxGspuhpqLDx6wiyjNtZAMdL4VZHirAn",
+                        "5VERv8NMvzbJMEkV8xnrLkEaWRtSz9CosKDYjCJjBRnbJLgp8uirBgmQpjKhoR4tjF3ZpRzrFmBV6UjKdiSZkQUW",
+                    )
+                    .build(),
+            )
+            .await;
+        let deposit_id = setup
+            .minter()
+            .with_http_mocks(
+                MockBuilder::with_start_id(16)
+                    .get_balance(BALANCE_ABOVE_MINIMUM)
+                    .build(),
+            )
+            .deposit_sol(DEFAULT_CALLER_ACCOUNT)
+            .await;
+
+        assert_eq!(deposit_id, Ok(0));
+
+        setup.drop().await;
+    }
+
+    #[tokio::test]
+    async fn should_fail_for_concurrent_access() {
+        let setup = SetupBuilder::new().with_proxy_canister().build().await;
+        let mocks = SharedMockHttpOutcalls::new(
+            MockBuilder::new()
+                .get_balance(BALANCE_ABOVE_MINIMUM)
+                .build(),
+        );
+        let minter1 = setup.minter().with_http_mocks(mocks.clone());
+        let minter2 = setup.minter().with_http_mocks(mocks.clone());
+
+        let results = join!(
+            minter1.deposit_sol(DEFAULT_CALLER_ACCOUNT),
+            minter2.deposit_sol(DEFAULT_CALLER_ACCOUNT)
+        );
+
+        assert!(
+            matches!(
+                results,
+                (Ok(0), Err(DepositSolError::AlreadyProcessing))
+                    | (Err(DepositSolError::AlreadyProcessing), Ok(0))
+            ),
+            "Expected one queued deposit and one AlreadyProcessing error, got: {results:?}"
+        );
+
+        setup.drop().await;
+    }
+
+    async fn get_balance_cycles_cost(setup: &Setup) -> u128 {
+        let deposit_address: solana_address::Address =
+            DEFAULT_CALLER_DEPOSIT_ADDRESS.parse().unwrap();
+        setup
+            .sol_rpc()
+            .get_balance(deposit_address)
+            .with_rpc_config(RpcConfig {
+                response_size_estimate: None,
+                response_consensus: Some(ConsensusStrategy::Threshold {
+                    min: 3,
+                    total: Some(4),
+                }),
+            })
+            .with_commitment(CommitmentLevel::Finalized)
+            .request_cost()
+            .send()
+            .await
+            .expect("Failed to get cycles cost for `getBalance` request")
+    }
+}
+
 mod anonymous_caller_tests {
     use super::*;
 
@@ -1045,6 +1259,14 @@ mod anonymous_caller_tests {
                     owner,
                     subaccount: None,
                     signature: deposit_transaction_signature(),
+                })
+                .await;
+            assert_matches!(result, Err(s) => s.contains("the owner must be non-anonymous"));
+
+            let result = minter
+                .try_deposit_sol(DepositSolArgs {
+                    owner,
+                    subaccount: None,
                 })
                 .await;
             assert_matches!(result, Err(s) => s.contains("the owner must be non-anonymous"));
