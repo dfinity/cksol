@@ -198,6 +198,22 @@ impl SolanaTestValidator {
             .expect("Failed to get Solana balance")
     }
 
+    /// The signatures of the transactions that mention `address`, newest first.
+    pub async fn get_signatures_for_address(&self, address: &Address) -> Vec<Signature> {
+        self.rpc_client()
+            .get_signatures_for_address(address)
+            .await
+            .expect("Failed to get signatures for Solana address")
+            .into_iter()
+            .map(|transaction| {
+                transaction
+                    .signature
+                    .parse()
+                    .expect("BUG: the validator returned a malformed signature")
+            })
+            .collect()
+    }
+
     pub async fn get_balances(&self, addresses: &[Address]) -> Vec<Lamport> {
         let mut balances = Vec::with_capacity(addresses.len());
         for address in addresses {

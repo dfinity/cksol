@@ -1,4 +1,3 @@
-use assert_matches::assert_matches;
 use candid::Principal;
 use cksol_int_tests::{
     Setup,
@@ -6,7 +5,7 @@ use cksol_int_tests::{
     ledger_init_args::LEDGER_TRANSFER_FEE,
     validator::{FEE_PER_SIGNATURE, SolanaTestValidator, wait_for_withdrawal_finalized},
 };
-use cksol_types::{DepositSolStatus, WithdrawalArgs};
+use cksol_types::{DepositSolId, DepositSolStatus, WithdrawalArgs};
 use icrc_ledger_types::icrc1::account::Account;
 use itertools::Itertools;
 use sol_rpc_types::Lamport;
@@ -247,50 +246,92 @@ async fn wait_for_minter_balance(setup: &Setup, expected_balance: Lamport) {
     panic!("Minter balance did not reach {expected_balance} within timeout");
 }
 
+/// The largest number of deposits the minter sweeps in a single Solana transaction.
+const MAX_DEPOSITS_PER_SWEEP: usize = 10;
+
 #[tokio::test(flavor = "multi_thread")]
-async fn should_sweep_deposit_address_after_deposit_sol() {
+async fn should_sweep_a_full_batch_of_deposits_in_one_transaction() {
     let validator = SolanaTestValidator::start().await;
     let setup = validator.setup().await;
-    let account = Account {
-        owner: DEPOSITOR,
-        subaccount: Some([0xAB; 32]),
-    };
-    let deposit_amount = LAMPORTS_PER_SOL / 10;
-    let sweepable_amount = deposit_amount - RENT_EXEMPTION_THRESHOLD;
-    let deposit_address: Address = setup.minter().get_deposit_address(account).await.into();
-    validator.transfer_to(deposit_address, deposit_amount).await;
-    validator
-        .wait_for_finalized_balance(&deposit_address, deposit_amount)
+
+    let accounts: Vec<Account> = (1..=MAX_DEPOSITS_PER_SWEEP as u8)
+        .map(|i| Account {
+            owner: Principal::from_slice(&[i; 10]),
+            subaccount: Some([i; 32]),
+        })
+        .collect();
+    let deposit_amounts: Vec<Lamport> = (1..=MAX_DEPOSITS_PER_SWEEP as Lamport)
+        .map(|i| (i + 2) * LAMPORTS_PER_SOL / 100)
+        .collect();
+
+    let deposit_addresses: Vec<Address> =
+        futures::future::join_all(accounts.iter().zip(&deposit_amounts).map(
+            async |(&account, &deposit_amount)| {
+                let deposit_address: Address =
+                    setup.minter().get_deposit_address(account).await.into();
+                validator.transfer_to(deposit_address, deposit_amount).await;
+                validator
+                    .wait_for_finalized_balance(&deposit_address, deposit_amount)
+                    .await;
+                deposit_address
+            },
+        ))
         .await;
     let minter_sol_before = validator.get_balance(&MINTER_ADDRESS).await;
 
-    let deposit_id = setup
-        .minter()
-        .deposit_sol(account)
-        .await
-        .expect("deposit_sol should queue a sweep");
+    let deposit_ids: Vec<DepositSolId> =
+        futures::future::join_all(accounts.iter().map(async |&account| {
+            setup
+                .minter()
+                .deposit_sol(account)
+                .await
+                .expect("deposit_sol should queue a sweep")
+        }))
+        .await;
 
-    assert_eq!(
-        setup.minter().deposit_status(deposit_id).await,
-        DepositSolStatus::Queued { sweepable_amount }
-    );
+    for (&deposit_id, &deposit_amount) in deposit_ids.iter().zip(&deposit_amounts) {
+        assert_eq!(
+            setup.minter().deposit_status(deposit_id).await,
+            DepositSolStatus::Queued {
+                sweepable_amount: deposit_amount - RENT_EXEMPTION_THRESHOLD
+            }
+        );
+    }
+
+    // Every deposit address signs the sweep, so the transaction costs one signature fee
+    // per deposit and the largest deposit pays all of them.
+    let total_sweepable_amount: Lamport = deposit_amounts
+        .iter()
+        .map(|deposit_amount| deposit_amount - RENT_EXEMPTION_THRESHOLD)
+        .sum();
+    let sweep_fee = MAX_DEPOSITS_PER_SWEEP as Lamport * FEE_PER_SIGNATURE;
 
     setup.advance_time(Duration::from_mins(1)).await;
     validator
         .wait_for_finalized_balance(
             &MINTER_ADDRESS,
-            minter_sol_before + sweepable_amount - FEE_PER_SIGNATURE,
+            minter_sol_before + total_sweepable_amount - sweep_fee,
         )
         .await;
 
-    assert_eq!(
-        validator.get_balance(&deposit_address).await,
-        RENT_EXEMPTION_THRESHOLD
-    );
-    assert_matches!(
-        setup.minter().deposit_status(deposit_id).await,
-        DepositSolStatus::Swept { .. }
-    );
+    let minter_transactions = validator.get_signatures_for_address(&MINTER_ADDRESS).await;
+    let [sweep_signature] = minter_transactions.as_slice() else {
+        panic!("Expected a single sweep transaction, got {minter_transactions:?}");
+    };
+    for deposit_address in &deposit_addresses {
+        assert_eq!(
+            validator.get_balance(deposit_address).await,
+            RENT_EXEMPTION_THRESHOLD
+        );
+    }
+    for &deposit_id in &deposit_ids {
+        assert_eq!(
+            setup.minter().deposit_status(deposit_id).await,
+            DepositSolStatus::Swept {
+                signature: (*sweep_signature).into()
+            }
+        );
+    }
 
     setup.drop().await;
 }
