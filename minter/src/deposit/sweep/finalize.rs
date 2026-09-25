@@ -9,6 +9,7 @@ use crate::{
 };
 use canlog::log;
 use cksol_types_internal::log::Priority;
+use derive_more::From;
 use sol_rpc_types::Lamport;
 use solana_address::Address;
 use solana_signature::Signature;
@@ -87,7 +88,14 @@ async fn credit_sweep<R: CanisterRuntime>(
             signature,
             amount_received,
         },
-        Err(e) => {
+        Err(SweepMetadataError::Unreadable(e)) => {
+            log!(
+                Priority::Info,
+                "Could not read the metadata of sweep {signature}: {e}, retrying later"
+            );
+            return;
+        }
+        Err(SweepMetadataError::Mismatch(e)) => {
             log!(
                 Priority::Error,
                 "Quarantining the deposits of sweep {signature}: {e}"
@@ -103,22 +111,25 @@ async fn credit_sweep<R: CanisterRuntime>(
 /// sweep transfers from it, plus the transaction fee for the fee payer, and is left
 /// rent-exempt. A transfer that arrived after the balance check legitimately leaves more
 /// than the rent exemption threshold on a deposit address.
+///
+/// The main account must have received all but at most the assumed transaction fee of the
+/// swept amount, which bounds the shortfall that the deposits of the sweep have to bear.
 fn amount_received_by(
     transaction: &EncodedConfirmedTransactionWithStatusMeta,
     main_address: Address,
     swept_addresses: &[(Address, Lamport)],
-) -> Result<Lamport, SweepBalanceError> {
+) -> Result<Lamport, SweepMetadataError> {
     let message = transaction
         .transaction
         .transaction
         .decode()
-        .ok_or(SweepBalanceError::TransactionDecodingFailed)?
+        .ok_or(UnreadableMetadata::TransactionDecodingFailed)?
         .message;
     let meta = transaction
         .transaction
         .meta
         .as_ref()
-        .ok_or(SweepBalanceError::NoMetaField)?;
+        .ok_or(UnreadableMetadata::NoMetaField)?;
     let balances = AccountBalances {
         account_keys: message.static_account_keys(),
         pre_balances: &meta.pre_balances,
@@ -126,34 +137,49 @@ fn amount_received_by(
     };
 
     let assumed_fee = FEE_PER_SIGNATURE * swept_addresses.len() as u64;
+    let mut swept_amount: Lamport = 0;
     for (address, sweepable_amount) in swept_addresses {
         let (index, pre, post) = balances.of(address)?;
         let expected_decrease = if index == FEE_PAYER_ACCOUNT_INDEX {
-            (sweepable_amount + meta.fee)
-                .checked_sub(assumed_fee)
-                .ok_or(SweepBalanceError::UnexpectedFee { fee: meta.fee })?
+            sweepable_amount
+                .checked_add(meta.fee)
+                .and_then(|paid| paid.checked_sub(assumed_fee))
+                .ok_or(SweepMismatch::UnexpectedFee { fee: meta.fee })?
         } else {
             *sweepable_amount
         };
         if pre.checked_sub(post) != Some(expected_decrease) {
-            return Err(SweepBalanceError::UnexpectedBalanceChange {
+            return Err(SweepMismatch::UnexpectedBalanceChange {
                 address: *address,
                 pre,
                 post,
                 expected_decrease,
-            });
+            }
+            .into());
         }
         if post < RENT_EXEMPTION_THRESHOLD {
-            return Err(SweepBalanceError::NotRentExempt {
+            return Err(SweepMismatch::NotRentExempt {
                 address: *address,
                 post,
-            });
+            }
+            .into());
         }
+        swept_amount += sweepable_amount;
     }
 
     let (_, pre, post) = balances.of(&main_address)?;
-    post.checked_sub(pre)
-        .ok_or(SweepBalanceError::MainAccountDebited { pre, post })
+    let amount_received = post
+        .checked_sub(pre)
+        .ok_or(SweepMismatch::MainAccountDebited { pre, post })?;
+    if swept_amount.saturating_sub(amount_received) > assumed_fee {
+        return Err(SweepMismatch::AmountReceivedTooSmall {
+            swept_amount,
+            amount_received,
+            assumed_fee,
+        }
+        .into());
+    }
+    Ok(amount_received)
 }
 
 struct AccountBalances<'a> {
@@ -163,35 +189,49 @@ struct AccountBalances<'a> {
 }
 
 impl AccountBalances<'_> {
-    fn of(&self, address: &Address) -> Result<(usize, Lamport, Lamport), SweepBalanceError> {
+    fn of(&self, address: &Address) -> Result<(usize, Lamport, Lamport), SweepMetadataError> {
         let index = self
             .account_keys
             .iter()
             .position(|key| key == address)
-            .ok_or(SweepBalanceError::AddressNotInTransaction { address: *address })?;
+            .ok_or(SweepMismatch::AddressNotInTransaction { address: *address })?;
         let pre = *self
             .pre_balances
             .get(index)
-            .ok_or(SweepBalanceError::IncompleteBalances)?;
+            .ok_or(UnreadableMetadata::IncompleteBalances)?;
         let post = *self
             .post_balances
             .get(index)
-            .ok_or(SweepBalanceError::IncompleteBalances)?;
+            .ok_or(UnreadableMetadata::IncompleteBalances)?;
         Ok((index, pre, post))
     }
 }
 
+#[derive(Debug, PartialEq, Eq, Error, From)]
+enum SweepMetadataError {
+    /// The response says nothing about the sweep, so fetching it again may succeed.
+    #[error("{0}")]
+    Unreadable(UnreadableMetadata),
+    /// The metadata contradicts the minter's model of the sweep.
+    #[error("{0}")]
+    Mismatch(SweepMismatch),
+}
+
 #[derive(Debug, PartialEq, Eq, Error)]
-enum SweepBalanceError {
+enum UnreadableMetadata {
     #[error("the sweep transaction could not be decoded")]
     TransactionDecodingFailed,
     #[error("the 'getTransaction' response has no 'meta' field")]
     NoMetaField,
     #[error("the balances in the metadata do not cover all account keys")]
     IncompleteBalances,
+}
+
+#[derive(Debug, PartialEq, Eq, Error)]
+enum SweepMismatch {
     #[error("the address {address} is not part of the sweep transaction")]
     AddressNotInTransaction { address: Address },
-    #[error("the fee payer paid a fee of {fee} lamports that exceeds its transfer")]
+    #[error("the fee payer paid a fee of {fee} lamports that does not fit its transfer")]
     UnexpectedFee { fee: Lamport },
     #[error(
         "the address {address} went from {pre} to {post} lamports instead of decreasing by {expected_decrease}"
@@ -208,4 +248,12 @@ enum SweepBalanceError {
     NotRentExempt { address: Address, post: Lamport },
     #[error("the main account went from {pre} to {post} lamports")]
     MainAccountDebited { pre: Lamport, post: Lamport },
+    #[error(
+        "the main account received {amount_received} of the {swept_amount} lamports swept, more than the assumed fee of {assumed_fee} lamports short"
+    )]
+    AmountReceivedTooSmall {
+        swept_amount: Lamport,
+        amount_received: Lamport,
+        assumed_fee: Lamport,
+    },
 }

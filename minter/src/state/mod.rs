@@ -629,7 +629,7 @@ impl State {
                 .deposit
                 .sweepable_amount
                 .checked_sub(shortfall_share)
-                .expect("BUG: the shortfall share exceeds the sweepable amount");
+                .expect("BUG: the credited shortfall exceeds the transaction fee of the sweep");
             self.pending_mints.insert(
                 deposit_id,
                 PendingMint {

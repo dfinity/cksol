@@ -307,32 +307,51 @@ mod swept_deposits {
 
     #[test]
     fn should_credit_finalized_deposits_with_their_share_of_the_shortfall() {
-        init_state();
-        queue_three_deposits();
-        let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
-        submit_sweep(sweep_signature, vec![2, 0]);
-        succeed_transaction(sweep_signature);
+        let cases = [
+            ("some lamports are missing", 390, vec![(0, 95), (2, 295)]),
+            (
+                "the whole swept amount arrived",
+                400,
+                vec![(0, 100), (2, 300)],
+            ),
+            (
+                "more than the swept amount arrived",
+                407,
+                vec![(0, 100), (2, 300)],
+            ),
+        ];
+        for (name, amount_received, expected_mints) in cases {
+            reset_state();
+            reset_events();
+            init_state();
+            queue_three_deposits();
+            let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
+            submit_sweep(sweep_signature, vec![2, 0]);
+            succeed_transaction(sweep_signature);
 
-        credit_sweep(sweep_signature, 400 - 10);
+            credit_sweep(sweep_signature, amount_received);
 
-        read_state(|s| {
-            assert!(s.finalized_deposits().is_empty());
-            assert_eq!(s.balance(), 390);
+            read_state(|s| {
+                assert!(s.finalized_deposits().is_empty(), "{name}");
+                assert_eq!(s.balance(), amount_received, "{name}");
+                assert_eq!(
+                    s.pending_mints()
+                        .iter()
+                        .map(|(deposit_id, pending)| (*deposit_id, pending.amount_to_mint))
+                        .collect::<Vec<_>>(),
+                    expected_mints,
+                    "{name}"
+                );
+            });
+            assert_in_flight_ids_unchanged();
             assert_eq!(
-                s.pending_mints()
-                    .iter()
-                    .map(|(deposit_id, pending)| (*deposit_id, pending.amount_to_mint))
-                    .collect::<Vec<_>>(),
-                vec![(0, 100 - 5), (2, 300 - 5)]
+                deposit_status(0),
+                DepositSolStatus::Finalized {
+                    signature: sweep_signature.into()
+                },
+                "{name}"
             );
-        });
-        assert_in_flight_ids_unchanged();
-        assert_eq!(
-            deposit_status(0),
-            DepositSolStatus::Finalized {
-                signature: sweep_signature.into()
-            }
-        );
+        }
     }
 
     #[test]

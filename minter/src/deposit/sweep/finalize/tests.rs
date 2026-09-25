@@ -1,4 +1,7 @@
-use super::{SweepBalanceError, amount_received_by, credit_finalized_sweeps};
+use super::{
+    SweepMetadataError, SweepMismatch, UnreadableMetadata, amount_received_by,
+    credit_finalized_sweeps,
+};
 use crate::{
     address::account_address,
     constants::{FEE_PER_SIGNATURE, RENT_EXEMPTION_THRESHOLD},
@@ -60,21 +63,45 @@ mod amount_received {
     fn should_report_the_increase_of_the_main_account_balance() {
         let swept = swept_addresses();
         let cases = [
-            ("the fee was as assumed", sweep_transaction(&swept)),
+            (
+                "the fee was as assumed",
+                sweep_transaction(&swept),
+                swept_amount() - ASSUMED_FEE,
+            ),
             (
                 "a late transfer left extra on a deposit address",
                 sweep_transaction(&swept).with_late_transfer(swept[1].0, 123_456),
+                swept_amount() - ASSUMED_FEE,
             ),
             (
                 "a lower fee left extra on the fee payer",
                 sweep_transaction(&swept).with_fee(ASSUMED_FEE - 1_000),
+                swept_amount() - ASSUMED_FEE,
+            ),
+            (
+                "the whole swept amount arrived",
+                sweep_transaction(&swept).with_balances(
+                    MINTER_ADDRESS,
+                    MAIN_BALANCE,
+                    MAIN_BALANCE + swept_amount(),
+                ),
+                swept_amount(),
+            ),
+            (
+                "more than the swept amount arrived",
+                sweep_transaction(&swept).with_balances(
+                    MINTER_ADDRESS,
+                    MAIN_BALANCE,
+                    MAIN_BALANCE + swept_amount() + 7,
+                ),
+                swept_amount() + 7,
             ),
         ];
 
-        for (name, transaction) in cases {
+        for (name, transaction, expected) in cases {
             assert_eq!(
                 amount_received_by(&transaction.encode(), MINTER_ADDRESS, &swept),
-                Ok(swept_amount() - ASSUMED_FEE),
+                Ok(expected),
                 "{name}"
             );
         }
@@ -90,23 +117,23 @@ mod amount_received {
                 "no meta field",
                 sweep_transaction(&swept).encode_without_meta(),
                 swept.clone(),
-                SweepBalanceError::NoMetaField,
+                SweepMetadataError::Unreadable(UnreadableMetadata::NoMetaField),
             ),
             (
                 "the main account is not part of the transaction",
                 sweep_transaction_to(&swept, other_address()).encode(),
                 swept.clone(),
-                SweepBalanceError::AddressNotInTransaction {
+                SweepMetadataError::Mismatch(SweepMismatch::AddressNotInTransaction {
                     address: MINTER_ADDRESS,
-                },
+                }),
             ),
             (
                 "a deposit address is not part of the transaction",
                 sweep_transaction(&swept).encode(),
                 vec![(other_address(), 1_000_000)],
-                SweepBalanceError::AddressNotInTransaction {
+                SweepMetadataError::Mismatch(SweepMismatch::AddressNotInTransaction {
                     address: other_address(),
-                },
+                }),
             ),
             (
                 "a deposit address moved by the wrong amount",
@@ -118,12 +145,12 @@ mod amount_received {
                     )
                     .encode(),
                 swept.clone(),
-                SweepBalanceError::UnexpectedBalanceChange {
+                SweepMetadataError::Mismatch(SweepMismatch::UnexpectedBalanceChange {
                     address: wrong_amount,
                     pre: RENT_EXEMPTION_THRESHOLD + SWEEPABLE_AMOUNTS[2],
                     post: RENT_EXEMPTION_THRESHOLD + 1,
                     expected_decrease: SWEEPABLE_AMOUNTS[2],
-                },
+                }),
             ),
             (
                 "a deposit address is left below the rent exemption threshold",
@@ -131,10 +158,10 @@ mod amount_received {
                     .with_balances(below_threshold, SWEEPABLE_AMOUNTS[1], 0)
                     .encode(),
                 swept.clone(),
-                SweepBalanceError::NotRentExempt {
+                SweepMetadataError::Mismatch(SweepMismatch::NotRentExempt {
                     address: below_threshold,
                     post: 0,
-                },
+                }),
             ),
             (
                 "the main account was debited",
@@ -142,10 +169,26 @@ mod amount_received {
                     .with_balances(MINTER_ADDRESS, MAIN_BALANCE, MAIN_BALANCE - 1)
                     .encode(),
                 swept.clone(),
-                SweepBalanceError::MainAccountDebited {
+                SweepMetadataError::Mismatch(SweepMismatch::MainAccountDebited {
                     pre: MAIN_BALANCE,
                     post: MAIN_BALANCE - 1,
-                },
+                }),
+            ),
+            (
+                "the main account received less than the swept amount minus the assumed fee",
+                sweep_transaction(&swept)
+                    .with_balances(
+                        MINTER_ADDRESS,
+                        MAIN_BALANCE,
+                        MAIN_BALANCE + swept_amount() - ASSUMED_FEE - 1,
+                    )
+                    .encode(),
+                swept.clone(),
+                SweepMetadataError::Mismatch(SweepMismatch::AmountReceivedTooSmall {
+                    swept_amount: swept_amount(),
+                    amount_received: swept_amount() - ASSUMED_FEE - 1,
+                    assumed_fee: ASSUMED_FEE,
+                }),
             ),
         ];
 
@@ -263,6 +306,54 @@ mod credit {
         assert_eq!(
             deposit_status(0),
             DepositSolStatus::Finalized {
+                signature: sweep_signature.into()
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn should_keep_deposits_finalized_if_the_metadata_cannot_be_read() {
+        setup();
+        let sweep_signature = queue_finalized_sweep();
+        let events_before = EventsAssert::from_recorded();
+        let runtime =
+            runtime_returning(sweep_transaction(&swept_addresses()).encode_without_meta());
+
+        credit_finalized_sweeps(&runtime).await;
+
+        assert_eq!(events_before, EventsAssert::from_recorded());
+        read_state(|state| {
+            assert_eq!(state.finalized_deposits().len(), SWEEPABLE_AMOUNTS.len());
+            assert!(state.quarantined_sweeps().is_empty());
+        });
+        assert_eq!(
+            deposit_status(0),
+            DepositSolStatus::Finalized {
+                signature: sweep_signature.into()
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn should_quarantine_deposits_if_too_little_arrived_on_the_main_account() {
+        setup();
+        let sweep_signature = queue_finalized_sweep();
+        let runtime = runtime_returning(
+            sweep_transaction(&swept_addresses())
+                .with_balances(MINTER_ADDRESS, MAIN_BALANCE, MAIN_BALANCE)
+                .encode(),
+        );
+
+        credit_finalized_sweeps(&runtime).await;
+
+        read_state(|state| {
+            assert!(state.pending_mints().is_empty());
+            assert_eq!(state.quarantined_sweeps().len(), SWEEPABLE_AMOUNTS.len());
+            assert_eq!(state.balance(), 0);
+        });
+        assert_eq!(
+            deposit_status(0),
+            DepositSolStatus::Quarantined {
                 signature: sweep_signature.into()
             }
         );
