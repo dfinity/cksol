@@ -208,3 +208,30 @@ fn signing_error() -> SignCallError {
 fn should_panic_on_an_expected_signer_that_never_signs() {
     let _signer = MockSchnorrSigner::default().add_signer(sign_for(&account(1)).times(2));
 }
+
+#[tokio::test]
+#[should_panic(expected = "fewer than expected")]
+async fn should_panic_when_an_account_signs_fewer_times_than_expected() {
+    let signer = MockSchnorrSigner::default().add_signer(sign_for(&account(1)).times(2));
+
+    sign(&signer, &account(1)).await;
+}
+
+#[tokio::test]
+#[should_panic(expected = "No matching expectation found")]
+async fn should_panic_when_an_account_signs_more_times_than_expected() {
+    let signer = MockSchnorrSigner::default().add_signer(sign_for(&account(1)).times(2));
+
+    sign(&signer, &account(1)).await;
+    sign(&signer, &account(1)).await;
+    sign(&signer, &account(1)).await;
+}
+
+#[tokio::test]
+#[should_panic(expected = "fewer than expected")]
+async fn should_panic_when_a_given_sequence_is_not_exhausted() {
+    let signer = MockSchnorrSigner::default()
+        .add_signer(sign_for(&account(1)).expect([Ok(signature(0xAA)), Ok(signature(0xBB))]));
+
+    assert_eq!(sign(&signer, &account(1)).await, signature(0xAA));
+}
