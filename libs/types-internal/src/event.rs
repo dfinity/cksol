@@ -135,6 +135,11 @@ pub enum TransactionPurpose {
         /// The burn transaction indices on the ckSOL ledger.
         burn_indices: Vec<u64>,
     },
+    /// Sweep the deposit addresses of deposits queued by `deposit_sol` into the minter's main account.
+    SweepDeposits {
+        /// The ids of the swept deposits, the fee payer first.
+        deposit_ids: Vec<u64>,
+    },
 }
 
 /// A versioned Solana transaction message.

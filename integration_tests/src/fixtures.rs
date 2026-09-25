@@ -28,22 +28,25 @@ pub const DEPOSIT_AMOUNT: Lamport = 500_000_000;
 /// Minimum balance left on a deposit address to keep it rent-exempt.
 pub const RENT_EXEMPTION_THRESHOLD: Lamport = 890_880;
 
-/// The SOL RPC canister rounds the slot returned by `getSlot` down to the nearest
-/// multiple of this value before querying `getBlock`.
-pub const SOL_RPC_SLOT_ROUNDING: u64 = 20;
-/// Slots without a block before any block the mocked `getBlock` reports, so that
-/// the block height it reports stays below the slot.
-const MOCK_SKIPPED_SLOTS: u64 = 1_000;
+/// The slot the mocked `getSlot` reports. A test says which block height the mocked
+/// `getBlock` then reports, since that is what the minter records and what it judges
+/// blockhash expiry by. The slot itself only has to match the `getBlock` request the
+/// SOL RPC canister derives from it by rounding it down to a multiple of 20.
+const MOCK_SLOT: u64 = 100_000_000;
 
-/// The block height the mocked `getBlock` reports for the block fetched after `getSlot`
-/// returned `slot`.
-pub fn mock_block_height(slot: u64) -> u64 {
-    sol_rpc_rounded_slot(slot) - MOCK_SKIPPED_SLOTS
-}
-
-fn sol_rpc_rounded_slot(slot: u64) -> u64 {
-    slot / SOL_RPC_SLOT_ROUNDING * SOL_RPC_SLOT_ROUNDING
-}
+/// Blockhash of the block a timer builds its first transaction on, and the signature the
+/// mocked `sendTransaction` answers with for it.
+const SUBMITTED_BLOCKHASH: &str = "4sGjMW1sUnHzSxGspuhpqLDx6wiyjNtZAMdL4VZHirAn";
+const SUBMITTED_SIGNATURE: &str =
+    "5VERv8NMvzbJMEkV8xnrLkEaWRtSz9CosKDYjCJjBRnbJLgp8uirBgmQpjKhoR4tjF3ZpRzrFmBV6UjKdiSZkQUW";
+/// Blockhash of the later block a timer builds the replacement of an expired transaction
+/// on, and the signature the mocked `sendTransaction` answers with for it. Both differ from
+/// those of the first submission, so a test can tell the two transactions apart.
+const REPLACEMENT_BLOCKHASH: &str = "9ZNTfG4NyQgxy2SWjSiQoUyBPEvXT2xo7fKc5hPYYJ7b";
+const REPLACEMENT_SIGNATURE: &str =
+    "drWLXM6bHretgz7KuwvGZvPBeQ8KEbS3AKB2WJPy4TbBDaqdqAiNcj3cTAS7UnyJKM7eEZoUf4DvhY1TKkus9Bp";
+/// Blockhash the mocks report for a block a timer only reads the height of.
+const IGNORED_BLOCKHASH: &str = "CzBVNFJkh7WkQDfJUiDjLc7kPrJd8kR2yiCvwBUhSe7Y";
 
 pub const EXPECTED_MINT_AMOUNT: Lamport = DEPOSIT_AMOUNT - Setup::DEFAULT_MANUAL_DEPOSIT_FEE;
 
@@ -172,56 +175,50 @@ impl MockBuilder {
         self.expect(get_balance_request(), get_balance_response(balance))
     }
 
-    /// Mocks for `getSlot` → `getBlock`.
-    pub fn get_slot_and_block(self, slot: u64, blockhash: &str) -> Self {
-        self.expect(get_slot_request(), get_slot_response(slot))
-            .expect(get_block_request(slot), get_block_response(slot, blockhash))
-    }
-
-    /// Mocks for `getSlot` → `getBlock` → `sendTransaction`.
-    pub fn submit_transaction(self, slot: u64, blockhash: &str, tx_signature: &str) -> Self {
-        self.expect(get_slot_request(), get_slot_response(slot))
-            .expect(get_block_request(slot), get_block_response(slot, blockhash))
+    /// Mocks for a timer submitting a transaction built on the block at `block_height`:
+    /// `getSlot` → `getBlock` → `sendTransaction`.
+    pub fn submit_transaction(self, block_height: u64) -> Self {
+        self.get_current_block(block_height, SUBMITTED_BLOCKHASH)
             .expect(
                 send_transaction_request(),
-                send_transaction_response(tx_signature),
+                send_transaction_response(SUBMITTED_SIGNATURE),
             )
     }
 
-    /// Mock for `getSignatureStatuses` returning not-found for `count` signatures.
-    pub fn check_signature_statuses_not_found(self, count: usize) -> Self {
-        self.expect(
-            get_signature_statuses_request(),
-            get_signature_statuses_not_found_response(count),
-        )
+    /// Mocks for `finalize_transactions` finding the pending transaction expired at
+    /// `block_height`: `getSlot` → `getBlock` → `getSignatureStatuses` reporting it as not
+    /// found.
+    pub fn mark_transaction_expired(self, block_height: u64) -> Self {
+        self.get_current_block(block_height, IGNORED_BLOCKHASH)
+            .check_signature_statuses(get_signature_statuses_not_found_response())
     }
 
-    /// Mock for `getSignatureStatuses` returning finalized for `count` signatures.
-    pub fn check_signature_statuses_finalized(self, count: usize) -> Self {
-        self.expect(
-            get_signature_statuses_request(),
-            get_signature_statuses_finalized_response(count),
-        )
-    }
-
-    /// Mocks for `getSlot` → `getBlock`, used by the monitor timer to snapshot the current slot.
-    pub fn get_current_slot(self, slot: u64, blockhash: &str) -> Self {
-        self.expect(get_slot_request(), get_slot_response(slot))
-            .expect(get_block_request(slot), get_block_response(slot, blockhash))
-    }
-
-    /// Mocks for resubmitting an expired transaction:
-    /// `getSlot` → `getBlock` → `getSignatureStatuses`(not found) → `getSlot` → `getBlock` → `sendTransaction`.
-    pub fn resubmit_transaction(self, slot: u64, blockhash: &str, tx_signature: &str) -> Self {
-        self.expect(get_slot_request(), get_slot_response(slot))
-            .expect(get_block_request(slot), get_block_response(slot, blockhash))
-            .check_signature_statuses_not_found(1)
-            .expect(get_slot_request(), get_slot_response(slot))
-            .expect(get_block_request(slot), get_block_response(slot, blockhash))
+    /// Mocks for `resubmit_transactions` sending the replacement transaction, built on the
+    /// block at `block_height`: `getSlot` → `getBlock` → `sendTransaction`.
+    pub fn resubmit_transaction(self, block_height: u64) -> Self {
+        self.get_current_block(block_height, REPLACEMENT_BLOCKHASH)
             .expect(
                 send_transaction_request(),
-                send_transaction_response(tx_signature),
+                send_transaction_response(REPLACEMENT_SIGNATURE),
             )
+    }
+
+    /// Mocks for `finalize_transactions` reporting the pending transaction as finalized at
+    /// `block_height`.
+    pub fn finalize_transaction(self, block_height: u64) -> Self {
+        self.get_current_block(block_height, IGNORED_BLOCKHASH)
+            .check_signature_statuses(get_signature_statuses_finalized_response())
+    }
+
+    fn check_signature_statuses(self, response: JsonRpcResponse) -> Self {
+        self.expect(get_signature_statuses_request(), response)
+    }
+
+    fn get_current_block(self, block_height: u64, blockhash: &str) -> Self {
+        self.expect(get_slot_request(), get_slot_response()).expect(
+            get_block_request(),
+            get_block_response(block_height, blockhash),
+        )
     }
 }
 
@@ -313,17 +310,17 @@ fn get_slot_request() -> JsonRpcRequestMatcher {
     JsonRpcRequestMatcher::with_method("getSlot")
 }
 
-fn get_slot_response(slot: u64) -> JsonRpcResponse {
+fn get_slot_response() -> JsonRpcResponse {
     JsonRpcResponse::from(json!({
         "jsonrpc": "2.0",
-        "result": slot,
+        "result": MOCK_SLOT,
         "id": 1
     }))
 }
 
-fn get_block_request(slot: u64) -> JsonRpcRequestMatcher {
+fn get_block_request() -> JsonRpcRequestMatcher {
     JsonRpcRequestMatcher::with_method("getBlock").with_params(json!([
-        sol_rpc_rounded_slot(slot),
+        MOCK_SLOT,
         {
             "transactionDetails": "none",
             "rewards": false,
@@ -332,7 +329,7 @@ fn get_block_request(slot: u64) -> JsonRpcRequestMatcher {
     ]))
 }
 
-fn get_block_response(slot: u64, blockhash: &str) -> JsonRpcResponse {
+fn get_block_response(block_height: u64, blockhash: &str) -> JsonRpcResponse {
     JsonRpcResponse::from(json!({
         "jsonrpc": "2.0",
         "result": {
@@ -340,7 +337,7 @@ fn get_block_response(slot: u64, blockhash: &str) -> JsonRpcResponse {
             "previousBlockhash": "CzBVNFJkh7WkQDfJUiDjLc7kPrJd8kR2yiCvwBUhSe7Y",
             "parentSlot": 449819444,
             "blockTime": 1700000000_i64,
-            "blockHeight": mock_block_height(slot)
+            "blockHeight": block_height
         },
         "id": 1
     }))
@@ -350,34 +347,33 @@ fn get_signature_statuses_request() -> JsonRpcRequestMatcher {
     JsonRpcRequestMatcher::with_method("getSignatureStatuses")
 }
 
-fn get_signature_statuses_not_found_response(count: usize) -> JsonRpcResponse {
+/// Response to a `getSignatureStatuses` request for the single pending transaction,
+/// reporting that the transaction is unknown to the cluster.
+fn get_signature_statuses_not_found_response() -> JsonRpcResponse {
     JsonRpcResponse::from(json!({
         "jsonrpc": "2.0",
         "result": {
             "context": { "slot": 0 },
-            "value": vec![serde_json::Value::Null; count]
+            "value": [serde_json::Value::Null]
         },
         "id": 1
     }))
 }
 
-fn get_signature_statuses_finalized_response(count: usize) -> JsonRpcResponse {
-    let statuses: Vec<_> = (0..count)
-        .map(|_| {
-            json!({
+/// Response to a `getSignatureStatuses` request for the single pending transaction,
+/// reporting that the transaction succeeded and is finalized.
+fn get_signature_statuses_finalized_response() -> JsonRpcResponse {
+    JsonRpcResponse::from(json!({
+        "jsonrpc": "2.0",
+        "result": {
+            "context": { "slot": 0 },
+            "value": [{
                 "slot": 350_000_000_u64,
                 "confirmations": null,
                 "status": { "Ok": null },
                 "err": null,
                 "confirmationStatus": "finalized"
-            })
-        })
-        .collect();
-    JsonRpcResponse::from(json!({
-        "jsonrpc": "2.0",
-        "result": {
-            "context": { "slot": 0 },
-            "value": statuses
+            }]
         },
         "id": 1
     }))

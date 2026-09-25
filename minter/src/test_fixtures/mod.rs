@@ -12,6 +12,7 @@ use crate::{
 use candid::Principal;
 use cksol_types::DepositStatus;
 use cksol_types_internal::{Ed25519KeyName, InitArgs, SolanaNetwork};
+use ic_cdk_management_canister::SchnorrPublicKeyResult;
 use ic_ed25519::{PocketIcMasterPublicKeyId, PublicKey};
 use icrc_ledger_types::icrc1::account::Account;
 use sol_rpc_types::Lamport;
@@ -93,12 +94,24 @@ pub fn init_balance_to(amount: Lamport) {
 }
 
 pub fn init_schnorr_master_key() {
-    mutate_state(|s| {
-        s.set_once_minter_public_key(SchnorrPublicKey {
-            public_key: PublicKey::pocketic_key(PocketIcMasterPublicKeyId::Key1),
-            chain_code: [1; 32],
-        })
-    });
+    mutate_state(|s| s.set_once_minter_public_key(schnorr_master_key()));
+}
+
+/// The master key [`init_schnorr_master_key`] caches, as the management canister returns it,
+/// for a test that starts without it cached and lets the minter fetch it.
+pub fn schnorr_master_key_response() -> SchnorrPublicKeyResult {
+    let master_key = schnorr_master_key();
+    SchnorrPublicKeyResult {
+        public_key: master_key.public_key.serialize_raw().to_vec(),
+        chain_code: master_key.chain_code.to_vec(),
+    }
+}
+
+fn schnorr_master_key() -> SchnorrPublicKey {
+    SchnorrPublicKey {
+        public_key: PublicKey::pocketic_key(PocketIcMasterPublicKeyId::Key1),
+        chain_code: [1; 32],
+    }
 }
 
 /// Returns a [`Signature`] unique for any `usize` index, derived from `i as u64` via le_bytes.
@@ -169,15 +182,17 @@ pub mod events {
     use super::{
         DEFAULT_BLOCK_HEIGHT, MANUAL_DEPOSIT_FEE, WITHDRAWAL_FEE, runtime::TestCanisterRuntime,
     };
+    use crate::deposit::sweep::deposit_status;
     use crate::{
         numeric::{LedgerBurnIndex, LedgerMintIndex},
         rpc::BlockHeight,
         state::{
             audit::process_event,
             event::{DepositId, EventType, TransactionPurpose, WithdrawalRequest},
-            mutate_state,
+            mutate_state, read_state,
         },
     };
+    use cksol_types::{DepositSolId, DepositSolStatus};
     use icrc_ledger_types::icrc1::account::Account;
     use sol_rpc_types::Lamport;
     use solana_signature::Signature;
@@ -254,6 +269,49 @@ pub mod events {
                             .collect(),
                     },
                     block_height,
+                },
+                &runtime(),
+            )
+        });
+    }
+
+    pub fn queue_deposit(
+        deposit_id: DepositSolId,
+        account: Account,
+        sweepable_amount: Lamport,
+    ) -> DepositSolStatus {
+        mutate_state(|state| {
+            process_event(
+                state,
+                EventType::QueuedDeposit {
+                    deposit_id,
+                    account,
+                    sweepable_amount,
+                },
+                &runtime(),
+            )
+        });
+        deposit_status(deposit_id)
+    }
+
+    /// Submits a sweep of the given queued deposits, signed by their accounts in the given order.
+    pub fn submit_sweep(signature: Signature, deposit_ids: Vec<DepositSolId>) {
+        let signers = read_state(|state| {
+            deposit_ids
+                .iter()
+                .filter_map(|deposit_id| state.queued_deposits().get(deposit_id))
+                .map(|deposit| deposit.account)
+                .collect()
+        });
+        mutate_state(|state| {
+            process_event(
+                state,
+                EventType::SubmittedTransaction {
+                    signature,
+                    message: message().into(),
+                    signers,
+                    purpose: TransactionPurpose::SweepDeposits { deposit_ids },
+                    block_height: DEFAULT_BLOCK_HEIGHT,
                 },
                 &runtime(),
             )
@@ -584,6 +642,8 @@ pub mod arb {
                     ),
                     prop::collection::vec(arb_ledger_burn_index(), 1..10)
                         .prop_map(|burn_indices| TransactionPurpose::WithdrawSol { burn_indices }),
+                    prop::collection::vec(any::<u64>(), 1..10)
+                        .prop_map(|deposit_ids| TransactionPurpose::SweepDeposits { deposit_ids }),
                 ],
                 arb_block_height(),
             )

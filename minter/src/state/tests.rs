@@ -101,6 +101,212 @@ mod queued_deposits {
     }
 }
 
+mod swept_deposits {
+    use super::*;
+    use crate::{
+        state::reset_state,
+        storage::reset_events,
+        test_fixtures::events::{queue_deposit, submit_sweep},
+    };
+    use cksol_types::DepositSolStatus;
+
+    const SWEEP_SIGNATURE_INDEX: usize = 0xAA;
+
+    #[test]
+    fn should_move_queued_deposits_to_swept_with_signature_and_total_amount() {
+        init_state();
+        queue_three_deposits();
+        let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
+
+        submit_sweep(sweep_signature, vec![2, 0]);
+
+        let expected_swept = |deposit_id: u64| SweptDeposit {
+            deposit: QueuedDeposit {
+                account: account(deposit_id as usize + 1),
+                sweepable_amount: 100 * (deposit_id + 1),
+            },
+            signature: sweep_signature,
+        };
+        read_state(|s| {
+            assert_eq!(
+                s.swept_deposits(),
+                &BTreeMap::from([(0, expected_swept(0)), (2, expected_swept(2))])
+            );
+            assert_eq!(s.queued_deposits().keys().collect::<Vec<_>>(), vec![&1]);
+            let transaction = s.submitted_transactions().get(&sweep_signature).unwrap();
+            assert_eq!(transaction.amount, 100 + 300);
+            assert_eq!(transaction.signers, vec![account(3), account(1)]);
+            assert_eq!(
+                transaction.purpose,
+                TransactionPurpose::SweepDeposits {
+                    deposit_ids: vec![2, 0]
+                }
+            );
+            assert_eq!(s.balance(), 0);
+        });
+        assert_in_flight_ids_unchanged();
+        assert_eq!(
+            deposit_status(0),
+            DepositSolStatus::Swept {
+                signature: sweep_signature.into()
+            }
+        );
+        assert_eq!(
+            deposit_status(1),
+            DepositSolStatus::Queued {
+                sweepable_amount: 200
+            }
+        );
+        assert_eq!(
+            deposit_status(2),
+            DepositSolStatus::Swept {
+                signature: sweep_signature.into()
+            }
+        );
+    }
+
+    #[test]
+    fn should_keep_deposits_swept_and_balance_unchanged_after_sweep_outcome() {
+        type RecordOutcome = fn(Signature);
+        let outcomes: [(&str, RecordOutcome); 2] = [
+            ("succeeded", succeed_transaction),
+            ("failed", fail_transaction),
+        ];
+        for (outcome, record_outcome) in outcomes {
+            reset_state();
+            reset_events();
+            init_state();
+            queue_three_deposits();
+            let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
+            submit_sweep(sweep_signature, vec![2, 0]);
+
+            record_outcome(sweep_signature);
+
+            read_state(|s| {
+                assert!(s.submitted_transactions().is_empty(), "{outcome}");
+                assert!(s.transactions_to_resubmit().is_empty(), "{outcome}");
+                assert_eq!(s.swept_deposits().len(), 2, "{outcome}");
+                assert_eq!(s.balance(), 0, "{outcome}");
+            });
+            assert_in_flight_ids_unchanged();
+            assert_eq!(
+                deposit_status(0),
+                DepositSolStatus::Swept {
+                    signature: sweep_signature.into()
+                },
+                "{outcome}"
+            );
+        }
+    }
+
+    #[test]
+    fn should_queue_expired_sweep_for_resubmission_like_other_transactions() {
+        init_state();
+        queue_three_deposits();
+        let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
+        submit_sweep(sweep_signature, vec![2, 0]);
+
+        expire_transaction(sweep_signature);
+
+        read_state(|s| {
+            assert!(s.submitted_transactions().is_empty());
+            assert!(s.transactions_to_resubmit().contains_key(&sweep_signature));
+            assert_eq!(s.swept_deposits().len(), 2);
+            assert_eq!(s.balance(), 0);
+        });
+        assert_in_flight_ids_unchanged();
+        assert_eq!(
+            deposit_status(0),
+            DepositSolStatus::Swept {
+                signature: sweep_signature.into()
+            }
+        );
+    }
+
+    #[test]
+    fn should_report_new_signature_after_resubmitting_expired_sweep() {
+        init_state();
+        queue_three_deposits();
+        let expired_sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
+        let unrelated_sweep_signature = signature(SWEEP_SIGNATURE_INDEX + 1);
+        submit_sweep(expired_sweep_signature, vec![2, 0]);
+        submit_sweep(unrelated_sweep_signature, vec![1]);
+        expire_transaction(expired_sweep_signature);
+        let resubmitted_sweep_signature = signature(SWEEP_SIGNATURE_INDEX + 2);
+
+        resubmit_transaction(expired_sweep_signature, resubmitted_sweep_signature);
+
+        read_state(|s| {
+            assert_eq!(
+                s.swept_deposits()
+                    .iter()
+                    .map(|(deposit_id, swept)| (*deposit_id, swept.signature))
+                    .collect::<Vec<_>>(),
+                vec![
+                    (0, resubmitted_sweep_signature),
+                    (1, unrelated_sweep_signature),
+                    (2, resubmitted_sweep_signature),
+                ]
+            );
+        });
+        for (deposit_id, expected_signature) in [
+            (0, resubmitted_sweep_signature),
+            (1, unrelated_sweep_signature),
+            (2, resubmitted_sweep_signature),
+        ] {
+            assert_eq!(
+                deposit_status(deposit_id),
+                DepositSolStatus::Swept {
+                    signature: expected_signature.into()
+                }
+            );
+        }
+        assert_in_flight_ids_unchanged();
+    }
+
+    #[test]
+    #[should_panic(expected = "Attempted to sweep unknown or already swept deposit 3")]
+    fn should_panic_when_sweeping_unknown_deposit() {
+        init_state();
+        queue_three_deposits();
+
+        submit_sweep(signature(SWEEP_SIGNATURE_INDEX), vec![0, 3]);
+    }
+
+    #[test]
+    #[should_panic(expected = "Attempted to sweep unknown or already swept deposit 0")]
+    fn should_panic_when_sweeping_already_swept_deposit() {
+        init_state();
+        queue_three_deposits();
+        submit_sweep(signature(SWEEP_SIGNATURE_INDEX), vec![0]);
+
+        submit_sweep(signature(SWEEP_SIGNATURE_INDEX + 1), vec![1, 0]);
+    }
+
+    fn queue_three_deposits() {
+        for deposit_id in 0..3 {
+            queue_deposit(
+                deposit_id,
+                account(deposit_id as usize + 1),
+                100 * (deposit_id + 1),
+            );
+        }
+    }
+
+    fn assert_in_flight_ids_unchanged() {
+        for deposit_id in 0..3 {
+            assert_eq!(
+                read_state(|s| s.in_flight_deposit_id(&account(deposit_id as usize + 1))),
+                Some(deposit_id)
+            );
+        }
+    }
+
+    fn deposit_status(deposit_id: u64) -> DepositSolStatus {
+        read_state(|s| s.deposit_sol_status(deposit_id))
+    }
+}
+
 mod state_validation {
     use super::*;
 
@@ -298,6 +504,7 @@ mod state_from_init_args {
                 pending_withdrawal_request_guards: BTreeSet::new(),
                 next_deposit_sol_id: 0,
                 queued_deposits: BTreeMap::new(),
+                swept_deposits: BTreeMap::new(),
                 in_flight_deposit_ids: BTreeMap::new(),
                 accepted_deposits: InsertionOrderedMap::new(),
                 quarantined_deposits: InsertionOrderedMap::new(),

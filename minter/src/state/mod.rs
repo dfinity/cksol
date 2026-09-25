@@ -99,6 +99,7 @@ pub struct State {
     pending_withdrawal_request_guards: BTreeSet<Account>,
     next_deposit_sol_id: DepositSolId,
     queued_deposits: BTreeMap<DepositSolId, QueuedDeposit>,
+    swept_deposits: BTreeMap<DepositSolId, SweptDeposit>,
     in_flight_deposit_ids: BTreeMap<Account, DepositSolId>,
     accepted_deposits: InsertionOrderedMap<DepositId, Deposit>,
     quarantined_deposits: InsertionOrderedMap<DepositId, Deposit>,
@@ -191,13 +192,26 @@ impl State {
         self.in_flight_deposit_ids.get(account).copied()
     }
 
+    pub fn queued_deposits(&self) -> &BTreeMap<DepositSolId, QueuedDeposit> {
+        &self.queued_deposits
+    }
+
+    pub fn swept_deposits(&self) -> &BTreeMap<DepositSolId, SweptDeposit> {
+        &self.swept_deposits
+    }
+
     pub fn deposit_sol_status(&self, deposit_id: DepositSolId) -> DepositSolStatus {
-        match self.queued_deposits.get(&deposit_id) {
-            Some(deposit) => DepositSolStatus::Queued {
+        if let Some(deposit) = self.queued_deposits.get(&deposit_id) {
+            return DepositSolStatus::Queued {
                 sweepable_amount: deposit.sweepable_amount,
-            },
-            None => DepositSolStatus::NotFound,
+            };
         }
+        if let Some(swept) = self.swept_deposits.get(&deposit_id) {
+            return DepositSolStatus::Swept {
+                signature: swept.signature.into(),
+            };
+        }
+        DepositSolStatus::NotFound
     }
 
     pub fn quarantined_deposits(&self) -> &InsertionOrderedMap<DepositId, Deposit> {
@@ -479,6 +493,24 @@ impl State {
         self.next_deposit_sol_id += 1;
     }
 
+    fn process_swept_deposit(
+        &mut self,
+        deposit_id: DepositSolId,
+        signature: &Signature,
+    ) -> Lamport {
+        let deposit = self.queued_deposits.remove(&deposit_id).unwrap_or_else(|| {
+            panic!("Attempted to sweep unknown or already swept deposit {deposit_id}")
+        });
+        self.swept_deposits.insert(
+            deposit_id,
+            SweptDeposit {
+                deposit,
+                signature: *signature,
+            },
+        );
+        deposit.sweepable_amount
+    }
+
     fn process_quarantined_deposit(&mut self, deposit_id: &DepositId) {
         assert!(
             !self.minted_deposits.contains_key(deposit_id),
@@ -657,6 +689,10 @@ impl State {
                     .expect("BUG: insufficient minter balance for withdrawal");
                 total
             }
+            TransactionPurpose::SweepDeposits { deposit_ids } => deposit_ids
+                .iter()
+                .map(|deposit_id| self.process_swept_deposit(*deposit_id, signature))
+                .sum(),
         };
         assert_eq!(
             self.submitted_transactions.insert(
@@ -712,6 +748,11 @@ impl State {
                 sent.signature = *new_signature;
             }
         }
+        for swept in self.swept_deposits.values_mut() {
+            if &swept.signature == old_signature {
+                swept.signature = *new_signature;
+            }
+        }
     }
 
     fn process_transaction_succeeded(&mut self, signature: &Signature) {
@@ -725,15 +766,15 @@ impl State {
             .unwrap_or_else(|| {
                 panic!("Attempted to mark unknown transaction {signature:?} as succeeded")
             });
-        if matches!(
-            transaction.purpose,
-            TransactionPurpose::ConsolidateDeposits { .. }
-        ) {
-            let tx_fee = transaction.message.transaction_fee();
-            self.balance += transaction
-                .amount
-                .checked_sub(tx_fee)
-                .expect("BUG: consolidation amount is less than transaction fee");
+        match transaction.purpose {
+            TransactionPurpose::ConsolidateDeposits { .. } => {
+                let tx_fee = transaction.message.transaction_fee();
+                self.balance += transaction
+                    .amount
+                    .checked_sub(tx_fee)
+                    .expect("BUG: consolidation amount is less than transaction fee");
+            }
+            TransactionPurpose::WithdrawSol { .. } | TransactionPurpose::SweepDeposits { .. } => {}
         }
         assert!(
             !self.transactions_to_resubmit.contains_key(signature),
@@ -833,6 +874,7 @@ impl TryFrom<InitArgs> for State {
             pending_withdrawal_request_guards: BTreeSet::new(),
             next_deposit_sol_id: 0,
             queued_deposits: BTreeMap::new(),
+            swept_deposits: BTreeMap::new(),
             in_flight_deposit_ids: BTreeMap::new(),
             accepted_deposits: InsertionOrderedMap::new(),
             quarantined_deposits: InsertionOrderedMap::new(),
@@ -929,6 +971,13 @@ pub struct QueuedDeposit {
     pub sweepable_amount: Lamport,
 }
 
+/// A queued deposit whose sweep transaction has been submitted but not yet finalized.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SweptDeposit {
+    pub deposit: QueuedDeposit,
+    pub signature: Signature,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MintedDeposit {
     pub block_index: LedgerMintIndex,
@@ -938,6 +987,7 @@ pub struct MintedDeposit {
 #[derive(Copy, Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum TaskType {
     DepositConsolidation,
+    SweepDeposits,
     Mint,
     FinalizeTransactions,
     ResubmitTransactions,

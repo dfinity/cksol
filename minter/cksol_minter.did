@@ -142,7 +142,7 @@ type DepositSolId = nat64;
 
 // The status of a deposit queued by the `deposit_sol` endpoint.
 //
-// Further variants (`Swept`, `Finalized`, `Minted`, `Dropped`, `Quarantined`)
+// Further variants (`Finalized`, `Minted`, `Dropped`, `Quarantined`)
 // will follow as the sweep flow is implemented.
 type DepositSolStatus = variant {
     // No deposit with this identifier was queued.
@@ -151,6 +151,12 @@ type DepositSolStatus = variant {
     Queued : record {
         // The amount that will be swept from the deposit address.
         sweepable_amount: Lamport;
+    };
+    // A Solana transaction sweeping the deposit address to the minter's main
+    // account has been submitted but is not yet finalized.
+    Swept : record {
+        // The signature of the sweep transaction.
+        signature: Signature;
     };
 };
 
@@ -355,6 +361,12 @@ type TransactionPurpose = variant {
     WithdrawSol : record {
         // The ledger burn indices of the withdrawal requests included in this transaction.
         burn_indices: vec LedgerBurnIndex;
+    };
+    // Sweep the deposit addresses of deposits queued by `deposit_sol` into the
+    // minter's main account.
+    SweepDeposits : record {
+        // The ids of the swept deposits, the fee payer first.
+        deposit_ids: vec DepositSolId;
     };
 };
 
