@@ -382,7 +382,7 @@ mod resubmission {
                 RESUBMISSION_BLOCK_HEIGHT,
             ))))
             .add_stub_response(SendTransactionResult::Consistent(Ok(new_signature.into())))
-            .signing_for(&MINTER_ACCOUNT, new_signature);
+            .add_signature(&MINTER_ACCOUNT, Ok(new_signature));
 
         resubmit_transactions(resubmit_runtime).await;
 
@@ -447,7 +447,7 @@ mod resubmission {
                 RESUBMISSION_BLOCK_HEIGHT,
             ))))
             .add_stub_response(SendTransactionResult::Inconsistent(vec![]))
-            .signing_for(&MINTER_ACCOUNT, new_signature);
+            .add_signature(&MINTER_ACCOUNT, Ok(new_signature));
 
         resubmit_transactions(resubmit_runtime).await;
 
@@ -484,7 +484,7 @@ mod resubmission {
                 .add_stub_response(SendTransactionResult::Consistent(Ok(
                     signature(0xA0 + i).into()
                 )))
-                .signing_for(&MINTER_ACCOUNT, signature(0xA0 + i));
+                .add_signature(&MINTER_ACCOUNT, Ok(signature(0xA0 + i)));
         }
 
         resubmit_transactions(runtime.clone()).await;
@@ -510,7 +510,7 @@ mod resubmission {
                 .add_stub_response(SendTransactionResult::Consistent(Ok(
                     signature(0xB0 + i).into()
                 )))
-                .signing_for(&MINTER_ACCOUNT, signature(0xB0 + i));
+                .add_signature(&MINTER_ACCOUNT, Ok(signature(0xB0 + i)));
         }
 
         resubmit_transactions(runtime.clone()).await;

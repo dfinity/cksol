@@ -174,11 +174,11 @@ mod consolidation_tests {
         };
         let blockhash = Hash::new_from_array([0xBB; 32]);
 
-        let runtime = TestCanisterRuntime::new().failing_to_sign_for(
+        let runtime = TestCanisterRuntime::new().add_signature(
             &source_account,
-            SignCallError::CallFailed(
+            Err(SignCallError::CallFailed(
                 CallRejected::with_rejection(4, "signing service unavailable".to_string()).into(),
-            ),
+            )),
         );
 
         let result = create_signed_consolidation_transaction(
@@ -204,11 +204,11 @@ mod consolidation_tests {
         };
         let blockhash = Hash::new_from_array([0xDD; 32]);
 
-        let runtime = TestCanisterRuntime::new().failing_to_sign_for(
+        let runtime = TestCanisterRuntime::new().add_signature(
             &account_2,
-            SignCallError::CallFailed(
+            Err(SignCallError::CallFailed(
                 CallRejected::with_rejection(5, "canister trapped".to_string()).into(),
-            ),
+            )),
         );
 
         let result = create_signed_consolidation_transaction(
@@ -450,11 +450,11 @@ mod batch_withdrawal_tests {
         let target = Address::new_from_array([0xAA; 32]);
         let blockhash = Hash::new_from_array([0xBB; 32]);
 
-        let runtime = TestCanisterRuntime::new().failing_to_sign_for(
+        let runtime = TestCanisterRuntime::new().add_signature(
             &MINTER_ACCOUNT,
-            SignCallError::CallFailed(
+            Err(SignCallError::CallFailed(
                 CallRejected::with_rejection(4, "signing service unavailable".to_string()).into(),
-            ),
+            )),
         );
 
         let result =

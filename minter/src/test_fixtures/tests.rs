@@ -21,6 +21,10 @@ fn should_derive_distinct_signatures_for_distinct_accounts() {
     let accounts = [
         MINTER_ACCOUNT,
         Account::from(Principal::from_slice(&[1])),
+        Account::from(Principal::from_slice(&[1, 0])),
+        Account::from(Principal::from_slice(&[1, 0, 0])),
+        Account::from(Principal::from_slice(&[0])),
+        account(0),
         Account::from(Principal::from_slice(&[1; 29])),
         Account {
             owner: Principal::from_slice(&[1]),
@@ -63,7 +67,7 @@ async fn should_sign_with_the_signature_derived_from_the_signing_account() {
 
 #[tokio::test]
 async fn should_prefer_a_registered_override_over_the_derived_signature() {
-    let signer = MockSchnorrSigner::default().signing_for(&account(1), signature(0xAA));
+    let signer = MockSchnorrSigner::default().add_signature(&account(1), Ok(signature(0xAA)));
 
     assert_eq!(sign(&signer, &account(1)).await, signature(0xAA));
     assert_eq!(sign(&signer, &account(2)).await, signature(2));
@@ -73,8 +77,8 @@ async fn should_prefer_a_registered_override_over_the_derived_signature() {
 #[tokio::test]
 async fn should_consume_overrides_for_the_same_account_in_registration_order() {
     let signer = MockSchnorrSigner::default()
-        .signing_for(&account(1), signature(0xAA))
-        .signing_for(&account(1), signature(0xBB));
+        .add_signature(&account(1), Ok(signature(0xAA)))
+        .add_signature(&account(1), Ok(signature(0xBB)));
 
     assert_eq!(sign(&signer, &account(1)).await, signature(0xAA));
     assert_eq!(sign(&signer, &account(1)).await, signature(0xBB));
@@ -82,7 +86,7 @@ async fn should_consume_overrides_for_the_same_account_in_registration_order() {
 
 #[tokio::test]
 async fn should_share_consumed_overrides_between_clones() {
-    let signer = MockSchnorrSigner::default().signing_for(&account(1), signature(0xAA));
+    let signer = MockSchnorrSigner::default().add_signature(&account(1), Ok(signature(0xAA)));
     let clone = signer.clone();
 
     assert_eq!(sign(&signer, &account(1)).await, signature(0xAA));
@@ -91,7 +95,7 @@ async fn should_share_consumed_overrides_between_clones() {
 
 #[tokio::test]
 async fn should_fail_to_sign_for_the_registered_account_only() {
-    let signer = MockSchnorrSigner::default().failing_to_sign_for(&account(1), signing_error());
+    let signer = MockSchnorrSigner::default().add_signature(&account(1), Err(signing_error()));
 
     assert!(
         signer
@@ -105,7 +109,7 @@ async fn should_fail_to_sign_for_the_registered_account_only() {
 #[tokio::test]
 #[should_panic(expected = "fewer than expected")]
 async fn should_panic_on_an_override_that_is_never_used() {
-    let signer = MockSchnorrSigner::default().signing_for(&account(1), signature(0xAA));
+    let signer = MockSchnorrSigner::default().add_signature(&account(1), Ok(signature(0xAA)));
 
     sign(&signer, &account(2)).await;
 }
@@ -116,7 +120,7 @@ async fn should_panic_on_an_override_registered_after_the_first_signing_request(
     let signer = MockSchnorrSigner::default();
     sign(&signer, &account(1)).await;
 
-    let _ = signer.signing_for(&account(1), signature(0xAA));
+    let _ = signer.add_signature(&account(1), Ok(signature(0xAA)));
 }
 
 #[test]

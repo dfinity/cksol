@@ -486,12 +486,12 @@ mod process_pending_withdrawals_tests {
             .with_increasing_time()
             .add_stub_response(GetSlotResult::Consistent(Ok(slot)))
             .add_stub_response(GetBlockResult::Consistent(Ok(confirmed_block())))
-            .failing_to_sign_for(
+            .add_signature(
                 &MINTER_ACCOUNT,
-                SignCallError::CallFailed(
+                Err(SignCallError::CallFailed(
                     CallRejected::with_rejection(4, "signing service unavailable".to_string())
                         .into(),
-                ),
+                )),
             );
 
         process_pending_withdrawals(runtime).await;
@@ -533,9 +533,9 @@ mod process_pending_withdrawals_tests {
             .with_increasing_time()
             .add_stub_response(GetSlotResult::Consistent(Ok(slot)))
             .add_stub_response(GetBlockResult::Consistent(Ok(confirmed_block())))
-            .signing_for(&MINTER_ACCOUNT, signature(1))
+            .add_signature(&MINTER_ACCOUNT, Ok(signature(1)))
             .add_stub_response(SendTransactionResult::Consistent(Ok(signature(1).into())))
-            .signing_for(&MINTER_ACCOUNT, signature(2))
+            .add_signature(&MINTER_ACCOUNT, Ok(signature(2)))
             .add_stub_response(SendTransactionResult::Consistent(Ok(signature(2).into())));
 
         process_pending_withdrawals(runtime).await;
@@ -570,7 +570,7 @@ mod process_pending_withdrawals_tests {
             .add_stub_response(GetBlockResult::Consistent(Ok(confirmed_block())));
         for i in 0..MAX_CONCURRENT_RPC_CALLS {
             runtime = runtime
-                .signing_for(&MINTER_ACCOUNT, signature(i + 1))
+                .add_signature(&MINTER_ACCOUNT, Ok(signature(i + 1)))
                 .add_stub_response(SendTransactionResult::Consistent(Ok(
                     signature(i + 1).into()
                 )));
@@ -590,7 +590,7 @@ mod process_pending_withdrawals_tests {
             .with_increasing_time()
             .add_stub_response(GetSlotResult::Consistent(Ok(slot)))
             .add_stub_response(GetBlockResult::Consistent(Ok(confirmed_block())))
-            .signing_for(&MINTER_ACCOUNT, last_sig)
+            .add_signature(&MINTER_ACCOUNT, Ok(last_sig))
             .add_stub_response(SendTransactionResult::Consistent(Ok(last_sig.into())));
 
         process_pending_withdrawals(runtime.clone()).await;

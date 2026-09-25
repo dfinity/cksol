@@ -77,13 +77,12 @@ impl TestCanisterRuntime {
         self
     }
 
-    pub fn signing_for(mut self, account: &Account, signature: Signature) -> Self {
-        self.signer = self.signer.signing_for(account, signature);
-        self
-    }
-
-    pub fn failing_to_sign_for(mut self, account: &Account, error: SignCallError) -> Self {
-        self.signer = self.signer.failing_to_sign_for(account, error);
+    pub fn add_signature(
+        mut self,
+        account: &Account,
+        signature: Result<Signature, SignCallError>,
+    ) -> Self {
+        self.signer = self.signer.add_signature(account, signature);
         self
     }
 

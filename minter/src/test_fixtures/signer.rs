@@ -10,15 +10,28 @@ use std::sync::{Arc, OnceLock};
 
 /// The [`Signature`] the mock signer returns for `derivation_path` unless the test
 /// registers an override, laid out so that the owner and the subaccount of the signing
-/// account are both readable in the signature bytes.
+/// account are both readable in the signature bytes: the owner first, the subaccount after
+/// the widest principal, and how far the owner falls short of that width last.
+///
+/// Recording the shortfall rather than the owner length keeps the mapping injective — the
+/// owners `[1]` and `[1, 0]` would otherwise share a signature — while leaving the byte zero
+/// for a full-width owner, so `account_signature(&account(i)) == signature(i)` holds.
 pub(super) fn derivation_path_signature(derivation_path: &DerivationPath) -> Signature {
     const MAX_PRINCIPAL_LEN: usize = 29;
+    const SUBACCOUNT_OFFSET: usize = MAX_PRINCIPAL_LEN;
+    const OWNER_SHORTFALL_OFFSET: usize = SUBACCOUNT_OFFSET + 32;
+
     let [_schema_version, owner, subaccount] = derivation_path.as_slice() else {
         panic!("BUG: unexpected derivation path {derivation_path:?}");
     };
+    let owner_shortfall = MAX_PRINCIPAL_LEN
+        .checked_sub(owner.len())
+        .expect("BUG: principal wider than a derivation path can hold");
+
     let mut bytes = [0_u8; 64];
     bytes[..owner.len()].copy_from_slice(owner);
-    bytes[MAX_PRINCIPAL_LEN..MAX_PRINCIPAL_LEN + subaccount.len()].copy_from_slice(subaccount);
+    bytes[SUBACCOUNT_OFFSET..SUBACCOUNT_OFFSET + subaccount.len()].copy_from_slice(subaccount);
+    bytes[OWNER_SHORTFALL_OFFSET] = owner_shortfall as u8;
     Signature::from(bytes)
 }
 
@@ -38,9 +51,9 @@ mock! {
 /// [`derivation_path_signature`], so the signature a transaction carries follows from which
 /// account signed it.
 ///
-/// Tests that need a different answer register it up front with [`Self::signing_for`] or
-/// [`Self::failing_to_sign_for`]. Overrides are consumed in registration order and must all
-/// be used, so an account registered twice signs twice.
+/// Tests that need a different answer register it up front with [`Self::add_signature`].
+/// Overrides are consumed in registration order and must all be used, so an account
+/// registered twice signs twice.
 #[derive(Clone, Default)]
 pub struct MockSchnorrSigner {
     overrides: Vec<(DerivationPath, Result<Vec<u8>, SignCallError>)>,
@@ -48,20 +61,19 @@ pub struct MockSchnorrSigner {
 }
 
 impl MockSchnorrSigner {
-    pub fn signing_for(self, account: &Account, signature: Signature) -> Self {
-        self.overriding(account, Ok(signature.as_ref().to_vec()))
-    }
-
-    pub fn failing_to_sign_for(self, account: &Account, error: SignCallError) -> Self {
-        self.overriding(account, Err(error))
-    }
-
-    fn overriding(mut self, account: &Account, response: Result<Vec<u8>, SignCallError>) -> Self {
+    pub fn add_signature(
+        mut self,
+        account: &Account,
+        signature: Result<Signature, SignCallError>,
+    ) -> Self {
         assert!(
             self.mock.get().is_none(),
             "BUG: register all signing overrides before the first signing request"
         );
-        self.overrides.push((derivation_path(account), response));
+        self.overrides.push((
+            derivation_path(account),
+            signature.map(|signature| signature.as_ref().to_vec()),
+        ));
         self
     }
 
