@@ -304,6 +304,14 @@ cargo test -p cksol-int-tests --test solana_test_validator
 > [!CAUTION]
 > Running `cargo test` without arguments will attempt all tests, including the Solana validator suite, and will fail if the Solana CLI is not installed.
 
+**Coverage** — measures the unit tests only, since the integration tests drive a prebuilt Wasm that host instrumentation cannot observe:
+
+```sh
+./scripts/coverage
+```
+
+This writes `coverage/`, including a browsable report at `coverage/html/index.html`. CI runs the same script and publishes the summary and the report as a build artifact.
+
 <a id="related-projects"></a>
 ## 🔗 Related Projects
 
