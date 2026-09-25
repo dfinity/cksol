@@ -2,6 +2,7 @@
 "cargo:cargo-sort" = "2.0.1"
 "cargo:canbench" = "0.4.1"
 "github:dfinity/ic-wasm" = "0.11.1"
+"aqua:taiki-e/cargo-llvm-cov" = "0.9.1"
 
 [settings]
 lockfile = true

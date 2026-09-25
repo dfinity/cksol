@@ -1,0 +1,108 @@
+#!/usr/bin/env bash
+# vim: ft=bash
+
+set -euo pipefail
+
+SCRIPTS_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+cd "$SCRIPTS_DIR/.."
+
+OUTPUT_DIR="coverage"
+EXCLUDED_PACKAGE="cksol-int-tests"
+EXCLUDED_FILES='minter/src/test_fixtures/'
+
+function title() {
+    echo "Measure unit-test coverage of the ckSOL workspace"
+}
+
+function usage() {
+    cat << EOF
+
+Usage:
+  $0
+
+EOF
+}
+
+function help() {
+    cat << EOF
+
+This will create (and override) "./$OUTPUT_DIR", containing:
+
+  lcov.info     coverage in LCOV format, for external tooling
+  coverage.json coverage as reported by llvm-cov
+  summary.md    a Markdown summary, appended to the CI job summary
+  html/         a browsable HTML report, open html/index.html
+
+The "$EXCLUDED_PACKAGE" package is left out because those tests drive a
+prebuilt canister wasm inside PocketIC, which host instrumentation cannot
+observe. Files under "$EXCLUDED_FILES" are left out because they are test
+scaffolding rather than production code.
+
+Requires the llvm-tools-preview toolchain component and cargo-llvm-cov, both
+of which "mise install" provides.
+EOF
+}
+
+function measure() {
+    rm -rf "$OUTPUT_DIR"
+    mkdir -p "$OUTPUT_DIR"
+
+    cargo llvm-cov --no-report --locked --workspace --exclude "$EXCLUDED_PACKAGE"
+
+    local report=(cargo llvm-cov report --ignore-filename-regex "$EXCLUDED_FILES")
+    "${report[@]}" --lcov --output-path "$OUTPUT_DIR/lcov.info"
+    "${report[@]}" --json --output-path "$OUTPUT_DIR/coverage.json"
+    "${report[@]}" --html --output-dir "$OUTPUT_DIR"
+}
+
+function summarize() {
+    jq -r --arg root "$PWD/" '
+        def percent: (. * 100 | round) / 100;
+        def ratio(metric): "\(metric.covered)/\(metric.count)";
+
+        .data[0] as $data
+        | "## Unit-test coverage",
+          "",
+          "| Metric | Covered | Coverage |",
+          "| --- | --- | --- |",
+          "| Lines | \(ratio($data.totals.lines)) | **\($data.totals.lines.percent | percent)%** |",
+          "| Functions | \(ratio($data.totals.functions)) | \($data.totals.functions.percent | percent)% |",
+          "| Regions | \(ratio($data.totals.regions)) | \($data.totals.regions.percent | percent)% |",
+          "",
+          "<details><summary>Per-file line coverage, least covered first</summary>",
+          "",
+          "| File | Covered | Coverage |",
+          "| --- | --- | --- |",
+          ( $data.files
+            | sort_by(.summary.lines.percent)
+            | .[]
+            | "| `\(.filename | ltrimstr($root))` | \(ratio(.summary.lines)) | \(.summary.lines.percent | percent)% |"
+          ),
+          "",
+          "</details>"
+    ' "$OUTPUT_DIR/coverage.json" > "$OUTPUT_DIR/summary.md"
+
+    cat "$OUTPUT_DIR/summary.md"
+}
+
+while [[ $# -gt 0 ]]
+do
+    case $1 in
+        -h|--help)
+            title
+            usage
+            help
+            exit 0
+            ;;
+        *)
+            echo "ERROR: unknown argument $1"
+            usage
+            echo
+            echo "Use '$0 --help' for more information"
+            exit 1
+            ;;
+    esac
+done
+
+measure
+summarize

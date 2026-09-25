@@ -98,6 +98,34 @@ jobs:
       - name: 'Run unit tests'
         run: cargo test --locked --workspace --exclude cksol-int-tests
 
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 'Checkout'
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: 'Setup mise'
+        uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3
+        env:
+          MISE_LOCKED: 1
+        with:
+          # Disable cache to avoid issues with wasm32 target
+          # See https://github.com/jdx/mise-action/issues/215
+          cache: false
+
+      - name: 'Measure coverage'
+        run: ./scripts/coverage
+
+      - name: 'Add summary'
+        run: cat ./coverage/summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 'Archive Artifact'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: coverage
+          path: ./coverage
+          if-no-files-found: error
+
   benchmarks:
     runs-on: ubuntu-latest
     steps:
@@ -156,6 +184,7 @@ jobs:
       - lint
       - reproducible-build
       - unit-tests
+      - coverage
       - benchmarks
       - integration-tests
     runs-on: ubuntu-latest

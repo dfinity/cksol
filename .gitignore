@@ -61,7 +61,7 @@ node_modules/
 ## generated output
 out
 dist
-coverage
+/coverage/
 .dfx
 pocket-ic
 ic-wasm
