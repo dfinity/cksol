@@ -25,6 +25,8 @@ pub const DEFAULT_CALLER_DEPOSIT_ADDRESS: &str = "Cybe9JqZKtmhBoVGNHBxRVMUndZno5
 pub const MINTER_ADDRESS: Address = address!("5G64DcCfSFRTwZWSTjub1qGRYrJFLeNMkYjfgCfKi1fi");
 
 pub const DEPOSIT_AMOUNT: Lamport = 500_000_000;
+/// Minimum balance left on a deposit address to keep it rent-exempt.
+pub const RENT_EXEMPTION_THRESHOLD: Lamport = 890_880;
 
 /// The SOL RPC canister rounds the slot returned by `getSlot` down to the nearest
 /// multiple of this value before querying `getBlock`.
@@ -42,6 +44,7 @@ pub fn mock_block_height(slot: u64) -> u64 {
 fn sol_rpc_rounded_slot(slot: u64) -> u64 {
     slot / SOL_RPC_SLOT_ROUNDING * SOL_RPC_SLOT_ROUNDING
 }
+
 pub const EXPECTED_MINT_AMOUNT: Lamport = DEPOSIT_AMOUNT - Setup::DEFAULT_MANUAL_DEPOSIT_FEE;
 
 /// Signature for a Solana transaction depositing [`DEPOSIT_AMOUNT`] lamports to
@@ -162,6 +165,11 @@ impl MockBuilder {
     /// Mock for `getTransaction` returning the default deposit transaction.
     pub fn get_deposit_transaction(self) -> Self {
         self.get_transaction(get_deposit_transaction_response())
+    }
+
+    /// Mock for `getBalance` returning the given balance for any address.
+    pub fn get_balance(self, balance: Lamport) -> Self {
+        self.expect(get_balance_request(), get_balance_response(balance))
     }
 
     /// Mocks for `getSlot` → `getBlock`.
@@ -285,6 +293,18 @@ fn get_deposit_transaction_response() -> JsonRpcResponse {
                 "base64"
             ]
         },
+        "id": 1
+    }))
+}
+
+fn get_balance_request() -> JsonRpcRequestMatcher {
+    JsonRpcRequestMatcher::with_method("getBalance")
+}
+
+fn get_balance_response(balance: Lamport) -> JsonRpcResponse {
+    JsonRpcResponse::from(json!({
+        "jsonrpc": "2.0",
+        "result": { "context": { "apiVersion": "2.0.15", "slot": 341_197_053 }, "value": balance },
         "id": 1
     }))
 }

@@ -292,10 +292,13 @@ impl Setup {
     pub fn proxy(&self) -> Canister<'_> {
         Canister {
             runtime: self.runtime(Setup::DEFAULT_CALLER),
-            id: self
-                .proxy_canister_id
-                .expect("Proxy canister not installed"),
+            id: self.proxy_canister_id(),
         }
+    }
+
+    pub fn proxy_canister_id(&self) -> Principal {
+        self.proxy_canister_id
+            .expect("Proxy canister not installed")
     }
 
     pub fn sol_rpc(&self) -> SolRpcClient<PocketIcRuntime<'_>> {
@@ -435,11 +438,31 @@ impl CkSolMinter<'_> {
             .expect("deposit_sol failed")
     }
 
+    pub async fn deposit_sol_with_cycles(
+        &self,
+        args: impl Into<DepositSolArgs>,
+        cycles: u128,
+    ) -> Result<DepositSolId, DepositSolError> {
+        self.try_deposit_sol_with_cycles(args, cycles)
+            .await
+            .expect("deposit_sol failed")
+    }
+
     pub async fn try_deposit_sol(
         &self,
         args: impl Into<DepositSolArgs>,
     ) -> Result<Result<DepositSolId, DepositSolError>, String> {
-        self.try_update_call("deposit_sol", (args.into(),), 0).await
+        self.try_deposit_sol_with_cycles(args, Setup::DEFAULT_PROCESS_DEPOSIT_REQUIRED_CYCLES)
+            .await
+    }
+
+    pub async fn try_deposit_sol_with_cycles(
+        &self,
+        args: impl Into<DepositSolArgs>,
+        cycles: u128,
+    ) -> Result<Result<DepositSolId, DepositSolError>, String> {
+        self.try_update_call("deposit_sol", (args.into(),), cycles)
+            .await
     }
 
     pub async fn deposit_status(&self, deposit_id: DepositSolId) -> DepositSolStatus {
