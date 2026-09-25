@@ -5,7 +5,7 @@ use cksol_int_tests::{
     ledger_init_args::LEDGER_TRANSFER_FEE,
     validator::{FEE_PER_SIGNATURE, SolanaTestValidator, wait_for_withdrawal_finalized},
 };
-use cksol_types::{DepositSolId, DepositSolStatus, WithdrawalArgs};
+use cksol_types::{DepositSolId, DepositSolStatus, Signature, WithdrawalArgs};
 use icrc_ledger_types::icrc1::account::Account;
 use itertools::Itertools;
 use sol_rpc_types::Lamport;
@@ -315,9 +315,10 @@ async fn should_sweep_a_full_batch_of_deposits_in_one_transaction() {
         .await;
 
     let minter_transactions = validator.get_signatures_for_address(&MINTER_ADDRESS).await;
-    let [sweep_signature] = minter_transactions.as_slice() else {
+    let [swept_by] = minter_transactions.as_slice() else {
         panic!("Expected a single sweep transaction, got {minter_transactions:?}");
     };
+    let sweep_signature = Signature::from(*swept_by);
     for deposit_address in &deposit_addresses {
         assert_eq!(
             validator.get_balance(deposit_address).await,
@@ -328,7 +329,18 @@ async fn should_sweep_a_full_batch_of_deposits_in_one_transaction() {
         assert_eq!(
             setup.minter().deposit_status(deposit_id).await,
             DepositSolStatus::Swept {
-                signature: (*sweep_signature).into()
+                signature: sweep_signature.clone()
+            }
+        );
+    }
+
+    wait_for_minter_balance(&setup, total_sweepable_amount - sweep_fee).await;
+
+    for &deposit_id in &deposit_ids {
+        assert_eq!(
+            setup.minter().deposit_status(deposit_id).await,
+            DepositSolStatus::Finalized {
+                signature: sweep_signature.clone()
             }
         );
     }

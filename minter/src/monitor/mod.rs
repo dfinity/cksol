@@ -1,6 +1,7 @@
 use crate::{
     address::derivation_path,
     constants::MAX_CONCURRENT_RPC_CALLS,
+    deposit::sweep::credit_finalized_sweeps,
     guard::TimerGuard,
     rpc::{
         Block, BlockHeight, SubmitTransactionError, get_recent_block, get_signature_statuses,
@@ -53,6 +54,11 @@ pub async fn finalize_transactions<R: CanisterRuntime>(runtime: R) {
         Err(_) => return,
     };
 
+    check_submitted_transactions(&runtime).await;
+    credit_finalized_sweeps(&runtime).await;
+}
+
+async fn check_submitted_transactions<R: CanisterRuntime>(runtime: &R) {
     let all_transactions: BTreeMap<Signature, BlockHeight> = read_state(|state| {
         state
             .submitted_transactions()
@@ -73,7 +79,7 @@ pub async fn finalize_transactions<R: CanisterRuntime>(runtime: R) {
     // Fetch the current block before checking statuses: if a transaction finalizes
     // after we snapshot the block, the status check will see it as finalized rather
     // than missing, so it will never be incorrectly marked as expired.
-    let current_block = match get_recent_block(&runtime).await {
+    let current_block = match get_recent_block(runtime).await {
         Ok(block) => block,
         Err(e) => {
             log!(Priority::Info, "Failed to get current block: {e}");
@@ -82,7 +88,7 @@ pub async fn finalize_transactions<R: CanisterRuntime>(runtime: R) {
     };
 
     let signatures: Vec<Signature> = all_transactions.keys().copied().collect();
-    let statuses = check_transaction_statuses(&runtime, signatures).await;
+    let statuses = check_transaction_statuses(runtime, signatures).await;
 
     for (signature, error) in &statuses.errored {
         log!(
@@ -95,7 +101,7 @@ pub async fn finalize_transactions<R: CanisterRuntime>(runtime: R) {
                 EventType::FailedTransaction {
                     signature: *signature,
                 },
-                &runtime,
+                runtime,
             )
         });
     }
@@ -108,7 +114,7 @@ pub async fn finalize_transactions<R: CanisterRuntime>(runtime: R) {
                 EventType::SucceededTransaction {
                     signature: *signature,
                 },
-                &runtime,
+                runtime,
             )
         });
     }
@@ -134,7 +140,7 @@ pub async fn finalize_transactions<R: CanisterRuntime>(runtime: R) {
                 EventType::ExpiredTransaction {
                     signature: *signature,
                 },
-                &runtime,
+                runtime,
             )
         });
     }
