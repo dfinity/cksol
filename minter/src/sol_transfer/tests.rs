@@ -3,7 +3,7 @@ use crate::{
     constants::FEE_PER_SIGNATURE,
     state::{event::VersionedMessage, read_state},
     test_fixtures::{
-        MINTER_ACCOUNT, MINTER_ADDRESS, init_schnorr_master_key, init_state,
+        MINTER_ACCOUNT, MINTER_ADDRESS, account_signature, init_schnorr_master_key, init_state,
         runtime::TestCanisterRuntime,
     },
 };
@@ -12,7 +12,6 @@ use candid::Principal;
 use ic_cdk::call::CallRejected;
 use ic_cdk_management_canister::SignCallError;
 use solana_address::Address;
-use solana_signature::Signature;
 
 fn setup() {
     init_state();
@@ -44,11 +43,10 @@ mod consolidation_tests {
         };
         let amount: Lamport = 500_000_000;
         let blockhash = Hash::new_from_array([0xBB; 32]);
-        let signature = [0x42u8; 64];
 
         let source_address = derive_address(&source_account);
 
-        let runtime = TestCanisterRuntime::new().add_signature(signature);
+        let runtime = TestCanisterRuntime::new();
         let (tx, signers) = create_signed_consolidation_transaction(
             &runtime,
             vec![(source_account, amount)],
@@ -81,7 +79,7 @@ mod consolidation_tests {
         );
 
         // Signature is placed for the source address (position 0 = fee payer)
-        assert_eq!(tx.signatures[0], Signature::from(signature));
+        assert_eq!(tx.signatures[0], account_signature(&source_account));
 
         // Recent blockhash is set
         assert_eq!(tx.message.recent_blockhash, blockhash);
@@ -101,15 +99,11 @@ mod consolidation_tests {
         let amount_1: Lamport = 100_000_000;
         let amount_2: Lamport = 200_000_000;
         let blockhash = Hash::new_from_array([0xDD; 32]);
-        let sig_1 = [0x11u8; 64];
-        let sig_2 = [0x22u8; 64];
 
         let source_1 = derive_address(&account_1);
         let source_2 = derive_address(&account_2);
 
-        let runtime = TestCanisterRuntime::new()
-            .add_signature(sig_1)
-            .add_signature(sig_2);
+        let runtime = TestCanisterRuntime::new();
         let (tx, signers) = create_signed_consolidation_transaction(
             &runtime,
             vec![(account_1, amount_1), (account_2, amount_2)],
@@ -167,8 +161,8 @@ mod consolidation_tests {
             .iter()
             .position(|k| *k == source_2)
             .unwrap();
-        assert_eq!(tx.signatures[pos_1], Signature::from(sig_1));
-        assert_eq!(tx.signatures[pos_2], Signature::from(sig_2));
+        assert_eq!(tx.signatures[pos_1], account_signature(&account_1));
+        assert_eq!(tx.signatures[pos_2], account_signature(&account_2));
     }
 
     #[tokio::test]
@@ -180,10 +174,12 @@ mod consolidation_tests {
         };
         let blockhash = Hash::new_from_array([0xBB; 32]);
 
-        let runtime =
-            TestCanisterRuntime::new().add_schnorr_signing_error(SignCallError::CallFailed(
+        let runtime = TestCanisterRuntime::new().failing_to_sign_for(
+            &source_account,
+            SignCallError::CallFailed(
                 CallRejected::with_rejection(4, "signing service unavailable".to_string()).into(),
-            ));
+            ),
+        );
 
         let result = create_signed_consolidation_transaction(
             &runtime,
@@ -196,7 +192,7 @@ mod consolidation_tests {
     }
 
     #[tokio::test]
-    async fn should_fail_when_second_signing_fails() {
+    async fn should_fail_when_signing_fails_for_one_of_the_sources() {
         setup();
         let account_1 = Account {
             owner: Principal::from_slice(&[1]),
@@ -208,11 +204,12 @@ mod consolidation_tests {
         };
         let blockhash = Hash::new_from_array([0xDD; 32]);
 
-        let runtime = TestCanisterRuntime::new()
-            .add_signature([0x11; 64])
-            .add_schnorr_signing_error(SignCallError::CallFailed(
+        let runtime = TestCanisterRuntime::new().failing_to_sign_for(
+            &account_2,
+            SignCallError::CallFailed(
                 CallRejected::with_rejection(5, "canister trapped".to_string()).into(),
-            ));
+            ),
+        );
 
         let result = create_signed_consolidation_transaction(
             &runtime,
@@ -242,12 +239,12 @@ mod consolidation_tests {
             })
             .collect();
 
-        let mut runtime = TestCanisterRuntime::new();
-        for _ in 0..=MAX_SIGNATURES {
-            runtime = runtime.add_signature([0xAA; 64]);
-        }
-
-        let result = create_signed_consolidation_transaction(&runtime, sources, blockhash).await;
+        let result = create_signed_consolidation_transaction(
+            &TestCanisterRuntime::new(),
+            sources,
+            blockhash,
+        )
+        .await;
 
         assert_matches!(
             result,
@@ -276,12 +273,12 @@ mod consolidation_tests {
             })
             .collect();
 
-        let mut runtime = TestCanisterRuntime::new();
-        for _ in 0..MAX_SIGNATURES {
-            runtime = runtime.add_signature([0x11; 64]);
-        }
-
-        let result = create_signed_consolidation_transaction(&runtime, sources, blockhash).await;
+        let result = create_signed_consolidation_transaction(
+            &TestCanisterRuntime::new(),
+            sources,
+            blockhash,
+        )
+        .await;
 
         assert!(result.is_ok());
     }
@@ -305,12 +302,12 @@ mod consolidation_tests {
             })
             .collect();
 
-        let mut runtime = TestCanisterRuntime::new();
-        for _ in 0..NUM_SOURCES {
-            runtime = runtime.add_signature([0xAA; 64]);
-        }
-
-        let result = create_signed_consolidation_transaction(&runtime, sources, blockhash).await;
+        let result = create_signed_consolidation_transaction(
+            &TestCanisterRuntime::new(),
+            sources,
+            blockhash,
+        )
+        .await;
 
         assert_matches!(
             result,
@@ -331,9 +328,8 @@ mod consolidation_tests {
         };
         let blockhash = Hash::new_from_array([0xAA; 32]);
 
-        let runtime = TestCanisterRuntime::new().add_signature([0x11; 64]);
         let _ = create_signed_consolidation_transaction(
-            &runtime,
+            &TestCanisterRuntime::new(),
             vec![(account_1, 100_000_000), (account_1, 300_000_000)],
             blockhash,
         )
@@ -355,11 +351,8 @@ mod consolidation_tests {
 
         let account_1_address = derive_address(&account_1);
 
-        let runtime = TestCanisterRuntime::new()
-            .add_signature([0x11; 64])
-            .add_signature([0x22; 64]);
         let (tx, _signers) = create_signed_consolidation_transaction(
-            &runtime,
+            &TestCanisterRuntime::new(),
             vec![(account_1, 100_000_000), (account_2, 200_000_000)],
             blockhash,
         )
@@ -379,9 +372,8 @@ mod consolidation_tests {
         };
         let blockhash = Hash::new_from_array([0xBB; 32]);
 
-        let runtime = TestCanisterRuntime::new().add_signature([0x42; 64]);
         let (tx, _signers) = create_signed_consolidation_transaction(
-            &runtime,
+            &TestCanisterRuntime::new(),
             vec![(source_account, 500_000_000)],
             blockhash,
         )
@@ -402,17 +394,18 @@ mod batch_withdrawal_tests {
         let target = Address::new_from_array([0xAA; 32]);
         let amount: Lamport = 500_000_000;
         let blockhash = Hash::new_from_array([0xBB; 32]);
-        let sig = [0x42u8; 64];
 
-        let runtime = TestCanisterRuntime::new().add_signature(sig);
-        let (tx, signers) =
-            create_signed_batch_withdrawal_transaction(&runtime, &[(target, amount)], blockhash)
-                .await
-                .expect("transaction creation should succeed");
+        let (tx, signers) = create_signed_batch_withdrawal_transaction(
+            &TestCanisterRuntime::new(),
+            &[(target, amount)],
+            blockhash,
+        )
+        .await
+        .expect("transaction creation should succeed");
 
         assert_eq!(signers, vec![MINTER_ACCOUNT]);
         assert_eq!(tx.signatures.len(), 1);
-        assert_eq!(tx.signatures[0], Signature::from(sig));
+        assert_eq!(tx.signatures[0], account_signature(&MINTER_ACCOUNT));
         assert_eq!(tx.message.account_keys[0], MINTER_ADDRESS);
         assert!(tx.message.account_keys.contains(&target));
         assert_eq!(tx.message.instructions.len(), 1);
@@ -426,11 +419,9 @@ mod batch_withdrawal_tests {
         let target_2 = Address::new_from_array([0xBB; 32]);
         let target_3 = Address::new_from_array([0xCC; 32]);
         let blockhash = Hash::new_from_array([0xDD; 32]);
-        let sig = [0x11u8; 64];
 
-        let runtime = TestCanisterRuntime::new().add_signature(sig);
         let (tx, signers) = create_signed_batch_withdrawal_transaction(
-            &runtime,
+            &TestCanisterRuntime::new(),
             &[(target_1, 100), (target_2, 200), (target_3, 300)],
             blockhash,
         )
@@ -459,10 +450,12 @@ mod batch_withdrawal_tests {
         let target = Address::new_from_array([0xAA; 32]);
         let blockhash = Hash::new_from_array([0xBB; 32]);
 
-        let runtime =
-            TestCanisterRuntime::new().add_schnorr_signing_error(SignCallError::CallFailed(
+        let runtime = TestCanisterRuntime::new().failing_to_sign_for(
+            &MINTER_ACCOUNT,
+            SignCallError::CallFailed(
                 CallRejected::with_rejection(4, "signing service unavailable".to_string()).into(),
-            ));
+            ),
+        );
 
         let result =
             create_signed_batch_withdrawal_transaction(&runtime, &[(target, 100)], blockhash).await;
@@ -474,7 +467,6 @@ mod batch_withdrawal_tests {
     async fn should_create_batch_withdrawal_at_max_capacity() {
         setup();
         let blockhash = Hash::new_from_array([0xDD; 32]);
-        let sig = [0x42u8; 64];
 
         let targets: Vec<(Address, Lamport)> = (0..MAX_WITHDRAWALS_PER_TX)
             .map(|i| {
@@ -485,11 +477,13 @@ mod batch_withdrawal_tests {
             })
             .collect();
 
-        let runtime = TestCanisterRuntime::new().add_signature(sig);
-        let (tx, signers) =
-            create_signed_batch_withdrawal_transaction(&runtime, &targets, blockhash)
-                .await
-                .expect("transaction creation should succeed at max capacity");
+        let (tx, signers) = create_signed_batch_withdrawal_transaction(
+            &TestCanisterRuntime::new(),
+            &targets,
+            blockhash,
+        )
+        .await
+        .expect("transaction creation should succeed at max capacity");
 
         assert_eq!(signers, vec![MINTER_ACCOUNT]);
         assert_eq!(tx.signatures.len(), 1);
@@ -500,7 +494,6 @@ mod batch_withdrawal_tests {
     async fn should_charge_the_fee_reserved_per_batch() {
         setup();
         let blockhash = Hash::new_from_array([0xDD; 32]);
-        let sig = [0x42u8; 64];
         let targets: Vec<(Address, Lamport)> = (0..MAX_WITHDRAWALS_PER_TX)
             .map(|i| {
                 let mut addr = [0u8; 32];
@@ -510,11 +503,13 @@ mod batch_withdrawal_tests {
             })
             .collect();
 
-        let runtime = TestCanisterRuntime::new().add_signature(sig);
-        let (tx, _signers) =
-            create_signed_batch_withdrawal_transaction(&runtime, &targets, blockhash)
-                .await
-                .expect("transaction creation should succeed at max capacity");
+        let (tx, _signers) = create_signed_batch_withdrawal_transaction(
+            &TestCanisterRuntime::new(),
+            &targets,
+            blockhash,
+        )
+        .await
+        .expect("transaction creation should succeed at max capacity");
 
         assert_eq!(
             VersionedMessage::Legacy(tx.message).transaction_fee(),
@@ -539,13 +534,12 @@ mod batch_withdrawal_tests {
             })
             .collect();
 
-        let mut runtime = TestCanisterRuntime::new();
-        for _ in 0..NUM_TARGETS {
-            runtime = runtime.add_signature([0xAA; 64]);
-        }
-
-        let result =
-            create_signed_batch_withdrawal_transaction(&runtime, &targets, blockhash).await;
+        let result = create_signed_batch_withdrawal_transaction(
+            &TestCanisterRuntime::new(),
+            &targets,
+            blockhash,
+        )
+        .await;
 
         assert_matches!(
             result,

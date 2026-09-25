@@ -57,6 +57,7 @@ thiserror = { workspace = true }
 
 [dev-dependencies]
 candid_parser = { workspace = true }
+mockall = { workspace = true }
 proptest = { workspace = true }
 scraper = { workspace = true }
 tokio = { workspace = true, features = ["full"] }

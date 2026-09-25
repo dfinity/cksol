@@ -19,7 +19,7 @@ pub mod storage;
 pub mod utils;
 pub mod withdraw;
 
-#[cfg(any(test, feature = "canbench-rs"))]
+#[cfg(test)]
 pub mod test_fixtures;
 
 #[cfg(feature = "canbench-rs")]

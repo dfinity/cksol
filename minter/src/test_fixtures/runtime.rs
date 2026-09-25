@@ -3,6 +3,8 @@ use crate::{runtime::CanisterRuntime, signer::SchnorrSigner};
 use candid::{CandidType, Principal};
 use ic_canister_runtime::{IcError, Runtime, StubRuntime};
 use ic_cdk_management_canister::{SchnorrPublicKeyArgs, SchnorrPublicKeyResult, SignCallError};
+use icrc_ledger_types::icrc1::account::Account;
+use solana_signature::Signature;
 use std::{
     future::Future,
     sync::{Arc, Mutex},
@@ -75,13 +77,13 @@ impl TestCanisterRuntime {
         self
     }
 
-    pub fn add_signature(mut self, signature: [u8; 64]) -> Self {
-        self.signer = self.signer.add_signature(signature);
+    pub fn signing_for(mut self, account: &Account, signature: Signature) -> Self {
+        self.signer = self.signer.signing_for(account, signature);
         self
     }
 
-    pub fn add_schnorr_signing_error(mut self, error: SignCallError) -> Self {
-        self.signer = self.signer.add_response(Err(error));
+    pub fn failing_to_sign_for(mut self, account: &Account, error: SignCallError) -> Self {
+        self.signer = self.signer.failing_to_sign_for(account, error);
         self
     }
 
@@ -90,7 +92,6 @@ impl TestCanisterRuntime {
         self
     }
 
-    #[cfg(any(test, not(feature = "canbench-rs")))]
     pub(crate) fn set_timer_call_count(&self) -> usize {
         *self.set_timer_call_count.lock().unwrap()
     }
