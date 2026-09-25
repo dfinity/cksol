@@ -12,9 +12,10 @@ use std::{
     sync::{Arc, OnceLock},
 };
 
-/// The [`Signature`] the mock signer returns the `occurrence`-th time `derivation_path`
-/// signs, as the hash of both. Hashing every component under its own length keeps the
-/// mapping injective, so no two accounts and no two signatures by the same account collide.
+/// The [`Signature`] the mock signer answers with the `occurrence`-th time
+/// `derivation_path` signs, as the hash of both. Hashing every component under its own
+/// length keeps the mapping injective, so no two accounts and no two signatures by the same
+/// account collide.
 pub(super) fn derivation_path_signature(
     derivation_path: &DerivationPath,
     occurrence: usize,
@@ -30,6 +31,18 @@ pub(super) fn derivation_path_signature(
     Signature::try_from(hasher.finalize().as_slice()).expect("BUG: SHA-512 is 64 bytes wide")
 }
 
+/// How the mock signer answers one expected signing request.
+#[derive(Clone)]
+pub enum ExpectedSignature {
+    /// Answer with the signature derived from the signing account, which the test reads
+    /// back with `account_signature` or `account_signature_nth`.
+    Derived,
+    /// Answer with this signature, for a test that cannot derive the one it needs.
+    Exactly(Signature),
+    /// Fail the signing request.
+    Failing(SignCallError),
+}
+
 mock! {
     Signer {}
 
@@ -42,53 +55,53 @@ mock! {
     }
 }
 
-/// A [`SchnorrSigner`] that answers every signing request with
-/// [`derivation_path_signature`], so the signature a transaction carries follows from which
-/// account signed it and from how many times that account has signed before.
+/// A [`SchnorrSigner`] that answers only the signing requests a test has registered with
+/// [`Self::add_signature`], in registration order per account.
 ///
-/// Tests that need a different answer register it up front with [`Self::add_signature`].
-/// Overrides are consumed in registration order and must all be used, so an account
-/// registered twice signs twice; they do not advance the occurrence count.
+/// There is no default answer: signing without a registration fails the test, and so does a
+/// registration that is never used. An account expected to sign twice is registered twice,
+/// and its two [`ExpectedSignature::Derived`] answers are its first and second signatures.
 #[derive(Clone, Default)]
 pub struct MockSchnorrSigner {
-    overrides: Vec<(DerivationPath, Result<Vec<u8>, SignCallError>)>,
+    expectations: Vec<(DerivationPath, ExpectedSignature)>,
     mock: Arc<OnceLock<MockSigner>>,
 }
 
 impl MockSchnorrSigner {
-    pub fn add_signature(
-        mut self,
-        account: &Account,
-        signature: Result<Signature, SignCallError>,
-    ) -> Self {
+    pub fn add_signature(mut self, account: &Account, signature: ExpectedSignature) -> Self {
         assert!(
             self.mock.get().is_none(),
-            "BUG: register all signing overrides before the first signing request"
+            "BUG: register all expected signatures before the first signing request"
         );
-        self.overrides.push((
-            derivation_path(account),
-            signature.map(|signature| signature.as_ref().to_vec()),
-        ));
+        self.expectations
+            .push((derivation_path(account), signature));
         self
     }
 
     fn mock(&self) -> &MockSigner {
         self.mock.get_or_init(|| {
             let mut mock = MockSigner::new();
-            for (derivation_path, response) in self.overrides.clone() {
-                mock.expect_sign()
-                    .withf(move |_message, path| path == &derivation_path)
-                    .times(1)
-                    .return_once(move |_message, _path| response);
-            }
+            let mut occurrences: BTreeMap<&DerivationPath, usize> = BTreeMap::new();
 
-            let mut occurrences: BTreeMap<DerivationPath, usize> = BTreeMap::new();
-            mock.expect_sign().returning(move |_message, path| {
-                let occurrence = occurrences.entry(path.clone()).or_default();
-                let signature = derivation_path_signature(&path, *occurrence);
+            for (derivation_path, expected) in &self.expectations {
+                let occurrence = occurrences.entry(derivation_path).or_default();
+                let response = match expected {
+                    ExpectedSignature::Derived => {
+                        Ok(derivation_path_signature(derivation_path, *occurrence))
+                    }
+                    ExpectedSignature::Exactly(signature) => Ok(*signature),
+                    ExpectedSignature::Failing(error) => Err(error.clone()),
+                };
                 *occurrence += 1;
-                Ok(signature.as_ref().to_vec())
-            });
+
+                let expected_path = derivation_path.clone();
+                mock.expect_sign()
+                    .withf(move |_message, path| path == &expected_path)
+                    .times(1)
+                    .return_once(move |_message, _path| {
+                        response.map(|signature| signature.as_ref().to_vec())
+                    });
+            }
             mock
         })
     }

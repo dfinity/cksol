@@ -1,4 +1,5 @@
 use super::*;
+use crate::test_fixtures::signer::ExpectedSignature::{Derived, Failing};
 use crate::{
     constants::FEE_PER_SIGNATURE,
     state::{event::VersionedMessage, read_state},
@@ -21,6 +22,18 @@ fn setup() {
 fn derive_address(account: &Account) -> Address {
     let master_key = read_state(|s| s.minter_public_key().cloned().unwrap());
     Address::from(derive_public_key(&master_key, derivation_path(account)).serialize_raw())
+}
+
+fn expecting_all(sources: &[(Account, Lamport)]) -> TestCanisterRuntime {
+    sources
+        .iter()
+        .fold(TestCanisterRuntime::new(), |runtime, (account, _)| {
+            runtime.add_signature(account, Derived)
+        })
+}
+
+fn minter_signing_once() -> TestCanisterRuntime {
+    TestCanisterRuntime::new().add_signature(&MINTER_ACCOUNT, Derived)
 }
 
 /// Extracts the transfer amount (in lamports) from a compiled system program
@@ -46,7 +59,7 @@ mod consolidation_tests {
 
         let source_address = derive_address(&source_account);
 
-        let runtime = TestCanisterRuntime::new();
+        let runtime = TestCanisterRuntime::new().add_signature(&source_account, Derived);
         let (tx, signers) = create_signed_consolidation_transaction(
             &runtime,
             vec![(source_account, amount)],
@@ -103,7 +116,9 @@ mod consolidation_tests {
         let source_1 = derive_address(&account_1);
         let source_2 = derive_address(&account_2);
 
-        let runtime = TestCanisterRuntime::new();
+        let runtime = TestCanisterRuntime::new()
+            .add_signature(&account_1, Derived)
+            .add_signature(&account_2, Derived);
         let (tx, signers) = create_signed_consolidation_transaction(
             &runtime,
             vec![(account_1, amount_1), (account_2, amount_2)],
@@ -176,7 +191,7 @@ mod consolidation_tests {
 
         let runtime = TestCanisterRuntime::new().add_signature(
             &source_account,
-            Err(SignCallError::CallFailed(
+            Failing(SignCallError::CallFailed(
                 CallRejected::with_rejection(4, "signing service unavailable".to_string()).into(),
             )),
         );
@@ -204,12 +219,14 @@ mod consolidation_tests {
         };
         let blockhash = Hash::new_from_array([0xDD; 32]);
 
-        let runtime = TestCanisterRuntime::new().add_signature(
-            &account_2,
-            Err(SignCallError::CallFailed(
-                CallRejected::with_rejection(5, "canister trapped".to_string()).into(),
-            )),
-        );
+        let runtime = TestCanisterRuntime::new()
+            .add_signature(&account_1, Derived)
+            .add_signature(
+                &account_2,
+                Failing(SignCallError::CallFailed(
+                    CallRejected::with_rejection(5, "canister trapped".to_string()).into(),
+                )),
+            );
 
         let result = create_signed_consolidation_transaction(
             &runtime,
@@ -239,12 +256,9 @@ mod consolidation_tests {
             })
             .collect();
 
-        let result = create_signed_consolidation_transaction(
-            &TestCanisterRuntime::new(),
-            sources,
-            blockhash,
-        )
-        .await;
+        let result =
+            create_signed_consolidation_transaction(&expecting_all(&sources), sources, blockhash)
+                .await;
 
         assert_matches!(
             result,
@@ -273,12 +287,9 @@ mod consolidation_tests {
             })
             .collect();
 
-        let result = create_signed_consolidation_transaction(
-            &TestCanisterRuntime::new(),
-            sources,
-            blockhash,
-        )
-        .await;
+        let result =
+            create_signed_consolidation_transaction(&expecting_all(&sources), sources, blockhash)
+                .await;
 
         assert!(result.is_ok());
     }
@@ -302,12 +313,9 @@ mod consolidation_tests {
             })
             .collect();
 
-        let result = create_signed_consolidation_transaction(
-            &TestCanisterRuntime::new(),
-            sources,
-            blockhash,
-        )
-        .await;
+        let result =
+            create_signed_consolidation_transaction(&expecting_all(&sources), sources, blockhash)
+                .await;
 
         assert_matches!(
             result,
@@ -351,8 +359,11 @@ mod consolidation_tests {
 
         let account_1_address = derive_address(&account_1);
 
+        let runtime = TestCanisterRuntime::new()
+            .add_signature(&account_1, Derived)
+            .add_signature(&account_2, Derived);
         let (tx, _signers) = create_signed_consolidation_transaction(
-            &TestCanisterRuntime::new(),
+            &runtime,
             vec![(account_1, 100_000_000), (account_2, 200_000_000)],
             blockhash,
         )
@@ -372,8 +383,9 @@ mod consolidation_tests {
         };
         let blockhash = Hash::new_from_array([0xBB; 32]);
 
+        let runtime = TestCanisterRuntime::new().add_signature(&source_account, Derived);
         let (tx, _signers) = create_signed_consolidation_transaction(
-            &TestCanisterRuntime::new(),
+            &runtime,
             vec![(source_account, 500_000_000)],
             blockhash,
         )
@@ -396,7 +408,7 @@ mod batch_withdrawal_tests {
         let blockhash = Hash::new_from_array([0xBB; 32]);
 
         let (tx, signers) = create_signed_batch_withdrawal_transaction(
-            &TestCanisterRuntime::new(),
+            &minter_signing_once(),
             &[(target, amount)],
             blockhash,
         )
@@ -421,7 +433,7 @@ mod batch_withdrawal_tests {
         let blockhash = Hash::new_from_array([0xDD; 32]);
 
         let (tx, signers) = create_signed_batch_withdrawal_transaction(
-            &TestCanisterRuntime::new(),
+            &minter_signing_once(),
             &[(target_1, 100), (target_2, 200), (target_3, 300)],
             blockhash,
         )
@@ -452,7 +464,7 @@ mod batch_withdrawal_tests {
 
         let runtime = TestCanisterRuntime::new().add_signature(
             &MINTER_ACCOUNT,
-            Err(SignCallError::CallFailed(
+            Failing(SignCallError::CallFailed(
                 CallRejected::with_rejection(4, "signing service unavailable".to_string()).into(),
             )),
         );
@@ -477,13 +489,10 @@ mod batch_withdrawal_tests {
             })
             .collect();
 
-        let (tx, signers) = create_signed_batch_withdrawal_transaction(
-            &TestCanisterRuntime::new(),
-            &targets,
-            blockhash,
-        )
-        .await
-        .expect("transaction creation should succeed at max capacity");
+        let (tx, signers) =
+            create_signed_batch_withdrawal_transaction(&minter_signing_once(), &targets, blockhash)
+                .await
+                .expect("transaction creation should succeed at max capacity");
 
         assert_eq!(signers, vec![MINTER_ACCOUNT]);
         assert_eq!(tx.signatures.len(), 1);
@@ -503,13 +512,10 @@ mod batch_withdrawal_tests {
             })
             .collect();
 
-        let (tx, _signers) = create_signed_batch_withdrawal_transaction(
-            &TestCanisterRuntime::new(),
-            &targets,
-            blockhash,
-        )
-        .await
-        .expect("transaction creation should succeed at max capacity");
+        let (tx, _signers) =
+            create_signed_batch_withdrawal_transaction(&minter_signing_once(), &targets, blockhash)
+                .await
+                .expect("transaction creation should succeed at max capacity");
 
         assert_eq!(
             VersionedMessage::Legacy(tx.message).transaction_fee(),
@@ -534,12 +540,9 @@ mod batch_withdrawal_tests {
             })
             .collect();
 
-        let result = create_signed_batch_withdrawal_transaction(
-            &TestCanisterRuntime::new(),
-            &targets,
-            blockhash,
-        )
-        .await;
+        let result =
+            create_signed_batch_withdrawal_transaction(&minter_signing_once(), &targets, blockhash)
+                .await;
 
         assert_matches!(
             result,
