@@ -202,3 +202,9 @@ async fn sign(signer: &MockSchnorrSigner, account: &Account) -> Signature {
 fn signing_error() -> SignCallError {
     SignCallError::CallFailed(CallRejected::with_rejection(4, "unavailable".to_string()).into())
 }
+
+#[test]
+#[should_panic(expected = "never requested")]
+fn should_panic_on_an_expected_signer_that_never_signs() {
+    let _signer = MockSchnorrSigner::default().add_signer(sign_for(&account(1)).times(2));
+}

@@ -9,7 +9,10 @@ use sha2::{Digest, Sha512};
 use solana_signature::Signature;
 use std::{
     collections::BTreeMap,
-    sync::{Arc, OnceLock},
+    sync::{
+        Arc, OnceLock,
+        atomic::{AtomicUsize, Ordering},
+    },
 };
 
 /// The [`Signature`] the mock signer answers with the `occurrence`-th time
@@ -68,6 +71,13 @@ impl SignerExpectation {
         self
     }
 
+    fn count(&self) -> usize {
+        match &self.answers {
+            Answers::Derived(count) => *count,
+            Answers::Given(answers) => answers.len(),
+        }
+    }
+
     fn signatures(&self, first_occurrence: usize) -> Vec<Result<Signature, SignCallError>> {
         match &self.answers {
             Answers::Derived(count) => (0..*count)
@@ -109,21 +119,42 @@ mock! {
 #[derive(Clone, Default)]
 pub struct MockSchnorrSigner {
     expectations: Vec<SignerExpectation>,
-    mock: Arc<OnceLock<MockSigner>>,
+    state: Arc<SignerState>,
+}
+
+/// Holds the mock itself, so that clones handed out by `signer()` share which expectations
+/// have already been consumed, and the number of signatures expected of it, so that
+/// expectations still count when a test never reaches the signer at all.
+#[derive(Default)]
+struct SignerState {
+    mock: OnceLock<MockSigner>,
+    expected_signatures: AtomicUsize,
+}
+
+impl Drop for SignerState {
+    fn drop(&mut self) {
+        let expected = self.expected_signatures.load(Ordering::Relaxed);
+        if self.mock.get().is_none() && expected > 0 && !std::thread::panicking() {
+            panic!("{expected} expected signature(s) were never requested");
+        }
+    }
 }
 
 impl MockSchnorrSigner {
     pub fn add_signer(mut self, expectation: SignerExpectation) -> Self {
         assert!(
-            self.mock.get().is_none(),
+            self.state.mock.get().is_none(),
             "BUG: register all expected signers before the first signing request"
         );
+        self.state
+            .expected_signatures
+            .fetch_add(expectation.count(), Ordering::Relaxed);
         self.expectations.push(expectation);
         self
     }
 
     fn mock(&self) -> &MockSigner {
-        self.mock.get_or_init(|| {
+        self.state.mock.get_or_init(|| {
             let mut mock = MockSigner::new();
             let mut occurrences: BTreeMap<&DerivationPath, usize> = BTreeMap::new();
 
