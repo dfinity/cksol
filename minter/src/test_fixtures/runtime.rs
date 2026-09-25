@@ -1,12 +1,11 @@
 use super::{
-    signer::{ExpectedSignature, MockSchnorrSigner},
+    signer::{MockSchnorrSigner, SignerExpectation},
     stubs::Stubs,
 };
 use crate::{runtime::CanisterRuntime, signer::SchnorrSigner};
 use candid::{CandidType, Principal};
 use ic_canister_runtime::{IcError, Runtime, StubRuntime};
 use ic_cdk_management_canister::{SchnorrPublicKeyArgs, SchnorrPublicKeyResult};
-use icrc_ledger_types::icrc1::account::Account;
 use std::{
     future::Future,
     sync::{Arc, Mutex},
@@ -73,8 +72,8 @@ impl TestCanisterRuntime {
         self
     }
 
-    pub fn add_signature(mut self, account: &Account, signature: ExpectedSignature) -> Self {
-        self.signer = self.signer.add_signature(account, signature);
+    pub fn add_signer(mut self, expectation: SignerExpectation) -> Self {
+        self.signer = self.signer.add_signer(expectation);
         self
     }
 

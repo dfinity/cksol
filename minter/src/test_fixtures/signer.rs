@@ -31,16 +31,62 @@ pub(super) fn derivation_path_signature(
     Signature::try_from(hasher.finalize().as_slice()).expect("BUG: SHA-512 is 64 bytes wide")
 }
 
-/// How the mock signer answers one expected signing request.
+/// Expects `account` to sign once, answering with the signature derived from it, which the
+/// test reads back with `account_signature`.
+///
+/// Use [`SignerExpectation::times`] for an account that signs repeatedly, each time
+/// answered with its next derived signature, or [`SignerExpectation::expect`] to spell out
+/// the exact sequence of answers.
+pub fn sign_for(account: &Account) -> SignerExpectation {
+    SignerExpectation {
+        derivation_path: derivation_path(account),
+        answers: Answers::Derived(1),
+    }
+}
+
+/// What one account is expected to be asked to sign, and how the mock signer answers.
 #[derive(Clone)]
-pub enum ExpectedSignature {
-    /// Answer with the signature derived from the signing account, which the test reads
-    /// back with `account_signature` or `account_signature_nth`.
-    Derived,
-    /// Answer with this signature, for a test that cannot derive the one it needs.
-    Exactly(Signature),
-    /// Fail the signing request.
-    Failing(SignCallError),
+pub struct SignerExpectation {
+    derivation_path: DerivationPath,
+    answers: Answers,
+}
+
+impl SignerExpectation {
+    /// Expects `count` signing requests, each answered with the account's next derived
+    /// signature, so no two of them are alike.
+    pub fn times(mut self, count: usize) -> Self {
+        self.answers = Answers::Derived(count);
+        self
+    }
+
+    /// Expects one signing request per given answer, in order.
+    pub fn expect(
+        mut self,
+        answers: impl IntoIterator<Item = Result<Signature, SignCallError>>,
+    ) -> Self {
+        self.answers = Answers::Given(answers.into_iter().collect());
+        self
+    }
+
+    fn signatures(&self, first_occurrence: usize) -> Vec<Result<Signature, SignCallError>> {
+        match &self.answers {
+            Answers::Derived(count) => (0..*count)
+                .map(|index| {
+                    Ok(derivation_path_signature(
+                        &self.derivation_path,
+                        first_occurrence + index,
+                    ))
+                })
+                .collect(),
+            Answers::Given(answers) => answers.clone(),
+        }
+    }
+}
+
+#[derive(Clone)]
+enum Answers {
+    Derived(usize),
+    Given(Vec<Result<Signature, SignCallError>>),
 }
 
 mock! {
@@ -56,25 +102,23 @@ mock! {
 }
 
 /// A [`SchnorrSigner`] that answers only the signing requests a test has registered with
-/// [`Self::add_signature`], in registration order per account.
+/// [`Self::add_signer`], in registration order per account.
 ///
-/// There is no default answer: signing without a registration fails the test, and so does a
-/// registration that is never used. An account expected to sign twice is registered twice,
-/// and its two [`ExpectedSignature::Derived`] answers are its first and second signatures.
+/// There is no default answer: signing without an expectation fails the test, and so does an
+/// expectation that goes unused.
 #[derive(Clone, Default)]
 pub struct MockSchnorrSigner {
-    expectations: Vec<(DerivationPath, ExpectedSignature)>,
+    expectations: Vec<SignerExpectation>,
     mock: Arc<OnceLock<MockSigner>>,
 }
 
 impl MockSchnorrSigner {
-    pub fn add_signature(mut self, account: &Account, signature: ExpectedSignature) -> Self {
+    pub fn add_signer(mut self, expectation: SignerExpectation) -> Self {
         assert!(
             self.mock.get().is_none(),
-            "BUG: register all expected signatures before the first signing request"
+            "BUG: register all expected signers before the first signing request"
         );
-        self.expectations
-            .push((derivation_path(account), signature));
+        self.expectations.push(expectation);
         self
     }
 
@@ -83,24 +127,20 @@ impl MockSchnorrSigner {
             let mut mock = MockSigner::new();
             let mut occurrences: BTreeMap<&DerivationPath, usize> = BTreeMap::new();
 
-            for (derivation_path, expected) in &self.expectations {
-                let occurrence = occurrences.entry(derivation_path).or_default();
-                let response = match expected {
-                    ExpectedSignature::Derived => {
-                        Ok(derivation_path_signature(derivation_path, *occurrence))
-                    }
-                    ExpectedSignature::Exactly(signature) => Ok(*signature),
-                    ExpectedSignature::Failing(error) => Err(error.clone()),
-                };
-                *occurrence += 1;
+            for expectation in &self.expectations {
+                let occurrence = occurrences.entry(&expectation.derivation_path).or_default();
+                let signatures = expectation.signatures(*occurrence);
+                *occurrence += signatures.len();
 
-                let expected_path = derivation_path.clone();
-                mock.expect_sign()
-                    .withf(move |_message, path| path == &expected_path)
-                    .times(1)
-                    .return_once(move |_message, _path| {
-                        response.map(|signature| signature.as_ref().to_vec())
-                    });
+                for signature in signatures {
+                    let expected_path = expectation.derivation_path.clone();
+                    mock.expect_sign()
+                        .withf(move |_message, path| path == &expected_path)
+                        .times(1)
+                        .return_once(move |_message, _path| {
+                            signature.map(|signature| signature.as_ref().to_vec())
+                        });
+                }
             }
             mock
         })

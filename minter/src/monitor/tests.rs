@@ -2,7 +2,7 @@ use super::{
     MAX_BLOCKHASH_AGE_IN_BLOCKS, MAX_SIGNATURES_PER_STATUS_CHECK, finalize_transactions,
     resubmit_transactions,
 };
-use crate::test_fixtures::signer::ExpectedSignature::Derived;
+use crate::test_fixtures::signer::sign_for;
 use crate::{
     constants::MAX_CONCURRENT_RPC_CALLS,
     rpc::BlockHeight,
@@ -383,7 +383,7 @@ mod resubmission {
                 RESUBMISSION_BLOCK_HEIGHT,
             ))))
             .add_stub_response(SendTransactionResult::Consistent(Ok(new_signature.into())))
-            .add_signature(&account(1), Derived);
+            .add_signer(sign_for(&account(1)));
 
         resubmit_transactions(resubmit_runtime).await;
 
@@ -448,7 +448,7 @@ mod resubmission {
                 RESUBMISSION_BLOCK_HEIGHT,
             ))))
             .add_stub_response(SendTransactionResult::Inconsistent(vec![]))
-            .add_signature(&account(1), Derived);
+            .add_signer(sign_for(&account(1)));
 
         resubmit_transactions(resubmit_runtime).await;
 
@@ -485,7 +485,7 @@ mod resubmission {
                 .add_stub_response(SendTransactionResult::Consistent(Ok(
                     signature(0xA0 + i).into()
                 )))
-                .add_signature(&account(i), Derived);
+                .add_signer(sign_for(&account(i)));
         }
 
         resubmit_transactions(runtime.clone()).await;
@@ -511,7 +511,7 @@ mod resubmission {
                 .add_stub_response(SendTransactionResult::Consistent(Ok(
                     signature(0xB0 + i).into()
                 )))
-                .add_signature(&account(MAX_CONCURRENT_RPC_CALLS + i), Derived);
+                .add_signer(sign_for(&account(MAX_CONCURRENT_RPC_CALLS + i)));
         }
 
         resubmit_transactions(runtime.clone()).await;

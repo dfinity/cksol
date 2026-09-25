@@ -1,5 +1,5 @@
 use super::*;
-use crate::test_fixtures::signer::ExpectedSignature::{Derived, Failing};
+use crate::test_fixtures::signer::sign_for;
 use crate::{
     constants::FEE_PER_SIGNATURE,
     state::{event::VersionedMessage, read_state},
@@ -28,12 +28,12 @@ fn expecting_all(sources: &[(Account, Lamport)]) -> TestCanisterRuntime {
     sources
         .iter()
         .fold(TestCanisterRuntime::new(), |runtime, (account, _)| {
-            runtime.add_signature(account, Derived)
+            runtime.add_signer(sign_for(account))
         })
 }
 
 fn minter_signing_once() -> TestCanisterRuntime {
-    TestCanisterRuntime::new().add_signature(&MINTER_ACCOUNT, Derived)
+    TestCanisterRuntime::new().add_signer(sign_for(&MINTER_ACCOUNT))
 }
 
 /// Extracts the transfer amount (in lamports) from a compiled system program
@@ -59,7 +59,7 @@ mod consolidation_tests {
 
         let source_address = derive_address(&source_account);
 
-        let runtime = TestCanisterRuntime::new().add_signature(&source_account, Derived);
+        let runtime = TestCanisterRuntime::new().add_signer(sign_for(&source_account));
         let (tx, signers) = create_signed_consolidation_transaction(
             &runtime,
             vec![(source_account, amount)],
@@ -117,8 +117,8 @@ mod consolidation_tests {
         let source_2 = derive_address(&account_2);
 
         let runtime = TestCanisterRuntime::new()
-            .add_signature(&account_1, Derived)
-            .add_signature(&account_2, Derived);
+            .add_signer(sign_for(&account_1))
+            .add_signer(sign_for(&account_2));
         let (tx, signers) = create_signed_consolidation_transaction(
             &runtime,
             vec![(account_1, amount_1), (account_2, amount_2)],
@@ -189,12 +189,13 @@ mod consolidation_tests {
         };
         let blockhash = Hash::new_from_array([0xBB; 32]);
 
-        let runtime = TestCanisterRuntime::new().add_signature(
-            &source_account,
-            Failing(SignCallError::CallFailed(
-                CallRejected::with_rejection(4, "signing service unavailable".to_string()).into(),
-            )),
-        );
+        let runtime =
+            TestCanisterRuntime::new().add_signer(
+                sign_for(&source_account).expect([Err(SignCallError::CallFailed(
+                    CallRejected::with_rejection(4, "signing service unavailable".to_string())
+                        .into(),
+                ))]),
+            );
 
         let result = create_signed_consolidation_transaction(
             &runtime,
@@ -220,13 +221,10 @@ mod consolidation_tests {
         let blockhash = Hash::new_from_array([0xDD; 32]);
 
         let runtime = TestCanisterRuntime::new()
-            .add_signature(&account_1, Derived)
-            .add_signature(
-                &account_2,
-                Failing(SignCallError::CallFailed(
-                    CallRejected::with_rejection(5, "canister trapped".to_string()).into(),
-                )),
-            );
+            .add_signer(sign_for(&account_1))
+            .add_signer(sign_for(&account_2).expect([Err(SignCallError::CallFailed(
+                CallRejected::with_rejection(5, "canister trapped".to_string()).into(),
+            ))]));
 
         let result = create_signed_consolidation_transaction(
             &runtime,
@@ -360,8 +358,8 @@ mod consolidation_tests {
         let account_1_address = derive_address(&account_1);
 
         let runtime = TestCanisterRuntime::new()
-            .add_signature(&account_1, Derived)
-            .add_signature(&account_2, Derived);
+            .add_signer(sign_for(&account_1))
+            .add_signer(sign_for(&account_2));
         let (tx, _signers) = create_signed_consolidation_transaction(
             &runtime,
             vec![(account_1, 100_000_000), (account_2, 200_000_000)],
@@ -383,7 +381,7 @@ mod consolidation_tests {
         };
         let blockhash = Hash::new_from_array([0xBB; 32]);
 
-        let runtime = TestCanisterRuntime::new().add_signature(&source_account, Derived);
+        let runtime = TestCanisterRuntime::new().add_signer(sign_for(&source_account));
         let (tx, _signers) = create_signed_consolidation_transaction(
             &runtime,
             vec![(source_account, 500_000_000)],
@@ -462,12 +460,13 @@ mod batch_withdrawal_tests {
         let target = Address::new_from_array([0xAA; 32]);
         let blockhash = Hash::new_from_array([0xBB; 32]);
 
-        let runtime = TestCanisterRuntime::new().add_signature(
-            &MINTER_ACCOUNT,
-            Failing(SignCallError::CallFailed(
-                CallRejected::with_rejection(4, "signing service unavailable".to_string()).into(),
-            )),
-        );
+        let runtime =
+            TestCanisterRuntime::new().add_signer(
+                sign_for(&MINTER_ACCOUNT).expect([Err(SignCallError::CallFailed(
+                    CallRejected::with_rejection(4, "signing service unavailable".to_string())
+                        .into(),
+                ))]),
+            );
 
         let result =
             create_signed_batch_withdrawal_transaction(&runtime, &[(target, 100)], blockhash).await;

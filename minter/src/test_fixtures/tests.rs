@@ -1,4 +1,4 @@
-use super::signer::ExpectedSignature::{Derived, Exactly, Failing};
+use super::signer::sign_for;
 use super::{
     MINTER_ACCOUNT, account, account_signature, account_signature_nth, signature,
     signer::MockSchnorrSigner,
@@ -75,8 +75,8 @@ fn should_ignore_a_default_subaccount() {
 #[tokio::test]
 async fn should_answer_a_registered_request_with_the_derived_signature() {
     let signer = MockSchnorrSigner::default()
-        .add_signature(&account(0), Derived)
-        .add_signature(&account(1), Derived);
+        .add_signer(sign_for(&account(0)))
+        .add_signer(sign_for(&account(1)));
 
     assert_eq!(
         sign(&signer, &account(0)).await,
@@ -90,7 +90,8 @@ async fn should_answer_a_registered_request_with_the_derived_signature() {
 
 #[tokio::test]
 async fn should_answer_a_registered_request_with_the_given_signature() {
-    let signer = MockSchnorrSigner::default().add_signature(&account(1), Exactly(signature(0xAA)));
+    let signer = MockSchnorrSigner::default()
+        .add_signer(sign_for(&account(1)).expect([Ok(signature(0xAA))]));
 
     assert_eq!(sign(&signer, &account(1)).await, signature(0xAA));
 }
@@ -98,9 +99,9 @@ async fn should_answer_a_registered_request_with_the_given_signature() {
 #[tokio::test]
 async fn should_advance_the_occurrence_per_account() {
     let signer = MockSchnorrSigner::default()
-        .add_signature(&account(1), Derived)
-        .add_signature(&account(2), Derived)
-        .add_signature(&account(1), Derived);
+        .add_signer(sign_for(&account(1)))
+        .add_signer(sign_for(&account(2)))
+        .add_signer(sign_for(&account(1)));
 
     assert_eq!(
         sign(&signer, &account(1)).await,
@@ -119,9 +120,9 @@ async fn should_advance_the_occurrence_per_account() {
 #[tokio::test]
 async fn should_answer_registrations_for_one_account_in_order() {
     let signer = MockSchnorrSigner::default()
-        .add_signature(&account(1), Exactly(signature(0xAA)))
-        .add_signature(&account(1), Derived)
-        .add_signature(&account(1), Exactly(signature(0xBB)));
+        .add_signer(sign_for(&account(1)).expect([Ok(signature(0xAA))]))
+        .add_signer(sign_for(&account(1)))
+        .add_signer(sign_for(&account(1)).expect([Ok(signature(0xBB))]));
 
     assert_eq!(sign(&signer, &account(1)).await, signature(0xAA));
     assert_eq!(
@@ -134,8 +135,8 @@ async fn should_answer_registrations_for_one_account_in_order() {
 #[tokio::test]
 async fn should_share_consumed_registrations_between_clones() {
     let signer = MockSchnorrSigner::default()
-        .add_signature(&account(1), Exactly(signature(0xAA)))
-        .add_signature(&account(1), Derived);
+        .add_signer(sign_for(&account(1)).expect([Ok(signature(0xAA))]))
+        .add_signer(sign_for(&account(1)));
     let clone = signer.clone();
 
     assert_eq!(sign(&signer, &account(1)).await, signature(0xAA));
@@ -148,8 +149,8 @@ async fn should_share_consumed_registrations_between_clones() {
 #[tokio::test]
 async fn should_fail_the_registered_request_only() {
     let signer = MockSchnorrSigner::default()
-        .add_signature(&account(1), Failing(signing_error()))
-        .add_signature(&account(1), Derived);
+        .add_signer(sign_for(&account(1)).expect([Err(signing_error())]))
+        .add_signer(sign_for(&account(1)));
 
     assert!(
         signer
@@ -166,7 +167,7 @@ async fn should_fail_the_registered_request_only() {
 #[tokio::test]
 #[should_panic(expected = "No matching expectation found")]
 async fn should_panic_on_an_unregistered_signing_request() {
-    let signer = MockSchnorrSigner::default().add_signature(&account(1), Derived);
+    let signer = MockSchnorrSigner::default().add_signer(sign_for(&account(1)));
 
     sign(&signer, &account(2)).await;
 }
@@ -175,19 +176,19 @@ async fn should_panic_on_an_unregistered_signing_request() {
 #[should_panic(expected = "fewer than expected")]
 async fn should_panic_on_a_registration_that_is_never_used() {
     let signer = MockSchnorrSigner::default()
-        .add_signature(&account(1), Derived)
-        .add_signature(&account(2), Derived);
+        .add_signer(sign_for(&account(1)))
+        .add_signer(sign_for(&account(2)));
 
     sign(&signer, &account(1)).await;
 }
 
 #[tokio::test]
-#[should_panic(expected = "register all expected signatures")]
-async fn should_panic_on_a_registration_added_after_the_first_signing_request() {
-    let signer = MockSchnorrSigner::default().add_signature(&account(1), Derived);
+#[should_panic(expected = "register all expected signers")]
+async fn should_panic_on_a_signer_added_after_the_first_signing_request() {
+    let signer = MockSchnorrSigner::default().add_signer(sign_for(&account(1)));
     sign(&signer, &account(1)).await;
 
-    let _ = signer.add_signature(&account(1), Derived);
+    let _ = signer.add_signer(sign_for(&account(1)));
 }
 
 async fn sign(signer: &MockSchnorrSigner, account: &Account) -> Signature {

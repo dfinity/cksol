@@ -1,5 +1,5 @@
 use super::{MAX_TRANSFERS_PER_CONSOLIDATION, consolidate_deposits};
-use crate::test_fixtures::signer::ExpectedSignature::Derived;
+use crate::test_fixtures::signer::sign_for;
 use crate::{
     constants::MAX_CONCURRENT_RPC_CALLS,
     numeric::LedgerMintIndex,
@@ -92,7 +92,7 @@ async fn should_submit_single_consolidation_request() {
         .add_stub_response(SendTransactionResult::Consistent(Ok(
             fee_payer_signature.into()
         )))
-        .add_signature(&account(0), Derived);
+        .add_signer(sign_for(&account(0)));
 
     consolidate_deposits(runtime).await;
 
@@ -127,7 +127,7 @@ async fn should_record_events_even_if_transaction_submission_fails() {
         .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())))
         // Transaction submission fails
         .add_stub_response(SendTransactionResult::Inconsistent(vec![]))
-        .add_signature(&account(0), Derived);
+        .add_signer(sign_for(&account(0)));
 
     consolidate_deposits(runtime).await;
 
@@ -172,7 +172,7 @@ async fn should_submit_multiple_consolidation_batches() {
             fee_payer_signature_2.into()
         )));
     for i in 0..NUM_DEPOSITS {
-        runtime = runtime.add_signature(&account(i), Derived);
+        runtime = runtime.add_signer(sign_for(&account(i)));
     }
 
     consolidate_deposits(runtime).await;
@@ -238,7 +238,7 @@ async fn should_consolidate_multiple_deposits_to_same_account_in_single_transfer
         .add_stub_response(SendTransactionResult::Consistent(Ok(
             fee_payer_signature.into()
         )))
-        .add_signature(&same_account, Derived);
+        .add_signer(sign_for(&same_account));
 
     consolidate_deposits(runtime).await;
 
@@ -282,7 +282,7 @@ async fn should_reschedule_until_all_deposits_consolidated() {
             runtime.add_stub_response(SendTransactionResult::Consistent(Ok(signature(i).into())));
     }
     for i in 0..(MAX_CONCURRENT_RPC_CALLS * MAX_TRANSFERS_PER_CONSOLIDATION) {
-        runtime = runtime.add_signature(&account(i), Derived);
+        runtime = runtime.add_signer(sign_for(&account(i)));
     }
 
     consolidate_deposits(runtime.clone()).await;
@@ -300,7 +300,7 @@ async fn should_reschedule_until_all_deposits_consolidated() {
         .add_stub_response(SlotResult::Consistent(Ok(slot)))
         .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())))
         .add_stub_response(SendTransactionResult::Consistent(Ok(last_sig.into())))
-        .add_signature(&account(num_deposits - 1), Derived);
+        .add_signer(sign_for(&account(num_deposits - 1)));
 
     consolidate_deposits(runtime.clone()).await;
 
