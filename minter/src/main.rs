@@ -12,9 +12,9 @@ use cksol_minter::{
     withdraw::{WITHDRAWAL_PROCESSING_DELAY, process_pending_withdrawals},
 };
 use cksol_types::{
-    Address, DepositStatus, GetDepositAddressArgs, MinterInfo, ProcessDepositArgs,
-    ProcessDepositError, WithdrawalArgs, WithdrawalError, WithdrawalOk, WithdrawalStatus,
-    WithdrawalStatusArgs,
+    Address, DepositSolArgs, DepositSolError, DepositSolId, DepositSolStatus, DepositStatus,
+    GetDepositAddressArgs, MinterInfo, ProcessDepositArgs, ProcessDepositError, WithdrawalArgs,
+    WithdrawalError, WithdrawalOk, WithdrawalStatus, WithdrawalStatusArgs,
 };
 use cksol_types_internal::{MinterArg, log::Priority};
 use ic_http_types::{HttpRequest, HttpResponse, HttpResponseBuilder};
@@ -73,6 +73,17 @@ async fn process_deposit(args: ProcessDepositArgs) -> Result<DepositStatus, Proc
         args.signature.into(),
     )
     .await
+}
+
+#[ic_cdk::update]
+fn deposit_sol(args: DepositSolArgs) -> Result<DepositSolId, DepositSolError> {
+    let account = resolve_account(args.owner, args.subaccount);
+    cksol_minter::deposit::sweep::deposit_sol(account)
+}
+
+#[ic_cdk::query]
+fn deposit_status(deposit_id: DepositSolId) -> DepositSolStatus {
+    cksol_minter::deposit::sweep::deposit_status(deposit_id)
 }
 
 #[ic_cdk::update]
@@ -323,17 +334,18 @@ fn http_request(request: HttpRequest) -> HttpResponse {
     }
 }
 
+fn resolve_account(owner: Option<Principal>, subaccount: Option<Subaccount>) -> Account {
+    let owner = owner.unwrap_or_else(ic_cdk::api::msg_caller);
+    Account { owner, subaccount }
+}
+
 fn assert_non_anonymous_account(
     owner: Option<Principal>,
     subaccount: Option<Subaccount>,
 ) -> Account {
-    let owner = owner.unwrap_or_else(ic_cdk::api::msg_caller);
-    assert_ne!(
-        owner,
-        Principal::anonymous(),
-        "the owner must be non-anonymous"
-    );
-    Account { owner, subaccount }
+    let account = resolve_account(owner, subaccount);
+    cksol_minter::utils::assert_non_anonymous_account(&account);
+    account
 }
 
 fn setup_timers() {

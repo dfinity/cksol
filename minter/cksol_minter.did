@@ -124,6 +124,47 @@ type DepositStatus = variant {
 // Represents the result of a call to the `process_deposit` endpoint.
 type ProcessDepositResult = variant { Ok : DepositStatus; Err : ProcessDepositError };
 
+// Arguments for a request to the `deposit_sol` endpoint.
+type DepositSolArgs = record {
+    // The principal to credit with the deposit.
+    //
+    // If not set, defaults to the caller's principal.
+    // The resolved owner must be a non-anonymous principal.
+    owner: opt principal;
+    // The subaccount to credit with the deposit.
+    subaccount: opt blob;
+};
+
+// Identifies a deposit queued by the `deposit_sol` endpoint.
+//
+// A sequence number assigned when the deposit is queued.
+type DepositSolId = nat64;
+
+// The status of a deposit queued by the `deposit_sol` endpoint.
+//
+// Further variants (`Swept`, `Finalized`, `Minted`, `Dropped`, `Quarantined`)
+// will follow as the sweep flow is implemented.
+type DepositSolStatus = variant {
+    // No deposit with this identifier was queued.
+    NotFound;
+    // The deposit address is queued for a sweep to the minter's main account.
+    Queued : record {
+        // The amount that will be swept from the deposit address.
+        sweepable_amount: Lamport;
+    };
+};
+
+// An error from the `deposit_sol` endpoint.
+//
+// Further variants will follow as the sweep flow is implemented.
+type DepositSolError = variant {
+    // The minter experiences temporary issues, try the call again later.
+    TemporarilyUnavailable : text;
+};
+
+// Represents the result of a call to the `deposit_sol` endpoint.
+type DepositSolResult = variant { Ok : DepositSolId; Err : DepositSolError };
+
 // The Solana network to connect to.
 type SolanaNetwork = variant {
     Mainnet;
@@ -447,6 +488,18 @@ service : (MinterArg) -> {
     // `Quarantined`, or `Minted`) without charging additional cycles. If minting
     // previously failed (status `Processing`), calling again will retry the mint.
     process_deposit: (ProcessDepositArgs) -> (ProcessDepositResult);
+
+    // Queues the deposit address of the given account for a sweep
+    // to the minter's main account and returns the identifier of
+    // the queued deposit, which can be used to query its status.
+    //
+    // If the owner is not set, it defaults to the caller's principal.
+    // The resolved owner must be a non-anonymous principal.
+    deposit_sol: (DepositSolArgs) -> (DepositSolResult);
+
+    // Returns the status of the deposit with the given identifier,
+    // or `NotFound` if no deposit with this identifier was queued.
+    deposit_status: (DepositSolId) -> (DepositSolStatus) query;
 
     // Submits a request to convert ckSOL to Solana.
     withdraw : (WithdrawalArgs) -> (WithdrawalResult);

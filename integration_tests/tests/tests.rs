@@ -10,9 +10,9 @@ use cksol_int_tests::{
     },
 };
 use cksol_types::{
-    DepositId, DepositStatus, GetDepositAddressArgs, InsufficientCyclesError, Lamport, MinterInfo,
-    ProcessDepositArgs, ProcessDepositError, TxFinalizedStatus, WithdrawalArgs, WithdrawalError,
-    WithdrawalStatus,
+    DepositId, DepositSolArgs, DepositSolStatus, DepositStatus, GetDepositAddressArgs,
+    InsufficientCyclesError, Lamport, MinterInfo, ProcessDepositArgs, ProcessDepositError,
+    TxFinalizedStatus, WithdrawalArgs, WithdrawalError, WithdrawalStatus,
 };
 use cksol_types_internal::{
     UpgradeArgs,
@@ -1015,6 +1015,47 @@ mod process_deposit_tests {
     }
 }
 
+mod deposit_sol_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn should_queue_deposit_for_non_anonymous_owner() {
+        let setup = SetupBuilder::new().build().await;
+        let user_1 = Setup::DEFAULT_CALLER;
+        let user_2 = Principal::from_slice(&[1]);
+
+        for (caller, owner) in [
+            (user_1, None),
+            (user_1, Some(user_1)),
+            (user_2, Some(user_1)),
+            (Principal::anonymous(), Some(user_1)),
+        ] {
+            let minter = setup.minter_with_caller(caller);
+
+            let deposit_id = minter
+                .deposit_sol(DepositSolArgs {
+                    owner,
+                    subaccount: None,
+                })
+                .await
+                .unwrap_or_else(|e| {
+                    panic!("deposit_sol by {caller} for {owner:?} should queue a sweep: {e}")
+                });
+            let status = minter.deposit_status(deposit_id).await;
+
+            assert_eq!(
+                status,
+                DepositSolStatus::Queued {
+                    sweepable_amount: 0
+                },
+                "deposit by {caller} for {owner:?}"
+            );
+        }
+
+        setup.drop().await;
+    }
+}
+
 mod anonymous_caller_tests {
     use super::*;
 
@@ -1045,6 +1086,14 @@ mod anonymous_caller_tests {
                     owner,
                     subaccount: None,
                     signature: deposit_transaction_signature(),
+                })
+                .await;
+            assert_matches!(result, Err(s) => s.contains("the owner must be non-anonymous"));
+
+            let result = minter
+                .try_deposit_sol(DepositSolArgs {
+                    owner,
+                    subaccount: None,
                 })
                 .await;
             assert_matches!(result, Err(s) => s.contains("the owner must be non-anonymous"));

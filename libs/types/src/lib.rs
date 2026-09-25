@@ -96,6 +96,57 @@ pub struct ProcessDepositArgs {
     pub signature: Signature,
 }
 
+/// Arguments for a request to the `deposit_sol` ckSOL minter endpoint.
+#[derive(Clone, Eq, PartialEq, Debug, Default, CandidType, Deserialize, Serialize)]
+pub struct DepositSolArgs {
+    /// The principal to credit with the deposit.
+    ///
+    /// If not set, defaults to the caller's principal.
+    /// The resolved owner must be a non-anonymous principal.
+    pub owner: Option<Principal>,
+    /// The subaccount to credit with the deposit.
+    pub subaccount: Option<Subaccount>,
+}
+
+impl From<Account> for DepositSolArgs {
+    fn from(account: Account) -> Self {
+        Self {
+            owner: Some(account.owner),
+            subaccount: account.subaccount,
+        }
+    }
+}
+
+/// Identifies a deposit queued by the `deposit_sol` ckSOL minter endpoint.
+///
+/// A sequence number assigned when the deposit is queued.
+pub type DepositSolId = u64;
+
+/// The status of a deposit queued by the `deposit_sol` ckSOL minter endpoint.
+///
+/// Further variants (`Swept`, `Finalized`, `Minted`, `Dropped`, `Quarantined`) will follow
+/// as the sweep flow is implemented.
+#[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize, Serialize)]
+pub enum DepositSolStatus {
+    /// No deposit with this identifier was queued.
+    NotFound,
+    /// The deposit address is queued for a sweep to the minter's main account.
+    Queued {
+        /// The amount that will be swept from the deposit address.
+        sweepable_amount: Lamport,
+    },
+}
+
+/// An error from the `deposit_sol` ckSOL minter endpoint.
+///
+/// Further variants will follow as the sweep flow is implemented.
+#[derive(Debug, Clone, PartialEq, CandidType, Deserialize, Error)]
+pub enum DepositSolError {
+    /// The minter experiences temporary issues, try the call again later.
+    #[error("Transient error, try the call again later: {0}")]
+    TemporarilyUnavailable(String),
+}
+
 /// An error from the `process_deposit` ckSOL minter endpoint.
 #[derive(Debug, Clone, PartialEq, CandidType, Deserialize, Error)]
 pub enum ProcessDepositError {
