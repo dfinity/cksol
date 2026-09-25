@@ -28,18 +28,6 @@ pub async fn process_deposit<R: CanisterRuntime>(
 ) -> Result<DepositStatus, ProcessDepositError> {
     let _guard = process_deposit_guard(account)?;
 
-    // TODO hq-3k1.6: This check only exists while `process_deposit` can still mint for a
-    // transaction whose lamports a running `deposit_sol` call or the sweep it queued moves
-    // to the main account, and is removed together with this endpoint by the last PR of the
-    // stack.
-    if read_state(|state| state.has_deposit_sol_in_progress(&account)) {
-        return Err(ProcessDepositError::TemporarilyUnavailable(
-            "a deposit_sol call or sweep for this account is in progress, try again once it \
-             has been minted or dropped"
-                .to_string(),
-        ));
-    }
-
     let deposit_id = DepositId { account, signature };
 
     let Deposit {
