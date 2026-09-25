@@ -31,6 +31,7 @@ const FINALIZE_TRANSACTIONS_DELAY: Duration = Duration::from_mins(2);
 const RESUBMIT_TRANSACTIONS_DELAY: Duration = Duration::from_mins(3);
 const DEPOSIT_CONSOLIDATION_DELAY: Duration = Duration::from_mins(10);
 const SWEEP_DEPOSITS_DELAY: Duration = Duration::from_mins(1);
+const MAX_BLOCKHASH_AGE: Slot = 150;
 
 /// Deposits funds into the minter via `process_deposit`, consolidates them,
 /// and finalizes the consolidation so the minter's internal balance is credited.
@@ -265,8 +266,6 @@ mod withdrawal_tests {
     use solana_address::Address;
 
     use super::*;
-
-    const MAX_BLOCKHASH_AGE: Slot = 150;
 
     #[tokio::test]
     async fn should_validate_solana_address() {
@@ -1017,6 +1016,8 @@ mod process_deposit_tests {
 }
 
 mod deposit_sol_tests {
+    use cksol_int_tests::fixtures::SOL_RPC_SLOT_ROUNDING;
+
     use super::*;
 
     const BALANCE_ABOVE_MINIMUM: Lamport = Setup::DEFAULT_MINIMUM_DEPOSIT_AMOUNT + 1;
@@ -1228,6 +1229,59 @@ mod deposit_sol_tests {
     }
 
     #[tokio::test]
+    async fn should_report_resubmitted_signature_after_sweep_expires() {
+        const SLOT: Slot = 100_000_000;
+        let resubmission_slot = SLOT + MAX_BLOCKHASH_AGE + SOL_RPC_SLOT_ROUNDING + 1;
+        let setup = SetupBuilder::new().with_proxy_canister().build().await;
+        let deposit_id = setup
+            .minter()
+            .with_http_mocks(
+                MockBuilder::new()
+                    .get_balance(BALANCE_ABOVE_MINIMUM)
+                    .build(),
+            )
+            .deposit_sol(DEFAULT_CALLER_ACCOUNT)
+            .await
+            .expect("deposit_sol should queue a sweep");
+        setup.advance_time(SWEEP_DEPOSITS_DELAY).await;
+        setup
+            .execute_http_mocks(submit_sweep_http_mocks(SLOT))
+            .await;
+        let submitted_sweep_signature = assert_matches!(
+            setup.minter().deposit_status(deposit_id).await,
+            DepositSolStatus::Swept { signature } => signature
+        );
+
+        setup.advance_time(FINALIZE_TRANSACTIONS_DELAY).await;
+        setup
+            .execute_http_mocks(mark_expired_sweep_http_mocks(resubmission_slot))
+            .await;
+        setup.advance_time(RESUBMIT_TRANSACTIONS_DELAY).await;
+        setup
+            .execute_http_mocks(resubmit_sweep_http_mocks(resubmission_slot))
+            .await;
+
+        let resubmitted_sweep_signature = assert_matches!(
+            setup.minter().deposit_status(deposit_id).await,
+            DepositSolStatus::Swept { signature } => signature
+        );
+        assert_ne!(resubmitted_sweep_signature, submitted_sweep_signature);
+        setup.minter().assert_that_events().await.satisfy(|events| {
+            check!(events.iter().any(|e| matches!(
+                e,
+                EventType::ResubmittedTransaction {
+                    old_signature,
+                    new_signature,
+                    ..
+                } if *old_signature == submitted_sweep_signature
+                    && *new_signature == resubmitted_sweep_signature
+            )));
+        });
+
+        setup.drop().await;
+    }
+
+    #[tokio::test]
     async fn should_fail_for_concurrent_access() {
         let setup = SetupBuilder::new().with_proxy_canister().build().await;
         let mocks = SharedMockHttpOutcalls::new(
@@ -1253,6 +1307,37 @@ mod deposit_sol_tests {
         );
 
         setup.drop().await;
+    }
+
+    /// HTTP mocks for the sweep timer submitting the sweep transaction.
+    fn submit_sweep_http_mocks(slot: Slot) -> MockHttpOutcalls {
+        MockBuilder::with_start_id(4)
+            .submit_transaction(
+                slot,
+                "4sGjMW1sUnHzSxGspuhpqLDx6wiyjNtZAMdL4VZHirAn",
+                "5VERv8NMvzbJMEkV8xnrLkEaWRtSz9CosKDYjCJjBRnbJLgp8uirBgmQpjKhoR4tjF3ZpRzrFmBV6UjKdiSZkQUW",
+            )
+            .build()
+    }
+
+    /// HTTP mocks for finalize_transactions detecting the expired sweep:
+    /// fetches slot, checks status (not found), marks for resubmission.
+    fn mark_expired_sweep_http_mocks(current_slot: Slot) -> MockHttpOutcalls {
+        MockBuilder::with_start_id(16)
+            .get_current_slot(current_slot, "9ZNTfG4NyQgxy2SWjSiQoUyBPEvXT2xo7fKc5hPYYJ7b")
+            .check_signature_statuses_not_found(1)
+            .build()
+    }
+
+    /// HTTP mocks for resubmit_transactions sending the replacement sweep transaction.
+    fn resubmit_sweep_http_mocks(current_slot: Slot) -> MockHttpOutcalls {
+        MockBuilder::with_start_id(28)
+            .submit_transaction(
+                current_slot,
+                "9ZNTfG4NyQgxy2SWjSiQoUyBPEvXT2xo7fKc5hPYYJ7b",
+                "drWLXM6bHretgz7KuwvGZvPBeQ8KEbS3AKB2WJPy4TbBDaqdqAiNcj3cTAS7UnyJKM7eEZoUf4DvhY1TKkus9Bp",
+            )
+            .build()
     }
 
     async fn get_balance_cycles_cost(setup: &Setup) -> u128 {
