@@ -1,4 +1,5 @@
 use crate::{
+    address::lazy_get_schnorr_master_key,
     constants::MAX_CONCURRENT_RPC_CALLS,
     guard::TimerGuard,
     rpc::{Block, SubmitTransactionError, get_recent_block, submit_transaction},
@@ -47,6 +48,8 @@ pub async fn sweep_queued_deposits<R: CanisterRuntime>(runtime: R) {
             return;
         }
     };
+    ensure_schnorr_master_key_cached(&runtime).await;
+
     let reschedule = scopeguard::guard(runtime.clone(), |runtime| {
         runtime.set_timer(Duration::ZERO, sweep_queued_deposits);
     });
@@ -68,6 +71,10 @@ pub async fn sweep_queued_deposits<R: CanisterRuntime>(runtime: R) {
     if !sweep.leaves_deposits_queued {
         scopeguard::ScopeGuard::into_inner(reschedule);
     }
+}
+
+async fn ensure_schnorr_master_key_cached<R: CanisterRuntime>(runtime: &R) {
+    let _ = lazy_get_schnorr_master_key(runtime).await;
 }
 
 struct SweepRound {

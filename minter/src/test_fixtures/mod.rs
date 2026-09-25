@@ -12,6 +12,7 @@ use crate::{
 use candid::Principal;
 use cksol_types::DepositStatus;
 use cksol_types_internal::{Ed25519KeyName, InitArgs, SolanaNetwork};
+use ic_cdk_management_canister::SchnorrPublicKeyResult;
 use ic_ed25519::{PocketIcMasterPublicKeyId, PublicKey};
 use icrc_ledger_types::icrc1::account::Account;
 use sol_rpc_types::Lamport;
@@ -93,12 +94,24 @@ pub fn init_balance_to(amount: Lamport) {
 }
 
 pub fn init_schnorr_master_key() {
-    mutate_state(|s| {
-        s.set_once_minter_public_key(SchnorrPublicKey {
-            public_key: PublicKey::pocketic_key(PocketIcMasterPublicKeyId::Key1),
-            chain_code: [1; 32],
-        })
-    });
+    mutate_state(|s| s.set_once_minter_public_key(schnorr_master_key()));
+}
+
+/// The master key [`init_schnorr_master_key`] caches, as the management canister returns it,
+/// for a test that starts without it cached and lets the minter fetch it.
+pub fn schnorr_master_key_response() -> SchnorrPublicKeyResult {
+    let master_key = schnorr_master_key();
+    SchnorrPublicKeyResult {
+        public_key: master_key.public_key.serialize_raw().to_vec(),
+        chain_code: master_key.chain_code.to_vec(),
+    }
+}
+
+fn schnorr_master_key() -> SchnorrPublicKey {
+    SchnorrPublicKey {
+        public_key: PublicKey::pocketic_key(PocketIcMasterPublicKeyId::Key1),
+        chain_code: [1; 32],
+    }
 }
 
 /// Returns a [`Signature`] unique for any `usize` index, derived from `i as u64` via le_bytes.

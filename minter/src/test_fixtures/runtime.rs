@@ -15,6 +15,7 @@ use std::{
     sync::{Arc, Mutex},
     time::Duration,
 };
+use tokio::task::yield_now;
 
 pub const TEST_CANISTER_ID: Principal = Principal::from_slice(&[0xCA; 10]);
 
@@ -29,6 +30,7 @@ pub struct TestCanisterRuntime {
     msg_cycles_refunded: Stubs<u128>,
     set_timer_call_count: Arc<Mutex<usize>>,
     schnorr_public_key_results: Stubs<SchnorrPublicKeyResult>,
+    schnorr_public_key_call_count: Arc<Mutex<usize>>,
 }
 
 impl TestCanisterRuntime {
@@ -109,6 +111,10 @@ impl TestCanisterRuntime {
     pub(crate) fn set_timer_call_count(&self) -> usize {
         *self.set_timer_call_count.lock().unwrap()
     }
+
+    pub(crate) fn schnorr_public_key_call_count(&self) -> usize {
+        *self.schnorr_public_key_call_count.lock().unwrap()
+    }
 }
 
 impl CanisterRuntime for TestCanisterRuntime {
@@ -163,6 +169,14 @@ impl CanisterRuntime for TestCanisterRuntime {
     }
 
     async fn schnorr_public_key(&self, _args: SchnorrPublicKeyArgs) -> SchnorrPublicKeyResult {
+        suspend_like_an_inter_canister_call().await;
+        *self.schnorr_public_key_call_count.lock().unwrap() += 1;
         self.schnorr_public_key_results.next()
     }
+}
+
+/// Suspends the caller once, so that concurrent callers all reach the call before any of
+/// them sees its response, as they do on the IC.
+async fn suspend_like_an_inter_canister_call() {
+    yield_now().await;
 }

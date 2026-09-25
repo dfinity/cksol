@@ -10,7 +10,7 @@ use crate::{
     test_fixtures::{
         DEFAULT_BLOCK_HEIGHT, EventsAssert, MINIMUM_DEPOSIT_AMOUNT, MINTER_ADDRESS, account,
         account_signature, events::queue_deposit, init_schnorr_master_key, init_state,
-        runtime::TestCanisterRuntime, signer::sign_for,
+        runtime::TestCanisterRuntime, schnorr_master_key_response, signer::sign_for,
     },
 };
 use assert_matches::assert_matches;
@@ -234,6 +234,28 @@ async fn should_reschedule_until_all_deposits_swept() {
         assert_eq!(s.swept_deposits().len(), num_deposits);
     });
     assert_eq!(runtime.set_timer_call_count(), 0);
+}
+
+#[tokio::test]
+async fn should_fetch_the_master_key_once_for_all_batches_of_a_round() {
+    const NUM_DEPOSITS: usize = MAX_DEPOSITS_PER_SWEEP + 1;
+    init_state();
+    queue_deposits_with_increasing_amounts(NUM_DEPOSITS);
+    let fee_payer_signatures = [
+        account_signature(&account(MAX_DEPOSITS_PER_SWEEP - 1)),
+        account_signature(&account(NUM_DEPOSITS - 1)),
+    ];
+    let runtime = runtime_submitting_sweeps(&fee_payer_signatures, (0..NUM_DEPOSITS).map(account))
+        .with_schnorr_public_key(schnorr_master_key_response());
+
+    sweep_queued_deposits(runtime.clone()).await;
+
+    assert_eq!(runtime.schnorr_public_key_call_count(), 1);
+    read_state(|s| {
+        assert_eq!(s.submitted_transactions().len(), fee_payer_signatures.len());
+        assert_eq!(s.swept_deposits().len(), NUM_DEPOSITS);
+        assert!(s.queued_deposits().is_empty());
+    });
 }
 
 fn setup() {
