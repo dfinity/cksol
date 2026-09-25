@@ -35,6 +35,72 @@ proptest! {
     }
 }
 
+mod queued_deposits {
+    use super::*;
+    use crate::state::audit::replay_events;
+    use cksol_types::DepositSolStatus;
+
+    fn state() -> State {
+        State::try_from(valid_init_args()).unwrap()
+    }
+
+    #[test]
+    fn should_assign_sequential_ids_and_report_status() {
+        let mut state = state();
+
+        state.process_queued_deposit(0, &account(1), 100);
+        state.process_queued_deposit(1, &account(2), 200);
+
+        assert_eq!(state.next_deposit_sol_id(), 2);
+        assert_eq!(state.in_flight_deposit_id(&account(2)), Some(1));
+        assert_eq!(state.in_flight_deposit_id(&account(3)), None);
+        assert_eq!(
+            state.deposit_sol_status(1),
+            DepositSolStatus::Queued {
+                sweepable_amount: 200
+            }
+        );
+        assert_eq!(state.deposit_sol_status(2), DepositSolStatus::NotFound);
+    }
+
+    #[test]
+    fn should_replay_queued_deposits_like_direct_transitions() {
+        let queued = |deposit_id, i| Event {
+            timestamp: 0,
+            payload: EventType::QueuedDeposit {
+                deposit_id,
+                account: account(i),
+                sweepable_amount: 100 * (deposit_id + 1),
+            },
+        };
+        let init = Event {
+            timestamp: 0,
+            payload: EventType::Init(valid_init_args()),
+        };
+        let mut expected = state();
+        expected.process_queued_deposit(0, &account(1), 100);
+        expected.process_queued_deposit(1, &account(2), 200);
+
+        let replayed = replay_events([init, queued(0, 1), queued(1, 2)]);
+
+        assert_eq!(replayed, expected);
+    }
+
+    #[test]
+    #[should_panic(expected = "out of sequence")]
+    fn should_panic_if_deposit_id_out_of_sequence() {
+        state().process_queued_deposit(1, &account(1), 100);
+    }
+
+    #[test]
+    #[should_panic(expected = "already has one in flight")]
+    fn should_panic_if_account_already_queued() {
+        let mut state = state();
+        state.process_queued_deposit(0, &account(1), 100);
+        state.process_queued_deposit(1, &account(1), 200);
+    }
+}
+
 mod state_validation {
     use super::*;
 
@@ -229,6 +295,9 @@ mod state_from_init_args {
                 process_deposit_required_cycles: PROCESS_DEPOSIT_REQUIRED_CYCLES,
                 pending_process_deposit_request_guards: BTreeSet::new(),
                 pending_withdrawal_request_guards: BTreeSet::new(),
+                next_deposit_sol_id: 0,
+                queued_deposits: BTreeMap::new(),
+                in_flight_deposit_ids: BTreeMap::new(),
                 accepted_deposits: InsertionOrderedMap::new(),
                 quarantined_deposits: InsertionOrderedMap::new(),
                 minted_deposits: InsertionOrderedMap::new(),

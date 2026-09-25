@@ -209,6 +209,15 @@ fn get_events(
             EventType::ExpiredTransaction { signature } => event::EventType::ExpiredTransaction {
                 signature: signature.into(),
             },
+            EventType::QueuedDeposit {
+                deposit_id,
+                account,
+                sweepable_amount,
+            } => event::EventType::QueuedDeposit {
+                deposit_id,
+                account,
+                sweepable_amount,
+            },
         }
     }
 

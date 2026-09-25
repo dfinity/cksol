@@ -142,9 +142,28 @@ pub enum DepositSolStatus {
 /// Further variants will follow as the sweep flow is implemented.
 #[derive(Debug, Clone, PartialEq, CandidType, Deserialize, Error)]
 pub enum DepositSolError {
+    /// Insufficient cycles attached by the caller to complete the `deposit_sol` call.
+    #[error(transparent)]
+    InsufficientCycles(#[from] InsufficientCyclesError),
     /// The minter experiences temporary issues, try the call again later.
     #[error("Transient error, try the call again later: {0}")]
     TemporarilyUnavailable(String),
+    /// There is already a concurrent `deposit_sol` invocation for the same account.
+    #[error("There is already a concurrent `deposit_sol` invocation for the same account")]
+    AlreadyProcessing,
+    /// The balance of the deposit address is below the minimum deposit amount.
+    ///
+    /// The minimum deposit amount applies to the balance of the deposit address and includes
+    /// the rent exemption threshold, so a deposit of exactly the minimum is accepted.
+    #[error(
+        "Insufficient deposit address balance: expected at least {minimum_deposit_amount} lamports, but got {balance} lamports"
+    )]
+    ValueTooSmall {
+        /// The balance of the deposit address.
+        balance: Lamport,
+        /// The minimum deposit amount for the deposit to be queued.
+        minimum_deposit_amount: Lamport,
+    },
 }
 
 /// An error from the `process_deposit` ckSOL minter endpoint.

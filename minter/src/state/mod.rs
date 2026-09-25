@@ -8,7 +8,9 @@ use crate::{
     utils::insertion_ordered_map::InsertionOrderedMap,
 };
 use candid::Principal;
-use cksol_types::{DepositStatus, TxFinalizedStatus, WithdrawalStatus};
+use cksol_types::{
+    DepositSolId, DepositSolStatus, DepositStatus, TxFinalizedStatus, WithdrawalStatus,
+};
 use cksol_types_internal::SolanaNetwork;
 use cksol_types_internal::{Ed25519KeyName, InitArgs, UpgradeArgs};
 use ic_canister_runtime::Runtime;
@@ -94,6 +96,9 @@ pub struct State {
     deposit_consolidation_fee: u128,
     pending_process_deposit_request_guards: BTreeSet<Account>,
     pending_withdrawal_request_guards: BTreeSet<Account>,
+    next_deposit_sol_id: DepositSolId,
+    queued_deposits: BTreeMap<DepositSolId, QueuedDeposit>,
+    in_flight_deposit_ids: BTreeMap<Account, DepositSolId>,
     accepted_deposits: InsertionOrderedMap<DepositId, Deposit>,
     quarantined_deposits: InsertionOrderedMap<DepositId, Deposit>,
     minted_deposits: InsertionOrderedMap<DepositId, MintedDeposit>,
@@ -175,6 +180,23 @@ impl State {
 
     pub fn accepted_deposits(&self) -> &InsertionOrderedMap<DepositId, Deposit> {
         &self.accepted_deposits
+    }
+
+    pub fn next_deposit_sol_id(&self) -> DepositSolId {
+        self.next_deposit_sol_id
+    }
+
+    pub fn in_flight_deposit_id(&self, account: &Account) -> Option<DepositSolId> {
+        self.in_flight_deposit_ids.get(account).copied()
+    }
+
+    pub fn deposit_sol_status(&self, deposit_id: DepositSolId) -> DepositSolStatus {
+        match self.queued_deposits.get(&deposit_id) {
+            Some(deposit) => DepositSolStatus::Queued {
+                sweepable_amount: deposit.sweepable_amount,
+            },
+            None => DepositSolStatus::NotFound,
+        }
     }
 
     pub fn quarantined_deposits(&self) -> &InsertionOrderedMap<DepositId, Deposit> {
@@ -417,6 +439,33 @@ impl State {
             None,
             "Attempted to accept an already accepted deposit: {deposit_id:?}"
         );
+    }
+
+    fn process_queued_deposit(
+        &mut self,
+        deposit_id: DepositSolId,
+        account: &Account,
+        sweepable_amount: Lamport,
+    ) {
+        assert_eq!(
+            deposit_id, self.next_deposit_sol_id,
+            "Attempted to queue deposit {deposit_id} out of sequence, expected {}",
+            self.next_deposit_sol_id
+        );
+        assert!(
+            self.in_flight_deposit_ids
+                .insert(*account, deposit_id)
+                .is_none(),
+            "Attempted to queue a deposit for account {account:?} that already has one in flight"
+        );
+        self.queued_deposits.insert(
+            deposit_id,
+            QueuedDeposit {
+                account: *account,
+                sweepable_amount,
+            },
+        );
+        self.next_deposit_sol_id += 1;
     }
 
     fn process_quarantined_deposit(&mut self, deposit_id: &DepositId) {
@@ -770,6 +819,9 @@ impl TryFrom<InitArgs> for State {
             deposit_consolidation_fee: deposit_consolidation_fee as u128,
             pending_process_deposit_request_guards: BTreeSet::new(),
             pending_withdrawal_request_guards: BTreeSet::new(),
+            next_deposit_sol_id: 0,
+            queued_deposits: BTreeMap::new(),
+            in_flight_deposit_ids: BTreeMap::new(),
             accepted_deposits: InsertionOrderedMap::new(),
             quarantined_deposits: InsertionOrderedMap::new(),
             minted_deposits: InsertionOrderedMap::new(),
@@ -856,6 +908,13 @@ pub struct SchnorrPublicKey {
 pub struct Deposit {
     pub deposit_amount: Lamport,
     pub amount_to_mint: Lamport,
+}
+
+/// A deposit address queued for a sweep to the minter's main account.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct QueuedDeposit {
+    pub account: Account,
+    pub sweepable_amount: Lamport,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

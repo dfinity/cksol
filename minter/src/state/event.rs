@@ -3,6 +3,7 @@ use crate::{
     numeric::{LedgerBurnIndex, LedgerMintIndex},
     rpc::BlockHeight,
 };
+use cksol_types::DepositSolId;
 use cksol_types_internal::{InitArgs, UpgradeArgs};
 use derive_more::From;
 use ic_stable_structures::{Storable, storable::Bound};
@@ -139,6 +140,17 @@ pub enum EventType {
         /// The signature of the expired Solana transaction.
         #[cbor(n(0), with = "cbor::signature")]
         signature: Signature,
+    },
+    /// A user queued the deposit address of an account for a sweep via `deposit_sol`.
+    /// The deposit id is the next sequence number of the minter at the time of the event.
+    #[n(11)]
+    QueuedDeposit {
+        #[n(0)]
+        deposit_id: DepositSolId,
+        #[n(1)]
+        account: Account,
+        #[n(2)]
+        sweepable_amount: Lamport,
     },
 }
 
