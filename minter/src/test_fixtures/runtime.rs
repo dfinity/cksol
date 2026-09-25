@@ -175,6 +175,8 @@ impl CanisterRuntime for TestCanisterRuntime {
     }
 }
 
+/// Suspends the caller once, so that concurrent callers all reach the call before any of
+/// them sees its response, as they do on the IC.
 async fn suspend_like_an_inter_canister_call() {
     yield_now().await;
 }
