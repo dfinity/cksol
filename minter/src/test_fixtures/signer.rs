@@ -5,34 +5,29 @@ use crate::{
 use ic_cdk_management_canister::SignCallError;
 use icrc_ledger_types::icrc1::account::Account;
 use mockall::mock;
+use sha2::{Digest, Sha512};
 use solana_signature::Signature;
-use std::sync::{Arc, OnceLock};
+use std::{
+    collections::BTreeMap,
+    sync::{Arc, OnceLock},
+};
 
-/// The [`Signature`] the mock signer returns for `derivation_path` unless the test
-/// registers an override, laid out so that the owner and the subaccount of the signing
-/// account are both readable in the signature bytes: the owner first, the subaccount after
-/// the widest principal, and how far the owner falls short of that width last.
-///
-/// Recording the shortfall rather than the owner length keeps the mapping injective — the
-/// owners `[1]` and `[1, 0]` would otherwise share a signature — while leaving the byte zero
-/// for a full-width owner, so `account_signature(&account(i)) == signature(i)` holds.
-pub(super) fn derivation_path_signature(derivation_path: &DerivationPath) -> Signature {
-    const MAX_PRINCIPAL_LEN: usize = 29;
-    const SUBACCOUNT_OFFSET: usize = MAX_PRINCIPAL_LEN;
-    const OWNER_SHORTFALL_OFFSET: usize = SUBACCOUNT_OFFSET + 32;
+/// The [`Signature`] the mock signer returns the `occurrence`-th time `derivation_path`
+/// signs, as the hash of both. Hashing every component under its own length keeps the
+/// mapping injective, so no two accounts and no two signatures by the same account collide.
+pub(super) fn derivation_path_signature(
+    derivation_path: &DerivationPath,
+    occurrence: usize,
+) -> Signature {
+    let mut hasher = Sha512::new();
+    hasher.update((derivation_path.len() as u64).to_le_bytes());
+    for component in derivation_path {
+        hasher.update((component.len() as u64).to_le_bytes());
+        hasher.update(component);
+    }
+    hasher.update((occurrence as u64).to_le_bytes());
 
-    let [_schema_version, owner, subaccount] = derivation_path.as_slice() else {
-        panic!("BUG: unexpected derivation path {derivation_path:?}");
-    };
-    let owner_shortfall = MAX_PRINCIPAL_LEN
-        .checked_sub(owner.len())
-        .expect("BUG: principal wider than a derivation path can hold");
-
-    let mut bytes = [0_u8; 64];
-    bytes[..owner.len()].copy_from_slice(owner);
-    bytes[SUBACCOUNT_OFFSET..SUBACCOUNT_OFFSET + subaccount.len()].copy_from_slice(subaccount);
-    bytes[OWNER_SHORTFALL_OFFSET] = owner_shortfall as u8;
-    Signature::from(bytes)
+    Signature::try_from(hasher.finalize().as_slice()).expect("BUG: SHA-512 is 64 bytes wide")
 }
 
 mock! {
@@ -49,11 +44,11 @@ mock! {
 
 /// A [`SchnorrSigner`] that answers every signing request with
 /// [`derivation_path_signature`], so the signature a transaction carries follows from which
-/// account signed it.
+/// account signed it and from how many times that account has signed before.
 ///
 /// Tests that need a different answer register it up front with [`Self::add_signature`].
 /// Overrides are consumed in registration order and must all be used, so an account
-/// registered twice signs twice.
+/// registered twice signs twice; they do not advance the occurrence count.
 #[derive(Clone, Default)]
 pub struct MockSchnorrSigner {
     overrides: Vec<(DerivationPath, Result<Vec<u8>, SignCallError>)>,
@@ -86,8 +81,14 @@ impl MockSchnorrSigner {
                     .times(1)
                     .return_once(move |_message, _path| response);
             }
-            mock.expect_sign()
-                .returning(|_message, path| Ok(derivation_path_signature(&path).as_ref().to_vec()));
+
+            let mut occurrences: BTreeMap<DerivationPath, usize> = BTreeMap::new();
+            mock.expect_sign().returning(move |_message, path| {
+                let occurrence = occurrences.entry(path.clone()).or_default();
+                let signature = derivation_path_signature(&path, *occurrence);
+                *occurrence += 1;
+                Ok(signature.as_ref().to_vec())
+            });
             mock
         })
     }

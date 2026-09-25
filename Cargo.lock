@@ -928,6 +928,7 @@ dependencies = [
  "scopeguard",
  "scraper",
  "serde",
+ "sha2",
  "sol_rpc_client",
  "sol_rpc_types",
  "solana-address 2.3.0",

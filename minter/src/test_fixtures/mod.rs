@@ -150,10 +150,16 @@ pub fn account(i: usize) -> Account {
     }
 }
 
-/// Returns the [`Signature`] that [`signer::MockSchnorrSigner`] produces for `account`,
-/// chosen so that `account_signature(&account(i)) == signature(i)`.
+/// Returns the [`Signature`] that [`signer::MockSchnorrSigner`] produces the first time
+/// `account` signs.
 pub fn account_signature(account: &Account) -> solana_signature::Signature {
-    signer::derivation_path_signature(&derivation_path(account))
+    account_signature_nth(account, 0)
+}
+
+/// Returns the [`Signature`] that [`signer::MockSchnorrSigner`] produces the
+/// `occurrence`-th time `account` signs, counting from zero.
+pub fn account_signature_nth(account: &Account, occurrence: usize) -> solana_signature::Signature {
+    signer::derivation_path_signature(&derivation_path(account), occurrence)
 }
 
 /// Helpers for constructing state transitions via [`process_event`] in tests.

@@ -1,6 +1,6 @@
 use super::{
-    MINTER_ACCOUNT, account, account_signature, signature, signer::MockSchnorrSigner,
-    signer::derivation_path_signature,
+    MINTER_ACCOUNT, account, account_signature, account_signature_nth, signature,
+    signer::MockSchnorrSigner,
 };
 use crate::{address::derivation_path, signer::SchnorrSigner};
 use candid::Principal;
@@ -8,13 +8,6 @@ use ic_cdk::call::CallRejected;
 use ic_cdk_management_canister::SignCallError;
 use icrc_ledger_types::icrc1::account::Account;
 use solana_signature::Signature;
-
-#[test]
-fn should_derive_the_signature_of_the_matching_index_for_every_account() {
-    for i in [0, 1, 2, 0xAA, 0xFF, u32::MAX as usize, usize::MAX] {
-        assert_eq!(account_signature(&account(i)), signature(i));
-    }
-}
 
 #[test]
 fn should_derive_distinct_signatures_for_distinct_accounts() {
@@ -25,6 +18,7 @@ fn should_derive_distinct_signatures_for_distinct_accounts() {
         Account::from(Principal::from_slice(&[1, 0, 0])),
         Account::from(Principal::from_slice(&[0])),
         account(0),
+        account(1),
         Account::from(Principal::from_slice(&[1; 29])),
         Account {
             owner: Principal::from_slice(&[1]),
@@ -41,6 +35,27 @@ fn should_derive_distinct_signatures_for_distinct_accounts() {
             assert_ne!(account_signature(account), account_signature(other));
         }
     }
+}
+
+#[test]
+fn should_derive_distinct_signatures_for_each_occurrence() {
+    let occurrences: Vec<_> = (0..8)
+        .map(|occurrence| account_signature_nth(&account(1), occurrence))
+        .collect();
+
+    for (index, signature) in occurrences.iter().enumerate() {
+        for other in &occurrences[index + 1..] {
+            assert_ne!(signature, other);
+        }
+    }
+}
+
+#[test]
+fn should_derive_the_first_occurrence_by_default() {
+    assert_eq!(
+        account_signature(&account(1)),
+        account_signature_nth(&account(1), 0)
+    );
 }
 
 #[test]
@@ -61,8 +76,29 @@ async fn should_sign_with_the_signature_derived_from_the_signing_account() {
     let signer = MockSchnorrSigner::default();
 
     for i in 0..3 {
-        assert_eq!(sign(&signer, &account(i)).await, signature(i));
+        assert_eq!(
+            sign(&signer, &account(i)).await,
+            account_signature(&account(i))
+        );
     }
+}
+
+#[tokio::test]
+async fn should_advance_the_occurrence_per_account() {
+    let signer = MockSchnorrSigner::default();
+
+    assert_eq!(
+        sign(&signer, &account(1)).await,
+        account_signature(&account(1))
+    );
+    assert_eq!(
+        sign(&signer, &account(2)).await,
+        account_signature(&account(2))
+    );
+    assert_eq!(
+        sign(&signer, &account(1)).await,
+        account_signature_nth(&account(1), 1)
+    );
 }
 
 #[tokio::test]
@@ -70,8 +106,10 @@ async fn should_prefer_a_registered_override_over_the_derived_signature() {
     let signer = MockSchnorrSigner::default().add_signature(&account(1), Ok(signature(0xAA)));
 
     assert_eq!(sign(&signer, &account(1)).await, signature(0xAA));
-    assert_eq!(sign(&signer, &account(2)).await, signature(2));
-    assert_eq!(sign(&signer, &account(1)).await, signature(1));
+    assert_eq!(
+        sign(&signer, &account(1)).await,
+        account_signature(&account(1))
+    );
 }
 
 #[tokio::test]
@@ -85,12 +123,19 @@ async fn should_consume_overrides_for_the_same_account_in_registration_order() {
 }
 
 #[tokio::test]
-async fn should_share_consumed_overrides_between_clones() {
+async fn should_share_consumed_overrides_and_occurrences_between_clones() {
     let signer = MockSchnorrSigner::default().add_signature(&account(1), Ok(signature(0xAA)));
     let clone = signer.clone();
 
     assert_eq!(sign(&signer, &account(1)).await, signature(0xAA));
-    assert_eq!(sign(&clone, &account(1)).await, signature(1));
+    assert_eq!(
+        sign(&clone, &account(1)).await,
+        account_signature(&account(1))
+    );
+    assert_eq!(
+        sign(&signer, &account(1)).await,
+        account_signature_nth(&account(1), 1)
+    );
 }
 
 #[tokio::test]
@@ -103,7 +148,10 @@ async fn should_fail_to_sign_for_the_registered_account_only() {
             .await
             .is_err()
     );
-    assert_eq!(sign(&signer, &account(1)).await, signature(1));
+    assert_eq!(
+        sign(&signer, &account(1)).await,
+        account_signature(&account(1))
+    );
 }
 
 #[tokio::test]
@@ -123,18 +171,12 @@ async fn should_panic_on_an_override_registered_after_the_first_signing_request(
     let _ = signer.add_signature(&account(1), Ok(signature(0xAA)));
 }
 
-#[test]
-#[should_panic(expected = "unexpected derivation path")]
-fn should_panic_on_a_derivation_path_the_minter_does_not_produce() {
-    derivation_path_signature(&vec![vec![1]]);
-}
-
 async fn sign(signer: &MockSchnorrSigner, account: &Account) -> Signature {
     let bytes = signer
         .sign(vec![], derivation_path(account))
         .await
         .expect("signing should succeed");
-    Signature::from(<[u8; 64]>::try_from(bytes.as_slice()).expect("expected a 64-byte signature"))
+    Signature::try_from(bytes.as_slice()).expect("expected a 64-byte signature")
 }
 
 fn signing_error() -> SignCallError {
