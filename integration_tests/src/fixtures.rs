@@ -28,22 +28,11 @@ pub const DEPOSIT_AMOUNT: Lamport = 500_000_000;
 /// Minimum balance left on a deposit address to keep it rent-exempt.
 pub const RENT_EXEMPTION_THRESHOLD: Lamport = 890_880;
 
-/// The SOL RPC canister rounds the slot returned by `getSlot` down to the nearest
-/// multiple of this value before querying `getBlock`.
-pub const SOL_RPC_SLOT_ROUNDING: u64 = 20;
-/// Slots without a block before any block the mocked `getBlock` reports, so that
-/// the block height it reports stays below the slot.
-const MOCK_SKIPPED_SLOTS: u64 = 1_000;
-
-/// The block height the mocked `getBlock` reports for the block fetched after `getSlot`
-/// returned `slot`.
-pub fn mock_block_height(slot: u64) -> u64 {
-    sol_rpc_rounded_slot(slot) - MOCK_SKIPPED_SLOTS
-}
-
-fn sol_rpc_rounded_slot(slot: u64) -> u64 {
-    slot / SOL_RPC_SLOT_ROUNDING * SOL_RPC_SLOT_ROUNDING
-}
+/// The slot the mocked `getSlot` reports. A test says which block height the mocked
+/// `getBlock` then reports, since that is what the minter records and what it judges
+/// blockhash expiry by. The slot itself only has to match the `getBlock` request the
+/// SOL RPC canister derives from it by rounding it down to a multiple of 20.
+const MOCK_SLOT: u64 = 100_000_000;
 
 pub const EXPECTED_MINT_AMOUNT: Lamport = DEPOSIT_AMOUNT - Setup::DEFAULT_MANUAL_DEPOSIT_FEE;
 
@@ -172,20 +161,17 @@ impl MockBuilder {
         self.expect(get_balance_request(), get_balance_response(balance))
     }
 
-    /// Mocks for `getSlot` → `getBlock`.
-    pub fn get_slot_and_block(self, slot: u64, blockhash: &str) -> Self {
-        self.expect(get_slot_request(), get_slot_response(slot))
-            .expect(get_block_request(slot), get_block_response(slot, blockhash))
-    }
-
     /// Mocks for `getSlot` → `getBlock` → `sendTransaction`.
-    pub fn submit_transaction(self, slot: u64, blockhash: &str, tx_signature: &str) -> Self {
-        self.expect(get_slot_request(), get_slot_response(slot))
-            .expect(get_block_request(slot), get_block_response(slot, blockhash))
-            .expect(
-                send_transaction_request(),
-                send_transaction_response(tx_signature),
-            )
+    pub fn submit_transaction(
+        self,
+        block_height: u64,
+        blockhash: &str,
+        tx_signature: &str,
+    ) -> Self {
+        self.get_current_block(block_height, blockhash).expect(
+            send_transaction_request(),
+            send_transaction_response(tx_signature),
+        )
     }
 
     /// Mock for `getSignatureStatuses` returning not-found for `count` signatures.
@@ -204,24 +190,12 @@ impl MockBuilder {
         )
     }
 
-    /// Mocks for `getSlot` → `getBlock`, used by the monitor timer to snapshot the current slot.
-    pub fn get_current_slot(self, slot: u64, blockhash: &str) -> Self {
-        self.expect(get_slot_request(), get_slot_response(slot))
-            .expect(get_block_request(slot), get_block_response(slot, blockhash))
-    }
-
-    /// Mocks for resubmitting an expired transaction:
-    /// `getSlot` → `getBlock` → `getSignatureStatuses`(not found) → `getSlot` → `getBlock` → `sendTransaction`.
-    pub fn resubmit_transaction(self, slot: u64, blockhash: &str, tx_signature: &str) -> Self {
-        self.expect(get_slot_request(), get_slot_response(slot))
-            .expect(get_block_request(slot), get_block_response(slot, blockhash))
-            .check_signature_statuses_not_found(1)
-            .expect(get_slot_request(), get_slot_response(slot))
-            .expect(get_block_request(slot), get_block_response(slot, blockhash))
-            .expect(
-                send_transaction_request(),
-                send_transaction_response(tx_signature),
-            )
+    /// Mocks for `getSlot` → `getBlock`, the block a timer builds on or compares against.
+    pub fn get_current_block(self, block_height: u64, blockhash: &str) -> Self {
+        self.expect(get_slot_request(), get_slot_response()).expect(
+            get_block_request(),
+            get_block_response(block_height, blockhash),
+        )
     }
 }
 
@@ -313,17 +287,17 @@ fn get_slot_request() -> JsonRpcRequestMatcher {
     JsonRpcRequestMatcher::with_method("getSlot")
 }
 
-fn get_slot_response(slot: u64) -> JsonRpcResponse {
+fn get_slot_response() -> JsonRpcResponse {
     JsonRpcResponse::from(json!({
         "jsonrpc": "2.0",
-        "result": slot,
+        "result": MOCK_SLOT,
         "id": 1
     }))
 }
 
-fn get_block_request(slot: u64) -> JsonRpcRequestMatcher {
+fn get_block_request() -> JsonRpcRequestMatcher {
     JsonRpcRequestMatcher::with_method("getBlock").with_params(json!([
-        sol_rpc_rounded_slot(slot),
+        MOCK_SLOT,
         {
             "transactionDetails": "none",
             "rewards": false,
@@ -332,7 +306,7 @@ fn get_block_request(slot: u64) -> JsonRpcRequestMatcher {
     ]))
 }
 
-fn get_block_response(slot: u64, blockhash: &str) -> JsonRpcResponse {
+fn get_block_response(block_height: u64, blockhash: &str) -> JsonRpcResponse {
     JsonRpcResponse::from(json!({
         "jsonrpc": "2.0",
         "result": {
@@ -340,7 +314,7 @@ fn get_block_response(slot: u64, blockhash: &str) -> JsonRpcResponse {
             "previousBlockhash": "CzBVNFJkh7WkQDfJUiDjLc7kPrJd8kR2yiCvwBUhSe7Y",
             "parentSlot": 449819444,
             "blockTime": 1700000000_i64,
-            "blockHeight": mock_block_height(slot)
+            "blockHeight": block_height
         },
         "id": 1
     }))

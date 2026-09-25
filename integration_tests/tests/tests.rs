@@ -22,7 +22,7 @@ use cksol_types_internal::{
 use ic_pocket_canister_runtime::{JsonRpcResponse, MockHttpOutcalls};
 use icrc_ledger_types::icrc1::account::{Account, Subaccount};
 use serde_json::json;
-use sol_rpc_types::{CommitmentLevel, ConsensusStrategy, GetTransactionEncoding, RpcConfig, Slot};
+use sol_rpc_types::{CommitmentLevel, ConsensusStrategy, GetTransactionEncoding, RpcConfig};
 use std::time::Duration;
 use tokio::join;
 
@@ -31,7 +31,13 @@ const FINALIZE_TRANSACTIONS_DELAY: Duration = Duration::from_mins(2);
 const RESUBMIT_TRANSACTIONS_DELAY: Duration = Duration::from_mins(3);
 const DEPOSIT_CONSOLIDATION_DELAY: Duration = Duration::from_mins(10);
 const SWEEP_DEPOSITS_DELAY: Duration = Duration::from_mins(1);
-const MAX_BLOCKHASH_AGE: Slot = 150;
+/// Number of blocks a blockhash stays valid for, as the minter counts them.
+const MAX_BLOCKHASH_AGE_IN_BLOCKS: u64 = 150;
+/// Height of the block whose blockhash the mocks hand a timer for a first submission.
+const SUBMISSION_BLOCK_HEIGHT: u64 = 100_000_000;
+/// First height at which the blockhash of a transaction submitted at
+/// [`SUBMISSION_BLOCK_HEIGHT`] is no longer accepted.
+const EXPIRY_BLOCK_HEIGHT: u64 = SUBMISSION_BLOCK_HEIGHT + MAX_BLOCKHASH_AGE_IN_BLOCKS + 1;
 
 /// Deposits funds into the minter via `process_deposit`, consolidates them,
 /// and finalizes the consolidation so the minter's internal balance is credited.
@@ -51,7 +57,7 @@ async fn deposit_and_consolidate_funds(setup: &Setup) {
         .execute_http_mocks(
             MockBuilder::with_start_id(4)
                 .submit_transaction(
-                    100_000_000,
+                    SUBMISSION_BLOCK_HEIGHT,
                     "4sGjMW1sUnHzSxGspuhpqLDx6wiyjNtZAMdL4VZHirAn",
                     "5VERv8NMvzbJMEkV8xnrLkEaWRtSz9CosKDYjCJjBRnbJLgp8uirBgmQpjKhoR4tjF3ZpRzrFmBV6UjKdiSZkQUW",
                 )
@@ -64,7 +70,10 @@ async fn deposit_and_consolidate_funds(setup: &Setup) {
     setup
         .execute_http_mocks(
             MockBuilder::with_start_id(16)
-                .get_current_slot(100_000_000, "4sGjMW1sUnHzSxGspuhpqLDx6wiyjNtZAMdL4VZHirAn")
+                .get_current_block(
+                    SUBMISSION_BLOCK_HEIGHT,
+                    "4sGjMW1sUnHzSxGspuhpqLDx6wiyjNtZAMdL4VZHirAn",
+                )
                 .check_signature_statuses_finalized(1)
                 .build(),
         )
@@ -256,10 +265,7 @@ mod withdrawal_tests {
     use std::str::FromStr;
 
     use candid::Nat;
-    use cksol_int_tests::{
-        fixtures::{SOL_RPC_SLOT_ROUNDING, get_memo, mock_block_height},
-        ledger_init_args::LEDGER_TRANSFER_FEE,
-    };
+    use cksol_int_tests::{fixtures::get_memo, ledger_init_args::LEDGER_TRANSFER_FEE};
     use cksol_types::{BurnMemo, Memo, WithdrawalOk};
     use cksol_types_internal::UpgradeArgs;
     use icrc_ledger_types::icrc1::account::Account;
@@ -648,11 +654,9 @@ mod withdrawal_tests {
             .await
             .expect("withdraw should succeed");
 
-        const INITIAL_SLOT: u64 = 350_000_000;
-
         setup.advance_time(WITHDRAWAL_PROCESSING_DELAY).await;
         setup
-            .execute_http_mocks(estimate_blockhash_http_mocks(INITIAL_SLOT))
+            .execute_http_mocks(submit_withdrawal_http_mocks(SUBMISSION_BLOCK_HEIGHT))
             .await;
 
         setup.minter().assert_that_events().await.satisfy(|events| {
@@ -663,7 +667,7 @@ mod withdrawal_tests {
                     block_height,
                     ..
                 } if burn_indices == &[block_index]
-                  && block_height == &mock_block_height(INITIAL_SLOT)
+                  && block_height == &SUBMISSION_BLOCK_HEIGHT
             )));
         });
 
@@ -676,21 +680,16 @@ mod withdrawal_tests {
 
         // Advance time to trigger finalize_transactions, which fetches the current block,
         // checks statuses (not found), and marks the expired transaction for resubmission.
-        // Expiry is judged by the mocked block height, which is the slot rounded down to
-        // SOL_RPC_SLOT_ROUNDING minus a fixed offset, so the same arithmetic applies to
-        // slots: adding SOL_RPC_SLOT_ROUNDING + 1 ensures the current height is strictly
-        // greater than the submission height + MAX_BLOCKHASH_AGE (the expiry threshold).
-        let resubmission_slot = INITIAL_SLOT + MAX_BLOCKHASH_AGE + SOL_RPC_SLOT_ROUNDING + 1;
         setup.advance_time(FINALIZE_TRANSACTIONS_DELAY).await;
         setup
-            .execute_http_mocks(mark_expired_withdrawal_http_mocks(resubmission_slot))
+            .execute_http_mocks(mark_expired_withdrawal_http_mocks(EXPIRY_BLOCK_HEIGHT))
             .await;
 
         // Advance time to trigger resubmit_transactions. finalize_transactions also
         // fires but has no pending transactions, so it makes no HTTP outcalls.
         setup.advance_time(RESUBMIT_TRANSACTIONS_DELAY).await;
         setup
-            .execute_http_mocks(resubmit_withdrawal_http_mocks(resubmission_slot))
+            .execute_http_mocks(resubmit_withdrawal_http_mocks(EXPIRY_BLOCK_HEIGHT))
             .await;
 
         // Withdrawal status should now have a different signature
@@ -710,7 +709,7 @@ mod withdrawal_tests {
         // transaction is reported as finalized.
         setup.advance_time(FINALIZE_TRANSACTIONS_DELAY).await;
         setup
-            .execute_http_mocks(finalize_withdrawal_http_mocks(resubmission_slot))
+            .execute_http_mocks(finalize_withdrawal_http_mocks(EXPIRY_BLOCK_HEIGHT))
             .await;
 
         // Withdrawal status should now be TxFinalized with Success
@@ -730,10 +729,10 @@ mod withdrawal_tests {
         setup.drop().await;
     }
 
-    fn estimate_blockhash_http_mocks(slot: u64) -> MockHttpOutcalls {
+    fn submit_withdrawal_http_mocks(block_height: u64) -> MockHttpOutcalls {
         MockBuilder::with_start_id(28)
             .submit_transaction(
-                slot,
+                block_height,
                 "4sGjMW1sUnHzSxGspuhpqLDx6wiyjNtZAMdL4VZHirAn",
                 "drWLXM6bHretgz7KuwvGZvPBeQ8KEbS3AKB2WJPy4TbBDaqdqAiNcj3cTAS7UnyJKM7eEZoUf4DvhY1TKkus9Bp",
             )
@@ -742,18 +741,21 @@ mod withdrawal_tests {
 
     /// HTTP mocks for finalize_transactions detecting an expired transaction:
     /// fetches slot, checks status (not found), marks for resubmission.
-    fn mark_expired_withdrawal_http_mocks(current_slot: u64) -> MockHttpOutcalls {
+    fn mark_expired_withdrawal_http_mocks(current_block_height: u64) -> MockHttpOutcalls {
         MockBuilder::with_start_id(40)
-            .get_current_slot(current_slot, "9ZNTfG4NyQgxy2SWjSiQoUyBPEvXT2xo7fKc5hPYYJ7b")
+            .get_current_block(
+                current_block_height,
+                "9ZNTfG4NyQgxy2SWjSiQoUyBPEvXT2xo7fKc5hPYYJ7b",
+            )
             .check_signature_statuses_not_found(1)
             .build()
     }
 
     /// HTTP mocks for resubmit_transactions sending the replacement transaction.
-    fn resubmit_withdrawal_http_mocks(current_slot: u64) -> MockHttpOutcalls {
+    fn resubmit_withdrawal_http_mocks(current_block_height: u64) -> MockHttpOutcalls {
         MockBuilder::with_start_id(52)
             .submit_transaction(
-                current_slot,
+                current_block_height,
                 "9ZNTfG4NyQgxy2SWjSiQoUyBPEvXT2xo7fKc5hPYYJ7b",
                 "5VERv8NMvzbJMEkV8xnrLkEaWRtSz9CosKDYjCJjBRnbJLgp8uirBgmQpjKhoR4tjF3ZpRzrFmBV6UjKdiSZkQUW",
             )
@@ -761,9 +763,12 @@ mod withdrawal_tests {
     }
 
     /// HTTP mocks for finalize_transactions confirming the resubmitted transaction.
-    fn finalize_withdrawal_http_mocks(current_slot: u64) -> MockHttpOutcalls {
+    fn finalize_withdrawal_http_mocks(current_block_height: u64) -> MockHttpOutcalls {
         MockBuilder::with_start_id(64)
-            .get_current_slot(current_slot, "9ZNTfG4NyQgxy2SWjSiQoUyBPEvXT2xo7fKc5hPYYJ7b")
+            .get_current_block(
+                current_block_height,
+                "9ZNTfG4NyQgxy2SWjSiQoUyBPEvXT2xo7fKc5hPYYJ7b",
+            )
             .check_signature_statuses_finalized(1)
             .build()
     }
@@ -1016,8 +1021,6 @@ mod process_deposit_tests {
 }
 
 mod deposit_sol_tests {
-    use cksol_int_tests::fixtures::SOL_RPC_SLOT_ROUNDING;
-
     use super::*;
 
     const BALANCE_ABOVE_MINIMUM: Lamport = Setup::DEFAULT_MINIMUM_DEPOSIT_AMOUNT + 1;
@@ -1160,7 +1163,7 @@ mod deposit_sol_tests {
             .execute_http_mocks(
                 MockBuilder::with_start_id(4)
                     .submit_transaction(
-                        100_000_000,
+                        SUBMISSION_BLOCK_HEIGHT,
                         "4sGjMW1sUnHzSxGspuhpqLDx6wiyjNtZAMdL4VZHirAn",
                         "5VERv8NMvzbJMEkV8xnrLkEaWRtSz9CosKDYjCJjBRnbJLgp8uirBgmQpjKhoR4tjF3ZpRzrFmBV6UjKdiSZkQUW",
                     )
@@ -1184,7 +1187,6 @@ mod deposit_sol_tests {
 
     #[tokio::test]
     async fn should_sweep_queued_deposit_after_timer() {
-        const SLOT: Slot = 100_000_000;
         let setup = SetupBuilder::new().with_proxy_canister().build().await;
         let deposit_id = setup
             .minter()
@@ -1202,7 +1204,7 @@ mod deposit_sol_tests {
             .execute_http_mocks(
                 MockBuilder::with_start_id(4)
                     .submit_transaction(
-                        SLOT,
+                        SUBMISSION_BLOCK_HEIGHT,
                         "4sGjMW1sUnHzSxGspuhpqLDx6wiyjNtZAMdL4VZHirAn",
                         "5VERv8NMvzbJMEkV8xnrLkEaWRtSz9CosKDYjCJjBRnbJLgp8uirBgmQpjKhoR4tjF3ZpRzrFmBV6UjKdiSZkQUW",
                     )
@@ -1230,8 +1232,6 @@ mod deposit_sol_tests {
 
     #[tokio::test]
     async fn should_report_resubmitted_signature_after_sweep_expires() {
-        const SLOT: Slot = 100_000_000;
-        let resubmission_slot = SLOT + MAX_BLOCKHASH_AGE + SOL_RPC_SLOT_ROUNDING + 1;
         let setup = SetupBuilder::new().with_proxy_canister().build().await;
         let deposit_id = setup
             .minter()
@@ -1245,7 +1245,7 @@ mod deposit_sol_tests {
             .expect("deposit_sol should queue a sweep");
         setup.advance_time(SWEEP_DEPOSITS_DELAY).await;
         setup
-            .execute_http_mocks(submit_sweep_http_mocks(SLOT))
+            .execute_http_mocks(submit_sweep_http_mocks(SUBMISSION_BLOCK_HEIGHT))
             .await;
         let submitted_sweep_signature = assert_matches!(
             setup.minter().deposit_status(deposit_id).await,
@@ -1254,11 +1254,11 @@ mod deposit_sol_tests {
 
         setup.advance_time(FINALIZE_TRANSACTIONS_DELAY).await;
         setup
-            .execute_http_mocks(mark_expired_sweep_http_mocks(resubmission_slot))
+            .execute_http_mocks(mark_expired_sweep_http_mocks(EXPIRY_BLOCK_HEIGHT))
             .await;
         setup.advance_time(RESUBMIT_TRANSACTIONS_DELAY).await;
         setup
-            .execute_http_mocks(resubmit_sweep_http_mocks(resubmission_slot))
+            .execute_http_mocks(resubmit_sweep_http_mocks(EXPIRY_BLOCK_HEIGHT))
             .await;
 
         let resubmitted_sweep_signature = assert_matches!(
@@ -1310,10 +1310,10 @@ mod deposit_sol_tests {
     }
 
     /// HTTP mocks for the sweep timer submitting the sweep transaction.
-    fn submit_sweep_http_mocks(slot: Slot) -> MockHttpOutcalls {
+    fn submit_sweep_http_mocks(block_height: u64) -> MockHttpOutcalls {
         MockBuilder::with_start_id(4)
             .submit_transaction(
-                slot,
+                block_height,
                 "4sGjMW1sUnHzSxGspuhpqLDx6wiyjNtZAMdL4VZHirAn",
                 "5VERv8NMvzbJMEkV8xnrLkEaWRtSz9CosKDYjCJjBRnbJLgp8uirBgmQpjKhoR4tjF3ZpRzrFmBV6UjKdiSZkQUW",
             )
@@ -1322,18 +1322,21 @@ mod deposit_sol_tests {
 
     /// HTTP mocks for finalize_transactions detecting the expired sweep:
     /// fetches slot, checks status (not found), marks for resubmission.
-    fn mark_expired_sweep_http_mocks(current_slot: Slot) -> MockHttpOutcalls {
+    fn mark_expired_sweep_http_mocks(current_block_height: u64) -> MockHttpOutcalls {
         MockBuilder::with_start_id(16)
-            .get_current_slot(current_slot, "9ZNTfG4NyQgxy2SWjSiQoUyBPEvXT2xo7fKc5hPYYJ7b")
+            .get_current_block(
+                current_block_height,
+                "9ZNTfG4NyQgxy2SWjSiQoUyBPEvXT2xo7fKc5hPYYJ7b",
+            )
             .check_signature_statuses_not_found(1)
             .build()
     }
 
     /// HTTP mocks for resubmit_transactions sending the replacement sweep transaction.
-    fn resubmit_sweep_http_mocks(current_slot: Slot) -> MockHttpOutcalls {
+    fn resubmit_sweep_http_mocks(current_block_height: u64) -> MockHttpOutcalls {
         MockBuilder::with_start_id(28)
             .submit_transaction(
-                current_slot,
+                current_block_height,
                 "9ZNTfG4NyQgxy2SWjSiQoUyBPEvXT2xo7fKc5hPYYJ7b",
                 "drWLXM6bHretgz7KuwvGZvPBeQ8KEbS3AKB2WJPy4TbBDaqdqAiNcj3cTAS7UnyJKM7eEZoUf4DvhY1TKkus9Bp",
             )
@@ -1457,7 +1460,7 @@ mod consolidation_tests {
     fn http_mocks_for_deposit_consolidation() -> MockHttpOutcalls {
         MockBuilder::with_start_id(4)
             .submit_transaction(
-                100_000_000,
+                SUBMISSION_BLOCK_HEIGHT,
                 "4sGjMW1sUnHzSxGspuhpqLDx6wiyjNtZAMdL4VZHirAn",
                 "5VERv8NMvzbJMEkV8xnrLkEaWRtSz9CosKDYjCJjBRnbJLgp8uirBgmQpjKhoR4tjF3ZpRzrFmBV6UjKdiSZkQUW",
             )
