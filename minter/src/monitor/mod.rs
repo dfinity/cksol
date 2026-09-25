@@ -114,21 +114,29 @@ pub async fn finalize_transactions<R: CanisterRuntime>(runtime: R) {
     }
 
     for signature in &statuses.not_found {
-        if is_blockhash_expired(all_transactions[signature], current_block.block_height) {
+        if !is_blockhash_expired(all_transactions[signature], current_block.block_height) {
+            continue;
+        }
+        if read_state(|state| state.is_sweep_transaction(signature)) {
+            log!(
+                Priority::Error,
+                "Sweep transaction {signature} expired, dropping its deposits"
+            );
+        } else {
             log!(
                 Priority::Info,
                 "Transaction {signature} expired, marking for resubmission"
             );
-            mutate_state(|state| {
-                process_event(
-                    state,
-                    EventType::ExpiredTransaction {
-                        signature: *signature,
-                    },
-                    &runtime,
-                )
-            });
         }
+        mutate_state(|state| {
+            process_event(
+                state,
+                EventType::ExpiredTransaction {
+                    signature: *signature,
+                },
+                &runtime,
+            )
+        });
     }
 
     if !more_to_process {

@@ -100,6 +100,7 @@ pub struct State {
     next_deposit_sol_id: DepositSolId,
     queued_deposits: BTreeMap<DepositSolId, QueuedDeposit>,
     swept_deposits: BTreeMap<DepositSolId, SweptDeposit>,
+    dropped_deposits: BTreeMap<DepositSolId, SweptDeposit>,
     in_flight_deposit_ids: BTreeMap<Account, DepositSolId>,
     accepted_deposits: InsertionOrderedMap<DepositId, Deposit>,
     quarantined_deposits: InsertionOrderedMap<DepositId, Deposit>,
@@ -200,6 +201,10 @@ impl State {
         &self.swept_deposits
     }
 
+    pub fn dropped_deposits(&self) -> &BTreeMap<DepositSolId, SweptDeposit> {
+        &self.dropped_deposits
+    }
+
     pub fn deposit_sol_status(&self, deposit_id: DepositSolId) -> DepositSolStatus {
         if let Some(deposit) = self.queued_deposits.get(&deposit_id) {
             return DepositSolStatus::Queued {
@@ -209,6 +214,11 @@ impl State {
         if let Some(swept) = self.swept_deposits.get(&deposit_id) {
             return DepositSolStatus::Swept {
                 signature: swept.signature.into(),
+            };
+        }
+        if let Some(dropped) = self.dropped_deposits.get(&deposit_id) {
+            return DepositSolStatus::Dropped {
+                signature: dropped.signature.into(),
             };
         }
         DepositSolStatus::NotFound
@@ -254,6 +264,17 @@ impl State {
         &self.transactions_to_resubmit
     }
 
+    pub fn is_sweep_transaction(&self, signature: &Signature) -> bool {
+        self.submitted_transactions
+            .get(signature)
+            .is_some_and(|transaction| {
+                matches!(
+                    transaction.purpose,
+                    TransactionPurpose::SweepDeposits { .. }
+                )
+            })
+    }
+
     pub fn process_transaction_expired(&mut self, signature: &Signature) {
         assert!(
             !self.succeeded_transactions.contains(signature),
@@ -269,6 +290,10 @@ impl State {
             .unwrap_or_else(|| {
                 panic!("BUG: cannot mark non-submitted transaction {signature} for resubmission")
             });
+        if let TransactionPurpose::SweepDeposits { deposit_ids } = &transaction.purpose {
+            self.drop_swept_deposits(deposit_ids);
+            return;
+        }
         assert!(
             self.transactions_to_resubmit
                 .insert(*signature, transaction)
@@ -511,6 +536,24 @@ impl State {
         deposit.sweepable_amount
     }
 
+    fn drop_swept_deposits(&mut self, deposit_ids: &[DepositSolId]) {
+        for deposit_id in deposit_ids {
+            let swept = self.swept_deposits.remove(deposit_id).unwrap_or_else(|| {
+                panic!("Attempted to drop deposit {deposit_id} that is not swept")
+            });
+            self.release_in_flight_deposit(*deposit_id, &swept.deposit.account);
+            self.dropped_deposits.insert(*deposit_id, swept);
+        }
+    }
+
+    fn release_in_flight_deposit(&mut self, deposit_id: DepositSolId, account: &Account) {
+        assert_eq!(
+            self.in_flight_deposit_ids.remove(account),
+            Some(deposit_id),
+            "BUG: deposit {deposit_id} is not the in-flight deposit of account {account:?}"
+        );
+    }
+
     fn process_quarantined_deposit(&mut self, deposit_id: &DepositId) {
         assert!(
             !self.minted_deposits.contains_key(deposit_id),
@@ -723,6 +766,13 @@ impl State {
                 panic!("Attempted to resubmit unknown transaction with signature {old_signature:?}")
             });
         assert!(
+            !matches!(
+                old_transaction.purpose,
+                TransactionPurpose::SweepDeposits { .. }
+            ),
+            "BUG: sweep transaction {old_signature} must be dropped instead of resubmitted"
+        );
+        assert!(
             !self.succeeded_transactions.contains(new_signature),
             "Attempted to resubmit with signature {new_signature:?} that already succeeded"
         );
@@ -746,11 +796,6 @@ impl State {
         for sent in self.sent_withdrawal_requests.values_mut() {
             if &sent.signature == old_signature {
                 sent.signature = *new_signature;
-            }
-        }
-        for swept in self.swept_deposits.values_mut() {
-            if &swept.signature == old_signature {
-                swept.signature = *new_signature;
             }
         }
     }
@@ -806,6 +851,9 @@ impl State {
             !self.transactions_to_resubmit.contains_key(signature),
             "BUG: transaction {signature} is queued for resubmission but is being marked as failed"
         );
+        if let TransactionPurpose::SweepDeposits { deposit_ids } = &transaction.purpose {
+            self.drop_swept_deposits(deposit_ids);
+        }
         assert_eq!(
             self.failed_transactions.insert(*signature, transaction),
             None,
@@ -875,6 +923,7 @@ impl TryFrom<InitArgs> for State {
             next_deposit_sol_id: 0,
             queued_deposits: BTreeMap::new(),
             swept_deposits: BTreeMap::new(),
+            dropped_deposits: BTreeMap::new(),
             in_flight_deposit_ids: BTreeMap::new(),
             accepted_deposits: InsertionOrderedMap::new(),
             quarantined_deposits: InsertionOrderedMap::new(),

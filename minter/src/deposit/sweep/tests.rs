@@ -12,6 +12,7 @@ use crate::{
         },
         events, init_schnorr_master_key, init_state,
         runtime::TestCanisterRuntime,
+        signature,
     },
 };
 use assert_matches::assert_matches;
@@ -173,6 +174,33 @@ async fn should_fail_while_process_deposit_deposit_awaits_consolidation() {
         .expect_event_eq(accepted_deposit_event())
         .expect_event_eq(minted_event(BLOCK_INDEX))
         .assert_no_more_events();
+}
+
+#[tokio::test]
+async fn should_queue_a_new_deposit_after_the_previous_one_was_dropped() {
+    init_state();
+    init_schnorr_master_key();
+    let sweep_signature = signature(0xAA);
+    events::queue_deposit(0, DEPOSITOR_ACCOUNT, MINIMUM_DEPOSIT_AMOUNT);
+    events::submit_sweep(sweep_signature, vec![0]);
+    events::expire_transaction(sweep_signature);
+    let runtime = runtime().add_get_balance_response(MINIMUM_DEPOSIT_AMOUNT);
+
+    let result = deposit_sol(&runtime, DEPOSITOR_ACCOUNT).await;
+
+    assert_eq!(result, Ok(1));
+    assert_eq!(
+        deposit_status(0),
+        DepositSolStatus::Dropped {
+            signature: sweep_signature.into()
+        }
+    );
+    assert_eq!(
+        deposit_status(1),
+        DepositSolStatus::Queued {
+            sweepable_amount: MINIMUM_DEPOSIT_AMOUNT - RENT_EXEMPTION_THRESHOLD
+        }
+    );
 }
 
 #[tokio::test]
