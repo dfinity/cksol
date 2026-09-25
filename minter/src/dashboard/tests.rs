@@ -193,7 +193,7 @@ fn should_display_all_deposit_statuses() {
 }
 
 #[test]
-fn should_display_quarantined_sweeps_with_the_sweep_signature() {
+fn should_display_quarantined_swept_deposits_with_the_sweep_signature() {
     init_state();
     let sweep_signature = signature(0xAA);
     let sweepable_amount = 400_000_000;
@@ -204,14 +204,14 @@ fn should_display_quarantined_sweeps_with_the_sweep_signature() {
 
     DashboardAssert::assert_that(dashboard())
         .has_table_row_value(
-            "#quarantined-sweeps + table > tbody > tr:nth-child(1)",
+            "#quarantined-swept-deposits + table > tbody > tr:nth-child(1)",
             &[
                 "0",
                 &account(1).to_string(),
                 &sweep_signature.to_string(),
                 &lamports_to_sol(sweepable_amount),
             ],
-            "quarantined sweeps",
+            "quarantined swept deposits",
         )
         .has_links_satisfying(
             |href| href.contains("solscan.io/tx/"),

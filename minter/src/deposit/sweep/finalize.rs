@@ -28,10 +28,12 @@ const FEE_PAYER_ACCOUNT_INDEX: usize = 0;
 /// the fee schedule, so that the ckSOL supply is covered even if Solana charges less
 /// than the fee the sweep was built with. A sweep whose metadata does not match the
 /// minter's model of the transaction is quarantined instead of credited.
-pub async fn credit_finalized_sweeps<R: CanisterRuntime>(runtime: &R) {
+///
+/// Returns whether the finalization timer must run again immediately.
+pub async fn credit_finalized_sweeps<R: CanisterRuntime>(runtime: &R) -> bool {
     let signatures = read_state(State::sweeps_awaiting_credit);
     if signatures.is_empty() {
-        return;
+        return false;
     }
 
     let master_key = lazy_get_schnorr_master_key(runtime).await;
@@ -39,13 +41,15 @@ pub async fn credit_finalized_sweeps<R: CanisterRuntime>(runtime: &R) {
 
     futures::future::join_all(
         signatures
-            .into_iter()
+            .iter()
             .take(MAX_CONCURRENT_RPC_CALLS)
             .map(async |signature| {
-                credit_sweep(runtime, signature, &master_key, main_address).await
+                credit_sweep(runtime, *signature, &master_key, main_address).await
             }),
     )
     .await;
+
+    signatures.len() > MAX_CONCURRENT_RPC_CALLS
 }
 
 async fn credit_sweep<R: CanisterRuntime>(

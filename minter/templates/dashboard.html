@@ -104,8 +104,8 @@
                 </tbody>
             </table>
 
-            {% if !quarantined_sweeps.is_empty() %}
-            <h3 id="quarantined-sweeps">Quarantined Sweeps</h3>
+            {% if !quarantined_swept_deposits.is_empty() %}
+            <h3 id="quarantined-swept-deposits">Quarantined Swept Deposits</h3>
             <table>
                 <thead>
                 <tr>
@@ -116,12 +116,12 @@
                 </tr>
                 </thead>
                 <tbody>
-                {% for sweep in quarantined_sweeps %}
+                {% for deposit in quarantined_swept_deposits %}
                 <tr>
-                    <td>{{ sweep.deposit_id }}</td>
-                    <td><code>{{ sweep.account }}</code></td>
-                    <td>{% call solscan_tx_link(sweep.signature) %}</td>
-                    <td>{{ sweep.swept_amount }}</td>
+                    <td>{{ deposit.deposit_id }}</td>
+                    <td><code>{{ deposit.account }}</code></td>
+                    <td>{% call solscan_tx_link(deposit.signature) %}</td>
+                    <td>{{ deposit.swept_amount }}</td>
                 </tr>
                 {% endfor %}
                 </tbody>

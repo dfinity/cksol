@@ -103,7 +103,7 @@ pub struct State {
     finalized_deposits: BTreeMap<DepositSolId, SweptDeposit>,
     pending_mints: BTreeMap<DepositSolId, PendingMint>,
     dropped_deposits: BTreeMap<DepositSolId, SweptDeposit>,
-    quarantined_sweeps: BTreeMap<DepositSolId, SweptDeposit>,
+    quarantined_swept_deposits: BTreeMap<DepositSolId, SweptDeposit>,
     in_flight_deposit_ids: BTreeMap<Account, DepositSolId>,
     accepted_deposits: InsertionOrderedMap<DepositId, Deposit>,
     quarantined_deposits: InsertionOrderedMap<DepositId, Deposit>,
@@ -216,8 +216,8 @@ impl State {
         &self.dropped_deposits
     }
 
-    pub fn quarantined_sweeps(&self) -> &BTreeMap<DepositSolId, SweptDeposit> {
-        &self.quarantined_sweeps
+    pub fn quarantined_swept_deposits(&self) -> &BTreeMap<DepositSolId, SweptDeposit> {
+        &self.quarantined_swept_deposits
     }
 
     /// The signatures of the finalized sweep transactions whose deposits still
@@ -267,7 +267,7 @@ impl State {
                 signature: dropped.signature.into(),
             };
         }
-        if let Some(quarantined) = self.quarantined_sweeps.get(&deposit_id) {
+        if let Some(quarantined) = self.quarantined_swept_deposits.get(&deposit_id) {
             return DepositSolStatus::Quarantined {
                 signature: quarantined.signature.into(),
             };
@@ -313,17 +313,6 @@ impl State {
 
     pub fn transactions_to_resubmit(&self) -> &InsertionOrderedMap<Signature, SolanaTransaction> {
         &self.transactions_to_resubmit
-    }
-
-    pub fn is_sweep_transaction(&self, signature: &Signature) -> bool {
-        self.submitted_transactions
-            .get(signature)
-            .is_some_and(|transaction| {
-                matches!(
-                    transaction.purpose,
-                    TransactionPurpose::SweepDeposits { .. }
-                )
-            })
     }
 
     pub fn process_transaction_expired(&mut self, signature: &Signature) {
@@ -642,7 +631,7 @@ impl State {
 
     fn process_quarantined_sweep(&mut self, signature: &Signature) {
         for (deposit_id, deposit) in self.take_finalized_deposits(signature) {
-            self.quarantined_sweeps.insert(deposit_id, deposit);
+            self.quarantined_swept_deposits.insert(deposit_id, deposit);
         }
     }
 
@@ -1036,7 +1025,7 @@ impl TryFrom<InitArgs> for State {
             finalized_deposits: BTreeMap::new(),
             pending_mints: BTreeMap::new(),
             dropped_deposits: BTreeMap::new(),
-            quarantined_sweeps: BTreeMap::new(),
+            quarantined_swept_deposits: BTreeMap::new(),
             in_flight_deposit_ids: BTreeMap::new(),
             accepted_deposits: InsertionOrderedMap::new(),
             quarantined_deposits: InsertionOrderedMap::new(),

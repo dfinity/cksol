@@ -54,11 +54,20 @@ pub async fn finalize_transactions<R: CanisterRuntime>(runtime: R) {
         Err(_) => return,
     };
 
-    check_submitted_transactions(&runtime).await;
-    credit_finalized_sweeps(&runtime).await;
+    let reschedule = scopeguard::guard(runtime.clone(), |runtime| {
+        runtime.set_timer(Duration::ZERO, finalize_transactions);
+    });
+
+    let more_transactions_to_check = check_submitted_transactions(&runtime).await;
+    let more_sweeps_to_credit = credit_finalized_sweeps(&runtime).await;
+
+    if !more_transactions_to_check && !more_sweeps_to_credit {
+        scopeguard::ScopeGuard::into_inner(reschedule);
+    }
 }
 
-async fn check_submitted_transactions<R: CanisterRuntime>(runtime: &R) {
+/// Returns whether the finalization timer must run again immediately.
+async fn check_submitted_transactions<R: CanisterRuntime>(runtime: &R) -> bool {
     let all_transactions: BTreeMap<Signature, BlockHeight> = read_state(|state| {
         state
             .submitted_transactions()
@@ -67,14 +76,8 @@ async fn check_submitted_transactions<R: CanisterRuntime>(runtime: &R) {
             .collect()
     });
     if all_transactions.is_empty() {
-        return;
+        return false;
     }
-
-    let more_to_process =
-        all_transactions.len() > MAX_CONCURRENT_RPC_CALLS * MAX_SIGNATURES_PER_STATUS_CHECK;
-    let reschedule = scopeguard::guard(runtime.clone(), |runtime| {
-        runtime.set_timer(Duration::ZERO, finalize_transactions);
-    });
 
     // Fetch the current block before checking statuses: if a transaction finalizes
     // after we snapshot the block, the status check will see it as finalized rather
@@ -83,7 +86,7 @@ async fn check_submitted_transactions<R: CanisterRuntime>(runtime: &R) {
         Ok(block) => block,
         Err(e) => {
             log!(Priority::Info, "Failed to get current block: {e}");
-            return;
+            return true;
         }
     };
 
@@ -123,17 +126,7 @@ async fn check_submitted_transactions<R: CanisterRuntime>(runtime: &R) {
         if !is_blockhash_expired(all_transactions[signature], current_block.block_height) {
             continue;
         }
-        if read_state(|state| state.is_sweep_transaction(signature)) {
-            log!(
-                Priority::Error,
-                "Sweep transaction {signature} expired, dropping its deposits"
-            );
-        } else {
-            log!(
-                Priority::Info,
-                "Transaction {signature} expired, marking for resubmission"
-            );
-        }
+        log!(Priority::Info, "Transaction {signature} expired");
         mutate_state(|state| {
             process_event(
                 state,
@@ -145,10 +138,7 @@ async fn check_submitted_transactions<R: CanisterRuntime>(runtime: &R) {
         });
     }
 
-    if !more_to_process {
-        // All work fits in this round
-        scopeguard::ScopeGuard::into_inner(reschedule);
-    }
+    all_transactions.len() > MAX_CONCURRENT_RPC_CALLS * MAX_SIGNATURES_PER_STATUS_CHECK
 }
 
 fn is_blockhash_expired(

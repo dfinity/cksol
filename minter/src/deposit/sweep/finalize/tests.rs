@@ -4,7 +4,7 @@ use super::{
 };
 use crate::{
     address::account_address,
-    constants::{FEE_PER_SIGNATURE, RENT_EXEMPTION_THRESHOLD},
+    constants::{FEE_PER_SIGNATURE, MAX_CONCURRENT_RPC_CALLS, RENT_EXEMPTION_THRESHOLD},
     state::{PendingMint, QueuedDeposit, SweptDeposit, event::EventType, read_state},
     test_fixtures::{
         EventsAssert, MINTER_ADDRESS, account,
@@ -211,9 +211,37 @@ mod credit {
     async fn should_do_nothing_without_finalized_deposits() {
         setup();
 
-        credit_finalized_sweeps(&TestCanisterRuntime::new()).await;
+        let run_again = credit_finalized_sweeps(&TestCanisterRuntime::new()).await;
 
+        assert!(!run_again);
         EventsAssert::assert_no_events_recorded();
+    }
+
+    #[tokio::test]
+    async fn should_ask_for_another_round_when_sweeps_are_left_over() {
+        const SWEEPABLE_AMOUNT: Lamport = 25_000_000;
+        setup();
+        let sweeps = MAX_CONCURRENT_RPC_CALLS + 1;
+        let mut runtime = TestCanisterRuntime::new().with_increasing_time();
+        for index in 0..sweeps {
+            let deposit_id = index as DepositSolId;
+            queue_deposit(deposit_id, account(index), SWEEPABLE_AMOUNT);
+            let sweep_signature = signature(index);
+            submit_sweep(sweep_signature, vec![deposit_id]);
+            succeed_transaction(sweep_signature);
+            if index < MAX_CONCURRENT_RPC_CALLS {
+                let swept = vec![(deposit_address(account(index)), SWEEPABLE_AMOUNT)];
+                runtime = with_transaction(runtime, sweep_transaction(&swept).encode());
+            }
+        }
+
+        let run_again = credit_finalized_sweeps(&runtime).await;
+
+        assert!(run_again);
+        read_state(|state| {
+            assert_eq!(state.pending_mints().len(), MAX_CONCURRENT_RPC_CALLS);
+            assert_eq!(state.finalized_deposits().len(), 1);
+        });
     }
 
     #[tokio::test]
@@ -324,7 +352,7 @@ mod credit {
         assert_eq!(events_before, EventsAssert::from_recorded());
         read_state(|state| {
             assert_eq!(state.finalized_deposits().len(), SWEEPABLE_AMOUNTS.len());
-            assert!(state.quarantined_sweeps().is_empty());
+            assert!(state.quarantined_swept_deposits().is_empty());
         });
         assert_eq!(
             deposit_status(0),
@@ -348,7 +376,10 @@ mod credit {
 
         read_state(|state| {
             assert!(state.pending_mints().is_empty());
-            assert_eq!(state.quarantined_sweeps().len(), SWEEPABLE_AMOUNTS.len());
+            assert_eq!(
+                state.quarantined_swept_deposits().len(),
+                SWEEPABLE_AMOUNTS.len()
+            );
             assert_eq!(state.balance(), 0);
         });
         assert_eq!(
@@ -371,7 +402,10 @@ mod credit {
         read_state(|state| {
             assert!(state.finalized_deposits().is_empty());
             assert!(state.pending_mints().is_empty());
-            assert_eq!(state.quarantined_sweeps().len(), SWEEPABLE_AMOUNTS.len());
+            assert_eq!(
+                state.quarantined_swept_deposits().len(),
+                SWEEPABLE_AMOUNTS.len()
+            );
             assert_eq!(state.balance(), 0);
         });
         for deposit_id in 0..SWEEPABLE_AMOUNTS.len() as DepositSolId {
@@ -467,13 +501,21 @@ mod credit {
     fn runtime_returning(
         transaction: EncodedConfirmedTransactionWithStatusMeta,
     ) -> TestCanisterRuntime {
-        TestCanisterRuntime::new()
-            .with_increasing_time()
-            .add_stub_response(GetTransactionResult::Consistent(Ok(Some(
-                transaction
-                    .try_into()
-                    .expect("failed to convert transaction"),
-            ))))
+        with_transaction(
+            TestCanisterRuntime::new().with_increasing_time(),
+            transaction,
+        )
+    }
+
+    fn with_transaction(
+        runtime: TestCanisterRuntime,
+        transaction: EncodedConfirmedTransactionWithStatusMeta,
+    ) -> TestCanisterRuntime {
+        runtime.add_stub_response(GetTransactionResult::Consistent(Ok(Some(
+            transaction
+                .try_into()
+                .expect("failed to convert transaction"),
+        ))))
     }
 
     fn deposit_status(deposit_id: DepositSolId) -> DepositSolStatus {

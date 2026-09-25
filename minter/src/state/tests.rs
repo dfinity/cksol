@@ -367,7 +367,7 @@ mod swept_deposits {
         read_state(|s| {
             assert!(s.finalized_deposits().is_empty());
             assert!(s.pending_mints().is_empty());
-            assert_eq!(s.quarantined_sweeps().len(), 2);
+            assert_eq!(s.quarantined_swept_deposits().len(), 2);
             assert_eq!(s.balance(), 0);
         });
         assert_in_flight_ids_unchanged();
@@ -636,7 +636,7 @@ mod state_from_init_args {
                 finalized_deposits: BTreeMap::new(),
                 pending_mints: BTreeMap::new(),
                 dropped_deposits: BTreeMap::new(),
-                quarantined_sweeps: BTreeMap::new(),
+                quarantined_swept_deposits: BTreeMap::new(),
                 in_flight_deposit_ids: BTreeMap::new(),
                 accepted_deposits: InsertionOrderedMap::new(),
                 quarantined_deposits: InsertionOrderedMap::new(),
