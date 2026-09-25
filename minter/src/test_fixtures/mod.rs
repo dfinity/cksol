@@ -181,6 +181,7 @@ pub mod events {
     use super::{
         DEFAULT_BLOCK_HEIGHT, MANUAL_DEPOSIT_FEE, WITHDRAWAL_FEE, runtime::TestCanisterRuntime,
     };
+    use crate::deposit::sweep::deposit_status;
     use crate::{
         numeric::{LedgerBurnIndex, LedgerMintIndex},
         rpc::BlockHeight,
@@ -190,7 +191,7 @@ pub mod events {
             mutate_state, read_state,
         },
     };
-    use cksol_types::DepositSolId;
+    use cksol_types::{DepositSolId, DepositSolStatus};
     use icrc_ledger_types::icrc1::account::Account;
     use sol_rpc_types::Lamport;
     use solana_signature::Signature;
@@ -273,7 +274,11 @@ pub mod events {
         });
     }
 
-    pub fn queue_deposit(deposit_id: DepositSolId, account: Account, sweepable_amount: Lamport) {
+    pub fn queue_deposit(
+        deposit_id: DepositSolId,
+        account: Account,
+        sweepable_amount: Lamport,
+    ) -> DepositSolStatus {
         mutate_state(|state| {
             process_event(
                 state,
@@ -285,6 +290,7 @@ pub mod events {
                 &runtime(),
             )
         });
+        deposit_status(deposit_id)
     }
 
     /// Submits a sweep of the given queued deposits, signed by their accounts in the given order.
