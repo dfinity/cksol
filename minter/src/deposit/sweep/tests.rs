@@ -248,6 +248,7 @@ fn queued_deposit_event(deposit_id: u64, account: Account, sweepable_amount: Lam
 fn runtime() -> TestCanisterRuntime {
     TestCanisterRuntime::new()
         .with_increasing_time()
+        .expecting_charges()
         .add_msg_cycles_available(PROCESS_DEPOSIT_REQUIRED_CYCLES)
         .add_msg_cycles_refunded(GET_BALANCE_REFUND)
 }
