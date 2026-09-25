@@ -760,6 +760,11 @@ impl State {
                 sent.signature = *new_signature;
             }
         }
+        for swept in self.swept_deposits.values_mut() {
+            if &swept.signature == old_signature {
+                swept.signature = *new_signature;
+            }
+        }
     }
 
     fn process_transaction_succeeded(&mut self, signature: &Signature) {

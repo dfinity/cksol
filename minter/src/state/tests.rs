@@ -224,6 +224,47 @@ mod swept_deposits {
     }
 
     #[test]
+    fn should_report_new_signature_after_resubmitting_expired_sweep() {
+        init_state();
+        queue_three_deposits();
+        let expired_sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
+        let unrelated_sweep_signature = signature(SWEEP_SIGNATURE_INDEX + 1);
+        submit_sweep(expired_sweep_signature, vec![2, 0]);
+        submit_sweep(unrelated_sweep_signature, vec![1]);
+        expire_transaction(expired_sweep_signature);
+        let resubmitted_sweep_signature = signature(SWEEP_SIGNATURE_INDEX + 2);
+
+        resubmit_transaction(expired_sweep_signature, resubmitted_sweep_signature);
+
+        read_state(|s| {
+            assert_eq!(
+                s.swept_deposits()
+                    .iter()
+                    .map(|(deposit_id, swept)| (*deposit_id, swept.signature))
+                    .collect::<Vec<_>>(),
+                vec![
+                    (0, resubmitted_sweep_signature),
+                    (1, unrelated_sweep_signature),
+                    (2, resubmitted_sweep_signature),
+                ]
+            );
+        });
+        for (deposit_id, expected_signature) in [
+            (0, resubmitted_sweep_signature),
+            (1, unrelated_sweep_signature),
+            (2, resubmitted_sweep_signature),
+        ] {
+            assert_eq!(
+                deposit_status(deposit_id),
+                DepositSolStatus::Swept {
+                    signature: expected_signature.into()
+                }
+            );
+        }
+        assert_in_flight_ids_unchanged();
+    }
+
+    #[test]
     #[should_panic(expected = "Attempted to sweep unknown or already swept deposit 3")]
     fn should_panic_when_sweeping_unknown_deposit() {
         init_state();
