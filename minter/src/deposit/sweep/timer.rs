@@ -5,7 +5,7 @@ use crate::{
     runtime::CanisterRuntime,
     sol_transfer::{CreateTransferError, MAX_SIGNATURES, create_signed_consolidation_transaction},
     state::{
-        QueuedDeposit, TaskType,
+        QueuedDeposit, State, TaskType,
         audit::process_event,
         event::{EventType, TransactionPurpose},
         mutate_state, read_state,
@@ -32,20 +32,10 @@ pub async fn sweep_queued_deposits<R: CanisterRuntime>(runtime: R) {
         Err(_) => return,
     };
 
-    let batches: Vec<SweepBatch> = read_state(|state| {
-        state
-            .queued_deposits()
-            .iter()
-            .map(|(deposit_id, deposit)| (*deposit_id, *deposit))
-            .chunks(MAX_DEPOSITS_PER_SWEEP)
-            .into_iter()
-            .map(|chunk| SweepBatch::largest_deposit_pays_fee(chunk.collect()))
-            .collect()
-    });
-    if batches.is_empty() {
+    let sweep = read_state(SweepRound::take_from_queue);
+    if sweep.batches.is_empty() {
         return;
     }
-    let more_to_process = batches.len() > MAX_CONCURRENT_RPC_CALLS;
 
     let block = match get_recent_block(&runtime).await {
         Ok(block) => block,
@@ -61,8 +51,8 @@ pub async fn sweep_queued_deposits<R: CanisterRuntime>(runtime: R) {
         runtime.set_timer(Duration::ZERO, sweep_queued_deposits);
     });
 
-    futures::future::join_all(batches.into_iter().take(MAX_CONCURRENT_RPC_CALLS).map(
-        async |batch| match submit_sweep_transaction(&runtime, batch, block).await {
+    futures::future::join_all(sweep.batches.into_iter().map(async |batch| {
+        match submit_sweep_transaction(&runtime, batch, block).await {
             Ok(signature) => log!(Priority::Info, "Submitted sweep transaction {signature}"),
             Err(SweepError::CreateTransactionFailed(e)) => {
                 log!(Priority::Error, "Failed to create sweep transaction: {e}")
@@ -71,12 +61,41 @@ pub async fn sweep_queued_deposits<R: CanisterRuntime>(runtime: R) {
                 Priority::Info,
                 "Failed to submit sweep transaction (awaiting finalization): {e}"
             ),
-        },
-    ))
+        }
+    }))
     .await;
 
-    if !more_to_process {
+    if !sweep.leaves_deposits_queued {
         scopeguard::ScopeGuard::into_inner(reschedule);
+    }
+}
+
+struct SweepRound {
+    batches: Vec<SweepBatch>,
+    leaves_deposits_queued: bool,
+}
+
+impl SweepRound {
+    const MAX_DEPOSITS_PER_ROUND: usize = MAX_DEPOSITS_PER_SWEEP * MAX_CONCURRENT_RPC_CALLS;
+
+    fn take_from_queue(state: &State) -> Self {
+        let mut deposits: Vec<(DepositSolId, QueuedDeposit)> = state
+            .queued_deposits()
+            .iter()
+            .map(|(deposit_id, deposit)| (*deposit_id, *deposit))
+            .take(Self::MAX_DEPOSITS_PER_ROUND + 1)
+            .collect();
+        let leaves_deposits_queued = deposits.len() > Self::MAX_DEPOSITS_PER_ROUND;
+        deposits.truncate(Self::MAX_DEPOSITS_PER_ROUND);
+        Self {
+            batches: deposits
+                .into_iter()
+                .chunks(MAX_DEPOSITS_PER_SWEEP)
+                .into_iter()
+                .map(|chunk| SweepBatch::largest_deposit_pays_fee(chunk.collect()))
+                .collect(),
+            leaves_deposits_queued,
+        }
     }
 }
 
