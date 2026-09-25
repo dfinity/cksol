@@ -17,6 +17,7 @@ pub struct TestCanisterRuntime {
     signer: MockSchnorrSigner,
     times: Stubs<u64>,
     instruction_counts: Stubs<u64>,
+    expects_charges: bool,
     msg_cycles_accepted: Arc<Mutex<Vec<u128>>>,
     msg_cycles_available: Stubs<u128>,
     msg_cycles_refunded: Stubs<u128>,
@@ -57,6 +58,11 @@ impl TestCanisterRuntime {
 
     pub fn with_increasing_time(mut self) -> Self {
         self.times = (0..).into();
+        self
+    }
+
+    pub fn expecting_charges(mut self) -> Self {
+        self.expects_charges = true;
         self
     }
 
@@ -118,6 +124,12 @@ impl CanisterRuntime for TestCanisterRuntime {
     }
 
     fn msg_cycles_accept(&self, amount: u128) -> u128 {
+        assert!(
+            self.expects_charges,
+            "a test that does not expect the caller to be charged must not accept cycles, \
+             but {amount} cycles were accepted: call \
+             TestCanisterRuntime::expecting_charges() to opt in to being charged"
+        );
         self.msg_cycles_accepted.lock().unwrap().push(amount);
         amount
     }

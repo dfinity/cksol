@@ -203,12 +203,13 @@ mod process_deposit_tests {
             .with_increasing_time()
             .add_mint_response(Ok(BLOCK_INDEX.into()));
         let result = process_deposit(
-            runtime,
+            runtime.clone(),
             DEPOSITOR_ACCOUNT,
             legacy_deposit_transaction_signature(),
         )
         .await;
         assert_eq!(result, Ok(deposit_status_minted()));
+        assert!(runtime.msg_cycles_accepted().is_empty());
 
         EventsAssert::from_recorded()
             .expect_event_eq(accepted_deposit_event())
@@ -292,12 +293,13 @@ mod process_deposit_tests {
         // Second call: returns the same status
         let runtime = TestCanisterRuntime::new();
         let result = process_deposit(
-            runtime,
+            runtime.clone(),
             DEPOSITOR_ACCOUNT,
             legacy_deposit_transaction_signature(),
         )
         .await;
         assert_eq!(result, Ok(deposit_status_minted()));
+        assert!(runtime.msg_cycles_accepted().is_empty());
 
         // Only one mint event recorded
         EventsAssert::from_recorded()
@@ -327,12 +329,13 @@ mod process_deposit_tests {
         // On the second call, the deposit should have been quarantined
         let runtime = TestCanisterRuntime::new();
         let second_result = process_deposit(
-            runtime,
+            runtime.clone(),
             DEPOSITOR_ACCOUNT,
             legacy_deposit_transaction_signature(),
         )
         .await;
         assert_eq!(second_result, Ok(deposit_status_quarantined()));
+        assert!(runtime.msg_cycles_accepted().is_empty());
 
         // Calling `process_deposit` again for the same deposit should return the same status
         let runtime = TestCanisterRuntime::new();
@@ -436,6 +439,7 @@ mod process_deposit_tests {
     fn rejected_runtime() -> TestCanisterRuntime {
         TestCanisterRuntime::new()
             .with_increasing_time()
+            .expecting_charges()
             .add_msg_cycles_available(PROCESS_DEPOSIT_REQUIRED_CYCLES)
             .add_msg_cycles_refunded(GET_TRANSACTION_CYCLES - RPC_COST)
     }
