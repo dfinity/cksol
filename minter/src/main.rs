@@ -224,6 +224,16 @@ fn get_events(
                 account,
                 sweepable_amount,
             },
+            EventType::CreditedSweep {
+                signature,
+                amount_received,
+            } => event::EventType::CreditedSweep {
+                signature: signature.into(),
+                amount_received,
+            },
+            EventType::QuarantinedSweep { signature } => event::EventType::QuarantinedSweep {
+                signature: signature.into(),
+            },
         }
     }
 

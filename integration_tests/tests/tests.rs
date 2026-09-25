@@ -1187,7 +1187,7 @@ mod deposit_sol_tests {
     }
 
     #[tokio::test]
-    async fn should_report_resubmitted_signature_after_sweep_expires() {
+    async fn should_drop_deposit_and_release_account_after_sweep_expires() {
         let setup = SetupBuilder::new().with_proxy_canister().build().await;
         let deposit_id = setup
             .minter()
@@ -1207,7 +1207,7 @@ mod deposit_sol_tests {
                     .build(),
             )
             .await;
-        let submitted_sweep_signature = assert_matches!(
+        let sweep_signature = assert_matches!(
             setup.minter().deposit_status(deposit_id).await,
             DepositSolStatus::Swept { signature } => signature
         );
@@ -1220,31 +1220,37 @@ mod deposit_sol_tests {
                     .build(),
             )
             .await;
-        setup.advance_time(RESUBMIT_TRANSACTIONS_DELAY).await;
-        setup
-            .execute_http_mocks(
+
+        assert_eq!(
+            setup.minter().deposit_status(deposit_id).await,
+            DepositSolStatus::Dropped {
+                signature: sweep_signature
+            }
+        );
+        setup.minter().assert_that_events().await.satisfy(|events| {
+            check!(
+                !events
+                    .iter()
+                    .any(|e| matches!(e, EventType::ResubmittedTransaction { .. }))
+            );
+        });
+        let setup = setup
+            .check_metrics()
+            .await
+            .assert_contains_metric_matching(r"dropped_deposits 1 \d+")
+            .into();
+
+        let deposit_id_after_drop = setup
+            .minter()
+            .with_http_mocks(
                 MockBuilder::with_start_id(28)
-                    .resubmit_transaction(EXPIRY_BLOCK_HEIGHT)
+                    .get_balance(BALANCE_ABOVE_MINIMUM)
                     .build(),
             )
-            .await;
-
-        let resubmitted_sweep_signature = assert_matches!(
-            setup.minter().deposit_status(deposit_id).await,
-            DepositSolStatus::Swept { signature } => signature
-        );
-        assert_ne!(resubmitted_sweep_signature, submitted_sweep_signature);
-        setup.minter().assert_that_events().await.satisfy(|events| {
-            check!(events.iter().any(|e| matches!(
-                e,
-                EventType::ResubmittedTransaction {
-                    old_signature,
-                    new_signature,
-                    ..
-                } if *old_signature == submitted_sweep_signature
-                    && *new_signature == resubmitted_sweep_signature
-            )));
-        });
+            .deposit_sol(DEFAULT_CALLER_ACCOUNT)
+            .await
+            .expect("a dropped deposit releases the account for a new sweep");
+        assert_eq!(deposit_id_after_drop, deposit_id + 1);
 
         setup.drop().await;
     }

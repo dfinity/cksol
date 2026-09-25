@@ -5,7 +5,8 @@ use crate::test_fixtures::{
     WITHDRAWAL_FEE, account, deposit_id,
     events::{
         accept_deposit, accept_withdrawal, fail_transaction, mint_deposit, quarantine_deposit,
-        submit_consolidation, submit_withdrawal, succeed_transaction,
+        quarantine_sweep, queue_deposit, submit_consolidation, submit_sweep, submit_withdrawal,
+        succeed_transaction,
     },
     init_balance, init_schnorr_master_key, init_state, init_state_with_args, ledger_canister_id,
     runtime::TestCanisterRuntime,
@@ -189,6 +190,33 @@ fn should_display_all_deposit_statuses() {
     assert!(statuses.contains(&"Quarantined"));
     assert!(statuses.contains(&"Minted"));
     assert!(statuses.contains(&"Consolidated"));
+}
+
+#[test]
+fn should_display_quarantined_swept_deposits_with_the_sweep_signature() {
+    init_state();
+    let sweep_signature = signature(0xAA);
+    let sweepable_amount = 400_000_000;
+    queue_deposit(0, account(1), sweepable_amount);
+    submit_sweep(sweep_signature, vec![0]);
+    succeed_transaction(sweep_signature);
+    quarantine_sweep(sweep_signature);
+
+    DashboardAssert::assert_that(dashboard())
+        .has_table_row_value(
+            "#quarantined-swept-deposits + table > tbody > tr:nth-child(1)",
+            &[
+                "0",
+                &account(1).to_string(),
+                &sweep_signature.to_string(),
+                &lamports_to_sol(sweepable_amount),
+            ],
+            "quarantined swept deposits",
+        )
+        .has_links_satisfying(
+            |href| href.contains("solscan.io/tx/"),
+            |href| href.contains(&sweep_signature.to_string()),
+        );
 }
 
 #[test]

@@ -152,6 +152,29 @@ pub enum EventType {
         #[n(2)]
         sweepable_amount: Lamport,
     },
+    /// The minter read the amount that the finalized sweep transaction moved to its
+    /// main account and enqueued a pending mint for each deposit of that sweep.
+    #[n(12)]
+    CreditedSweep {
+        /// The signature of the finalized sweep transaction.
+        #[cbor(n(0), with = "cbor::signature")]
+        signature: Signature,
+        /// The increase of the main account balance reported by the transaction metadata.
+        #[n(1)]
+        amount_received: Lamport,
+    },
+    /// The deposits of a finalized sweep transaction reached the minter's main account,
+    /// but the transaction metadata did not match the minter's model of the sweep, so
+    /// the amount received cannot be credited.
+    ///
+    /// The deposits are quarantined to avoid any double minting and will not be further
+    /// processed without manual intervention.
+    #[n(13)]
+    QuarantinedSweep {
+        /// The signature of the finalized sweep transaction.
+        #[cbor(n(0), with = "cbor::signature")]
+        signature: Signature,
+    },
 }
 
 /// Payload of the `AcceptedWithdrawalRequest` event.

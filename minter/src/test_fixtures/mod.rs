@@ -318,6 +318,25 @@ pub mod events {
         });
     }
 
+    pub fn credit_sweep(signature: Signature, amount_received: Lamport) {
+        mutate_state(|state| {
+            process_event(
+                state,
+                EventType::CreditedSweep {
+                    signature,
+                    amount_received,
+                },
+                &runtime(),
+            )
+        });
+    }
+
+    pub fn quarantine_sweep(signature: Signature) {
+        mutate_state(|state| {
+            process_event(state, EventType::QuarantinedSweep { signature }, &runtime())
+        });
+    }
+
     pub fn accept_withdrawal(account: Account, burn_index: u64, amount: Lamport) {
         accept_withdrawal_at(account, burn_index, amount, 0);
     }
@@ -675,6 +694,13 @@ pub mod arb {
                     sweepable_amount,
                 }
             ),
+            (arb_signature(), any::<u64>()).prop_map(|(signature, amount_received)| {
+                EventType::CreditedSweep {
+                    signature,
+                    amount_received,
+                }
+            }),
+            arb_signature().prop_map(|signature| EventType::QuarantinedSweep { signature }),
         ]
     }
 
