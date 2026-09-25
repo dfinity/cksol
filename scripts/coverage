@@ -38,14 +38,19 @@ prebuilt canister wasm inside PocketIC, which host instrumentation cannot
 observe. Files under "$EXCLUDED_FILES" are left out because they are test
 scaffolding rather than production code.
 
-Requires the llvm-tools-preview toolchain component and cargo-llvm-cov, both
-of which "mise install" provides.
+cargo-llvm-cov comes from "mise install". The llvm-tools-preview toolchain
+component is added on each run, which is a no-op once it is present. It is
+deliberately not declared in rust-toolchain.toml, because mise pins the
+component list in mise.lock and every mise job then fails under MISE_LOCKED
+until that lockfile is regenerated.
 EOF
 }
 
 function measure() {
     rm -rf "$OUTPUT_DIR"
     mkdir -p "$OUTPUT_DIR"
+
+    rustup component add llvm-tools-preview
 
     cargo llvm-cov --no-report --locked --workspace --exclude "$EXCLUDED_PACKAGE"
 
