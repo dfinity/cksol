@@ -18,7 +18,6 @@ pub struct TestCanisterRuntime {
     inter_canister_call_runtime: StubRuntime,
     signer: MockSchnorrSigner,
     times: Stubs<u64>,
-    instruction_counts: Stubs<u64>,
     msg_cycles_accept: Stubs<u128>,
     msg_cycles_available: Stubs<u128>,
     msg_cycles_refunded: Stubs<u128>,
@@ -39,11 +38,6 @@ impl TestCanisterRuntime {
 
     pub fn add_stub_error(mut self, error: IcError) -> Self {
         self.inter_canister_call_runtime = self.inter_canister_call_runtime.add_stub_error(error);
-        self
-    }
-
-    pub fn with_time(mut self, timestamp: u64) -> Self {
-        self.times = self.times.add(timestamp);
         self
     }
 
@@ -115,7 +109,7 @@ impl CanisterRuntime for TestCanisterRuntime {
     }
 
     fn instruction_counter(&self) -> u64 {
-        self.instruction_counts.next()
+        unimplemented!("TestCanisterRuntime does not model the instruction counter")
     }
 
     fn msg_cycles_accept(&self, amount: u128) -> u128 {
