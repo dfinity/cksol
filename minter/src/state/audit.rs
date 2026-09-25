@@ -79,6 +79,15 @@ fn apply_state_transition(state: &mut State, payload: &EventType, timestamp: u64
         } => {
             state.process_queued_deposit(*deposit_id, account, *sweepable_amount);
         }
+        EventType::CreditedSweep {
+            signature,
+            amount_received,
+        } => {
+            state.process_credited_sweep(signature, *amount_received);
+        }
+        EventType::QuarantinedSweep { signature } => {
+            state.process_quarantined_sweep(signature);
+        }
     }
 }
 

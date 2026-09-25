@@ -142,8 +142,7 @@ type DepositSolId = nat64;
 
 // The status of a deposit queued by the `deposit_sol` endpoint.
 //
-// Further variants (`Finalized`, `Minted`, `Quarantined`) will follow as the
-// sweep flow is implemented.
+// The `Minted` variant will follow as the sweep flow is implemented.
 type DepositSolStatus = variant {
     // No deposit with this identifier was queued.
     NotFound;
@@ -158,6 +157,12 @@ type DepositSolStatus = variant {
         // The signature of the sweep transaction.
         signature: Signature;
     };
+    // The sweep transaction was finalized successfully, so the deposited SOL
+    // reached the minter's main account, but the ckSOL mint has not landed yet.
+    Finalized : record {
+        // The signature of the sweep transaction.
+        signature: Signature;
+    };
     // The sweep transaction failed or expired, so the deposited SOL is still on
     // the deposit address and no ckSOL is owed. Calling `deposit_sol` again
     // queues a new sweep of that balance.
@@ -165,11 +170,16 @@ type DepositSolStatus = variant {
         // The signature of the sweep transaction.
         signature: Signature;
     };
+    // The deposited SOL reached the minter's main account, but the minter could
+    // not determine how much was received, so no ckSOL was minted. The deposit
+    // is not processed further without manual intervention.
+    Quarantined : record {
+        // The signature of the sweep transaction.
+        signature: Signature;
+    };
 };
 
 // An error from the `deposit_sol` endpoint.
-//
-// Further variants will follow as the sweep flow is implemented.
 type DepositSolError = variant {
     // Insufficient cycles attached by the caller to complete the `deposit_sol` call.
     InsufficientCycles : InsufficientCyclesError;
@@ -187,6 +197,13 @@ type DepositSolError = variant {
         balance: Lamport;
         // The minimum deposit amount for the deposit to be queued.
         minimum_deposit_amount: Lamport;
+    };
+    // The latest deposit of the account is quarantined: its SOL reached the
+    // minter's main account without being credited. The account stays rejected
+    // until manual intervention resolves the quarantined deposit.
+    Quarantined : record {
+        // The identifier of the quarantined deposit.
+        deposit_id: DepositSolId;
     };
 };
 
@@ -474,6 +491,24 @@ type EventType = variant {
         account: Account;
         // The amount that will be swept from the deposit address.
         sweepable_amount: Lamport;
+    };
+    // The minter read the amount that the finalized sweep transaction moved to
+    // its main account and enqueued a pending mint for each deposit of that sweep.
+    CreditedSweep : record {
+        // The signature of the finalized sweep transaction.
+        signature: Signature;
+        // The increase of the main account balance reported by the transaction metadata.
+        amount_received: Lamport;
+    };
+    // The deposits of a finalized sweep transaction reached the minter's main
+    // account, but the transaction metadata did not match the minter's model of
+    // the sweep, so the amount received cannot be credited.
+    //
+    // The deposits are quarantined to avoid any double minting and will not be
+    // further processed without manual intervention.
+    QuarantinedSweep : record {
+        // The signature of the finalized sweep transaction.
+        signature: Signature;
     };
 };
 

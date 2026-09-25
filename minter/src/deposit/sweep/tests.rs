@@ -177,6 +177,24 @@ async fn should_fail_while_process_deposit_deposit_awaits_consolidation() {
 }
 
 #[tokio::test]
+async fn should_reject_an_account_whose_latest_deposit_is_quarantined() {
+    init_state();
+    init_schnorr_master_key();
+    let sweep_signature = signature(0xAA);
+    events::queue_deposit(0, DEPOSITOR_ACCOUNT, MINIMUM_DEPOSIT_AMOUNT);
+    events::submit_sweep(sweep_signature, vec![0]);
+    events::succeed_transaction(sweep_signature);
+    events::quarantine_sweep(sweep_signature);
+    let runtime =
+        TestCanisterRuntime::new().add_msg_cycles_available(PROCESS_DEPOSIT_REQUIRED_CYCLES);
+
+    let result = deposit_sol(&runtime, DEPOSITOR_ACCOUNT).await;
+
+    assert_eq!(result, Err(DepositSolError::Quarantined { deposit_id: 0 }));
+    assert!(runtime.msg_cycles_accepted().is_empty());
+}
+
+#[tokio::test]
 async fn should_queue_a_new_deposit_after_the_previous_one_was_dropped() {
     init_state();
     init_schnorr_master_key();

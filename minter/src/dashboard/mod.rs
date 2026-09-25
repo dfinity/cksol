@@ -198,6 +198,16 @@ pub struct DashboardWithdrawal {
     pub status: &'static str,
 }
 
+/// A swept deposit that reached the minter's main account but could not be credited,
+/// shown so that an operator can resolve it manually.
+#[derive(Clone)]
+pub struct DashboardQuarantinedSweep {
+    pub deposit_id: String,
+    pub account: String,
+    pub signature: String,
+    pub swept_amount: String,
+}
+
 #[derive(Clone)]
 pub struct DashboardDeposit {
     pub signature: String,
@@ -223,6 +233,7 @@ pub struct DashboardTemplate {
     pub minimum_deposit_amount: String,
     pub minimum_withdrawal_amount: String,
     pub balance: String,
+    pub quarantined_sweeps: Vec<DashboardQuarantinedSweep>,
     pub deposits_table: DashboardPaginatedTable<DashboardDeposit>,
     pub consolidations_table: DashboardPaginatedTable<DashboardConsolidation>,
     pub withdrawals_table: DashboardPaginatedTable<DashboardWithdrawal>,
@@ -292,6 +303,18 @@ impl DashboardTemplate {
                 },
             );
         }
+
+        let quarantined_sweeps = state
+            .quarantined_sweeps()
+            .iter()
+            .rev()
+            .map(|(deposit_id, quarantined)| DashboardQuarantinedSweep {
+                deposit_id: deposit_id.to_string(),
+                account: quarantined.deposit.account.to_string(),
+                signature: quarantined.signature.to_string(),
+                swept_amount: lamports_to_sol(quarantined.deposit.sweepable_amount),
+            })
+            .collect();
 
         let deposits_table = DashboardPaginatedTable::from_items(
             &deposits,
@@ -436,6 +459,7 @@ impl DashboardTemplate {
             minimum_deposit_amount: lamports_to_sol(state.minimum_deposit_amount()),
             minimum_withdrawal_amount: lamports_to_sol(state.minimum_withdrawal_amount()),
             balance: lamports_to_sol(state.balance()),
+            quarantined_sweeps,
             deposits_table,
             consolidations_table,
             withdrawals_table,

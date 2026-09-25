@@ -100,7 +100,10 @@ pub struct State {
     next_deposit_sol_id: DepositSolId,
     queued_deposits: BTreeMap<DepositSolId, QueuedDeposit>,
     swept_deposits: BTreeMap<DepositSolId, SweptDeposit>,
+    finalized_deposits: BTreeMap<DepositSolId, SweptDeposit>,
+    pending_mints: BTreeMap<DepositSolId, PendingMint>,
     dropped_deposits: BTreeMap<DepositSolId, SweptDeposit>,
+    quarantined_sweeps: BTreeMap<DepositSolId, SweptDeposit>,
     in_flight_deposit_ids: BTreeMap<Account, DepositSolId>,
     accepted_deposits: InsertionOrderedMap<DepositId, Deposit>,
     quarantined_deposits: InsertionOrderedMap<DepositId, Deposit>,
@@ -201,8 +204,41 @@ impl State {
         &self.swept_deposits
     }
 
+    pub fn finalized_deposits(&self) -> &BTreeMap<DepositSolId, SweptDeposit> {
+        &self.finalized_deposits
+    }
+
+    pub fn pending_mints(&self) -> &BTreeMap<DepositSolId, PendingMint> {
+        &self.pending_mints
+    }
+
     pub fn dropped_deposits(&self) -> &BTreeMap<DepositSolId, SweptDeposit> {
         &self.dropped_deposits
+    }
+
+    pub fn quarantined_sweeps(&self) -> &BTreeMap<DepositSolId, SweptDeposit> {
+        &self.quarantined_sweeps
+    }
+
+    /// The signatures of the finalized sweep transactions whose deposits still
+    /// have to be credited from the transaction metadata.
+    pub fn sweeps_awaiting_credit(&self) -> BTreeSet<Signature> {
+        self.finalized_deposits
+            .values()
+            .map(|finalized| finalized.signature)
+            .collect()
+    }
+
+    /// The deposits of the given finalized sweep transaction, by increasing deposit id.
+    pub fn finalized_deposits_of(
+        &self,
+        signature: &Signature,
+    ) -> Vec<(DepositSolId, QueuedDeposit)> {
+        self.finalized_deposits
+            .iter()
+            .filter(|(_, finalized)| &finalized.signature == signature)
+            .map(|(deposit_id, finalized)| (*deposit_id, finalized.deposit))
+            .collect()
     }
 
     pub fn deposit_sol_status(&self, deposit_id: DepositSolId) -> DepositSolStatus {
@@ -216,9 +252,24 @@ impl State {
                 signature: swept.signature.into(),
             };
         }
+        if let Some(finalized) = self.finalized_deposits.get(&deposit_id) {
+            return DepositSolStatus::Finalized {
+                signature: finalized.signature.into(),
+            };
+        }
+        if let Some(pending) = self.pending_mints.get(&deposit_id) {
+            return DepositSolStatus::Finalized {
+                signature: pending.deposit.signature.into(),
+            };
+        }
         if let Some(dropped) = self.dropped_deposits.get(&deposit_id) {
             return DepositSolStatus::Dropped {
                 signature: dropped.signature.into(),
+            };
+        }
+        if let Some(quarantined) = self.quarantined_sweeps.get(&deposit_id) {
+            return DepositSolStatus::Quarantined {
+                signature: quarantined.signature.into(),
             };
         }
         DepositSolStatus::NotFound
@@ -536,6 +587,15 @@ impl State {
         deposit.sweepable_amount
     }
 
+    fn finalize_swept_deposits(&mut self, deposit_ids: &[DepositSolId]) {
+        for deposit_id in deposit_ids {
+            let swept = self.swept_deposits.remove(deposit_id).unwrap_or_else(|| {
+                panic!("Attempted to finalize deposit {deposit_id} that is not swept")
+            });
+            self.finalized_deposits.insert(*deposit_id, swept);
+        }
+    }
+
     fn drop_swept_deposits(&mut self, deposit_ids: &[DepositSolId]) {
         for deposit_id in deposit_ids {
             let swept = self.swept_deposits.remove(deposit_id).unwrap_or_else(|| {
@@ -552,6 +612,53 @@ impl State {
             Some(deposit_id),
             "BUG: deposit {deposit_id} is not the in-flight deposit of account {account:?}"
         );
+    }
+
+    fn process_credited_sweep(&mut self, signature: &Signature, amount_received: Lamport) {
+        let deposits = self.take_finalized_deposits(signature);
+        let swept_amount: Lamport = deposits
+            .iter()
+            .map(|(_, finalized)| finalized.deposit.sweepable_amount)
+            .sum();
+        let shortfall_share = swept_amount
+            .saturating_sub(amount_received)
+            .div_ceil(deposits.len() as u64);
+        self.balance += amount_received;
+        for (deposit_id, deposit) in deposits {
+            let amount_to_mint = deposit
+                .deposit
+                .sweepable_amount
+                .checked_sub(shortfall_share)
+                .expect("BUG: the shortfall share exceeds the sweepable amount");
+            self.pending_mints.insert(
+                deposit_id,
+                PendingMint {
+                    deposit,
+                    amount_to_mint,
+                },
+            );
+        }
+    }
+
+    fn process_quarantined_sweep(&mut self, signature: &Signature) {
+        for (deposit_id, deposit) in self.take_finalized_deposits(signature) {
+            self.quarantined_sweeps.insert(deposit_id, deposit);
+        }
+    }
+
+    fn take_finalized_deposits(
+        &mut self,
+        signature: &Signature,
+    ) -> Vec<(DepositSolId, SweptDeposit)> {
+        let deposits: Vec<_> = self
+            .finalized_deposits
+            .extract_if(.., |_, finalized| &finalized.signature == signature)
+            .collect();
+        assert!(
+            !deposits.is_empty(),
+            "Attempted to settle sweep {signature} without finalized deposits"
+        );
+        deposits
     }
 
     fn process_quarantined_deposit(&mut self, deposit_id: &DepositId) {
@@ -811,7 +918,7 @@ impl State {
             .unwrap_or_else(|| {
                 panic!("Attempted to mark unknown transaction {signature:?} as succeeded")
             });
-        match transaction.purpose {
+        match &transaction.purpose {
             TransactionPurpose::ConsolidateDeposits { .. } => {
                 let tx_fee = transaction.message.transaction_fee();
                 self.balance += transaction
@@ -819,7 +926,10 @@ impl State {
                     .checked_sub(tx_fee)
                     .expect("BUG: consolidation amount is less than transaction fee");
             }
-            TransactionPurpose::WithdrawSol { .. } | TransactionPurpose::SweepDeposits { .. } => {}
+            TransactionPurpose::WithdrawSol { .. } => {}
+            TransactionPurpose::SweepDeposits { deposit_ids } => {
+                self.finalize_swept_deposits(deposit_ids)
+            }
         }
         assert!(
             !self.transactions_to_resubmit.contains_key(signature),
@@ -923,7 +1033,10 @@ impl TryFrom<InitArgs> for State {
             next_deposit_sol_id: 0,
             queued_deposits: BTreeMap::new(),
             swept_deposits: BTreeMap::new(),
+            finalized_deposits: BTreeMap::new(),
+            pending_mints: BTreeMap::new(),
             dropped_deposits: BTreeMap::new(),
+            quarantined_sweeps: BTreeMap::new(),
             in_flight_deposit_ids: BTreeMap::new(),
             accepted_deposits: InsertionOrderedMap::new(),
             quarantined_deposits: InsertionOrderedMap::new(),
@@ -1025,6 +1138,15 @@ pub struct QueuedDeposit {
 pub struct SweptDeposit {
     pub deposit: QueuedDeposit,
     pub signature: Signature,
+}
+
+/// A swept deposit whose sweep reached the minter's main account and whose ckSOL
+/// mint has not been sent to the ledger yet.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PendingMint {
+    pub deposit: SweptDeposit,
+    /// The sweepable amount minus the deposit's share of the shortfall of the sweep.
+    pub amount_to_mint: Lamport,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -35,6 +35,50 @@ proptest! {
     }
 }
 
+/// Events recorded before the sweep crediting variants were added, so that a new
+/// variant index can never shift the index of an existing one.
+#[test]
+fn should_decode_events_recorded_before_the_sweep_credit_variants() {
+    const TIMESTAMP: u64 = 1_700_000_000_000_000_000;
+    let cases = [
+        (
+            "821b17979cfe362a00008203818258400700000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000081581d0700000000000000000000000000000000000000000000000000000000",
+            EventType::QuarantinedDeposit(deposit_id(7)),
+        ),
+        (
+            "821b17979cfe362a00008208815840aa000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+            EventType::SucceededTransaction {
+                signature: signature(0xAA),
+            },
+        ),
+        (
+            "821b17979cfe362a0000820a815840bb000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+            EventType::ExpiredTransaction {
+                signature: signature(0xBB),
+            },
+        ),
+        (
+            "821b17979cfe362a0000820b830381581d05000000000000000000000000000000000000000000000000000000001a075bcd15",
+            EventType::QueuedDeposit {
+                deposit_id: 3,
+                account: account(5),
+                sweepable_amount: 123_456_789,
+            },
+        ),
+    ];
+
+    for (encoded, payload) in cases {
+        let bytes = hex::decode(encoded).unwrap();
+        assert_eq!(
+            Event::from_bytes(Cow::Owned(bytes)),
+            Event {
+                timestamp: TIMESTAMP,
+                payload
+            }
+        );
+    }
+}
+
 mod queued_deposits {
     use super::*;
     use crate::state::audit::replay_events;
@@ -106,7 +150,7 @@ mod swept_deposits {
     use crate::{
         state::reset_state,
         storage::reset_events,
-        test_fixtures::events::{queue_deposit, submit_sweep},
+        test_fixtures::events::{credit_sweep, quarantine_sweep, queue_deposit, submit_sweep},
     };
     use cksol_types::DepositSolStatus;
 
@@ -166,7 +210,7 @@ mod swept_deposits {
     }
 
     #[test]
-    fn should_keep_deposits_swept_after_a_successful_sweep() {
+    fn should_finalize_swept_deposits_when_the_sweep_succeeds() {
         init_state();
         queue_three_deposits();
         let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
@@ -176,15 +220,27 @@ mod swept_deposits {
 
         read_state(|s| {
             assert!(s.submitted_transactions().is_empty());
-            assert!(s.transactions_to_resubmit().is_empty());
-            assert_eq!(s.swept_deposits().len(), 2);
+            assert!(s.swept_deposits().is_empty());
+            assert_eq!(s.finalized_deposits().len(), 2);
+            assert_eq!(
+                s.sweeps_awaiting_credit(),
+                BTreeSet::from([sweep_signature])
+            );
             assert_eq!(s.balance(), 0);
         });
         assert_in_flight_ids_unchanged();
+        for deposit_id in [0, 2] {
+            assert_eq!(
+                deposit_status(deposit_id),
+                DepositSolStatus::Finalized {
+                    signature: sweep_signature.into()
+                }
+            );
+        }
         assert_eq!(
-            deposit_status(0),
-            DepositSolStatus::Swept {
-                signature: sweep_signature.into()
+            deposit_status(1),
+            DepositSolStatus::Queued {
+                sweepable_amount: 200
             }
         );
     }
@@ -247,6 +303,74 @@ mod swept_deposits {
         });
 
         resubmit_transaction(sweep_signature, signature(SWEEP_SIGNATURE_INDEX + 1));
+    }
+
+    #[test]
+    fn should_credit_finalized_deposits_with_their_share_of_the_shortfall() {
+        init_state();
+        queue_three_deposits();
+        let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
+        submit_sweep(sweep_signature, vec![2, 0]);
+        succeed_transaction(sweep_signature);
+
+        credit_sweep(sweep_signature, 400 - 10);
+
+        read_state(|s| {
+            assert!(s.finalized_deposits().is_empty());
+            assert_eq!(s.balance(), 390);
+            assert_eq!(
+                s.pending_mints()
+                    .iter()
+                    .map(|(deposit_id, pending)| (*deposit_id, pending.amount_to_mint))
+                    .collect::<Vec<_>>(),
+                vec![(0, 100 - 5), (2, 300 - 5)]
+            );
+        });
+        assert_in_flight_ids_unchanged();
+        assert_eq!(
+            deposit_status(0),
+            DepositSolStatus::Finalized {
+                signature: sweep_signature.into()
+            }
+        );
+    }
+
+    #[test]
+    fn should_quarantine_finalized_deposits_without_crediting_the_balance() {
+        init_state();
+        queue_three_deposits();
+        let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
+        submit_sweep(sweep_signature, vec![2, 0]);
+        succeed_transaction(sweep_signature);
+
+        quarantine_sweep(sweep_signature);
+
+        read_state(|s| {
+            assert!(s.finalized_deposits().is_empty());
+            assert!(s.pending_mints().is_empty());
+            assert_eq!(s.quarantined_sweeps().len(), 2);
+            assert_eq!(s.balance(), 0);
+        });
+        assert_in_flight_ids_unchanged();
+        for deposit_id in [0, 2] {
+            assert_eq!(
+                deposit_status(deposit_id),
+                DepositSolStatus::Quarantined {
+                    signature: sweep_signature.into()
+                }
+            );
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "Attempted to settle sweep")]
+    fn should_panic_when_crediting_a_sweep_without_finalized_deposits() {
+        init_state();
+        queue_three_deposits();
+        let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
+        submit_sweep(sweep_signature, vec![2, 0]);
+
+        credit_sweep(sweep_signature, 400);
     }
 
     #[test]
@@ -490,7 +614,10 @@ mod state_from_init_args {
                 next_deposit_sol_id: 0,
                 queued_deposits: BTreeMap::new(),
                 swept_deposits: BTreeMap::new(),
+                finalized_deposits: BTreeMap::new(),
+                pending_mints: BTreeMap::new(),
                 dropped_deposits: BTreeMap::new(),
+                quarantined_sweeps: BTreeMap::new(),
                 in_flight_deposit_ids: BTreeMap::new(),
                 accepted_deposits: InsertionOrderedMap::new(),
                 quarantined_deposits: InsertionOrderedMap::new(),
