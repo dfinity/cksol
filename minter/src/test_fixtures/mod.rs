@@ -1,4 +1,5 @@
 use crate::{
+    address::derivation_path,
     numeric::LedgerMintIndex,
     rpc::BlockHeight,
     state::{
@@ -26,6 +27,8 @@ use std::{collections::VecDeque, str::FromStr};
 pub mod runtime;
 pub mod signer;
 mod stubs;
+#[cfg(test)]
+mod tests;
 
 pub const BLOCK_INDEX: u64 = 98763_u64;
 pub const MANUAL_DEPOSIT_FEE: Lamport = 10_000; // 0.00001 SOL
@@ -145,6 +148,18 @@ pub fn account(i: usize) -> Account {
         owner: Principal::from_slice(&bytes),
         subaccount: None,
     }
+}
+
+/// Returns the [`Signature`] that [`signer::MockSchnorrSigner`] produces the first time
+/// `account` signs.
+pub fn account_signature(account: &Account) -> solana_signature::Signature {
+    account_signature_nth(account, 0)
+}
+
+/// Returns the [`Signature`] that [`signer::MockSchnorrSigner`] produces the
+/// `occurrence`-th time `account` signs, counting from zero.
+pub fn account_signature_nth(account: &Account, occurrence: usize) -> solana_signature::Signature {
+    signer::derivation_path_signature(&derivation_path(account), occurrence)
 }
 
 /// Helpers for constructing state transitions via [`process_event`] in tests.

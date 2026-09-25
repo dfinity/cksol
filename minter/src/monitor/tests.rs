@@ -2,13 +2,14 @@ use super::{
     MAX_BLOCKHASH_AGE_IN_BLOCKS, MAX_SIGNATURES_PER_STATUS_CHECK, finalize_transactions,
     resubmit_transactions,
 };
+use crate::test_fixtures::signer::sign_for;
 use crate::{
     constants::MAX_CONCURRENT_RPC_CALLS,
     rpc::BlockHeight,
     state::{TaskType, event::EventType, mutate_state, read_state, reset_state},
     storage::reset_events,
     test_fixtures::{
-        EventsAssert, MINTER_ACCOUNT, confirmed_block_at_height, deposit_id, events,
+        EventsAssert, account, account_signature, confirmed_block_at_height, deposit_id, events,
         init_schnorr_master_key, init_state, runtime::TestCanisterRuntime, signature,
     },
 };
@@ -368,7 +369,7 @@ mod resubmission {
         setup();
 
         let old_signature = submit_consolidation_transaction(EXPIRED_BLOCK_HEIGHT);
-        let new_signature = signature(0xAA);
+        let new_signature = account_signature(&account(1));
         events::expire_transaction(old_signature);
 
         read_state(|s| {
@@ -382,7 +383,7 @@ mod resubmission {
                 RESUBMISSION_BLOCK_HEIGHT,
             ))))
             .add_stub_response(SendTransactionResult::Consistent(Ok(new_signature.into())))
-            .add_signature(new_signature.into());
+            .add_signer(sign_for(&account(1)));
 
         resubmit_transactions(resubmit_runtime).await;
 
@@ -437,7 +438,7 @@ mod resubmission {
         setup();
 
         let old_signature = submit_consolidation_transaction(EXPIRED_BLOCK_HEIGHT);
-        let new_signature = signature(0xAA);
+        let new_signature = account_signature(&account(1));
         events::expire_transaction(old_signature);
 
         let resubmit_runtime = TestCanisterRuntime::new()
@@ -447,7 +448,7 @@ mod resubmission {
                 RESUBMISSION_BLOCK_HEIGHT,
             ))))
             .add_stub_response(SendTransactionResult::Inconsistent(vec![]))
-            .add_signature(new_signature.into());
+            .add_signer(sign_for(&account(1)));
 
         resubmit_transactions(resubmit_runtime).await;
 
@@ -484,7 +485,7 @@ mod resubmission {
                 .add_stub_response(SendTransactionResult::Consistent(Ok(
                     signature(0xA0 + i).into()
                 )))
-                .add_signature(signature(0xA0 + i).into());
+                .add_signer(sign_for(&account(i)));
         }
 
         resubmit_transactions(runtime.clone()).await;
@@ -510,7 +511,7 @@ mod resubmission {
                 .add_stub_response(SendTransactionResult::Consistent(Ok(
                     signature(0xB0 + i).into()
                 )))
-                .add_signature(signature(0xB0 + i).into());
+                .add_signer(sign_for(&account(MAX_CONCURRENT_RPC_CALLS + i)));
         }
 
         resubmit_transactions(runtime.clone()).await;
@@ -540,6 +541,6 @@ fn submit_consolidation_transaction_with_signature(
     let signature = signature(i);
     events::accept_deposit(deposit_id(i), 1_000_000);
     events::mint_deposit(deposit_id(i), i as u64);
-    events::submit_consolidation_at_height(signature, MINTER_ACCOUNT, block_height, vec![i as u64]);
+    events::submit_consolidation_at_height(signature, account(i), block_height, vec![i as u64]);
     signature
 }

@@ -1,4 +1,5 @@
 use super::{MAX_TRANSFERS_PER_CONSOLIDATION, consolidate_deposits};
+use crate::test_fixtures::signer::sign_for;
 use crate::{
     constants::MAX_CONCURRENT_RPC_CALLS,
     numeric::LedgerMintIndex,
@@ -9,7 +10,8 @@ use crate::{
         mutate_state, read_state,
     },
     test_fixtures::{
-        EventsAssert, account, confirmed_block, confirmed_block_at_height, deposit_id,
+        EventsAssert, account, account_signature, confirmed_block, confirmed_block_at_height,
+        deposit_id,
         events::{accept_deposit, mint_deposit},
         init_schnorr_master_key, init_state,
         runtime::TestCanisterRuntime,
@@ -77,7 +79,7 @@ async fn should_submit_single_consolidation_request() {
 
     add_funds_to_consolidate(&[(deposit_id(0), 1_000_000_000)]);
 
-    let fee_payer_signature = signature(0x11);
+    let fee_payer_signature = account_signature(&account(0));
     let slot = 100;
     let block_height = BlockHeight::new(90);
     let runtime = TestCanisterRuntime::new()
@@ -90,7 +92,7 @@ async fn should_submit_single_consolidation_request() {
         .add_stub_response(SendTransactionResult::Consistent(Ok(
             fee_payer_signature.into()
         )))
-        .add_signature(fee_payer_signature.into());
+        .add_signer(sign_for(&account(0)));
 
     consolidate_deposits(runtime).await;
 
@@ -117,7 +119,6 @@ async fn should_record_events_even_if_transaction_submission_fails() {
 
     add_funds_to_consolidate(&[(deposit_id(0), 1_000_000_000)]);
 
-    let fee_payer_signature = signature(0x11);
     let slot = 100;
     let runtime = TestCanisterRuntime::new()
         .with_increasing_time()
@@ -126,7 +127,7 @@ async fn should_record_events_even_if_transaction_submission_fails() {
         .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())))
         // Transaction submission fails
         .add_stub_response(SendTransactionResult::Inconsistent(vec![]))
-        .add_signature(fee_payer_signature.into());
+        .add_signer(sign_for(&account(0)));
 
     consolidate_deposits(runtime).await;
 
@@ -155,8 +156,8 @@ async fn should_submit_multiple_consolidation_batches() {
 
     const BATCH_1_SIZE: usize = MAX_TRANSFERS_PER_CONSOLIDATION;
 
-    let fee_payer_signature_1 = signature(0);
-    let fee_payer_signature_2 = signature(BATCH_1_SIZE);
+    let fee_payer_signature_1 = account_signature(&account(0));
+    let fee_payer_signature_2 = account_signature(&account(BATCH_1_SIZE));
     let slot = 100;
 
     let mut runtime = TestCanisterRuntime::new()
@@ -170,9 +171,8 @@ async fn should_submit_multiple_consolidation_batches() {
         .add_stub_response(SendTransactionResult::Consistent(Ok(
             fee_payer_signature_2.into()
         )));
-
-    for i in 0..(2 + NUM_DEPOSITS) {
-        runtime = runtime.add_signature(signature(i).into());
+    for i in 0..NUM_DEPOSITS {
+        runtime = runtime.add_signer(sign_for(&account(i)));
     }
 
     consolidate_deposits(runtime).await;
@@ -229,7 +229,7 @@ async fn should_consolidate_multiple_deposits_to_same_account_in_single_transfer
     };
     add_funds_to_consolidate(&[(deposit_a, 500_000_000), (deposit_b, 300_000_000)]);
 
-    let fee_payer_signature = signature(0x11);
+    let fee_payer_signature = account_signature(&same_account);
     let slot = 100;
     let runtime = TestCanisterRuntime::new()
         .with_increasing_time()
@@ -238,7 +238,7 @@ async fn should_consolidate_multiple_deposits_to_same_account_in_single_transfer
         .add_stub_response(SendTransactionResult::Consistent(Ok(
             fee_payer_signature.into()
         )))
-        .add_signature(fee_payer_signature.into());
+        .add_signer(sign_for(&same_account));
 
     consolidate_deposits(runtime).await;
 
@@ -281,8 +281,8 @@ async fn should_reschedule_until_all_deposits_consolidated() {
         runtime =
             runtime.add_stub_response(SendTransactionResult::Consistent(Ok(signature(i).into())));
     }
-    for i in 0..(MAX_CONCURRENT_RPC_CALLS + num_deposits) {
-        runtime = runtime.add_signature(signature(i).into());
+    for i in 0..(MAX_CONCURRENT_RPC_CALLS * MAX_TRANSFERS_PER_CONSOLIDATION) {
+        runtime = runtime.add_signer(sign_for(&account(i)));
     }
 
     consolidate_deposits(runtime.clone()).await;
@@ -294,13 +294,13 @@ async fn should_reschedule_until_all_deposits_consolidated() {
     assert_eq!(runtime.set_timer_call_count(), 1);
 
     // Round 2: processes the remaining 1 deposit → no reschedule
-    let last_sig = signature(num_deposits);
+    let last_sig = account_signature(&account(num_deposits - 1));
     let runtime = TestCanisterRuntime::new()
         .with_increasing_time()
         .add_stub_response(SlotResult::Consistent(Ok(slot)))
         .add_stub_response(BlockResult::Consistent(Ok(confirmed_block())))
         .add_stub_response(SendTransactionResult::Consistent(Ok(last_sig.into())))
-        .add_signature(last_sig.into());
+        .add_signer(sign_for(&account(num_deposits - 1)));
 
     consolidate_deposits(runtime.clone()).await;
 

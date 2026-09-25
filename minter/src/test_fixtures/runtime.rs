@@ -1,8 +1,11 @@
-use super::{signer::MockSchnorrSigner, stubs::Stubs};
+use super::{
+    signer::{MockSchnorrSigner, SignerExpectation},
+    stubs::Stubs,
+};
 use crate::{runtime::CanisterRuntime, signer::SchnorrSigner};
 use candid::{CandidType, Principal};
 use ic_canister_runtime::{IcError, Runtime, StubRuntime};
-use ic_cdk_management_canister::{SchnorrPublicKeyArgs, SchnorrPublicKeyResult, SignCallError};
+use ic_cdk_management_canister::{SchnorrPublicKeyArgs, SchnorrPublicKeyResult};
 use std::{
     future::Future,
     sync::{Arc, Mutex},
@@ -16,7 +19,6 @@ pub struct TestCanisterRuntime {
     inter_canister_call_runtime: StubRuntime,
     signer: MockSchnorrSigner,
     times: Stubs<u64>,
-    instruction_counts: Stubs<u64>,
     expects_charges: bool,
     msg_cycles_accepted: Arc<Mutex<Vec<u128>>>,
     msg_cycles_available: Stubs<u128>,
@@ -38,11 +40,6 @@ impl TestCanisterRuntime {
 
     pub fn add_stub_error(mut self, error: IcError) -> Self {
         self.inter_canister_call_runtime = self.inter_canister_call_runtime.add_stub_error(error);
-        self
-    }
-
-    pub fn with_time(mut self, timestamp: u64) -> Self {
-        self.times = self.times.add(timestamp);
         self
     }
 
@@ -80,13 +77,8 @@ impl TestCanisterRuntime {
         self
     }
 
-    pub fn add_signature(mut self, signature: [u8; 64]) -> Self {
-        self.signer = self.signer.add_signature(signature);
-        self
-    }
-
-    pub fn add_schnorr_signing_error(mut self, error: SignCallError) -> Self {
-        self.signer = self.signer.add_response(Err(error));
+    pub fn add_signer(mut self, expectation: SignerExpectation) -> Self {
+        self.signer = self.signer.add_signer(expectation);
         self
     }
 
@@ -95,7 +87,6 @@ impl TestCanisterRuntime {
         self
     }
 
-    #[cfg(any(test, not(feature = "canbench-rs")))]
     pub(crate) fn set_timer_call_count(&self) -> usize {
         *self.set_timer_call_count.lock().unwrap()
     }
@@ -120,7 +111,7 @@ impl CanisterRuntime for TestCanisterRuntime {
     }
 
     fn instruction_counter(&self) -> u64 {
-        self.instruction_counts.next()
+        unimplemented!("TestCanisterRuntime does not model the instruction counter")
     }
 
     fn msg_cycles_accept(&self, amount: u128) -> u128 {
