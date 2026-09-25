@@ -39,31 +39,28 @@ async fn should_return_early_if_no_deposits_queued() {
 async fn should_return_early_if_task_already_active() {
     setup();
     queue_deposit(0, account(1), MINIMUM_DEPOSIT_AMOUNT);
+    let events_before = EventsAssert::from_recorded();
     mutate_state(|s| {
         s.active_tasks_mut().insert(TaskType::SweepDeposits);
     });
 
     sweep_queued_deposits(TestCanisterRuntime::new()).await;
 
-    assert_only_queued_deposit_events(1);
+    assert_eq!(events_before, EventsAssert::from_recorded());
 }
 
 #[tokio::test]
 async fn should_not_submit_if_fetching_blockhash_fails() {
     setup();
-    queue_deposit(0, account(1), MINIMUM_DEPOSIT_AMOUNT);
+    let status_before = queue_deposit(0, account(1), MINIMUM_DEPOSIT_AMOUNT);
+    let events_before = EventsAssert::from_recorded();
     let runtime = TestCanisterRuntime::new()
         .add_recent_block(Err(RpcError::ValidationError("Error".to_string())));
 
     sweep_queued_deposits(runtime.clone()).await;
 
-    assert_only_queued_deposit_events(1);
-    assert_eq!(
-        deposit_status(0),
-        DepositSolStatus::Queued {
-            sweepable_amount: MINIMUM_DEPOSIT_AMOUNT
-        }
-    );
+    assert_eq!(events_before, EventsAssert::from_recorded());
+    assert_eq!(status_before, deposit_status(0));
     assert_eq!(runtime.set_timer_call_count(), 0);
 }
 
@@ -270,15 +267,6 @@ fn runtime_submitting_sweeps(
         runtime = runtime.add_signer(sign_for(&signing_account));
     }
     runtime
-}
-
-fn assert_only_queued_deposit_events(num_queued: usize) {
-    let mut events_assert = EventsAssert::from_recorded();
-    for _ in 0..num_queued {
-        events_assert =
-            events_assert.expect_event(|e| assert_matches!(e, EventType::QueuedDeposit { .. }));
-    }
-    events_assert.assert_no_more_events();
 }
 
 fn deposit_status(deposit_id: DepositSolId) -> DepositSolStatus {
