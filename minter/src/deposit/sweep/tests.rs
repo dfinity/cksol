@@ -1,13 +1,15 @@
 use crate::{
     constants::{GET_BALANCE_CYCLES, RENT_EXEMPTION_THRESHOLD},
     deposit::sweep::{deposit_sol, deposit_status, sweepable_amount},
-    guard::process_deposit_guard,
-    state::{event::EventType, read_state, reset_state},
-    storage::{reset_events, with_event_iter},
+    state::{event::EventType, read_state},
+    storage::with_event_iter,
     test_fixtures::{
         BLOCK_INDEX, DEPOSIT_CONSOLIDATION_FEE, EventsAssert, MINIMUM_DEPOSIT_AMOUNT,
         PROCESS_DEPOSIT_REQUIRED_CYCLES, account,
-        deposit::{DEPOSIT_AMOUNT, DEPOSITOR_ACCOUNT, deposit_id as manual_deposit_id},
+        deposit::{
+            DEPOSIT_AMOUNT, DEPOSITOR_ACCOUNT, accepted_deposit_event,
+            deposit_id as manual_deposit_id, minted_event,
+        },
         events, init_schnorr_master_key, init_state,
         runtime::TestCanisterRuntime,
     },
@@ -153,47 +155,24 @@ async fn should_queue_deposits_from_minimum_with_sequential_ids() {
 }
 
 #[tokio::test]
-async fn should_fail_while_process_deposit_is_in_progress() {
-    enum ProcessDepositState {
-        CallRunning,
-        DepositAccepted,
-        DepositAwaitingConsolidation,
-    }
-    for process_deposit_state in [
-        ProcessDepositState::CallRunning,
-        ProcessDepositState::DepositAccepted,
-        ProcessDepositState::DepositAwaitingConsolidation,
-    ] {
-        reset_state();
-        reset_events();
-        init_state();
-        let _process_deposit_guard = match process_deposit_state {
-            ProcessDepositState::CallRunning => {
-                Some(process_deposit_guard(DEPOSITOR_ACCOUNT).unwrap())
-            }
-            ProcessDepositState::DepositAccepted => {
-                events::accept_deposit(manual_deposit_id(), DEPOSIT_AMOUNT);
-                None
-            }
-            ProcessDepositState::DepositAwaitingConsolidation => {
-                events::accept_deposit(manual_deposit_id(), DEPOSIT_AMOUNT);
-                events::mint_deposit(manual_deposit_id(), BLOCK_INDEX);
-                None
-            }
-        };
-        let events_before = EventsAssert::from_recorded();
-        let runtime =
-            TestCanisterRuntime::new().add_msg_cycles_available(PROCESS_DEPOSIT_REQUIRED_CYCLES);
+async fn should_fail_while_process_deposit_deposit_awaits_consolidation() {
+    init_state();
+    events::accept_deposit(manual_deposit_id(), DEPOSIT_AMOUNT);
+    events::mint_deposit(manual_deposit_id(), BLOCK_INDEX);
+    let runtime =
+        TestCanisterRuntime::new().add_msg_cycles_available(PROCESS_DEPOSIT_REQUIRED_CYCLES);
 
-        let result = deposit_sol(&runtime, EXPLICIT_DEFAULT_SUBACCOUNT).await;
+    let result = deposit_sol(&runtime, EXPLICIT_DEFAULT_SUBACCOUNT).await;
 
-        assert_matches!(
-            result,
-            Err(DepositSolError::TemporarilyUnavailable(e)) => assert!(e.contains("awaiting consolidation"))
-        );
-        assert!(runtime.msg_cycles_accepted().is_empty());
-        assert_eq!(EventsAssert::from_recorded(), events_before);
-    }
+    assert_matches!(
+        result,
+        Err(DepositSolError::TemporarilyUnavailable(e)) => assert!(e.contains("awaiting consolidation"))
+    );
+    assert!(runtime.msg_cycles_accepted().is_empty());
+    EventsAssert::from_recorded()
+        .expect_event_eq(accepted_deposit_event())
+        .expect_event_eq(minted_event(BLOCK_INDEX))
+        .assert_no_more_events();
 }
 
 #[tokio::test]

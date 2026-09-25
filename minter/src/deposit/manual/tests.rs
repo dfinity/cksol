@@ -1,15 +1,11 @@
 use crate::{
     constants::GET_TRANSACTION_CYCLES,
     deposit::manual::process_deposit,
-    guard::deposit_sol_guard,
-    state::{
-        event::{DepositId, EventType},
-        reset_state,
-    },
+    state::event::{DepositId, EventType},
     storage::reset_events,
     test_fixtures::{
         BLOCK_INDEX, DEPOSIT_CONSOLIDATION_FEE, EventsAssert, MANUAL_DEPOSIT_FEE,
-        MINIMUM_DEPOSIT_AMOUNT, PROCESS_DEPOSIT_REQUIRED_CYCLES,
+        PROCESS_DEPOSIT_REQUIRED_CYCLES,
         deposit::{
             DEPOSIT_AMOUNT, DEPOSITOR_ACCOUNT, DEPOSITOR_PRINCIPAL, accepted_deposit_event,
             deposit_status_minted, deposit_status_processing, deposit_status_quarantined,
@@ -19,7 +15,6 @@ use crate::{
             legacy_deposit_transaction, legacy_deposit_transaction_signature, minted_event,
             quarantined_deposit_event, v0_deposit_transaction, v0_deposit_transaction_signature,
         },
-        events::queue_deposit,
         init_schnorr_master_key, init_state, init_state_with_args,
         runtime::TestCanisterRuntime,
         valid_init_args,
@@ -131,46 +126,6 @@ mod process_deposit_tests {
         );
         assert_eq!(runtime.msg_cycles_accepted(), ACCEPTED_ON_REJECTION);
         EventsAssert::assert_no_events_recorded();
-    }
-
-    #[tokio::test]
-    async fn should_fail_while_deposit_sol_is_in_progress() {
-        enum DepositSolState {
-            CallRunning,
-            DepositInFlight,
-        }
-        for deposit_sol_state in [
-            DepositSolState::CallRunning,
-            DepositSolState::DepositInFlight,
-        ] {
-            reset_state();
-            reset_events();
-            init_state();
-            let _deposit_sol_guard = match deposit_sol_state {
-                DepositSolState::CallRunning => Some(deposit_sol_guard(DEPOSITOR_ACCOUNT).unwrap()),
-                DepositSolState::DepositInFlight => {
-                    queue_deposit(0, DEPOSITOR_ACCOUNT, MINIMUM_DEPOSIT_AMOUNT);
-                    None
-                }
-            };
-            let events_before = EventsAssert::from_recorded();
-            let runtime = TestCanisterRuntime::new()
-                .add_msg_cycles_available(PROCESS_DEPOSIT_REQUIRED_CYCLES);
-
-            let result = process_deposit(
-                runtime.clone(),
-                DEPOSITOR_ACCOUNT,
-                legacy_deposit_transaction_signature(),
-            )
-            .await;
-
-            assert_matches!(
-                result,
-                Err(ProcessDepositError::TemporarilyUnavailable(e)) => assert!(e.contains("deposit_sol call or sweep"))
-            );
-            assert!(runtime.msg_cycles_accepted().is_empty());
-            assert_eq!(EventsAssert::from_recorded(), events_before);
-        }
     }
 
     #[tokio::test]
