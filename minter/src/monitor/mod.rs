@@ -3,7 +3,7 @@ use crate::{
     constants::MAX_CONCURRENT_RPC_CALLS,
     guard::TimerGuard,
     rpc::{
-        SubmitTransactionError, get_recent_slot_and_blockhash, get_signature_statuses,
+        Block, BlockHeight, SubmitTransactionError, get_recent_block, get_signature_statuses,
         submit_transaction,
     },
     runtime::CanisterRuntime,
@@ -20,7 +20,6 @@ use cksol_types_internal::log::Priority;
 use ic_cdk_management_canister::SignCallError;
 use icrc_ledger_types::icrc1::account::Account;
 use itertools::Itertools;
-use sol_rpc_types::Slot;
 use solana_signature::Signature;
 use solana_transaction::Transaction;
 use solana_transaction_status_client_types::TransactionConfirmationStatus;
@@ -33,7 +32,15 @@ mod tests;
 
 pub const FINALIZE_TRANSACTIONS_DELAY: Duration = Duration::from_mins(2);
 pub const RESUBMIT_TRANSACTIONS_DELAY: Duration = Duration::from_mins(3);
-const MAX_BLOCKHASH_AGE: Slot = 150;
+/// A leader accepts a transaction while its blockhash is still among the last
+/// `MAX_PROCESSING_AGE` entries of the recent-blockhash queue, which holds one
+/// entry per non-skipped slot. The public documentation describes this window
+/// as 150 slots, but the validator counts blocks: in the `solana-clock` crate,
+/// `MAX_PROCESSING_AGE = MAX_RECENT_BLOCKHASHES / 2` and
+/// `MAX_RECENT_BLOCKHASHES = MAX_HASH_AGE_IN_SECONDS * DEFAULT_TICKS_PER_SECOND
+/// / DEFAULT_TICKS_PER_SLOT`, asserted to be 150 and 300 respectively.
+/// See https://github.com/anza-xyz/agave/blob/master/sdk/clock/src/lib.rs
+const MAX_BLOCKHASH_AGE_IN_BLOCKS: BlockHeight = BlockHeight::new(150);
 /// Maximum number of signatures per `getSignatureStatuses` RPC call.
 /// See https://solana.com/docs/rpc/http/getsignaturestatuses
 const MAX_SIGNATURES_PER_STATUS_CHECK: usize = 256;
@@ -46,11 +53,11 @@ pub async fn finalize_transactions<R: CanisterRuntime>(runtime: R) {
         Err(_) => return,
     };
 
-    let all_transactions: BTreeMap<Signature, Slot> = read_state(|state| {
+    let all_transactions: BTreeMap<Signature, BlockHeight> = read_state(|state| {
         state
             .submitted_transactions()
             .iter()
-            .map(|(sig, tx)| (*sig, tx.slot))
+            .map(|(sig, tx)| (*sig, tx.block_height))
             .collect()
     });
     if all_transactions.is_empty() {
@@ -63,13 +70,13 @@ pub async fn finalize_transactions<R: CanisterRuntime>(runtime: R) {
         runtime.set_timer(Duration::ZERO, finalize_transactions);
     });
 
-    // Fetch the current slot before checking statuses: if a transaction finalizes
-    // after we snapshot the slot, the status check will see it as finalized rather
+    // Fetch the current block before checking statuses: if a transaction finalizes
+    // after we snapshot the block, the status check will see it as finalized rather
     // than missing, so it will never be incorrectly marked as expired.
-    let (current_slot, _) = match get_recent_slot_and_blockhash(&runtime).await {
-        Ok(result) => result,
+    let current_block = match get_recent_block(&runtime).await {
+        Ok(block) => block,
         Err(e) => {
-            log!(Priority::Info, "Failed to get current slot: {e}");
+            log!(Priority::Info, "Failed to get current block: {e}");
             return;
         }
     };
@@ -107,7 +114,7 @@ pub async fn finalize_transactions<R: CanisterRuntime>(runtime: R) {
     }
 
     for signature in &statuses.not_found {
-        if all_transactions[signature] + MAX_BLOCKHASH_AGE < current_slot {
+        if is_blockhash_expired(all_transactions[signature], current_block.block_height) {
             log!(
                 Priority::Info,
                 "Transaction {signature} expired, marking for resubmission"
@@ -128,6 +135,13 @@ pub async fn finalize_transactions<R: CanisterRuntime>(runtime: R) {
         // All work fits in this round
         scopeguard::ScopeGuard::into_inner(reschedule);
     }
+}
+
+fn is_blockhash_expired(
+    transaction_block_height: BlockHeight,
+    current_block_height: BlockHeight,
+) -> bool {
+    current_block_height.saturating_sub(transaction_block_height) > MAX_BLOCKHASH_AGE_IN_BLOCKS
 }
 
 /// Resubmit transactions that have been marked for resubmission by
@@ -230,8 +244,8 @@ async fn resubmit_expired_transactions<R: CanisterRuntime>(
     runtime: &R,
     to_resubmit: Vec<(Signature, VersionedMessage, Vec<Account>)>,
 ) {
-    let (new_slot, new_blockhash) = match get_recent_slot_and_blockhash(runtime).await {
-        Ok(result) => result,
+    let block = match get_recent_block(runtime).await {
+        Ok(block) => block,
         Err(e) => {
             log!(Priority::Info, "Failed to get recent blockhash: {e}");
             return;
@@ -240,16 +254,7 @@ async fn resubmit_expired_transactions<R: CanisterRuntime>(
 
     futures::future::join_all(to_resubmit.into_iter().take(MAX_CONCURRENT_RPC_CALLS).map(
         async |(old_signature, message, signers)| {
-            match try_resubmit_transaction(
-                runtime,
-                old_signature,
-                message,
-                signers,
-                new_slot,
-                new_blockhash,
-            )
-            .await
-            {
+            match try_resubmit_transaction(runtime, old_signature, message, signers, block).await {
                 Ok(new_sig) => log!(
                     Priority::Info,
                     "Resubmitted transaction {old_signature} as {new_sig}"
@@ -269,11 +274,10 @@ async fn try_resubmit_transaction<R: CanisterRuntime>(
     old_signature: Signature,
     versioned_message: VersionedMessage,
     signers: Vec<Account>,
-    new_slot: Slot,
-    new_blockhash: solana_hash::Hash,
+    block: Block,
 ) -> Result<Signature, ResubmitError> {
     let VersionedMessage::Legacy(mut message) = versioned_message;
-    message.recent_blockhash = new_blockhash;
+    message.recent_blockhash = block.blockhash;
 
     let mut transaction = Transaction::new_unsigned(message);
     transaction.signatures = sign_bytes(
@@ -291,7 +295,7 @@ async fn try_resubmit_transaction<R: CanisterRuntime>(
             EventType::ResubmittedTransaction {
                 old_signature,
                 new_signature,
-                new_slot,
+                new_block_height: block.block_height,
             },
             runtime,
         )

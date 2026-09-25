@@ -8,6 +8,7 @@ use crate::{
 use cksol_types::ProcessDepositError;
 use derive_more::From;
 use ic_canister_runtime::IcError;
+use minicbor::{Decode, Encode};
 use sol_rpc_types::{CommitmentLevel, GetTransactionEncoding, MultiRpcResult, RpcError, Slot};
 use solana_hash::Hash;
 use solana_signature::Signature;
@@ -77,9 +78,9 @@ pub enum SubmitTransactionError {
     InconsistentRpcResults,
 }
 
-pub async fn get_recent_slot_and_blockhash<R: CanisterRuntime>(
+pub async fn get_recent_block<R: CanisterRuntime>(
     runtime: &R,
-) -> Result<(Slot, Hash), GetRecentBlockhashError> {
+) -> Result<Block, GetRecentBlockError> {
     let client = read_state(|state| state.sol_rpc_client(runtime.inter_canister_call_runtime()));
     match client.get_recent_block().try_send().await {
         Ok((slot, block)) => {
@@ -88,20 +89,60 @@ pub async fn get_recent_slot_and_blockhash<R: CanisterRuntime>(
                     .blockhash
                     .parse()
                     .map_err(|e: solana_hash::ParseHashError| {
-                        GetRecentBlockhashError::Failed(vec![e.to_string()])
+                        GetRecentBlockError::Failed(vec![e.to_string()])
                     })?;
-            Ok((slot, blockhash))
+            let block_height = block
+                .block_height
+                .map(BlockHeight::from)
+                .ok_or(GetRecentBlockError::MissingBlockHeight { slot })?;
+            Ok(Block {
+                slot,
+                blockhash,
+                block_height,
+            })
         }
-        Err(errors) => Err(GetRecentBlockhashError::Failed(
+        Err(errors) => Err(GetRecentBlockError::Failed(
             errors.into_iter().map(|e| e.to_string()).collect(),
         )),
     }
 }
 
+/// A block whose blockhash a new transaction can use.
+///
+/// The blockhash stays valid for 150 blocks after `block_height`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Block {
+    pub slot: Slot,
+    pub blockhash: Hash,
+    pub block_height: BlockHeight,
+}
+
+/// The height of a block in the Solana ledger, i.e. the number of blocks
+/// beneath it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Decode, Encode, From)]
+#[cbor(transparent)]
+pub struct BlockHeight(#[n(0)] u64);
+
+impl BlockHeight {
+    pub const fn new(height: u64) -> Self {
+        Self(height)
+    }
+
+    pub const fn get(self) -> u64 {
+        self.0
+    }
+
+    pub fn saturating_sub(self, other: Self) -> Self {
+        Self(self.0.saturating_sub(other.0))
+    }
+}
+
 #[derive(Debug, PartialEq, Error)]
-pub enum GetRecentBlockhashError {
+pub enum GetRecentBlockError {
     #[error("Failed to get recent block: {0:?}")]
     Failed(Vec<String>),
+    #[error("Block at slot {slot} has no block height")]
+    MissingBlockHeight { slot: Slot },
 }
 
 pub async fn get_signature_statuses<R: CanisterRuntime>(

@@ -4,7 +4,7 @@ use crate::{InitArgs, UpgradeArgs};
 use candid::CandidType;
 use icrc_ledger_types::icrc1::account::Account;
 use serde::Deserialize;
-use sol_rpc_types::{Lamport, Pubkey as Address, Signature, Slot};
+use sol_rpc_types::{Lamport, Pubkey as Address, Signature};
 
 /// A minter event that can be serialized to Candid.
 #[derive(Clone, Debug, CandidType, Deserialize)]
@@ -80,10 +80,10 @@ pub enum EventType {
         transaction: VersionedTransactionMessage,
         /// The signing accounts in signature order (fee payer first).
         signers: Vec<Account>,
-        /// The slot of the blockhash used in the transaction.
-        slot: Slot,
         /// The purpose of this transaction.
         purpose: TransactionPurpose,
+        /// The block height of the block whose blockhash the transaction uses.
+        block_height: u64,
     },
     /// A previously submitted transaction was resubmitted with a new signature.
     ResubmittedTransaction {
@@ -91,8 +91,8 @@ pub enum EventType {
         old_signature: Signature,
         /// The signature of the new transaction.
         new_signature: Signature,
-        /// The slot of the new blockhash used in the resubmitted transaction.
-        new_slot: Slot,
+        /// The block height of the new blockhash used in the resubmitted transaction.
+        new_block_height: u64,
     },
     /// A previously submitted Solana transaction has been finalized successfully.
     SucceededTransaction {

@@ -174,7 +174,7 @@ fn should_display_all_deposit_statuses() {
     // Consolidated (minted + consolidation submitted)
     accept_deposit(deposit_id(4), 300_000_000);
     mint_deposit(deposit_id(4), 20);
-    submit_consolidation(signature(0xAA), account(0), 1, vec![20]);
+    submit_consolidation(signature(0xAA), account(0), vec![20]);
 
     let rendered_dashboard = dashboard();
     assert_eq!(rendered_dashboard.deposits_table.current_page.len(), 4);
@@ -255,16 +255,16 @@ fn should_display_all_withdrawal_statuses() {
 
     // Sent
     accept_withdrawal(account(2), 1, 200_000_000);
-    submit_withdrawal(signature(0xCC), account(0), 1, vec![1]);
+    submit_withdrawal(signature(0xCC), account(0), vec![1]);
 
     // Succeeded
     accept_withdrawal(account(3), 2, 300_000_000);
-    submit_withdrawal(signature(0xDD), account(0), 2, vec![2]);
+    submit_withdrawal(signature(0xDD), account(0), vec![2]);
     succeed_transaction(signature(0xDD));
 
     // Failed
     accept_withdrawal(account(4), 3, 400_000_000);
-    submit_withdrawal(signature(0xEE), account(0), 3, vec![3]);
+    submit_withdrawal(signature(0xEE), account(0), vec![3]);
     fail_transaction(signature(0xEE));
 
     let rendered_dashboard = dashboard();
@@ -296,7 +296,7 @@ fn should_display_consolidation_transactions() {
     mint_deposit(deposit_id(2), 20);
 
     // Submit consolidation transaction for both deposits
-    submit_consolidation(signature(0xBB), account(0), 1, vec![10, 20]);
+    submit_consolidation(signature(0xBB), account(0), vec![10, 20]);
 
     let rendered_dashboard = dashboard();
     assert_eq!(

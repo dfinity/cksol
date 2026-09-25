@@ -45,17 +45,23 @@ fn apply_state_transition(state: &mut State, payload: &EventType, timestamp: u64
             signature,
             message,
             signers,
-            slot,
             purpose,
+            block_height,
         } => {
-            state.process_transaction_submitted(signature, message, signers, *slot, purpose);
+            state.process_transaction_submitted(
+                signature,
+                message,
+                signers,
+                purpose,
+                *block_height,
+            );
         }
         EventType::ResubmittedTransaction {
             old_signature,
             new_signature,
-            new_slot,
+            new_block_height,
         } => {
-            state.process_transaction_resubmitted(old_signature, new_signature, *new_slot);
+            state.process_transaction_resubmitted(old_signature, new_signature, *new_block_height);
         }
         EventType::SucceededTransaction { signature } => {
             state.process_transaction_succeeded(signature);

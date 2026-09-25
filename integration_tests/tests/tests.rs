@@ -254,7 +254,10 @@ mod withdrawal_tests {
     use std::str::FromStr;
 
     use candid::Nat;
-    use cksol_int_tests::{fixtures::get_memo, ledger_init_args::LEDGER_TRANSFER_FEE};
+    use cksol_int_tests::{
+        fixtures::{SOL_RPC_SLOT_ROUNDING, get_memo, mock_block_height},
+        ledger_init_args::LEDGER_TRANSFER_FEE,
+    };
     use cksol_types::{BurnMemo, Memo, WithdrawalOk};
     use cksol_types_internal::UpgradeArgs;
     use icrc_ledger_types::icrc1::account::Account;
@@ -263,9 +266,6 @@ mod withdrawal_tests {
     use super::*;
 
     const MAX_BLOCKHASH_AGE: Slot = 150;
-    /// The SOL RPC canister rounds the slot returned by getSlot down to the nearest multiple
-    /// of this value before querying getBlock and returning the slot to callers.
-    const SOL_RPC_SLOT_ROUNDING: u64 = 20;
 
     #[tokio::test]
     async fn should_validate_solana_address() {
@@ -660,8 +660,10 @@ mod withdrawal_tests {
                 e,
                 EventType::SubmittedTransaction {
                     purpose: TransactionPurpose::WithdrawSol { burn_indices },
+                    block_height,
                     ..
                 } if burn_indices == &[block_index]
+                  && block_height == &mock_block_height(INITIAL_SLOT)
             )));
         });
 
@@ -672,11 +674,12 @@ mod withdrawal_tests {
             other => panic!("Expected TxSent, got: {other:?}"),
         };
 
-        // Advance time to trigger finalize_transactions, which fetches the current slot,
+        // Advance time to trigger finalize_transactions, which fetches the current block,
         // checks statuses (not found), and marks the expired transaction for resubmission.
-        // The SOL RPC canister rounds the slot down to SOL_RPC_SLOT_ROUNDING before returning
-        // it, so we add SOL_RPC_SLOT_ROUNDING + 1 to ensure the rounded slot is strictly
-        // greater than INITIAL_SLOT + MAX_BLOCKHASH_AGE (the expiry threshold).
+        // Expiry is judged by the mocked block height, which is the slot rounded down to
+        // SOL_RPC_SLOT_ROUNDING minus a fixed offset, so the same arithmetic applies to
+        // slots: adding SOL_RPC_SLOT_ROUNDING + 1 ensures the current height is strictly
+        // greater than the submission height + MAX_BLOCKHASH_AGE (the expiry threshold).
         let resubmission_slot = INITIAL_SLOT + MAX_BLOCKHASH_AGE + SOL_RPC_SLOT_ROUNDING + 1;
         setup.advance_time(FINALIZE_TRANSACTIONS_DELAY).await;
         setup

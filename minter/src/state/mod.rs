@@ -2,6 +2,7 @@ use crate::{
     constants::{FEE_PER_SIGNATURE, RENT_EXEMPTION_THRESHOLD},
     ledger::client::LedgerClient,
     numeric::{LedgerBurnIndex, LedgerMintIndex},
+    rpc::BlockHeight,
     sol_transfer::{BATCH_WITHDRAWAL_TX_FEE, MAX_WITHDRAWALS_PER_TX},
     state::event::{DepositId, TransactionPurpose, VersionedMessage, WithdrawalRequest},
     utils::insertion_ordered_map::InsertionOrderedMap,
@@ -14,7 +15,7 @@ use ic_canister_runtime::Runtime;
 use ic_ed25519::PublicKey;
 use icrc_ledger_types::icrc1::account::Account;
 use sol_rpc_client::SolRpcClient;
-use sol_rpc_types::{ConsensusStrategy, Lamport, RpcSources, Slot, SolanaCluster};
+use sol_rpc_types::{ConsensusStrategy, Lamport, RpcSources, SolanaCluster};
 use solana_signature::Signature;
 use std::{
     cell::RefCell,
@@ -537,8 +538,8 @@ impl State {
         signature: &Signature,
         transaction: &VersionedMessage,
         signers: &[Account],
-        slot: Slot,
         purpose: &TransactionPurpose,
+        block_height: BlockHeight,
     ) {
         assert!(
             !self.succeeded_transactions.contains(signature),
@@ -603,7 +604,7 @@ impl State {
                 SolanaTransaction {
                     message: transaction.clone(),
                     signers: signers.to_vec(),
-                    slot,
+                    block_height,
                     purpose: purpose.clone(),
                     amount,
                 }
@@ -617,7 +618,7 @@ impl State {
         &mut self,
         old_signature: &Signature,
         new_signature: &Signature,
-        new_slot: Slot,
+        new_block_height: BlockHeight,
     ) {
         let old_transaction = self
             .transactions_to_resubmit
@@ -634,7 +635,7 @@ impl State {
             "Attempted to resubmit with signature {new_signature:?} that already failed"
         );
         let new_transaction = SolanaTransaction {
-            slot: new_slot,
+            block_height: new_block_height,
             ..old_transaction
         };
         assert_eq!(
@@ -889,7 +890,8 @@ impl ConsolidationTransaction {
 pub struct SolanaTransaction {
     pub message: VersionedMessage,
     pub signers: Vec<Account>,
-    pub slot: Slot,
+    /// The block height of the block whose blockhash the transaction uses.
+    pub block_height: BlockHeight,
     pub purpose: TransactionPurpose,
     /// Total transfer amount in lamports (excluding fees).
     pub amount: Lamport,

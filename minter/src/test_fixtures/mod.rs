@@ -1,5 +1,6 @@
 use crate::{
     numeric::LedgerMintIndex,
+    rpc::BlockHeight,
     state::{
         SchnorrPublicKey, State,
         event::{DepositId, Event, EventType},
@@ -84,7 +85,7 @@ pub fn init_balance_to(amount: Lamport) {
 
     events::accept_deposit(id, amount);
     events::mint_deposit(id, mint_index);
-    events::submit_consolidation(consolidation_signature, MINTER_ACCOUNT, 0, vec![mint_index]);
+    events::submit_consolidation(consolidation_signature, MINTER_ACCOUNT, vec![mint_index]);
     events::succeed_transaction(consolidation_signature);
 }
 
@@ -104,14 +105,23 @@ pub fn signature(i: usize) -> solana_signature::Signature {
     solana_signature::Signature::from(bytes)
 }
 
-/// Returns a [`ConfirmedBlock`] with a deterministic blockhash for use in RPC mock stubs.
+/// The block height used by fixtures whose test does not care about blockhash expiry.
+pub const DEFAULT_BLOCK_HEIGHT: BlockHeight = BlockHeight::new(400_000_000);
+
+/// Returns a [`ConfirmedBlock`] with a deterministic blockhash at
+/// [`DEFAULT_BLOCK_HEIGHT`], for use in RPC mock stubs.
 pub fn confirmed_block() -> sol_rpc_types::ConfirmedBlock {
+    confirmed_block_at_height(DEFAULT_BLOCK_HEIGHT)
+}
+
+/// Returns a [`ConfirmedBlock`] with a deterministic blockhash at the given block height.
+pub fn confirmed_block_at_height(block_height: BlockHeight) -> sol_rpc_types::ConfirmedBlock {
     sol_rpc_types::ConfirmedBlock {
         previous_blockhash: Default::default(),
         blockhash: solana_hash::Hash::from([0x42; 32]).into(),
         parent_slot: 0,
         block_time: None,
-        block_height: None,
+        block_height: Some(block_height.get()),
         signatures: None,
         rewards: None,
         num_reward_partitions: None,
@@ -141,9 +151,12 @@ pub fn account(i: usize) -> Account {
 ///
 /// All helpers operate on the global thread-local state via [`mutate_state`].
 pub mod events {
-    use super::{MANUAL_DEPOSIT_FEE, WITHDRAWAL_FEE, runtime::TestCanisterRuntime};
+    use super::{
+        DEFAULT_BLOCK_HEIGHT, MANUAL_DEPOSIT_FEE, WITHDRAWAL_FEE, runtime::TestCanisterRuntime,
+    };
     use crate::{
         numeric::{LedgerBurnIndex, LedgerMintIndex},
+        rpc::BlockHeight,
         state::{
             audit::process_event,
             event::{DepositId, EventType, TransactionPurpose, WithdrawalRequest},
@@ -151,7 +164,7 @@ pub mod events {
         },
     };
     use icrc_ledger_types::icrc1::account::Account;
-    use sol_rpc_types::{Lamport, Slot};
+    use sol_rpc_types::Lamport;
     use solana_signature::Signature;
 
     fn message() -> solana_message::Message {
@@ -202,10 +215,14 @@ pub mod events {
         });
     }
 
-    pub fn submit_consolidation(
+    pub fn submit_consolidation(signature: Signature, fee_payer: Account, mint_indices: Vec<u64>) {
+        submit_consolidation_at_height(signature, fee_payer, DEFAULT_BLOCK_HEIGHT, mint_indices);
+    }
+
+    pub fn submit_consolidation_at_height(
         signature: Signature,
         fee_payer: Account,
-        slot: Slot,
+        block_height: BlockHeight,
         mint_indices: Vec<u64>,
     ) {
         mutate_state(|state| {
@@ -215,13 +232,13 @@ pub mod events {
                     signature,
                     message: message().into(),
                     signers: vec![fee_payer],
-                    slot,
                     purpose: TransactionPurpose::ConsolidateDeposits {
                         mint_indices: mint_indices
                             .into_iter()
                             .map(LedgerMintIndex::from)
                             .collect(),
                     },
+                    block_height,
                 },
                 &runtime(),
             )
@@ -253,12 +270,7 @@ pub mod events {
         });
     }
 
-    pub fn submit_withdrawal(
-        signature: Signature,
-        fee_payer: Account,
-        slot: Slot,
-        burn_indices: Vec<u64>,
-    ) {
+    pub fn submit_withdrawal(signature: Signature, fee_payer: Account, burn_indices: Vec<u64>) {
         mutate_state(|state| {
             process_event(
                 state,
@@ -266,13 +278,13 @@ pub mod events {
                     signature,
                     message: message().into(),
                     signers: vec![fee_payer],
-                    slot,
                     purpose: TransactionPurpose::WithdrawSol {
                         burn_indices: burn_indices
                             .into_iter()
                             .map(LedgerBurnIndex::from)
                             .collect(),
                     },
+                    block_height: DEFAULT_BLOCK_HEIGHT,
                 },
                 &runtime(),
             )
@@ -309,18 +321,14 @@ pub mod events {
         });
     }
 
-    pub fn resubmit_transaction(
-        old_signature: Signature,
-        new_signature: Signature,
-        new_slot: Slot,
-    ) {
+    pub fn resubmit_transaction(old_signature: Signature, new_signature: Signature) {
         mutate_state(|state| {
             process_event(
                 state,
                 EventType::ResubmittedTransaction {
                     old_signature,
                     new_signature,
-                    new_slot,
+                    new_block_height: DEFAULT_BLOCK_HEIGHT,
                 },
                 &runtime(),
             )
@@ -332,13 +340,13 @@ pub mod events {
 pub mod arb {
     use crate::{
         numeric::{LedgerBurnIndex, LedgerMintIndex},
+        rpc::BlockHeight,
         state::event::{DepositId, Event, EventType, TransactionPurpose, WithdrawalRequest},
     };
     use candid::Principal;
     use cksol_types_internal::{Ed25519KeyName, InitArgs, SolanaNetwork, UpgradeArgs};
     use icrc_ledger_types::icrc1::account::Account;
     use proptest::prelude::{Just, Strategy, any, prop, prop_oneof};
-    use sol_rpc_types::Slot;
     use solana_address::Address;
     use solana_message::{Hash, Instruction, Message};
     use solana_signature::Signature;
@@ -363,6 +371,10 @@ pub mod arb {
     pub fn arb_deposit_id() -> impl Strategy<Value = DepositId> {
         (arb_signature(), arb_account())
             .prop_map(|(signature, account)| DepositId { signature, account })
+    }
+
+    pub fn arb_block_height() -> impl Strategy<Value = BlockHeight> {
+        any::<u64>().prop_map(BlockHeight::from)
     }
 
     pub fn arb_ledger_mint_index() -> impl Strategy<Value = LedgerMintIndex> {
@@ -551,7 +563,6 @@ pub mod arb {
                 arb_signature(),
                 arb_message(),
                 prop::collection::vec(arb_account(), 1..10),
-                any::<Slot>(),
                 prop_oneof![
                     prop::collection::vec(arb_ledger_mint_index(), 1..10).prop_map(
                         |mint_indices| TransactionPurpose::ConsolidateDeposits { mint_indices }
@@ -559,24 +570,25 @@ pub mod arb {
                     prop::collection::vec(arb_ledger_burn_index(), 1..10)
                         .prop_map(|burn_indices| TransactionPurpose::WithdrawSol { burn_indices }),
                 ],
+                arb_block_height(),
             )
-                .prop_map(|(signature, message, signers, slot, purpose)| {
+                .prop_map(|(signature, message, signers, purpose, block_height)| {
                     EventType::SubmittedTransaction {
                         signature,
                         message: message.into(),
                         signers,
-                        slot,
                         purpose,
+                        block_height,
                     }
                 }),
-            (arb_signature(), arb_signature(), any::<Slot>()).prop_map(
-                |(old_signature, new_signature, new_slot)| {
+            (arb_signature(), arb_signature(), arb_block_height(),).prop_map(
+                |(old_signature, new_signature, new_block_height)| {
                     EventType::ResubmittedTransaction {
                         old_signature,
                         new_signature,
-                        new_slot,
+                        new_block_height,
                     }
-                },
+                }
             ),
             arb_signature().prop_map(|signature| EventType::SucceededTransaction { signature }),
             arb_signature().prop_map(|signature| EventType::FailedTransaction { signature }),
@@ -891,6 +903,10 @@ impl EventsAssert {
             "Expected exactly 1 occurrence of {expected:?}, found more"
         );
         self
+    }
+
+    pub fn contains_event(&self, expected: &EventType) -> bool {
+        self.0.iter().any(|event| &event.payload == expected)
     }
 
     pub fn assert_no_more_events(&self) {
