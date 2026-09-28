@@ -1,6 +1,5 @@
-use crate::{Setup, SetupBuilder};
-use assert_matches::assert_matches;
-use cksol_types::{DepositStatus, ProcessDepositArgs, WithdrawalStatus};
+use crate::{Setup, SetupBuilder, fixtures::RENT_EXEMPTION_THRESHOLD};
+use cksol_types::WithdrawalStatus;
 use icrc_ledger_types::icrc1::account::Account;
 use sol_rpc_types::{InstallArgs, Lamport, OverrideProvider, RegexSubstitution, RoundingError};
 use solana_address::Address;
@@ -141,44 +140,23 @@ impl SolanaTestValidator {
             .await
     }
 
-    /// Deposits `amount` to the deposit address of `account`, has the minter
-    /// process it, and returns the deposit address and the minted amount.
-    pub async fn deposit_to_account(
+    /// Transfers `amount` to the deposit address of `account`, waits for the
+    /// transfer to be finalized, and returns the deposit address.
+    pub async fn fund_deposit_address(
         &self,
         setup: &Setup,
         account: Account,
         amount: Lamport,
-    ) -> (Address, Lamport) {
-        let expected_mint_amount = amount - Setup::DEFAULT_MANUAL_DEPOSIT_FEE;
+    ) -> Address {
         let deposit_address = setup.minter().get_deposit_address(account).await.into();
 
         println!("Depositing {amount} Lamport to address {deposit_address}");
 
-        let balance_before = setup.ledger().balance_of(account).await;
-        assert_eq!(balance_before, 0);
-
-        let deposit_signature = self.transfer_to(deposit_address, amount).await;
-
-        let result = setup
-            .minter()
-            .process_deposit(ProcessDepositArgs {
-                owner: Some(account.owner),
-                subaccount: account.subaccount,
-                signature: deposit_signature.into(),
-            })
+        self.transfer_to(deposit_address, amount).await;
+        self.wait_for_finalized_balance(&deposit_address, amount)
             .await;
-        assert_matches!(result, Ok(DepositStatus::Minted {
-            minted_amount,
-            deposit_id,
-            block_index: _,
-        }) if minted_amount == expected_mint_amount
-            && deposit_id.signature == deposit_signature.into()
-            && deposit_id.account == account);
 
-        let balance_after = setup.ledger().balance_of(account).await;
-        assert_eq!(balance_after, expected_mint_amount);
-
-        (deposit_address, expected_mint_amount)
+        deposit_address
     }
 
     /// The JSON-RPC URL of this validator.
@@ -223,10 +201,15 @@ impl SolanaTestValidator {
     }
 
     /// Transfers `amount` to `address` from a freshly airdropped account and
-    /// waits for the transfer to be finalized.
+    /// waits for the transfer to be finalized. The sender is funded so that it
+    /// stays rent-exempt after the transfer, whatever the amount.
     pub async fn transfer_to(&self, address: Address, amount: Lamport) -> Signature {
         let sender = Keypair::new();
-        self.airdrop_and_confirm(sender.pubkey(), 2 * amount).await;
+        self.airdrop_and_confirm(
+            sender.pubkey(),
+            amount + FEE_PER_SIGNATURE + RENT_EXEMPTION_THRESHOLD,
+        )
+        .await;
 
         let rpc = self.rpc_client();
         let recent_blockhash = rpc.get_latest_blockhash().await.unwrap();
