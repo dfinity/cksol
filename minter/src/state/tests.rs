@@ -141,11 +141,14 @@ mod queued_deposits {
 mod swept_deposits {
     use super::*;
     use crate::{
-        state::reset_state,
-        storage::reset_events,
+        state::{audit::replay_events, reset_state},
+        storage::{reset_events, with_event_iter},
         test_fixtures::{
             DEFAULT_BLOCK_HEIGHT,
-            events::{credit_sweep, quarantine_sweep, queue_deposits, submit_sweep},
+            events::{
+                credit_sweep, credit_sweep_at, mint_swept_deposit, quarantine_pending_mint,
+                quarantine_sweep, queue_deposits, submit_sweep,
+            },
             sweep_message,
         },
     };
@@ -307,6 +310,98 @@ mod swept_deposits {
                 &TestCanisterRuntime::new().add_times([0, 0]),
             )
         });
+    }
+
+    #[test]
+    fn should_mint_pending_deposit_without_changing_the_balance() {
+        init_state();
+        queue_deposits::<3>();
+        let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
+        submit_sweep(sweep_signature, vec![2, 0]);
+        succeed_transaction(sweep_signature);
+        credit_sweep(sweep_signature, 3_990_000);
+
+        mint_swept_deposit(0, 42);
+
+        read_state(|s| {
+            assert_eq!(
+                s.deposits().pending_mints().keys().collect::<Vec<_>>(),
+                vec![&2]
+            );
+            assert_eq!(s.deposits().minted().keys().collect::<Vec<_>>(), vec![&0]);
+            assert_eq!(s.balance(), 3_990_000);
+        });
+    }
+
+    #[test]
+    fn should_quarantine_pending_mint_without_changing_the_balance() {
+        init_state();
+        queue_deposits::<3>();
+        let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
+        submit_sweep(sweep_signature, vec![2, 0]);
+        succeed_transaction(sweep_signature);
+        credit_sweep(sweep_signature, 3_990_000);
+
+        quarantine_pending_mint(0);
+
+        read_state(|s| {
+            assert_eq!(
+                s.deposits().pending_mints().keys().collect::<Vec<_>>(),
+                vec![&2]
+            );
+            assert_eq!(
+                s.deposits().quarantined().keys().collect::<Vec<_>>(),
+                vec![&0]
+            );
+            assert_eq!(s.balance(), 3_990_000);
+        });
+    }
+
+    #[test]
+    fn should_store_the_credited_sweep_timestamp_as_created_at_time() {
+        init_state();
+        queue_deposits::<3>();
+        let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
+        submit_sweep(sweep_signature, vec![2, 0]);
+        succeed_transaction(sweep_signature);
+
+        credit_sweep_at(sweep_signature, 3_990_000, 1_234_000_000);
+
+        read_state(|s| {
+            assert_eq!(s.deposits().pending_mints().len(), 2);
+            assert!(
+                s.deposits()
+                    .pending_mints()
+                    .values()
+                    .all(|pending| pending.created_at_time == 1_234_000_000)
+            );
+        });
+    }
+
+    #[test]
+    fn should_replay_the_recorded_events_including_created_at_time() {
+        init_state();
+        queue_deposits::<3>();
+        let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
+        submit_sweep(sweep_signature, vec![2, 0]);
+        succeed_transaction(sweep_signature);
+        credit_sweep_at(sweep_signature, 3_990_000, 1_234_000_000);
+        mint_swept_deposit(0, 42);
+        let recorded_events: Vec<Event> = with_event_iter(|events| events.collect());
+
+        let replayed = replay_events(
+            std::iter::once(Event {
+                timestamp: 0,
+                payload: EventType::Init(valid_init_args()),
+            })
+            .chain(recorded_events),
+        );
+
+        assert_eq!(
+            replayed.deposits().pending_mints()[&2].created_at_time,
+            1_234_000_000
+        );
+        read_state(|live_state| assert_eq!(&replayed, live_state));
     }
 
     #[test]

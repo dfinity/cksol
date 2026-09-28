@@ -15,6 +15,17 @@ pub const SWEEP_DEPOSITS_DELAY: Duration = Duration::from_mins(1);
 /// transfer creation stay unavailable until the key is recorded, so the retry is quick.
 pub const MINTER_PUBLIC_KEY_RETRY_DELAY: Duration = Duration::from_secs(5);
 
+/// Interval of the timer minting the pending mints of credited sweeps.
+pub const PROCESS_PENDING_MINTS_DELAY: Duration = Duration::from_mins(1);
+
+/// The window within which the ckSOL ledger deduplicates transfers by their
+/// `created_at_time`, matching `TRANSACTION_WINDOW` of the ICRC-1 ledger:
+/// <https://github.com/dfinity/ic/blob/master/rs/ledger_suite/icrc1/ledger/src/lib.rs>
+///
+/// Retrying a pending mint beyond this window is no longer deduplicated, so a
+/// pending mint older than that is quarantined instead of retried.
+pub const LEDGER_DEDUPLICATION_WINDOW: Duration = Duration::from_hours(24);
+
 /// Matches the ICP HTTPS outcall response limit for variable-length RPC calls
 /// such as `getTransaction` and `getSignatureStatuses`:
 /// https://docs.internetcomputer.org/references/ic-interface-spec#ic-http_request

@@ -35,8 +35,9 @@ mod deposits;
 pub mod event;
 
 pub use deposits::{
-    DepositBalance, Deposits, PendingMint, QueuedDeposit, SettledSweep, Sweep, SweepMismatch,
-    SweepRecoveryError, SweepSettlementError, Sweeps, SweptDeposit, Transfer, UnreadableOutcome,
+    DepositBalance, Deposits, MintedSweep, PendingMint, QueuedDeposit, SettledSweep, Sweep,
+    SweepMismatch, SweepRecoveryError, SweepSettlementError, Sweeps, SweptDeposit, Transfer,
+    UnreadableOutcome,
 };
 
 thread_local! {
@@ -504,14 +505,27 @@ impl State {
         signature: &Signature,
         amount_received: Lamport,
         mints: &[CreditedDeposit],
+        timestamp: u64,
     ) {
         let amount_to_mint: Lamport = mints.iter().map(|mint| mint.amount_to_mint).sum();
         assert!(
             amount_to_mint <= amount_received,
             "Attempted to credit sweep {signature} with mints of {amount_to_mint} lamports exceeding the {amount_received} lamports received"
         );
-        self.deposits.credit_sweep(signature, mints);
+        self.deposits.credit_sweep(signature, mints, timestamp);
         self.balance += amount_received;
+    }
+
+    fn process_minted_swept_deposit(
+        &mut self,
+        deposit_id: DepositSolId,
+        mint_block_index: &LedgerMintIndex,
+    ) {
+        self.deposits.mint(deposit_id, *mint_block_index);
+    }
+
+    fn process_quarantined_pending_mint(&mut self, deposit_id: DepositSolId) {
+        self.deposits.quarantine_pending_mint(deposit_id);
     }
 
     fn process_quarantined_sweep(&mut self, signature: &Signature) {

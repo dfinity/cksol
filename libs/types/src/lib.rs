@@ -123,8 +123,6 @@ impl From<Account> for DepositSolArgs {
 pub type DepositSolId = u64;
 
 /// The status of a deposit queued by the `deposit_sol` ckSOL minter endpoint.
-///
-/// The `Minted` variant will follow as the sweep flow is implemented.
 #[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize, Serialize)]
 pub enum DepositSolStatus {
     /// No deposit with this identifier was queued.
@@ -145,6 +143,14 @@ pub enum DepositSolStatus {
     Finalized {
         /// The signature of the sweep transaction.
         signature: Signature,
+    },
+    /// The minter minted ckSOL for the deposit on the ledger.
+    Minted {
+        /// The mint transaction index on the ckSOL ledger.
+        block_index: LedgerMintIndex,
+        /// The minted amount: the swept amount minus the deposit's share of the
+        /// transaction fee of the sweep.
+        minted_amount: Lamport,
     },
     /// The sweep transaction failed, or expired without ever being seen on chain, so no
     /// ckSOL is owed. Calling `deposit_sol` again queues a new sweep of whatever balance
