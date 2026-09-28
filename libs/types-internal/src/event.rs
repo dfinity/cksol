@@ -156,11 +156,6 @@ pub enum Signer {
 /// The purpose of a submitted Solana transaction.
 #[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]
 pub enum TransactionPurpose {
-    /// Consolidate deposited funds into the minter's main account.
-    ConsolidateDeposits {
-        /// The mint indices of the deposits being consolidated.
-        mint_indices: Vec<u64>,
-    },
     /// Send withdrawals to users' Solana addresses.
     WithdrawSol {
         /// The burn transaction indices on the ckSOL ledger.

@@ -108,12 +108,10 @@ pub struct State {
     sent_withdrawal_requests: BTreeMap<LedgerBurnIndex, SentWithdrawalRequest>,
     successful_withdrawal_requests: BTreeMap<LedgerBurnIndex, SentWithdrawalRequest>,
     failed_withdrawal_requests: BTreeMap<LedgerBurnIndex, SentWithdrawalRequest>,
-    deposits_to_consolidate: BTreeMap<LedgerMintIndex, (Account, Lamport)>,
     submitted_transactions: InsertionOrderedMap<Signature, SolanaTransaction>,
     transactions_to_resubmit: InsertionOrderedMap<Signature, SolanaTransaction>,
     succeeded_transactions: BTreeSet<Signature>,
     failed_transactions: InsertionOrderedMap<Signature, SolanaTransaction>,
-    consolidation_transactions: InsertionOrderedMap<Signature, ConsolidationTransaction>,
     active_tasks: BTreeSet<TaskType>,
     balance: Lamport,
 }
@@ -198,16 +196,6 @@ impl State {
         &self.failed_withdrawal_requests
     }
 
-    pub fn deposits_to_consolidate(&self) -> &BTreeMap<LedgerMintIndex, (Account, Lamport)> {
-        &self.deposits_to_consolidate
-    }
-
-    pub fn has_deposit_awaiting_consolidation(&self, account: &Account) -> bool {
-        self.deposits_to_consolidate
-            .values()
-            .any(|(depositor, _)| depositor == account)
-    }
-
     pub fn submitted_transactions(&self) -> &InsertionOrderedMap<Signature, SolanaTransaction> {
         &self.submitted_transactions
     }
@@ -253,12 +241,6 @@ impl State {
 
     pub fn balance(&self) -> Lamport {
         self.balance
-    }
-
-    pub fn consolidation_transactions(
-        &self,
-    ) -> &InsertionOrderedMap<Signature, ConsolidationTransaction> {
-        &self.consolidation_transactions
     }
 
     pub fn sol_rpc_client<R: Runtime>(&self, runtime: R) -> SolRpcClient<R> {
@@ -510,23 +492,6 @@ impl State {
             "Attempted to submit already failed transaction {signature:?}"
         );
         let amount = match purpose {
-            TransactionPurpose::ConsolidateDeposits { mint_indices } => {
-                let mut total: Lamport = 0;
-                let mut deposits = Vec::with_capacity(mint_indices.len());
-                for mint_index in mint_indices {
-                    let (_account, deposit_amount) = self
-                        .deposits_to_consolidate
-                        .remove(mint_index)
-                        .unwrap_or_else(|| {
-                            panic!("Attempted to consolidate unknown mint index: {mint_index:?}")
-                        });
-                    total += deposit_amount;
-                    deposits.push((*mint_index, deposit_amount));
-                }
-                self.consolidation_transactions
-                    .insert(*signature, ConsolidationTransaction { deposits });
-                total
-            }
             TransactionPurpose::WithdrawSol { burn_indices } => {
                 let mut total: Lamport = 0;
                 for burn_index in burn_indices {
@@ -614,9 +579,6 @@ impl State {
             None,
             "Attempted to resubmit transaction with signature {new_signature:?} that already exists"
         );
-        if let Some(info) = self.consolidation_transactions.remove(old_signature) {
-            self.consolidation_transactions.insert(*new_signature, info);
-        }
         for sent in self.sent_withdrawal_requests.values_mut() {
             if &sent.signature == old_signature {
                 sent.signature = *new_signature;
@@ -636,13 +598,6 @@ impl State {
                 panic!("Attempted to mark unknown transaction {signature:?} as succeeded")
             });
         match &transaction.purpose {
-            TransactionPurpose::ConsolidateDeposits { .. } => {
-                let tx_fee = transaction.message.transaction_fee();
-                self.balance += transaction
-                    .amount
-                    .checked_sub(tx_fee)
-                    .expect("BUG: consolidation amount is less than transaction fee");
-            }
             TransactionPurpose::WithdrawSol { .. } => {}
             TransactionPurpose::SweepDeposits { .. } => self.deposits.finalize_swept(signature),
         }
@@ -757,12 +712,10 @@ impl TryFrom<InitArgs> for State {
             sent_withdrawal_requests: BTreeMap::new(),
             successful_withdrawal_requests: BTreeMap::new(),
             failed_withdrawal_requests: BTreeMap::new(),
-            deposits_to_consolidate: BTreeMap::new(),
             submitted_transactions: InsertionOrderedMap::new(),
             transactions_to_resubmit: InsertionOrderedMap::new(),
             succeeded_transactions: BTreeSet::new(),
             failed_transactions: InsertionOrderedMap::new(),
-            consolidation_transactions: InsertionOrderedMap::new(),
             active_tasks: BTreeSet::new(),
             balance: 0,
         };
@@ -834,25 +787,11 @@ pub struct SchnorrPublicKey {
 
 #[derive(Copy, Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum TaskType {
-    DepositConsolidation,
     SweepDeposits,
     Mint,
     FinalizeTransactions,
     ResubmitTransactions,
     WithdrawalProcessing,
-}
-
-/// Details about a consolidation transaction, capturing the individual
-/// deposits (by mint index and amount) being consolidated.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ConsolidationTransaction {
-    pub deposits: Vec<(LedgerMintIndex, Lamport)>,
-}
-
-impl ConsolidationTransaction {
-    pub fn total_amount(&self) -> Lamport {
-        self.deposits.iter().map(|(_, amount)| amount).sum()
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
