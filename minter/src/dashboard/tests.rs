@@ -1,12 +1,13 @@
+use crate::constants::FEE_PER_SIGNATURE;
 use crate::dashboard::{DashboardPaginationParameters, DashboardTemplate, lamports_to_sol};
 use crate::state::read_state;
 use crate::test_fixtures::{
     AUTOMATED_DEPOSIT_FEE, MANUAL_DEPOSIT_FEE, MINIMUM_DEPOSIT_AMOUNT, MINIMUM_WITHDRAWAL_AMOUNT,
     WITHDRAWAL_FEE, account, deposit_id,
     events::{
-        accept_deposit, accept_withdrawal, fail_transaction, mint_deposit, quarantine_deposit,
-        quarantine_sweep, queue_deposit, submit_consolidation, submit_sweep, submit_withdrawal,
-        succeed_transaction,
+        accept_deposit, accept_withdrawal, credit_sweep, fail_transaction, mint_deposit,
+        mint_swept_deposit, quarantine_deposit, quarantine_sweep, queue_deposit,
+        submit_consolidation, submit_sweep, submit_withdrawal, succeed_transaction,
     },
     init_balance, init_schnorr_master_key, init_state, init_state_with_args, ledger_canister_id,
     signature, sol_rpc_canister_id, valid_init_args,
@@ -208,6 +209,62 @@ fn should_display_quarantined_swept_deposits_with_the_sweep_signature() {
             |href| href.contains("solscan.io/tx/"),
             |href| href.contains(&sweep_signature.to_string()),
         );
+}
+
+#[test]
+fn should_display_minted_swept_deposits_with_amount_and_block_index() {
+    init_state();
+    let sweep_signature = signature(0xAA);
+    let sweepable_amount = 400_000_000;
+    queue_deposit(0, account(1), sweepable_amount);
+    submit_sweep(sweep_signature, vec![0]);
+    succeed_transaction(sweep_signature);
+    credit_sweep(sweep_signature, sweepable_amount);
+    mint_swept_deposit(0, 42);
+
+    DashboardAssert::assert_that(dashboard()).has_table_row_value(
+        "#minted-sweeps + table > tbody > tr:nth-child(1)",
+        &[
+            "0",
+            &account(1).to_string(),
+            &lamports_to_sol(sweepable_amount - FEE_PER_SIGNATURE),
+            "42",
+        ],
+        "minted swept deposits",
+    );
+}
+
+#[test]
+fn should_paginate_minted_swept_deposits_across_multiple_pages() {
+    use crate::dashboard::DEFAULT_PAGE_SIZE;
+
+    init_state();
+
+    let total_minted_sweeps = DEFAULT_PAGE_SIZE + 1;
+    for i in 0..total_minted_sweeps {
+        let sweep_signature = signature(i);
+        queue_deposit(i as u64, account(i + 1), 400_000_000);
+        submit_sweep(sweep_signature, vec![i as u64]);
+        succeed_transaction(sweep_signature);
+        credit_sweep(sweep_signature, 400_000_000);
+        mint_swept_deposit(i as u64, i as u64);
+    }
+
+    let page1 = dashboard();
+    assert_eq!(
+        page1.minted_sweeps_table.current_page.len(),
+        DEFAULT_PAGE_SIZE
+    );
+    assert!(page1.minted_sweeps_table.has_more_than_one_page());
+    assert_eq!(page1.minted_sweeps_table.pagination.pages.len(), 2);
+    assert_eq!(page1.minted_sweeps_table.pagination.current_page_index, 1);
+
+    let page2 = dashboard_with_pagination(DashboardPaginationParameters {
+        minted_sweeps_start: DEFAULT_PAGE_SIZE,
+        ..Default::default()
+    });
+    assert_eq!(page2.minted_sweeps_table.current_page.len(), 1);
+    assert_eq!(page2.minted_sweeps_table.pagination.current_page_index, 2);
 }
 
 #[test]

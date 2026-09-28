@@ -129,6 +129,31 @@
             </table>
             {% endif %}
 
+            {% if !minted_sweeps_table.is_empty() %}
+            <h3 id="minted-sweeps">Minted Swept Deposits</h3>
+            <table>
+                <thead>
+                <tr>
+                    <th>Deposit Id</th>
+                    <th>Account</th>
+                    <th>Minted Amount (SOL)</th>
+                    <th>Mint Block Index</th>
+                </tr>
+                </thead>
+                <tbody>
+                {% for minted in minted_sweeps_table.current_page %}
+                <tr>
+                    <td>{{ minted.deposit_id }}</td>
+                    <td><code>{{ minted.account }}</code></td>
+                    <td>{{ minted.minted_amount }}</td>
+                    <td>{{ minted.mint_block_index }}</td>
+                </tr>
+                {% endfor %}
+                {% if minted_sweeps_table.has_more_than_one_page() %}{{ minted_sweeps_table.pagination|safe }}{% endif %}
+                </tbody>
+            </table>
+            {% endif %}
+
             {% if !deposits_table.is_empty() %}
             <h3 id="deposits">Deposits</h3>
             <table>
