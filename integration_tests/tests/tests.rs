@@ -9,6 +9,7 @@ use cksol_int_tests::{
         default_process_deposit_args, deposit_transaction_signature,
         get_deposit_transaction_response,
     },
+    validator::FEE_PER_SIGNATURE,
 };
 use cksol_types::{
     DepositId, DepositSolArgs, DepositSolError, DepositSolStatus, DepositStatus,
@@ -32,6 +33,7 @@ const FINALIZE_TRANSACTIONS_DELAY: Duration = Duration::from_mins(2);
 const RESUBMIT_TRANSACTIONS_DELAY: Duration = Duration::from_mins(3);
 const DEPOSIT_CONSOLIDATION_DELAY: Duration = Duration::from_mins(10);
 const SWEEP_DEPOSITS_DELAY: Duration = Duration::from_mins(1);
+const PROCESS_PENDING_MINTS_DELAY: Duration = Duration::from_mins(1);
 /// Number of blocks a blockhash stays valid for, as the minter counts them.
 const MAX_BLOCKHASH_AGE_IN_BLOCKS: u64 = 150;
 /// Height of the block whose blockhash the mocks hand a timer for a first submission.
@@ -1191,7 +1193,8 @@ mod deposit_sol_tests {
     }
 
     #[tokio::test]
-    async fn should_sweep_queued_deposit_after_timer() {
+    async fn should_sweep_finalize_and_mint_queued_deposit_after_timers() {
+        const SWEEPABLE_AMOUNT: Lamport = BALANCE_ABOVE_MINIMUM - RENT_EXEMPTION_THRESHOLD;
         let setup = SetupBuilder::new().with_proxy_canister().build().await;
         let deposit_id = setup
             .minter()
@@ -1227,6 +1230,34 @@ mod deposit_sol_tests {
                 } if *signature == sweep_signature && deposit_ids == &[deposit_id]
             )));
         });
+
+        setup.advance_time(FINALIZE_TRANSACTIONS_DELAY).await;
+        setup
+            .execute_http_mocks(
+                MockBuilder::with_start_id(16)
+                    .finalize_transaction(SUBMISSION_BLOCK_HEIGHT)
+                    .get_sweep_transaction(&sweep_signature, SWEEPABLE_AMOUNT)
+                    .build(),
+            )
+            .await;
+
+        setup.advance_time(PROCESS_PENDING_MINTS_DELAY).await;
+        for _ in 0..10 {
+            setup.tick().await;
+        }
+
+        let minted_amount = SWEEPABLE_AMOUNT - FEE_PER_SIGNATURE;
+        assert_eq!(
+            setup.minter().deposit_status(deposit_id).await,
+            DepositSolStatus::Minted {
+                block_index: 0,
+                minted_amount,
+            }
+        );
+        assert_eq!(
+            setup.ledger().balance_of(DEFAULT_CALLER_ACCOUNT).await,
+            minted_amount
+        );
 
         setup.drop().await;
     }
