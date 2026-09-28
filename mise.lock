@@ -44,9 +44,19 @@ url = "https://github.com/taiki-e/cargo-llvm-cov/releases/download/v0.9.1/cargo-
 checksum = "sha256:ddf949b82a63017441ea76aa068bdd7e2dde8055f47cd3ef736fdbbd633bc33e"
 url = "https://github.com/taiki-e/cargo-llvm-cov/releases/download/v0.9.1/cargo-llvm-cov-x86_64-apple-darwin.tar.gz"
 
-[[tools."cargo:cargo-sort"]]
-version = "2.0.1"
-backend = "cargo:cargo-sort"
+[[tools."github:DevinR528/cargo-sort"]]
+version = "2.1.3"
+backend = "github:DevinR528/cargo-sort"
+
+[tools."github:DevinR528/cargo-sort"."platforms.linux-x64"]
+checksum = "sha256:12f7bb3c314ae6a9f9e3d53bafc2e16b869b29e4b22811de75859f4849531a72"
+url = "https://github.com/DevinR528/cargo-sort/releases/download/v2.1.3/cargo-sort-x86_64-unknown-linux-gnu.tar.gz"
+url_api = "https://api.github.com/repos/DevinR528/cargo-sort/releases/assets/376683045"
+
+[tools."github:DevinR528/cargo-sort"."platforms.macos-arm64"]
+checksum = "sha256:bc5e16d43dda4a7177268028350b21c770625fd2e52304ea402751573b0a00b8"
+url = "https://github.com/DevinR528/cargo-sort/releases/download/v2.1.3/cargo-sort-aarch64-apple-darwin.tar.gz"
+url_api = "https://api.github.com/repos/DevinR528/cargo-sort/releases/assets/376683067"
 
 [[tools."github:dfinity/ic-wasm"]]
 version = "0.11.1"
