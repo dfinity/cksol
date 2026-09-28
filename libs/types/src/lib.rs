@@ -18,49 +18,6 @@ pub type LedgerMintIndex = u64;
 /// Index of a burn transaction on the ckSOL ledger.
 pub type LedgerBurnIndex = u64;
 
-/// A single transaction can deposit to multiple accounts, so the signature alone is not sufficient.
-/// The combination of a Solana transaction signature and the account it targets together
-/// uniquely identify a deposit. If a transaction contains multiple transfers to the same account,
-/// they are aggregated into a single deposit.
-#[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize, Serialize)]
-pub struct DepositId {
-    /// The Solana transaction signature.
-    pub signature: Signature,
-    /// The account to which the deposit is attributed.
-    pub account: Account,
-}
-
-/// The outcome of processing a Solana deposit transaction.
-#[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize, Serialize)]
-pub enum DepositStatus {
-    /// The transaction is a valid deposit, but the corresponding ckSOL tokens
-    /// have not yet been minted.
-    Processing {
-        /// The deposit amount.
-        deposit_amount: Lamport,
-        /// The amount to mint (deposit amount minus fees).
-        amount_to_mint: Lamport,
-        /// The deposit identifier.
-        deposit_id: DepositId,
-    },
-    /// The transaction is a valid deposit, but it is unknown whether the
-    /// corresponding ckSOL tokens have been minted, most likely because there
-    /// was an unexpected panic while trying to mint.
-    ///
-    /// The deposit is quarantined to avoid any double minting and will not
-    /// be further processed without manual intervention.
-    Quarantined(DepositId),
-    /// The minter accepted the deposit and minted ckSOL tokens on the ledger.
-    Minted {
-        /// The mint transaction index on the ledger.
-        block_index: LedgerMintIndex,
-        /// The minted amount (deposit amount minus fees).
-        minted_amount: Lamport,
-        /// The deposit identifier.
-        deposit_id: DepositId,
-    },
-}
-
 /// Arguments for a request to the `get_deposit_address` ckSOL minter endpoint.
 #[derive(Clone, Eq, PartialEq, Debug, Default, CandidType, Deserialize, Serialize)]
 pub struct GetDepositAddressArgs {
@@ -80,20 +37,6 @@ impl From<Account> for GetDepositAddressArgs {
             subaccount: account.subaccount,
         }
     }
-}
-
-/// Arguments for a request to the `process_deposit` ckSOL minter endpoint.
-#[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize, Serialize)]
-pub struct ProcessDepositArgs {
-    /// The principal to credit with the deposit.
-    ///
-    /// If not set, defaults to the caller's principal.
-    /// The resolved owner must be a non-anonymous principal.
-    pub owner: Option<Principal>,
-    /// The subaccount to credit with the deposit.
-    pub subaccount: Option<Subaccount>,
-    /// Signature of the deposit transaction.
-    pub signature: Signature,
 }
 
 /// Arguments for a request to the `deposit_sol` ckSOL minter endpoint.
@@ -210,40 +153,6 @@ pub enum DepositSolError {
     },
 }
 
-/// An error from the `process_deposit` ckSOL minter endpoint.
-#[derive(Debug, Clone, PartialEq, CandidType, Deserialize, Error)]
-pub enum ProcessDepositError {
-    /// Insufficient cycles attached by the caller to complete the [`process_deposit`] call.
-    #[error(transparent)]
-    InsufficientCycles(#[from] InsufficientCyclesError),
-    /// The minter experiences temporary issues, try the call again later.
-    #[error("Transient error, try the call again later: {0}")]
-    TemporarilyUnavailable(String),
-    /// There is already a concurrent `process_deposit` invocation from the same caller.
-    #[error("There is already a concurrent `process_deposit` invocation from the same caller")]
-    AlreadyProcessing,
-    /// No matching transaction was found for the given signature.
-    ///
-    /// This can also happen if the transaction is not yet finalized, in which case trying
-    /// this call again later may result in a successful mint.
-    #[error("No transaction found for the given signature")]
-    TransactionNotFound,
-    /// The Solana transaction with the given signature is not a valid
-    /// deposit to the owner's deposit address.
-    #[error("The transaction is not a valid deposit: {0}")]
-    InvalidDepositTransaction(String),
-    /// The deposit amount does not cover the deposit fee.
-    #[error(
-        "Insufficient deposit amount: expected at least {minimum_deposit_amount} lamports, but got {deposit_amount} lamports"
-    )]
-    ValueTooSmall {
-        /// The minimum deposit amount for the deposit to be accepted.
-        minimum_deposit_amount: Lamport,
-        /// The amount that was deposited.
-        deposit_amount: Lamport,
-    },
-}
-
 /// Insufficient cycles attached by the caller to complete the call.
 #[derive(Debug, Clone, PartialEq, CandidType, Deserialize, Error)]
 #[error("Insufficient cycles attached, expected {expected} but got {received}")]
@@ -343,11 +252,9 @@ pub enum WithdrawalStatus {
 /// Information about the ckSOL minter canister.
 #[derive(Clone, Debug, Eq, PartialEq, CandidType, Deserialize, Serialize)]
 pub struct MinterInfo {
-    /// Fee deducted from each deposit in the manual flow (SOL -> ckSOL).
-    pub manual_deposit_fee: Lamport,
     /// Fee deducted from each deposit in the automated flow (SOL -> ckSOL).
     pub automated_deposit_fee: Lamport,
-    /// Extra cycles charged per `process_deposit` call to offset deposit consolidation costs.
+    /// Extra cycles charged per `deposit_sol` call to offset the cost of the sweep.
     pub deposit_consolidation_fee: u128,
     /// Minimum withdrawal amount in lamports.
     pub minimum_withdrawal_amount: Lamport,
@@ -355,7 +262,7 @@ pub struct MinterInfo {
     pub minimum_deposit_amount: Lamport,
     /// Fee deducted from each withdrawal (ckSOL -> SOL).
     pub withdrawal_fee: Lamport,
-    /// Minimum cycles the caller must attach when calling `process_deposit`.
+    /// Minimum cycles the caller must attach when calling `deposit_sol`.
     pub process_deposit_required_cycles: u128,
     /// The minter's tracked SOL balance in lamports.
     pub balance: Lamport,

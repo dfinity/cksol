@@ -23,9 +23,6 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 use thiserror::Error;
 
-#[cfg(test)]
-mod tests;
-
 pub const DEPOSIT_CONSOLIDATION_DELAY: Duration = Duration::from_mins(10);
 
 pub(crate) const MAX_TRANSFERS_PER_CONSOLIDATION: usize = MAX_SIGNATURES as usize;

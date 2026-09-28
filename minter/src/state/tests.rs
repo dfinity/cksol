@@ -5,14 +5,12 @@ use crate::{
     sol_transfer::MAX_SIGNATURES,
     state::{audit::process_event, read_state},
     test_fixtures::{
-        AUTOMATED_DEPOSIT_FEE, DEPOSIT_CONSOLIDATION_FEE, MANUAL_DEPOSIT_FEE,
-        MINIMUM_DEPOSIT_AMOUNT, MINIMUM_WITHDRAWAL_AMOUNT, PROCESS_DEPOSIT_REQUIRED_CYCLES,
-        WITHDRAWAL_FEE, account,
+        AUTOMATED_DEPOSIT_FEE, DEPOSIT_CONSOLIDATION_FEE, MINIMUM_DEPOSIT_AMOUNT,
+        MINIMUM_WITHDRAWAL_AMOUNT, PROCESS_DEPOSIT_REQUIRED_CYCLES, WITHDRAWAL_FEE, account,
         arb::arb_event,
-        deposit_id,
         events::{
-            accept_deposit, accept_withdrawal, accept_withdrawal_at, expire_transaction,
-            fail_transaction, mint_deposit, resubmit_transaction, submit_withdrawal,
+            accept_withdrawal, accept_withdrawal_at, credit_sweep, expire_transaction,
+            fail_transaction, queue_deposit, resubmit_transaction, submit_sweep, submit_withdrawal,
             succeed_transaction,
         },
         init_balance, init_schnorr_master_key, init_state, ledger_canister_id, planned_sweep,
@@ -414,30 +412,6 @@ mod state_validation {
 
     #[test]
     fn should_fail_with_invalid_args() {
-        // manual_deposit_fee exceeds automated_deposit_fee
-        assert_fails_both(
-            InitArgs {
-                manual_deposit_fee: AUTOMATED_DEPOSIT_FEE + 1,
-                ..valid_init_args()
-            },
-            UpgradeArgs {
-                manual_deposit_fee: Some(AUTOMATED_DEPOSIT_FEE + 1),
-                ..Default::default()
-            },
-            |e| matches!(e, InvalidStateError::InvalidDepositFees { .. }),
-        );
-        // automated_deposit_fee below manual_deposit_fee
-        assert_fails_both(
-            InitArgs {
-                automated_deposit_fee: MANUAL_DEPOSIT_FEE - 1,
-                ..valid_init_args()
-            },
-            UpgradeArgs {
-                automated_deposit_fee: Some(MANUAL_DEPOSIT_FEE - 1),
-                ..Default::default()
-            },
-            |e| matches!(e, InvalidStateError::InvalidDepositFees { .. }),
-        );
         // automated_deposit_fee exceeds minimum_deposit_amount
         assert_fails_both(
             InitArgs {
@@ -463,19 +437,17 @@ mod state_validation {
             |e| matches!(e, InvalidStateError::InvalidDepositFees { .. }),
         );
         // minimum_deposit_amount below the fee of a full sweep + rent exemption threshold
-        // (automated_deposit_fee and manual_deposit_fee set to 1 to isolate this condition)
+        // (automated_deposit_fee set to 1 to isolate this condition)
         let maximum_sweep_fee = MAX_SIGNATURES * FEE_PER_SIGNATURE;
         let minimum_required = maximum_sweep_fee + RENT_EXEMPTION_THRESHOLD;
         assert_fails_both(
             InitArgs {
                 automated_deposit_fee: 1,
-                manual_deposit_fee: 1,
                 minimum_deposit_amount: minimum_required - 1,
                 ..valid_init_args()
             },
             UpgradeArgs {
                 automated_deposit_fee: Some(1),
-                manual_deposit_fee: Some(1),
                 minimum_deposit_amount: Some(minimum_required - 1),
                 ..Default::default()
             },
@@ -492,13 +464,11 @@ mod state_validation {
         assert_fails_both(
             InitArgs {
                 automated_deposit_fee: 1,
-                manual_deposit_fee: 1,
                 minimum_deposit_amount: minimum_funding_main_address - 1,
                 ..valid_init_args()
             },
             UpgradeArgs {
                 automated_deposit_fee: Some(1),
-                manual_deposit_fee: Some(1),
                 minimum_deposit_amount: Some(minimum_funding_main_address - 1),
                 ..Default::default()
             },
@@ -574,17 +544,6 @@ mod state_validation {
 
     #[test]
     fn should_succeed_at_boundary_conditions() {
-        // manual_deposit_fee can equal automated_deposit_fee
-        assert_succeeds_both(
-            InitArgs {
-                manual_deposit_fee: AUTOMATED_DEPOSIT_FEE,
-                ..valid_init_args()
-            },
-            UpgradeArgs {
-                manual_deposit_fee: Some(AUTOMATED_DEPOSIT_FEE),
-                ..Default::default()
-            },
-        );
         // minimum_deposit_amount can equal automated_deposit_fee
         assert_succeeds_both(
             InitArgs {
@@ -601,13 +560,11 @@ mod state_validation {
         assert_succeeds_both(
             InitArgs {
                 automated_deposit_fee: 1,
-                manual_deposit_fee: 1,
                 minimum_deposit_amount: minimum_required,
                 ..valid_init_args()
             },
             UpgradeArgs {
                 automated_deposit_fee: Some(1),
-                manual_deposit_fee: Some(1),
                 minimum_deposit_amount: Some(minimum_required),
                 ..Default::default()
             },
@@ -682,20 +639,15 @@ mod state_from_init_args {
                 ledger_canister_id: ledger_canister_id(),
                 sol_rpc_canister_id: sol_rpc_canister_id(),
                 solana_network: SolanaNetwork::Mainnet,
-                manual_deposit_fee: MANUAL_DEPOSIT_FEE,
                 automated_deposit_fee: AUTOMATED_DEPOSIT_FEE,
                 deposit_consolidation_fee: DEPOSIT_CONSOLIDATION_FEE,
                 withdrawal_fee: WITHDRAWAL_FEE,
                 minimum_withdrawal_amount: MINIMUM_WITHDRAWAL_AMOUNT,
                 minimum_deposit_amount: MINIMUM_DEPOSIT_AMOUNT,
                 process_deposit_required_cycles: PROCESS_DEPOSIT_REQUIRED_CYCLES,
-                pending_process_deposit_request_guards: BTreeSet::new(),
                 pending_deposit_sol_request_guards: BTreeSet::new(),
                 pending_withdrawal_request_guards: BTreeSet::new(),
                 deposits: Deposits::default(),
-                accepted_deposits: InsertionOrderedMap::new(),
-                quarantined_deposits: InsertionOrderedMap::new(),
-                minted_deposits: InsertionOrderedMap::new(),
                 pending_withdrawal_requests: BTreeMap::new(),
                 sent_withdrawal_requests: BTreeMap::new(),
                 successful_withdrawal_requests: BTreeMap::new(),
@@ -756,7 +708,6 @@ mod state_upgrade {
     #[test]
     fn should_update_fields() {
         let new_canister_id = Principal::from_slice(&[3_u8; 20]);
-        let new_manual_fee = MANUAL_DEPOSIT_FEE / 2;
         let new_automated_fee = AUTOMATED_DEPOSIT_FEE / 2;
         let new_minimum_deposit_amount = MINIMUM_DEPOSIT_AMOUNT * 2;
         let new_minimum_withdrawal_amount = MINIMUM_WITHDRAWAL_AMOUNT * 2;
@@ -771,15 +722,6 @@ mod state_upgrade {
             })
             .unwrap();
         assert_eq!(state.sol_rpc_canister_id(), new_canister_id);
-
-        let mut state = initial_state();
-        state
-            .upgrade(UpgradeArgs {
-                manual_deposit_fee: Some(new_manual_fee),
-                ..Default::default()
-            })
-            .unwrap();
-        assert_eq!(state.manual_deposit_fee(), new_manual_fee);
 
         let mut state = initial_state();
         state
@@ -908,26 +850,19 @@ fn should_track_balance_through_deposits_withdrawals_and_failures() {
     init_state();
     assert_eq!(read_state(|s| s.balance()), 0);
 
-    // Accepting and minting deposits does not change the balance
-    accept_deposit(deposit_id(1), DEPOSIT_1);
-    accept_deposit(deposit_id(2), DEPOSIT_2);
-    mint_deposit(deposit_id(1), 0);
-    mint_deposit(deposit_id(2), 1);
+    // Queueing and sweeping deposits does not change the balance
+    queue_deposit(0, account(1), DEPOSIT_1);
+    queue_deposit(1, account(2), DEPOSIT_2);
+    submit_sweep(signature(0xAA), vec![0, 1]);
     assert_eq!(read_state(|s| s.balance()), 0);
 
-    // Submitting a consolidation (2 signers) does not change the balance
-    submit_transaction(
-        signature(0xAA),
-        2,
-        TransactionPurpose::ConsolidateDeposits {
-            mint_indices: vec![0.into(), 1.into()],
-        },
-    );
-    assert_eq!(read_state(|s| s.balance()), 0);
-
-    // Finalized consolidation: balance += total_deposits - tx_fee(2 signers)
+    // A finalized sweep does not change the balance until it is credited
     succeed_transaction(signature(0xAA));
+    assert_eq!(read_state(|s| s.balance()), 0);
+
+    // Crediting the sweep adds the amount received: balance += total_deposits - tx_fee(2 signers)
     let expected = DEPOSIT_1 + DEPOSIT_2 - 2 * FEE_PER_SIGNATURE;
+    credit_sweep(signature(0xAA), expected);
     assert_eq!(read_state(|s| s.balance()), expected);
 
     // Accepting withdrawals does not change the balance
@@ -950,16 +885,9 @@ fn should_track_balance_through_deposits_withdrawals_and_failures() {
     succeed_transaction(signature(0xBB));
     assert_eq!(read_state(|s| s.balance()), expected);
 
-    // Failed consolidation does not credit the balance
-    accept_deposit(deposit_id(3), DEPOSIT_3);
-    mint_deposit(deposit_id(3), 2);
-    submit_transaction(
-        signature(0xCC),
-        1,
-        TransactionPurpose::ConsolidateDeposits {
-            mint_indices: vec![2.into()],
-        },
-    );
+    // A failed sweep does not credit the balance
+    queue_deposit(2, account(5), DEPOSIT_3);
+    submit_sweep(signature(0xCC), vec![2]);
     fail_transaction(signature(0xCC));
     assert_eq!(read_state(|s| s.balance()), expected);
 }

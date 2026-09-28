@@ -31,21 +31,6 @@ pub fn encode_metrics(w: &mut MetricsEncoder<Vec<u8>>, s: &State) -> std::io::Re
         "Total number of events in the event log.",
     )?;
     w.encode_gauge(
-        "accepted_deposits",
-        s.accepted_deposits().len().metric_value(),
-        "Number of accepted deposits pending minting.",
-    )?;
-    w.encode_gauge(
-        "quarantined_deposits",
-        s.quarantined_deposits().len().metric_value(),
-        "Number of quarantined deposits.",
-    )?;
-    w.encode_gauge(
-        "minted_deposits",
-        s.minted_deposits().len().metric_value(),
-        "Number of minted deposits.",
-    )?;
-    w.encode_gauge(
         "finalized_deposits",
         s.deposits().finalized().deposit_count().metric_value(),
         "Number of deposits whose sweep is finalized but not yet credited.",
