@@ -345,5 +345,29 @@ async fn should_sweep_a_full_batch_of_deposits_in_one_transaction() {
         );
     }
 
+    for ((&deposit_id, &account), &deposit_amount) in
+        deposit_ids.iter().zip(&accounts).zip(&deposit_amounts)
+    {
+        let expected_minted_amount = deposit_amount - RENT_EXEMPTION_THRESHOLD - FEE_PER_SIGNATURE;
+        let minted_amount = wait_for_deposit_minted(&setup, deposit_id).await;
+        assert_eq!(minted_amount, expected_minted_amount);
+        assert_eq!(
+            setup.ledger().balance_of(account).await,
+            expected_minted_amount
+        );
+    }
+
     setup.drop().await;
+}
+
+async fn wait_for_deposit_minted(setup: &Setup, deposit_id: DepositSolId) -> Lamport {
+    for _ in 0..30 {
+        if let DepositSolStatus::Minted { minted_amount, .. } =
+            setup.minter().deposit_status(deposit_id).await
+        {
+            return minted_amount;
+        }
+        setup.advance_time_and_settle(Duration::from_mins(1)).await;
+    }
+    panic!("Deposit {deposit_id} was not minted within timeout");
 }
