@@ -8,26 +8,17 @@ use crate::test_fixtures::{
         submit_consolidation, submit_withdrawal, succeed_transaction,
     },
     init_balance, init_schnorr_master_key, init_state, init_state_with_args, ledger_canister_id,
-    runtime::TestCanisterRuntime,
     signature, sol_rpc_canister_id, valid_init_args,
 };
 use askama::Template;
 use cksol_types_internal::SolanaNetwork;
 
 fn dashboard() -> DashboardTemplate {
-    read_state(|state| {
-        DashboardTemplate::from_state(
-            state,
-            &TestCanisterRuntime::new(),
-            DashboardPaginationParameters::default(),
-        )
-    })
+    dashboard_with_pagination(DashboardPaginationParameters::default())
 }
 
 fn dashboard_with_pagination(pagination: DashboardPaginationParameters) -> DashboardTemplate {
-    read_state(|state| {
-        DashboardTemplate::from_state(state, &TestCanisterRuntime::new(), pagination)
-    })
+    read_state(|state| DashboardTemplate::from_state(state, pagination))
 }
 
 fn init_state_with_network(network: SolanaNetwork) {

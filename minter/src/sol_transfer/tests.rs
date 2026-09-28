@@ -1,11 +1,11 @@
 use super::*;
-use crate::test_fixtures::signer::sign_for;
+use crate::test_fixtures::signer::{sign_as_minter, sign_for};
 use crate::{
     constants::FEE_PER_SIGNATURE,
     state::{event::VersionedMessage, read_state},
     test_fixtures::{
         MINTER_ACCOUNT, MINTER_ADDRESS, account_signature, init_schnorr_master_key, init_state,
-        runtime::TestCanisterRuntime,
+        minter_signature, runtime::TestCanisterRuntime,
     },
 };
 use assert_matches::assert_matches;
@@ -33,7 +33,7 @@ fn expecting_all(sources: &[(Account, Lamport)]) -> TestCanisterRuntime {
 }
 
 fn minter_signing_once() -> TestCanisterRuntime {
-    TestCanisterRuntime::new().add_signer(sign_for(&MINTER_ACCOUNT))
+    TestCanisterRuntime::new().add_signer(sign_as_minter())
 }
 
 /// Extracts the transfer amount (in lamports) from a compiled system program
@@ -415,7 +415,7 @@ mod batch_withdrawal_tests {
 
         assert_eq!(signers, vec![MINTER_ACCOUNT]);
         assert_eq!(tx.signatures.len(), 1);
-        assert_eq!(tx.signatures[0], account_signature(&MINTER_ACCOUNT));
+        assert_eq!(tx.signatures[0], minter_signature());
         assert_eq!(tx.message.account_keys[0], MINTER_ADDRESS);
         assert!(tx.message.account_keys.contains(&target));
         assert_eq!(tx.message.instructions.len(), 1);
@@ -460,13 +460,11 @@ mod batch_withdrawal_tests {
         let target = Address::new_from_array([0xAA; 32]);
         let blockhash = Hash::new_from_array([0xBB; 32]);
 
-        let runtime =
-            TestCanisterRuntime::new().add_signer(
-                sign_for(&MINTER_ACCOUNT).expect([Err(SignCallError::CallFailed(
-                    CallRejected::with_rejection(4, "signing service unavailable".to_string())
-                        .into(),
-                ))]),
-            );
+        let runtime = TestCanisterRuntime::new().add_signer(sign_as_minter().expect([Err(
+            SignCallError::CallFailed(
+                CallRejected::with_rejection(4, "signing service unavailable".to_string()).into(),
+            ),
+        )]));
 
         let result =
             create_signed_batch_withdrawal_transaction(&runtime, &[(target, 100)], blockhash).await;

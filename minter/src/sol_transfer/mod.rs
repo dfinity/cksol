@@ -1,7 +1,7 @@
 use crate::{
     address::{
-        DerivationPath, derivation_path, derive_public_key, lazy_get_schnorr_master_key,
-        minter_address,
+        DerivationPath, MINTER_DERIVATION_PATH, derivation_path, derive_public_key,
+        lazy_get_schnorr_master_key, minter_address,
     },
     constants::FEE_PER_SIGNATURE,
     runtime::CanisterRuntime,
@@ -61,7 +61,7 @@ pub async fn create_signed_consolidation_transaction<R: CanisterRuntime>(
     assert!(!sources.is_empty(), "BUG: sources must not be empty");
 
     let master_public_key = lazy_get_schnorr_master_key(runtime).await;
-    let target_address = minter_address(&master_public_key, runtime);
+    let target_address = minter_address(&master_public_key);
     let (derivation_paths, addresses): (Vec<_>, Vec<_>) = sources
         .iter()
         .map(|(account, _)| {
@@ -142,10 +142,7 @@ pub async fn create_signed_batch_withdrawal_transaction<R: CanisterRuntime>(
 ) -> Result<(Transaction, Vec<Account>), CreateTransferError> {
     let fee_payer_account = Account::from(runtime.canister_self());
     let master_public_key = lazy_get_schnorr_master_key(runtime).await;
-    let fee_payer_derivation_path = derivation_path(&fee_payer_account);
-    let fee_payer_address = Address::from(
-        derive_public_key(&master_public_key, fee_payer_derivation_path.to_vec()).serialize_raw(),
-    );
+    let fee_payer_address = minter_address(&master_public_key);
 
     let instructions: Vec<Instruction> = targets
         .iter()
@@ -158,7 +155,7 @@ pub async fn create_signed_batch_withdrawal_transaction<R: CanisterRuntime>(
 
     sign_transaction(
         &mut transaction,
-        vec![fee_payer_derivation_path],
+        vec![MINTER_DERIVATION_PATH],
         &runtime.signer(),
     )
     .await?;

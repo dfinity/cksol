@@ -22,7 +22,9 @@ pub const DEFAULT_CALLER_ACCOUNT: Account = Account {
 };
 
 pub const DEFAULT_CALLER_DEPOSIT_ADDRESS: &str = "Cybe9JqZKtmhBoVGNHBxRVMUndZno5vNj5bS9GqTCty1";
-pub const MINTER_ADDRESS: Address = address!("5G64DcCfSFRTwZWSTjub1qGRYrJFLeNMkYjfgCfKi1fi");
+/// The minter's main Solana address: the minter canister's root `key_1` public key
+/// on PocketIC, i.e. the empty derivation path.
+pub const MINTER_ADDRESS: Address = address!("2YKPWqP51gUFEYo1FD2K3LoRE6Cd2f99E11rmjm9qu3Q");
 
 pub const DEPOSIT_AMOUNT: Lamport = 500_000_000;
 /// Minimum balance left on a deposit address to keep it rent-exempt.

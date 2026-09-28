@@ -1,5 +1,5 @@
 use crate::{
-    address::{DerivationPath, derivation_path},
+    address::{DerivationPath, MINTER_DERIVATION_PATH, derivation_path},
     signer::SchnorrSigner,
 };
 use ic_cdk_management_canister::SignCallError;
@@ -43,6 +43,15 @@ pub(super) fn derivation_path_signature(
 pub fn sign_for(account: &Account) -> SignerExpectation {
     SignerExpectation {
         derivation_path: derivation_path(account),
+        answers: Answers::Derived(1),
+    }
+}
+
+/// Expects the minter's main address to sign once, on [`MINTER_DERIVATION_PATH`],
+/// answering with the signature the test reads back with `minter_signature`.
+pub fn sign_as_minter() -> SignerExpectation {
+    SignerExpectation {
+        derivation_path: MINTER_DERIVATION_PATH,
         answers: Answers::Derived(1),
     }
 }

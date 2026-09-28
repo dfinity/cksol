@@ -1,14 +1,17 @@
 use crate::{
     address::{
         account_address, derive_public_key_from_account, get_deposit_address,
-        lazy_get_schnorr_master_key,
+        lazy_get_schnorr_master_key, minter_address,
     },
     state::{SchnorrPublicKey, read_state},
-    test_fixtures::{account, init_schnorr_master_key, init_state, runtime::TestCanisterRuntime},
+    test_fixtures::{
+        MINTER_ACCOUNT, account, init_schnorr_master_key, init_state, runtime::TestCanisterRuntime,
+    },
 };
 use ic_cdk_management_canister::SchnorrPublicKeyResult;
 use ic_ed25519::{PocketIcMasterPublicKeyId, PublicKey};
 use icrc_ledger_types::icrc1::account::Account;
+use solana_address::Address;
 
 #[test]
 fn test_derive_default_subaccount() {
@@ -61,6 +64,27 @@ fn test_derive_different_chain_code() {
         derive_public_key_from_account(&test_key(), &acc),
         derive_public_key_from_account(&master_key2, &acc)
     );
+}
+
+mod minter_address_tests {
+    use super::*;
+
+    #[test]
+    fn should_differ_from_deposit_address_of_minter_account() {
+        assert_ne!(
+            minter_address(&test_key()),
+            account_address(&test_key(), &MINTER_ACCOUNT)
+        );
+    }
+
+    #[test]
+    fn should_be_raw_master_public_key() {
+        let master_key = test_key();
+        assert_eq!(
+            minter_address(&master_key),
+            Address::from(master_key.public_key.serialize_raw())
+        );
+    }
 }
 
 mod lazy_schnorr_master_key {

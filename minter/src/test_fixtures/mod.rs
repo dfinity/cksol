@@ -1,5 +1,5 @@
 use crate::{
-    address::derivation_path,
+    address::{MINTER_DERIVATION_PATH, derivation_path},
     numeric::LedgerMintIndex,
     rpc::BlockHeight,
     state::{
@@ -40,8 +40,8 @@ pub const MINTER_ACCOUNT: Account = Account {
     owner: runtime::TEST_CANISTER_ID,
     subaccount: None,
 };
-/// Solana address derived from [`MINTER_ACCOUNT`] using the test master key.
-pub const MINTER_ADDRESS: Address = address!("38ZYiAPZp4S9MqhU6AL5Ydm8wB7WfayCWLs1EGRi7Dou");
+/// The minter's main Solana address under the test master key: the raw master public key.
+pub const MINTER_ADDRESS: Address = address!("Fkt68XQXBDDBGBNNjFh8GM27ffpZGmncUdDG19njnRvY");
 pub const MINIMUM_DEPOSIT_AMOUNT: Lamport = 20_000_000; // 0.02 SOL
 pub const PROCESS_DEPOSIT_REQUIRED_CYCLES: u128 = 1_000_000_000_000;
 
@@ -160,6 +160,18 @@ pub fn account_signature(account: &Account) -> solana_signature::Signature {
 /// `occurrence`-th time `account` signs, counting from zero.
 pub fn account_signature_nth(account: &Account, occurrence: usize) -> solana_signature::Signature {
     signer::derivation_path_signature(&derivation_path(account), occurrence)
+}
+
+/// Returns the [`Signature`] that [`signer::MockSchnorrSigner`] produces the first time
+/// the minter's main address signs.
+pub fn minter_signature() -> solana_signature::Signature {
+    minter_signature_nth(0)
+}
+
+/// Returns the [`Signature`] that [`signer::MockSchnorrSigner`] produces the
+/// `occurrence`-th time the minter's main address signs, counting from zero.
+pub fn minter_signature_nth(occurrence: usize) -> solana_signature::Signature {
+    signer::derivation_path_signature(&MINTER_DERIVATION_PATH, occurrence)
 }
 
 /// Helpers for constructing state transitions via [`process_event`] in tests.
@@ -286,6 +298,15 @@ pub mod events {
     }
 
     pub fn submit_withdrawal(signature: Signature, fee_payer: Account, burn_indices: Vec<u64>) {
+        submit_withdrawal_at_height(signature, fee_payer, DEFAULT_BLOCK_HEIGHT, burn_indices);
+    }
+
+    pub fn submit_withdrawal_at_height(
+        signature: Signature,
+        fee_payer: Account,
+        block_height: BlockHeight,
+        burn_indices: Vec<u64>,
+    ) {
         mutate_state(|state| {
             process_event(
                 state,
@@ -299,7 +320,7 @@ pub mod events {
                             .map(LedgerBurnIndex::from)
                             .collect(),
                     },
-                    block_height: DEFAULT_BLOCK_HEIGHT,
+                    block_height,
                 },
                 &runtime(),
             )

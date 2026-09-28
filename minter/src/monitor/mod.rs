@@ -1,5 +1,5 @@
 use crate::{
-    address::derivation_path,
+    address::{DerivationPath, MINTER_DERIVATION_PATH, derivation_path},
     constants::MAX_CONCURRENT_RPC_CALLS,
     guard::TimerGuard,
     rpc::{
@@ -9,16 +9,15 @@ use crate::{
     runtime::CanisterRuntime,
     signer::sign_bytes,
     state::{
-        TaskType,
+        SolanaTransaction, TaskType,
         audit::process_event,
-        event::{EventType, VersionedMessage},
+        event::{EventType, TransactionPurpose, VersionedMessage},
         mutate_state, read_state,
     },
 };
 use canlog::log;
 use cksol_types_internal::log::Priority;
 use ic_cdk_management_canister::SignCallError;
-use icrc_ledger_types::icrc1::account::Account;
 use itertools::Itertools;
 use solana_signature::Signature;
 use solana_transaction::Transaction;
@@ -156,7 +155,7 @@ pub async fn resubmit_transactions<R: CanisterRuntime>(runtime: R) {
         state
             .transactions_to_resubmit()
             .iter()
-            .map(|(sig, tx)| (*sig, tx.message.clone(), tx.signers.clone()))
+            .map(|(sig, tx)| (*sig, tx.message.clone(), signing_derivation_paths(tx)))
             .collect()
     });
     if to_resubmit.is_empty() {
@@ -240,9 +239,18 @@ async fn check_transaction_statuses<R: CanisterRuntime>(
     result
 }
 
+fn signing_derivation_paths(transaction: &SolanaTransaction) -> Vec<DerivationPath> {
+    match &transaction.purpose {
+        TransactionPurpose::WithdrawSol { .. } => vec![MINTER_DERIVATION_PATH],
+        TransactionPurpose::ConsolidateDeposits { .. } => {
+            transaction.signers.iter().map(derivation_path).collect()
+        }
+    }
+}
+
 async fn resubmit_expired_transactions<R: CanisterRuntime>(
     runtime: &R,
-    to_resubmit: Vec<(Signature, VersionedMessage, Vec<Account>)>,
+    to_resubmit: Vec<(Signature, VersionedMessage, Vec<DerivationPath>)>,
 ) {
     let block = match get_recent_block(runtime).await {
         Ok(block) => block,
@@ -253,8 +261,10 @@ async fn resubmit_expired_transactions<R: CanisterRuntime>(
     };
 
     futures::future::join_all(to_resubmit.into_iter().take(MAX_CONCURRENT_RPC_CALLS).map(
-        async |(old_signature, message, signers)| {
-            match try_resubmit_transaction(runtime, old_signature, message, signers, block).await {
+        async |(old_signature, message, derivation_paths)| {
+            match try_resubmit_transaction(runtime, old_signature, message, derivation_paths, block)
+                .await
+            {
                 Ok(new_sig) => log!(
                     Priority::Info,
                     "Resubmitted transaction {old_signature} as {new_sig}"
@@ -273,7 +283,7 @@ async fn try_resubmit_transaction<R: CanisterRuntime>(
     runtime: &R,
     old_signature: Signature,
     versioned_message: VersionedMessage,
-    signers: Vec<Account>,
+    derivation_paths: Vec<DerivationPath>,
     block: Block,
 ) -> Result<Signature, ResubmitError> {
     let VersionedMessage::Legacy(mut message) = versioned_message;
@@ -281,7 +291,7 @@ async fn try_resubmit_transaction<R: CanisterRuntime>(
 
     let mut transaction = Transaction::new_unsigned(message);
     transaction.signatures = sign_bytes(
-        signers.iter().map(derivation_path),
+        derivation_paths,
         &runtime.signer(),
         transaction.message_data(),
     )
