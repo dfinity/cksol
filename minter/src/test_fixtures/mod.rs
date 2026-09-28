@@ -311,7 +311,7 @@ pub mod events {
         let signers = read_state(|state| {
             deposit_ids
                 .iter()
-                .filter_map(|deposit_id| state.queued_deposits().get(deposit_id))
+                .filter_map(|deposit_id| state.deposits().queued().get(deposit_id))
                 .map(|deposit| Signer::Account(deposit.account))
                 .collect()
         });

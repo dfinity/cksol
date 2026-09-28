@@ -75,30 +75,6 @@ mod cache_minter_public_key {
 mod queued_deposits {
     use super::*;
     use crate::state::audit::replay_events;
-    use cksol_types::DepositSolStatus;
-
-    fn state() -> State {
-        State::try_from(valid_init_args()).unwrap()
-    }
-
-    #[test]
-    fn should_assign_sequential_ids_and_report_status() {
-        let mut state = state();
-
-        state.process_queued_deposit(0, &account(1), 100);
-        state.process_queued_deposit(1, &account(2), 200);
-
-        assert_eq!(state.next_deposit_sol_id(), 2);
-        assert_eq!(state.in_flight_deposit_id(&account(2)), Some(1));
-        assert_eq!(state.in_flight_deposit_id(&account(3)), None);
-        assert_eq!(
-            state.deposit_sol_status(1),
-            DepositSolStatus::Queued {
-                sweepable_amount: 200
-            }
-        );
-        assert_eq!(state.deposit_sol_status(2), DepositSolStatus::NotFound);
-    }
 
     #[test]
     fn should_replay_queued_deposits_like_direct_transitions() {
@@ -114,27 +90,13 @@ mod queued_deposits {
             timestamp: 0,
             payload: EventType::Init(valid_init_args()),
         };
-        let mut expected = state();
+        let mut expected = State::try_from(valid_init_args()).unwrap();
         expected.process_queued_deposit(0, &account(1), 100);
         expected.process_queued_deposit(1, &account(2), 200);
 
         let replayed = replay_events([init, queued(0, 1), queued(1, 2)]);
 
         assert_eq!(replayed, expected);
-    }
-
-    #[test]
-    #[should_panic(expected = "out of sequence")]
-    fn should_panic_if_deposit_id_out_of_sequence() {
-        state().process_queued_deposit(1, &account(1), 100);
-    }
-
-    #[test]
-    #[should_panic(expected = "already has one in flight")]
-    fn should_panic_if_account_already_queued() {
-        let mut state = state();
-        state.process_queued_deposit(0, &account(1), 100);
-        state.process_queued_deposit(1, &account(1), 200);
     }
 }
 
@@ -166,10 +128,10 @@ mod swept_deposits {
         };
         read_state(|s| {
             assert_eq!(
-                s.swept_deposits(),
+                s.deposits().swept(),
                 &BTreeMap::from([(0, expected_swept(0)), (2, expected_swept(2))])
             );
-            assert_eq!(s.queued_deposits().keys().collect::<Vec<_>>(), vec![&1]);
+            assert_eq!(s.deposits().queued().keys().collect::<Vec<_>>(), vec![&1]);
             let transaction = s.submitted_transactions().get(&sweep_signature).unwrap();
             assert_eq!(transaction.amount, 100 + 300);
             assert_eq!(
@@ -225,7 +187,7 @@ mod swept_deposits {
             read_state(|s| {
                 assert!(s.submitted_transactions().is_empty(), "{outcome}");
                 assert!(s.transactions_to_resubmit().is_empty(), "{outcome}");
-                assert_eq!(s.swept_deposits().len(), 2, "{outcome}");
+                assert_eq!(s.deposits().swept().len(), 2, "{outcome}");
                 assert_eq!(s.balance(), 0, "{outcome}");
             });
             assert_in_flight_ids_unchanged();
@@ -251,7 +213,7 @@ mod swept_deposits {
         read_state(|s| {
             assert!(s.submitted_transactions().is_empty());
             assert!(s.transactions_to_resubmit().contains_key(&sweep_signature));
-            assert_eq!(s.swept_deposits().len(), 2);
+            assert_eq!(s.deposits().swept().len(), 2);
             assert_eq!(s.balance(), 0);
         });
         assert_in_flight_ids_unchanged();
@@ -278,7 +240,8 @@ mod swept_deposits {
 
         read_state(|s| {
             assert_eq!(
-                s.swept_deposits()
+                s.deposits()
+                    .swept()
                     .iter()
                     .map(|(deposit_id, swept)| (*deposit_id, swept.signature))
                     .collect::<Vec<_>>(),
@@ -304,25 +267,6 @@ mod swept_deposits {
         assert_in_flight_ids_unchanged();
     }
 
-    #[test]
-    #[should_panic(expected = "Attempted to sweep unknown or already swept deposit 3")]
-    fn should_panic_when_sweeping_unknown_deposit() {
-        init_state();
-        queue_three_deposits();
-
-        submit_sweep(signature(SWEEP_SIGNATURE_INDEX), vec![0, 3]);
-    }
-
-    #[test]
-    #[should_panic(expected = "Attempted to sweep unknown or already swept deposit 0")]
-    fn should_panic_when_sweeping_already_swept_deposit() {
-        init_state();
-        queue_three_deposits();
-        submit_sweep(signature(SWEEP_SIGNATURE_INDEX), vec![0]);
-
-        submit_sweep(signature(SWEEP_SIGNATURE_INDEX + 1), vec![1, 0]);
-    }
-
     fn queue_three_deposits() {
         for deposit_id in 0..3 {
             queue_deposit(
@@ -336,14 +280,14 @@ mod swept_deposits {
     fn assert_in_flight_ids_unchanged() {
         for deposit_id in 0..3 {
             assert_eq!(
-                read_state(|s| s.in_flight_deposit_id(&account(deposit_id as usize + 1))),
+                read_state(|s| s.deposits().in_flight_id(&account(deposit_id as usize + 1))),
                 Some(deposit_id)
             );
         }
     }
 
     fn deposit_status(deposit_id: u64) -> DepositSolStatus {
-        read_state(|s| s.deposit_sol_status(deposit_id))
+        read_state(|s| s.deposits().status(deposit_id))
     }
 }
 
@@ -630,10 +574,7 @@ mod state_from_init_args {
                 pending_process_deposit_request_guards: BTreeSet::new(),
                 pending_deposit_sol_request_guards: BTreeSet::new(),
                 pending_withdrawal_request_guards: BTreeSet::new(),
-                next_deposit_sol_id: 0,
-                queued_deposits: BTreeMap::new(),
-                swept_deposits: BTreeMap::new(),
-                in_flight_deposit_ids: BTreeMap::new(),
+                deposits: Deposits::default(),
                 accepted_deposits: InsertionOrderedMap::new(),
                 quarantined_deposits: InsertionOrderedMap::new(),
                 minted_deposits: InsertionOrderedMap::new(),

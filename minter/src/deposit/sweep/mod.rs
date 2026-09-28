@@ -38,7 +38,7 @@ pub async fn deposit_sol<R: CanisterRuntime>(
         });
     check_caller_available_cycles(runtime, required_cycles)?;
 
-    if let Some(deposit_id) = read_state(|state| state.in_flight_deposit_id(&account)) {
+    if let Some(deposit_id) = read_state(|state| state.deposits().in_flight_id(&account)) {
         return Ok(deposit_id);
     }
 
@@ -71,7 +71,7 @@ pub async fn deposit_sol<R: CanisterRuntime>(
     let sweepable_amount = result?;
 
     let deposit_id = mutate_state(|state| {
-        let deposit_id = state.next_deposit_sol_id();
+        let deposit_id = state.deposits().next_id();
         process_event(
             state,
             EventType::QueuedDeposit {
@@ -91,7 +91,7 @@ pub async fn deposit_sol<R: CanisterRuntime>(
 }
 
 pub fn deposit_status(deposit_id: DepositSolId) -> DepositSolStatus {
-    read_state(|state| state.deposit_sol_status(deposit_id))
+    read_state(|state| state.deposits().status(deposit_id))
 }
 
 fn sweepable_amount_above_minimum(
