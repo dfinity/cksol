@@ -503,6 +503,10 @@ impl State {
         self.balance += amount_received;
     }
 
+    fn process_quarantined_sweep(&mut self, signature: &Signature) {
+        self.deposits.quarantine_sweep(signature);
+    }
+
     fn process_quarantined_deposit(&mut self, deposit_id: &DepositId) {
         assert!(
             !self.minted_deposits.contains_key(deposit_id),

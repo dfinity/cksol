@@ -461,6 +461,70 @@ mod credit_sweep {
     }
 }
 
+mod quarantine_sweep {
+    use super::{
+        BTreeMap, DepositSolStatus, Deposits, SWEEP_SIGNATURE_INDEX, SweptDeposit, queued_deposit,
+        signature, sweep_message,
+    };
+
+    #[test]
+    fn should_move_the_deposits_of_the_sweep_to_quarantined_and_keep_their_accounts_in_flight() {
+        let mut deposits = Deposits::default();
+        deposits.queue(0, queued_deposit(0));
+        deposits.queue(1, queued_deposit(1));
+        deposits.queue(2, queued_deposit(2));
+        let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
+        deposits.sweep(
+            &[2, 0],
+            &sweep_message([(2, queued_deposit(2)), (0, queued_deposit(0))]),
+            &sweep_signature,
+        );
+        deposits.finalize_swept(&sweep_signature);
+
+        deposits.quarantine_sweep(&sweep_signature);
+
+        assert!(deposits.finalized().is_empty());
+        assert!(deposits.pending_mints().is_empty());
+        let quarantined = |deposit_id| SweptDeposit {
+            deposit: queued_deposit(deposit_id),
+            signature: sweep_signature,
+        };
+        assert_eq!(
+            deposits.quarantined(),
+            &BTreeMap::from([(0, quarantined(0)), (2, quarantined(2))])
+        );
+        for deposit_id in 0..3 {
+            assert_eq!(
+                deposits.in_flight_id(&queued_deposit(deposit_id).account),
+                Some(deposit_id)
+            );
+        }
+        for deposit_id in [0, 2] {
+            assert_eq!(
+                deposits.status(deposit_id),
+                DepositSolStatus::Quarantined {
+                    signature: sweep_signature.into()
+                }
+            );
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "Attempted to quarantine sweep")]
+    fn should_panic_when_the_sweep_is_not_finalized() {
+        let mut deposits = Deposits::default();
+        deposits.queue(0, queued_deposit(0));
+        let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
+        deposits.sweep(
+            &[0],
+            &sweep_message([(0, queued_deposit(0))]),
+            &sweep_signature,
+        );
+
+        deposits.quarantine_sweep(&sweep_signature);
+    }
+}
+
 fn mint(deposit_id: DepositSolId, amount_to_mint: Lamport) -> CreditedDeposit {
     CreditedDeposit {
         deposit_id,

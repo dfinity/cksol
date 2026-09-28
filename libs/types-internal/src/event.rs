@@ -132,6 +132,16 @@ pub enum EventType {
         /// The mint enqueued for each deposit of the sweep.
         mints: Vec<CreditedDeposit>,
     },
+    /// The deposits of a finalized sweep transaction reached the minter's main account,
+    /// but the transaction metadata did not match the minter's model of the sweep, so
+    /// the amount received cannot be credited.
+    ///
+    /// The deposits are quarantined to avoid any double minting and will not be further
+    /// processed without manual intervention.
+    QuarantinedSweep {
+        /// The signature of the finalized sweep transaction.
+        signature: Signature,
+    },
 }
 
 /// The mint enqueued for one deposit of a `CreditedSweep` event.

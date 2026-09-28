@@ -113,7 +113,7 @@ mod swept_deposits {
     use crate::{
         state::reset_state,
         storage::reset_events,
-        test_fixtures::events::{credit_sweep, queue_deposits, submit_sweep},
+        test_fixtures::events::{credit_sweep, quarantine_sweep, queue_deposits, submit_sweep},
     };
 
     const SWEEP_SIGNATURE_INDEX: usize = 0xAA;
@@ -266,6 +266,23 @@ mod swept_deposits {
                 },
                 &TestCanisterRuntime::new().add_times([0, 0]),
             )
+        });
+    }
+
+    #[test]
+    fn should_quarantine_finalized_deposits_without_crediting_the_balance() {
+        init_state();
+        queue_deposits::<3>();
+        let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
+        submit_sweep(sweep_signature, vec![2, 0]);
+        succeed_transaction(sweep_signature);
+
+        quarantine_sweep(sweep_signature);
+
+        read_state(|s| {
+            assert!(s.deposits().finalized().is_empty());
+            assert_eq!(s.deposits().quarantined().len(), 2);
+            assert_eq!(s.balance(), 0);
         });
     }
 }

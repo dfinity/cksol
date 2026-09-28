@@ -24,8 +24,8 @@ mod tests;
 ///
 /// ```text
 /// queued --sendTransaction--> swept --getSignatureStatuses--> finalized --getTransaction--> pending_mints
-///                                |
-///                                +--failed or expired--> dropped
+///                                |                              |
+///                                +--failed or expired--> dropped  +--metadata mismatch--> quarantined
 /// ```
 ///
 /// * `queued`: the deposit address holds a sweepable amount and waits for a sweep transaction.
@@ -42,6 +42,8 @@ mod tests;
 /// * `pending_mints`: the metadata returned by `getTransaction` was read and the transaction
 ///   fee of the sweep was shared between its deposits. Each deposit now carries the amount to
 ///   mint and only the mint on the ledger remains, so the deposits are tracked individually again.
+/// * `quarantined`: the metadata contradicts the minter's model of the sweep, so nothing is
+///   minted and the accounts stay rejected by `deposit_sol` until manual intervention.
 ///
 /// Every account has at most one deposit in flight, so that `deposit_sol` can report the
 /// deposit it is already tracking instead of queueing the same balance twice.
@@ -53,6 +55,7 @@ pub struct Deposits {
     finalized: Sweeps,
     pending_mints: BTreeMap<DepositSolId, PendingMint>,
     dropped: BTreeMap<DepositSolId, SweptDeposit>,
+    quarantined: BTreeMap<DepositSolId, SweptDeposit>,
     in_flight_ids: BTreeMap<Account, DepositSolId>,
 }
 
@@ -79,6 +82,10 @@ impl Deposits {
 
     pub fn dropped(&self) -> &BTreeMap<DepositSolId, SweptDeposit> {
         &self.dropped
+    }
+
+    pub fn quarantined(&self) -> &BTreeMap<DepositSolId, SweptDeposit> {
+        &self.quarantined
     }
 
     pub fn in_flight_id(&self, account: &Account) -> Option<DepositSolId> {
@@ -109,6 +116,11 @@ impl Deposits {
         if let Some(dropped) = self.dropped.get(&deposit_id) {
             return DepositSolStatus::Dropped {
                 signature: dropped.signature.into(),
+            };
+        }
+        if let Some(quarantined) = self.quarantined.get(&deposit_id) {
+            return DepositSolStatus::Quarantined {
+                signature: quarantined.signature.into(),
             };
         }
         DepositSolStatus::NotFound
@@ -165,16 +177,19 @@ impl Deposits {
             .swept
             .remove(signature)
             .unwrap_or_else(|| panic!("Attempted to drop sweep {signature} that is not swept"));
-        for (deposit_id, deposit) in sweep.deposits() {
-            self.release_in_flight(*deposit_id, &deposit.account);
-            self.dropped.insert(
-                *deposit_id,
-                SweptDeposit {
-                    deposit: *deposit,
-                    signature: *signature,
-                },
-            );
+        for (deposit_id, dropped) in swept_deposits(&sweep, signature) {
+            self.release_in_flight(deposit_id, &dropped.deposit.account);
+            self.dropped.insert(deposit_id, dropped);
         }
+    }
+
+    /// Moves every deposit of the given finalized sweep to the quarantine, keeping their
+    /// accounts in flight.
+    pub(super) fn quarantine_sweep(&mut self, signature: &Signature) {
+        let sweep = self.finalized.remove(signature).unwrap_or_else(|| {
+            panic!("Attempted to quarantine sweep {signature} that is not finalized")
+        });
+        self.quarantined.extend(swept_deposits(&sweep, signature));
     }
 
     fn release_in_flight(&mut self, deposit_id: DepositSolId, account: &Account) {
@@ -236,6 +251,21 @@ impl Deposits {
             );
         }
     }
+}
+
+fn swept_deposits<'a>(
+    sweep: &'a Sweep,
+    signature: &'a Signature,
+) -> impl Iterator<Item = (DepositSolId, SweptDeposit)> + 'a {
+    sweep.deposits().iter().map(|(deposit_id, deposit)| {
+        (
+            *deposit_id,
+            SweptDeposit {
+                deposit: *deposit,
+                signature: *signature,
+            },
+        )
+    })
 }
 
 /// A deposit address queued for a sweep to the minter's main account.
