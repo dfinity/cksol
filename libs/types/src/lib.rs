@@ -258,7 +258,7 @@ pub struct MinterInfo {
     /// Fee deducted from each withdrawal (ckSOL -> SOL).
     pub withdrawal_fee: Lamport,
     /// Minimum cycles the caller must attach when calling `deposit_sol`.
-    pub process_deposit_required_cycles: u128,
+    pub deposit_sol_required_cycles: u128,
     /// The minter's tracked SOL balance in lamports.
     pub balance: Lamport,
 }

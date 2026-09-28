@@ -2,16 +2,16 @@ use super::{
     MAX_BLOCKHASH_AGE_IN_BLOCKS, MAX_SIGNATURES_PER_STATUS_CHECK, finalize_transactions,
     resubmit_transactions,
 };
-use crate::test_fixtures::signer::{sign_as_minter, sign_for};
+use crate::test_fixtures::signer::sign_as_minter;
 use crate::{
     constants::MAX_CONCURRENT_RPC_CALLS,
     rpc::BlockHeight,
     state::{TaskType, event::EventType, mutate_state, read_state, reset_state},
     storage::reset_events,
     test_fixtures::{
-        EventsAssert, MINIMUM_WITHDRAWAL_AMOUNT, account, account_signature,
-        confirmed_block_at_height, events, init_balance, init_schnorr_master_key, init_state,
-        minter_signature, runtime::TestCanisterRuntime, signature,
+        EventsAssert, MINIMUM_WITHDRAWAL_AMOUNT, account, confirmed_block_at_height, events,
+        init_balance, init_schnorr_master_key, init_state, minter_signature, minter_signature_nth,
+        runtime::TestCanisterRuntime, signature,
     },
 };
 use sol_rpc_types::{
@@ -369,7 +369,7 @@ mod resubmission {
         setup();
 
         let old_signature = submit_withdrawal_transaction(EXPIRED_BLOCK_HEIGHT);
-        let new_signature = account_signature(&account(1));
+        let new_signature = minter_signature();
         events::expire_transaction(old_signature);
 
         read_state(|s| {
@@ -383,7 +383,7 @@ mod resubmission {
                 RESUBMISSION_BLOCK_HEIGHT,
             ))))
             .add_stub_response(SendTransactionResult::Consistent(Ok(new_signature.into())))
-            .add_signer(sign_for(&account(1)));
+            .add_signer(sign_as_minter());
 
         resubmit_transactions(resubmit_runtime).await;
 
@@ -474,7 +474,7 @@ mod resubmission {
         setup();
 
         let old_signature = submit_withdrawal_transaction(EXPIRED_BLOCK_HEIGHT);
-        let new_signature = account_signature(&account(1));
+        let new_signature = minter_signature();
         events::expire_transaction(old_signature);
 
         let resubmit_runtime = TestCanisterRuntime::new()
@@ -484,7 +484,7 @@ mod resubmission {
                 RESUBMISSION_BLOCK_HEIGHT,
             ))))
             .add_stub_response(SendTransactionResult::Inconsistent(vec![]))
-            .add_signer(sign_for(&account(1)));
+            .add_signer(sign_as_minter());
 
         resubmit_transactions(resubmit_runtime).await;
 
@@ -515,13 +515,13 @@ mod resubmission {
             .add_stub_response(SlotResult::Consistent(Ok(RESUBMISSION_SLOT)))
             .add_stub_response(BlockResult::Consistent(Ok(confirmed_block_at_height(
                 RESUBMISSION_BLOCK_HEIGHT,
-            ))));
+            ))))
+            .add_signer(sign_as_minter().times(MAX_CONCURRENT_RPC_CALLS));
         for i in 0..MAX_CONCURRENT_RPC_CALLS {
             runtime = runtime
                 .add_stub_response(SendTransactionResult::Consistent(Ok(
                     signature(0xA0 + i).into()
-                )))
-                .add_signer(sign_for(&account(i)));
+                )));
         }
 
         resubmit_transactions(runtime.clone()).await;
@@ -541,13 +541,15 @@ mod resubmission {
             .add_stub_response(SlotResult::Consistent(Ok(RESUBMISSION_SLOT)))
             .add_stub_response(BlockResult::Consistent(Ok(confirmed_block_at_height(
                 RESUBMISSION_BLOCK_HEIGHT,
-            ))));
+            ))))
+            .add_signer(
+                sign_as_minter().expect([Ok(minter_signature_nth(MAX_CONCURRENT_RPC_CALLS))]),
+            );
         for i in 0..(num_transactions - MAX_CONCURRENT_RPC_CALLS) {
             runtime = runtime
                 .add_stub_response(SendTransactionResult::Consistent(Ok(
                     signature(0xB0 + i).into()
-                )))
-                .add_signer(sign_for(&account(MAX_CONCURRENT_RPC_CALLS + i)));
+                )));
         }
 
         resubmit_transactions(runtime.clone()).await;

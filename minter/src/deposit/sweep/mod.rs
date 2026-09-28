@@ -35,7 +35,7 @@ pub async fn deposit_sol<R: CanisterRuntime>(
     let (required_cycles, deposit_consolidation_fee, minimum_deposit_amount) =
         read_state(|state| {
             (
-                state.process_deposit_required_cycles(),
+                state.deposit_sol_required_cycles(),
                 state.deposit_consolidation_fee(),
                 state.minimum_deposit_amount(),
             )
