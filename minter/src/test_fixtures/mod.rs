@@ -94,7 +94,7 @@ pub fn init_balance_to(amount: Lamport) {
 
 pub fn init_schnorr_master_key() {
     mutate_state(|s| {
-        s.set_once_minter_public_key(SchnorrPublicKey {
+        s.cache_minter_public_key(SchnorrPublicKey {
             public_key: PublicKey::pocketic_key(PocketIcMasterPublicKeyId::Key1),
             chain_code: [1; 32],
         })

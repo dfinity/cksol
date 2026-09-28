@@ -122,17 +122,21 @@ impl State {
         self.minter_public_key.as_ref()
     }
 
-    /// Set the minter public key only once.
+    /// Cache the minter public key.
     ///
-    /// This is expected to happen only when the minter was freshly installed or after a canister upgrade.
+    /// Concurrent calls may each fetch the key before either one caches it.
+    /// All of them fetch with identical arguments and thus obtain the same key,
+    /// so caching the same key again is a no-op.
     ///
     /// # Panics
-    /// This method will panic if the public key was already set
-    pub fn set_once_minter_public_key(&mut self, public_key: SchnorrPublicKey) {
-        if self.minter_public_key.is_some() {
-            panic!("BUG: minter public key is already set")
+    /// This method will panic if a different public key is already cached,
+    /// since the minter public key must never change.
+    pub fn cache_minter_public_key(&mut self, public_key: SchnorrPublicKey) {
+        match &self.minter_public_key {
+            None => self.minter_public_key = Some(public_key),
+            Some(cached) if *cached == public_key => {}
+            Some(_) => panic!("BUG: attempt to overwrite the minter public key"),
         }
-        self.minter_public_key = Some(public_key);
     }
 
     pub fn sol_rpc_canister_id(&self) -> Principal {
