@@ -111,7 +111,7 @@ pub enum EventType {
     },
     /// A previously submitted Solana transaction has an expired blockhash
     /// and a null on-chain status, meaning it will never be executed.
-    /// A withdrawal or consolidation transaction is marked for resubmission;
+    /// A withdrawal transaction is marked for resubmission;
     /// the deposits of a sweep transaction are dropped instead.
     #[n(7)]
     ExpiredTransaction {
@@ -252,22 +252,15 @@ impl Signer {
 
 #[derive(Clone, Eq, PartialEq, Debug, Decode, Encode)]
 pub enum TransactionPurpose {
-    /// Consolidate deposited funds into the minter's main account.
-    #[n(0)]
-    ConsolidateDeposits {
-        /// The ledger mint indices of the deposits being consolidated.
-        #[cbor(n(0), with = "cbor::id_vec")]
-        mint_indices: Vec<LedgerMintIndex>,
-    },
     /// Withdraw SOL to users' Solana addresses.
-    #[n(1)]
+    #[n(0)]
     WithdrawSol {
         /// The ledger burn indices of the withdrawal requests included in this transaction.
         #[cbor(n(0), with = "cbor::id_vec")]
         burn_indices: Vec<LedgerBurnIndex>,
     },
     /// Sweep the deposit addresses of deposits queued by `deposit_sol` into the minter's main account.
-    #[n(2)]
+    #[n(1)]
     SweepDeposits {
         /// The ids of the swept deposits.
         #[n(0)]

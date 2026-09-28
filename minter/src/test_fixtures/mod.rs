@@ -1026,9 +1026,6 @@ pub mod arb {
                 arb_message(),
                 prop::collection::vec(arb_signer(), 1..10),
                 prop_oneof![
-                    prop::collection::vec(arb_ledger_mint_index(), 1..10).prop_map(
-                        |mint_indices| TransactionPurpose::ConsolidateDeposits { mint_indices }
-                    ),
                     prop::collection::vec(arb_ledger_burn_index(), 1..10)
                         .prop_map(|burn_indices| TransactionPurpose::WithdrawSol { burn_indices }),
                     prop::collection::vec(any::<u64>(), 1..10)

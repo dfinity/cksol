@@ -652,12 +652,10 @@ mod state_from_init_args {
                 sent_withdrawal_requests: BTreeMap::new(),
                 successful_withdrawal_requests: BTreeMap::new(),
                 failed_withdrawal_requests: BTreeMap::new(),
-                deposits_to_consolidate: BTreeMap::new(),
                 submitted_transactions: InsertionOrderedMap::new(),
                 transactions_to_resubmit: InsertionOrderedMap::new(),
                 succeeded_transactions: BTreeSet::new(),
                 failed_transactions: InsertionOrderedMap::new(),
-                consolidation_transactions: InsertionOrderedMap::new(),
                 active_tasks: BTreeSet::new(),
                 balance: 0,
             }

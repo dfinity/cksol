@@ -1,6 +1,6 @@
 use crate::{
     address::minter_address,
-    state::{ConsolidationTransaction, QuarantineCause, State},
+    state::{QuarantineCause, State},
 };
 use askama::Template;
 use candid::Principal;
@@ -41,7 +41,6 @@ pub struct DashboardPaginationParameters {
     pub quarantined_swept_deposits_start: usize,
     pub minted_sweeps_start: usize,
     pub withdrawals_start: usize,
-    pub consolidations_start: usize,
 }
 
 impl DashboardPaginationParameters {
@@ -58,7 +57,6 @@ impl DashboardPaginationParameters {
             quarantined_swept_deposits_start: parse(req, "quarantined_swept_deposits_start")?,
             minted_sweeps_start: parse(req, "minted_sweeps_start")?,
             withdrawals_start: parse(req, "withdrawals_start")?,
-            consolidations_start: parse(req, "consolidations_start")?,
         })
     }
 
@@ -71,7 +69,6 @@ impl DashboardPaginationParameters {
             ),
             ("minted_sweeps_start", self.minted_sweeps_start),
             ("withdrawals_start", self.withdrawals_start),
-            ("consolidations_start", self.consolidations_start),
         ]
         .into_iter()
         .filter(|(name, _)| *name != exclude)
@@ -210,19 +207,6 @@ impl DashboardTablePagination {
 // --- Dashboard data ---
 
 #[derive(Clone)]
-pub struct DashboardConsolidation {
-    pub transaction: String,
-    pub deposits: Vec<DashboardConsolidationDeposit>,
-    pub status: &'static str,
-}
-
-#[derive(Clone)]
-pub struct DashboardConsolidationDeposit {
-    pub mint_index: String,
-    pub deposit_amount: String,
-}
-
-#[derive(Clone)]
 pub struct DashboardWithdrawal {
     pub transaction: Option<String>,
     pub account: String,
@@ -270,7 +254,6 @@ pub struct DashboardTemplate {
     pub balance: String,
     pub quarantined_swept_deposits_table: DashboardPaginatedTable<DashboardQuarantinedDeposit>,
     pub minted_sweeps_table: DashboardPaginatedTable<DashboardMintedSweep>,
-    pub consolidations_table: DashboardPaginatedTable<DashboardConsolidation>,
     pub withdrawals_table: DashboardPaginatedTable<DashboardWithdrawal>,
 }
 
@@ -327,58 +310,6 @@ impl DashboardTemplate {
             "minted-sweeps",
             "minted_sweeps_start",
             pagination.other_params("minted_sweeps_start"),
-        );
-
-        let consolidation_transactions = state.consolidation_transactions();
-
-        fn to_dashboard_consolidation(
-            signature: &solana_signature::Signature,
-            info: &ConsolidationTransaction,
-            status: &'static str,
-        ) -> DashboardConsolidation {
-            let mut deposits: Vec<_> = info.deposits.iter().collect();
-            deposits.sort_by(|a, b| b.0.cmp(&a.0));
-            DashboardConsolidation {
-                transaction: signature.to_string(),
-                deposits: deposits
-                    .into_iter()
-                    .map(|(mint_index, amount)| DashboardConsolidationDeposit {
-                        mint_index: mint_index.to_string(),
-                        deposit_amount: lamports_to_sol(*amount),
-                    })
-                    .collect(),
-                status,
-            }
-        }
-
-        let consolidations: Vec<DashboardConsolidation> = consolidation_transactions
-            .iter()
-            .rev()
-            .filter_map(|(sig, info)| {
-                let status = if state.submitted_transactions().contains_key(sig) {
-                    "Submitted"
-                } else if state.succeeded_transactions().contains(sig) {
-                    "Succeeded"
-                } else if state.failed_transactions().contains_key(sig) {
-                    "Failed"
-                } else if state.transactions_to_resubmit().contains_key(sig) {
-                    "Queued for resubmission"
-                } else {
-                    return None;
-                };
-                Some(to_dashboard_consolidation(sig, info, status))
-            })
-            .collect();
-
-        // The num_cols for consolidations uses the max column span (transaction + status + deposit columns)
-        let consolidations_table = DashboardPaginatedTable::from_items(
-            &consolidations,
-            pagination.consolidations_start,
-            DEFAULT_PAGE_SIZE,
-            4,
-            "consolidations",
-            "consolidations_start",
-            pagination.other_params("consolidations_start"),
         );
 
         let mut withdrawals: Vec<DashboardWithdrawal> = Vec::new();
@@ -463,7 +394,6 @@ impl DashboardTemplate {
             balance: lamports_to_sol(state.balance()),
             quarantined_swept_deposits_table,
             minted_sweeps_table,
-            consolidations_table,
             withdrawals_table,
         }
     }

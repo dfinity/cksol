@@ -39,9 +39,6 @@ type Signature = text;
 // i.e. 1_000_000_000 Lamports is 1 SOL
 type Lamport = nat64;
 
-// Index of a mint transaction on the ckSOL ledger.
-type LedgerMintIndex = nat64;
-
 // Index of a burn transaction on the ckSOL ledger.
 type LedgerBurnIndex = nat64;
 
@@ -341,11 +338,6 @@ type Signer = variant {
 // *WARNING*: This type is used exclusively by the debug `get_events` endpoint.
 // Backwards-compatibility is not guaranteed.
 type TransactionPurpose = variant {
-    // Consolidate deposited funds into the minter's main account.
-    ConsolidateDeposits : record {
-        // The ledger mint indices of the deposits being consolidated.
-        mint_indices: vec LedgerMintIndex;
-    };
     // Withdraw SOL to users' Solana addresses.
     WithdrawSol : record {
         // The ledger burn indices of the withdrawal requests included in this transaction.

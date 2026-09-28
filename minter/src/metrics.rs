@@ -71,11 +71,6 @@ pub fn encode_metrics(w: &mut MetricsEncoder<Vec<u8>>, s: &State) -> std::io::Re
         mint_unresolved.metric_value(),
     )?;
     w.encode_gauge(
-        "deposits_to_consolidate",
-        s.deposits_to_consolidate().len().metric_value(),
-        "Number of deposits pending consolidation.",
-    )?;
-    w.encode_gauge(
         "pending_withdrawal_requests",
         s.pending_withdrawal_requests().len().metric_value(),
         "Number of pending withdrawal requests.",

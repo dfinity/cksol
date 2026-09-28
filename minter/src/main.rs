@@ -2,7 +2,6 @@ use candid::Principal;
 use canlog::{Log, Sort};
 use cksol_minter::{
     address::fetch_and_record_minter_public_key,
-    consolidate::{DEPOSIT_CONSOLIDATION_DELAY, consolidate_deposits},
     deposit::sweep::{
         PROCESS_PENDING_MINTS_DELAY, SWEEP_DEPOSITS_DELAY, process_pending_mints,
         sweep_queued_deposits,
@@ -136,11 +135,6 @@ fn get_events(
                 block_height,
             } => {
                 let purpose = match purpose {
-                    TransactionPurpose::ConsolidateDeposits { mint_indices } => {
-                        event::TransactionPurpose::ConsolidateDeposits {
-                            mint_indices: mint_indices.iter().map(|idx| *idx.get()).collect(),
-                        }
-                    }
                     TransactionPurpose::WithdrawSol { burn_indices } => {
                         event::TransactionPurpose::WithdrawSol {
                             burn_indices: burn_indices.iter().map(|idx| *idx.get()).collect(),
@@ -385,9 +379,6 @@ fn assert_valid_deposit_account(
 fn setup_timers() {
     ic_cdk_timers::set_timer(Duration::from_secs(0), async {
         fetch_and_record_minter_public_key(IcCanisterRuntime::new()).await;
-    });
-    ic_cdk_timers::set_timer_interval(DEPOSIT_CONSOLIDATION_DELAY, async || {
-        consolidate_deposits(IcCanisterRuntime::new()).await;
     });
     ic_cdk_timers::set_timer_interval(WITHDRAWAL_PROCESSING_DELAY, async || {
         process_pending_withdrawals(IcCanisterRuntime::new()).await;
