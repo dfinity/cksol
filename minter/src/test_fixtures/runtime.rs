@@ -1,6 +1,6 @@
 use super::{
     confirmed_block,
-    signer::{MockSchnorrSigner, SignerExpectation},
+    signer::{MockSchnorrSigner, SignerExpectation, sign_for},
     stubs::Stubs,
 };
 use crate::{
@@ -9,7 +9,8 @@ use crate::{
 use candid::{CandidType, Principal};
 use ic_canister_runtime::{IcError, Runtime, StubRuntime};
 use ic_cdk_management_canister::{SchnorrPublicKeyArgs, SchnorrPublicKeyResult};
-use sol_rpc_types::{MultiRpcResult, RpcResult, Slot};
+use icrc_ledger_types::icrc1::account::Account;
+use sol_rpc_types::{MultiRpcResult, RpcResult, Signature, Slot};
 use std::{
     future::Future,
     sync::{Arc, Mutex},
@@ -36,6 +37,16 @@ pub struct TestCanisterRuntime {
 impl TestCanisterRuntime {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Registers the mocks for one transaction paid for by `fee_payer` and submitted under
+    /// `transaction_signature`. See [`TransactionBuilder`].
+    pub fn transaction_builder(
+        self,
+        fee_payer: Account,
+        transaction_signature: solana_signature::Signature,
+    ) -> TransactionBuilder {
+        TransactionBuilder::new(self, fee_payer, transaction_signature)
     }
 
     pub fn add_stub_response<Out: CandidType>(mut self, response: Out) -> Self {
@@ -179,4 +190,40 @@ impl CanisterRuntime for TestCanisterRuntime {
 /// them sees its response, as they do on the IC.
 async fn suspend_like_an_inter_canister_call() {
     yield_now().await;
+}
+
+/// Expects the fee payer to sign with the transaction signature, answers the
+/// `sendTransaction` call with it, and expects every account added with
+/// [`Self::add_signers`] to sign with its own derived signature, which the test reads back
+/// with `account_signature`.
+///
+/// Chain a further [`TestCanisterRuntime::transaction_builder`] onto [`Self::build`] for
+/// each additional transaction a test expects.
+pub struct TransactionBuilder(TestCanisterRuntime);
+
+impl TransactionBuilder {
+    fn new(
+        runtime: TestCanisterRuntime,
+        fee_payer: Account,
+        transaction_signature: solana_signature::Signature,
+    ) -> Self {
+        Self(
+            runtime
+                .add_signer(sign_for(&fee_payer).expect([Ok(transaction_signature)]))
+                .add_stub_response(MultiRpcResult::<Signature>::Consistent(Ok(
+                    transaction_signature.into(),
+                ))),
+        )
+    }
+
+    pub fn add_signers(mut self, accounts: impl IntoIterator<Item = Account>) -> Self {
+        for account in accounts {
+            self.0 = self.0.add_signer(sign_for(&account));
+        }
+        self
+    }
+
+    pub fn build(self) -> TestCanisterRuntime {
+        self.0
+    }
 }

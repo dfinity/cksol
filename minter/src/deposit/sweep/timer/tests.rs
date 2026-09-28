@@ -76,8 +76,12 @@ async fn should_sweep_batch_with_largest_deposit_as_fee_payer() {
         queue_deposit(deposit_id, account, sweepable_amount);
     }
     let fee_payer_signature = account_signature(&account(2));
-    let runtime =
-        runtime_submitting_sweeps(&[fee_payer_signature], [account(1), account(2), account(3)]);
+    let runtime = TestCanisterRuntime::new()
+        .with_increasing_time()
+        .add_recent_block(Ok(SLOT))
+        .transaction_builder(account(2), fee_payer_signature)
+        .add_signers([account(1), account(3)])
+        .build();
 
     sweep_queued_deposits(runtime.clone()).await;
 
@@ -161,12 +165,19 @@ async fn should_split_deposits_into_batches_of_max_size() {
     const NUM_DEPOSITS: usize = MAX_DEPOSITS_PER_SWEEP + 2;
     setup();
     queue_deposits_with_increasing_amounts(NUM_DEPOSITS);
-    let fee_payer_signature_1 = account_signature(&account(MAX_DEPOSITS_PER_SWEEP - 1));
-    let fee_payer_signature_2 = account_signature(&account(NUM_DEPOSITS - 1));
-    let runtime = runtime_submitting_sweeps(
-        &[fee_payer_signature_1, fee_payer_signature_2],
-        (0..NUM_DEPOSITS).map(account),
-    );
+    let fee_payer_1 = account(MAX_DEPOSITS_PER_SWEEP - 1);
+    let fee_payer_2 = account(NUM_DEPOSITS - 1);
+    let fee_payer_signature_1 = account_signature(&fee_payer_1);
+    let fee_payer_signature_2 = account_signature(&fee_payer_2);
+    let runtime = TestCanisterRuntime::new()
+        .with_increasing_time()
+        .add_recent_block(Ok(SLOT))
+        .transaction_builder(fee_payer_1, fee_payer_signature_1)
+        .add_signers((0..MAX_DEPOSITS_PER_SWEEP - 1).map(account))
+        .build()
+        .transaction_builder(fee_payer_2, fee_payer_signature_2)
+        .add_signers([account(MAX_DEPOSITS_PER_SWEEP)])
+        .build();
 
     sweep_queued_deposits(runtime.clone()).await;
 
@@ -205,13 +216,18 @@ async fn should_reschedule_until_all_deposits_swept() {
     let num_deposits = MAX_DEPOSITS_PER_SWEEP * MAX_CONCURRENT_RPC_CALLS + 1;
     queue_deposits_with_increasing_amounts(num_deposits);
     let swept_in_first_round = num_deposits - 1;
-    let round_1_fee_payer_signatures: Vec<_> = (0..MAX_CONCURRENT_RPC_CALLS)
-        .map(|batch| account_signature(&account((batch + 1) * MAX_DEPOSITS_PER_SWEEP - 1)))
-        .collect();
-    let runtime = runtime_submitting_sweeps(
-        &round_1_fee_payer_signatures,
-        (0..swept_in_first_round).map(account),
-    );
+    let mut runtime = TestCanisterRuntime::new()
+        .with_increasing_time()
+        .add_recent_block(Ok(SLOT));
+    for batch in 0..MAX_CONCURRENT_RPC_CALLS {
+        let first_in_batch = batch * MAX_DEPOSITS_PER_SWEEP;
+        let fee_payer_index = first_in_batch + MAX_DEPOSITS_PER_SWEEP - 1;
+        let fee_payer = account(fee_payer_index);
+        runtime = runtime
+            .transaction_builder(fee_payer, account_signature(&fee_payer))
+            .add_signers((first_in_batch..fee_payer_index).map(account))
+            .build();
+    }
 
     sweep_queued_deposits(runtime.clone()).await;
 
@@ -223,8 +239,11 @@ async fn should_reschedule_until_all_deposits_swept() {
     assert_eq!(runtime.set_timer_call_count(), 1);
 
     let last_account = account(num_deposits - 1);
-    let last_signature = account_signature(&last_account);
-    let runtime = runtime_submitting_sweeps(&[last_signature], [last_account]);
+    let runtime = TestCanisterRuntime::new()
+        .with_increasing_time()
+        .add_recent_block(Ok(SLOT))
+        .transaction_builder(last_account, account_signature(&last_account))
+        .build();
 
     sweep_queued_deposits(runtime.clone()).await;
 
@@ -242,20 +261,26 @@ async fn should_reschedule_until_all_deposits_swept() {
 #[tokio::test]
 async fn should_fetch_the_master_key_once_for_all_batches_of_a_round() {
     const NUM_DEPOSITS: usize = MAX_DEPOSITS_PER_SWEEP + 1;
+    const NUM_BATCHES: usize = 2;
     init_state();
     queue_deposits_with_increasing_amounts(NUM_DEPOSITS);
-    let fee_payer_signatures = [
-        account_signature(&account(MAX_DEPOSITS_PER_SWEEP - 1)),
-        account_signature(&account(NUM_DEPOSITS - 1)),
-    ];
-    let runtime = runtime_submitting_sweeps(&fee_payer_signatures, (0..NUM_DEPOSITS).map(account))
+    let fee_payer_1 = account(MAX_DEPOSITS_PER_SWEEP - 1);
+    let fee_payer_2 = account(NUM_DEPOSITS - 1);
+    let runtime = TestCanisterRuntime::new()
+        .with_increasing_time()
+        .add_recent_block(Ok(SLOT))
+        .transaction_builder(fee_payer_1, account_signature(&fee_payer_1))
+        .add_signers((0..MAX_DEPOSITS_PER_SWEEP - 1).map(account))
+        .build()
+        .transaction_builder(fee_payer_2, account_signature(&fee_payer_2))
+        .build()
         .with_schnorr_public_key(schnorr_master_key_response());
 
     sweep_queued_deposits(runtime.clone()).await;
 
     assert_eq!(runtime.schnorr_public_key_call_count(), 1);
     read_state(|s| {
-        assert_eq!(s.submitted_transactions().len(), fee_payer_signatures.len());
+        assert_eq!(s.submitted_transactions().len(), NUM_BATCHES);
         assert_eq!(s.swept_deposits().len(), NUM_DEPOSITS);
         assert!(s.queued_deposits().is_empty());
     });
@@ -274,24 +299,6 @@ fn queue_deposits_with_increasing_amounts(num_deposits: usize) {
             MINIMUM_DEPOSIT_AMOUNT + i as Lamport,
         );
     }
-}
-
-fn runtime_submitting_sweeps(
-    transaction_signatures: &[solana_signature::Signature],
-    signing_accounts: impl IntoIterator<Item = Account>,
-) -> TestCanisterRuntime {
-    let mut runtime = TestCanisterRuntime::new()
-        .with_increasing_time()
-        .add_recent_block(Ok(SLOT));
-    for transaction_signature in transaction_signatures {
-        runtime = runtime.add_stub_response(SendTransactionResult::Consistent(Ok(
-            (*transaction_signature).into(),
-        )));
-    }
-    for signing_account in signing_accounts {
-        runtime = runtime.add_signer(sign_for(&signing_account));
-    }
-    runtime
 }
 
 fn deposit_status(deposit_id: DepositSolId) -> DepositSolStatus {
