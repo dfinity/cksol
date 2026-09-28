@@ -44,10 +44,6 @@ url = "https://github.com/taiki-e/cargo-llvm-cov/releases/download/v0.9.1/cargo-
 checksum = "sha256:ddf949b82a63017441ea76aa068bdd7e2dde8055f47cd3ef736fdbbd633bc33e"
 url = "https://github.com/taiki-e/cargo-llvm-cov/releases/download/v0.9.1/cargo-llvm-cov-x86_64-apple-darwin.tar.gz"
 
-[[tools."cargo:canbench"]]
-version = "0.4.1"
-backend = "cargo:canbench"
-
 [[tools."cargo:cargo-sort"]]
 version = "2.0.1"
 backend = "cargo:cargo-sort"
