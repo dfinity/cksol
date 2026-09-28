@@ -1,5 +1,6 @@
 use crate::{
     constants::RENT_EXEMPTION_THRESHOLD,
+    numeric::LedgerMintIndex,
     state::event::{CreditedDeposit, VersionedMessage},
 };
 use cksol_types::{DepositSolId, DepositSolStatus};
@@ -23,9 +24,9 @@ mod tests;
 /// A deposit is in exactly one stage at a time and only moves forward:
 ///
 /// ```text
-/// queued --sendTransaction--> swept --getSignatureStatuses--> finalized --getTransaction--> pending_mints
-///                                |                              |
-///                                +--failed or expired--> dropped  +--metadata mismatch--> quarantined
+/// queued --sendTransaction--> swept --getSignatureStatuses--> finalized --getTransaction--> pending_mints --icrc1_transfer--> minted
+///                                |                              |                                |
+///                                +--failed or expired--> dropped  +--metadata mismatch--> quarantined <--beyond the deduplication window--+
 /// ```
 ///
 /// * `queued`: the deposit address holds a sweepable amount and waits for a sweep transaction.
@@ -42,7 +43,9 @@ mod tests;
 /// * `pending_mints`: the metadata returned by `getTransaction` was read and the transaction
 ///   fee of the sweep was shared between its deposits. Each deposit now carries the amount to
 ///   mint and only the mint on the ledger remains, so the deposits are tracked individually again.
-/// * `quarantined`: the metadata contradicts the minter's model of the sweep, so nothing is
+/// * `minted`: the ckSOL mint landed on the ledger and the account is released.
+/// * `quarantined`: the metadata contradicts the minter's model of the sweep, or a pending mint
+///   could no longer be retried within the deduplication window of the ledger. Nothing is
 ///   minted and the accounts stay rejected by `deposit_sol` until manual intervention.
 ///
 /// Every account has at most one deposit in flight, so that `deposit_sol` can report the
@@ -54,6 +57,7 @@ pub struct Deposits {
     swept: Sweeps,
     finalized: Sweeps,
     pending_mints: BTreeMap<DepositSolId, PendingMint>,
+    minted: BTreeMap<DepositSolId, MintedSweep>,
     dropped: BTreeMap<DepositSolId, SweptDeposit>,
     quarantined: BTreeMap<DepositSolId, SweptDeposit>,
     in_flight_ids: BTreeMap<Account, DepositSolId>,
@@ -78,6 +82,10 @@ impl Deposits {
 
     pub fn pending_mints(&self) -> &BTreeMap<DepositSolId, PendingMint> {
         &self.pending_mints
+    }
+
+    pub fn minted(&self) -> &BTreeMap<DepositSolId, MintedSweep> {
+        &self.minted
     }
 
     pub fn dropped(&self) -> &BTreeMap<DepositSolId, SweptDeposit> {
@@ -110,7 +118,13 @@ impl Deposits {
         }
         if let Some(pending) = self.pending_mints.get(&deposit_id) {
             return DepositSolStatus::Finalized {
-                signature: pending.deposit.signature.into(),
+                signature: pending.sweep_signature().into(),
+            };
+        }
+        if let Some(minted) = self.minted.get(&deposit_id) {
+            return DepositSolStatus::Minted {
+                block_index: *minted.mint_block_index.get(),
+                minted_amount: minted.minted_amount,
             };
         }
         if let Some(dropped) = self.dropped.get(&deposit_id) {
@@ -225,7 +239,12 @@ impl Deposits {
 
     /// Moves every deposit of the given finalized sweep to the pending mints, each with
     /// the amount its mint carries.
-    pub(super) fn credit_sweep(&mut self, signature: &Signature, mints: &[CreditedDeposit]) {
+    pub(super) fn credit_sweep(
+        &mut self,
+        signature: &Signature,
+        mints: &[CreditedDeposit],
+        timestamp: u64,
+    ) {
         let sweep = self.finalized.remove(signature).unwrap_or_else(|| {
             panic!("Attempted to credit sweep {signature} that is not finalized")
         });
@@ -256,6 +275,7 @@ impl Deposits {
                     signature: *signature,
                 },
                 amount_to_mint: mint.amount_to_mint,
+                created_at_time: timestamp,
             };
             assert!(
                 self.pending_mints
@@ -265,6 +285,28 @@ impl Deposits {
                 mint.deposit_id
             );
         }
+    }
+
+    pub(super) fn mint(&mut self, deposit_id: DepositSolId, mint_block_index: LedgerMintIndex) {
+        let pending = self.pending_mints.remove(&deposit_id).unwrap_or_else(|| {
+            panic!("Attempted to mint deposit {deposit_id} that has no pending mint")
+        });
+        self.release_in_flight(deposit_id, &pending.account());
+        self.minted.insert(
+            deposit_id,
+            MintedSweep {
+                deposit: pending.deposit,
+                minted_amount: pending.amount_to_mint,
+                mint_block_index,
+            },
+        );
+    }
+
+    pub(super) fn quarantine_pending_mint(&mut self, deposit_id: DepositSolId) {
+        let pending = self.pending_mints.remove(&deposit_id).unwrap_or_else(|| {
+            panic!("Attempted to quarantine deposit {deposit_id} that has no pending mint")
+        });
+        self.quarantined.insert(deposit_id, pending.deposit);
     }
 }
 
@@ -323,4 +365,28 @@ pub struct PendingMint {
     pub deposit: SweptDeposit,
     /// The sweepable amount minus the deposit's share of the transaction fee of the sweep.
     pub amount_to_mint: Lamport,
+    /// The timestamp of the `CreditedSweep` event that enqueued this pending mint.
+    ///
+    /// Every retry of the mint sends this same `created_at_time` to the ckSOL
+    /// ledger, so the ledger deduplicates retries after an unknown outcome.
+    pub created_at_time: u64,
+}
+
+impl PendingMint {
+    pub fn account(&self) -> Account {
+        self.deposit.deposit.account
+    }
+
+    pub fn sweep_signature(&self) -> Signature {
+        self.deposit.signature
+    }
+}
+
+/// A swept deposit whose ckSOL mint landed on the ledger.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MintedSweep {
+    pub deposit: SweptDeposit,
+    /// The sweepable amount minus the deposit's share of the transaction fee of the sweep.
+    pub minted_amount: Lamport,
+    pub mint_block_index: LedgerMintIndex,
 }

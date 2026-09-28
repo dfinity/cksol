@@ -34,15 +34,7 @@ impl<R: Runtime> LedgerClient<R> {
                 0,
             )
             .await
-            .map(|result| {
-                result.map(|index| {
-                    index
-                        .0
-                        .to_u64()
-                        .expect("ledger block index does not fit into u64")
-                        .into()
-                })
-            })
+            .map(|result| result.map(to_ledger_mint_index))
     }
 }
 
@@ -55,4 +47,13 @@ impl<R: Runtime> LedgerClient<R> {
             .update_call(self.ledger_canister_id, "icrc2_transfer_from", (args,), 0)
             .await
     }
+}
+
+pub(crate) fn to_ledger_mint_index(block_index: BlockIndex) -> LedgerMintIndex {
+    LedgerMintIndex::from(
+        block_index
+            .0
+            .to_u64()
+            .expect("ledger block index does not fit into u64"),
+    )
 }

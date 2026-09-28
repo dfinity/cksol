@@ -6,10 +6,15 @@ use super::{
 use crate::{
     constants::GET_RECENT_BLOCK_MAX_TRIES, runtime::CanisterRuntime, signer::SchnorrSigner,
 };
-use candid::{CandidType, Principal};
+use async_trait::async_trait;
+use candid::{
+    CandidType, Principal,
+    utils::{ArgumentEncoder, decode_args, encode_args},
+};
 use ic_canister_runtime::{IcError, Runtime, StubRuntime};
 use ic_cdk_management_canister::{SchnorrPublicKeyArgs, SchnorrPublicKeyResult};
 use icrc_ledger_types::icrc1::account::Account;
+use serde::de::DeserializeOwned;
 use sol_rpc_types::{MultiRpcResult, RpcResult, Signature, Slot};
 use std::{
     future::Future,
@@ -22,7 +27,7 @@ pub const TEST_CANISTER_ID: Principal = Principal::from_slice(&[0xCA; 10]);
 
 #[derive(Clone, Default)]
 pub struct TestCanisterRuntime {
-    inter_canister_call_runtime: StubRuntime,
+    inter_canister_call_runtime: RecordingStubRuntime,
     signer: MockSchnorrSigner,
     times: Stubs<u64>,
     expects_charges: bool,
@@ -50,14 +55,26 @@ impl TestCanisterRuntime {
     }
 
     pub fn add_stub_response<Out: CandidType>(mut self, response: Out) -> Self {
-        self.inter_canister_call_runtime =
-            self.inter_canister_call_runtime.add_stub_response(response);
+        self.inter_canister_call_runtime.stub = self
+            .inter_canister_call_runtime
+            .stub
+            .add_stub_response(response);
         self
     }
 
     pub fn add_stub_error(mut self, error: IcError) -> Self {
-        self.inter_canister_call_runtime = self.inter_canister_call_runtime.add_stub_error(error);
+        self.inter_canister_call_runtime.stub =
+            self.inter_canister_call_runtime.stub.add_stub_error(error);
         self
+    }
+
+    /// The inter-canister update calls made through this runtime, in call order.
+    pub fn sent_update_calls(&self) -> Vec<SentUpdateCall> {
+        self.inter_canister_call_runtime
+            .sent_update_calls
+            .lock()
+            .unwrap()
+            .clone()
     }
 
     pub fn add_recent_block(mut self, result: RpcResult<Slot>) -> Self {
@@ -183,6 +200,63 @@ impl CanisterRuntime for TestCanisterRuntime {
         *self.schnorr_public_key_call_count.lock().unwrap() += 1;
         suspend_like_an_inter_canister_call().await;
         self.schnorr_public_key_results.next()
+    }
+}
+
+/// Wraps [`StubRuntime`] to record the method and Candid-encoded arguments of every
+/// update call, so that a test can assert exactly what was sent.
+#[derive(Clone, Default)]
+struct RecordingStubRuntime {
+    stub: StubRuntime,
+    sent_update_calls: Arc<Mutex<Vec<SentUpdateCall>>>,
+}
+
+/// An inter-canister update call recorded by [`TestCanisterRuntime`].
+#[derive(Clone, Debug, PartialEq)]
+pub struct SentUpdateCall {
+    pub method: String,
+    args: Vec<u8>,
+}
+
+impl SentUpdateCall {
+    /// Decodes the single Candid argument of the recorded call.
+    pub fn single_arg<Arg: CandidType + DeserializeOwned>(&self) -> Arg {
+        let (arg,) = decode_args(&self.args).expect("Failed to decode the call argument");
+        arg
+    }
+}
+
+#[async_trait]
+impl Runtime for RecordingStubRuntime {
+    async fn update_call<In, Out>(
+        &self,
+        id: Principal,
+        method: &str,
+        args: In,
+        cycles: u128,
+    ) -> Result<Out, IcError>
+    where
+        In: ArgumentEncoder + Send,
+        Out: CandidType + DeserializeOwned,
+    {
+        self.sent_update_calls.lock().unwrap().push(SentUpdateCall {
+            method: method.to_string(),
+            args: encode_args(args).expect("Failed to encode the call arguments"),
+        });
+        self.stub.update_call(id, method, (), cycles).await
+    }
+
+    async fn query_call<In, Out>(
+        &self,
+        id: Principal,
+        method: &str,
+        args: In,
+    ) -> Result<Out, IcError>
+    where
+        In: ArgumentEncoder + Send,
+        Out: CandidType + DeserializeOwned,
+    {
+        self.stub.query_call(id, method, args).await
     }
 }
 
