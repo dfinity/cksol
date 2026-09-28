@@ -247,8 +247,8 @@ icp canister call -e prod cksol_minter withdrawal_status \
 ### Prerequisites
 
 Install [`mise`](https://mise.jdx.dev/) and then provision the pinned toolchain
-(Rust with the `wasm32-unknown-unknown` target, `cargo-sort`, `canbench` and
-[`ic-wasm`](https://github.com/dfinity/ic-wasm)):
+(Rust with the `wasm32-unknown-unknown` target, `cargo-sort`, `canbench`,
+[`ic-wasm`](https://github.com/dfinity/ic-wasm), `cargo-llvm-cov` and `jq`):
 
 ```sh
 mise install
