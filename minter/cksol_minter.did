@@ -45,44 +45,6 @@ type LedgerMintIndex = nat64;
 // Index of a burn transaction on the ckSOL ledger.
 type LedgerBurnIndex = nat64;
 
-// Arguments for a request to the `process_deposit` endpoint.
-type ProcessDepositArgs = record {
-    // If provided, update the balance for this principal.
-    //
-    // If not set, defaults to the caller's principal.
-    // The resolved owner must be a non-anonymous principal.
-    owner: opt principal;
-    // The subaccount for which to update the balance.
-    subaccount: opt blob;
-    // Signature of the deposit transaction.
-    signature: Signature;
-};
-
-// An error from the `process_deposit` ckSOL minter endpoint.
-type ProcessDepositError = variant {
-    // Insufficient cycles attached by the caller to complete the `process_deposit` call.
-    InsufficientCycles : InsufficientCyclesError;
-    // The minter experiences temporary issues, try the call again later.
-    TemporarilyUnavailable : text;
-    // There is already a concurrent `process_deposit` invocation from the same caller.
-    AlreadyProcessing;
-    // No matching transaction was found for the given signature.
-    //
-    // This can also happen if the transaction is not yet finalized, in which
-    // case trying this call again later may result in a successful mint.
-    TransactionNotFound;
-    // The Solana transaction with the given signature is not a valid
-    // deposit to the owner's deposit address.
-    InvalidDepositTransaction : text;
-    // The deposit amount does not cover the deposit fee.
-    ValueTooSmall : record {
-        // The minimum deposit amount for the deposit to be accepted.
-        minimum_deposit_amount: Lamport;
-        // The amount that was deposited.
-        deposit_amount: Lamport;
-    };
-};
-
 // Insufficient cycles attached by the caller to complete the call.
 type InsufficientCyclesError = record {
     // The amount of cycles the call requires.
@@ -90,39 +52,6 @@ type InsufficientCyclesError = record {
     // The amount of cycles received by the minter.
     received: nat;
 };
-
-// The outcome of processing a Solana deposit transaction.
-type DepositStatus = variant {
-    // The transaction is a valid deposit, but the corresponding ckSOL tokens
-    // have not yet been minted.
-    Processing : record {
-        // The deposit amount.
-        deposit_amount: Lamport;
-        // The amount to mint (deposit amount minus fees).
-        amount_to_mint: Lamport;
-        // The deposit identifier.
-        deposit_id: DepositId;
-    };
-    // The transaction is a valid deposit, but it is unknown whether the
-    // corresponding ckSOL tokens have been minted, most likely because there
-    // was an unexpected panic while trying to mint.
-    //
-    // The deposit is quarantined to avoid any double minting and will not
-    // be further processed without manual intervention.
-    Quarantined : DepositId;
-    // The minter accepted the deposit and minted ckSOL tokens on the ledger.
-    Minted : record {
-        // The mint transaction index on the ledger.
-        block_index: LedgerMintIndex;
-        // The minted amount (deposit amount minus fees).
-        minted_amount: Lamport;
-        // The deposit identifier.
-        deposit_id: DepositId;
-    };
-};
-
-// Represents the result of a call to the `process_deposit` endpoint.
-type ProcessDepositResult = variant { Ok : DepositStatus; Err : ProcessDepositError };
 
 // Arguments for a request to the `deposit_sol` endpoint.
 type DepositSolArgs = record {
@@ -233,7 +162,6 @@ type InitArgs = record {
     sol_rpc_canister_id : principal;
     ledger_canister_id : principal;
     master_key_name : Ed25519KeyName;
-    manual_deposit_fee : Lamport;
     automated_deposit_fee : Lamport;
     deposit_consolidation_fee : nat64;
     minimum_withdrawal_amount : Lamport;
@@ -245,7 +173,6 @@ type InitArgs = record {
 
 // Information about the ckSOL minter canister.
 type MinterInfo = record {
-    manual_deposit_fee : Lamport;
     automated_deposit_fee : Lamport;
     deposit_consolidation_fee : nat;
     minimum_withdrawal_amount : Lamport;
@@ -270,7 +197,6 @@ type MinterArg = variant {
 // removed, or renamed across releases.
 type UpgradeArgs = record {
     sol_rpc_canister_id : opt principal;
-    manual_deposit_fee : opt Lamport;
     automated_deposit_fee : opt Lamport;
     deposit_consolidation_fee : opt nat64;
     minimum_withdrawal_amount : opt Lamport;
@@ -440,42 +366,6 @@ type EventType = variant {
     // burned the requested amount of ckSOL.
     // The Solana transaction was not generated yet.
     AcceptedWithdrawalRequest : AcceptedWithdrawalRequest;
-    // A user manually submitted a valid ckSOL deposit transaction via
-    // `process_deposit`. ckSOL tokens have not yet been minted for this deposit.
-    AcceptedManualDeposit : record {
-        // The signature of the Solana deposit transaction.
-        signature: Signature;
-        // The account to which the minter should mint ckSOL.
-        account: Account;
-        // The amount that was deposited.
-        deposit_amount: Lamport;
-        // The amount of ckSOL tokens to mint for this deposit.
-        // This amount is generally lower than `deposit_amount` due
-        // to the deposit fee.
-        amount_to_mint: Lamport;
-    };
-    // The minter discovered a Solana transaction that is a valid ckSOL
-    // deposit, but it is unknown whether ckSOL tokens were minted for
-    // it or not, most likely because there was an unexpected panic in
-    // the callback.
-    //
-    // The deposit is quarantined to avoid any double minting and
-    // will not be further processed without manual intervention.
-    QuarantinedDeposit : record {
-        // The signature of the Solana deposit transaction.
-        signature: Signature;
-        // The account to which the minter should mint ckSOL.
-        account: Account;
-    };
-    // The minter minted ckSOL in response to a deposit.
-    Minted : record {
-        // The signature of the Solana deposit transaction.
-        signature: Signature;
-        // The account to which the minter minted ckSOL.
-        account: Account;
-        // The transaction index on the ckSOL ledger.
-        mint_block_index: LedgerMintIndex;
-    };
     // Submitted a Solana transaction.
     SubmittedTransaction : record {
         // The signature of the Solana transaction.
@@ -574,18 +464,6 @@ type EventType = variant {
     };
 };
 
-// A single transaction can deposit to multiple accounts, so the signature alone
-// is not sufficient. The combination of the Solana transaction signature and the
-// account it targets together uniquely identify a deposit. If a transaction
-// contains multiple transfers to the same account, they are aggregated into a
-// single deposit.
-type DepositId = record {
-    // The signature of the Solana deposit transaction.
-    signature: Signature;
-    // The account to which the minter should mint ckSOL.
-    account: Account;
-};
-
 // A minter event.
 //
 // *WARNING*: This type is used exclusively by the debug `get_events` endpoint.
@@ -619,15 +497,6 @@ service : (MinterArg) -> {
     // If the owner is not set, it defaults to the caller's principal.
     // The resolved owner must be a non-anonymous principal.
     get_deposit_address: (GetDepositAddressArgs) -> (Address) query;
-
-    // Update the ckSOL balance of the given owner with the funds
-    // deposited in a specific Solana transaction.
-    //
-    // Safe to call multiple times with the same signature: if the deposit was
-    // already accepted, the call returns the current status (`Processing`,
-    // `Quarantined`, or `Minted`) without charging additional cycles. If minting
-    // previously failed (status `Processing`), calling again will retry the mint.
-    process_deposit: (ProcessDepositArgs) -> (ProcessDepositResult);
 
     // Queues the deposit address of the given account for a sweep
     // to the minter's main account and returns the identifier of

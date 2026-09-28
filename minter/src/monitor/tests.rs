@@ -10,8 +10,8 @@ use crate::{
     storage::reset_events,
     test_fixtures::{
         EventsAssert, MINIMUM_WITHDRAWAL_AMOUNT, account, account_signature,
-        confirmed_block_at_height, deposit_id, events, init_balance, init_schnorr_master_key,
-        init_state, minter_signature, runtime::TestCanisterRuntime, signature,
+        confirmed_block_at_height, events, init_balance, init_schnorr_master_key, init_state,
+        minter_signature, runtime::TestCanisterRuntime, signature,
     },
 };
 use sol_rpc_types::{
@@ -39,16 +39,17 @@ mod finalization {
     #[tokio::test]
     async fn should_return_early_if_no_submitted_transactions() {
         setup();
+        let events_before = EventsAssert::from_recorded();
 
         finalize_transactions(TestCanisterRuntime::new().with_increasing_time()).await;
 
-        EventsAssert::assert_no_events_recorded();
+        assert_eq!(EventsAssert::from_recorded(), events_before);
     }
 
     #[tokio::test]
     async fn should_return_early_if_task_already_active() {
         setup();
-        submit_consolidation_transaction(CURRENT_BLOCK_HEIGHT);
+        submit_withdrawal_transaction(CURRENT_BLOCK_HEIGHT);
 
         mutate_state(|s| {
             s.active_tasks_mut().insert(TaskType::FinalizeTransactions);
@@ -65,7 +66,7 @@ mod finalization {
     #[tokio::test]
     async fn should_return_early_if_fetching_current_block_fails() {
         setup();
-        submit_consolidation_transaction(EXPIRED_BLOCK_HEIGHT);
+        submit_withdrawal_transaction(EXPIRED_BLOCK_HEIGHT);
 
         let events_before = EventsAssert::from_recorded();
 
@@ -84,7 +85,7 @@ mod finalization {
 
         let num = MAX_CONCURRENT_RPC_CALLS * MAX_SIGNATURES_PER_STATUS_CHECK + 1;
         for i in 0..num {
-            submit_consolidation_transaction_with_signature(i, CURRENT_BLOCK_HEIGHT);
+            submit_withdrawal_transaction_with_signature(i, CURRENT_BLOCK_HEIGHT);
         }
 
         // Round 1: finalizes MAX_CONCURRENT_RPC_CALLS batches, 1 transaction unchecked → reschedule
@@ -122,7 +123,7 @@ mod finalization {
     async fn should_finalize_transaction_with_finalized_status() {
         setup();
 
-        let signature = submit_consolidation_transaction(CURRENT_BLOCK_HEIGHT);
+        let signature = submit_withdrawal_transaction(CURRENT_BLOCK_HEIGHT);
 
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
@@ -158,7 +159,7 @@ mod finalization {
         reset_events();
         setup();
 
-        submit_consolidation_transaction(block_height);
+        submit_withdrawal_transaction(block_height);
 
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
@@ -180,7 +181,7 @@ mod finalization {
     async fn should_record_failed_transaction_event_on_error() {
         setup();
 
-        let signature = submit_consolidation_transaction(CURRENT_BLOCK_HEIGHT);
+        let signature = submit_withdrawal_transaction(CURRENT_BLOCK_HEIGHT);
 
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
@@ -214,9 +215,9 @@ mod finalization {
         let sig_a = 0x01;
         let sig_b = 0x02;
         let sig_c = 0x03;
-        submit_consolidation_transaction_with_signature(sig_a, CURRENT_BLOCK_HEIGHT);
-        submit_consolidation_transaction_with_signature(sig_b, CURRENT_BLOCK_HEIGHT);
-        submit_consolidation_transaction_with_signature(sig_c, CURRENT_BLOCK_HEIGHT);
+        submit_withdrawal_transaction_with_signature(sig_a, CURRENT_BLOCK_HEIGHT);
+        submit_withdrawal_transaction_with_signature(sig_b, CURRENT_BLOCK_HEIGHT);
+        submit_withdrawal_transaction_with_signature(sig_c, CURRENT_BLOCK_HEIGHT);
 
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
@@ -275,7 +276,7 @@ mod finalization {
             reset_state();
             reset_events();
             setup();
-            let signature = submit_consolidation_transaction(case.transaction_block_height);
+            let signature = submit_withdrawal_transaction(case.transaction_block_height);
             let runtime = TestCanisterRuntime::new()
                 .with_increasing_time()
                 .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
@@ -338,16 +339,17 @@ mod resubmission {
     #[tokio::test]
     async fn should_return_early_if_no_transactions_to_resubmit() {
         setup();
+        let events_before = EventsAssert::from_recorded();
 
         resubmit_transactions(TestCanisterRuntime::new().with_increasing_time()).await;
 
-        EventsAssert::assert_no_events_recorded();
+        assert_eq!(EventsAssert::from_recorded(), events_before);
     }
 
     #[tokio::test]
     async fn should_return_early_if_task_already_active() {
         setup();
-        let sig = submit_consolidation_transaction(EXPIRED_BLOCK_HEIGHT);
+        let sig = submit_withdrawal_transaction(EXPIRED_BLOCK_HEIGHT);
         events::expire_transaction(sig);
 
         mutate_state(|s| {
@@ -366,7 +368,7 @@ mod resubmission {
     async fn should_resubmit_expired_transaction_with_no_status() {
         setup();
 
-        let old_signature = submit_consolidation_transaction(EXPIRED_BLOCK_HEIGHT);
+        let old_signature = submit_withdrawal_transaction(EXPIRED_BLOCK_HEIGHT);
         let new_signature = account_signature(&account(1));
         events::expire_transaction(old_signature);
 
@@ -442,7 +444,7 @@ mod resubmission {
     async fn should_not_resubmit_expired_transaction_if_status_check_fails() {
         setup();
 
-        submit_consolidation_transaction(EXPIRED_BLOCK_HEIGHT);
+        submit_withdrawal_transaction(EXPIRED_BLOCK_HEIGHT);
 
         let events_before = EventsAssert::from_recorded();
 
@@ -471,7 +473,7 @@ mod resubmission {
     async fn should_record_resubmission_event_even_if_submission_fails() {
         setup();
 
-        let old_signature = submit_consolidation_transaction(EXPIRED_BLOCK_HEIGHT);
+        let old_signature = submit_withdrawal_transaction(EXPIRED_BLOCK_HEIGHT);
         let new_signature = account_signature(&account(1));
         events::expire_transaction(old_signature);
 
@@ -503,7 +505,7 @@ mod resubmission {
 
         let num_transactions = MAX_CONCURRENT_RPC_CALLS + 1;
         for i in 0..num_transactions {
-            let sig = submit_consolidation_transaction_with_signature(i, EXPIRED_BLOCK_HEIGHT);
+            let sig = submit_withdrawal_transaction_with_signature(i, EXPIRED_BLOCK_HEIGHT);
             events::expire_transaction(sig);
         }
 
@@ -557,6 +559,7 @@ mod resubmission {
 
 fn setup() {
     init_state();
+    init_balance();
     init_schnorr_master_key();
 }
 
@@ -564,17 +567,16 @@ fn current_block() -> ConfirmedBlock {
     confirmed_block_at_height(CURRENT_BLOCK_HEIGHT)
 }
 
-fn submit_consolidation_transaction(block_height: BlockHeight) -> solana_signature::Signature {
-    submit_consolidation_transaction_with_signature(1, block_height)
+fn submit_withdrawal_transaction(block_height: BlockHeight) -> solana_signature::Signature {
+    submit_withdrawal_transaction_with_signature(1, block_height)
 }
 
-fn submit_consolidation_transaction_with_signature(
+fn submit_withdrawal_transaction_with_signature(
     i: usize,
     block_height: BlockHeight,
 ) -> solana_signature::Signature {
     let signature = signature(i);
-    events::accept_deposit(deposit_id(i), 1_000_000);
-    events::mint_deposit(deposit_id(i), i as u64);
-    events::submit_consolidation_at_height(signature, account(i), block_height, vec![i as u64]);
+    events::accept_withdrawal(account(i), i as u64, MINIMUM_WITHDRAWAL_AMOUNT);
+    events::submit_withdrawal_at_height(signature, block_height, vec![i as u64]);
     signature
 }

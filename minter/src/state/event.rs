@@ -57,38 +57,11 @@ pub enum EventType {
     /// The minter upgraded with the specified arguments.
     #[n(1)]
     Upgrade(#[n(0)] UpgradeArgs),
-    /// A user manually submitted a valid ckSOL deposit transaction via
-    /// `process_deposit`. ckSOL tokens have not yet been minted for this deposit.
-    #[n(2)]
-    AcceptedManualDeposit {
-        #[n(0)]
-        deposit_id: DepositId,
-        #[n(1)]
-        deposit_amount: Lamport,
-        #[n(2)]
-        amount_to_mint: Lamport,
-    },
-    /// The minter discovered a Solana transaction that is a valid ckSOL
-    /// deposit, but it is unknown whether ckSOL tokens were minted for
-    /// it or not, most likely because there was an unexpected panic in
-    /// the callback.
-    ///
-    /// The deposit is quarantined to avoid any double minting and
-    /// will not be further processed without manual intervention.
-    #[n(3)]
-    QuarantinedDeposit(#[n(0)] DepositId),
-    #[n(4)]
-    Minted {
-        #[n(0)]
-        deposit_id: DepositId,
-        #[cbor(n(1), with = "cbor::id")]
-        mint_block_index: LedgerMintIndex,
-    },
     /// The minter burned ckSOL for a withdrawal request.
-    #[n(5)]
+    #[n(2)]
     AcceptedWithdrawalRequest(#[n(0)] WithdrawalRequest),
     /// The minter submitted a Solana transaction.
-    #[n(6)]
+    #[n(3)]
     SubmittedTransaction {
         /// The transaction signature.
         #[cbor(n(0), with = "cbor::signature")]
@@ -109,7 +82,7 @@ pub enum EventType {
     },
     /// A previously submitted transaction was resubmitted with a new signature.
     /// The transaction message and signers remain the same.
-    #[n(7)]
+    #[n(4)]
     ResubmittedTransaction {
         /// The signature of the old transaction being replaced
         #[cbor(n(0), with = "cbor::signature")]
@@ -122,14 +95,14 @@ pub enum EventType {
         new_block_height: BlockHeight,
     },
     /// A previously submitted Solana transaction has been finalized successfully.
-    #[n(8)]
+    #[n(5)]
     SucceededTransaction {
         /// The signature of the succeeded Solana transaction.
         #[cbor(n(0), with = "cbor::signature")]
         signature: Signature,
     },
     /// A previously submitted Solana transaction has failed.
-    #[n(9)]
+    #[n(6)]
     FailedTransaction {
         /// The signature of the failed Solana transaction.
         #[cbor(n(0), with = "cbor::signature")]
@@ -139,7 +112,7 @@ pub enum EventType {
     /// and a null on-chain status, meaning it will never be executed.
     /// A withdrawal or consolidation transaction is marked for resubmission;
     /// the deposits of a sweep transaction are dropped instead.
-    #[n(10)]
+    #[n(7)]
     ExpiredTransaction {
         /// The signature of the expired Solana transaction.
         #[cbor(n(0), with = "cbor::signature")]
@@ -147,7 +120,7 @@ pub enum EventType {
     },
     /// A user queued the deposit address of an account for a sweep via `deposit_sol`.
     /// The deposit id is the next sequence number of the minter at the time of the event.
-    #[n(11)]
+    #[n(8)]
     QueuedDeposit {
         #[n(0)]
         deposit_id: DepositSolId,
@@ -160,7 +133,7 @@ pub enum EventType {
     },
     /// The minter read the amount that the finalized sweep transaction moved to its
     /// main account and enqueued a pending mint for each deposit of that sweep.
-    #[n(12)]
+    #[n(9)]
     CreditedSweep {
         /// The signature of the finalized sweep transaction.
         #[cbor(n(0), with = "cbor::signature")]
@@ -177,7 +150,7 @@ pub enum EventType {
     ///
     /// The deposits are quarantined to avoid any double minting and will not be further
     /// processed without manual intervention.
-    #[n(13)]
+    #[n(10)]
     QuarantinedSweep {
         /// The signature of the finalized sweep transaction.
         #[cbor(n(0), with = "cbor::signature")]
@@ -185,7 +158,7 @@ pub enum EventType {
     },
     /// The minter minted ckSOL on the ledger for a swept deposit whose sweep
     /// was credited.
-    #[n(14)]
+    #[n(11)]
     MintedSweptDeposit {
         /// The identifier of the minted deposit.
         #[n(0)]
@@ -207,7 +180,7 @@ pub enum EventType {
     /// must therefore first search the ledger for a mint whose memo carries the
     /// sweep signature before crediting by hand, otherwise a double mint
     /// results.
-    #[n(15)]
+    #[n(12)]
     QuarantinedPendingMint {
         /// The identifier of the deposit whose pending mint was quarantined.
         #[n(0)]
@@ -290,23 +263,6 @@ pub enum TransactionPurpose {
         #[n(0)]
         deposit_ids: Vec<DepositSolId>,
     },
-}
-
-#[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd, Debug, Decode, Encode)]
-pub struct DepositId {
-    #[cbor(n(0), with = "cbor::signature")]
-    pub signature: Signature,
-    #[n(1)]
-    pub account: Account,
-}
-
-impl From<DepositId> for cksol_types::DepositId {
-    fn from(id: DepositId) -> Self {
-        Self {
-            signature: id.signature.into(),
-            account: id.account,
-        }
-    }
 }
 
 impl Storable for Event {

@@ -5,12 +5,12 @@ use crate::{
     rpc::BlockHeight,
     sol_transfer::{BATCH_WITHDRAWAL_TX_FEE, MAX_SIGNATURES, MAX_WITHDRAWALS_PER_TX},
     state::event::{
-        CreditedDeposit, DepositId, Signer, TransactionPurpose, VersionedMessage, WithdrawalRequest,
+        CreditedDeposit, Signer, TransactionPurpose, VersionedMessage, WithdrawalRequest,
     },
     utils::insertion_ordered_map::InsertionOrderedMap,
 };
 use candid::Principal;
-use cksol_types::{DepositSolId, DepositStatus, TxFinalizedStatus, WithdrawalStatus};
+use cksol_types::{DepositSolId, TxFinalizedStatus, WithdrawalStatus};
 use cksol_types_internal::SolanaNetwork;
 use cksol_types_internal::{Ed25519KeyName, InitArgs, UpgradeArgs};
 use ic_canister_runtime::Runtime;
@@ -95,20 +95,15 @@ pub struct State {
     ledger_canister_id: Principal,
     sol_rpc_canister_id: Principal,
     solana_network: SolanaNetwork,
-    manual_deposit_fee: Lamport,
     automated_deposit_fee: Lamport,
     withdrawal_fee: Lamport,
     minimum_withdrawal_amount: Lamport,
     minimum_deposit_amount: Lamport,
     process_deposit_required_cycles: u128,
     deposit_consolidation_fee: u128,
-    pending_process_deposit_request_guards: BTreeSet<Account>,
     pending_deposit_sol_request_guards: BTreeSet<Account>,
     pending_withdrawal_request_guards: BTreeSet<Account>,
     deposits: Deposits,
-    accepted_deposits: InsertionOrderedMap<DepositId, Deposit>,
-    quarantined_deposits: InsertionOrderedMap<DepositId, Deposit>,
-    minted_deposits: InsertionOrderedMap<DepositId, MintedDeposit>,
     pending_withdrawal_requests: BTreeMap<LedgerBurnIndex, PendingWithdrawalRequest>,
     sent_withdrawal_requests: BTreeMap<LedgerBurnIndex, SentWithdrawalRequest>,
     successful_withdrawal_requests: BTreeMap<LedgerBurnIndex, SentWithdrawalRequest>,
@@ -157,10 +152,6 @@ impl State {
         self.master_key_name
     }
 
-    pub fn manual_deposit_fee(&self) -> u64 {
-        self.manual_deposit_fee
-    }
-
     pub fn automated_deposit_fee(&self) -> u64 {
         self.automated_deposit_fee
     }
@@ -189,20 +180,8 @@ impl State {
         self.process_deposit_required_cycles
     }
 
-    pub fn accepted_deposits(&self) -> &InsertionOrderedMap<DepositId, Deposit> {
-        &self.accepted_deposits
-    }
-
     pub fn deposits(&self) -> &Deposits {
         &self.deposits
-    }
-
-    pub fn quarantined_deposits(&self) -> &InsertionOrderedMap<DepositId, Deposit> {
-        &self.quarantined_deposits
-    }
-
-    pub fn minted_deposits(&self) -> &InsertionOrderedMap<DepositId, MintedDeposit> {
-        &self.minted_deposits
     }
 
     pub fn sent_withdrawal_requests(&self) -> &BTreeMap<LedgerBurnIndex, SentWithdrawalRequest> {
@@ -282,35 +261,6 @@ impl State {
         &self.consolidation_transactions
     }
 
-    pub fn deposit_status(&self, deposit_id: &DepositId) -> Option<DepositStatus> {
-        if self.quarantined_deposits.contains_key(deposit_id) {
-            return Some(DepositStatus::Quarantined((*deposit_id).into()));
-        }
-        if let Some(Deposit {
-            deposit_amount,
-            amount_to_mint,
-        }) = self.accepted_deposits.get(deposit_id)
-        {
-            return Some(DepositStatus::Processing {
-                deposit_amount: *deposit_amount,
-                amount_to_mint: *amount_to_mint,
-                deposit_id: (*deposit_id).into(),
-            });
-        }
-        if let Some(MintedDeposit {
-            block_index,
-            deposit: Deposit { amount_to_mint, .. },
-        }) = self.minted_deposits.get(deposit_id)
-        {
-            return Some(DepositStatus::Minted {
-                block_index: *block_index.get(),
-                minted_amount: *amount_to_mint,
-                deposit_id: (*deposit_id).into(),
-            });
-        }
-        None
-    }
-
     pub fn sol_rpc_client<R: Runtime>(&self, runtime: R) -> SolRpcClient<R> {
         SolRpcClient::builder(runtime, self.sol_rpc_canister_id)
             .with_rpc_sources(RpcSources::Default(SolanaCluster::from(
@@ -325,10 +275,6 @@ impl State {
 
     pub fn ledger_client<R: Runtime>(&self, runtime: R) -> LedgerClient<R> {
         LedgerClient::new(runtime, self.ledger_canister_id)
-    }
-
-    pub fn pending_process_deposit_request_guards_mut(&mut self) -> &mut BTreeSet<Account> {
-        &mut self.pending_process_deposit_request_guards
     }
 
     pub fn pending_deposit_sol_request_guards_mut(&mut self) -> &mut BTreeSet<Account> {
@@ -357,16 +303,10 @@ impl State {
                 "ERROR: provided canister IDs are not distinct!".to_string(),
             ));
         }
-        if self.automated_deposit_fee < self.manual_deposit_fee {
-            return Err(InvalidStateError::InvalidDepositFees {
-                automated_deposit_fee: self.automated_deposit_fee,
-                manual_deposit_fee: self.manual_deposit_fee,
-            });
-        }
         if self.minimum_deposit_amount < self.automated_deposit_fee {
             return Err(InvalidStateError::InvalidDepositFees {
                 automated_deposit_fee: self.automated_deposit_fee,
-                manual_deposit_fee: self.manual_deposit_fee,
+                minimum_deposit_amount: self.minimum_deposit_amount,
             });
         }
         let maximum_sweep_fee = MAX_SIGNATURES * FEE_PER_SIGNATURE;
@@ -409,7 +349,6 @@ impl State {
         &mut self,
         UpgradeArgs {
             sol_rpc_canister_id,
-            manual_deposit_fee,
             automated_deposit_fee,
             minimum_withdrawal_amount,
             minimum_deposit_amount,
@@ -420,9 +359,6 @@ impl State {
     ) -> Result<(), InvalidStateError> {
         if let Some(sol_rpc_canister_id) = sol_rpc_canister_id {
             self.sol_rpc_canister_id = sol_rpc_canister_id;
-        }
-        if let Some(manual_deposit_fee) = manual_deposit_fee {
-            self.manual_deposit_fee = manual_deposit_fee;
         }
         if let Some(automated_deposit_fee) = automated_deposit_fee {
             self.automated_deposit_fee = automated_deposit_fee;
@@ -443,33 +379,6 @@ impl State {
             self.deposit_consolidation_fee = deposit_consolidation_fee as u128;
         }
         self.validate()
-    }
-
-    fn process_accepted_deposit(
-        &mut self,
-        deposit_id: &DepositId,
-        deposit_amount: &Lamport,
-        amount_to_mint: &Lamport,
-    ) {
-        assert!(
-            !self.quarantined_deposits.contains_key(deposit_id),
-            "Attempted to accept already quarantined deposit: {deposit_id:?}"
-        );
-        assert!(
-            !self.minted_deposits.contains_key(deposit_id),
-            "Attempted to accept an already minted deposit: {deposit_id:?}"
-        );
-        assert_eq!(
-            self.accepted_deposits.insert(
-                *deposit_id,
-                Deposit {
-                    deposit_amount: *deposit_amount,
-                    amount_to_mint: *amount_to_mint,
-                }
-            ),
-            None,
-            "Attempted to accept an already accepted deposit: {deposit_id:?}"
-        );
     }
 
     fn process_queued_deposit(
@@ -519,25 +428,6 @@ impl State {
 
     fn process_quarantined_sweep(&mut self, signature: &Signature) {
         self.deposits.quarantine_sweep(signature);
-    }
-
-    fn process_quarantined_deposit(&mut self, deposit_id: &DepositId) {
-        assert!(
-            !self.minted_deposits.contains_key(deposit_id),
-            "Attempted to quarantine an already minted deposit: {deposit_id:?}"
-        );
-        let accepted_deposit = self
-            .accepted_deposits
-            .remove(deposit_id)
-            .unwrap_or_else(|| {
-                panic!("Attempted to quarantine an unknown deposit: {deposit_id:?}")
-            });
-        assert_eq!(
-            self.quarantined_deposits
-                .insert(*deposit_id, accepted_deposit),
-            None,
-            "Attempted to quarantine already quarantined deposit: {deposit_id:?}"
-        );
     }
 
     pub fn withdrawal_status(&self, block_index: u64) -> WithdrawalStatus {
@@ -600,38 +490,6 @@ impl State {
             None,
             "Attempted to accept an already accepted withdrawal request: {:?}",
             request.burn_block_index
-        );
-    }
-
-    fn process_mint(&mut self, deposit_id: &DepositId, mint_block_index: &LedgerMintIndex) {
-        assert!(
-            !self.quarantined_deposits.contains_key(deposit_id),
-            "Attempted to mint ckSOL for a quarantined deposit: {deposit_id:?}",
-        );
-        let deposit = self
-            .accepted_deposits
-            .remove(deposit_id)
-            .unwrap_or_else(|| {
-                panic!("Attempted to mint ckSOL for an unknown deposit: {deposit_id:?}")
-            });
-        assert_eq!(
-            self.deposits_to_consolidate.insert(
-                *mint_block_index,
-                (deposit_id.account, deposit.deposit_amount)
-            ),
-            None,
-            "Attempted to consolidate funds for an already consolidated mint index: {mint_block_index:?}",
-        );
-        assert_eq!(
-            self.minted_deposits.insert(
-                *deposit_id,
-                MintedDeposit {
-                    block_index: *mint_block_index,
-                    deposit,
-                }
-            ),
-            None,
-            "Attempted to mint ckSOL twice for the same deposit: {deposit_id:?}",
         );
     }
 
@@ -839,7 +697,7 @@ pub enum InvalidStateError {
     InvalidCanisterId(String),
     InvalidDepositFees {
         automated_deposit_fee: u64,
-        manual_deposit_fee: u64,
+        minimum_deposit_amount: u64,
     },
     InvalidMinimumDepositAmount {
         minimum_deposit_amount: u64,
@@ -870,7 +728,6 @@ impl TryFrom<InitArgs> for State {
         InitArgs {
             sol_rpc_canister_id,
             ledger_canister_id,
-            manual_deposit_fee,
             automated_deposit_fee,
             master_key_name,
             minimum_withdrawal_amount,
@@ -887,20 +744,15 @@ impl TryFrom<InitArgs> for State {
             ledger_canister_id,
             sol_rpc_canister_id,
             solana_network,
-            manual_deposit_fee,
             automated_deposit_fee,
             withdrawal_fee,
             minimum_withdrawal_amount,
             minimum_deposit_amount,
             process_deposit_required_cycles: process_deposit_required_cycles as u128,
             deposit_consolidation_fee: deposit_consolidation_fee as u128,
-            pending_process_deposit_request_guards: BTreeSet::new(),
             pending_deposit_sol_request_guards: BTreeSet::new(),
             pending_withdrawal_request_guards: BTreeSet::new(),
             deposits: Deposits::default(),
-            accepted_deposits: InsertionOrderedMap::new(),
-            quarantined_deposits: InsertionOrderedMap::new(),
-            minted_deposits: InsertionOrderedMap::new(),
             pending_withdrawal_requests: BTreeMap::new(),
             sent_withdrawal_requests: BTreeMap::new(),
             successful_withdrawal_requests: BTreeMap::new(),
@@ -978,18 +830,6 @@ pub struct SentWithdrawalRequest {
 pub struct SchnorrPublicKey {
     pub public_key: PublicKey,
     pub chain_code: [u8; 32],
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Deposit {
-    pub deposit_amount: Lamport,
-    pub amount_to_mint: Lamport,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct MintedDeposit {
-    pub block_index: LedgerMintIndex,
-    pub deposit: Deposit,
 }
 
 #[derive(Copy, Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
