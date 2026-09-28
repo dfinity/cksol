@@ -53,7 +53,7 @@ pub struct InitArgs {
     pub withdrawal_fee: Lamport,
     /// Minimum cycles the caller must attach when calling `deposit_sol`.
     #[cfg_attr(feature = "event", n(7))]
-    pub process_deposit_required_cycles: u64,
+    pub deposit_sol_required_cycles: u64,
     /// The Solana network to use.
     #[cfg_attr(feature = "event", n(8))]
     pub solana_network: SolanaNetwork,
@@ -83,7 +83,7 @@ pub struct UpgradeArgs {
     pub withdrawal_fee: Option<Lamport>,
     /// New minimum cycles the caller must attach when calling `deposit_sol`.
     #[cfg_attr(feature = "event", n(5))]
-    pub process_deposit_required_cycles: Option<u64>,
+    pub deposit_sol_required_cycles: Option<u64>,
     /// New extra cycles charged per `deposit_sol` call to offset the cost of the sweep.
     #[cfg_attr(feature = "event", n(6))]
     pub deposit_consolidation_fee: Option<u64>,

@@ -1,12 +1,12 @@
 use super::{event::*, *};
 use crate::{
-    constants::{FEE_PER_SIGNATURE, GET_TRANSACTION_CYCLES, RENT_EXEMPTION_THRESHOLD},
+    constants::{FEE_PER_SIGNATURE, GET_BALANCE_CYCLES, RENT_EXEMPTION_THRESHOLD},
     rpc::BlockHeight,
     sol_transfer::MAX_SIGNATURES,
     state::{audit::process_event, read_state},
     test_fixtures::{
-        AUTOMATED_DEPOSIT_FEE, DEPOSIT_CONSOLIDATION_FEE, MINIMUM_DEPOSIT_AMOUNT,
-        MINIMUM_WITHDRAWAL_AMOUNT, PROCESS_DEPOSIT_REQUIRED_CYCLES, WITHDRAWAL_FEE, account,
+        AUTOMATED_DEPOSIT_FEE, DEPOSIT_CONSOLIDATION_FEE, DEPOSIT_SOL_REQUIRED_CYCLES,
+        MINIMUM_DEPOSIT_AMOUNT, MINIMUM_WITHDRAWAL_AMOUNT, WITHDRAWAL_FEE, account,
         arb::arb_event,
         events::{
             accept_withdrawal, accept_withdrawal_at, credit_sweep, expire_transaction,
@@ -504,25 +504,25 @@ mod state_validation {
             },
             |e| matches!(e, InvalidStateError::InvalidMinimumWithdrawalAmount { .. }),
         );
-        let minimum_required = GET_TRANSACTION_CYCLES + DEPOSIT_CONSOLIDATION_FEE;
+        let minimum_required = GET_BALANCE_CYCLES + DEPOSIT_CONSOLIDATION_FEE;
         assert_fails_both(
             InitArgs {
-                process_deposit_required_cycles: (minimum_required - 1) as u64,
+                deposit_sol_required_cycles: (minimum_required - 1) as u64,
                 ..valid_init_args()
             },
             UpgradeArgs {
-                process_deposit_required_cycles: Some((minimum_required - 1) as u64),
+                deposit_sol_required_cycles: Some((minimum_required - 1) as u64),
                 ..Default::default()
             },
             |e| {
-                e == &InvalidStateError::ProcessDepositRequiredCyclesTooLow {
+                e == &InvalidStateError::DepositSolRequiredCyclesTooLow {
                     required_cycles: minimum_required - 1,
-                    get_transaction_cycles: GET_TRANSACTION_CYCLES,
+                    get_balance_cycles: GET_BALANCE_CYCLES,
                     consolidation_fee: DEPOSIT_CONSOLIDATION_FEE,
                 }
             },
         );
-        let maximum_fee = PROCESS_DEPOSIT_REQUIRED_CYCLES - GET_TRANSACTION_CYCLES;
+        let maximum_fee = DEPOSIT_SOL_REQUIRED_CYCLES - GET_BALANCE_CYCLES;
         assert_fails_both(
             InitArgs {
                 deposit_consolidation_fee: (maximum_fee + 1) as u64,
@@ -533,9 +533,9 @@ mod state_validation {
                 ..Default::default()
             },
             |e| {
-                e == &InvalidStateError::ProcessDepositRequiredCyclesTooLow {
-                    required_cycles: PROCESS_DEPOSIT_REQUIRED_CYCLES,
-                    get_transaction_cycles: GET_TRANSACTION_CYCLES,
+                e == &InvalidStateError::DepositSolRequiredCyclesTooLow {
+                    required_cycles: DEPOSIT_SOL_REQUIRED_CYCLES,
+                    get_balance_cycles: GET_BALANCE_CYCLES,
                     consolidation_fee: maximum_fee + 1,
                 }
             },
@@ -581,18 +581,18 @@ mod state_validation {
                 ..Default::default()
             },
         );
-        let minimum_required = GET_TRANSACTION_CYCLES + DEPOSIT_CONSOLIDATION_FEE;
+        let minimum_required = GET_BALANCE_CYCLES + DEPOSIT_CONSOLIDATION_FEE;
         assert_succeeds_both(
             InitArgs {
-                process_deposit_required_cycles: minimum_required as u64,
+                deposit_sol_required_cycles: minimum_required as u64,
                 ..valid_init_args()
             },
             UpgradeArgs {
-                process_deposit_required_cycles: Some(minimum_required as u64),
+                deposit_sol_required_cycles: Some(minimum_required as u64),
                 ..Default::default()
             },
         );
-        let maximum_fee = PROCESS_DEPOSIT_REQUIRED_CYCLES - GET_TRANSACTION_CYCLES;
+        let maximum_fee = DEPOSIT_SOL_REQUIRED_CYCLES - GET_BALANCE_CYCLES;
         assert_succeeds_both(
             InitArgs {
                 deposit_consolidation_fee: maximum_fee as u64,
@@ -644,7 +644,7 @@ mod state_from_init_args {
                 withdrawal_fee: WITHDRAWAL_FEE,
                 minimum_withdrawal_amount: MINIMUM_WITHDRAWAL_AMOUNT,
                 minimum_deposit_amount: MINIMUM_DEPOSIT_AMOUNT,
-                process_deposit_required_cycles: PROCESS_DEPOSIT_REQUIRED_CYCLES,
+                deposit_sol_required_cycles: DEPOSIT_SOL_REQUIRED_CYCLES,
                 pending_deposit_sol_request_guards: BTreeSet::new(),
                 pending_withdrawal_request_guards: BTreeSet::new(),
                 deposits: Deposits::default(),
@@ -710,7 +710,7 @@ mod state_upgrade {
         let new_minimum_deposit_amount = MINIMUM_DEPOSIT_AMOUNT * 2;
         let new_minimum_withdrawal_amount = MINIMUM_WITHDRAWAL_AMOUNT * 2;
         let new_withdrawal_fee = WITHDRAWAL_FEE / 2;
-        let new_process_deposit_required_cycles = (PROCESS_DEPOSIT_REQUIRED_CYCLES * 2) as u64;
+        let new_deposit_sol_required_cycles = (DEPOSIT_SOL_REQUIRED_CYCLES * 2) as u64;
 
         let mut state = initial_state();
         state
@@ -763,13 +763,13 @@ mod state_upgrade {
         let mut state = initial_state();
         state
             .upgrade(UpgradeArgs {
-                process_deposit_required_cycles: Some(new_process_deposit_required_cycles),
+                deposit_sol_required_cycles: Some(new_deposit_sol_required_cycles),
                 ..Default::default()
             })
             .unwrap();
         assert_eq!(
-            state.process_deposit_required_cycles(),
-            new_process_deposit_required_cycles as u128
+            state.deposit_sol_required_cycles(),
+            new_deposit_sol_required_cycles as u128
         );
     }
 

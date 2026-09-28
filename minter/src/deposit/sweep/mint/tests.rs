@@ -5,8 +5,7 @@ use crate::{
     state::{TaskType, event::EventType, mutate_state, read_state, reset_state},
     storage::reset_events,
     test_fixtures::{
-        BLOCK_INDEX, EventsAssert, MINIMUM_DEPOSIT_AMOUNT, PROCESS_DEPOSIT_REQUIRED_CYCLES,
-        account,
+        BLOCK_INDEX, DEPOSIT_SOL_REQUIRED_CYCLES, EventsAssert, MINIMUM_DEPOSIT_AMOUNT, account,
         flow::deposit::{DepositFlow, PendingMintFlow, SweepFlow},
         init_schnorr_master_key, init_state,
         runtime::TestCanisterRuntime,
@@ -351,7 +350,7 @@ fn deposit_sol_runtime() -> TestCanisterRuntime {
     TestCanisterRuntime::new()
         .with_increasing_time()
         .expecting_charges()
-        .add_msg_cycles_available(PROCESS_DEPOSIT_REQUIRED_CYCLES)
+        .add_msg_cycles_available(DEPOSIT_SOL_REQUIRED_CYCLES)
         .add_msg_cycles_refunded(GET_BALANCE_CYCLES / 2)
         .add_stub_response(MultiRpcResult::<Lamport>::Consistent(Ok(
             MINIMUM_DEPOSIT_AMOUNT,

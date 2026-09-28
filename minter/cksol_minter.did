@@ -171,7 +171,7 @@ type InitArgs = record {
     minimum_withdrawal_amount : Lamport;
     minimum_deposit_amount : Lamport;
     withdrawal_fee : Lamport;
-    process_deposit_required_cycles : nat64;
+    deposit_sol_required_cycles : nat64;
     solana_network : SolanaNetwork;
 };
 
@@ -182,7 +182,7 @@ type MinterInfo = record {
     minimum_withdrawal_amount : Lamport;
     minimum_deposit_amount : Lamport;
     withdrawal_fee : Lamport;
-    process_deposit_required_cycles : nat;
+    deposit_sol_required_cycles : nat;
     balance : Lamport;
 };
 
@@ -206,7 +206,7 @@ type UpgradeArgs = record {
     minimum_withdrawal_amount : opt Lamport;
     minimum_deposit_amount : opt Lamport;
     withdrawal_fee : opt Lamport;
-    process_deposit_required_cycles : opt nat64;
+    deposit_sol_required_cycles : opt nat64;
 };
 
 type WithdrawalArgs = record {

@@ -4,8 +4,8 @@ use crate::{
     state::{event::EventType, read_state},
     storage::with_event_iter,
     test_fixtures::{
-        DEPOSIT_CONSOLIDATION_FEE, EventsAssert, MINIMUM_DEPOSIT_AMOUNT, MINTER_ACCOUNT,
-        PROCESS_DEPOSIT_REQUIRED_CYCLES, account, deposit::DEPOSITOR_ACCOUNT, events,
+        DEPOSIT_CONSOLIDATION_FEE, DEPOSIT_SOL_REQUIRED_CYCLES, EventsAssert,
+        MINIMUM_DEPOSIT_AMOUNT, MINTER_ACCOUNT, account, deposit::DEPOSITOR_ACCOUNT, events,
         init_schnorr_master_key, init_state, queued_deposit_of, runtime::TestCanisterRuntime,
         signature,
     },
@@ -35,7 +35,7 @@ fn should_report_unknown_deposit_as_not_found() {
 async fn should_fail_if_insufficient_cycles_attached() {
     init_state();
     let runtime =
-        TestCanisterRuntime::new().add_msg_cycles_available(PROCESS_DEPOSIT_REQUIRED_CYCLES - 1);
+        TestCanisterRuntime::new().add_msg_cycles_available(DEPOSIT_SOL_REQUIRED_CYCLES - 1);
 
     let result = deposit_sol(&runtime, DEPOSITOR_ACCOUNT).await;
 
@@ -43,8 +43,8 @@ async fn should_fail_if_insufficient_cycles_attached() {
         result,
         Err(DepositSolError::InsufficientCycles(
             InsufficientCyclesError {
-                expected: PROCESS_DEPOSIT_REQUIRED_CYCLES,
-                received: PROCESS_DEPOSIT_REQUIRED_CYCLES - 1,
+                expected: DEPOSIT_SOL_REQUIRED_CYCLES,
+                received: DEPOSIT_SOL_REQUIRED_CYCLES - 1,
             }
         ))
     );
@@ -55,8 +55,7 @@ async fn should_fail_if_insufficient_cycles_attached() {
 #[tokio::test]
 async fn should_fail_while_the_minter_public_key_is_unavailable() {
     init_state();
-    let runtime =
-        TestCanisterRuntime::new().add_msg_cycles_available(PROCESS_DEPOSIT_REQUIRED_CYCLES);
+    let runtime = TestCanisterRuntime::new().add_msg_cycles_available(DEPOSIT_SOL_REQUIRED_CYCLES);
 
     let result = deposit_sol(&runtime, DEPOSITOR_ACCOUNT).await;
 
@@ -162,8 +161,7 @@ async fn should_reject_an_account_whose_latest_deposit_is_quarantined() {
     events::submit_sweep(sweep_signature, vec![0]);
     events::succeed_transaction(sweep_signature);
     events::quarantine_sweep(sweep_signature);
-    let runtime =
-        TestCanisterRuntime::new().add_msg_cycles_available(PROCESS_DEPOSIT_REQUIRED_CYCLES);
+    let runtime = TestCanisterRuntime::new().add_msg_cycles_available(DEPOSIT_SOL_REQUIRED_CYCLES);
 
     let result = deposit_sol(&runtime, DEPOSITOR_ACCOUNT).await;
 
@@ -221,8 +219,7 @@ async fn assert_second_call_returns_same_deposit(first: Account, second: Account
         .assert_no_more_events();
     let num_events_after_first_call = with_event_iter(|events| events.count());
 
-    let runtime =
-        TestCanisterRuntime::new().add_msg_cycles_available(PROCESS_DEPOSIT_REQUIRED_CYCLES);
+    let runtime = TestCanisterRuntime::new().add_msg_cycles_available(DEPOSIT_SOL_REQUIRED_CYCLES);
     let result = deposit_sol(&runtime, second).await;
 
     assert_eq!(result, Ok(deposit_id));
@@ -253,7 +250,7 @@ fn runtime() -> TestCanisterRuntime {
     TestCanisterRuntime::new()
         .with_increasing_time()
         .expecting_charges()
-        .add_msg_cycles_available(PROCESS_DEPOSIT_REQUIRED_CYCLES)
+        .add_msg_cycles_available(DEPOSIT_SOL_REQUIRED_CYCLES)
         .add_msg_cycles_refunded(GET_BALANCE_REFUND)
 }
 

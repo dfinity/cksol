@@ -1,6 +1,6 @@
 use crate::{
     address::{account_address, minter_address},
-    constants::{FEE_PER_SIGNATURE, GET_TRANSACTION_CYCLES, RENT_EXEMPTION_THRESHOLD},
+    constants::{FEE_PER_SIGNATURE, GET_BALANCE_CYCLES, RENT_EXEMPTION_THRESHOLD},
     ledger::client::LedgerClient,
     numeric::{LedgerBurnIndex, LedgerMintIndex},
     rpc::BlockHeight,
@@ -100,7 +100,7 @@ pub struct State {
     withdrawal_fee: Lamport,
     minimum_withdrawal_amount: Lamport,
     minimum_deposit_amount: Lamport,
-    process_deposit_required_cycles: u128,
+    deposit_sol_required_cycles: u128,
     deposit_consolidation_fee: u128,
     pending_deposit_sol_request_guards: BTreeSet<Account>,
     pending_withdrawal_request_guards: BTreeSet<Account>,
@@ -175,8 +175,8 @@ impl State {
         self.solana_network
     }
 
-    pub fn process_deposit_required_cycles(&self) -> u128 {
-        self.process_deposit_required_cycles
+    pub fn deposit_sol_required_cycles(&self) -> u128 {
+        self.deposit_sol_required_cycles
     }
 
     pub fn deposits(&self) -> &Deposits {
@@ -316,12 +316,10 @@ impl State {
                 rent_exemption_threshold: RENT_EXEMPTION_THRESHOLD,
             });
         }
-        if self.process_deposit_required_cycles
-            < GET_TRANSACTION_CYCLES + self.deposit_consolidation_fee
-        {
-            return Err(InvalidStateError::ProcessDepositRequiredCyclesTooLow {
-                required_cycles: self.process_deposit_required_cycles,
-                get_transaction_cycles: GET_TRANSACTION_CYCLES,
+        if self.deposit_sol_required_cycles < GET_BALANCE_CYCLES + self.deposit_consolidation_fee {
+            return Err(InvalidStateError::DepositSolRequiredCyclesTooLow {
+                required_cycles: self.deposit_sol_required_cycles,
+                get_balance_cycles: GET_BALANCE_CYCLES,
                 consolidation_fee: self.deposit_consolidation_fee,
             });
         }
@@ -336,7 +334,7 @@ impl State {
             minimum_withdrawal_amount,
             minimum_deposit_amount,
             withdrawal_fee,
-            process_deposit_required_cycles,
+            deposit_sol_required_cycles,
             deposit_consolidation_fee,
         }: UpgradeArgs,
     ) -> Result<(), InvalidStateError> {
@@ -355,8 +353,8 @@ impl State {
         if let Some(minimum_deposit_amount) = minimum_deposit_amount {
             self.minimum_deposit_amount = minimum_deposit_amount;
         }
-        if let Some(process_deposit_required_cycles) = process_deposit_required_cycles {
-            self.process_deposit_required_cycles = process_deposit_required_cycles as u128;
+        if let Some(deposit_sol_required_cycles) = deposit_sol_required_cycles {
+            self.deposit_sol_required_cycles = deposit_sol_required_cycles as u128;
         }
         if let Some(deposit_consolidation_fee) = deposit_consolidation_fee {
             self.deposit_consolidation_fee = deposit_consolidation_fee as u128;
@@ -684,9 +682,9 @@ pub enum InvalidStateError {
         withdrawal_fee: u64,
         rent_exemption_threshold: u64,
     },
-    ProcessDepositRequiredCyclesTooLow {
+    DepositSolRequiredCyclesTooLow {
         required_cycles: u128,
-        get_transaction_cycles: u128,
+        get_balance_cycles: u128,
         consolidation_fee: u128,
     },
 }
@@ -703,7 +701,7 @@ impl TryFrom<InitArgs> for State {
             minimum_withdrawal_amount,
             minimum_deposit_amount,
             withdrawal_fee,
-            process_deposit_required_cycles,
+            deposit_sol_required_cycles,
             solana_network,
             deposit_consolidation_fee,
         }: InitArgs,
@@ -718,7 +716,7 @@ impl TryFrom<InitArgs> for State {
             withdrawal_fee,
             minimum_withdrawal_amount,
             minimum_deposit_amount,
-            process_deposit_required_cycles: process_deposit_required_cycles as u128,
+            deposit_sol_required_cycles: deposit_sol_required_cycles as u128,
             deposit_consolidation_fee: deposit_consolidation_fee as u128,
             pending_deposit_sol_request_guards: BTreeSet::new(),
             pending_withdrawal_request_guards: BTreeSet::new(),
