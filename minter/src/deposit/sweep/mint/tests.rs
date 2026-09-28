@@ -17,7 +17,7 @@ use crate::{
     },
 };
 use candid::Nat;
-use cksol_types::{DepositSolId, DepositSolStatus, Memo, MintMemo};
+use cksol_types::{DepositSolError, DepositSolId, DepositSolStatus, Memo, MintMemo};
 use ic_canister_runtime::IcError;
 use icrc_ledger_types::icrc1::transfer::{BlockIndex, NumTokens, TransferArg, TransferError};
 use sol_rpc_types::{Lamport, MultiRpcResult};
@@ -169,6 +169,13 @@ async fn should_quarantine_stale_pending_mint_without_calling_the_ledger() {
     EventsAssert::from_recorded()
         .expect_contains_event_eq(EventType::QuarantinedPendingMint { deposit_id: 0 });
     assert_eq!(runtime.set_timer_call_count(), 0);
+
+    let result = deposit_sol(
+        &TestCanisterRuntime::new().add_msg_cycles_available(PROCESS_DEPOSIT_REQUIRED_CYCLES),
+        account(1),
+    )
+    .await;
+    assert_eq!(result, Err(DepositSolError::Quarantined { deposit_id: 0 }));
 }
 
 #[tokio::test]
