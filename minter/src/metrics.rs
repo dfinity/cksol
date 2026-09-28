@@ -56,6 +56,11 @@ pub fn encode_metrics(w: &mut MetricsEncoder<Vec<u8>>, s: &State) -> std::io::Re
         "Number of swept deposits whose ckSOL mint is pending.",
     )?;
     w.encode_gauge(
+        "dropped_deposits",
+        s.deposits().dropped().len().metric_value(),
+        "Number of deposits whose sweep transaction failed or expired.",
+    )?;
+    w.encode_gauge(
         "deposits_to_consolidate",
         s.deposits_to_consolidate().len().metric_value(),
         "Number of deposits pending consolidation.",

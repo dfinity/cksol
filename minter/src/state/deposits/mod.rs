@@ -24,14 +24,18 @@ mod tests;
 ///
 /// ```text
 /// queued --sendTransaction--> swept --getSignatureStatuses--> finalized --getTransaction--> pending_mints
+///                                |
+///                                +--failed or expired--> dropped
 /// ```
 ///
 /// * `queued`: the deposit address holds a sweepable amount and waits for a sweep transaction.
 ///   Deposits are keyed by id, so the sweep timer takes them in the order they were queued.
 /// * `swept`: a sweep transaction moving the deposits to the main account was submitted.
 ///   The deposits of one transaction are kept together under its signature, since the
-///   transaction is what the finalization timer tracks from here on. The signature changes
-///   whenever the sweep expires and is resubmitted with a fresh blockhash.
+///   transaction is what the finalization timer tracks from here on. A sweep is never
+///   resubmitted: when it fails or expires, its deposits are dropped and their accounts
+///   released, so that `deposit_sol` can queue a new sweep of the balance still on the
+///   deposit address.
 /// * `finalized`: `getSignatureStatuses` reported the sweep as finalized without error. The
 ///   amount received by the main account is still unknown, because Solana may charge a
 ///   different transaction fee than the sweep was built with.
@@ -48,6 +52,7 @@ pub struct Deposits {
     swept: Sweeps,
     finalized: Sweeps,
     pending_mints: BTreeMap<DepositSolId, PendingMint>,
+    dropped: BTreeMap<DepositSolId, SweptDeposit>,
     in_flight_ids: BTreeMap<Account, DepositSolId>,
 }
 
@@ -70,6 +75,10 @@ impl Deposits {
 
     pub fn pending_mints(&self) -> &BTreeMap<DepositSolId, PendingMint> {
         &self.pending_mints
+    }
+
+    pub fn dropped(&self) -> &BTreeMap<DepositSolId, SweptDeposit> {
+        &self.dropped
     }
 
     pub fn in_flight_id(&self, account: &Account) -> Option<DepositSolId> {
@@ -95,6 +104,11 @@ impl Deposits {
         if let Some(pending) = self.pending_mints.get(&deposit_id) {
             return DepositSolStatus::Finalized {
                 signature: pending.deposit.signature.into(),
+            };
+        }
+        if let Some(dropped) = self.dropped.get(&deposit_id) {
+            return DepositSolStatus::Dropped {
+                signature: dropped.signature.into(),
             };
         }
         DepositSolStatus::NotFound
@@ -145,10 +159,30 @@ impl Deposits {
         expected_received
     }
 
-    pub(super) fn resubmit_sweep(&mut self, old_signature: &Signature, new_signature: &Signature) {
-        if let Some(sweep) = self.swept.remove(old_signature) {
-            self.swept.insert(*new_signature, sweep);
+    /// Drops every deposit of the given swept sweep and releases their accounts.
+    pub(super) fn drop_swept(&mut self, signature: &Signature) {
+        let sweep = self
+            .swept
+            .remove(signature)
+            .unwrap_or_else(|| panic!("Attempted to drop sweep {signature} that is not swept"));
+        for (deposit_id, deposit) in sweep.deposits() {
+            self.release_in_flight(*deposit_id, &deposit.account);
+            self.dropped.insert(
+                *deposit_id,
+                SweptDeposit {
+                    deposit: *deposit,
+                    signature: *signature,
+                },
+            );
         }
+    }
+
+    fn release_in_flight(&mut self, deposit_id: DepositSolId, account: &Account) {
+        assert_eq!(
+            self.in_flight_ids.remove(account),
+            Some(deposit_id),
+            "BUG: deposit {deposit_id} is not the in-flight deposit of account {account:?}"
+        );
     }
 
     pub(super) fn finalize_swept(&mut self, signature: &Signature) {
@@ -245,7 +279,7 @@ impl DepositBalance {
     }
 }
 
-/// A deposit together with the finalized sweep transaction that moved it to the main account.
+/// A deposit together with the sweep transaction that was submitted to move it to the main account.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SweptDeposit {
     pub deposit: QueuedDeposit,

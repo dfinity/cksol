@@ -137,7 +137,8 @@ pub enum EventType {
     },
     /// A previously submitted Solana transaction has an expired blockhash
     /// and a null on-chain status, meaning it will never be executed.
-    /// The transaction has been marked for resubmission.
+    /// A withdrawal or consolidation transaction is marked for resubmission;
+    /// the deposits of a sweep transaction are dropped instead.
     #[n(10)]
     ExpiredTransaction {
         /// The signature of the expired Solana transaction.
