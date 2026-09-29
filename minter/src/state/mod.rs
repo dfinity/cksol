@@ -4,7 +4,7 @@ use crate::{
     numeric::{LedgerBurnIndex, LedgerMintIndex},
     rpc::BlockHeight,
     sol_transfer::{BATCH_WITHDRAWAL_TX_FEE, MAX_SIGNATURES, MAX_WITHDRAWALS_PER_TX},
-    state::event::{DepositId, TransactionPurpose, VersionedMessage, WithdrawalRequest},
+    state::event::{DepositId, Signer, TransactionPurpose, VersionedMessage, WithdrawalRequest},
     utils::insertion_ordered_map::InsertionOrderedMap,
 };
 use candid::Principal;
@@ -620,7 +620,7 @@ impl State {
         &mut self,
         signature: &Signature,
         transaction: &VersionedMessage,
-        signers: &[Account],
+        signers: &[Signer],
         purpose: &TransactionPurpose,
         block_height: BlockHeight,
     ) {
@@ -993,7 +993,7 @@ impl ConsolidationTransaction {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SolanaTransaction {
     pub message: VersionedMessage,
-    pub signers: Vec<Account>,
+    pub signers: Vec<Signer>,
     /// The block height of the block whose blockhash the transaction uses.
     pub block_height: BlockHeight,
     pub purpose: TransactionPurpose,

@@ -1,6 +1,6 @@
 use super::signer::sign_for;
 use super::{
-    MINTER_ACCOUNT, account, account_signature, account_signature_nth, signature,
+    MINTER_ACCOUNT, account, account_signature, account_signature_nth, minter_signature, signature,
     signer::MockSchnorrSigner,
 };
 use crate::{address::derivation_path, signer::SchnorrSigner};
@@ -32,6 +32,7 @@ fn should_derive_distinct_signatures_for_distinct_accounts() {
     ];
 
     for (index, account) in accounts.iter().enumerate() {
+        assert_ne!(minter_signature(), account_signature(account));
         for other in &accounts[index + 1..] {
             assert_ne!(account_signature(account), account_signature(other));
         }

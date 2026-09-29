@@ -5,7 +5,9 @@ use crate::{
     runtime::IcCanisterRuntime,
     state::{
         audit::{process_event, replay_events},
-        event::{DepositId, EventType, TransactionPurpose, VersionedMessage, WithdrawalRequest},
+        event::{
+            DepositId, EventType, Signer, TransactionPurpose, VersionedMessage, WithdrawalRequest,
+        },
         init_once_state, mutate_state, reset_state,
     },
     storage::{reset_events, total_event_count, with_event_iter},
@@ -122,7 +124,7 @@ fn setup_10k_events() {
                 EventType::SubmittedTransaction {
                     signature: sig,
                     message: VersionedMessage::Legacy(message()),
-                    signers: vec![minter],
+                    signers: vec![Signer::Account(minter)],
                     purpose: TransactionPurpose::ConsolidateDeposits {
                         mint_indices: vec![mint_index],
                     },
@@ -184,7 +186,7 @@ fn setup_10k_events() {
                 EventType::SubmittedTransaction {
                     signature: sig,
                     message: VersionedMessage::Legacy(message()),
-                    signers: vec![minter],
+                    signers: vec![Signer::Minter],
                     purpose: TransactionPurpose::WithdrawSol {
                         burn_indices: vec![burn_index],
                     },
@@ -236,7 +238,7 @@ fn setup_10k_events() {
                 EventType::SubmittedTransaction {
                     signature: sig,
                     message: VersionedMessage::Legacy(message()),
-                    signers: vec![minter],
+                    signers: vec![Signer::Account(minter)],
                     purpose: TransactionPurpose::ConsolidateDeposits {
                         mint_indices: vec![mint_index],
                     },
@@ -285,7 +287,7 @@ fn setup_10k_events() {
                 EventType::SubmittedTransaction {
                     signature: old_sig,
                     message: VersionedMessage::Legacy(message()),
-                    signers: vec![minter],
+                    signers: vec![Signer::Account(minter)],
                     purpose: TransactionPurpose::ConsolidateDeposits {
                         mint_indices: vec![mint_index],
                     },

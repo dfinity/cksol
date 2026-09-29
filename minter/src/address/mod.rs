@@ -12,6 +12,11 @@ mod tests;
 
 pub(crate) type DerivationPath = Vec<Vec<u8>>;
 
+/// Derivation path of the minter's main address: the empty path, i.e. the master key
+/// itself. Account paths always start with the schema tag (see [`derivation_path`]),
+/// so the main address can never collide with any deposit address.
+pub const MINTER_DERIVATION_PATH: DerivationPath = Vec::new();
+
 /// Implementation of the `get_deposit_address` canister endpoint.
 /// Because the endpoint is a query, it must be synchronous and cannot fetch the
 /// master key on demand — it traps if the key has not yet been initialized.
@@ -21,15 +26,10 @@ pub fn get_deposit_address(account: &Account) -> Address {
     account_address(&master_key, account)
 }
 
-pub fn minter_account<R: CanisterRuntime>(runtime: &R) -> Account {
-    Account {
-        owner: runtime.canister_self(),
-        subaccount: None,
-    }
-}
-
-pub fn minter_address<R: CanisterRuntime>(master_key: &SchnorrPublicKey, runtime: &R) -> Address {
-    account_address(master_key, &minter_account(runtime))
+/// The minter's main Solana address, holding the consolidated funds:
+/// the master public key itself, on [`MINTER_DERIVATION_PATH`].
+pub fn minter_address(master_key: &SchnorrPublicKey) -> Address {
+    master_key.public_key.serialize_raw().into()
 }
 
 pub fn account_address(master_key: &SchnorrPublicKey, account: &Account) -> Address {

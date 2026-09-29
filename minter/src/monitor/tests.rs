@@ -2,15 +2,16 @@ use super::{
     MAX_BLOCKHASH_AGE_IN_BLOCKS, MAX_SIGNATURES_PER_STATUS_CHECK, finalize_transactions,
     resubmit_transactions,
 };
-use crate::test_fixtures::signer::sign_for;
+use crate::test_fixtures::signer::{sign_as_minter, sign_for};
 use crate::{
     constants::MAX_CONCURRENT_RPC_CALLS,
     rpc::BlockHeight,
     state::{TaskType, event::EventType, mutate_state, read_state, reset_state},
     storage::reset_events,
     test_fixtures::{
-        EventsAssert, account, account_signature, confirmed_block_at_height, deposit_id, events,
-        init_schnorr_master_key, init_state, runtime::TestCanisterRuntime, signature,
+        EventsAssert, MINIMUM_WITHDRAWAL_AMOUNT, account, account_signature,
+        confirmed_block_at_height, deposit_id, events, init_balance, init_schnorr_master_key,
+        init_state, minter_signature, runtime::TestCanisterRuntime, signature,
     },
 };
 use sol_rpc_types::{
@@ -401,6 +402,42 @@ mod resubmission {
             assert_eq!(s.submitted_transactions().len(), 1);
             let resubmitted = s.submitted_transactions().get(&new_signature).unwrap();
             assert_eq!(resubmitted.block_height, RESUBMISSION_BLOCK_HEIGHT);
+        });
+    }
+
+    #[tokio::test]
+    async fn should_resubmit_expired_withdrawal_signed_by_the_minter() {
+        setup();
+        init_balance();
+
+        let old_signature = signature(1);
+        let burn_index = 1;
+        events::accept_withdrawal(account(1), burn_index, MINIMUM_WITHDRAWAL_AMOUNT);
+        events::submit_withdrawal_at_height(old_signature, EXPIRED_BLOCK_HEIGHT, vec![burn_index]);
+        events::expire_transaction(old_signature);
+
+        let new_signature = minter_signature();
+
+        let resubmit_runtime = TestCanisterRuntime::new()
+            .with_increasing_time()
+            .add_stub_response(SlotResult::Consistent(Ok(RESUBMISSION_SLOT)))
+            .add_stub_response(BlockResult::Consistent(Ok(confirmed_block_at_height(
+                RESUBMISSION_BLOCK_HEIGHT,
+            ))))
+            .add_stub_response(SendTransactionResult::Consistent(Ok(new_signature.into())))
+            .add_signer(sign_as_minter());
+
+        resubmit_transactions(resubmit_runtime).await;
+
+        EventsAssert::from_recorded().expect_contains_event_eq(EventType::ResubmittedTransaction {
+            old_signature,
+            new_signature,
+            new_block_height: RESUBMISSION_BLOCK_HEIGHT,
+        });
+
+        read_state(|s| {
+            assert_eq!(s.submitted_transactions().len(), 1);
+            assert!(s.submitted_transactions().contains_key(&new_signature));
         });
     }
 

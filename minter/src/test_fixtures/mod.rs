@@ -1,5 +1,5 @@
 use crate::{
-    address::derivation_path,
+    address::{MINTER_DERIVATION_PATH, derivation_path},
     numeric::LedgerMintIndex,
     rpc::BlockHeight,
     state::{
@@ -40,8 +40,8 @@ pub const MINTER_ACCOUNT: Account = Account {
     owner: runtime::TEST_CANISTER_ID,
     subaccount: None,
 };
-/// Solana address derived from [`MINTER_ACCOUNT`] using the test master key.
-pub const MINTER_ADDRESS: Address = address!("38ZYiAPZp4S9MqhU6AL5Ydm8wB7WfayCWLs1EGRi7Dou");
+/// The minter's main Solana address under the test master key: the raw master public key.
+pub const MINTER_ADDRESS: Address = address!("Fkt68XQXBDDBGBNNjFh8GM27ffpZGmncUdDG19njnRvY");
 pub const MINIMUM_DEPOSIT_AMOUNT: Lamport = 20_000_000; // 0.02 SOL
 pub const PROCESS_DEPOSIT_REQUIRED_CYCLES: u128 = 1_000_000_000_000;
 
@@ -88,7 +88,7 @@ pub fn init_balance_to(amount: Lamport) {
 
     events::accept_deposit(id, amount);
     events::mint_deposit(id, mint_index);
-    events::submit_consolidation(consolidation_signature, MINTER_ACCOUNT, vec![mint_index]);
+    events::submit_consolidation(consolidation_signature, account(0xFD), vec![mint_index]);
     events::succeed_transaction(consolidation_signature);
 }
 
@@ -162,6 +162,18 @@ pub fn account_signature_nth(account: &Account, occurrence: usize) -> solana_sig
     signer::derivation_path_signature(&derivation_path(account), occurrence)
 }
 
+/// Returns the [`Signature`] that [`signer::MockSchnorrSigner`] produces the first time
+/// the minter's main address signs.
+pub fn minter_signature() -> solana_signature::Signature {
+    minter_signature_nth(0)
+}
+
+/// Returns the [`Signature`] that [`signer::MockSchnorrSigner`] produces the
+/// `occurrence`-th time the minter's main address signs, counting from zero.
+pub fn minter_signature_nth(occurrence: usize) -> solana_signature::Signature {
+    signer::derivation_path_signature(&MINTER_DERIVATION_PATH, occurrence)
+}
+
 /// Helpers for constructing state transitions via [`process_event`] in tests.
 ///
 /// All helpers operate on the global thread-local state via [`mutate_state`].
@@ -174,7 +186,7 @@ pub mod events {
         rpc::BlockHeight,
         state::{
             audit::process_event,
-            event::{DepositId, EventType, TransactionPurpose, WithdrawalRequest},
+            event::{DepositId, EventType, Signer, TransactionPurpose, WithdrawalRequest},
             mutate_state,
         },
     };
@@ -246,7 +258,7 @@ pub mod events {
                 EventType::SubmittedTransaction {
                     signature,
                     message: message().into(),
-                    signers: vec![fee_payer],
+                    signers: vec![Signer::Account(fee_payer)],
                     purpose: TransactionPurpose::ConsolidateDeposits {
                         mint_indices: mint_indices
                             .into_iter()
@@ -285,21 +297,29 @@ pub mod events {
         });
     }
 
-    pub fn submit_withdrawal(signature: Signature, fee_payer: Account, burn_indices: Vec<u64>) {
+    pub fn submit_withdrawal(signature: Signature, burn_indices: Vec<u64>) {
+        submit_withdrawal_at_height(signature, DEFAULT_BLOCK_HEIGHT, burn_indices);
+    }
+
+    pub fn submit_withdrawal_at_height(
+        signature: Signature,
+        block_height: BlockHeight,
+        burn_indices: Vec<u64>,
+    ) {
         mutate_state(|state| {
             process_event(
                 state,
                 EventType::SubmittedTransaction {
                     signature,
                     message: message().into(),
-                    signers: vec![fee_payer],
+                    signers: vec![Signer::Minter],
                     purpose: TransactionPurpose::WithdrawSol {
                         burn_indices: burn_indices
                             .into_iter()
                             .map(LedgerBurnIndex::from)
                             .collect(),
                     },
-                    block_height: DEFAULT_BLOCK_HEIGHT,
+                    block_height,
                 },
                 &runtime(),
             )
@@ -356,7 +376,9 @@ pub mod arb {
     use crate::{
         numeric::{LedgerBurnIndex, LedgerMintIndex},
         rpc::BlockHeight,
-        state::event::{DepositId, Event, EventType, TransactionPurpose, WithdrawalRequest},
+        state::event::{
+            DepositId, Event, EventType, Signer, TransactionPurpose, WithdrawalRequest,
+        },
     };
     use candid::Principal;
     use cksol_types_internal::{Ed25519KeyName, InitArgs, SolanaNetwork, UpgradeArgs};
@@ -381,6 +403,13 @@ pub mod arb {
 
     pub fn arb_signature() -> impl Strategy<Value = Signature> {
         any::<[u8; 64]>().prop_map(Signature::from)
+    }
+
+    pub fn arb_signer() -> impl Strategy<Value = Signer> {
+        prop_oneof![
+            Just(Signer::Minter),
+            arb_account().prop_map(Signer::Account),
+        ]
     }
 
     pub fn arb_deposit_id() -> impl Strategy<Value = DepositId> {
@@ -577,7 +606,7 @@ pub mod arb {
             (
                 arb_signature(),
                 arb_message(),
-                prop::collection::vec(arb_account(), 1..10),
+                prop::collection::vec(arb_signer(), 1..10),
                 prop_oneof![
                     prop::collection::vec(arb_ledger_mint_index(), 1..10).prop_map(
                         |mint_indices| TransactionPurpose::ConsolidateDeposits { mint_indices }

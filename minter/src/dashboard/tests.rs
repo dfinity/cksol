@@ -8,26 +8,17 @@ use crate::test_fixtures::{
         submit_consolidation, submit_withdrawal, succeed_transaction,
     },
     init_balance, init_schnorr_master_key, init_state, init_state_with_args, ledger_canister_id,
-    runtime::TestCanisterRuntime,
     signature, sol_rpc_canister_id, valid_init_args,
 };
 use askama::Template;
 use cksol_types_internal::SolanaNetwork;
 
 fn dashboard() -> DashboardTemplate {
-    read_state(|state| {
-        DashboardTemplate::from_state(
-            state,
-            &TestCanisterRuntime::new(),
-            DashboardPaginationParameters::default(),
-        )
-    })
+    dashboard_with_pagination(DashboardPaginationParameters::default())
 }
 
 fn dashboard_with_pagination(pagination: DashboardPaginationParameters) -> DashboardTemplate {
-    read_state(|state| {
-        DashboardTemplate::from_state(state, &TestCanisterRuntime::new(), pagination)
-    })
+    read_state(|state| DashboardTemplate::from_state(state, pagination))
 }
 
 fn init_state_with_network(network: SolanaNetwork) {
@@ -255,16 +246,16 @@ fn should_display_all_withdrawal_statuses() {
 
     // Sent
     accept_withdrawal(account(2), 1, 200_000_000);
-    submit_withdrawal(signature(0xCC), account(0), vec![1]);
+    submit_withdrawal(signature(0xCC), vec![1]);
 
     // Succeeded
     accept_withdrawal(account(3), 2, 300_000_000);
-    submit_withdrawal(signature(0xDD), account(0), vec![2]);
+    submit_withdrawal(signature(0xDD), vec![2]);
     succeed_transaction(signature(0xDD));
 
     // Failed
     accept_withdrawal(account(4), 3, 400_000_000);
-    submit_withdrawal(signature(0xEE), account(0), vec![3]);
+    submit_withdrawal(signature(0xEE), vec![3]);
     fail_transaction(signature(0xEE));
 
     let rendered_dashboard = dashboard();

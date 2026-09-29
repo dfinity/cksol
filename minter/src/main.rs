@@ -60,7 +60,7 @@ fn post_upgrade(args: Option<MinterArg>) {
 
 #[ic_cdk::query]
 fn get_deposit_address(args: GetDepositAddressArgs) -> Address {
-    let account = assert_non_anonymous_account(args.owner, args.subaccount);
+    let account = assert_valid_deposit_account(args.owner, args.subaccount);
     cksol_minter::address::get_deposit_address(&account).into()
 }
 
@@ -68,7 +68,7 @@ fn get_deposit_address(args: GetDepositAddressArgs) -> Address {
 // PR of the stack, together with the consolidation check that `deposit_sol` needs meanwhile.
 #[ic_cdk::update]
 async fn process_deposit(args: ProcessDepositArgs) -> Result<DepositStatus, ProcessDepositError> {
-    let account = assert_non_anonymous_account(args.owner, args.subaccount);
+    let account = assert_valid_deposit_account(args.owner, args.subaccount);
     cksol_minter::deposit::manual::process_deposit(
         IcCanisterRuntime::new(),
         account,
@@ -110,7 +110,9 @@ fn withdrawal_status(args: WithdrawalStatusArgs) -> WithdrawalStatus {
 fn get_events(
     args: cksol_types_internal::event::GetEventsArgs,
 ) -> cksol_types_internal::event::GetEventsResult {
-    use cksol_minter::state::event::{Event, EventType, TransactionPurpose, VersionedMessage};
+    use cksol_minter::state::event::{
+        Event, EventType, Signer, TransactionPurpose, VersionedMessage,
+    };
     use cksol_types_internal::event;
 
     const MAX_EVENTS_PER_RESPONSE: u64 = 2_000;
@@ -186,7 +188,13 @@ fn get_events(
                             )
                         }
                     },
-                    signers,
+                    signers: signers
+                        .into_iter()
+                        .map(|signer| match signer {
+                            Signer::Minter => event::Signer::Minter,
+                            Signer::Account(account) => event::Signer::Account(account),
+                        })
+                        .collect(),
                     purpose,
                     block_height: block_height.get(),
                 }
@@ -263,9 +271,7 @@ fn http_request(request: HttpRequest) -> HttpResponse {
                         .build();
                 }
             };
-            let runtime = IcCanisterRuntime::new();
-            let dashboard =
-                read_state(|state| DashboardTemplate::from_state(state, &runtime, pagination));
+            let dashboard = read_state(|state| DashboardTemplate::from_state(state, pagination));
             HttpResponseBuilder::ok()
                 .header("Content-Type", "text/html; charset=utf-8")
                 .with_body_and_content_length(dashboard.render().unwrap())
@@ -356,6 +362,15 @@ fn assert_non_anonymous_account(
 ) -> Account {
     let account = resolve_account(owner, subaccount);
     cksol_minter::utils::assert_non_anonymous_account(&account);
+    account
+}
+
+fn assert_valid_deposit_account(
+    owner: Option<Principal>,
+    subaccount: Option<Subaccount>,
+) -> Account {
+    let account = resolve_account(owner, subaccount);
+    cksol_minter::utils::assert_valid_deposit_owner(&account, ic_cdk::api::canister_self());
     account
 }
 

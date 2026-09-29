@@ -1,6 +1,5 @@
 use crate::{
     address::minter_address,
-    runtime::CanisterRuntime,
     state::{ConsolidationTransaction, State},
 };
 use askama::Template;
@@ -229,14 +228,10 @@ pub struct DashboardTemplate {
 }
 
 impl DashboardTemplate {
-    pub fn from_state<R: CanisterRuntime>(
-        state: &State,
-        runtime: &R,
-        pagination: DashboardPaginationParameters,
-    ) -> Self {
+    pub fn from_state(state: &State, pagination: DashboardPaginationParameters) -> Self {
         let minter_address = state
             .minter_public_key()
-            .map(|key| minter_address(key, runtime).to_string())
+            .map(|key| minter_address(key).to_string())
             .unwrap_or_default();
 
         let deposits_to_consolidate = state.deposits_to_consolidate();
