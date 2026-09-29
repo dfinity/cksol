@@ -61,7 +61,7 @@ pub async fn lazy_get_schnorr_master_key<R: CanisterRuntime>(runtime: &R) -> Sch
         chain_code: response.chain_code.as_slice().try_into().unwrap(),
     };
 
-    mutate_state(|s| s.set_once_minter_public_key(schnorr_public_key.clone()));
+    mutate_state(|s| s.cache_minter_public_key(schnorr_public_key.clone()));
     schnorr_public_key
 }
 

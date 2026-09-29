@@ -6,6 +6,7 @@ use crate::{
     state::{SchnorrPublicKey, read_state},
     test_fixtures::{account, init_schnorr_master_key, init_state, runtime::TestCanisterRuntime},
 };
+use futures::join;
 use ic_cdk_management_canister::SchnorrPublicKeyResult;
 use ic_ed25519::{PocketIcMasterPublicKeyId, PublicKey};
 use icrc_ledger_types::icrc1::account::Account;
@@ -78,6 +79,27 @@ mod lazy_schnorr_master_key {
         // Second call: key is now cached — no stubs left, would panic if it hit the runtime.
         let cached = lazy_get_schnorr_master_key(&runtime).await;
         assert_eq!(result, cached);
+    }
+
+    #[tokio::test]
+    async fn interleaved_first_calls_both_fetch_and_cache_one_key() {
+        init_state();
+        let runtime = TestCanisterRuntime::new()
+            .with_schnorr_public_key(test_key_result())
+            .with_schnorr_public_key(test_key_result());
+
+        let (first, second) = join!(
+            lazy_get_schnorr_master_key(&runtime),
+            lazy_get_schnorr_master_key(&runtime)
+        );
+
+        assert_eq!(first, test_key());
+        assert_eq!(second, test_key());
+        assert_eq!(runtime.schnorr_public_key_call_count(), 2);
+        assert_eq!(
+            read_state(|s| s.minter_public_key().cloned()),
+            Some(test_key())
+        );
     }
 }
 

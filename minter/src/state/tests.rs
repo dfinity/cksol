@@ -36,6 +36,42 @@ proptest! {
     }
 }
 
+mod cache_minter_public_key {
+    use super::*;
+    use ic_ed25519::{PocketIcMasterPublicKeyId, PublicKey};
+
+    #[test]
+    fn should_ignore_caching_the_same_key_again() {
+        let mut state = state();
+        let key = schnorr_public_key(1);
+
+        state.cache_minter_public_key(key.clone());
+        state.cache_minter_public_key(key.clone());
+
+        assert_eq!(state.minter_public_key(), Some(&key));
+    }
+
+    #[test]
+    #[should_panic(expected = "BUG: attempt to overwrite the minter public key")]
+    fn should_panic_when_caching_a_different_key() {
+        let mut state = state();
+
+        state.cache_minter_public_key(schnorr_public_key(1));
+        state.cache_minter_public_key(schnorr_public_key(2));
+    }
+
+    fn state() -> State {
+        State::try_from(valid_init_args()).unwrap()
+    }
+
+    fn schnorr_public_key(chain_code_byte: u8) -> SchnorrPublicKey {
+        SchnorrPublicKey {
+            public_key: PublicKey::pocketic_key(PocketIcMasterPublicKeyId::Key1),
+            chain_code: [chain_code_byte; 32],
+        }
+    }
+}
+
 mod queued_deposits {
     use super::*;
     use crate::state::audit::replay_events;
