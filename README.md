@@ -247,7 +247,7 @@ icp canister call -e prod cksol_minter withdrawal_status \
 ### Prerequisites
 
 Install [`mise`](https://mise.jdx.dev/) and then provision the pinned toolchain
-(Rust with the `wasm32-unknown-unknown` target, `cargo-sort`, `canbench`,
+(Rust with the `wasm32-unknown-unknown` target, `cargo-sort`,
 [`ic-wasm`](https://github.com/dfinity/ic-wasm), `cargo-llvm-cov` and `jq`):
 
 ```sh
@@ -257,6 +257,20 @@ mise install
 Tool versions are defined in [`mise.toml`](./mise.toml) and their download
 checksums in [`mise.lock`](./mise.lock), so local, CI and the reproducible
 Docker build stay in sync.
+
+`canbench` is kept out of that set, because only the benchmarks need it and
+building it from source costs about two minutes. It lives in
+[`mise.bench.toml`](./mise.bench.toml) instead, which mise loads only for the
+`bench` environment:
+
+```sh
+MISE_ENV=bench mise install
+```
+
+> [!NOTE]
+> Upstream publishes a single Linux x86-64 `canbench` binary, and mise offers it
+> for every platform. On macOS or Windows that binary will install but not run,
+> so build it from source instead: `cargo install --locked canbench`.
 
 Additionally:
 

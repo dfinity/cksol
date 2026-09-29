@@ -1,9 +1,9 @@
 [tools]
-"cargo:cargo-sort" = "2.0.1"
-"cargo:canbench" = "0.4.1"
 "github:dfinity/ic-wasm" = "0.11.1"
 "aqua:taiki-e/cargo-llvm-cov" = "0.9.1"
 "aqua:jqlang/jq" = "1.8.2"
+"github:DevinR528/cargo-sort" = { version = "2.1.3", os = ["linux/x64", "macos/arm64"] }
+"cargo:cargo-sort" = { version = "2.1.3", os = ["linux/arm64", "macos/x64", "windows/x64"] }
 
 [settings]
 lockfile = true

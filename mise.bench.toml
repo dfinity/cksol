@@ -1,0 +1,5 @@
+[tools]
+"github:dfinity/canbench" = "0.6.0"
+
+[settings]
+lockfile = true
