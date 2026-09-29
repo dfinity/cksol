@@ -4,16 +4,34 @@ use sol_rpc_types::Lamport;
 use solana_signature::Signature;
 use std::collections::BTreeMap;
 
+pub use sweeps::{Sweep, Sweeps};
+
+mod sweeps;
 #[cfg(test)]
 mod tests;
 
-/// The deposits swept from their deposit addresses to the minter's main account,
-/// keyed by deposit id and grouped by their progress towards a ckSOL mint.
+/// The deposits accepted by `deposit_sol`, grouped by their progress towards a ckSOL mint.
+///
+/// A deposit is in exactly one stage at a time and only moves forward:
+///
+/// ```text
+/// queued --sendTransaction--> swept
+/// ```
+///
+/// * `queued`: the deposit address holds a sweepable amount and waits for a sweep transaction.
+///   Deposits are keyed by id, so the sweep timer takes them in the order they were queued.
+/// * `swept`: a sweep transaction moving the deposits to the main account was submitted.
+///   The deposits of one transaction are kept together under its signature, since the
+///   transaction is what the finalization timer tracks from here on. The signature changes
+///   whenever the sweep expires and is resubmitted with a fresh blockhash.
+///
+/// Every account has at most one deposit in flight, so that `deposit_sol` can report the
+/// deposit it is already tracking instead of queueing the same balance twice.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct Deposits {
     next_id: DepositSolId,
     queued: BTreeMap<DepositSolId, QueuedDeposit>,
-    swept: BTreeMap<DepositSolId, SweptDeposit>,
+    swept: Sweeps,
     in_flight_ids: BTreeMap<Account, DepositSolId>,
 }
 
@@ -26,7 +44,7 @@ impl Deposits {
         &self.queued
     }
 
-    pub fn swept(&self) -> &BTreeMap<DepositSolId, SweptDeposit> {
+    pub fn swept(&self) -> &Sweeps {
         &self.swept
     }
 
@@ -40,9 +58,9 @@ impl Deposits {
                 sweepable_amount: deposit.sweepable_amount,
             };
         }
-        if let Some(swept) = self.swept.get(&deposit_id) {
+        if let Some((signature, _)) = self.swept.deposit(deposit_id) {
             return DepositSolStatus::Swept {
-                signature: swept.signature.into(),
+                signature: (*signature).into(),
             };
         }
         DepositSolStatus::NotFound
@@ -65,25 +83,31 @@ impl Deposits {
         self.next_id += 1;
     }
 
-    pub(super) fn sweep(&mut self, deposit_id: DepositSolId, signature: &Signature) -> Lamport {
-        let deposit = self.queued.remove(&deposit_id).unwrap_or_else(|| {
-            panic!("Attempted to sweep unknown or already swept deposit {deposit_id}")
-        });
-        self.swept.insert(
-            deposit_id,
-            SweptDeposit {
-                deposit,
-                signature: *signature,
-            },
+    /// Moves the given queued deposits to the sweep with the given signature and
+    /// returns the amount the sweep transfers to the main account.
+    pub(super) fn sweep(&mut self, deposit_ids: &[DepositSolId], signature: &Signature) -> Lamport {
+        assert!(
+            !deposit_ids.is_empty(),
+            "Attempted to sweep no deposits with transaction {signature}"
         );
-        deposit.sweepable_amount
+        let deposits = deposit_ids
+            .iter()
+            .map(|deposit_id| {
+                let deposit = self.queued.remove(deposit_id).unwrap_or_else(|| {
+                    panic!("Attempted to sweep unknown or already swept deposit {deposit_id}")
+                });
+                (*deposit_id, deposit)
+            })
+            .collect();
+        let sweep = Sweep::new(deposits);
+        let swept_amount = sweep.swept_amount();
+        self.swept.insert(*signature, sweep);
+        swept_amount
     }
 
     pub(super) fn resubmit_sweep(&mut self, old_signature: &Signature, new_signature: &Signature) {
-        for swept in self.swept.values_mut() {
-            if &swept.signature == old_signature {
-                swept.signature = *new_signature;
-            }
+        if let Some(sweep) = self.swept.remove(old_signature) {
+            self.swept.insert(*new_signature, sweep);
         }
     }
 }
@@ -93,11 +117,4 @@ impl Deposits {
 pub struct QueuedDeposit {
     pub account: Account,
     pub sweepable_amount: Lamport,
-}
-
-/// A queued deposit whose sweep transaction has been submitted but not yet finalized.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct SweptDeposit {
-    pub deposit: QueuedDeposit,
-    pub signature: Signature,
 }

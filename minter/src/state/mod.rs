@@ -30,7 +30,7 @@ pub mod audit;
 mod deposits;
 pub mod event;
 
-pub use deposits::{Deposits, QueuedDeposit, SweptDeposit};
+pub use deposits::{Deposits, QueuedDeposit, Sweep, Sweeps};
 
 thread_local! {
     static STATE: RefCell<Option<State>> = RefCell::default();
@@ -654,10 +654,9 @@ impl State {
                     .expect("BUG: insufficient minter balance for withdrawal");
                 total
             }
-            TransactionPurpose::SweepDeposits { deposit_ids } => deposit_ids
-                .iter()
-                .map(|deposit_id| self.deposits.sweep(*deposit_id, signature))
-                .sum(),
+            TransactionPurpose::SweepDeposits { deposit_ids } => {
+                self.deposits.sweep(deposit_ids, signature)
+            }
         };
         assert_eq!(
             self.submitted_transactions.insert(

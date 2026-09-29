@@ -234,7 +234,7 @@ async fn should_reschedule_until_all_deposits_swept() {
     read_state(|s| {
         assert_eq!(s.submitted_transactions().len(), MAX_CONCURRENT_RPC_CALLS);
         assert_eq!(s.deposits().queued().len(), 1);
-        assert_eq!(s.deposits().swept().len(), swept_in_first_round);
+        assert_eq!(s.deposits().swept().deposit_count(), swept_in_first_round);
     });
     assert_eq!(runtime.set_timer_call_count(), 1);
 
@@ -253,7 +253,7 @@ async fn should_reschedule_until_all_deposits_swept() {
             MAX_CONCURRENT_RPC_CALLS + 1
         );
         assert!(s.deposits().queued().is_empty());
-        assert_eq!(s.deposits().swept().len(), num_deposits);
+        assert_eq!(s.deposits().swept().deposit_count(), num_deposits);
     });
     assert_eq!(runtime.set_timer_call_count(), 0);
 }
@@ -281,7 +281,7 @@ async fn should_fetch_the_master_key_once_for_all_batches_of_a_round() {
     assert_eq!(runtime.schnorr_public_key_call_count(), 1);
     read_state(|s| {
         assert_eq!(s.submitted_transactions().len(), NUM_BATCHES);
-        assert_eq!(s.deposits().swept().len(), NUM_DEPOSITS);
+        assert_eq!(s.deposits().swept().deposit_count(), NUM_DEPOSITS);
         assert!(s.deposits().queued().is_empty());
     });
 }

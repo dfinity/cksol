@@ -119,17 +119,22 @@ mod swept_deposits {
 
         submit_sweep(sweep_signature, vec![2, 0]);
 
-        let expected_swept = |deposit_id: u64| SweptDeposit {
-            deposit: QueuedDeposit {
-                account: account(deposit_id as usize + 1),
-                sweepable_amount: 100 * (deposit_id + 1),
-            },
-            signature: sweep_signature,
+        let expected_deposit = |deposit_id: u64| {
+            (
+                deposit_id,
+                QueuedDeposit {
+                    account: account(deposit_id as usize + 1),
+                    sweepable_amount: 100 * (deposit_id + 1),
+                },
+            )
         };
         read_state(|s| {
             assert_eq!(
-                s.deposits().swept(),
-                &BTreeMap::from([(0, expected_swept(0)), (2, expected_swept(2))])
+                s.deposits().swept().get(&sweep_signature),
+                Some(&Sweep::new(BTreeMap::from([
+                    expected_deposit(0),
+                    expected_deposit(2)
+                ])))
             );
             assert_eq!(s.deposits().queued().keys().collect::<Vec<_>>(), vec![&1]);
             let transaction = s.submitted_transactions().get(&sweep_signature).unwrap();
@@ -187,7 +192,7 @@ mod swept_deposits {
             read_state(|s| {
                 assert!(s.submitted_transactions().is_empty(), "{outcome}");
                 assert!(s.transactions_to_resubmit().is_empty(), "{outcome}");
-                assert_eq!(s.deposits().swept().len(), 2, "{outcome}");
+                assert_eq!(s.deposits().swept().deposit_count(), 2, "{outcome}");
                 assert_eq!(s.balance(), 0, "{outcome}");
             });
             assert_in_flight_ids_unchanged();
@@ -213,7 +218,7 @@ mod swept_deposits {
         read_state(|s| {
             assert!(s.submitted_transactions().is_empty());
             assert!(s.transactions_to_resubmit().contains_key(&sweep_signature));
-            assert_eq!(s.deposits().swept().len(), 2);
+            assert_eq!(s.deposits().swept().deposit_count(), 2);
             assert_eq!(s.balance(), 0);
         });
         assert_in_flight_ids_unchanged();
@@ -239,16 +244,18 @@ mod swept_deposits {
         resubmit_transaction(expired_sweep_signature, resubmitted_sweep_signature);
 
         read_state(|s| {
-            assert_eq!(
+            let sweep_of = |deposit_id: u64| {
                 s.deposits()
                     .swept()
-                    .iter()
-                    .map(|(deposit_id, swept)| (*deposit_id, swept.signature))
-                    .collect::<Vec<_>>(),
+                    .deposit(deposit_id)
+                    .map(|(signature, _)| *signature)
+            };
+            assert_eq!(
+                (0..3).map(sweep_of).collect::<Vec<_>>(),
                 vec![
-                    (0, resubmitted_sweep_signature),
-                    (1, unrelated_sweep_signature),
-                    (2, resubmitted_sweep_signature),
+                    Some(resubmitted_sweep_signature),
+                    Some(unrelated_sweep_signature),
+                    Some(resubmitted_sweep_signature),
                 ]
             );
         });
