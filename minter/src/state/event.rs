@@ -1,4 +1,5 @@
 use crate::{
+    address::{DerivationPath, MINTER_DERIVATION_PATH, derivation_path},
     constants::FEE_PER_SIGNATURE,
     numeric::{LedgerBurnIndex, LedgerMintIndex},
     rpc::BlockHeight,
@@ -93,9 +94,9 @@ pub enum EventType {
         /// The versioned transaction message.
         #[n(1)]
         message: VersionedMessage,
-        /// The signing accounts in signature order (fee payer first).
+        /// The signers in signature order (fee payer first).
         #[n(2)]
-        signers: Vec<Account>,
+        signers: Vec<Signer>,
         /// The purpose of this transaction.
         #[n(3)]
         purpose: TransactionPurpose,
@@ -172,6 +173,28 @@ pub struct WithdrawalRequest {
     /// The net amount to transfer to the user (in lamports).
     #[n(4)]
     pub amount_to_transfer: Lamport,
+}
+
+/// The key that produced one signature of a submitted Solana transaction.
+#[derive(Clone, Eq, PartialEq, Debug, Decode, Encode)]
+pub enum Signer {
+    /// The minter itself, signing with the master key
+    /// on [`MINTER_DERIVATION_PATH`].
+    #[n(0)]
+    Minter,
+    /// A minter-controlled account, signing with the key derived
+    /// for its deposit address.
+    #[n(1)]
+    Account(#[n(0)] Account),
+}
+
+impl Signer {
+    pub fn derivation_path(&self) -> DerivationPath {
+        match self {
+            Signer::Minter => MINTER_DERIVATION_PATH,
+            Signer::Account(account) => derivation_path(account),
+        }
+    }
 }
 
 #[derive(Clone, Eq, PartialEq, Debug, Decode, Encode)]

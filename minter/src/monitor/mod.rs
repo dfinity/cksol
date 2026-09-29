@@ -1,5 +1,5 @@
 use crate::{
-    address::{DerivationPath, MINTER_DERIVATION_PATH, derivation_path},
+    address::DerivationPath,
     constants::MAX_CONCURRENT_RPC_CALLS,
     guard::TimerGuard,
     rpc::{
@@ -9,9 +9,9 @@ use crate::{
     runtime::CanisterRuntime,
     signer::sign_bytes,
     state::{
-        SolanaTransaction, TaskType,
+        TaskType,
         audit::process_event,
-        event::{EventType, TransactionPurpose, VersionedMessage},
+        event::{EventType, Signer, VersionedMessage},
         mutate_state, read_state,
     },
 };
@@ -155,7 +155,16 @@ pub async fn resubmit_transactions<R: CanisterRuntime>(runtime: R) {
         state
             .transactions_to_resubmit()
             .iter()
-            .map(|(sig, tx)| (*sig, tx.message.clone(), signing_derivation_paths(tx)))
+            .map(|(sig, tx)| {
+                (
+                    *sig,
+                    tx.message.clone(),
+                    tx.signers
+                        .iter()
+                        .map(Signer::derivation_path)
+                        .collect::<Vec<DerivationPath>>(),
+                )
+            })
             .collect()
     });
     if to_resubmit.is_empty() {
@@ -237,15 +246,6 @@ async fn check_transaction_statuses<R: CanisterRuntime>(
     }
 
     result
-}
-
-fn signing_derivation_paths(transaction: &SolanaTransaction) -> Vec<DerivationPath> {
-    match &transaction.purpose {
-        TransactionPurpose::WithdrawSol { .. } => vec![MINTER_DERIVATION_PATH],
-        TransactionPurpose::ConsolidateDeposits { .. } => {
-            transaction.signers.iter().map(derivation_path).collect()
-        }
-    }
 }
 
 async fn resubmit_expired_transactions<R: CanisterRuntime>(

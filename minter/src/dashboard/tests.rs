@@ -246,16 +246,16 @@ fn should_display_all_withdrawal_statuses() {
 
     // Sent
     accept_withdrawal(account(2), 1, 200_000_000);
-    submit_withdrawal(signature(0xCC), account(0), vec![1]);
+    submit_withdrawal(signature(0xCC), vec![1]);
 
     // Succeeded
     accept_withdrawal(account(3), 2, 300_000_000);
-    submit_withdrawal(signature(0xDD), account(0), vec![2]);
+    submit_withdrawal(signature(0xDD), vec![2]);
     succeed_transaction(signature(0xDD));
 
     // Failed
     accept_withdrawal(account(4), 3, 400_000_000);
-    submit_withdrawal(signature(0xEE), account(0), vec![3]);
+    submit_withdrawal(signature(0xEE), vec![3]);
     fail_transaction(signature(0xEE));
 
     let rendered_dashboard = dashboard();

@@ -110,7 +110,9 @@ fn withdrawal_status(args: WithdrawalStatusArgs) -> WithdrawalStatus {
 fn get_events(
     args: cksol_types_internal::event::GetEventsArgs,
 ) -> cksol_types_internal::event::GetEventsResult {
-    use cksol_minter::state::event::{Event, EventType, TransactionPurpose, VersionedMessage};
+    use cksol_minter::state::event::{
+        Event, EventType, Signer, TransactionPurpose, VersionedMessage,
+    };
     use cksol_types_internal::event;
 
     const MAX_EVENTS_PER_RESPONSE: u64 = 2_000;
@@ -186,7 +188,13 @@ fn get_events(
                             )
                         }
                     },
-                    signers,
+                    signers: signers
+                        .into_iter()
+                        .map(|signer| match signer {
+                            Signer::Minter => event::Signer::Minter,
+                            Signer::Account(account) => event::Signer::Account(account),
+                        })
+                        .collect(),
                     purpose,
                     block_height: block_height.get(),
                 }

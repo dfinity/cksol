@@ -9,7 +9,7 @@ use crate::{
     state::{TaskType, event::EventType, mutate_state, read_state, reset_state},
     storage::reset_events,
     test_fixtures::{
-        EventsAssert, MINIMUM_WITHDRAWAL_AMOUNT, MINTER_ACCOUNT, account, account_signature,
+        EventsAssert, MINIMUM_WITHDRAWAL_AMOUNT, account, account_signature,
         confirmed_block_at_height, deposit_id, events, init_balance, init_schnorr_master_key,
         init_state, minter_signature, runtime::TestCanisterRuntime, signature,
     },
@@ -413,12 +413,7 @@ mod resubmission {
         let old_signature = signature(1);
         let burn_index = 1;
         events::accept_withdrawal(account(1), burn_index, MINIMUM_WITHDRAWAL_AMOUNT);
-        events::submit_withdrawal_at_height(
-            old_signature,
-            MINTER_ACCOUNT,
-            EXPIRED_BLOCK_HEIGHT,
-            vec![burn_index],
-        );
+        events::submit_withdrawal_at_height(old_signature, EXPIRED_BLOCK_HEIGHT, vec![burn_index]);
         events::expire_transaction(old_signature);
 
         let new_signature = minter_signature();

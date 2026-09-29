@@ -4,8 +4,8 @@ use crate::{
     constants::FEE_PER_SIGNATURE,
     state::{event::VersionedMessage, read_state},
     test_fixtures::{
-        MINTER_ACCOUNT, MINTER_ADDRESS, account_signature, init_schnorr_master_key, init_state,
-        minter_signature, runtime::TestCanisterRuntime,
+        MINTER_ADDRESS, account_signature, init_schnorr_master_key, init_state, minter_signature,
+        runtime::TestCanisterRuntime,
     },
 };
 use assert_matches::assert_matches;
@@ -69,7 +69,7 @@ mod consolidation_tests {
         .expect("transaction creation should succeed");
 
         // Verify signers list
-        assert_eq!(signers, vec![source_account]);
+        assert_eq!(signers, vec![Signer::Account(source_account)]);
 
         // Fee payer is the source address
         assert_eq!(tx.message.account_keys[0], source_address);
@@ -128,7 +128,10 @@ mod consolidation_tests {
         .expect("transaction creation should succeed");
 
         // Verify signers list (fee payer first, then sources)
-        assert_eq!(signers, vec![account_1, account_2]);
+        assert_eq!(
+            signers,
+            vec![Signer::Account(account_1), Signer::Account(account_2)]
+        );
 
         // Two signers => two signatures
         assert_eq!(tx.signatures.len(), 2);
@@ -413,7 +416,7 @@ mod batch_withdrawal_tests {
         .await
         .expect("transaction creation should succeed");
 
-        assert_eq!(signers, vec![MINTER_ACCOUNT]);
+        assert_eq!(signers, vec![Signer::Minter]);
         assert_eq!(tx.signatures.len(), 1);
         assert_eq!(tx.signatures[0], minter_signature());
         assert_eq!(tx.message.account_keys[0], MINTER_ADDRESS);
@@ -439,7 +442,7 @@ mod batch_withdrawal_tests {
         .expect("transaction creation should succeed");
 
         // Only the minter signs
-        assert_eq!(signers, vec![MINTER_ACCOUNT]);
+        assert_eq!(signers, vec![Signer::Minter]);
         assert_eq!(tx.signatures.len(), 1);
 
         // Fee payer is at position 0
@@ -491,7 +494,7 @@ mod batch_withdrawal_tests {
                 .await
                 .expect("transaction creation should succeed at max capacity");
 
-        assert_eq!(signers, vec![MINTER_ACCOUNT]);
+        assert_eq!(signers, vec![Signer::Minter]);
         assert_eq!(tx.signatures.len(), 1);
         assert_eq!(tx.message.instructions.len(), MAX_WITHDRAWALS_PER_TX);
     }

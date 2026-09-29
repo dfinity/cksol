@@ -186,7 +186,7 @@ pub mod events {
         rpc::BlockHeight,
         state::{
             audit::process_event,
-            event::{DepositId, EventType, TransactionPurpose, WithdrawalRequest},
+            event::{DepositId, EventType, Signer, TransactionPurpose, WithdrawalRequest},
             mutate_state,
         },
     };
@@ -258,7 +258,7 @@ pub mod events {
                 EventType::SubmittedTransaction {
                     signature,
                     message: message().into(),
-                    signers: vec![fee_payer],
+                    signers: vec![Signer::Account(fee_payer)],
                     purpose: TransactionPurpose::ConsolidateDeposits {
                         mint_indices: mint_indices
                             .into_iter()
@@ -297,13 +297,12 @@ pub mod events {
         });
     }
 
-    pub fn submit_withdrawal(signature: Signature, fee_payer: Account, burn_indices: Vec<u64>) {
-        submit_withdrawal_at_height(signature, fee_payer, DEFAULT_BLOCK_HEIGHT, burn_indices);
+    pub fn submit_withdrawal(signature: Signature, burn_indices: Vec<u64>) {
+        submit_withdrawal_at_height(signature, DEFAULT_BLOCK_HEIGHT, burn_indices);
     }
 
     pub fn submit_withdrawal_at_height(
         signature: Signature,
-        fee_payer: Account,
         block_height: BlockHeight,
         burn_indices: Vec<u64>,
     ) {
@@ -313,7 +312,7 @@ pub mod events {
                 EventType::SubmittedTransaction {
                     signature,
                     message: message().into(),
-                    signers: vec![fee_payer],
+                    signers: vec![Signer::Minter],
                     purpose: TransactionPurpose::WithdrawSol {
                         burn_indices: burn_indices
                             .into_iter()
@@ -377,7 +376,9 @@ pub mod arb {
     use crate::{
         numeric::{LedgerBurnIndex, LedgerMintIndex},
         rpc::BlockHeight,
-        state::event::{DepositId, Event, EventType, TransactionPurpose, WithdrawalRequest},
+        state::event::{
+            DepositId, Event, EventType, Signer, TransactionPurpose, WithdrawalRequest,
+        },
     };
     use candid::Principal;
     use cksol_types_internal::{Ed25519KeyName, InitArgs, SolanaNetwork, UpgradeArgs};
@@ -402,6 +403,13 @@ pub mod arb {
 
     pub fn arb_signature() -> impl Strategy<Value = Signature> {
         any::<[u8; 64]>().prop_map(Signature::from)
+    }
+
+    pub fn arb_signer() -> impl Strategy<Value = Signer> {
+        prop_oneof![
+            Just(Signer::Minter),
+            arb_account().prop_map(Signer::Account),
+        ]
     }
 
     pub fn arb_deposit_id() -> impl Strategy<Value = DepositId> {
@@ -598,7 +606,7 @@ pub mod arb {
             (
                 arb_signature(),
                 arb_message(),
-                prop::collection::vec(arb_account(), 1..10),
+                prop::collection::vec(arb_signer(), 1..10),
                 prop_oneof![
                     prop::collection::vec(arb_ledger_mint_index(), 1..10).prop_map(
                         |mint_indices| TransactionPurpose::ConsolidateDeposits { mint_indices }

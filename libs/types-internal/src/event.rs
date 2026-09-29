@@ -78,8 +78,8 @@ pub enum EventType {
         signature: Signature,
         /// The versioned transaction message.
         transaction: VersionedTransactionMessage,
-        /// The signing accounts in signature order (fee payer first).
-        signers: Vec<Account>,
+        /// The signers in signature order (fee payer first).
+        signers: Vec<Signer>,
         /// The purpose of this transaction.
         purpose: TransactionPurpose,
         /// The block height of the block whose blockhash the transaction uses.
@@ -120,6 +120,17 @@ pub enum EventType {
         /// The amount that will be swept from the deposit address.
         sweepable_amount: Lamport,
     },
+}
+
+/// The key that produced one signature of a submitted Solana transaction.
+#[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]
+pub enum Signer {
+    /// The minter itself, signing with the master key that controls
+    /// the minter's main address.
+    Minter,
+    /// A minter-controlled account, signing with the key derived
+    /// for its deposit address.
+    Account(Account),
 }
 
 /// The purpose of a submitted Solana transaction.

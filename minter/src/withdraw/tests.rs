@@ -612,7 +612,7 @@ mod withdrawal_finalization_tests {
     fn setup_sent_withdrawal(burn_block_index: u64) -> Signature {
         let tx_signature = signature(burn_block_index as usize + 1);
         events::accept_withdrawal(MINTER_ACCOUNT, burn_block_index, MINIMUM_WITHDRAWAL_AMOUNT);
-        events::submit_withdrawal(tx_signature, MINTER_ACCOUNT, vec![burn_block_index]);
+        events::submit_withdrawal(tx_signature, vec![burn_block_index]);
         tx_signature
     }
 

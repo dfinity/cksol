@@ -1,11 +1,12 @@
 use crate::{
     address::{
-        DerivationPath, MINTER_DERIVATION_PATH, derivation_path, derive_public_key,
-        lazy_get_schnorr_master_key, minter_address,
+        DerivationPath, derivation_path, derive_public_key, lazy_get_schnorr_master_key,
+        minter_address,
     },
     constants::FEE_PER_SIGNATURE,
     runtime::CanisterRuntime,
     signer::{SchnorrSigner, sign_bytes},
+    state::event::Signer,
 };
 use derive_more::From;
 use ic_cdk_management_canister::SignCallError;
@@ -46,7 +47,7 @@ pub enum CreateTransferError {
 /// The first source account is used as the fee payer. Its transfer amount
 /// is reduced by the transaction fee.
 ///
-/// Returns the signed transaction and the list of signer accounts.
+/// Returns the signed transaction and its signers in signature order.
 ///
 /// # Panics
 ///
@@ -57,19 +58,18 @@ pub async fn create_signed_consolidation_transaction<R: CanisterRuntime>(
     runtime: &R,
     sources: Vec<(Account, Lamport)>,
     recent_blockhash: Hash,
-) -> Result<(Transaction, Vec<Account>), CreateTransferError> {
+) -> Result<(Transaction, Vec<Signer>), CreateTransferError> {
     assert!(!sources.is_empty(), "BUG: sources must not be empty");
 
     let master_public_key = lazy_get_schnorr_master_key(runtime).await;
     let target_address = minter_address(&master_public_key);
-    let (derivation_paths, addresses): (Vec<_>, Vec<_>) = sources
+    let addresses: Vec<Address> = sources
         .iter()
         .map(|(account, _)| {
-            let path = derivation_path(account);
-            let public_key = derive_public_key(&master_public_key, path.to_vec());
-            (path, Address::from(public_key.serialize_raw()))
+            let public_key = derive_public_key(&master_public_key, derivation_path(account));
+            Address::from(public_key.serialize_raw())
         })
-        .unzip();
+        .collect();
 
     let fee_payer_address = &addresses[0];
     let transaction_fee = FEE_PER_SIGNATURE * sources.len() as u64;
@@ -101,16 +101,11 @@ pub async fn create_signed_consolidation_transaction<R: CanisterRuntime>(
     );
 
     // Re-order signers to match the order of the message account keys
-    let mut signer_map: BTreeMap<Address, (Account, DerivationPath)> = addresses
+    let mut signer_map: BTreeMap<Address, Signer> = addresses
         .into_iter()
-        .zip(
-            sources
-                .iter()
-                .map(|(account, _)| *account)
-                .zip(derivation_paths),
-        )
+        .zip(sources.iter().map(|(account, _)| Signer::Account(*account)))
         .collect();
-    let (signer_accounts, signer_derivation_paths): (Vec<_>, Vec<_>) = transaction
+    let signers: Vec<Signer> = transaction
         .message
         .signer_keys()
         .iter()
@@ -119,18 +114,20 @@ pub async fn create_signed_consolidation_transaction<R: CanisterRuntime>(
                 .remove(key)
                 .expect("BUG: signer key not found in source addresses")
         })
-        .unzip();
+        .collect();
 
-    sign_transaction(&mut transaction, signer_derivation_paths, &runtime.signer()).await?;
+    let derivation_paths: Vec<DerivationPath> =
+        signers.iter().map(Signer::derivation_path).collect();
+    sign_transaction(&mut transaction, derivation_paths, &runtime.signer()).await?;
 
-    Ok((transaction, signer_accounts))
+    Ok((transaction, signers))
 }
 
 /// Creates a signed Solana transaction that transfers lamports from a single
 /// minter-controlled address (the fee payer) to multiple target addresses.
 ///
-/// Returns the signed transaction and the list of signer accounts
-/// (only the fee payer).
+/// Returns the signed transaction and its signers:
+/// only [`Signer::Minter`], the fee payer.
 ///
 /// # Panics
 ///
@@ -139,8 +136,7 @@ pub async fn create_signed_batch_withdrawal_transaction<R: CanisterRuntime>(
     runtime: &R,
     targets: &[(Address, Lamport)],
     recent_blockhash: Hash,
-) -> Result<(Transaction, Vec<Account>), CreateTransferError> {
-    let fee_payer_account = Account::from(runtime.canister_self());
+) -> Result<(Transaction, Vec<Signer>), CreateTransferError> {
     let master_public_key = lazy_get_schnorr_master_key(runtime).await;
     let fee_payer_address = minter_address(&master_public_key);
 
@@ -153,14 +149,12 @@ pub async fn create_signed_batch_withdrawal_transaction<R: CanisterRuntime>(
         Message::new_with_blockhash(&instructions, Some(&fee_payer_address), &recent_blockhash);
     let mut transaction = Transaction::new_unsigned(message);
 
-    sign_transaction(
-        &mut transaction,
-        vec![MINTER_DERIVATION_PATH],
-        &runtime.signer(),
-    )
-    .await?;
+    let signers = vec![Signer::Minter];
+    let derivation_paths: Vec<DerivationPath> =
+        signers.iter().map(Signer::derivation_path).collect();
+    sign_transaction(&mut transaction, derivation_paths, &runtime.signer()).await?;
 
-    Ok((transaction, vec![fee_payer_account]))
+    Ok((transaction, signers))
 }
 
 // Sign transaction, return error if it exceeds the maximum transaction size.
