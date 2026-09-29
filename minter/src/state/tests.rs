@@ -15,7 +15,7 @@ use crate::{
             fail_transaction, mint_deposit, resubmit_transaction, submit_withdrawal,
             succeed_transaction,
         },
-        init_balance, init_state, ledger_canister_id,
+        init_balance, init_state, ledger_canister_id, queued_deposit,
         runtime::TestCanisterRuntime,
         signature, sol_rpc_canister_id, valid_init_args,
     },
@@ -78,12 +78,12 @@ mod queued_deposits {
 
     #[test]
     fn should_replay_queued_deposits_like_direct_transitions() {
-        let queued = |deposit_id, i| Event {
+        let queued = |deposit_id| Event {
             timestamp: 0,
             payload: EventType::QueuedDeposit {
                 deposit_id,
-                account: account(i),
-                sweepable_amount: 100 * (deposit_id + 1),
+                account: queued_deposit(deposit_id).account,
+                sweepable_amount: queued_deposit(deposit_id).sweepable_amount,
             },
         };
         let init = Event {
@@ -91,10 +91,12 @@ mod queued_deposits {
             payload: EventType::Init(valid_init_args()),
         };
         let mut expected = State::try_from(valid_init_args()).unwrap();
-        expected.process_queued_deposit(0, &account(1), 100);
-        expected.process_queued_deposit(1, &account(2), 200);
+        for deposit_id in 0..2 {
+            let deposit = queued_deposit(deposit_id);
+            expected.process_queued_deposit(deposit_id, &deposit.account, deposit.sweepable_amount);
+        }
 
-        let replayed = replay_events([init, queued(0, 1), queued(1, 2)]);
+        let replayed = replay_events([init, queued(0), queued(1)]);
 
         assert_eq!(replayed, expected);
     }
@@ -119,22 +121,13 @@ mod swept_deposits {
 
         submit_sweep(sweep_signature, vec![2, 0]);
 
-        let expected_deposit = |deposit_id: u64| {
-            (
-                deposit_id,
-                QueuedDeposit {
-                    account: account(deposit_id as usize + 1),
-                    sweepable_amount: 100 * (deposit_id + 1),
-                },
-            )
-        };
         read_state(|s| {
             assert_eq!(
                 s.deposits().swept().get(&sweep_signature),
-                Some(&Sweep::new(BTreeMap::from([
-                    expected_deposit(0),
-                    expected_deposit(2)
-                ])))
+                Some(&Sweep::new([
+                    (0, queued_deposit(0)),
+                    (2, queued_deposit(2))
+                ]))
             );
             assert_eq!(s.deposits().queued().keys().collect::<Vec<_>>(), vec![&1]);
             let transaction = s.submitted_transactions().get(&sweep_signature).unwrap();
@@ -276,18 +269,17 @@ mod swept_deposits {
 
     fn queue_three_deposits() {
         for deposit_id in 0..3 {
-            queue_deposit(
-                deposit_id,
-                account(deposit_id as usize + 1),
-                100 * (deposit_id + 1),
-            );
+            let deposit = queued_deposit(deposit_id);
+            queue_deposit(deposit_id, deposit.account, deposit.sweepable_amount);
         }
     }
 
     fn assert_in_flight_ids_unchanged() {
         for deposit_id in 0..3 {
             assert_eq!(
-                read_state(|s| s.deposits().in_flight_id(&account(deposit_id as usize + 1))),
+                read_state(|s| s
+                    .deposits()
+                    .in_flight_id(&queued_deposit(deposit_id).account)),
                 Some(deposit_id)
             );
         }

@@ -62,7 +62,8 @@ pub struct Sweep {
 }
 
 impl Sweep {
-    pub fn new(deposits: BTreeMap<DepositSolId, QueuedDeposit>) -> Self {
+    pub fn new(deposits: impl IntoIterator<Item = (DepositSolId, QueuedDeposit)>) -> Self {
+        let deposits: BTreeMap<_, _> = deposits.into_iter().collect();
         assert!(
             !deposits.is_empty(),
             "Attempted to create a sweep without deposits"

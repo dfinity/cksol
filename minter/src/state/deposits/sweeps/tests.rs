@@ -1,19 +1,30 @@
 use super::{Sweep, Sweeps};
-use crate::{state::QueuedDeposit, test_fixtures::account, test_fixtures::signature};
-use cksol_types::DepositSolId;
+use crate::{
+    state::QueuedDeposit,
+    test_fixtures::{account, queued_deposit, signature},
+};
 
 #[test]
 fn should_find_deposits_by_sweep_signature_and_by_deposit_id() {
     let mut sweeps = Sweeps::default();
     let first_sweep = signature(1);
     let second_sweep = signature(2);
-    sweeps.insert(first_sweep, sweep_of([2, 0]));
-    sweeps.insert(second_sweep, sweep_of([1]));
+    sweeps.insert(
+        first_sweep,
+        Sweep::new([(0, queued_deposit(0)), (2, queued_deposit(2))]),
+    );
+    sweeps.insert(second_sweep, Sweep::new([(1, queued_deposit(1))]));
 
-    assert_eq!(sweeps.get(&first_sweep), Some(&sweep_of([0, 2])));
+    assert_eq!(
+        sweeps.get(&first_sweep),
+        Some(&Sweep::new([
+            (0, queued_deposit(0)),
+            (2, queued_deposit(2))
+        ]))
+    );
     assert_eq!(sweeps.get(&signature(3)), None);
-    assert_eq!(sweeps.deposit(0), Some((&first_sweep, &queued(0))));
-    assert_eq!(sweeps.deposit(1), Some((&second_sweep, &queued(1))));
+    assert_eq!(sweeps.deposit(0), Some((&first_sweep, &queued_deposit(0))));
+    assert_eq!(sweeps.deposit(1), Some((&second_sweep, &queued_deposit(1))));
     assert_eq!(sweeps.deposit(3), None);
     assert_eq!(
         sweeps.signatures().collect::<Vec<_>>(),
@@ -29,14 +40,20 @@ fn should_remove_a_sweep_by_signature() {
     let mut sweeps = Sweeps::default();
     let removed_sweep = signature(1);
     let kept_sweep = signature(2);
-    sweeps.insert(removed_sweep, sweep_of([2, 0]));
-    sweeps.insert(kept_sweep, sweep_of([1]));
+    sweeps.insert(
+        removed_sweep,
+        Sweep::new([(0, queued_deposit(0)), (2, queued_deposit(2))]),
+    );
+    sweeps.insert(kept_sweep, Sweep::new([(1, queued_deposit(1))]));
 
-    assert_eq!(sweeps.remove(&removed_sweep), Some(sweep_of([0, 2])));
+    assert_eq!(
+        sweeps.remove(&removed_sweep),
+        Some(Sweep::new([(0, queued_deposit(0)), (2, queued_deposit(2))]))
+    );
 
     assert_eq!(sweeps.remove(&removed_sweep), None);
     assert_eq!(sweeps.deposit(0), None);
-    assert_eq!(sweeps.deposit(1), Some((&kept_sweep, &queued(1))));
+    assert_eq!(sweeps.deposit(1), Some((&kept_sweep, &queued_deposit(1))));
     assert_eq!(sweeps.deposit_count(), 1);
 }
 
@@ -55,35 +72,35 @@ fn should_report_an_empty_collection() {
 fn should_panic_when_inserting_a_sweep_with_a_known_signature() {
     let mut sweeps = Sweeps::default();
     let sweep_signature = signature(1);
-    sweeps.insert(sweep_signature, sweep_of([0]));
+    sweeps.insert(sweep_signature, Sweep::new([(0, queued_deposit(0))]));
 
-    sweeps.insert(sweep_signature, sweep_of([1]));
+    sweeps.insert(sweep_signature, Sweep::new([(1, queued_deposit(1))]));
 }
 
 #[test]
-fn should_sum_the_swept_amount_of_a_sweep() {
-    assert_eq!(sweep_of([2, 0]).swept_amount(), 300 + 100);
-    assert_eq!(sweep_of([1]).swept_amount(), 200);
+fn should_sum_the_sweepable_amounts_of_the_deposits() {
+    let sweep = Sweep::new([
+        (
+            0,
+            QueuedDeposit {
+                account: account(1),
+                sweepable_amount: 1_000,
+            },
+        ),
+        (
+            1,
+            QueuedDeposit {
+                account: account(2),
+                sweepable_amount: 250,
+            },
+        ),
+    ]);
+
+    assert_eq!(sweep.swept_amount(), 1_250);
 }
 
 #[test]
 #[should_panic(expected = "without deposits")]
 fn should_panic_when_creating_a_sweep_without_deposits() {
-    sweep_of([]);
-}
-
-fn sweep_of<const N: usize>(deposit_ids: [DepositSolId; N]) -> Sweep {
-    Sweep::new(
-        deposit_ids
-            .into_iter()
-            .map(|deposit_id| (deposit_id, queued(deposit_id)))
-            .collect(),
-    )
-}
-
-fn queued(deposit_id: DepositSolId) -> QueuedDeposit {
-    QueuedDeposit {
-        account: account(deposit_id as usize + 1),
-        sweepable_amount: 100 * (deposit_id + 1),
-    }
+    Sweep::new([]);
 }

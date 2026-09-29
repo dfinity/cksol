@@ -3,14 +3,14 @@ use crate::{
     numeric::LedgerMintIndex,
     rpc::BlockHeight,
     state::{
-        SchnorrPublicKey, State,
+        QueuedDeposit, SchnorrPublicKey, State,
         event::{DepositId, Event, EventType},
         init_once_state, mutate_state,
     },
     storage::with_event_iter,
 };
 use candid::Principal;
-use cksol_types::DepositStatus;
+use cksol_types::{DepositSolId, DepositStatus};
 use cksol_types_internal::{Ed25519KeyName, InitArgs, SolanaNetwork};
 use ic_cdk_management_canister::SchnorrPublicKeyResult;
 use ic_ed25519::{PocketIcMasterPublicKeyId, PublicKey};
@@ -154,6 +154,15 @@ pub fn deposit_id(i: usize) -> DepositId {
 }
 
 /// Returns an [`Account`] with a deterministic principal derived from `i`.
+/// The deposit of `account(deposit_id + 1)` with `100 * (deposit_id + 1)` sweepable lamports,
+/// so that a sequence of deposits has distinct accounts and amounts.
+pub fn queued_deposit(deposit_id: DepositSolId) -> QueuedDeposit {
+    QueuedDeposit {
+        account: account(deposit_id as usize + 1),
+        sweepable_amount: 100 * (deposit_id + 1),
+    }
+}
+
 pub fn account(i: usize) -> Account {
     let mut bytes = [0u8; 29];
     bytes[..8].copy_from_slice(&(i as u64).to_le_bytes());
