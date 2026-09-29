@@ -1251,7 +1251,7 @@ mod anonymous_caller_tests {
                     subaccount: None,
                 })
                 .await;
-            assert_matches!(result, Err(s) => s.contains("the owner must be non-anonymous"));
+            assert_matches!(result, Err(s) if s.contains("the owner must be non-anonymous"));
 
             // `process_deposit` endpoint
             let result = minter
@@ -1261,7 +1261,7 @@ mod anonymous_caller_tests {
                     signature: deposit_transaction_signature(),
                 })
                 .await;
-            assert_matches!(result, Err(s) => s.contains("the owner must be non-anonymous"));
+            assert_matches!(result, Err(s) if s.contains("the owner must be non-anonymous"));
 
             let result = minter
                 .try_deposit_sol(DepositSolArgs {
@@ -1269,7 +1269,7 @@ mod anonymous_caller_tests {
                     subaccount: None,
                 })
                 .await;
-            assert_matches!(result, Err(s) => s.contains("the owner must be non-anonymous"));
+            assert_matches!(result, Err(s) if s.contains("the owner must be non-anonymous"));
         }
 
         // `withdraw` endpoint (no `owner` field, only anonymous caller applies)
@@ -1281,7 +1281,51 @@ mod anonymous_caller_tests {
                 address: "E4MpwNnMWs2XtW5gVrxZvyS7fMq31QD5HvbxmwP45Tz3".to_string(),
             })
             .await;
-        assert_matches!(result, Err(s) => s.contains("the owner must be non-anonymous"));
+        assert_matches!(result, Err(s) if s.contains("the owner must be non-anonymous"));
+
+        setup.drop().await;
+    }
+}
+
+mod minter_owner_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn should_fail_for_minter_owner() {
+        let setup = SetupBuilder::new().build().await;
+        let owner = Some(setup.minter_canister_id());
+        let expected_message = format!(
+            "the minter's own principal {} is not a valid deposit owner",
+            setup.minter_canister_id()
+        );
+
+        let result = setup
+            .minter()
+            .try_get_deposit_address(GetDepositAddressArgs {
+                owner,
+                subaccount: None,
+            })
+            .await;
+        assert_matches!(result, Err(s) if s.contains(&expected_message));
+
+        let result = setup
+            .minter()
+            .try_deposit_sol(DepositSolArgs {
+                owner,
+                subaccount: None,
+            })
+            .await;
+        assert_matches!(result, Err(s) if s.contains(&expected_message));
+
+        let result = setup
+            .minter()
+            .try_process_deposit(ProcessDepositArgs {
+                owner,
+                subaccount: None,
+                signature: deposit_transaction_signature(),
+            })
+            .await;
+        assert_matches!(result, Err(s) if s.contains(&expected_message));
 
         setup.drop().await;
     }

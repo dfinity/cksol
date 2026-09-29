@@ -6,7 +6,7 @@ use crate::{
     rpc::get_balance,
     runtime::CanisterRuntime,
     state::{audit::process_event, event::EventType, mutate_state, read_state},
-    utils::assert_non_anonymous_account,
+    utils::assert_valid_deposit_owner,
 };
 use canlog::log;
 use cksol_types::{DepositSolError, DepositSolId, DepositSolStatus, Lamport};
@@ -20,7 +20,7 @@ pub async fn deposit_sol<R: CanisterRuntime>(
     runtime: &R,
     account: Account,
 ) -> Result<DepositSolId, DepositSolError> {
-    assert_non_anonymous_account(&account);
+    assert_valid_deposit_owner(&account, runtime.canister_self());
     let _guard = deposit_sol_guard(account)?;
 
     let (required_cycles, deposit_consolidation_fee, minimum_deposit_amount) =

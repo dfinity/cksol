@@ -60,7 +60,7 @@ fn post_upgrade(args: Option<MinterArg>) {
 
 #[ic_cdk::query]
 fn get_deposit_address(args: GetDepositAddressArgs) -> Address {
-    let account = assert_non_anonymous_account(args.owner, args.subaccount);
+    let account = assert_valid_deposit_account(args.owner, args.subaccount);
     cksol_minter::address::get_deposit_address(&account).into()
 }
 
@@ -68,7 +68,7 @@ fn get_deposit_address(args: GetDepositAddressArgs) -> Address {
 // PR of the stack, together with the consolidation check that `deposit_sol` needs meanwhile.
 #[ic_cdk::update]
 async fn process_deposit(args: ProcessDepositArgs) -> Result<DepositStatus, ProcessDepositError> {
-    let account = assert_non_anonymous_account(args.owner, args.subaccount);
+    let account = assert_valid_deposit_account(args.owner, args.subaccount);
     cksol_minter::deposit::manual::process_deposit(
         IcCanisterRuntime::new(),
         account,
@@ -362,6 +362,15 @@ fn assert_non_anonymous_account(
 ) -> Account {
     let account = resolve_account(owner, subaccount);
     cksol_minter::utils::assert_non_anonymous_account(&account);
+    account
+}
+
+fn assert_valid_deposit_account(
+    owner: Option<Principal>,
+    subaccount: Option<Subaccount>,
+) -> Account {
+    let account = resolve_account(owner, subaccount);
+    cksol_minter::utils::assert_valid_deposit_owner(&account, ic_cdk::api::canister_self());
     account
 }
 

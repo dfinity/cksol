@@ -88,7 +88,7 @@ pub fn init_balance_to(amount: Lamport) {
 
     events::accept_deposit(id, amount);
     events::mint_deposit(id, mint_index);
-    events::submit_consolidation(consolidation_signature, MINTER_ACCOUNT, vec![mint_index]);
+    events::submit_consolidation(consolidation_signature, account(0xFD), vec![mint_index]);
     events::succeed_transaction(consolidation_signature);
 }
 

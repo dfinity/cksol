@@ -5,7 +5,7 @@ use crate::{
     storage::with_event_iter,
     test_fixtures::{
         BLOCK_INDEX, DEPOSIT_CONSOLIDATION_FEE, EventsAssert, MINIMUM_DEPOSIT_AMOUNT,
-        PROCESS_DEPOSIT_REQUIRED_CYCLES, account,
+        MINTER_ACCOUNT, PROCESS_DEPOSIT_REQUIRED_CYCLES, account,
         deposit::{
             DEPOSIT_AMOUNT, DEPOSITOR_ACCOUNT, accepted_deposit_event,
             deposit_id as manual_deposit_id, minted_event,
@@ -199,6 +199,12 @@ async fn should_reject_anonymous_owner() {
     };
 
     let _ = deposit_sol(&TestCanisterRuntime::new(), anonymous_account).await;
+}
+
+#[tokio::test]
+#[should_panic(expected = "is not a valid deposit owner")]
+async fn should_reject_the_minter_as_owner() {
+    let _ = deposit_sol(&TestCanisterRuntime::new(), MINTER_ACCOUNT).await;
 }
 
 async fn assert_second_call_returns_same_deposit(first: Account, second: Account) {
