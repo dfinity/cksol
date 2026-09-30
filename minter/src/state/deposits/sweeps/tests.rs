@@ -78,6 +78,18 @@ fn should_panic_when_inserting_a_sweep_with_a_known_signature() {
 }
 
 #[test]
+#[should_panic(expected = "while another sweep holds it")]
+fn should_panic_when_inserting_a_sweep_whose_deposit_another_sweep_holds() {
+    let mut sweeps = Sweeps::default();
+    sweeps.insert(signature(1), Sweep::new([(0, queued_deposit(0))]));
+
+    sweeps.insert(
+        signature(2),
+        Sweep::new([(0, queued_deposit(0)), (1, queued_deposit(1))]),
+    );
+}
+
+#[test]
 fn should_sum_the_sweepable_amounts_of_the_deposits() {
     let sweep = Sweep::new([
         (
@@ -103,4 +115,10 @@ fn should_sum_the_sweepable_amounts_of_the_deposits() {
 #[should_panic(expected = "without deposits")]
 fn should_panic_when_creating_a_sweep_without_deposits() {
     Sweep::new([]);
+}
+
+#[test]
+#[should_panic(expected = "with deposit 0 twice")]
+fn should_panic_when_creating_a_sweep_with_a_duplicated_deposit() {
+    Sweep::new([(0, queued_deposit(0)), (0, queued_deposit(0))]);
 }

@@ -9,7 +9,9 @@ mod tests;
 
 /// The sweep transactions at one stage of the deposit lifecycle, keyed by signature.
 ///
-/// A deposit belongs to exactly one sweep, so it can also be found by its id.
+/// A deposit belongs to exactly one sweep, so it can also be found by its id:
+/// [`Sweep::new`] rejects a duplicated deposit id and [`Sweeps::insert`] rejects
+/// a sweep containing a deposit that another sweep already holds.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct Sweeps {
     by_signature: BTreeMap<Signature, Sweep>,
@@ -44,6 +46,12 @@ impl Sweeps {
     }
 
     pub(super) fn insert(&mut self, signature: Signature, sweep: Sweep) {
+        for deposit_id in sweep.deposits().keys() {
+            assert!(
+                self.deposit(*deposit_id).is_none(),
+                "Attempted to record deposit {deposit_id} in sweep {signature} while another sweep holds it"
+            );
+        }
         assert!(
             self.by_signature.insert(signature, sweep).is_none(),
             "Attempted to record sweep {signature} twice"
@@ -56,6 +64,9 @@ impl Sweeps {
 }
 
 /// The deposits moved to the minter's main account by one sweep transaction.
+///
+/// Each value is the deposit as it was recorded when it was queued, whatever
+/// stage the sweep holding it has reached.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Sweep {
     deposits: BTreeMap<DepositSolId, QueuedDeposit>,
@@ -63,12 +74,18 @@ pub struct Sweep {
 
 impl Sweep {
     pub fn new(deposits: impl IntoIterator<Item = (DepositSolId, QueuedDeposit)>) -> Self {
-        let deposits: BTreeMap<_, _> = deposits.into_iter().collect();
+        let mut unique = BTreeMap::new();
+        for (deposit_id, deposit) in deposits {
+            assert!(
+                unique.insert(deposit_id, deposit).is_none(),
+                "Attempted to create a sweep with deposit {deposit_id} twice"
+            );
+        }
         assert!(
-            !deposits.is_empty(),
+            !unique.is_empty(),
             "Attempted to create a sweep without deposits"
         );
-        Self { deposits }
+        Self { deposits: unique }
     }
 
     pub fn deposits(&self) -> &BTreeMap<DepositSolId, QueuedDeposit> {
