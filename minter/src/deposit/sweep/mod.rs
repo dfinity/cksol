@@ -16,9 +16,11 @@ use icrc_ledger_types::icrc1::account::Account;
 #[cfg(test)]
 mod tests;
 
+mod finalize;
 mod timer;
 
 pub use crate::constants::SWEEP_DEPOSITS_DELAY;
+pub use finalize::credit_finalized_sweeps;
 pub use timer::sweep_queued_deposits;
 
 pub async fn deposit_sol<R: CanisterRuntime>(
