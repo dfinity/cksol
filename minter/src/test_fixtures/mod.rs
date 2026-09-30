@@ -4,7 +4,7 @@ use crate::{
     numeric::LedgerMintIndex,
     rpc::BlockHeight,
     state::{
-        DepositBalance, QueuedDeposit, SchnorrPublicKey, State,
+        DepositBalance, QueuedDeposit, SchnorrPublicKey, State, Sweep,
         event::{DepositId, Event, EventType},
         init_once_state, mutate_state,
     },
@@ -171,6 +171,11 @@ pub fn queued_deposit_of(account: Account, sweepable_amount: Lamport) -> QueuedD
     }
 }
 
+/// The sweep of the given deposits to [`MINTER_ADDRESS`].
+pub fn planned_sweep(deposits: impl IntoIterator<Item = (DepositSolId, QueuedDeposit)>) -> Sweep {
+    Sweep::plan(deposits, MINTER_ADDRESS)
+}
+
 /// The deposit address of the account under the master key of [`init_schnorr_master_key`].
 pub fn deposit_address(account: Account) -> solana_address::Address {
     account_address(&schnorr_master_key(), &account)
@@ -215,7 +220,7 @@ pub fn minter_signature_nth(occurrence: usize) -> solana_signature::Signature {
 /// All helpers operate on the global thread-local state via [`mutate_state`].
 pub mod events {
     use super::{
-        DEFAULT_BLOCK_HEIGHT, MANUAL_DEPOSIT_FEE, WITHDRAWAL_FEE, deposit_address,
+        DEFAULT_BLOCK_HEIGHT, MANUAL_DEPOSIT_FEE, MINTER_ADDRESS, WITHDRAWAL_FEE, deposit_address,
         runtime::TestCanisterRuntime,
     };
     use crate::deposit::sweep::deposit_status;
@@ -348,7 +353,10 @@ pub mod events {
                     signature,
                     message: message().into(),
                     signers,
-                    purpose: TransactionPurpose::SweepDeposits { deposit_ids },
+                    purpose: TransactionPurpose::SweepDeposits {
+                        deposit_ids,
+                        minter_address: MINTER_ADDRESS,
+                    },
                     block_height: DEFAULT_BLOCK_HEIGHT,
                 },
                 &runtime(),
@@ -697,8 +705,12 @@ pub mod arb {
                     ),
                     prop::collection::vec(arb_ledger_burn_index(), 1..10)
                         .prop_map(|burn_indices| TransactionPurpose::WithdrawSol { burn_indices }),
-                    prop::collection::vec(any::<u64>(), 1..10)
-                        .prop_map(|deposit_ids| TransactionPurpose::SweepDeposits { deposit_ids }),
+                    (prop::collection::vec(any::<u64>(), 1..10), arb_address()).prop_map(
+                        |(deposit_ids, minter_address)| TransactionPurpose::SweepDeposits {
+                            deposit_ids,
+                            minter_address,
+                        }
+                    ),
                 ],
                 arb_block_height(),
             )

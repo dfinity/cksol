@@ -222,6 +222,9 @@ pub enum TransactionPurpose {
         /// The ids of the swept deposits, the fee payer first.
         #[n(0)]
         deposit_ids: Vec<DepositSolId>,
+        /// The minter's main address the deposits are swept to.
+        #[cbor(n(1), with = "cbor::address")]
+        minter_address: Address,
     },
 }
 

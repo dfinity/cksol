@@ -1031,7 +1031,7 @@ mod deposit_sol_tests {
                             owner: proxy,
                             subaccount,
                         },
-                        address: deposit_address,
+                        address: deposit_address.clone(),
                         balance: BALANCE_ABOVE_MINIMUM,
                     }]
             );
@@ -1107,7 +1107,7 @@ mod deposit_sol_tests {
                     == [EventType::QueuedDeposit {
                         deposit_id,
                         account: DEFAULT_CALLER_ACCOUNT,
-                        address: deposit_address,
+                        address: deposit_address.clone(),
                         balance: BALANCE_ABOVE_MINIMUM,
                     }]
             );
@@ -1190,7 +1190,7 @@ mod deposit_sol_tests {
                 e,
                 EventType::SubmittedTransaction {
                     signature,
-                    purpose: TransactionPurpose::SweepDeposits { deposit_ids },
+                    purpose: TransactionPurpose::SweepDeposits { deposit_ids, .. },
                     ..
                 } if *signature == sweep_signature && deposit_ids == &[deposit_id]
             )));

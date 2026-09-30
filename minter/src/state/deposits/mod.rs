@@ -6,7 +6,7 @@ use solana_address::Address;
 use solana_signature::Signature;
 use std::collections::BTreeMap;
 
-pub use sweeps::{Sweep, Sweeps};
+pub use sweeps::{Sweep, Sweeps, Transfer};
 
 mod sweeps;
 #[cfg(test)]
@@ -87,17 +87,25 @@ impl Deposits {
 
     /// Moves the given queued deposits to the sweep with the given signature and
     /// returns the amount the sweep transfers to the main account.
-    pub(super) fn sweep(&mut self, deposit_ids: &[DepositSolId], signature: &Signature) -> Lamport {
+    pub(super) fn sweep(
+        &mut self,
+        deposit_ids: &[DepositSolId],
+        minter_address: Address,
+        signature: &Signature,
+    ) -> Lamport {
         assert!(
             !deposit_ids.is_empty(),
             "Attempted to sweep no deposits with transaction {signature}"
         );
-        let sweep = Sweep::new(deposit_ids.iter().map(|deposit_id| {
-            let deposit = self.queued.remove(deposit_id).unwrap_or_else(|| {
-                panic!("Attempted to sweep unknown or already swept deposit {deposit_id}")
-            });
-            (*deposit_id, deposit)
-        }));
+        let sweep = Sweep::plan(
+            deposit_ids.iter().map(|deposit_id| {
+                let deposit = self.queued.remove(deposit_id).unwrap_or_else(|| {
+                    panic!("Attempted to sweep unknown or already swept deposit {deposit_id}")
+                });
+                (*deposit_id, deposit)
+            }),
+            minter_address,
+        );
         let swept_amount = sweep.swept_amount();
         self.swept.insert(*signature, sweep);
         swept_amount

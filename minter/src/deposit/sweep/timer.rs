@@ -1,5 +1,5 @@
 use crate::{
-    address::lazy_get_schnorr_master_key,
+    address::{lazy_get_schnorr_master_key, minter_address},
     constants::MAX_CONCURRENT_RPC_CALLS,
     guard::TimerGuard,
     rpc::{Block, SubmitTransactionError, get_recent_block, submit_transaction},
@@ -145,6 +145,7 @@ async fn submit_sweep_transaction<R: CanisterRuntime>(
     batch: SweepBatch,
     block: Block,
 ) -> Result<Signature, SweepError> {
+    let minter_address = minter_address(&lazy_get_schnorr_master_key(runtime).await);
     let (transaction, signers) =
         create_signed_consolidation_transaction(runtime, batch.sources(), block.blockhash).await?;
     let signature = transaction.signatures[0];
@@ -158,6 +159,7 @@ async fn submit_sweep_transaction<R: CanisterRuntime>(
                 signers,
                 purpose: TransactionPurpose::SweepDeposits {
                     deposit_ids: batch.deposit_ids(),
+                    minter_address,
                 },
                 block_height: block.block_height,
             },

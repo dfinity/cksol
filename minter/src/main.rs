@@ -178,9 +178,13 @@ fn get_events(
                             burn_indices: burn_indices.iter().map(|idx| *idx.get()).collect(),
                         }
                     }
-                    TransactionPurpose::SweepDeposits { deposit_ids } => {
-                        event::TransactionPurpose::SweepDeposits { deposit_ids }
-                    }
+                    TransactionPurpose::SweepDeposits {
+                        deposit_ids,
+                        minter_address,
+                    } => event::TransactionPurpose::SweepDeposits {
+                        deposit_ids,
+                        minter_address: minter_address.into(),
+                    },
                 };
                 event::EventType::SubmittedTransaction {
                     signature: signature.into(),

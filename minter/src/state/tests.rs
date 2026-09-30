@@ -6,8 +6,8 @@ use crate::{
     state::{audit::process_event, read_state},
     test_fixtures::{
         AUTOMATED_DEPOSIT_FEE, DEPOSIT_CONSOLIDATION_FEE, MANUAL_DEPOSIT_FEE,
-        MINIMUM_DEPOSIT_AMOUNT, MINIMUM_WITHDRAWAL_AMOUNT, PROCESS_DEPOSIT_REQUIRED_CYCLES,
-        WITHDRAWAL_FEE, account,
+        MINIMUM_DEPOSIT_AMOUNT, MINIMUM_WITHDRAWAL_AMOUNT, MINTER_ADDRESS,
+        PROCESS_DEPOSIT_REQUIRED_CYCLES, WITHDRAWAL_FEE, account,
         arb::arb_event,
         deposit_id,
         events::{
@@ -15,7 +15,7 @@ use crate::{
             fail_transaction, mint_deposit, resubmit_transaction, submit_withdrawal,
             succeed_transaction,
         },
-        init_balance, init_state, ledger_canister_id, queued_deposit,
+        init_balance, init_state, ledger_canister_id, planned_sweep, queued_deposit,
         runtime::TestCanisterRuntime,
         signature, sol_rpc_canister_id, valid_init_args,
     },
@@ -130,7 +130,7 @@ mod swept_deposits {
         read_state(|s| {
             assert_eq!(
                 s.deposits().swept().get(&sweep_signature),
-                Some(&Sweep::new([
+                Some(&planned_sweep([
                     (0, queued_deposit(0)),
                     (2, queued_deposit(2))
                 ]))
@@ -145,7 +145,8 @@ mod swept_deposits {
             assert_eq!(
                 transaction.purpose,
                 TransactionPurpose::SweepDeposits {
-                    deposit_ids: vec![2, 0]
+                    deposit_ids: vec![2, 0],
+                    minter_address: MINTER_ADDRESS,
                 }
             );
             assert_eq!(s.balance(), 0);
