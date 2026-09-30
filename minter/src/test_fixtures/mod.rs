@@ -153,7 +153,6 @@ pub fn deposit_id(i: usize) -> DepositId {
     }
 }
 
-/// Returns an [`Account`] with a deterministic principal derived from `i`.
 /// The deposit of `account(deposit_id + 1)` with `100 * (deposit_id + 1)` sweepable lamports,
 /// so that a sequence of deposits has distinct accounts and amounts.
 pub fn queued_deposit(deposit_id: DepositSolId) -> QueuedDeposit {
@@ -163,6 +162,7 @@ pub fn queued_deposit(deposit_id: DepositSolId) -> QueuedDeposit {
     }
 }
 
+/// Returns an [`Account`] with a deterministic principal derived from `i`.
 pub fn account(i: usize) -> Account {
     let mut bytes = [0u8; 29];
     bytes[..8].copy_from_slice(&(i as u64).to_le_bytes());
