@@ -1,14 +1,28 @@
-use super::{Sweep, SweepRecoveryError, Sweeps, Transfer};
+use super::{
+    Sweep, SweepMismatch, SweepRecoveryError, SweepSettlementError, Sweeps, Transfer,
+    UnreadableOutcome,
+};
 use crate::{
-    constants::FEE_PER_SIGNATURE,
+    constants::{FEE_PER_SIGNATURE, RENT_EXEMPTION_THRESHOLD},
     state::event::VersionedMessage,
     test_fixtures::{
         MINTER_ADDRESS, account, planned_sweep, queued_deposit, queued_deposit_of, signature,
         sweep_message,
+        sweep_outcome::{MAIN_BALANCE, SweepOutcome},
     },
 };
 use cksol_types::DepositSolId;
+use serde_json::json;
 use sol_rpc_types::Lamport;
+use solana_address::{Address, address};
+use solana_hash::Hash;
+use solana_transaction::TransactionError;
+use solana_transaction_status_client_types::{
+    EncodedConfirmedTransactionWithStatusMeta, EncodedTransaction, UiTransactionError,
+};
+
+const SWEEPABLE_AMOUNTS: [Lamport; 3] = [30_000_000, 20_000_000, 10_000_000];
+const PLANNED_FEE: Lamport = FEE_PER_SIGNATURE * SWEEPABLE_AMOUNTS.len() as u64;
 
 #[test]
 fn should_find_deposits_by_sweep_signature_and_by_deposit_id() {
@@ -154,12 +168,11 @@ mod plan {
 }
 
 mod message {
-    use super::{FEE_PER_SIGNATURE, Lamport, MINTER_ADDRESS, account, sweep_of};
+    use super::{
+        FEE_PER_SIGNATURE, Hash, Lamport, MINTER_ADDRESS, SWEEPABLE_AMOUNTS, account, sweep_of,
+    };
     use crate::test_fixtures::deposit_address;
-    use solana_hash::Hash;
     use solana_message::{Message, MessageHeader, compiled_instruction::CompiledInstruction};
-
-    const SWEEPABLE_AMOUNTS: [Lamport; 3] = [30_000_000, 20_000_000, 10_000_000];
 
     #[test]
     fn should_transfer_from_every_deposit_address_to_the_minter_address() {
@@ -231,6 +244,218 @@ mod message {
     }
 }
 
+mod settle {
+    use super::{
+        Address, MAIN_BALANCE, MINTER_ADDRESS, PLANNED_FEE, RENT_EXEMPTION_THRESHOLD,
+        SWEEPABLE_AMOUNTS, Sweep, SweepMismatch, SweepOutcome, SweepSettlementError,
+        TransactionError, UiTransactionError, UnreadableOutcome, account, mutate_blob,
+        planned_sweep, queued_deposit_of, sweep_of,
+    };
+
+    #[test]
+    fn should_settle_an_outcome_matching_the_plan() {
+        let sweep = sweep_of(SWEEPABLE_AMOUNTS);
+        let second_deposit = sweep.transfers()[1].from;
+        let cases = [
+            ("the fee was as planned", SweepOutcome::of(&sweep)),
+            (
+                "a late transfer left extra on a deposit address",
+                SweepOutcome::of(&sweep).with_late_transfer(second_deposit, 123_456),
+            ),
+            (
+                "a lower fee left extra on the fee payer",
+                SweepOutcome::of(&sweep).with_fee(PLANNED_FEE - 1_000),
+            ),
+        ];
+
+        for (name, outcome) in cases {
+            let settled = sweep
+                .clone()
+                .settle(&outcome.encode())
+                .unwrap_or_else(|e| panic!("{name}: {e}"));
+
+            assert_eq!(
+                settled.amount_received(),
+                sweep.expected_received(),
+                "{name}"
+            );
+            assert_eq!(settled.into_mints(), sweep.mints(), "{name}");
+        }
+    }
+
+    #[test]
+    fn should_reject_an_outcome_that_cannot_be_read() {
+        let sweep = sweep_of(SWEEPABLE_AMOUNTS);
+        let mut incomplete_balances = SweepOutcome::of(&sweep).encode();
+        incomplete_balances
+            .transaction
+            .meta
+            .as_mut()
+            .expect("meta")
+            .post_balances
+            .pop();
+        let cases = [
+            (
+                "the transaction cannot be decoded",
+                mutate_blob(SweepOutcome::of(&sweep).encode()),
+                UnreadableOutcome::TransactionDecodingFailed,
+            ),
+            (
+                "the meta field is missing",
+                SweepOutcome::of(&sweep).encode_without_meta(),
+                UnreadableOutcome::NoMetaField,
+            ),
+            (
+                "the balances do not cover all account keys",
+                incomplete_balances,
+                UnreadableOutcome::IncompleteBalances,
+            ),
+        ];
+
+        for (name, outcome, expected) in cases {
+            assert_eq!(
+                sweep.clone().settle(&outcome),
+                Err(SweepSettlementError::Unreadable(expected)),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn should_reject_an_outcome_that_does_not_match_the_plan() {
+        let sweep = sweep_of(SWEEPABLE_AMOUNTS);
+        let transfers = sweep.transfers();
+        let fee_payer = transfers[0].from;
+        let second_deposit = transfers[1].from;
+        let other_minter = Address::from([0x77; 32]);
+        let other_sweep = planned_sweep(
+            [(9, queued_deposit_of(account(9), 5_000_000))]
+                .into_iter()
+                .chain(sweep.deposits().iter().map(|(id, deposit)| (*id, *deposit))),
+        );
+        let cases = [
+            (
+                "the transaction failed",
+                SweepOutcome::of(&sweep).with_error(UiTransactionError::from(
+                    TransactionError::InsufficientFundsForFee,
+                )),
+                SweepMismatch::TransactionFailed {
+                    error: TransactionError::InsufficientFundsForFee.to_string(),
+                },
+            ),
+            (
+                "the executed message is another sweep",
+                SweepOutcome::of(&sweep)
+                    .with_message(other_sweep.sweep_message(Default::default())),
+                SweepMismatch::UnexpectedMessage,
+            ),
+            (
+                "the executed message sweeps to another address",
+                SweepOutcome::of(&sweep).with_message(
+                    Sweep::plan(
+                        sweep.deposits().iter().map(|(id, deposit)| (*id, *deposit)),
+                        other_minter,
+                    )
+                    .sweep_message(Default::default()),
+                ),
+                SweepMismatch::UnexpectedMessage,
+            ),
+            (
+                "the fee exceeds the planned fee",
+                SweepOutcome::of(&sweep).with_fee(PLANNED_FEE + 1),
+                SweepMismatch::UnexpectedFee {
+                    expected: PLANNED_FEE,
+                    actual: PLANNED_FEE + 1,
+                },
+            ),
+            (
+                "a deposit address moved by the wrong amount",
+                SweepOutcome::of(&sweep).with_balances(
+                    second_deposit,
+                    RENT_EXEMPTION_THRESHOLD + SWEEPABLE_AMOUNTS[1],
+                    RENT_EXEMPTION_THRESHOLD + 1,
+                ),
+                SweepMismatch::UnexpectedBalanceChange {
+                    address: second_deposit,
+                    pre: RENT_EXEMPTION_THRESHOLD + SWEEPABLE_AMOUNTS[1],
+                    post: RENT_EXEMPTION_THRESHOLD + 1,
+                    expected_decrease: SWEEPABLE_AMOUNTS[1],
+                },
+            ),
+            (
+                "the fee payer paid more than its transfer and the fee",
+                SweepOutcome::of(&sweep).with_balances(
+                    fee_payer,
+                    RENT_EXEMPTION_THRESHOLD + SWEEPABLE_AMOUNTS[0] + 1,
+                    RENT_EXEMPTION_THRESHOLD,
+                ),
+                SweepMismatch::UnexpectedBalanceChange {
+                    address: fee_payer,
+                    pre: RENT_EXEMPTION_THRESHOLD + SWEEPABLE_AMOUNTS[0] + 1,
+                    post: RENT_EXEMPTION_THRESHOLD,
+                    expected_decrease: SWEEPABLE_AMOUNTS[0],
+                },
+            ),
+            (
+                "a deposit address is left below the rent exemption threshold",
+                SweepOutcome::of(&sweep).with_balances(
+                    second_deposit,
+                    SWEEPABLE_AMOUNTS[1] + RENT_EXEMPTION_THRESHOLD - 1,
+                    RENT_EXEMPTION_THRESHOLD - 1,
+                ),
+                SweepMismatch::NotRentExempt {
+                    address: second_deposit,
+                    post: RENT_EXEMPTION_THRESHOLD - 1,
+                },
+            ),
+            (
+                "the main account was debited",
+                SweepOutcome::of(&sweep).with_balances(
+                    MINTER_ADDRESS,
+                    MAIN_BALANCE,
+                    MAIN_BALANCE - 1,
+                ),
+                SweepMismatch::MainAccountDebited {
+                    pre: MAIN_BALANCE,
+                    post: MAIN_BALANCE - 1,
+                },
+            ),
+            (
+                "the main account received less than planned",
+                SweepOutcome::of(&sweep).with_balances(
+                    MINTER_ADDRESS,
+                    MAIN_BALANCE,
+                    MAIN_BALANCE + sweep.expected_received() - 1,
+                ),
+                SweepMismatch::UnexpectedAmountReceived {
+                    expected: sweep.expected_received(),
+                    actual: sweep.expected_received() - 1,
+                },
+            ),
+            (
+                "the main account received more than planned",
+                SweepOutcome::of(&sweep).with_balances(
+                    MINTER_ADDRESS,
+                    MAIN_BALANCE,
+                    MAIN_BALANCE + sweep.expected_received() + 1,
+                ),
+                SweepMismatch::UnexpectedAmountReceived {
+                    expected: sweep.expected_received(),
+                    actual: sweep.expected_received() + 1,
+                },
+            ),
+        ];
+
+        for (name, outcome, expected) in cases {
+            assert_eq!(
+                sweep.clone().settle(&outcome.encode()),
+                Err(SweepSettlementError::Mismatch(expected)),
+                "{name}"
+            );
+        }
+    }
+}
+
 mod mints {
     use super::{FEE_PER_SIGNATURE, Lamport, sweep_of};
     use crate::state::event::CreditedDeposit;
@@ -274,6 +499,38 @@ mod mints {
             );
         }
     }
+}
+
+#[test]
+fn should_parse_a_real_world_sweep_transaction() {
+    let transaction = transaction();
+
+    let message = transaction
+        .transaction
+        .transaction
+        .decode()
+        .expect("decodable transaction")
+        .message;
+    assert_eq!(
+        message.static_account_keys(),
+        &[
+            address!("FkEEvAwZNvSziMAkmt13z2L9Loy4MjJE2qDbRserzt5Z"),
+            address!("6rXWHNpqRuNuGdUvJbRdV9wgRRggBVSEeCsnqJYDh7K9"),
+            address!("AwgbdmwCfwc6qaZAVH2K5juuP7HL21kotkVreWym6Eq4"),
+            address!("5tEJDWwGGG54bv2xzrphSieXSAYjLkxzdMEPGe53JaTj"),
+            address!("11111111111111111111111111111111"),
+        ]
+    );
+    let meta = transaction.transaction.meta.expect("meta");
+    assert_eq!(meta.fee, 15_000);
+    assert_eq!(
+        meta.pre_balances,
+        vec![1_499_990_000, 500_000_000, 500_000_000, 0, 1]
+    );
+    assert_eq!(
+        meta.post_balances,
+        vec![1_399_975_000, 300_000_000, 200_000_000, 600_000_000, 1]
+    );
 }
 
 /// The sweep of the given sweepable amounts from the accounts `1..`, deposit ids from `0`.
@@ -380,4 +637,67 @@ fn should_panic_when_creating_a_sweep_without_deposits() {
 #[should_panic(expected = "with deposit 0 twice")]
 fn should_panic_when_creating_a_sweep_with_a_duplicated_deposit() {
     planned_sweep([(0, queued_deposit(0)), (0, queued_deposit(0))]);
+}
+
+fn mutate_blob(
+    mut outcome: EncodedConfirmedTransactionWithStatusMeta,
+) -> EncodedConfirmedTransactionWithStatusMeta {
+    match &mut outcome.transaction.transaction {
+        EncodedTransaction::Binary(blob, _) => blob.push('!'),
+        other => panic!("BUG: expected a binary transaction, got {other:?}"),
+    }
+    outcome
+}
+
+fn transaction() -> EncodedConfirmedTransactionWithStatusMeta {
+    serde_json::from_value(json!({
+      "blockTime": 1790688751,
+      "meta": {
+        "computeUnitsConsumed": 450,
+        "costUnits": 3827,
+        "err": null,
+        "fee": 15000,
+        "innerInstructions": [],
+        "loadedAddresses": {
+          "readonly": [],
+          "writable": []
+        },
+        "logMessages": [
+          "Program 11111111111111111111111111111111 invoke [1]",
+          "Program 11111111111111111111111111111111 success",
+          "Program 11111111111111111111111111111111 invoke [1]",
+          "Program 11111111111111111111111111111111 success",
+          "Program 11111111111111111111111111111111 invoke [1]",
+          "Program 11111111111111111111111111111111 success"
+        ],
+        "postBalances": [
+          1399975000,
+          300000000,
+          200000000,
+          600000000,
+          1
+        ],
+        "postTokenBalances": [],
+        "preBalances": [
+          1499990000,
+          500000000,
+          500000000,
+          0,
+          1
+        ],
+        "preTokenBalances": [],
+        "rewards": [],
+        "status": {
+          "Ok": null
+        }
+      },
+      "slot": 505546429,
+      "transaction": [
+        "A0l5aGzMiojZ7s3g857KdWKc5doZJEaXYR6pZcevgErpc9dLy9nwVnVfyPVnpB3bfpwF9HGQX4lIlcRuxArdtgdhxa5kqPjHR7e2Zks4KOCeS+cEAGQaFLDyNfy0TR9SlntM0eOts3e9CDQiZGgyqps7zYDBKGJlPb5JYHZ/Q/wOkIh/d7rIaqqROw1P4LoBXTcp+9s6KJKM6VF3dkXomwppY98UwX7VzNqbhEUjHwK0BANe8NxNk2pj0IEGH9tSAgMAAQXbFo/tF6Irs79HIQwkrXL2g5StGIhiLECAtszzWwuYzFb6YuCssGYBUTmCdb/38AL/yA3X2RJ8oD8BfyVye+uUk7tRk1tfdTVCsZXY9DqmOyL02mxVyqvO8TNExRK7+P9IjmdbL31Vgaf52SlZWAP86sW6R0T6zA2hJjN7zYaxugAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAb17pv0rswYcGIrcVc+2uZXToaVhHVtvsVkd9awK87ygDBAIAAwwCAAAAAOH1BQAAAAAEAgEDDAIAAAAAwusLAAAAAAQCAgMMAgAAAACj4REAAAAA",
+        "base64"
+      ],
+      "transactionIndex": 14,
+      "version": "legacy"
+    }))
+    .expect("BUG: the getTransaction result should deserialize")
 }

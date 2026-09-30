@@ -9,7 +9,10 @@ use solana_address::Address;
 use solana_signature::Signature;
 use std::collections::BTreeMap;
 
-pub use sweeps::{Sweep, SweepRecoveryError, Sweeps, Transfer};
+pub use sweeps::{
+    SettledSweep, Sweep, SweepMismatch, SweepRecoveryError, SweepSettlementError, Sweeps, Transfer,
+    UnreadableOutcome,
+};
 
 mod sweeps;
 #[cfg(test)]
