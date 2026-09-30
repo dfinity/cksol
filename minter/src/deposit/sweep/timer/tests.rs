@@ -206,7 +206,7 @@ async fn should_split_deposits_into_batches_of_max_size() {
             } if signature == fee_payer_signature_2 && deposit_ids == batch_2_ids)
         })
         .assert_no_more_events();
-    assert!(read_state(|s| s.queued_deposits().is_empty()));
+    assert!(read_state(|s| s.deposits().queued().is_empty()));
     assert_eq!(runtime.set_timer_call_count(), 0);
 }
 
@@ -233,8 +233,8 @@ async fn should_reschedule_until_all_deposits_swept() {
 
     read_state(|s| {
         assert_eq!(s.submitted_transactions().len(), MAX_CONCURRENT_RPC_CALLS);
-        assert_eq!(s.queued_deposits().len(), 1);
-        assert_eq!(s.swept_deposits().len(), swept_in_first_round);
+        assert_eq!(s.deposits().queued().len(), 1);
+        assert_eq!(s.deposits().swept().deposit_count(), swept_in_first_round);
     });
     assert_eq!(runtime.set_timer_call_count(), 1);
 
@@ -252,8 +252,8 @@ async fn should_reschedule_until_all_deposits_swept() {
             s.submitted_transactions().len(),
             MAX_CONCURRENT_RPC_CALLS + 1
         );
-        assert!(s.queued_deposits().is_empty());
-        assert_eq!(s.swept_deposits().len(), num_deposits);
+        assert!(s.deposits().queued().is_empty());
+        assert_eq!(s.deposits().swept().deposit_count(), num_deposits);
     });
     assert_eq!(runtime.set_timer_call_count(), 0);
 }
@@ -281,8 +281,8 @@ async fn should_fetch_the_master_key_once_for_all_batches_of_a_round() {
     assert_eq!(runtime.schnorr_public_key_call_count(), 1);
     read_state(|s| {
         assert_eq!(s.submitted_transactions().len(), NUM_BATCHES);
-        assert_eq!(s.swept_deposits().len(), NUM_DEPOSITS);
-        assert!(s.queued_deposits().is_empty());
+        assert_eq!(s.deposits().swept().deposit_count(), NUM_DEPOSITS);
+        assert!(s.deposits().queued().is_empty());
     });
 }
 
@@ -302,7 +302,7 @@ fn queue_deposits_with_increasing_amounts(num_deposits: usize) {
 }
 
 fn deposit_status(deposit_id: DepositSolId) -> DepositSolStatus {
-    read_state(|s| s.deposit_sol_status(deposit_id))
+    read_state(|s| s.deposits().status(deposit_id))
 }
 
 fn deposit_address(account: Account) -> Address {

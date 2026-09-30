@@ -232,7 +232,7 @@ async fn assert_second_call_returns_same_deposit(first: Account, second: Account
     assert_eq!(result, Ok(deposit_id));
     assert!(runtime.msg_cycles_accepted().is_empty());
     assert_eq!(
-        read_state(|state| state.in_flight_deposit_id(&second)),
+        read_state(|state| state.deposits().in_flight_id(&second)),
         Some(deposit_id)
     );
     assert_eq!(

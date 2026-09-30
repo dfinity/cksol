@@ -87,7 +87,8 @@ impl SweepRound {
 
     fn take_from_queue(state: &State) -> Self {
         let mut deposits: Vec<(DepositSolId, QueuedDeposit)> = state
-            .queued_deposits()
+            .deposits()
+            .queued()
             .iter()
             .map(|(deposit_id, deposit)| (*deposit_id, *deposit))
             .take(Self::MAX_DEPOSITS_PER_ROUND + 1)

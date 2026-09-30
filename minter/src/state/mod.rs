@@ -8,9 +8,7 @@ use crate::{
     utils::insertion_ordered_map::InsertionOrderedMap,
 };
 use candid::Principal;
-use cksol_types::{
-    DepositSolId, DepositSolStatus, DepositStatus, TxFinalizedStatus, WithdrawalStatus,
-};
+use cksol_types::{DepositSolId, DepositStatus, TxFinalizedStatus, WithdrawalStatus};
 use cksol_types_internal::SolanaNetwork;
 use cksol_types_internal::{Ed25519KeyName, InitArgs, UpgradeArgs};
 use ic_canister_runtime::Runtime;
@@ -29,7 +27,10 @@ use std::{
 mod tests;
 
 pub mod audit;
+mod deposits;
 pub mod event;
+
+pub use deposits::{Deposits, QueuedDeposit, Sweep, Sweeps};
 
 thread_local! {
     static STATE: RefCell<Option<State>> = RefCell::default();
@@ -97,10 +98,7 @@ pub struct State {
     pending_process_deposit_request_guards: BTreeSet<Account>,
     pending_deposit_sol_request_guards: BTreeSet<Account>,
     pending_withdrawal_request_guards: BTreeSet<Account>,
-    next_deposit_sol_id: DepositSolId,
-    queued_deposits: BTreeMap<DepositSolId, QueuedDeposit>,
-    swept_deposits: BTreeMap<DepositSolId, SweptDeposit>,
-    in_flight_deposit_ids: BTreeMap<Account, DepositSolId>,
+    deposits: Deposits,
     accepted_deposits: InsertionOrderedMap<DepositId, Deposit>,
     quarantined_deposits: InsertionOrderedMap<DepositId, Deposit>,
     minted_deposits: InsertionOrderedMap<DepositId, MintedDeposit>,
@@ -188,34 +186,8 @@ impl State {
         &self.accepted_deposits
     }
 
-    pub fn next_deposit_sol_id(&self) -> DepositSolId {
-        self.next_deposit_sol_id
-    }
-
-    pub fn in_flight_deposit_id(&self, account: &Account) -> Option<DepositSolId> {
-        self.in_flight_deposit_ids.get(account).copied()
-    }
-
-    pub fn queued_deposits(&self) -> &BTreeMap<DepositSolId, QueuedDeposit> {
-        &self.queued_deposits
-    }
-
-    pub fn swept_deposits(&self) -> &BTreeMap<DepositSolId, SweptDeposit> {
-        &self.swept_deposits
-    }
-
-    pub fn deposit_sol_status(&self, deposit_id: DepositSolId) -> DepositSolStatus {
-        if let Some(deposit) = self.queued_deposits.get(&deposit_id) {
-            return DepositSolStatus::Queued {
-                sweepable_amount: deposit.sweepable_amount,
-            };
-        }
-        if let Some(swept) = self.swept_deposits.get(&deposit_id) {
-            return DepositSolStatus::Swept {
-                signature: swept.signature.into(),
-            };
-        }
-        DepositSolStatus::NotFound
+    pub fn deposits(&self) -> &Deposits {
+        &self.deposits
     }
 
     pub fn quarantined_deposits(&self) -> &InsertionOrderedMap<DepositId, Deposit> {
@@ -495,43 +467,13 @@ impl State {
         account: &Account,
         sweepable_amount: Lamport,
     ) {
-        assert_eq!(
-            deposit_id, self.next_deposit_sol_id,
-            "Attempted to queue deposit {deposit_id} out of sequence, expected {}",
-            self.next_deposit_sol_id
-        );
-        assert!(
-            self.in_flight_deposit_ids
-                .insert(*account, deposit_id)
-                .is_none(),
-            "Attempted to queue a deposit for account {account:?} that already has one in flight"
-        );
-        self.queued_deposits.insert(
+        self.deposits.queue(
             deposit_id,
             QueuedDeposit {
                 account: *account,
                 sweepable_amount,
             },
         );
-        self.next_deposit_sol_id += 1;
-    }
-
-    fn process_swept_deposit(
-        &mut self,
-        deposit_id: DepositSolId,
-        signature: &Signature,
-    ) -> Lamport {
-        let deposit = self.queued_deposits.remove(&deposit_id).unwrap_or_else(|| {
-            panic!("Attempted to sweep unknown or already swept deposit {deposit_id}")
-        });
-        self.swept_deposits.insert(
-            deposit_id,
-            SweptDeposit {
-                deposit,
-                signature: *signature,
-            },
-        );
-        deposit.sweepable_amount
     }
 
     fn process_quarantined_deposit(&mut self, deposit_id: &DepositId) {
@@ -712,10 +654,9 @@ impl State {
                     .expect("BUG: insufficient minter balance for withdrawal");
                 total
             }
-            TransactionPurpose::SweepDeposits { deposit_ids } => deposit_ids
-                .iter()
-                .map(|deposit_id| self.process_swept_deposit(*deposit_id, signature))
-                .sum(),
+            TransactionPurpose::SweepDeposits { deposit_ids } => {
+                self.deposits.sweep(deposit_ids, signature)
+            }
         };
         assert_eq!(
             self.submitted_transactions.insert(
@@ -771,11 +712,7 @@ impl State {
                 sent.signature = *new_signature;
             }
         }
-        for swept in self.swept_deposits.values_mut() {
-            if &swept.signature == old_signature {
-                swept.signature = *new_signature;
-            }
-        }
+        self.deposits.resubmit_sweep(old_signature, new_signature);
     }
 
     fn process_transaction_succeeded(&mut self, signature: &Signature) {
@@ -905,10 +842,7 @@ impl TryFrom<InitArgs> for State {
             pending_process_deposit_request_guards: BTreeSet::new(),
             pending_deposit_sol_request_guards: BTreeSet::new(),
             pending_withdrawal_request_guards: BTreeSet::new(),
-            next_deposit_sol_id: 0,
-            queued_deposits: BTreeMap::new(),
-            swept_deposits: BTreeMap::new(),
-            in_flight_deposit_ids: BTreeMap::new(),
+            deposits: Deposits::default(),
             accepted_deposits: InsertionOrderedMap::new(),
             quarantined_deposits: InsertionOrderedMap::new(),
             minted_deposits: InsertionOrderedMap::new(),
@@ -995,20 +929,6 @@ pub struct SchnorrPublicKey {
 pub struct Deposit {
     pub deposit_amount: Lamport,
     pub amount_to_mint: Lamport,
-}
-
-/// A deposit address queued for a sweep to the minter's main account.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct QueuedDeposit {
-    pub account: Account,
-    pub sweepable_amount: Lamport,
-}
-
-/// A queued deposit whose sweep transaction has been submitted but not yet finalized.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct SweptDeposit {
-    pub deposit: QueuedDeposit,
-    pub signature: Signature,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
