@@ -7,6 +7,8 @@ use crate::{
         sweep_message,
     },
 };
+use cksol_types::DepositSolId;
+use sol_rpc_types::Lamport;
 
 #[test]
 fn should_find_deposits_by_sweep_signature_and_by_deposit_id() {
@@ -152,12 +154,8 @@ mod plan {
 }
 
 mod message {
-    use super::{
-        FEE_PER_SIGNATURE, MINTER_ADDRESS, Sweep, account, planned_sweep, queued_deposit_of,
-    };
+    use super::{FEE_PER_SIGNATURE, Lamport, MINTER_ADDRESS, account, sweep_of};
     use crate::test_fixtures::deposit_address;
-    use cksol_types::DepositSolId;
-    use sol_rpc_types::Lamport;
     use solana_hash::Hash;
     use solana_message::{Message, MessageHeader, compiled_instruction::CompiledInstruction};
 
@@ -231,21 +229,66 @@ mod message {
             data,
         }
     }
+}
 
-    /// The sweep of the given sweepable amounts from the accounts `1..`, deposit ids from `0`.
-    fn sweep_of<const N: usize>(sweepable_amounts: [Lamport; N]) -> Sweep {
-        planned_sweep(
-            sweepable_amounts
-                .into_iter()
-                .enumerate()
-                .map(|(index, sweepable_amount)| {
-                    (
-                        index as DepositSolId,
-                        queued_deposit_of(account(index + 1), sweepable_amount),
-                    )
-                }),
-        )
+mod mints {
+    use super::{FEE_PER_SIGNATURE, Lamport, sweep_of};
+    use crate::state::event::CreditedDeposit;
+
+    #[test]
+    fn should_share_the_fee_between_the_deposits_of_the_sweep() {
+        let cases = [
+            (
+                "the fee is shared evenly",
+                sweep_of([30_000_000, 20_000_000, 10_000_000]),
+                vec![
+                    (0, 30_000_000 - FEE_PER_SIGNATURE),
+                    (1, 20_000_000 - FEE_PER_SIGNATURE),
+                    (2, 10_000_000 - FEE_PER_SIGNATURE),
+                ],
+            ),
+            (
+                "a single deposit pays the whole fee",
+                sweep_of([10_000_000]),
+                vec![(0, 10_000_000 - FEE_PER_SIGNATURE)],
+            ),
+        ];
+        for (name, sweep, expected_mints) in cases {
+            let mints = sweep.mints();
+
+            assert_eq!(
+                mints
+                    .iter()
+                    .map(|mint| (mint.deposit_id, mint.amount_to_mint))
+                    .collect::<Vec<_>>(),
+                expected_mints,
+                "{name}"
+            );
+            assert!(
+                mints
+                    .iter()
+                    .map(|mint: &CreditedDeposit| mint.amount_to_mint)
+                    .sum::<Lamport>()
+                    <= sweep.expected_received(),
+                "{name}"
+            );
+        }
     }
+}
+
+/// The sweep of the given sweepable amounts from the accounts `1..`, deposit ids from `0`.
+fn sweep_of<const N: usize>(sweepable_amounts: [Lamport; N]) -> Sweep {
+    planned_sweep(
+        sweepable_amounts
+            .into_iter()
+            .enumerate()
+            .map(|(index, sweepable_amount)| {
+                (
+                    index as DepositSolId,
+                    queued_deposit_of(account(index + 1), sweepable_amount),
+                )
+            }),
+    )
 }
 
 mod recover {

@@ -16,7 +16,7 @@ use cksol_types_internal::{Ed25519KeyName, InitArgs, SolanaNetwork};
 use ic_cdk_management_canister::SchnorrPublicKeyResult;
 use ic_ed25519::{PocketIcMasterPublicKeyId, PublicKey};
 use icrc_ledger_types::icrc1::account::Account;
-use sol_rpc_types::Lamport;
+use sol_rpc_types::{Lamport, MultiRpcResult};
 use solana_address::{Address, address};
 use solana_transaction::versioned::TransactionVersion;
 use solana_transaction_status_client_types::{
@@ -31,6 +31,9 @@ pub mod signer;
 mod stubs;
 #[cfg(test)]
 mod tests;
+
+pub type GetTransactionResult =
+    MultiRpcResult<Option<sol_rpc_types::EncodedConfirmedTransactionWithStatusMeta>>;
 
 pub const BLOCK_INDEX: u64 = 98763_u64;
 pub const MANUAL_DEPOSIT_FEE: Lamport = 10_000; // 0.00001 SOL
@@ -228,6 +231,159 @@ pub fn minter_signature_nth(occurrence: usize) -> solana_signature::Signature {
     signer::derivation_path_signature(&MINTER_DERIVATION_PATH, occurrence)
 }
 
+/// Builds the `getTransaction` output of a planned sweep as if it executed as planned, so
+/// that a test only has to state how the outcome deviates from the plan.
+pub mod sweep_outcome {
+    use crate::{constants::RENT_EXEMPTION_THRESHOLD, state::Sweep};
+    use base64::{Engine, engine::general_purpose::STANDARD};
+    use sol_rpc_types::Lamport;
+    use solana_address::Address;
+    use solana_hash::Hash;
+    use solana_message::Message;
+    use solana_transaction::{Transaction, versioned::VersionedTransaction};
+    use solana_transaction_status_client_types::{
+        EncodedConfirmedTransactionWithStatusMeta, EncodedTransaction,
+        EncodedTransactionWithStatusMeta, TransactionBinaryEncoding, UiTransactionError,
+        UiTransactionStatusMeta, option_serializer::OptionSerializer,
+    };
+    use std::collections::BTreeMap;
+
+    pub const MAIN_BALANCE: Lamport = 7_000_000_000;
+
+    pub struct SweepOutcome {
+        message: Message,
+        planned_fee: Lamport,
+        fee: Lamport,
+        error: Option<UiTransactionError>,
+        balances: BTreeMap<Address, (Lamport, Lamport)>,
+    }
+
+    impl SweepOutcome {
+        pub fn of(sweep: &Sweep) -> Self {
+            let mut balances: BTreeMap<Address, (Lamport, Lamport)> = sweep
+                .transfers()
+                .iter()
+                .map(|transfer| {
+                    let fee_paid = if transfer.deposit_id == sweep.fee_payer() {
+                        sweep.fee()
+                    } else {
+                        0
+                    };
+                    (
+                        transfer.from,
+                        (
+                            RENT_EXEMPTION_THRESHOLD + transfer.amount + fee_paid,
+                            RENT_EXEMPTION_THRESHOLD,
+                        ),
+                    )
+                })
+                .collect();
+            balances.insert(
+                sweep.minter_address(),
+                (MAIN_BALANCE, MAIN_BALANCE + sweep.expected_received()),
+            );
+            Self {
+                message: sweep.sweep_message(Hash::default()),
+                planned_fee: sweep.fee(),
+                fee: sweep.fee(),
+                error: None,
+                balances,
+            }
+        }
+
+        /// Solana charged the given fee instead of the planned one, leaving the
+        /// difference on the fee payer's address.
+        pub fn with_fee(mut self, fee: Lamport) -> Self {
+            let fee_payer = self.message.account_keys[0];
+            let (pre, _) = self.balances[&fee_payer];
+            self.balances.insert(
+                fee_payer,
+                (pre, RENT_EXEMPTION_THRESHOLD + self.planned_fee - fee),
+            );
+            self.fee = fee;
+            self
+        }
+
+        pub fn with_late_transfer(mut self, address: Address, amount: Lamport) -> Self {
+            let (pre, post) = self.balances[&address];
+            self.balances.insert(address, (pre + amount, post + amount));
+            self
+        }
+
+        pub fn with_balances(mut self, address: Address, pre: Lamport, post: Lamport) -> Self {
+            self.balances.insert(address, (pre, post));
+            self
+        }
+
+        pub fn with_message(mut self, message: Message) -> Self {
+            self.message = message;
+            self
+        }
+
+        pub fn with_error(mut self, error: UiTransactionError) -> Self {
+            self.error = Some(error);
+            self
+        }
+
+        pub fn encode(&self) -> EncodedConfirmedTransactionWithStatusMeta {
+            self.encode_with_meta(Some(self.meta()))
+        }
+
+        pub fn encode_without_meta(&self) -> EncodedConfirmedTransactionWithStatusMeta {
+            self.encode_with_meta(None)
+        }
+
+        fn meta(&self) -> UiTransactionStatusMeta {
+            let (pre_balances, post_balances) = self
+                .message
+                .account_keys
+                .iter()
+                .map(|key| self.balances.get(key).copied().unwrap_or((1, 1)))
+                .unzip();
+            UiTransactionStatusMeta {
+                err: self.error.clone(),
+                fee: self.fee,
+                pre_balances,
+                post_balances,
+                status: self.error.clone().map_or(Ok(()), Err),
+                inner_instructions: OptionSerializer::Skip,
+                log_messages: OptionSerializer::Skip,
+                pre_token_balances: OptionSerializer::Skip,
+                post_token_balances: OptionSerializer::Skip,
+                rewards: OptionSerializer::Skip,
+                loaded_addresses: OptionSerializer::Skip,
+                return_data: OptionSerializer::Skip,
+                compute_units_consumed: OptionSerializer::Skip,
+                cost_units: OptionSerializer::Skip,
+            }
+        }
+
+        fn encode_with_meta(
+            &self,
+            meta: Option<UiTransactionStatusMeta>,
+        ) -> EncodedConfirmedTransactionWithStatusMeta {
+            let transaction =
+                VersionedTransaction::from(Transaction::new_unsigned(self.message.clone()));
+            let encoded = STANDARD.encode(
+                bincode::serialize(&transaction)
+                    .expect("serializing the transaction should succeed"),
+            );
+            EncodedConfirmedTransactionWithStatusMeta {
+                slot: 0,
+                transaction: EncodedTransactionWithStatusMeta {
+                    transaction: EncodedTransaction::Binary(
+                        encoded,
+                        TransactionBinaryEncoding::Base64,
+                    ),
+                    meta,
+                    version: None,
+                },
+                block_time: None,
+            }
+        }
+    }
+}
+
 /// Helpers for constructing state transitions via [`process_event`] in tests.
 ///
 /// All helpers operate on the global thread-local state via [`mutate_state`].
@@ -379,6 +535,28 @@ pub mod events {
         });
     }
 
+    pub fn credit_sweep(signature: Signature, amount_received: Lamport) {
+        let mints = read_state(|state| {
+            state
+                .deposits()
+                .finalized()
+                .get(&signature)
+                .expect("BUG: no finalized sweep with the given signature")
+                .mints()
+        });
+        mutate_state(|state| {
+            process_event(
+                state,
+                EventType::CreditedSweep {
+                    signature,
+                    amount_received,
+                    mints,
+                },
+                &runtime(),
+            )
+        });
+    }
+
     pub fn accept_withdrawal(account: Account, burn_index: u64, amount: Lamport) {
         accept_withdrawal_at(account, burn_index, amount, 0);
     }
@@ -487,7 +665,10 @@ pub mod arb {
         sol_transfer::MAX_SIGNATURES,
         state::{
             DepositBalance, QueuedDeposit,
-            event::{DepositId, Event, EventType, Signer, TransactionPurpose, WithdrawalRequest},
+            event::{
+                CreditedDeposit, DepositId, Event, EventType, Signer, TransactionPurpose,
+                WithdrawalRequest,
+            },
         },
     };
     use candid::Principal;
@@ -796,7 +977,26 @@ pub mod arb {
                         balance,
                     }
                 },),
+            (
+                arb_signature(),
+                any::<u64>(),
+                prop::collection::vec(arb_credited_deposit(), 0..10)
+            )
+                .prop_map(|(signature, amount_received, mints)| {
+                    EventType::CreditedSweep {
+                        signature,
+                        amount_received,
+                        mints,
+                    }
+                }),
         ]
+    }
+
+    fn arb_credited_deposit() -> impl Strategy<Value = CreditedDeposit> {
+        (any::<u64>(), any::<u64>()).prop_map(|(deposit_id, amount_to_mint)| CreditedDeposit {
+            deposit_id,
+            amount_to_mint,
+        })
     }
 
     pub fn arb_event() -> impl Strategy<Value = Event> {

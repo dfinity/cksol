@@ -110,11 +110,7 @@ mod queued_deposits {
 
 mod swept_deposits {
     use super::*;
-    use crate::{
-        state::reset_state,
-        storage::reset_events,
-        test_fixtures::events::{queue_deposit, submit_sweep},
-    };
+    use crate::test_fixtures::events::{credit_sweep, queue_deposit, submit_sweep};
     use cksol_types::DepositSolStatus;
 
     const SWEEP_SIGNATURE_INDEX: usize = 0xAA;
@@ -175,45 +171,104 @@ mod swept_deposits {
     }
 
     #[test]
-    fn should_keep_deposits_swept_and_balance_unchanged_after_sweep_outcome() {
-        type RecordOutcome = fn(Signature);
-        let outcomes: [(&str, RecordOutcome); 2] = [
-            ("succeeded", succeed_transaction),
-            ("failed", fail_transaction),
-        ];
-        for (outcome, record_outcome) in outcomes {
-            reset_state();
-            reset_events();
-            init_state();
-            queue_three_deposits();
-            let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
-            submit_sweep(sweep_signature, vec![2, 0]);
+    fn should_finalize_the_sweep_when_the_transaction_succeeds() {
+        init_state();
+        let sweep_signature = sweep_deposits_two_and_zero();
 
-            record_outcome(sweep_signature);
+        succeed_transaction(sweep_signature);
 
-            read_state(|s| {
-                assert!(s.submitted_transactions().is_empty(), "{outcome}");
-                assert!(s.transactions_to_resubmit().is_empty(), "{outcome}");
-                assert_eq!(s.deposits().swept().deposit_count(), 2, "{outcome}");
-                assert_eq!(s.balance(), 0, "{outcome}");
-            });
-            assert_in_flight_ids_unchanged();
+        read_state(|s| {
+            assert!(s.submitted_transactions().is_empty());
+            assert!(s.deposits().swept().is_empty());
             assert_eq!(
-                deposit_status(0),
-                DepositSolStatus::Swept {
-                    signature: sweep_signature.into()
-                },
-                "{outcome}"
+                s.deposits().finalized().get(&sweep_signature),
+                Some(&planned_sweep([
+                    (0, queued_deposit(0)),
+                    (2, queued_deposit(2))
+                ]))
             );
-        }
+            assert_eq!(s.balance(), 0);
+        });
+        assert_in_flight_ids_unchanged();
+        assert_eq!(
+            deposit_status(0),
+            DepositSolStatus::Finalized {
+                signature: sweep_signature.into()
+            }
+        );
+    }
+
+    #[test]
+    fn should_keep_deposits_swept_and_balance_unchanged_when_the_sweep_fails() {
+        init_state();
+        let sweep_signature = sweep_deposits_two_and_zero();
+
+        fail_transaction(sweep_signature);
+
+        read_state(|s| {
+            assert!(s.submitted_transactions().is_empty());
+            assert!(s.transactions_to_resubmit().is_empty());
+            assert_eq!(s.deposits().swept().deposit_count(), 2);
+            assert_eq!(s.balance(), 0);
+        });
+        assert_in_flight_ids_unchanged();
+        assert_eq!(
+            deposit_status(0),
+            DepositSolStatus::Swept {
+                signature: sweep_signature.into()
+            }
+        );
+    }
+
+    #[test]
+    fn should_credit_the_balance_with_the_amount_received_by_the_sweep() {
+        init_state();
+        let sweep_signature = finalize_sweep_of_deposits_two_and_zero();
+
+        credit_sweep(sweep_signature, 3_990_000);
+
+        read_state(|s| {
+            assert!(s.deposits().finalized().is_empty());
+            assert_eq!(
+                s.deposits().pending_mints().keys().collect::<Vec<_>>(),
+                vec![&0, &2]
+            );
+            assert_eq!(s.balance(), 3_990_000);
+        });
+    }
+
+    #[test]
+    #[should_panic(expected = "exceeding the 399 lamports received")]
+    fn should_panic_when_the_mints_exceed_the_amount_received() {
+        init_state();
+        let sweep_signature = finalize_sweep_of_deposits_two_and_zero();
+
+        mutate_state(|s| {
+            process_event(
+                s,
+                EventType::CreditedSweep {
+                    signature: sweep_signature,
+                    amount_received: 399,
+                    mints: vec![
+                        CreditedDeposit {
+                            deposit_id: 0,
+                            amount_to_mint: 100,
+                        },
+                        CreditedDeposit {
+                            deposit_id: 2,
+                            amount_to_mint: 300,
+                        },
+                    ],
+                },
+                &TestCanisterRuntime::new().add_times([0, 0]),
+            )
+        });
     }
 
     #[test]
     fn should_queue_expired_sweep_for_resubmission_like_other_transactions() {
         init_state();
-        queue_three_deposits();
-        let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
-        submit_sweep(sweep_signature, vec![2, 0]);
+        let sweep_signature = sweep_deposits_two_and_zero();
 
         expire_transaction(sweep_signature);
 
@@ -235,10 +290,8 @@ mod swept_deposits {
     #[test]
     fn should_report_new_signature_after_resubmitting_expired_sweep() {
         init_state();
-        queue_three_deposits();
-        let expired_sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
+        let expired_sweep_signature = sweep_deposits_two_and_zero();
         let unrelated_sweep_signature = signature(SWEEP_SIGNATURE_INDEX + 1);
-        submit_sweep(expired_sweep_signature, vec![2, 0]);
         submit_sweep(unrelated_sweep_signature, vec![1]);
         expire_transaction(expired_sweep_signature);
         let resubmitted_sweep_signature = signature(SWEEP_SIGNATURE_INDEX + 2);
@@ -281,6 +334,19 @@ mod swept_deposits {
             let deposit = queued_deposit(deposit_id);
             queue_deposit(deposit_id, deposit.account, deposit.sweepable_amount());
         }
+    }
+
+    fn sweep_deposits_two_and_zero() -> Signature {
+        queue_three_deposits();
+        let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
+        submit_sweep(sweep_signature, vec![2, 0]);
+        sweep_signature
+    }
+
+    fn finalize_sweep_of_deposits_two_and_zero() -> Signature {
+        let sweep_signature = sweep_deposits_two_and_zero();
+        succeed_transaction(sweep_signature);
+        sweep_signature
     }
 
     fn assert_in_flight_ids_unchanged() {

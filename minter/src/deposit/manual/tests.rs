@@ -4,8 +4,8 @@ use crate::{
     state::event::{DepositId, EventType},
     storage::reset_events,
     test_fixtures::{
-        BLOCK_INDEX, DEPOSIT_CONSOLIDATION_FEE, EventsAssert, MANUAL_DEPOSIT_FEE,
-        PROCESS_DEPOSIT_REQUIRED_CYCLES,
+        BLOCK_INDEX, DEPOSIT_CONSOLIDATION_FEE, EventsAssert, GetTransactionResult,
+        MANUAL_DEPOSIT_FEE, PROCESS_DEPOSIT_REQUIRED_CYCLES,
         deposit::{
             DEPOSIT_AMOUNT, DEPOSITOR_ACCOUNT, DEPOSITOR_PRINCIPAL, accepted_deposit_event,
             deposit_status_minted, deposit_status_processing, deposit_status_quarantined,
@@ -29,9 +29,8 @@ use icrc_ledger_types::icrc1::{
     account::Account,
     transfer::{BlockIndex, TransferError},
 };
-use sol_rpc_types::{EncodedConfirmedTransactionWithStatusMeta, Lamport, MultiRpcResult};
+use sol_rpc_types::{EncodedConfirmedTransactionWithStatusMeta, Lamport};
 
-type GetTransactionResult = MultiRpcResult<Option<EncodedConfirmedTransactionWithStatusMeta>>;
 type MintResult = Result<BlockIndex, TransferError>;
 
 mod process_deposit_tests {

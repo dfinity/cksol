@@ -4,7 +4,9 @@ use crate::{
     numeric::{LedgerBurnIndex, LedgerMintIndex},
     rpc::BlockHeight,
     sol_transfer::{BATCH_WITHDRAWAL_TX_FEE, MAX_SIGNATURES, MAX_WITHDRAWALS_PER_TX},
-    state::event::{DepositId, Signer, TransactionPurpose, VersionedMessage, WithdrawalRequest},
+    state::event::{
+        CreditedDeposit, DepositId, Signer, TransactionPurpose, VersionedMessage, WithdrawalRequest,
+    },
     utils::insertion_ordered_map::InsertionOrderedMap,
 };
 use candid::Principal;
@@ -32,7 +34,8 @@ mod deposits;
 pub mod event;
 
 pub use deposits::{
-    DepositBalance, Deposits, QueuedDeposit, Sweep, SweepRecoveryError, Sweeps, Transfer,
+    DepositBalance, Deposits, PendingMint, QueuedDeposit, Sweep, SweepRecoveryError, Sweeps,
+    SweptDeposit, Transfer,
 };
 
 thread_local! {
@@ -481,6 +484,21 @@ impl State {
         );
     }
 
+    fn process_credited_sweep(
+        &mut self,
+        signature: &Signature,
+        amount_received: Lamport,
+        mints: &[CreditedDeposit],
+    ) {
+        let amount_to_mint: Lamport = mints.iter().map(|mint| mint.amount_to_mint).sum();
+        assert!(
+            amount_to_mint <= amount_received,
+            "Attempted to credit sweep {signature} with mints of {amount_to_mint} lamports exceeding the {amount_received} lamports received"
+        );
+        self.deposits.credit_sweep(signature, mints);
+        self.balance += amount_received;
+    }
+
     fn process_quarantined_deposit(&mut self, deposit_id: &DepositId) {
         assert!(
             !self.minted_deposits.contains_key(deposit_id),
@@ -731,7 +749,7 @@ impl State {
             .unwrap_or_else(|| {
                 panic!("Attempted to mark unknown transaction {signature:?} as succeeded")
             });
-        match transaction.purpose {
+        match &transaction.purpose {
             TransactionPurpose::ConsolidateDeposits { .. } => {
                 let tx_fee = transaction.message.transaction_fee();
                 self.balance += transaction
@@ -739,7 +757,8 @@ impl State {
                     .checked_sub(tx_fee)
                     .expect("BUG: consolidation amount is less than transaction fee");
             }
-            TransactionPurpose::WithdrawSol { .. } | TransactionPurpose::SweepDeposits { .. } => {}
+            TransactionPurpose::WithdrawSol { .. } => {}
+            TransactionPurpose::SweepDeposits { .. } => self.deposits.finalize_swept(signature),
         }
         assert!(
             !self.transactions_to_resubmit.contains_key(signature),

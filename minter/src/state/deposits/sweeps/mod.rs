@@ -1,6 +1,9 @@
 use crate::{
     constants::FEE_PER_SIGNATURE,
-    state::{QueuedDeposit, event::VersionedMessage},
+    state::{
+        QueuedDeposit,
+        event::{CreditedDeposit, VersionedMessage},
+    },
 };
 use cksol_types::DepositSolId;
 use sol_rpc_types::Lamport;
@@ -20,7 +23,7 @@ mod tests;
 /// A deposit belongs to exactly one sweep, so it can also be found by its id:
 /// [`Sweep::plan`] rejects a duplicated deposit id and [`Sweeps::insert`] rejects
 /// a sweep containing a deposit that another sweep already holds.
-#[derive(Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Sweeps {
     by_signature: BTreeMap<Signature, Sweep>,
 }
@@ -39,6 +42,10 @@ impl Sweeps {
 
     pub fn signatures(&self) -> impl Iterator<Item = &Signature> {
         self.by_signature.keys()
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (&Signature, &Sweep)> {
+        self.by_signature.iter()
     }
 
     pub fn len(&self) -> usize {
@@ -215,6 +222,23 @@ impl Sweep {
 
     pub fn deposit_count(&self) -> usize {
         self.deposits.len()
+    }
+
+    /// The mints crediting the deposits of the sweep: each sweepable amount minus the
+    /// deposit's share of the fee, rounded up so that the total never exceeds the amount
+    /// the minter address receives.
+    pub fn mints(&self) -> Vec<CreditedDeposit> {
+        let fee_share = self.fee.div_ceil(self.deposit_count() as Lamport);
+        self.deposits
+            .iter()
+            .map(|(deposit_id, deposit)| CreditedDeposit {
+                deposit_id: *deposit_id,
+                amount_to_mint: deposit
+                    .sweepable_amount()
+                    .checked_sub(fee_share)
+                    .expect("BUG: the minimum deposit amount covers the fee share"),
+            })
+            .collect()
     }
 }
 

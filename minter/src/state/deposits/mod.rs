@@ -1,4 +1,7 @@
-use crate::{constants::RENT_EXEMPTION_THRESHOLD, state::event::VersionedMessage};
+use crate::{
+    constants::RENT_EXEMPTION_THRESHOLD,
+    state::event::{CreditedDeposit, VersionedMessage},
+};
 use cksol_types::{DepositSolId, DepositSolStatus};
 use icrc_ledger_types::icrc1::account::Account;
 use sol_rpc_types::Lamport;
@@ -17,7 +20,7 @@ mod tests;
 /// A deposit is in exactly one stage at a time and only moves forward:
 ///
 /// ```text
-/// queued --sendTransaction--> swept
+/// queued --sendTransaction--> swept --getSignatureStatuses--> finalized --getTransaction--> pending_mints
 /// ```
 ///
 /// * `queued`: the deposit address holds a sweepable amount and waits for a sweep transaction.
@@ -26,6 +29,12 @@ mod tests;
 ///   The deposits of one transaction are kept together under its signature, since the
 ///   transaction is what the finalization timer tracks from here on. The signature changes
 ///   whenever the sweep expires and is resubmitted with a fresh blockhash.
+/// * `finalized`: `getSignatureStatuses` reported the sweep as finalized without error. The
+///   amount received by the main account is still unknown, because Solana may charge a
+///   different transaction fee than the sweep was built with.
+/// * `pending_mints`: the metadata returned by `getTransaction` was read and the transaction
+///   fee of the sweep was shared between its deposits. Each deposit now carries the amount to
+///   mint and only the mint on the ledger remains, so the deposits are tracked individually again.
 ///
 /// Every account has at most one deposit in flight, so that `deposit_sol` can report the
 /// deposit it is already tracking instead of queueing the same balance twice.
@@ -34,6 +43,8 @@ pub struct Deposits {
     next_id: DepositSolId,
     queued: BTreeMap<DepositSolId, QueuedDeposit>,
     swept: Sweeps,
+    finalized: Sweeps,
+    pending_mints: BTreeMap<DepositSolId, PendingMint>,
     in_flight_ids: BTreeMap<Account, DepositSolId>,
 }
 
@@ -50,6 +61,14 @@ impl Deposits {
         &self.swept
     }
 
+    pub fn finalized(&self) -> &Sweeps {
+        &self.finalized
+    }
+
+    pub fn pending_mints(&self) -> &BTreeMap<DepositSolId, PendingMint> {
+        &self.pending_mints
+    }
+
     pub fn in_flight_id(&self, account: &Account) -> Option<DepositSolId> {
         self.in_flight_ids.get(account).copied()
     }
@@ -63,6 +82,16 @@ impl Deposits {
         if let Some((signature, _)) = self.swept.deposit(deposit_id) {
             return DepositSolStatus::Swept {
                 signature: (*signature).into(),
+            };
+        }
+        if let Some((signature, _)) = self.finalized.deposit(deposit_id) {
+            return DepositSolStatus::Finalized {
+                signature: (*signature).into(),
+            };
+        }
+        if let Some(pending) = self.pending_mints.get(&deposit_id) {
+            return DepositSolStatus::Finalized {
+                signature: pending.deposit.signature.into(),
             };
         }
         DepositSolStatus::NotFound
@@ -118,6 +147,58 @@ impl Deposits {
             self.swept.insert(*new_signature, sweep);
         }
     }
+
+    pub(super) fn finalize_swept(&mut self, signature: &Signature) {
+        let sweep = self
+            .swept
+            .remove(signature)
+            .unwrap_or_else(|| panic!("Attempted to finalize sweep {signature} that is not swept"));
+        self.finalized.insert(*signature, sweep);
+    }
+
+    /// Moves every deposit of the given finalized sweep to the pending mints, each with
+    /// the amount its mint carries.
+    pub(super) fn credit_sweep(&mut self, signature: &Signature, mints: &[CreditedDeposit]) {
+        let sweep = self.finalized.remove(signature).unwrap_or_else(|| {
+            panic!("Attempted to credit sweep {signature} that is not finalized")
+        });
+        assert_eq!(
+            mints.len(),
+            sweep.deposit_count(),
+            "Attempted to credit sweep {signature} with {} mints for {} deposits",
+            mints.len(),
+            sweep.deposit_count()
+        );
+        for mint in mints {
+            let deposit = sweep.deposits().get(&mint.deposit_id).unwrap_or_else(|| {
+                panic!(
+                    "Attempted to credit deposit {} that is not part of sweep {signature}",
+                    mint.deposit_id
+                )
+            });
+            assert!(
+                mint.amount_to_mint <= deposit.sweepable_amount(),
+                "Attempted to mint {} lamports for deposit {} beyond its sweepable amount of {} lamports",
+                mint.amount_to_mint,
+                mint.deposit_id,
+                deposit.sweepable_amount()
+            );
+            let pending = PendingMint {
+                deposit: SweptDeposit {
+                    deposit: *deposit,
+                    signature: *signature,
+                },
+                amount_to_mint: mint.amount_to_mint,
+            };
+            assert!(
+                self.pending_mints
+                    .insert(mint.deposit_id, pending)
+                    .is_none(),
+                "Attempted to credit deposit {} twice in sweep {signature}",
+                mint.deposit_id
+            );
+        }
+    }
 }
 
 /// A deposit address queued for a sweep to the minter's main account.
@@ -159,4 +240,20 @@ impl DepositBalance {
             .checked_sub(RENT_EXEMPTION_THRESHOLD)
             .expect("BUG: a deposit balance covers the rent exemption threshold")
     }
+}
+
+/// A deposit together with the finalized sweep transaction that moved it to the main account.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SweptDeposit {
+    pub deposit: QueuedDeposit,
+    pub signature: Signature,
+}
+
+/// A swept deposit whose sweep reached the minter's main account and whose ckSOL
+/// mint has not been sent to the ledger yet.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PendingMint {
+    pub deposit: SweptDeposit,
+    /// The sweepable amount minus the deposit's share of the transaction fee of the sweep.
+    pub amount_to_mint: Lamport,
 }
