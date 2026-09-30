@@ -117,8 +117,10 @@ pub enum EventType {
         deposit_id: u64,
         /// The account to which the minter should mint ckSOL once the sweep is finalized.
         account: Account,
-        /// The amount that will be swept from the deposit address.
-        sweepable_amount: Lamport,
+        /// The deposit address derived from the account.
+        address: Address,
+        /// The balance of the deposit address when the deposit was queued.
+        balance: Lamport,
     },
 }
 

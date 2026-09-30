@@ -226,11 +226,13 @@ fn get_events(
             EventType::QueuedDeposit {
                 deposit_id,
                 account,
-                sweepable_amount,
+                address,
+                balance,
             } => event::EventType::QueuedDeposit {
                 deposit_id,
                 account,
-                sweepable_amount,
+                address: address.into(),
+                balance,
             },
         }
     }

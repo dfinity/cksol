@@ -1,12 +1,45 @@
-use super::{Deposits, QueuedDeposit, Sweep};
-use crate::test_fixtures::{queued_deposit, signature};
+use super::{DepositBalance, Deposits, Sweep};
+use crate::{
+    constants::RENT_EXEMPTION_THRESHOLD,
+    test_fixtures::{queued_deposit, queued_deposit_of, signature},
+};
 use cksol_types::DepositSolStatus;
+use sol_rpc_types::Lamport;
 use std::collections::BTreeMap;
 
 const SWEEP_SIGNATURE_INDEX: usize = 0xAA;
 
+mod deposit_balance {
+    use super::{DepositBalance, Lamport, RENT_EXEMPTION_THRESHOLD};
+
+    #[test]
+    fn should_reject_a_balance_below_the_rent_exemption_threshold() {
+        for balance in [0, RENT_EXEMPTION_THRESHOLD - 1] {
+            assert_eq!(DepositBalance::new(balance), None, "balance {balance}");
+        }
+    }
+
+    #[test]
+    fn should_sweep_the_balance_above_the_rent_exemption_threshold() {
+        for (balance, expected) in [
+            (RENT_EXEMPTION_THRESHOLD, 0),
+            (RENT_EXEMPTION_THRESHOLD + 1, 1),
+            (Lamport::MAX, Lamport::MAX - RENT_EXEMPTION_THRESHOLD),
+        ] {
+            let deposit_balance = DepositBalance::new(balance).expect("rent-exempt balance");
+
+            assert_eq!(deposit_balance.get(), balance, "balance {balance}");
+            assert_eq!(
+                deposit_balance.sweepable_amount(),
+                expected,
+                "balance {balance}"
+            );
+        }
+    }
+}
+
 mod queue {
-    use super::{BTreeMap, DepositSolStatus, Deposits, QueuedDeposit, queued_deposit};
+    use super::{BTreeMap, DepositSolStatus, Deposits, queued_deposit, queued_deposit_of};
 
     #[test]
     fn should_assign_sequential_ids_and_keep_accounts_in_flight() {
@@ -32,7 +65,7 @@ mod queue {
         assert_eq!(
             deposits.status(0),
             DepositSolStatus::Queued {
-                sweepable_amount: queued_deposit(0).sweepable_amount
+                sweepable_amount: queued_deposit(0).sweepable_amount()
             }
         );
         assert_eq!(deposits.status(1), DepositSolStatus::NotFound);
@@ -50,13 +83,7 @@ mod queue {
         let mut deposits = Deposits::default();
         deposits.queue(0, queued_deposit(0));
 
-        deposits.queue(
-            1,
-            QueuedDeposit {
-                account: queued_deposit(0).account,
-                sweepable_amount: 200,
-            },
-        );
+        deposits.queue(1, queued_deposit_of(queued_deposit(0).account, 200));
     }
 }
 
@@ -78,7 +105,7 @@ mod sweep {
 
         assert_eq!(
             swept_amount,
-            queued_deposit(2).sweepable_amount + queued_deposit(0).sweepable_amount
+            queued_deposit(2).sweepable_amount() + queued_deposit(0).sweepable_amount()
         );
         assert_eq!(
             deposits.swept().get(&sweep_signature),
@@ -104,7 +131,7 @@ mod sweep {
         assert_eq!(
             deposits.status(1),
             DepositSolStatus::Queued {
-                sweepable_amount: queued_deposit(1).sweepable_amount
+                sweepable_amount: queued_deposit(1).sweepable_amount()
             }
         );
     }

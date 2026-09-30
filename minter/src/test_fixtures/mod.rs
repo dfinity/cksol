@@ -1,9 +1,10 @@
 use crate::{
-    address::{MINTER_DERIVATION_PATH, derivation_path},
+    address::{MINTER_DERIVATION_PATH, account_address, derivation_path},
+    constants::RENT_EXEMPTION_THRESHOLD,
     numeric::LedgerMintIndex,
     rpc::BlockHeight,
     state::{
-        QueuedDeposit, SchnorrPublicKey, State,
+        DepositBalance, QueuedDeposit, SchnorrPublicKey, State,
         event::{DepositId, Event, EventType},
         init_once_state, mutate_state,
     },
@@ -156,10 +157,23 @@ pub fn deposit_id(i: usize) -> DepositId {
 /// The deposit of `account(deposit_id + 1)` with `100 * (deposit_id + 1)` sweepable lamports,
 /// so that a sequence of deposits has distinct accounts and amounts.
 pub fn queued_deposit(deposit_id: DepositSolId) -> QueuedDeposit {
+    queued_deposit_of(account(deposit_id as usize + 1), 100 * (deposit_id + 1))
+}
+
+/// The deposit of the given account whose address holds the sweepable amount on top of the
+/// rent exemption threshold.
+pub fn queued_deposit_of(account: Account, sweepable_amount: Lamport) -> QueuedDeposit {
     QueuedDeposit {
-        account: account(deposit_id as usize + 1),
-        sweepable_amount: 100 * (deposit_id + 1),
+        account,
+        address: deposit_address(account),
+        balance: DepositBalance::new(sweepable_amount + RENT_EXEMPTION_THRESHOLD)
+            .expect("BUG: the balance covers the rent exemption threshold"),
     }
+}
+
+/// The deposit address of the account under the master key of [`init_schnorr_master_key`].
+pub fn deposit_address(account: Account) -> solana_address::Address {
+    account_address(&schnorr_master_key(), &account)
 }
 
 /// Returns an [`Account`] with a deterministic principal derived from `i`.
@@ -201,10 +215,12 @@ pub fn minter_signature_nth(occurrence: usize) -> solana_signature::Signature {
 /// All helpers operate on the global thread-local state via [`mutate_state`].
 pub mod events {
     use super::{
-        DEFAULT_BLOCK_HEIGHT, MANUAL_DEPOSIT_FEE, WITHDRAWAL_FEE, runtime::TestCanisterRuntime,
+        DEFAULT_BLOCK_HEIGHT, MANUAL_DEPOSIT_FEE, WITHDRAWAL_FEE, deposit_address,
+        runtime::TestCanisterRuntime,
     };
     use crate::deposit::sweep::deposit_status;
     use crate::{
+        constants::RENT_EXEMPTION_THRESHOLD,
         numeric::{LedgerBurnIndex, LedgerMintIndex},
         rpc::BlockHeight,
         state::{
@@ -307,7 +323,8 @@ pub mod events {
                 EventType::QueuedDeposit {
                     deposit_id,
                     account,
-                    sweepable_amount,
+                    address: deposit_address(account),
+                    balance: sweepable_amount + RENT_EXEMPTION_THRESHOLD,
                 },
                 &runtime(),
             )
@@ -706,12 +723,13 @@ pub mod arb {
             arb_signature().prop_map(|signature| EventType::SucceededTransaction { signature }),
             arb_signature().prop_map(|signature| EventType::FailedTransaction { signature }),
             arb_signature().prop_map(|signature| EventType::ExpiredTransaction { signature }),
-            (any::<u64>(), arb_account(), any::<u64>()).prop_map(
-                |(deposit_id, account, sweepable_amount)| EventType::QueuedDeposit {
+            (any::<u64>(), arb_account(), arb_address(), any::<u64>()).prop_map(
+                |(deposit_id, account, address, balance)| EventType::QueuedDeposit {
                     deposit_id,
                     account,
-                    sweepable_amount,
-                }
+                    address,
+                    balance,
+                },
             ),
         ]
     }

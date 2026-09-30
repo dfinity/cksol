@@ -113,7 +113,7 @@ struct SweepBatch {
 
 impl SweepBatch {
     fn largest_deposit_pays_fee(mut deposits: Vec<(DepositSolId, QueuedDeposit)>) -> Self {
-        deposits.sort_by_key(|(_, deposit)| Reverse(deposit.sweepable_amount));
+        deposits.sort_by_key(|(_, deposit)| Reverse(deposit.sweepable_amount()));
         Self { deposits }
     }
 
@@ -127,7 +127,7 @@ impl SweepBatch {
     fn sources(&self) -> Vec<(Account, Lamport)> {
         self.deposits
             .iter()
-            .map(|(_, deposit)| (deposit.account, deposit.sweepable_amount))
+            .map(|(_, deposit)| (deposit.account, deposit.sweepable_amount()))
             .collect()
     }
 }

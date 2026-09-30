@@ -1,6 +1,8 @@
+use crate::constants::RENT_EXEMPTION_THRESHOLD;
 use cksol_types::{DepositSolId, DepositSolStatus};
 use icrc_ledger_types::icrc1::account::Account;
 use sol_rpc_types::Lamport;
+use solana_address::Address;
 use solana_signature::Signature;
 use std::collections::BTreeMap;
 
@@ -55,7 +57,7 @@ impl Deposits {
     pub fn status(&self, deposit_id: DepositSolId) -> DepositSolStatus {
         if let Some(deposit) = self.queued.get(&deposit_id) {
             return DepositSolStatus::Queued {
-                sweepable_amount: deposit.sweepable_amount,
+                sweepable_amount: deposit.sweepable_amount(),
             };
         }
         if let Some((signature, _)) = self.swept.deposit(deposit_id) {
@@ -111,6 +113,36 @@ impl Deposits {
 /// A deposit address queued for a sweep to the minter's main account.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct QueuedDeposit {
+    /// The account credited with ckSOL once the sweep is finalized.
     pub account: Account,
-    pub sweepable_amount: Lamport,
+    /// The deposit address derived from the account, controlled by the minter.
+    pub address: Address,
+    /// The balance of the deposit address when the deposit was queued.
+    pub balance: DepositBalance,
+}
+
+impl QueuedDeposit {
+    pub fn sweepable_amount(&self) -> Lamport {
+        self.balance.sweepable_amount()
+    }
+}
+
+/// A deposit address balance that stays rent-exempt once its sweepable amount is transferred.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct DepositBalance(Lamport);
+
+impl DepositBalance {
+    /// The balance, if it covers the rent exemption threshold.
+    pub fn new(balance: Lamport) -> Option<Self> {
+        (balance >= RENT_EXEMPTION_THRESHOLD).then_some(Self(balance))
+    }
+
+    pub fn get(self) -> Lamport {
+        self.0
+    }
+
+    /// The balance minus the rent exemption threshold left on the deposit address.
+    pub fn sweepable_amount(self) -> Lamport {
+        self.0 - RENT_EXEMPTION_THRESHOLD
+    }
 }

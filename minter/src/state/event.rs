@@ -11,6 +11,7 @@ use ic_stable_structures::{Storable, storable::Bound};
 use icrc_ledger_types::icrc1::account::Account;
 use minicbor::{Decode, Encode};
 use sol_rpc_types::Lamport;
+use solana_address::Address;
 use solana_message::Message;
 use solana_signature::Signature;
 use std::borrow::Cow;
@@ -150,8 +151,10 @@ pub enum EventType {
         deposit_id: DepositSolId,
         #[n(1)]
         account: Account,
-        #[n(2)]
-        sweepable_amount: Lamport,
+        #[cbor(n(2), with = "cbor::address")]
+        address: Address,
+        #[n(3)]
+        balance: Lamport,
     },
 }
 

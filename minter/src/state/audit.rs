@@ -75,9 +75,10 @@ fn apply_state_transition(state: &mut State, payload: &EventType, timestamp: u64
         EventType::QueuedDeposit {
             deposit_id,
             account,
-            sweepable_amount,
+            address,
+            balance,
         } => {
-            state.process_queued_deposit(*deposit_id, account, *sweepable_amount);
+            state.process_queued_deposit(*deposit_id, account, address, *balance);
         }
     }
 }

@@ -1,6 +1,5 @@
 use super::{MAX_DEPOSITS_PER_SWEEP, sweep_queued_deposits};
 use crate::{
-    address::account_address,
     constants::{FEE_PER_SIGNATURE, MAX_CONCURRENT_RPC_CALLS},
     state::{
         TaskType,
@@ -9,13 +8,12 @@ use crate::{
     },
     test_fixtures::{
         DEFAULT_BLOCK_HEIGHT, EventsAssert, MINIMUM_DEPOSIT_AMOUNT, MINTER_ADDRESS, account,
-        account_signature, events::queue_deposit, init_schnorr_master_key, init_state,
-        runtime::TestCanisterRuntime, schnorr_master_key_response, signer::sign_for,
+        account_signature, deposit_address, events::queue_deposit, init_schnorr_master_key,
+        init_state, runtime::TestCanisterRuntime, schnorr_master_key_response, signer::sign_for,
     },
 };
 use assert_matches::assert_matches;
 use cksol_types::{DepositSolId, DepositSolStatus};
-use icrc_ledger_types::icrc1::account::Account;
 use sol_rpc_types::{Lamport, MultiRpcResult, RpcError, Signature, Slot};
 use solana_address::Address;
 use solana_system_interface::instruction::SystemInstruction;
@@ -303,11 +301,6 @@ fn queue_deposits_with_increasing_amounts(num_deposits: usize) {
 
 fn deposit_status(deposit_id: DepositSolId) -> DepositSolStatus {
     read_state(|s| s.deposits().status(deposit_id))
-}
-
-fn deposit_address(account: Account) -> Address {
-    let master_key = read_state(|s| s.minter_public_key().cloned()).unwrap();
-    account_address(&master_key, &account)
 }
 
 fn transfers_to_minter_address(message: &VersionedMessage) -> Vec<(Address, Lamport)> {

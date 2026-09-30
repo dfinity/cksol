@@ -1,8 +1,5 @@
 use super::{Sweep, Sweeps};
-use crate::{
-    state::QueuedDeposit,
-    test_fixtures::{account, queued_deposit, signature},
-};
+use crate::test_fixtures::{account, queued_deposit, queued_deposit_of, signature};
 
 #[test]
 fn should_find_deposits_by_sweep_signature_and_by_deposit_id() {
@@ -92,20 +89,8 @@ fn should_panic_when_inserting_a_sweep_whose_deposit_another_sweep_holds() {
 #[test]
 fn should_sum_the_sweepable_amounts_of_the_deposits() {
     let sweep = Sweep::new([
-        (
-            0,
-            QueuedDeposit {
-                account: account(1),
-                sweepable_amount: 1_000,
-            },
-        ),
-        (
-            1,
-            QueuedDeposit {
-                account: account(2),
-                sweepable_amount: 250,
-            },
-        ),
+        (0, queued_deposit_of(account(1), 1_000)),
+        (1, queued_deposit_of(account(2), 250)),
     ]);
 
     assert_eq!(sweep.swept_amount(), 1_250);

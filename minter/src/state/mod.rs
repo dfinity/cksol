@@ -16,6 +16,7 @@ use ic_ed25519::PublicKey;
 use icrc_ledger_types::icrc1::account::Account;
 use sol_rpc_client::SolRpcClient;
 use sol_rpc_types::{ConsensusStrategy, Lamport, RpcSources, SolanaCluster};
+use solana_address::Address;
 use solana_signature::Signature;
 use std::{
     cell::RefCell,
@@ -30,7 +31,7 @@ pub mod audit;
 mod deposits;
 pub mod event;
 
-pub use deposits::{Deposits, QueuedDeposit, Sweep, Sweeps};
+pub use deposits::{DepositBalance, Deposits, QueuedDeposit, Sweep, Sweeps};
 
 thread_local! {
     static STATE: RefCell<Option<State>> = RefCell::default();
@@ -465,13 +466,20 @@ impl State {
         &mut self,
         deposit_id: DepositSolId,
         account: &Account,
-        sweepable_amount: Lamport,
+        address: &Address,
+        balance: Lamport,
     ) {
+        let balance = DepositBalance::new(balance).unwrap_or_else(|| {
+            panic!(
+                "Attempted to queue deposit {deposit_id} with a balance of {balance} lamports below the rent exemption threshold"
+            )
+        });
         self.deposits.queue(
             deposit_id,
             QueuedDeposit {
                 account: *account,
-                sweepable_amount,
+                address: *address,
+                balance,
             },
         );
     }

@@ -95,7 +95,7 @@ impl Sweep {
     pub fn swept_amount(&self) -> Lamport {
         self.deposits
             .values()
-            .map(|deposit| deposit.sweepable_amount)
+            .map(QueuedDeposit::sweepable_amount)
             .sum()
     }
 

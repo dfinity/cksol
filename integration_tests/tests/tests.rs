@@ -1015,6 +1015,13 @@ mod deposit_sol_tests {
             }
         );
         let proxy = setup.proxy_canister_id();
+        let deposit_address = setup
+            .minter()
+            .get_deposit_address(GetDepositAddressArgs {
+                owner: Some(proxy),
+                subaccount,
+            })
+            .await;
         setup.minter().assert_that_events().await.satisfy(|events| {
             check!(
                 events[1..]
@@ -1024,7 +1031,8 @@ mod deposit_sol_tests {
                             owner: proxy,
                             subaccount,
                         },
-                        sweepable_amount: BALANCE_ABOVE_MINIMUM - RENT_EXEMPTION_THRESHOLD,
+                        address: deposit_address,
+                        balance: BALANCE_ABOVE_MINIMUM,
                     }]
             );
         });
@@ -1089,13 +1097,18 @@ mod deposit_sol_tests {
             .await;
 
         assert_eq!(result, Ok(deposit_id));
+        let deposit_address = setup
+            .minter()
+            .get_deposit_address(DEFAULT_CALLER_ACCOUNT)
+            .await;
         setup.minter().assert_that_events().await.satisfy(|events| {
             check!(
                 events[1..]
                     == [EventType::QueuedDeposit {
                         deposit_id,
                         account: DEFAULT_CALLER_ACCOUNT,
-                        sweepable_amount: BALANCE_ABOVE_MINIMUM - RENT_EXEMPTION_THRESHOLD,
+                        address: deposit_address,
+                        balance: BALANCE_ABOVE_MINIMUM,
                     }]
             );
         });

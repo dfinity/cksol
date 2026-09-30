@@ -83,7 +83,8 @@ mod queued_deposits {
             payload: EventType::QueuedDeposit {
                 deposit_id,
                 account: queued_deposit(deposit_id).account,
-                sweepable_amount: queued_deposit(deposit_id).sweepable_amount,
+                address: queued_deposit(deposit_id).address,
+                balance: queued_deposit(deposit_id).balance.get(),
             },
         };
         let init = Event {
@@ -93,7 +94,12 @@ mod queued_deposits {
         let mut expected = State::try_from(valid_init_args()).unwrap();
         for deposit_id in 0..2 {
             let deposit = queued_deposit(deposit_id);
-            expected.process_queued_deposit(deposit_id, &deposit.account, deposit.sweepable_amount);
+            expected.process_queued_deposit(
+                deposit_id,
+                &deposit.account,
+                &deposit.address,
+                deposit.balance.get(),
+            );
         }
 
         let replayed = replay_events([init, queued(0), queued(1)]);
@@ -154,7 +160,7 @@ mod swept_deposits {
         assert_eq!(
             deposit_status(1),
             DepositSolStatus::Queued {
-                sweepable_amount: 200
+                sweepable_amount: queued_deposit(1).sweepable_amount()
             }
         );
         assert_eq!(
@@ -270,7 +276,7 @@ mod swept_deposits {
     fn queue_three_deposits() {
         for deposit_id in 0..3 {
             let deposit = queued_deposit(deposit_id);
-            queue_deposit(deposit_id, deposit.account, deposit.sweepable_amount);
+            queue_deposit(deposit_id, deposit.account, deposit.sweepable_amount());
         }
     }
 
