@@ -17,6 +17,7 @@ use icrc_ledger_types::icrc1::account::Account;
 mod tests;
 
 mod timer;
+mod transaction;
 
 pub use crate::constants::SWEEP_DEPOSITS_DELAY;
 pub use timer::sweep_queued_deposits;

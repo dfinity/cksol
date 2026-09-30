@@ -4,9 +4,9 @@ use crate::{
     guard::TimerGuard,
     rpc::{Block, SubmitTransactionError, get_recent_block, submit_transaction},
     runtime::CanisterRuntime,
-    sol_transfer::{CreateTransferError, MAX_SIGNATURES, create_signed_consolidation_transaction},
+    sol_transfer::{CreateTransferError, MAX_SIGNATURES, sign_sweep_transaction},
     state::{
-        QueuedDeposit, State, TaskType,
+        QueuedDeposit, State, Sweep, TaskType,
         audit::process_event,
         event::{EventType, TransactionPurpose},
         mutate_state, read_state,
@@ -15,11 +15,9 @@ use crate::{
 use canlog::log;
 use cksol_types::DepositSolId;
 use cksol_types_internal::log::Priority;
-use icrc_ledger_types::icrc1::account::Account;
 use itertools::Itertools;
-use sol_rpc_types::Lamport;
 use solana_signature::Signature;
-use std::{cmp::Reverse, time::Duration};
+use std::time::Duration;
 use thiserror::Error;
 
 #[cfg(test)]
@@ -78,7 +76,7 @@ async fn ensure_schnorr_master_key_cached<R: CanisterRuntime>(runtime: &R) {
 }
 
 struct SweepRound {
-    batches: Vec<SweepBatch>,
+    batches: Vec<Vec<(DepositSolId, QueuedDeposit)>>,
     leaves_deposits_queued: bool,
 }
 
@@ -100,35 +98,10 @@ impl SweepRound {
                 .into_iter()
                 .chunks(MAX_DEPOSITS_PER_SWEEP)
                 .into_iter()
-                .map(|chunk| SweepBatch::largest_deposit_pays_fee(chunk.collect()))
+                .map(Iterator::collect)
                 .collect(),
             leaves_deposits_queued,
         }
-    }
-}
-
-struct SweepBatch {
-    deposits: Vec<(DepositSolId, QueuedDeposit)>,
-}
-
-impl SweepBatch {
-    fn largest_deposit_pays_fee(mut deposits: Vec<(DepositSolId, QueuedDeposit)>) -> Self {
-        deposits.sort_by_key(|(_, deposit)| Reverse(deposit.sweepable_amount()));
-        Self { deposits }
-    }
-
-    fn deposit_ids(&self) -> Vec<DepositSolId> {
-        self.deposits
-            .iter()
-            .map(|(deposit_id, _)| *deposit_id)
-            .collect()
-    }
-
-    fn sources(&self) -> Vec<(Account, Lamport)> {
-        self.deposits
-            .iter()
-            .map(|(_, deposit)| (deposit.account, deposit.sweepable_amount()))
-            .collect()
     }
 }
 
@@ -142,12 +115,12 @@ enum SweepError {
 
 async fn submit_sweep_transaction<R: CanisterRuntime>(
     runtime: &R,
-    batch: SweepBatch,
+    deposits: Vec<(DepositSolId, QueuedDeposit)>,
     block: Block,
 ) -> Result<Signature, SweepError> {
-    let minter_address = minter_address(&lazy_get_schnorr_master_key(runtime).await);
-    let (transaction, signers) =
-        create_signed_consolidation_transaction(runtime, batch.sources(), block.blockhash).await?;
+    let master_key = lazy_get_schnorr_master_key(runtime).await;
+    let sweep = Sweep::plan(deposits, minter_address(&master_key));
+    let (transaction, signers) = sign_sweep_transaction(runtime, &sweep, block.blockhash).await?;
     let signature = transaction.signatures[0];
 
     mutate_state(|state| {
@@ -158,8 +131,12 @@ async fn submit_sweep_transaction<R: CanisterRuntime>(
                 message: transaction.message.clone().into(),
                 signers,
                 purpose: TransactionPurpose::SweepDeposits {
-                    deposit_ids: batch.deposit_ids(),
-                    minter_address,
+                    deposit_ids: sweep
+                        .transfers()
+                        .iter()
+                        .map(|transfer| transfer.deposit_id)
+                        .collect(),
+                    minter_address: sweep.minter_address(),
                 },
                 block_height: block.block_height,
             },
