@@ -1,5 +1,15 @@
+use std::{num::NonZeroUsize, time::Duration};
+
 /// Maximum number of concurrent calls to the SOL RPC canister.
 pub const MAX_CONCURRENT_RPC_CALLS: usize = 10;
+
+/// Maximum number of attempts to fetch a recent block, each attempt consisting of
+/// at most one `getSlot` and one `getBlock` call.
+pub const GET_RECENT_BLOCK_MAX_TRIES: NonZeroUsize =
+    NonZeroUsize::new(3).expect("BUG: the maximum number of tries must be non-zero");
+
+/// Interval of the timer sweeping queued deposits, the same as withdrawal processing.
+pub const SWEEP_DEPOSITS_DELAY: Duration = Duration::from_mins(1);
 
 /// Matches the ICP HTTPS outcall response limit for variable-length RPC calls
 /// such as `getTransaction` and `getSignatureStatuses`:

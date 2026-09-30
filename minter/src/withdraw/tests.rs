@@ -7,9 +7,9 @@ use crate::{
     state::{TaskType, event::TransactionPurpose, read_state},
     test_fixtures::{
         EventsAssert, MINIMUM_WITHDRAWAL_AMOUNT, MINTER_ACCOUNT, WITHDRAWAL_FEE, account,
-        confirmed_block, confirmed_block_at_height, deposit_id, events, init_balance,
-        init_balance_to, init_schnorr_master_key, init_state, minter_signature,
-        minter_signature_nth, runtime::TestCanisterRuntime, signature,
+        confirmed_block_at_height, deposit_id, events, init_balance, init_balance_to,
+        init_schnorr_master_key, init_state, minter_signature, minter_signature_nth,
+        runtime::TestCanisterRuntime, signature,
     },
     withdraw::{process_pending_withdrawals, withdraw, withdrawal_status},
 };
@@ -348,8 +348,7 @@ mod process_pending_withdrawals_tests {
         let events_before = EventsAssert::from_recorded();
 
         let runtime = TestCanisterRuntime::new()
-            .add_stub_response(GetSlotResult::Consistent(Ok(1)))
-            .add_stub_response(GetBlockResult::Consistent(Ok(confirmed_block())))
+            .add_recent_block(Ok(1))
             .with_increasing_time();
 
         process_pending_withdrawals(runtime).await;
@@ -380,8 +379,7 @@ mod process_pending_withdrawals_tests {
         let events_before = EventsAssert::from_recorded();
 
         let runtime = TestCanisterRuntime::new()
-            .add_stub_response(GetSlotResult::Consistent(Ok(slot)))
-            .add_stub_response(GetBlockResult::Consistent(Ok(confirmed_block())))
+            .add_recent_block(Ok(slot))
             .add_stub_response(SendTransactionResult::Consistent(Ok(tx_signature.into())))
             .add_signer(sign_as_minter())
             .with_increasing_time();
@@ -444,15 +442,9 @@ mod process_pending_withdrawals_tests {
 
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
-            .add_stub_response(GetSlotResult::Consistent(Err(RpcError::ValidationError(
+            .add_recent_block(Err(RpcError::ValidationError(
                 "slot unavailable".to_string(),
-            ))))
-            .add_stub_response(GetSlotResult::Consistent(Err(RpcError::ValidationError(
-                "slot unavailable".to_string(),
-            ))))
-            .add_stub_response(GetSlotResult::Consistent(Err(RpcError::ValidationError(
-                "slot unavailable".to_string(),
-            ))));
+            )));
 
         process_pending_withdrawals(runtime).await;
 
@@ -487,8 +479,7 @@ mod process_pending_withdrawals_tests {
 
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
-            .add_stub_response(GetSlotResult::Consistent(Ok(slot)))
-            .add_stub_response(GetBlockResult::Consistent(Ok(confirmed_block())))
+            .add_recent_block(Ok(slot))
             .add_signer(sign_as_minter().expect([Err(SignCallError::CallFailed(
                 CallRejected::with_rejection(4, "signing service unavailable".to_string()).into(),
             ))]));
@@ -530,8 +521,7 @@ mod process_pending_withdrawals_tests {
 
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
-            .add_stub_response(GetSlotResult::Consistent(Ok(slot)))
-            .add_stub_response(GetBlockResult::Consistent(Ok(confirmed_block())))
+            .add_recent_block(Ok(slot))
             .add_stub_response(SendTransactionResult::Consistent(Ok(signature(1).into())))
             .add_stub_response(SendTransactionResult::Consistent(Ok(signature(2).into())))
             .add_signer(sign_as_minter().times(2));
@@ -564,8 +554,7 @@ mod process_pending_withdrawals_tests {
         // Round 1: processes MAX_CONCURRENT_RPC_CALLS batches, 1 request remains → reschedule
         let mut runtime = TestCanisterRuntime::new()
             .with_increasing_time()
-            .add_stub_response(GetSlotResult::Consistent(Ok(slot)))
-            .add_stub_response(GetBlockResult::Consistent(Ok(confirmed_block())));
+            .add_recent_block(Ok(slot));
         for i in 0..MAX_CONCURRENT_RPC_CALLS {
             runtime = runtime
                 .add_stub_response(SendTransactionResult::Consistent(Ok(
@@ -586,8 +575,7 @@ mod process_pending_withdrawals_tests {
         let signature_continuing_round_1 = minter_signature_nth(MAX_CONCURRENT_RPC_CALLS);
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
-            .add_stub_response(GetSlotResult::Consistent(Ok(slot)))
-            .add_stub_response(GetBlockResult::Consistent(Ok(confirmed_block())))
+            .add_recent_block(Ok(slot))
             .add_signer(sign_as_minter().expect([Ok(signature_continuing_round_1)]))
             .add_stub_response(SendTransactionResult::Consistent(Ok(
                 signature_continuing_round_1.into(),

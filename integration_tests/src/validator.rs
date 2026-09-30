@@ -198,6 +198,22 @@ impl SolanaTestValidator {
             .expect("Failed to get Solana balance")
     }
 
+    /// The signatures of the transactions that mention `address`, newest first.
+    pub async fn get_signatures_for_address(&self, address: &Address) -> Vec<Signature> {
+        self.rpc_client()
+            .get_signatures_for_address(address)
+            .await
+            .expect("Failed to get signatures for Solana address")
+            .into_iter()
+            .map(|transaction| {
+                transaction
+                    .signature
+                    .parse()
+                    .expect("BUG: the validator returned a malformed signature")
+            })
+            .collect()
+    }
+
     pub async fn get_balances(&self, addresses: &[Address]) -> Vec<Lamport> {
         let mut balances = Vec::with_capacity(addresses.len());
         for address in addresses {
@@ -260,27 +276,29 @@ impl SolanaTestValidator {
         panic!("Transaction {signature} not confirmed within timeout");
     }
 
-    /// Polls a Solana address at `finalized` commitment until its balance exceeds
-    /// `previous_balance`.
+    /// Polls a Solana address at `finalized` commitment until its balance is exactly
+    /// `expected_balance`.
     ///
     /// # Panics
     ///
-    /// Panics if the balance does not increase within a minute.
-    pub async fn wait_for_finalized_balance(&self, address: &Address, previous_balance: Lamport) {
+    /// Panics if the balance does not reach `expected_balance` within a minute, reporting
+    /// the balance last seen.
+    pub async fn wait_for_finalized_balance(&self, address: &Address, expected_balance: Lamport) {
+        let mut last_balance = None;
         for _ in 0..60 {
-            let balance = self
+            last_balance = self
                 .rpc_client()
                 .get_balance_with_commitment(address, CommitmentConfig::finalized())
                 .await
                 .map(|response| response.value)
-                .unwrap_or(0);
-            if balance > previous_balance {
+                .ok();
+            if last_balance == Some(expected_balance) {
                 return;
             }
             tokio::time::sleep(Duration::from_secs(1)).await;
         }
         panic!(
-            "Balance of {address} did not increase beyond {previous_balance} at finalized commitment"
+            "Balance of {address} at finalized commitment is {last_balance:?}, expected {expected_balance}"
         );
     }
 }

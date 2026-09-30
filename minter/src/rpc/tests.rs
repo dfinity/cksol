@@ -1,4 +1,5 @@
 use crate::{
+    constants::GET_RECENT_BLOCK_MAX_TRIES,
     rpc::{
         Block, BlockHeight, GetBalanceError, GetRecentBlockError, GetTransactionError,
         SubmitTransactionError, get_balance, get_recent_block, get_transaction, submit_transaction,
@@ -296,19 +297,15 @@ mod get_recent_block_tests {
     async fn should_fail_after_retrying() {
         init_state();
         let runtime = TestCanisterRuntime::new()
-            .add_stub_response(GetSlotResult::Consistent(Err(RpcError::ValidationError(
-                "Error 1".to_string(),
-            ))))
-            .add_stub_response(GetSlotResult::Consistent(Err(RpcError::ValidationError(
-                "Error 2".to_string(),
-            ))))
-            .add_stub_response(GetSlotResult::Consistent(Err(RpcError::ValidationError(
-                "Error 3".to_string(),
-            ))));
+            .add_recent_block(Err(RpcError::ValidationError("Error".to_string())));
 
         let result = get_recent_block(&runtime).await;
 
-        assert_matches!(result, Err(GetRecentBlockError::Failed(_)));
+        assert_matches!(
+            result,
+            Err(GetRecentBlockError::Failed(errors))
+                if errors.len() == GET_RECENT_BLOCK_MAX_TRIES.get()
+        );
     }
 
     fn blockhash() -> sol_rpc_types::Hash {
