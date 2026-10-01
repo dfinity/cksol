@@ -1190,7 +1190,7 @@ mod deposit_sol_tests {
                 e,
                 EventType::SubmittedTransaction {
                     signature,
-                    purpose: TransactionPurpose::SweepDeposits { deposit_ids, .. },
+                    purpose: TransactionPurpose::SweepDeposits { deposit_ids },
                     ..
                 } if *signature == sweep_signature && deposit_ids == &[deposit_id]
             )));
