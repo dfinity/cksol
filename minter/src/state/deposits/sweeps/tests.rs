@@ -185,10 +185,9 @@ mod message {
         assert_eq!(transfers[2].amount, 10_000_000);
     }
 
-    /// Replaying a recorded sweep requires [`super::Sweep::recover`] to rebuild a message
-    /// equal to the recorded one, so the message compiled for a given plan must never change.
-    /// A failure here means a dependency bump would break the replay of historical sweep
-    /// events.
+    /// Historical sweep events replay only if a plan always compiles to the same message,
+    /// so a failure here means a dependency bump broke replay — not that the expected
+    /// message needs updating.
     #[test]
     fn should_build_the_message_recorded_for_the_plan() {
         let sweep = sweep_of(SWEEPABLE_AMOUNTS);
@@ -220,8 +219,6 @@ mod message {
         );
     }
 
-    /// The compiled transfer of the given amount from the given account key to the minter
-    /// address, as recorded sweep messages contain it.
     fn transfer_instruction(from_index: u8, amount: Lamport) -> CompiledInstruction {
         const TRANSFER_DISCRIMINANT: u32 = 2;
         const SYSTEM_PROGRAM_INDEX: u8 = 4;
