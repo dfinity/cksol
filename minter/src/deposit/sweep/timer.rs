@@ -1,5 +1,5 @@
 use crate::{
-    address::{lazy_get_schnorr_master_key, minter_address},
+    address::{minter_address, minter_public_key},
     constants::MAX_CONCURRENT_RPC_CALLS,
     guard::TimerGuard,
     rpc::{Block, SubmitTransactionError, get_recent_block, submit_transaction},
@@ -16,6 +16,7 @@ use canlog::log;
 use cksol_types::DepositSolId;
 use cksol_types_internal::log::Priority;
 use itertools::Itertools;
+use solana_address::Address;
 use solana_signature::Signature;
 use std::time::Duration;
 use thiserror::Error;
@@ -36,6 +37,15 @@ pub async fn sweep_queued_deposits<R: CanisterRuntime>(runtime: R) {
         return;
     }
 
+    let master_key = match minter_public_key() {
+        Ok(key) => key,
+        Err(e) => {
+            log!(Priority::Info, "Skipping sweep of queued deposits: {e}");
+            return;
+        }
+    };
+    let sweep_destination = minter_address(&master_key);
+
     let block = match get_recent_block(&runtime).await {
         Ok(block) => block,
         Err(e) => {
@@ -46,14 +56,12 @@ pub async fn sweep_queued_deposits<R: CanisterRuntime>(runtime: R) {
             return;
         }
     };
-    ensure_schnorr_master_key_cached(&runtime).await;
-
     let reschedule = scopeguard::guard(runtime.clone(), |runtime| {
         runtime.set_timer(Duration::ZERO, sweep_queued_deposits);
     });
 
     futures::future::join_all(sweep.batches.into_iter().map(async |batch| {
-        match submit_sweep_transaction(&runtime, batch, block).await {
+        match submit_sweep_transaction(&runtime, batch, block, sweep_destination).await {
             Ok(signature) => log!(Priority::Info, "Submitted sweep transaction {signature}"),
             Err(SweepError::CreateTransactionFailed(e)) => {
                 log!(Priority::Error, "Failed to create sweep transaction: {e}")
@@ -69,10 +77,6 @@ pub async fn sweep_queued_deposits<R: CanisterRuntime>(runtime: R) {
     if !sweep.leaves_deposits_queued {
         scopeguard::ScopeGuard::into_inner(reschedule);
     }
-}
-
-async fn ensure_schnorr_master_key_cached<R: CanisterRuntime>(runtime: &R) {
-    let _ = lazy_get_schnorr_master_key(runtime).await;
 }
 
 struct SweepRound {
@@ -117,9 +121,9 @@ async fn submit_sweep_transaction<R: CanisterRuntime>(
     runtime: &R,
     deposits: Vec<(DepositSolId, QueuedDeposit)>,
     block: Block,
+    sweep_destination: Address,
 ) -> Result<Signature, SweepError> {
-    let master_key = lazy_get_schnorr_master_key(runtime).await;
-    let sweep = Sweep::plan(deposits, minter_address(&master_key));
+    let sweep = Sweep::plan(deposits, sweep_destination);
     let (transaction, signers) = sign_sweep_transaction(runtime, &sweep, block.blockhash).await?;
     let signature = transaction.signatures[0];
 

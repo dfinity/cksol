@@ -1,7 +1,7 @@
 use candid::Principal;
 use canlog::{Log, Sort};
 use cksol_minter::{
-    address::lazy_get_schnorr_master_key,
+    address::fetch_and_record_minter_public_key,
     consolidate::{DEPOSIT_CONSOLIDATION_DELAY, consolidate_deposits},
     deposit::sweep::{SWEEP_DEPOSITS_DELAY, sweep_queued_deposits},
     monitor::{
@@ -234,6 +234,13 @@ fn get_events(
                 address: address.into(),
                 balance: balance.into(),
             },
+            EventType::MinterPublicKeyFetched {
+                public_key,
+                chain_code,
+            } => event::EventType::MinterPublicKeyFetched {
+                public_key: public_key.serialize_raw().to_vec(),
+                chain_code: chain_code.to_vec(),
+            },
         }
     }
 
@@ -382,9 +389,7 @@ fn assert_valid_deposit_account(
 
 fn setup_timers() {
     ic_cdk_timers::set_timer(Duration::from_secs(0), async {
-        // Initialize the minter's Ed25519 public key
-        let runtime = IcCanisterRuntime::new();
-        let _ = lazy_get_schnorr_master_key(&runtime).await;
+        fetch_and_record_minter_public_key(&IcCanisterRuntime::new()).await;
     });
     ic_cdk_timers::set_timer_interval(DEPOSIT_CONSOLIDATION_DELAY, async || {
         consolidate_deposits(IcCanisterRuntime::new()).await;

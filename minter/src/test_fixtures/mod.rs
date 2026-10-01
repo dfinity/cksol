@@ -108,10 +108,19 @@ pub fn schnorr_master_key_response() -> SchnorrPublicKeyResult {
     }
 }
 
-fn schnorr_master_key() -> SchnorrPublicKey {
+pub fn schnorr_master_key() -> SchnorrPublicKey {
     SchnorrPublicKey {
         public_key: PublicKey::pocketic_key(PocketIcMasterPublicKeyId::Key1),
         chain_code: [1; 32],
+    }
+}
+
+/// The event recorded when the minter fetches the master key of [`init_schnorr_master_key`].
+pub fn minter_public_key_fetched_event() -> EventType {
+    let master_key = schnorr_master_key();
+    EventType::MinterPublicKeyFetched {
+        public_key: master_key.public_key,
+        chain_code: master_key.chain_code,
     }
 }
 
@@ -493,6 +502,7 @@ pub mod arb {
     use candid::Principal;
     use cksol_types::DepositSolId;
     use cksol_types_internal::{Ed25519KeyName, InitArgs, SolanaNetwork, UpgradeArgs};
+    use ic_ed25519::{PrivateKey, PublicKey};
     use icrc_ledger_types::icrc1::account::Account;
     use proptest::prelude::{Just, Strategy, any, prop, prop_oneof};
     use solana_address::Address;
@@ -570,6 +580,10 @@ pub mod arb {
 
     pub fn arb_address() -> impl Strategy<Value = Address> {
         any::<[u8; 32]>().prop_map(Address::from)
+    }
+
+    pub fn arb_ed25519_public_key() -> impl Strategy<Value = PublicKey> {
+        any::<[u8; 32]>().prop_map(|seed| PrivateKey::generate_from_seed(&seed).public_key())
     }
 
     pub fn arb_hash() -> impl Strategy<Value = Hash> {
@@ -796,6 +810,12 @@ pub mod arb {
                         balance,
                     }
                 },),
+            (arb_ed25519_public_key(), any::<[u8; 32]>()).prop_map(|(public_key, chain_code)| {
+                EventType::MinterPublicKeyFetched {
+                    public_key,
+                    chain_code,
+                }
+            }),
         ]
     }
 

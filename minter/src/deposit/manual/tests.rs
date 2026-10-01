@@ -65,6 +65,28 @@ mod process_deposit_tests {
     }
 
     #[tokio::test]
+    async fn should_fail_while_the_minter_public_key_is_unavailable() {
+        init_state();
+
+        let runtime =
+            TestCanisterRuntime::new().add_msg_cycles_available(PROCESS_DEPOSIT_REQUIRED_CYCLES);
+
+        let result = process_deposit(
+            runtime.clone(),
+            DEPOSITOR_ACCOUNT,
+            legacy_deposit_transaction_signature(),
+        )
+        .await;
+
+        assert_matches!(
+            result,
+            Err(ProcessDepositError::TemporarilyUnavailable(e)) => assert!(e.contains("minter public key"))
+        );
+        assert!(runtime.msg_cycles_accepted().is_empty());
+        EventsAssert::assert_no_events_recorded();
+    }
+
+    #[tokio::test]
     async fn should_return_error_if_get_transaction_fails() {
         init_state();
         init_schnorr_master_key();

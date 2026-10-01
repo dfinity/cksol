@@ -483,6 +483,14 @@ type EventType = variant {
         // The balance of the deposit address when the deposit was queued.
         balance: Lamport;
     };
+    // The minter fetched its Schnorr Ed25519 master public key, from which
+    // its main address and all deposit addresses are derived.
+    MinterPublicKeyFetched : record {
+        // The raw Ed25519 master public key (32 bytes).
+        public_key: blob;
+        // The chain code used to derive subkeys (32 bytes).
+        chain_code: blob;
+    };
 };
 
 // A single transaction can deposit to multiple accounts, so the signature alone

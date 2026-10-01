@@ -1,8 +1,8 @@
 use crate::{
-    address::{account_address, lazy_get_schnorr_master_key},
+    address::account_address,
     rpc::get_transaction,
     runtime::CanisterRuntime,
-    state::{event::DepositId, read_state},
+    state::{SchnorrPublicKey, event::DepositId, read_state},
 };
 use canlog::log;
 use cksol_types::ProcessDepositError;
@@ -24,13 +24,13 @@ pub mod sweep;
 
 pub async fn fetch_and_validate_deposit<R: CanisterRuntime>(
     runtime: &R,
+    master_key: &SchnorrPublicKey,
     account: Account,
     signature: Signature,
     fee: Lamport,
 ) -> Result<(DepositId, Lamport, Lamport), ProcessDepositError> {
     let deposit_id = DepositId { account, signature };
-    let master_key = lazy_get_schnorr_master_key(runtime).await;
-    let deposit_address = account_address(&master_key, &account);
+    let deposit_address = account_address(master_key, &account);
 
     let maybe_transaction = get_transaction(runtime, signature).await.map_err(|e| {
         log!(

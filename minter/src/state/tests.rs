@@ -72,6 +72,30 @@ mod cache_minter_public_key {
     }
 }
 
+mod minter_public_key_fetched {
+    use super::*;
+    use crate::{
+        state::audit::replay_events,
+        test_fixtures::{minter_public_key_fetched_event, schnorr_master_key},
+    };
+
+    #[test]
+    fn should_make_the_key_available_after_replay() {
+        let state = replay_events(vec![
+            Event {
+                timestamp: 0,
+                payload: EventType::Init(valid_init_args()),
+            },
+            Event {
+                timestamp: 1,
+                payload: minter_public_key_fetched_event(),
+            },
+        ]);
+
+        assert_eq!(state.minter_public_key(), Some(&schnorr_master_key()));
+    }
+}
+
 mod queued_deposits {
     use super::*;
     use crate::state::audit::replay_events;
