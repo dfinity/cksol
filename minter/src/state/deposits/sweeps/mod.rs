@@ -25,7 +25,7 @@ mod tests;
 /// A deposit belongs to exactly one sweep, so it can also be found by its id:
 /// [`Sweep::plan`] rejects a duplicated deposit id and [`Sweeps::insert`] rejects
 /// a sweep containing a deposit that another sweep already holds.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct Sweeps {
     by_signature: BTreeMap<Signature, Sweep>,
 }

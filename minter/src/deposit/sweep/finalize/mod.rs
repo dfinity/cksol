@@ -25,21 +25,21 @@ mod tests;
 /// only when this round credited a sweep and finalized sweeps are left. A round whose
 /// fetches all failed is retried at the timer interval instead of in a hot loop.
 pub async fn credit_finalized_sweeps<R: CanisterRuntime>(runtime: &R) -> bool {
-    let sweeps: Vec<(Signature, Sweep)> = read_state(|state| {
-        state
-            .deposits()
-            .finalized()
-            .iter()
-            .map(|(signature, sweep)| (*signature, sweep.clone()))
-            .collect()
+    let (finalized_count, round): (usize, Vec<(Signature, Sweep)>) = read_state(|state| {
+        let finalized = state.deposits().finalized();
+        (
+            finalized.len(),
+            finalized
+                .iter()
+                .take(MAX_CONCURRENT_RPC_CALLS)
+                .map(|(signature, sweep)| (*signature, sweep.clone()))
+                .collect(),
+        )
     });
-    if sweeps.is_empty() {
+    if round.is_empty() {
         return false;
     }
 
-    let finalized_count = sweeps.len();
-    let round: Vec<(Signature, Sweep)> =
-        sweeps.into_iter().take(MAX_CONCURRENT_RPC_CALLS).collect();
     let outcomes = futures::future::join_all(
         round
             .iter()
