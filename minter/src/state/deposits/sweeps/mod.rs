@@ -71,8 +71,9 @@ impl Sweeps {
 /// The plan of one sweep transaction: the deposits it moves to the minter's main account,
 /// the deposit paying the transaction fee, the fee assumed for it, and the destination.
 ///
-/// The plan is fixed when the transaction is submitted, so that its outcome can be
-/// checked against exactly what the minter built.
+/// The plan is a function of the queued deposits alone. The state keeps the plan it recovers
+/// from the submitted transaction, after checking that the plan builds that very message, so
+/// that the outcome of the transaction can be checked against exactly what the minter signed.
 ///
 /// Each deposit is kept as it was recorded when it was queued, whatever stage the sweep
 /// holding it has reached.
@@ -114,12 +115,13 @@ impl Sweep {
     }
 
     /// Plans again the sweep of the given deposits that the submitted message sweeps,
-    /// to the destination of its first transfer.
+    /// to the destination of its first transfer, and checks that the plan builds the
+    /// submitted message.
     pub fn recover(
         deposits: impl IntoIterator<Item = (DepositSolId, QueuedDeposit)>,
-        message: &VersionedMessage,
+        submitted: &VersionedMessage,
     ) -> Result<Self, SweepRecoveryError> {
-        let VersionedMessage::Legacy(message) = message;
+        let VersionedMessage::Legacy(message) = submitted;
         let minter_address = message
             .instructions
             .first()
@@ -127,7 +129,15 @@ impl Sweep {
             .and_then(|index| message.account_keys.get(*index as usize))
             .copied()
             .ok_or(SweepRecoveryError::MissingDestination)?;
-        Ok(Self::plan(deposits, minter_address))
+        let sweep = Self::plan(deposits, minter_address);
+        let planned = VersionedMessage::Legacy(sweep.sweep_message(message.recent_blockhash));
+        if planned != *submitted {
+            return Err(SweepRecoveryError::UnexpectedMessage {
+                planned: Box::new(planned),
+                submitted: Box::new(submitted.clone()),
+            });
+        }
+        Ok(sweep)
     }
 
     pub fn deposits(&self) -> &BTreeMap<DepositSolId, QueuedDeposit> {
@@ -199,6 +209,11 @@ impl Sweep {
 pub enum SweepRecoveryError {
     #[error("the message has no transfer to read the destination from")]
     MissingDestination,
+    #[error("the plan builds {planned:?} but the submitted message is {submitted:?}")]
+    UnexpectedMessage {
+        planned: Box<VersionedMessage>,
+        submitted: Box<VersionedMessage>,
+    },
 }
 
 /// One transfer of a sweep transaction, from a deposit address to the minter address.

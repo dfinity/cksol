@@ -169,6 +169,20 @@ mod sweep {
     }
 
     #[test]
+    #[should_panic(expected = "the plan builds")]
+    fn should_panic_when_the_message_does_not_match_the_plan() {
+        let mut deposits = Deposits::default();
+        deposits.queue(0, queued_deposit(0));
+        deposits.queue(1, queued_deposit(1));
+
+        deposits.sweep(
+            &[0, 1],
+            &sweep_message([(0, queued_deposit(0))]),
+            &signature(SWEEP_SIGNATURE_INDEX),
+        );
+    }
+
+    #[test]
     #[should_panic(expected = "Attempted to sweep no deposits")]
     fn should_panic_when_sweeping_no_deposits() {
         Deposits::default().sweep(

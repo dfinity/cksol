@@ -157,7 +157,7 @@ mod recover {
         sweep_message,
     };
     use solana_address::Address;
-    use solana_system_interface::instruction;
+    use solana_hash::Hash;
 
     #[test]
     fn should_plan_the_sweep_to_the_destination_of_the_submitted_message() {
@@ -170,17 +170,61 @@ mod recover {
     }
 
     #[test]
-    fn should_read_the_destination_from_the_first_transfer() {
-        let deposit = queued_deposit(0);
+    fn should_fail_when_the_plan_does_not_build_the_submitted_message() {
+        let deposits = [(0, queued_deposit(0)), (1, queued_deposit(1))];
+        let planned = sweep_message(deposits);
+        type Mutation = fn(&mut solana_message::Message);
+        let mutations: [(&str, Mutation); 3] = [
+            ("another fee payer", |message| {
+                message.account_keys.swap(0, 1)
+            }),
+            ("another amount", |message| {
+                message.instructions[0].data[4] ^= 1
+            }),
+            ("a transfer less", |message| {
+                message.instructions.pop();
+            }),
+        ];
+
+        for (name, mutate) in mutations {
+            let VersionedMessage::Legacy(mut message) = planned.clone();
+            mutate(&mut message);
+            let submitted = VersionedMessage::Legacy(message);
+
+            let sweep = Sweep::recover(deposits, &submitted);
+
+            assert_eq!(
+                sweep,
+                Err(SweepRecoveryError::UnexpectedMessage {
+                    planned: Box::new(planned.clone()),
+                    submitted: Box::new(submitted),
+                }),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn should_follow_the_destination_of_the_submitted_message() {
+        let deposits = [(0, queued_deposit(0)), (1, queued_deposit(1))];
         let destination = Address::from([0x42; 32]);
-        let message = solana_message::Message::new(
-            &[instruction::transfer(&deposit.address, &destination, 1)],
-            Some(&deposit.address),
-        );
+        let VersionedMessage::Legacy(mut message) = sweep_message(deposits);
+        message.account_keys[2] = destination;
 
-        let sweep = Sweep::recover([(0, deposit)], &VersionedMessage::Legacy(message));
+        let sweep = Sweep::recover(deposits, &VersionedMessage::Legacy(message));
 
-        assert_eq!(sweep.map(|sweep| sweep.minter_address()), Ok(destination));
+        assert_eq!(sweep, Ok(Sweep::plan(deposits, destination)));
+    }
+
+    #[test]
+    fn should_recover_the_plan_whatever_the_blockhash() {
+        let deposits = [(0, queued_deposit(0)), (1, queued_deposit(1))];
+        let submitted =
+            VersionedMessage::Legacy(planned_sweep(deposits).sweep_message(Hash::from([7; 32])));
+
+        let sweep = Sweep::recover(deposits, &submitted);
+
+        assert_eq!(sweep, Ok(planned_sweep(deposits)));
     }
 
     #[test]
