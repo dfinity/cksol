@@ -200,14 +200,9 @@ mod message {
 }
 
 mod recover {
-    use super::{
-        MINTER_ADDRESS, Sweep, SweepRecoveryError, VersionedMessage, planned_sweep, queued_deposit,
-        sweep_message,
-    };
+    use super::{Sweep, SweepRecoveryError, VersionedMessage, queued_deposit, sweep_message};
     use crate::test_fixtures::arb::{arb_address, arb_hash, arb_sweep_deposits};
     use proptest::{prop_assert_eq, proptest};
-    use solana_address::Address;
-    use solana_hash::Hash;
 
     proptest! {
         #[test]
@@ -223,16 +218,6 @@ mod recover {
 
             prop_assert_eq!(recovered, Ok(planned));
         }
-    }
-
-    #[test]
-    fn should_plan_the_sweep_to_the_destination_of_the_submitted_message() {
-        let deposits = [(0, queued_deposit(0)), (1, queued_deposit(1))];
-
-        let sweep = Sweep::recover(deposits, &sweep_message(deposits));
-
-        assert_eq!(sweep, Ok(planned_sweep(deposits)));
-        assert_eq!(sweep.unwrap().minter_address(), MINTER_ADDRESS);
     }
 
     #[test]
@@ -268,29 +253,6 @@ mod recover {
                 "{name}"
             );
         }
-    }
-
-    #[test]
-    fn should_follow_the_destination_of_the_submitted_message() {
-        let deposits = [(0, queued_deposit(0)), (1, queued_deposit(1))];
-        let destination = Address::from([0x42; 32]);
-        let VersionedMessage::Legacy(mut message) = sweep_message(deposits);
-        message.account_keys[2] = destination;
-
-        let sweep = Sweep::recover(deposits, &VersionedMessage::Legacy(message));
-
-        assert_eq!(sweep, Ok(Sweep::plan(deposits, destination)));
-    }
-
-    #[test]
-    fn should_recover_the_plan_whatever_the_blockhash() {
-        let deposits = [(0, queued_deposit(0)), (1, queued_deposit(1))];
-        let submitted =
-            VersionedMessage::Legacy(planned_sweep(deposits).sweep_message(Hash::from([7; 32])));
-
-        let sweep = Sweep::recover(deposits, &submitted);
-
-        assert_eq!(sweep, Ok(planned_sweep(deposits)));
     }
 
     #[test]
