@@ -132,7 +132,6 @@ async fn submit_sweep_transaction<R: CanisterRuntime>(
                 signers,
                 purpose: TransactionPurpose::SweepDeposits {
                     deposit_ids: sweep.deposits().keys().copied().collect(),
-                    minter_address: sweep.minter_address(),
                 },
                 block_height: block.block_height,
             },

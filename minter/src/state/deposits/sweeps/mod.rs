@@ -1,9 +1,13 @@
-use crate::{constants::FEE_PER_SIGNATURE, state::QueuedDeposit};
+use crate::{
+    constants::FEE_PER_SIGNATURE,
+    state::{QueuedDeposit, event::VersionedMessage},
+};
 use cksol_types::DepositSolId;
 use sol_rpc_types::Lamport;
 use solana_address::Address;
 use solana_signature::Signature;
 use std::{cmp::Reverse, collections::BTreeMap};
+use thiserror::Error;
 
 #[cfg(test)]
 mod tests;
@@ -109,6 +113,23 @@ impl Sweep {
         }
     }
 
+    /// Plans again the sweep of the given deposits that the submitted message sweeps,
+    /// to the destination of its first transfer.
+    pub fn recover(
+        deposits: impl IntoIterator<Item = (DepositSolId, QueuedDeposit)>,
+        message: &VersionedMessage,
+    ) -> Result<Self, SweepRecoveryError> {
+        let VersionedMessage::Legacy(message) = message;
+        let minter_address = message
+            .instructions
+            .first()
+            .and_then(|transfer| transfer.accounts.get(1))
+            .and_then(|index| message.account_keys.get(*index as usize))
+            .copied()
+            .ok_or(SweepRecoveryError::MissingDestination)?;
+        Ok(Self::plan(deposits, minter_address))
+    }
+
     pub fn deposits(&self) -> &BTreeMap<DepositSolId, QueuedDeposit> {
         &self.deposits
     }
@@ -172,6 +193,12 @@ impl Sweep {
     pub fn deposit_count(&self) -> usize {
         self.deposits.len()
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Error)]
+pub enum SweepRecoveryError {
+    #[error("the message has no transfer to read the destination from")]
+    MissingDestination,
 }
 
 /// One transfer of a sweep transaction, from a deposit address to the minter address.

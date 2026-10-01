@@ -1,8 +1,10 @@
-use super::{Sweeps, Transfer};
+use super::{Sweep, SweepRecoveryError, Sweeps, Transfer};
 use crate::{
     constants::FEE_PER_SIGNATURE,
+    state::event::VersionedMessage,
     test_fixtures::{
         MINTER_ADDRESS, account, planned_sweep, queued_deposit, queued_deposit_of, signature,
+        sweep_message,
     },
 };
 
@@ -146,6 +148,49 @@ mod plan {
         assert_eq!(sweep.fee_payer(), 7);
         assert_eq!(sweep.fee(), FEE_PER_SIGNATURE);
         assert_eq!(sweep.expected_received(), 1_000_000 - FEE_PER_SIGNATURE);
+    }
+}
+
+mod recover {
+    use super::{
+        MINTER_ADDRESS, Sweep, SweepRecoveryError, VersionedMessage, planned_sweep, queued_deposit,
+        sweep_message,
+    };
+    use solana_address::Address;
+    use solana_system_interface::instruction;
+
+    #[test]
+    fn should_plan_the_sweep_to_the_destination_of_the_submitted_message() {
+        let deposits = [(0, queued_deposit(0)), (1, queued_deposit(1))];
+
+        let sweep = Sweep::recover(deposits, &sweep_message(deposits));
+
+        assert_eq!(sweep, Ok(planned_sweep(deposits)));
+        assert_eq!(sweep.unwrap().minter_address(), MINTER_ADDRESS);
+    }
+
+    #[test]
+    fn should_read_the_destination_from_the_first_transfer() {
+        let deposit = queued_deposit(0);
+        let destination = Address::from([0x42; 32]);
+        let message = solana_message::Message::new(
+            &[instruction::transfer(&deposit.address, &destination, 1)],
+            Some(&deposit.address),
+        );
+
+        let sweep = Sweep::recover([(0, deposit)], &VersionedMessage::Legacy(message));
+
+        assert_eq!(sweep.map(|sweep| sweep.minter_address()), Ok(destination));
+    }
+
+    #[test]
+    fn should_fail_without_a_transfer_to_read_the_destination_from() {
+        let deposit = queued_deposit(0);
+        let message = solana_message::Message::new(&[], Some(&deposit.address));
+
+        let sweep = Sweep::recover([(0, deposit)], &VersionedMessage::Legacy(message));
+
+        assert_eq!(sweep, Err(SweepRecoveryError::MissingDestination));
     }
 }
 

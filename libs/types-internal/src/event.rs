@@ -152,8 +152,6 @@ pub enum TransactionPurpose {
     SweepDeposits {
         /// The ids of the swept deposits.
         deposit_ids: Vec<u64>,
-        /// The minter's main address the deposits are swept to.
-        minter_address: Address,
     },
 }
 

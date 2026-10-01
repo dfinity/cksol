@@ -6,8 +6,8 @@ use crate::{
     state::{audit::process_event, read_state},
     test_fixtures::{
         AUTOMATED_DEPOSIT_FEE, DEPOSIT_CONSOLIDATION_FEE, MANUAL_DEPOSIT_FEE,
-        MINIMUM_DEPOSIT_AMOUNT, MINIMUM_WITHDRAWAL_AMOUNT, MINTER_ADDRESS,
-        PROCESS_DEPOSIT_REQUIRED_CYCLES, WITHDRAWAL_FEE, account,
+        MINIMUM_DEPOSIT_AMOUNT, MINIMUM_WITHDRAWAL_AMOUNT, PROCESS_DEPOSIT_REQUIRED_CYCLES,
+        WITHDRAWAL_FEE, account,
         arb::arb_event,
         deposit_id,
         events::{
@@ -137,7 +137,7 @@ mod swept_deposits {
             );
             assert_eq!(s.deposits().queued().keys().collect::<Vec<_>>(), vec![&1]);
             let transaction = s.submitted_transactions().get(&sweep_signature).unwrap();
-            assert_eq!(transaction.amount, 100 + 300);
+            assert_eq!(transaction.amount, 1_000_000 + 3_000_000);
             assert_eq!(
                 transaction.signers,
                 vec![Signer::Account(account(3)), Signer::Account(account(1))]
@@ -146,7 +146,6 @@ mod swept_deposits {
                 transaction.purpose,
                 TransactionPurpose::SweepDeposits {
                     deposit_ids: vec![2, 0],
-                    minter_address: MINTER_ADDRESS,
                 }
             );
             assert_eq!(s.balance(), 0);

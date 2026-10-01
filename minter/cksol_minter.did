@@ -380,8 +380,6 @@ type TransactionPurpose = variant {
     SweepDeposits : record {
         // The ids of the swept deposits.
         deposit_ids: vec DepositSolId;
-        // The minter's main address the deposits are swept to.
-        minter_address: Address;
     };
 };
 
