@@ -98,8 +98,14 @@ fn should_panic_when_inserting_a_sweep_with_a_known_signature() {
 
 mod plan {
     use super::{
-        FEE_PER_SIGNATURE, MINTER_ADDRESS, Transfer, account, planned_sweep, queued_deposit_of,
+        FEE_PER_SIGNATURE, Lamport, MINTER_ADDRESS, Sweep, Transfer, account, planned_sweep,
+        queued_deposit_of,
     };
+    use crate::{
+        state::event::CreditedDeposit,
+        test_fixtures::arb::{arb_address, arb_sweep_deposits},
+    };
+    use proptest::{prop_assert, prop_assert_eq, proptest};
 
     #[test]
     fn should_charge_the_fee_to_the_largest_deposit_and_transfer_it_first() {
@@ -133,6 +139,23 @@ mod plan {
             ]
         );
         assert_eq!(sweep.expected_received(), 6_000_000 - 3 * FEE_PER_SIGNATURE);
+        assert_eq!(
+            sweep.mints(),
+            vec![
+                CreditedDeposit {
+                    deposit_id: 0,
+                    amount_to_mint: 1_000_000 - FEE_PER_SIGNATURE,
+                },
+                CreditedDeposit {
+                    deposit_id: 1,
+                    amount_to_mint: 3_000_000 - FEE_PER_SIGNATURE,
+                },
+                CreditedDeposit {
+                    deposit_id: 2,
+                    amount_to_mint: 2_000_000 - FEE_PER_SIGNATURE,
+                },
+            ]
+        );
     }
 
     #[test]
@@ -160,6 +183,37 @@ mod plan {
         assert_eq!(sweep.fee_payer(), 7);
         assert_eq!(sweep.fee(), FEE_PER_SIGNATURE);
         assert_eq!(sweep.expected_received(), 1_000_000 - FEE_PER_SIGNATURE);
+        assert_eq!(
+            sweep.mints(),
+            vec![CreditedDeposit {
+                deposit_id: 7,
+                amount_to_mint: 1_000_000 - FEE_PER_SIGNATURE,
+            }]
+        );
+    }
+
+    proptest! {
+        #[test]
+        fn should_never_mint_more_than_the_sweep_receives(
+            deposits in arb_sweep_deposits(),
+            minter_address in arb_address(),
+        ) {
+            let sweep = Sweep::plan(deposits.clone(), minter_address);
+
+            let mints = sweep.mints();
+
+            prop_assert_eq!(
+                mints.iter().map(|mint| mint.deposit_id).collect::<Vec<_>>(),
+                deposits.keys().copied().collect::<Vec<_>>()
+            );
+            for mint in &mints {
+                prop_assert!(mint.amount_to_mint <= deposits[&mint.deposit_id].sweepable_amount());
+            }
+            prop_assert!(
+                mints.iter().map(|mint| mint.amount_to_mint).sum::<Lamport>()
+                    <= sweep.expected_received()
+            );
+        }
     }
 }
 
@@ -454,51 +508,6 @@ mod settle {
             assert_eq!(
                 devnet_sweep::sweep().settle(&outcome),
                 Err(SweepSettlementError::Mismatch(expected)),
-                "{name}"
-            );
-        }
-    }
-}
-
-mod mints {
-    use super::{FEE_PER_SIGNATURE, Lamport, sweep_of};
-    use crate::state::event::CreditedDeposit;
-
-    #[test]
-    fn should_share_the_fee_between_the_deposits_of_the_sweep() {
-        let cases = [
-            (
-                "the fee is shared evenly",
-                sweep_of([30_000_000, 20_000_000, 10_000_000]),
-                vec![
-                    (0, 30_000_000 - FEE_PER_SIGNATURE),
-                    (1, 20_000_000 - FEE_PER_SIGNATURE),
-                    (2, 10_000_000 - FEE_PER_SIGNATURE),
-                ],
-            ),
-            (
-                "a single deposit pays the whole fee",
-                sweep_of([10_000_000]),
-                vec![(0, 10_000_000 - FEE_PER_SIGNATURE)],
-            ),
-        ];
-        for (name, sweep, expected_mints) in cases {
-            let mints = sweep.mints();
-
-            assert_eq!(
-                mints
-                    .iter()
-                    .map(|mint| (mint.deposit_id, mint.amount_to_mint))
-                    .collect::<Vec<_>>(),
-                expected_mints,
-                "{name}"
-            );
-            assert!(
-                mints
-                    .iter()
-                    .map(|mint: &CreditedDeposit| mint.amount_to_mint)
-                    .sum::<Lamport>()
-                    <= sweep.expected_received(),
                 "{name}"
             );
         }
