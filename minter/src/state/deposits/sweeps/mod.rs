@@ -83,12 +83,19 @@ pub struct Sweep {
     fee_payer: DepositSolId,
     fee: Lamport,
     minter_address: Address,
+    transfers: Vec<Transfer>,
+    expected_received: Lamport,
+    swept_amount: Lamport,
 }
 
 impl Sweep {
     /// Plans the sweep of the given deposits to the minter address. The deposit with the largest
     /// sweepable amount pays the fee of one signature per deposit, so that every deposit address
     /// is left with the rent exemption threshold.
+    ///
+    /// The transfers are ordered with the fee payer first, then the other deposits by decreasing
+    /// sweepable amount. The fee payer's transfer is reduced by the fee so that its address
+    /// stays rent-exempt.
     pub fn plan(
         deposits: impl IntoIterator<Item = (DepositSolId, QueuedDeposit)>,
         minter_address: Address,
@@ -100,17 +107,43 @@ impl Sweep {
                 "Attempted to create a sweep with deposit {deposit_id} twice"
             );
         }
-        let fee_payer = unique
+        let (fee_payer, fee_payer_deposit) = unique
             .iter()
             .max_by_key(|(deposit_id, deposit)| (deposit.sweepable_amount(), Reverse(**deposit_id)))
-            .map(|(deposit_id, _)| *deposit_id)
+            .map(|(deposit_id, deposit)| (*deposit_id, *deposit))
             .expect("Attempted to plan a sweep without deposits");
         let fee = FEE_PER_SIGNATURE * unique.len() as Lamport;
+        let mut others: Vec<_> = unique
+            .iter()
+            .filter(|(deposit_id, _)| **deposit_id != fee_payer)
+            .collect();
+        others.sort_by_key(|(deposit_id, deposit)| {
+            (Reverse(deposit.sweepable_amount()), **deposit_id)
+        });
+        let transfers: Vec<_> = std::iter::once(Transfer {
+            deposit_id: fee_payer,
+            from: fee_payer_deposit.address,
+            amount: fee_payer_deposit
+                .sweepable_amount()
+                .checked_sub(fee)
+                .expect("BUG: the minimum deposit amount covers the fee of a full sweep"),
+        })
+        .chain(others.into_iter().map(|(deposit_id, deposit)| Transfer {
+            deposit_id: *deposit_id,
+            from: deposit.address,
+            amount: deposit.sweepable_amount(),
+        }))
+        .collect();
+        let expected_received = transfers.iter().map(|transfer| transfer.amount).sum();
+        let swept_amount = unique.values().map(QueuedDeposit::sweepable_amount).sum();
         Self {
             deposits: unique,
             fee_payer,
             fee,
             minter_address,
+            transfers,
+            expected_received,
+            swept_amount,
         }
     }
 
@@ -156,48 +189,18 @@ impl Sweep {
         self.minter_address
     }
 
-    /// The transfers of the sweep transaction in their order: the fee payer first, then the
-    /// other deposits by decreasing sweepable amount. The fee payer's transfer is reduced by
-    /// the fee so that its address stays rent-exempt.
-    pub fn transfers(&self) -> Vec<Transfer> {
-        let mut others: Vec<_> = self
-            .deposits
-            .iter()
-            .filter(|(deposit_id, _)| **deposit_id != self.fee_payer)
-            .collect();
-        others.sort_by_key(|(deposit_id, deposit)| {
-            (Reverse(deposit.sweepable_amount()), **deposit_id)
-        });
-        let fee_payer = &self.deposits[&self.fee_payer];
-        std::iter::once(Transfer {
-            deposit_id: self.fee_payer,
-            from: fee_payer.address,
-            amount: fee_payer
-                .sweepable_amount()
-                .checked_sub(self.fee)
-                .expect("BUG: the minimum deposit amount covers the fee of a full sweep"),
-        })
-        .chain(others.into_iter().map(|(deposit_id, deposit)| Transfer {
-            deposit_id: *deposit_id,
-            from: deposit.address,
-            amount: deposit.sweepable_amount(),
-        }))
-        .collect()
+    /// The transfers of the sweep transaction in their order, the fee payer first.
+    pub fn transfers(&self) -> &[Transfer] {
+        &self.transfers
     }
 
     /// The amount the minter address receives: the sweepable amounts minus the fee.
     pub fn expected_received(&self) -> Lamport {
-        self.transfers()
-            .iter()
-            .map(|transfer| transfer.amount)
-            .sum()
+        self.expected_received
     }
 
     pub fn swept_amount(&self) -> Lamport {
-        self.deposits
-            .values()
-            .map(QueuedDeposit::sweepable_amount)
-            .sum()
+        self.swept_amount
     }
 
     pub fn deposit_count(&self) -> usize {
