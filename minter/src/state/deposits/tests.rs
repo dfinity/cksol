@@ -28,7 +28,7 @@ mod deposit_balance {
         ] {
             let deposit_balance = DepositBalance::new(balance).expect("rent-exempt balance");
 
-            assert_eq!(deposit_balance.get(), balance, "balance {balance}");
+            assert_eq!(Lamport::from(deposit_balance), balance, "balance {balance}");
             assert_eq!(
                 deposit_balance.sweepable_amount(),
                 expected,

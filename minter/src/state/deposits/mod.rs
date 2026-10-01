@@ -137,6 +137,12 @@ impl QueuedDeposit {
     }
 }
 
+impl From<DepositBalance> for Lamport {
+    fn from(balance: DepositBalance) -> Self {
+        balance.0
+    }
+}
+
 /// A deposit address balance that stays rent-exempt once its sweepable amount is transferred.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct DepositBalance(Lamport);
@@ -145,10 +151,6 @@ impl DepositBalance {
     /// The balance, if it covers the rent exemption threshold.
     pub fn new(balance: Lamport) -> Option<Self> {
         (balance >= RENT_EXEMPTION_THRESHOLD).then_some(Self(balance))
-    }
-
-    pub fn get(self) -> Lamport {
-        self.0
     }
 
     /// The balance minus the rent exemption threshold left on the deposit address.

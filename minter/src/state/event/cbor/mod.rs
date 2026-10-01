@@ -96,7 +96,7 @@ pub mod deposit_balance {
         e: &mut Encoder<W>,
         _ctx: &mut Ctx,
     ) -> Result<(), minicbor::encode::Error<W::Error>> {
-        e.u64(v.get())?;
+        e.u64(u64::from(*v))?;
         Ok(())
     }
 }
