@@ -1018,7 +1018,7 @@ mod deposit_sol_tests {
         let deposit_address = setup
             .minter()
             .get_deposit_address(GetDepositAddressArgs {
-                owner: Some(proxy),
+                owner: None,
                 subaccount,
             })
             .await;
