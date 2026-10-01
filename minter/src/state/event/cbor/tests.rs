@@ -4,7 +4,7 @@ use crate::{
         DepositBalance,
         event::{VersionedMessage, cbor},
     },
-    test_fixtures::arb::{arb_deposit_balance, arb_message, arb_signature},
+    test_fixtures::arb::{arb_address, arb_deposit_balance, arb_message, arb_signature},
 };
 use proptest::{prop_assert_eq, proptest};
 
@@ -73,6 +73,31 @@ mod signature_tests {
     fn decode_signature(bytes: &[u8]) -> solana_signature::Signature {
         let mut decoder = minicbor::Decoder::new(bytes);
         cbor::signature::decode(&mut decoder, &mut ()).unwrap()
+    }
+}
+
+mod address_tests {
+    use super::*;
+
+    proptest! {
+        #[test]
+        fn address_minicbor_roundtrip(address in arb_address()) {
+            let encoded = encode_address(&address);
+            let decoded = decode_address(&encoded);
+            prop_assert_eq!(address, decoded);
+        }
+    }
+
+    fn encode_address(address: &solana_address::Address) -> Vec<u8> {
+        let mut buf = Vec::new();
+        let mut encoder = minicbor::Encoder::new(&mut buf);
+        cbor::address::encode(address, &mut encoder, &mut ()).unwrap();
+        buf
+    }
+
+    fn decode_address(bytes: &[u8]) -> solana_address::Address {
+        let mut decoder = minicbor::Decoder::new(bytes);
+        cbor::address::decode(&mut decoder, &mut ()).unwrap()
     }
 }
 
