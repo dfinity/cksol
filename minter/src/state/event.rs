@@ -3,6 +3,7 @@ use crate::{
     constants::FEE_PER_SIGNATURE,
     numeric::{LedgerBurnIndex, LedgerMintIndex},
     rpc::BlockHeight,
+    state::DepositBalance,
 };
 use cksol_types::DepositSolId;
 use cksol_types_internal::{InitArgs, UpgradeArgs};
@@ -153,8 +154,8 @@ pub enum EventType {
         account: Account,
         #[cbor(n(2), with = "cbor::address")]
         address: Address,
-        #[n(3)]
-        balance: Lamport,
+        #[cbor(n(3), with = "cbor::deposit_balance")]
+        balance: DepositBalance,
     },
 }
 

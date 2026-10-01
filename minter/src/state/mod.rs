@@ -469,13 +469,8 @@ impl State {
         deposit_id: DepositSolId,
         account: &Account,
         address: &Address,
-        balance: Lamport,
+        balance: DepositBalance,
     ) {
-        let balance = DepositBalance::new(balance).unwrap_or_else(|| {
-            panic!(
-                "Attempted to queue deposit {deposit_id} with a balance of {balance} lamports below the rent exemption threshold"
-            )
-        });
         self.deposits.queue(
             deposit_id,
             QueuedDeposit {

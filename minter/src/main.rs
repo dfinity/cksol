@@ -232,7 +232,7 @@ fn get_events(
                 deposit_id,
                 account,
                 address: address.into(),
-                balance,
+                balance: balance.get(),
             },
         }
     }

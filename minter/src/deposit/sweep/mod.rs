@@ -68,10 +68,8 @@ pub async fn deposit_sol<R: CanisterRuntime>(
         },
         &result,
     );
-    let balance = result?;
-    let sweepable_amount = DepositBalance::new(balance)
-        .expect("BUG: the minimum deposit amount covers the rent exemption threshold")
-        .sweepable_amount();
+    let balance = DepositBalance::new(result?)
+        .expect("BUG: the minimum deposit amount covers the rent exemption threshold");
 
     let deposit_id = mutate_state(|state| {
         let deposit_id = state.deposits().next_id();
@@ -89,7 +87,8 @@ pub async fn deposit_sol<R: CanisterRuntime>(
     });
     log!(
         Priority::Info,
-        "Queued deposit {deposit_id} for account {account:?}: {sweepable_amount} lamports sweepable from {deposit_address}"
+        "Queued deposit {deposit_id} for account {account:?}: {} lamports sweepable from {deposit_address}",
+        balance.sweepable_amount()
     );
     Ok(deposit_id)
 }

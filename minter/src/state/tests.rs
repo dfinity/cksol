@@ -84,7 +84,7 @@ mod queued_deposits {
                 deposit_id,
                 account: queued_deposit(deposit_id).account,
                 address: queued_deposit(deposit_id).address,
-                balance: queued_deposit(deposit_id).balance.get(),
+                balance: queued_deposit(deposit_id).balance,
             },
         };
         let init = Event {
@@ -98,7 +98,7 @@ mod queued_deposits {
                 deposit_id,
                 &deposit.account,
                 &deposit.address,
-                deposit.balance.get(),
+                deposit.balance,
             );
         }
 

@@ -233,12 +233,11 @@ pub fn minter_signature_nth(occurrence: usize) -> solana_signature::Signature {
 /// All helpers operate on the global thread-local state via [`mutate_state`].
 pub mod events {
     use super::{
-        DEFAULT_BLOCK_HEIGHT, MANUAL_DEPOSIT_FEE, WITHDRAWAL_FEE, deposit_address,
+        DEFAULT_BLOCK_HEIGHT, MANUAL_DEPOSIT_FEE, WITHDRAWAL_FEE, queued_deposit_of,
         runtime::TestCanisterRuntime, sweep_message,
     };
     use crate::deposit::sweep::deposit_status;
     use crate::{
-        constants::RENT_EXEMPTION_THRESHOLD,
         numeric::{LedgerBurnIndex, LedgerMintIndex},
         rpc::BlockHeight,
         state::{
@@ -341,8 +340,8 @@ pub mod events {
                 EventType::QueuedDeposit {
                     deposit_id,
                     account,
-                    address: deposit_address(account),
-                    balance: sweepable_amount + RENT_EXEMPTION_THRESHOLD,
+                    address: queued_deposit_of(account, sweepable_amount).address,
+                    balance: queued_deposit_of(account, sweepable_amount).balance,
                 },
                 &runtime(),
             )
@@ -482,10 +481,12 @@ pub mod events {
 #[cfg(test)]
 pub mod arb {
     use crate::{
+        constants::RENT_EXEMPTION_THRESHOLD,
         numeric::{LedgerBurnIndex, LedgerMintIndex},
         rpc::BlockHeight,
-        state::event::{
-            DepositId, Event, EventType, Signer, TransactionPurpose, WithdrawalRequest,
+        state::{
+            DepositBalance,
+            event::{DepositId, Event, EventType, Signer, TransactionPurpose, WithdrawalRequest},
         },
     };
     use candid::Principal;
@@ -531,6 +532,13 @@ pub mod arb {
 
     pub fn arb_ledger_mint_index() -> impl Strategy<Value = LedgerMintIndex> {
         any::<u64>().prop_map(LedgerMintIndex::from)
+    }
+
+    pub fn arb_deposit_balance() -> impl Strategy<Value = DepositBalance> {
+        (RENT_EXEMPTION_THRESHOLD..=u64::MAX).prop_map(|balance| {
+            DepositBalance::new(balance)
+                .expect("BUG: the balance covers the rent exemption threshold")
+        })
     }
 
     pub fn arb_address() -> impl Strategy<Value = Address> {
@@ -747,14 +755,20 @@ pub mod arb {
             arb_signature().prop_map(|signature| EventType::SucceededTransaction { signature }),
             arb_signature().prop_map(|signature| EventType::FailedTransaction { signature }),
             arb_signature().prop_map(|signature| EventType::ExpiredTransaction { signature }),
-            (any::<u64>(), arb_account(), arb_address(), any::<u64>()).prop_map(
-                |(deposit_id, account, address, balance)| EventType::QueuedDeposit {
-                    deposit_id,
-                    account,
-                    address,
-                    balance,
-                },
-            ),
+            (
+                any::<u64>(),
+                arb_account(),
+                arb_address(),
+                arb_deposit_balance(),
+            )
+                .prop_map(|(deposit_id, account, address, balance)| {
+                    EventType::QueuedDeposit {
+                        deposit_id,
+                        account,
+                        address,
+                        balance,
+                    }
+                },),
         ]
     }
 

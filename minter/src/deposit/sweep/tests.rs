@@ -10,7 +10,7 @@ use crate::{
             DEPOSIT_AMOUNT, DEPOSITOR_ACCOUNT, accepted_deposit_event,
             deposit_id as manual_deposit_id, minted_event,
         },
-        deposit_address, events, init_schnorr_master_key, init_state,
+        events, init_schnorr_master_key, init_state, queued_deposit_of,
         runtime::TestCanisterRuntime,
     },
 };
@@ -229,11 +229,12 @@ async fn assert_second_call_returns_same_deposit(first: Account, second: Account
 }
 
 fn queued_deposit_event(deposit_id: u64, account: Account, sweepable_amount: Lamport) -> EventType {
+    let deposit = queued_deposit_of(account, sweepable_amount);
     EventType::QueuedDeposit {
         deposit_id,
         account,
-        address: deposit_address(account),
-        balance: sweepable_amount + RENT_EXEMPTION_THRESHOLD,
+        address: deposit.address,
+        balance: deposit.balance,
     }
 }
 

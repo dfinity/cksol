@@ -75,6 +75,32 @@ pub mod address {
     }
 }
 
+pub mod deposit_balance {
+    use crate::state::DepositBalance;
+    use minicbor::{
+        decode::{Decoder, Error},
+        encode::{Encoder, Write},
+    };
+
+    pub fn decode<Ctx>(d: &mut Decoder<'_>, _ctx: &mut Ctx) -> Result<DepositBalance, Error> {
+        let balance = d.u64()?;
+        DepositBalance::new(balance).ok_or_else(|| {
+            Error::message(format!(
+                "deposit balance of {balance} lamports below the rent exemption threshold"
+            ))
+        })
+    }
+
+    pub fn encode<Ctx, W: Write>(
+        v: &DepositBalance,
+        e: &mut Encoder<W>,
+        _ctx: &mut Ctx,
+    ) -> Result<(), minicbor::encode::Error<W::Error>> {
+        e.u64(v.get())?;
+        Ok(())
+    }
+}
+
 pub mod id_vec {
     use minicbor::{
         decode::{Decoder, Error},
