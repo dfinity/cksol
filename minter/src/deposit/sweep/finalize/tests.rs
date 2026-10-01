@@ -1,20 +1,15 @@
 use super::credit_finalized_sweeps;
 use crate::{
-    constants::{FEE_PER_SIGNATURE, MAX_CONCURRENT_RPC_CALLS},
+    constants::MAX_CONCURRENT_RPC_CALLS,
     deposit::sweep::deposit_status,
-    state::{
-        Sweep,
-        event::{CreditedDeposit, EventType},
-        read_state, reset_state,
-    },
+    state::{event::EventType, read_state, reset_state},
     storage::reset_events,
     test_fixtures::{
-        EventsAssert, GetTransactionResult, MINTER_ADDRESS, account,
-        events::{queue_deposit, submit_sweep, succeed_transaction},
+        EventsAssert, GetTransactionResult, account, devnet_sweep,
+        events::{queue, queue_deposit, submit_sweep, submit_sweep_to, succeed_transaction},
         init_schnorr_master_key, init_state,
         runtime::TestCanisterRuntime,
         signature,
-        sweep_outcome::{MAIN_BALANCE, SweepOutcome},
     },
 };
 use cksol_types::{DepositSolId, DepositSolStatus};
@@ -22,9 +17,7 @@ use sol_rpc_types::Lamport;
 use solana_signature::Signature;
 use solana_transaction_status_client_types::EncodedConfirmedTransactionWithStatusMeta;
 
-const SWEEPABLE_AMOUNTS: [Lamport; 3] = [30_000_000, 20_000_000, 10_000_000];
-const ASSUMED_FEE: Lamport = FEE_PER_SIGNATURE * SWEEPABLE_AMOUNTS.len() as u64;
-const SWEEP_SIGNATURE_INDEX: usize = 0xAA;
+const DEVNET_SWEEP_SIGNATURE_INDEX: usize = 0;
 
 #[tokio::test]
 async fn should_do_nothing_without_finalized_deposits() {
@@ -37,112 +30,111 @@ async fn should_do_nothing_without_finalized_deposits() {
 }
 
 #[tokio::test]
-async fn should_ask_for_another_round_when_sweeps_are_left_over() {
+async fn should_ask_for_another_round_only_after_crediting_with_sweeps_left_over() {
     const SWEEPABLE_AMOUNT: Lamport = 25_000_000;
-    setup();
-    let sweeps = MAX_CONCURRENT_RPC_CALLS + 1;
-    let mut runtime = TestCanisterRuntime::new().with_increasing_time();
-    for index in 0..sweeps {
-        let deposit_id = index as DepositSolId;
-        queue_deposit(deposit_id, account(index), SWEEPABLE_AMOUNT);
-        let sweep_signature = signature(index);
-        submit_sweep(sweep_signature, vec![deposit_id]);
-        succeed_transaction(sweep_signature);
-        if index < MAX_CONCURRENT_RPC_CALLS {
-            let outcome = SweepOutcome::of(&finalized_sweep(sweep_signature)).encode();
-            runtime = runtime.add_stub_response(transaction_response(outcome));
+    let cases = [
+        (
+            "the devnet sweep was credited",
+            transaction_response(devnet_sweep::outcome()),
+            true,
+        ),
+        (
+            "no sweep was credited",
+            GetTransactionResult::Consistent(Ok(None)),
+            false,
+        ),
+    ];
+
+    for (name, devnet_sweep_response, expected_run_again) in cases {
+        setup();
+        finalize_devnet_sweep();
+        let mut runtime = TestCanisterRuntime::new()
+            .with_increasing_time()
+            .add_stub_response(devnet_sweep_response);
+        for index in 0..MAX_CONCURRENT_RPC_CALLS {
+            let deposit_id = (devnet_sweep::DEPOSITS.len() + index) as DepositSolId;
+            queue_deposit(
+                deposit_id,
+                account(deposit_id as usize + 1),
+                SWEEPABLE_AMOUNT,
+            );
+            let sweep_signature = signature(DEVNET_SWEEP_SIGNATURE_INDEX + 1 + index);
+            submit_sweep(sweep_signature, vec![deposit_id]);
+            succeed_transaction(sweep_signature);
+            if index + 1 < MAX_CONCURRENT_RPC_CALLS {
+                runtime = runtime.add_stub_response(GetTransactionResult::Consistent(Ok(None)));
+            }
         }
+
+        let run_again = credit_finalized_sweeps(&runtime).await;
+
+        assert_eq!(run_again, expected_run_again, "{name}");
+        read_state(|state| {
+            let credited = if expected_run_again {
+                devnet_sweep::DEPOSITS.len()
+            } else {
+                0
+            };
+            assert_eq!(state.deposits().pending_mints().len(), credited, "{name}");
+            assert_eq!(
+                state.deposits().finalized().len(),
+                MAX_CONCURRENT_RPC_CALLS + 1 - usize::from(expected_run_again),
+                "{name}"
+            );
+        });
     }
-
-    let run_again = credit_finalized_sweeps(&runtime).await;
-
-    assert!(run_again);
-    read_state(|state| {
-        assert_eq!(
-            state.deposits().pending_mints().len(),
-            MAX_CONCURRENT_RPC_CALLS
-        );
-        assert_eq!(state.deposits().finalized().deposit_count(), 1);
-    });
-}
-
-#[tokio::test]
-async fn should_wait_for_the_timer_when_no_sweep_was_credited() {
-    const SWEEPABLE_AMOUNT: Lamport = 25_000_000;
-    setup();
-    let sweeps = MAX_CONCURRENT_RPC_CALLS + 1;
-    let mut runtime = TestCanisterRuntime::new().with_increasing_time();
-    for index in 0..sweeps {
-        let deposit_id = index as DepositSolId;
-        queue_deposit(deposit_id, account(index), SWEEPABLE_AMOUNT);
-        let sweep_signature = signature(index);
-        submit_sweep(sweep_signature, vec![deposit_id]);
-        succeed_transaction(sweep_signature);
-        if index < MAX_CONCURRENT_RPC_CALLS {
-            runtime = runtime.add_stub_response(GetTransactionResult::Consistent(Ok(None)));
-        }
-    }
-
-    let run_again = credit_finalized_sweeps(&runtime).await;
-
-    assert!(!run_again);
-    read_state(|state| {
-        assert!(state.deposits().pending_mints().is_empty());
-        assert_eq!(state.deposits().finalized().len(), sweeps);
-    });
 }
 
 #[tokio::test]
 async fn should_credit_the_amount_received_by_the_main_account() {
     setup();
-    let sweep_signature = queue_finalized_sweep();
-    let outcome = SweepOutcome::of(&finalized_sweep(sweep_signature)).encode();
+    let sweep_signature = finalize_devnet_sweep();
 
-    credit_finalized_sweeps(&runtime_returning(outcome)).await;
+    credit_finalized_sweeps(&runtime_returning(devnet_sweep::outcome())).await;
 
     EventsAssert::from_recorded().expect_contains_event_eq(EventType::CreditedSweep {
         signature: sweep_signature,
-        amount_received: SWEEPABLE_AMOUNTS.iter().sum::<Lamport>() - ASSUMED_FEE,
-        mints: SWEEPABLE_AMOUNTS
-            .iter()
-            .enumerate()
-            .map(|(deposit_id, sweepable_amount)| CreditedDeposit {
-                deposit_id: deposit_id as DepositSolId,
-                amount_to_mint: sweepable_amount - FEE_PER_SIGNATURE,
-            })
-            .collect(),
+        amount_received: devnet_sweep::AMOUNT_RECEIVED,
+        mints: devnet_sweep::mints(),
     });
     read_state(|state| {
         assert!(state.deposits().finalized().is_empty());
         assert_eq!(
             state.deposits().pending_mints().len(),
-            SWEEPABLE_AMOUNTS.len()
+            devnet_sweep::DEPOSITS.len()
         );
     });
 }
 
 #[tokio::test]
-async fn should_keep_deposits_finalized_until_the_outcome_can_be_read() {
-    type Response = fn(&Sweep) -> GetTransactionResult;
-    let cases: [(&str, Response); 3] = [
-        ("the transaction is not returned", |_| {
+async fn should_keep_deposits_finalized_when_the_outcome_cannot_be_settled() {
+    type Response = fn() -> GetTransactionResult;
+    let cases: [(&str, Response); 4] = [
+        ("the transaction is not returned", || {
             GetTransactionResult::Consistent(Ok(None))
         }),
-        ("fetching the transaction fails", |_| {
+        ("fetching the transaction fails", || {
             GetTransactionResult::Inconsistent(vec![])
         }),
-        ("the metadata cannot be read", |sweep| {
-            transaction_response(SweepOutcome::of(sweep).encode_without_meta())
+        ("the metadata cannot be read", || {
+            let mut outcome = devnet_sweep::outcome();
+            outcome.transaction.meta = None;
+            transaction_response(outcome)
+        }),
+        ("the outcome does not match the plan", || {
+            let mut outcome = devnet_sweep::outcome();
+            devnet_sweep::set_balances(&mut outcome, devnet_sweep::MINTER_ADDRESS, 1, 0);
+            transaction_response(outcome)
         }),
     ];
 
     for (name, response) in cases {
         setup();
-        let sweep_signature = queue_finalized_sweep();
+        let sweep_signature = finalize_devnet_sweep();
         let events_before = EventsAssert::from_recorded();
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
-            .add_stub_response(response(&finalized_sweep(sweep_signature)));
+            .add_stub_response(response());
 
         credit_finalized_sweeps(&runtime).await;
 
@@ -150,7 +142,7 @@ async fn should_keep_deposits_finalized_until_the_outcome_can_be_read() {
         read_state(|state| {
             assert_eq!(
                 state.deposits().finalized().deposit_count(),
-                SWEEPABLE_AMOUNTS.len(),
+                devnet_sweep::DEPOSITS.len(),
                 "{name}"
             );
             assert!(state.deposits().pending_mints().is_empty(), "{name}");
@@ -165,33 +157,6 @@ async fn should_keep_deposits_finalized_until_the_outcome_can_be_read() {
     }
 }
 
-#[tokio::test]
-async fn should_keep_deposits_finalized_if_the_outcome_does_not_match_the_plan() {
-    setup();
-    let sweep_signature = queue_finalized_sweep();
-    let events_before = EventsAssert::from_recorded();
-    let outcome = SweepOutcome::of(&finalized_sweep(sweep_signature))
-        .with_balances(MINTER_ADDRESS, MAIN_BALANCE, MAIN_BALANCE - 1)
-        .encode();
-
-    credit_finalized_sweeps(&runtime_returning(outcome)).await;
-
-    assert_eq!(events_before, EventsAssert::from_recorded());
-    read_state(|state| {
-        assert_eq!(
-            state.deposits().finalized().deposit_count(),
-            SWEEPABLE_AMOUNTS.len()
-        );
-        assert!(state.deposits().pending_mints().is_empty());
-    });
-    assert_eq!(
-        deposit_status(0),
-        DepositSolStatus::Finalized {
-            signature: sweep_signature.into()
-        }
-    );
-}
-
 fn setup() {
     reset_state();
     reset_events();
@@ -199,32 +164,20 @@ fn setup() {
     init_schnorr_master_key();
 }
 
-fn queue_finalized_sweep() -> Signature {
-    for (deposit_id, sweepable_amount) in SWEEPABLE_AMOUNTS.iter().enumerate() {
-        queue_deposit(
-            deposit_id as DepositSolId,
-            account(deposit_id),
-            *sweepable_amount,
-        );
+/// Queues the deposits of the devnet sweep, submits it and finalizes it.
+fn finalize_devnet_sweep() -> Signature {
+    let deposits = devnet_sweep::deposits();
+    for (deposit_id, deposit) in &deposits {
+        queue(*deposit_id, *deposit);
     }
-    let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
-    submit_sweep(
+    let sweep_signature = signature(DEVNET_SWEEP_SIGNATURE_INDEX);
+    submit_sweep_to(
         sweep_signature,
-        (0..SWEEPABLE_AMOUNTS.len() as DepositSolId).collect(),
+        deposits.iter().map(|(deposit_id, _)| *deposit_id).collect(),
+        devnet_sweep::MINTER_ADDRESS,
     );
     succeed_transaction(sweep_signature);
     sweep_signature
-}
-
-fn finalized_sweep(signature: Signature) -> Sweep {
-    read_state(|state| {
-        state
-            .deposits()
-            .finalized()
-            .get(&signature)
-            .cloned()
-            .expect("the sweep should be finalized")
-    })
 }
 
 fn runtime_returning(outcome: EncodedConfirmedTransactionWithStatusMeta) -> TestCanisterRuntime {

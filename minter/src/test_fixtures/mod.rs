@@ -231,156 +231,217 @@ pub fn minter_signature_nth(occurrence: usize) -> solana_signature::Signature {
     signer::derivation_path_signature(&MINTER_DERIVATION_PATH, occurrence)
 }
 
-/// Builds the `getTransaction` output of a planned sweep as if it executed as planned, so
-/// that a test only has to state how the outcome deviates from the plan.
-pub mod sweep_outcome {
-    use crate::{constants::RENT_EXEMPTION_THRESHOLD, state::Sweep};
+/// A sweep of four deposits that the minter submitted on devnet as transaction
+/// `59vLxkN5YGgBrHGTQMCrntNi7CrAxfkQxYek2v3hUgKfujgGtfkSDZZmFyVw6S59uTH2FEwWcvntPiEkdN5Ep5W2`,
+/// with the `getTransaction` response the minter settles it against, and ways to deviate
+/// from that response.
+pub mod devnet_sweep {
+    use super::account;
+    use crate::state::{DepositBalance, QueuedDeposit, Sweep, event::CreditedDeposit};
     use base64::{Engine, engine::general_purpose::STANDARD};
+    use cksol_types::DepositSolId;
+    use serde_json::json;
     use sol_rpc_types::Lamport;
-    use solana_address::Address;
-    use solana_hash::Hash;
+    use solana_address::{Address, address};
     use solana_message::Message;
     use solana_transaction::{Transaction, versioned::VersionedTransaction};
     use solana_transaction_status_client_types::{
-        EncodedConfirmedTransactionWithStatusMeta, EncodedTransaction,
-        EncodedTransactionWithStatusMeta, TransactionBinaryEncoding, UiTransactionError,
-        UiTransactionStatusMeta, option_serializer::OptionSerializer,
+        EncodedConfirmedTransactionWithStatusMeta, EncodedTransaction, TransactionBinaryEncoding,
+        UiTransactionError, UiTransactionStatusMeta,
     };
-    use std::collections::BTreeMap;
 
-    pub const MAIN_BALANCE: Lamport = 7_000_000_000;
+    pub const MINTER_ADDRESS: Address = address!("5yazYQT1Kwm3jEjMp58J5329gzbxA232fnPajemCeKbL");
+    pub const FEE: Lamport = 20_000;
+    pub const AMOUNT_RECEIVED: Lamport = 2_396_416_480;
+    /// The deposit addresses with their balances when queued, the fee payer first.
+    pub const DEPOSITS: [(Address, Lamport); 4] = [
+        (
+            address!("FkEEvAwZNvSziMAkmt13z2L9Loy4MjJE2qDbRserzt5Z"),
+            1_300_000_000,
+        ),
+        (
+            address!("5tEJDWwGGG54bv2xzrphSieXSAYjLkxzdMEPGe53JaTj"),
+            600_000_000,
+        ),
+        (
+            address!("6rXWHNpqRuNuGdUvJbRdV9wgRRggBVSEeCsnqJYDh7K9"),
+            300_000_000,
+        ),
+        (
+            address!("AwgbdmwCfwc6qaZAVH2K5juuP7HL21kotkVreWym6Eq4"),
+            200_000_000,
+        ),
+    ];
+    /// The sweepable amount of each deposit minus its share of the fee.
+    pub const AMOUNTS_TO_MINT: [Lamport; 4] =
+        [1_299_104_120, 599_104_120, 299_104_120, 199_104_120];
 
-    pub struct SweepOutcome {
-        message: Message,
-        planned_fee: Lamport,
-        fee: Lamport,
-        error: Option<UiTransactionError>,
-        balances: BTreeMap<Address, (Lamport, Lamport)>,
+    /// The deposits of the sweep under the ids `0..`, owned by the accounts `1..`.
+    pub fn deposits() -> Vec<(DepositSolId, QueuedDeposit)> {
+        DEPOSITS
+            .into_iter()
+            .enumerate()
+            .map(|(index, (address, balance))| {
+                (
+                    index as DepositSolId,
+                    QueuedDeposit {
+                        account: account(index + 1),
+                        address,
+                        balance: DepositBalance::new(balance)
+                            .expect("BUG: the balance covers the rent exemption threshold"),
+                    },
+                )
+            })
+            .collect()
     }
 
-    impl SweepOutcome {
-        pub fn of(sweep: &Sweep) -> Self {
-            let mut balances: BTreeMap<Address, (Lamport, Lamport)> = sweep
-                .transfers()
-                .iter()
-                .map(|transfer| {
-                    let fee_paid = if transfer.deposit_id == sweep.fee_payer() {
-                        sweep.fee()
-                    } else {
-                        0
-                    };
-                    (
-                        transfer.from,
-                        (
-                            RENT_EXEMPTION_THRESHOLD + transfer.amount + fee_paid,
-                            RENT_EXEMPTION_THRESHOLD,
-                        ),
-                    )
-                })
-                .collect();
-            balances.insert(
-                sweep.minter_address(),
-                (MAIN_BALANCE, MAIN_BALANCE + sweep.expected_received()),
-            );
-            Self {
-                message: sweep.sweep_message(Hash::default()),
-                planned_fee: sweep.fee(),
-                fee: sweep.fee(),
-                error: None,
-                balances,
+    pub fn sweep() -> Sweep {
+        Sweep::plan(deposits(), MINTER_ADDRESS)
+    }
+
+    pub fn mints() -> Vec<CreditedDeposit> {
+        AMOUNTS_TO_MINT
+            .into_iter()
+            .enumerate()
+            .map(|(index, amount_to_mint)| CreditedDeposit {
+                deposit_id: index as DepositSolId,
+                amount_to_mint,
+            })
+            .collect()
+    }
+
+    pub fn outcome() -> EncodedConfirmedTransactionWithStatusMeta {
+        serde_json::from_value(json!({
+          "blockTime": 1790862585u64,
+          "meta": {
+            "computeUnitsConsumed": 600,
+            "costUnits": 5000,
+            "err": null,
+            "fee": 20000,
+            "innerInstructions": [],
+            "loadedAddresses": {
+              "readonly": [],
+              "writable": []
+            },
+            "logMessages": [
+              "Program 11111111111111111111111111111111 invoke [1]",
+              "Program 11111111111111111111111111111111 success",
+              "Program 11111111111111111111111111111111 invoke [1]",
+              "Program 11111111111111111111111111111111 success",
+              "Program 11111111111111111111111111111111 invoke [1]",
+              "Program 11111111111111111111111111111111 success",
+              "Program 11111111111111111111111111111111 invoke [1]",
+              "Program 11111111111111111111111111111111 success"
+            ],
+            "postBalances": [
+              890880u64,
+              890880u64,
+              890880u64,
+              890880u64,
+              2396416480u64,
+              1u64
+            ],
+            "postTokenBalances": [],
+            "preBalances": [
+              1300000000u64,
+              600000000u64,
+              300000000u64,
+              200000000u64,
+              0u64,
+              1u64
+            ],
+            "preTokenBalances": [],
+            "rewards": [],
+            "status": {
+              "Ok": null
             }
-        }
+          },
+          "slot": 506293219u64,
+          "transaction": [
+            "BM/CkSfTLKj3DZWIrizfXnF5M3TkH8RSgdpeALtgF5kmrNP8FVTpK7Uf75LMGvYrva7zdm5QGoyS2Ueu/BiZ5wvlpcLP4yd/Dq2R6/jnNyCzL3z2+K8WjFpXVEQmm0Mmpg0w20rlMMTRkeuTGNDEKkHu6wGivLwDOGlmEFlFKHEC01HYieqayyULa8H7zVMIxZ2tQgsSf/ZVEuK4Z+G3XaJ6DyhniFeZX3Z/sWLFiCnVBICA6yx3wueXGPbKuXSLC63gH2PkNasWcMp9T9PfKEraBwgu/eQDV1XAd+IzOmzgBbcpLjfsPt9O75qIwG2r0murfk/UMKATNvuQTQC8XgYEAAEG2xaP7ReiK7O/RyEMJK1y9oOUrRiIYixAgLbM81sLmMxIjmdbL31Vgaf52SlZWAP86sW6R0T6zA2hJjN7zYaxulb6YuCssGYBUTmCdb/38AL/yA3X2RJ8oD8BfyVye+uUk7tRk1tfdTVCsZXY9DqmOyL02mxVyqvO8TNExRK7+P9J7bU/SB+jWFVOOkEkrbUMHK3C368iWfar8UzS8WpUhwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAE0o5/SLfZEhVop1j2SvWQVHZzfaoABQ2jhOLKuv+goIEBQIABAwCAAAA4IZuTQAAAAAFAgEEDAIAAAAArrUjAAAAAAUCAgQMAgAAAAAL1BEAAAAABQIDBAwCAAAAACreCwAAAAA=",
+            "base64"
+          ],
+          "transactionIndex": 9,
+          "version": "legacy"
+        }))
+        .expect("BUG: the getTransaction result should deserialize")
+    }
 
-        /// Solana charged the given fee instead of the planned one, leaving the
-        /// difference on the fee payer's address.
-        pub fn with_fee(mut self, fee: Lamport) -> Self {
-            let fee_payer = self.message.account_keys[0];
-            let (pre, _) = self.balances[&fee_payer];
-            self.balances.insert(
-                fee_payer,
-                (pre, RENT_EXEMPTION_THRESHOLD + self.planned_fee - fee),
-            );
-            self.fee = fee;
-            self
-        }
+    pub fn meta(
+        outcome: &mut EncodedConfirmedTransactionWithStatusMeta,
+    ) -> &mut UiTransactionStatusMeta {
+        outcome
+            .transaction
+            .meta
+            .as_mut()
+            .expect("BUG: the devnet response has a meta field")
+    }
 
-        pub fn with_late_transfer(mut self, address: Address, amount: Lamport) -> Self {
-            let (pre, post) = self.balances[&address];
-            self.balances.insert(address, (pre + amount, post + amount));
-            self
-        }
+    pub fn balances(
+        outcome: &EncodedConfirmedTransactionWithStatusMeta,
+        address: Address,
+    ) -> (Lamport, Lamport) {
+        let index = account_index(outcome, address);
+        let meta = outcome
+            .transaction
+            .meta
+            .as_ref()
+            .expect("BUG: the devnet response has a meta field");
+        (meta.pre_balances[index], meta.post_balances[index])
+    }
 
-        pub fn with_balances(mut self, address: Address, pre: Lamport, post: Lamport) -> Self {
-            self.balances.insert(address, (pre, post));
-            self
-        }
+    pub fn set_balances(
+        outcome: &mut EncodedConfirmedTransactionWithStatusMeta,
+        address: Address,
+        pre: Lamport,
+        post: Lamport,
+    ) {
+        let index = account_index(outcome, address);
+        let meta = meta(outcome);
+        meta.pre_balances[index] = pre;
+        meta.post_balances[index] = post;
+    }
 
-        pub fn with_message(mut self, message: Message) -> Self {
-            self.message = message;
-            self
-        }
+    pub fn set_error(
+        outcome: &mut EncodedConfirmedTransactionWithStatusMeta,
+        error: UiTransactionError,
+    ) {
+        let meta = meta(outcome);
+        meta.err = Some(error.clone());
+        meta.status = Err(error);
+    }
 
-        pub fn with_error(mut self, error: UiTransactionError) -> Self {
-            self.error = Some(error);
-            self
-        }
+    pub fn set_message(outcome: &mut EncodedConfirmedTransactionWithStatusMeta, message: Message) {
+        let transaction = VersionedTransaction::from(Transaction::new_unsigned(message));
+        let encoded = STANDARD.encode(
+            bincode::serialize(&transaction)
+                .expect("BUG: serializing the transaction should succeed"),
+        );
+        outcome.transaction.transaction =
+            EncodedTransaction::Binary(encoded, TransactionBinaryEncoding::Base64);
+    }
 
-        pub fn encode(&self) -> EncodedConfirmedTransactionWithStatusMeta {
-            self.encode_with_meta(Some(self.meta()))
+    pub fn corrupt_transaction(outcome: &mut EncodedConfirmedTransactionWithStatusMeta) {
+        match &mut outcome.transaction.transaction {
+            EncodedTransaction::Binary(blob, _) => blob.push('!'),
+            other => panic!("BUG: expected a binary transaction, got {other:?}"),
         }
+    }
 
-        pub fn encode_without_meta(&self) -> EncodedConfirmedTransactionWithStatusMeta {
-            self.encode_with_meta(None)
-        }
-
-        fn meta(&self) -> UiTransactionStatusMeta {
-            let (pre_balances, post_balances) = self
-                .message
-                .account_keys
-                .iter()
-                .map(|key| self.balances.get(key).copied().unwrap_or((1, 1)))
-                .unzip();
-            UiTransactionStatusMeta {
-                err: self.error.clone(),
-                fee: self.fee,
-                pre_balances,
-                post_balances,
-                status: self.error.clone().map_or(Ok(()), Err),
-                inner_instructions: OptionSerializer::Skip,
-                log_messages: OptionSerializer::Skip,
-                pre_token_balances: OptionSerializer::Skip,
-                post_token_balances: OptionSerializer::Skip,
-                rewards: OptionSerializer::Skip,
-                loaded_addresses: OptionSerializer::Skip,
-                return_data: OptionSerializer::Skip,
-                compute_units_consumed: OptionSerializer::Skip,
-                cost_units: OptionSerializer::Skip,
-            }
-        }
-
-        fn encode_with_meta(
-            &self,
-            meta: Option<UiTransactionStatusMeta>,
-        ) -> EncodedConfirmedTransactionWithStatusMeta {
-            let transaction =
-                VersionedTransaction::from(Transaction::new_unsigned(self.message.clone()));
-            let encoded = STANDARD.encode(
-                bincode::serialize(&transaction)
-                    .expect("serializing the transaction should succeed"),
-            );
-            EncodedConfirmedTransactionWithStatusMeta {
-                slot: 0,
-                transaction: EncodedTransactionWithStatusMeta {
-                    transaction: EncodedTransaction::Binary(
-                        encoded,
-                        TransactionBinaryEncoding::Base64,
-                    ),
-                    meta,
-                    version: None,
-                },
-                block_time: None,
-            }
-        }
+    fn account_index(
+        outcome: &EncodedConfirmedTransactionWithStatusMeta,
+        address: Address,
+    ) -> usize {
+        outcome
+            .transaction
+            .transaction
+            .decode()
+            .expect("BUG: the transaction should decode")
+            .message
+            .static_account_keys()
+            .iter()
+            .position(|key| *key == address)
+            .unwrap_or_else(|| panic!("BUG: {address} is not an account of the transaction"))
     }
 }
 
@@ -389,14 +450,15 @@ pub mod sweep_outcome {
 /// All helpers operate on the global thread-local state via [`mutate_state`].
 pub mod events {
     use super::{
-        DEFAULT_BLOCK_HEIGHT, MANUAL_DEPOSIT_FEE, WITHDRAWAL_FEE, queued_deposit_of,
-        runtime::TestCanisterRuntime, sweep_message,
+        DEFAULT_BLOCK_HEIGHT, MANUAL_DEPOSIT_FEE, MINTER_ADDRESS, WITHDRAWAL_FEE,
+        queued_deposit_of, runtime::TestCanisterRuntime,
     };
     use crate::deposit::sweep::deposit_status;
     use crate::{
         numeric::{LedgerBurnIndex, LedgerMintIndex},
         rpc::BlockHeight,
         state::{
+            QueuedDeposit, Sweep,
             audit::process_event,
             event::{DepositId, EventType, Signer, TransactionPurpose, WithdrawalRequest},
             mutate_state, read_state,
@@ -405,6 +467,7 @@ pub mod events {
     use cksol_types::{DepositSolId, DepositSolStatus};
     use icrc_ledger_types::icrc1::account::Account;
     use sol_rpc_types::Lamport;
+    use solana_address::Address;
     use solana_signature::Signature;
 
     fn message() -> solana_message::Message {
@@ -490,14 +553,18 @@ pub mod events {
         account: Account,
         sweepable_amount: Lamport,
     ) -> DepositSolStatus {
+        queue(deposit_id, queued_deposit_of(account, sweepable_amount))
+    }
+
+    pub fn queue(deposit_id: DepositSolId, deposit: QueuedDeposit) -> DepositSolStatus {
         mutate_state(|state| {
             process_event(
                 state,
                 EventType::QueuedDeposit {
                     deposit_id,
-                    account,
-                    address: queued_deposit_of(account, sweepable_amount).address,
-                    balance: queued_deposit_of(account, sweepable_amount).balance,
+                    account: deposit.account,
+                    address: deposit.address,
+                    balance: deposit.balance,
                 },
                 &runtime(),
             )
@@ -505,8 +572,17 @@ pub mod events {
         deposit_status(deposit_id)
     }
 
-    /// Submits a sweep of the given queued deposits, signed by their accounts in the given order.
+    /// Submits a sweep of the given queued deposits to [`MINTER_ADDRESS`], signed by their
+    /// accounts in the given order.
     pub fn submit_sweep(signature: Signature, deposit_ids: Vec<DepositSolId>) {
+        submit_sweep_to(signature, deposit_ids, MINTER_ADDRESS)
+    }
+
+    pub fn submit_sweep_to(
+        signature: Signature,
+        deposit_ids: Vec<DepositSolId>,
+        minter_address: Address,
+    ) {
         let deposits: Vec<_> = read_state(|state| {
             deposit_ids
                 .iter()
@@ -525,7 +601,9 @@ pub mod events {
                 state,
                 EventType::SubmittedTransaction {
                     signature,
-                    message: sweep_message(deposits),
+                    message: Sweep::plan(deposits, minter_address)
+                        .sweep_message(solana_hash::Hash::default())
+                        .into(),
                     signers,
                     purpose: TransactionPurpose::SweepDeposits { deposit_ids },
                     block_height: DEFAULT_BLOCK_HEIGHT,
