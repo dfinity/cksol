@@ -37,9 +37,31 @@ pub async fn get_transaction<R: CanisterRuntime>(
         .try_send()
         .await;
     match result? {
-        MultiRpcResult::Consistent(Ok(maybe_transaction)) => Ok(maybe_transaction),
+        MultiRpcResult::Consistent(Ok(Some(transaction))) => {
+            ensure_signed_with(&transaction, signature)?;
+            Ok(Some(transaction))
+        }
+        MultiRpcResult::Consistent(Ok(None)) => Ok(None),
         MultiRpcResult::Consistent(Err(e)) => Err(GetTransactionError::RpcError(e)),
         MultiRpcResult::Inconsistent(_) => Err(GetTransactionError::InconsistentRpcResults),
+    }
+}
+
+fn ensure_signed_with(
+    transaction: &EncodedConfirmedTransactionWithStatusMeta,
+    queried: Signature,
+) -> Result<(), GetTransactionError> {
+    let decoded = transaction
+        .transaction
+        .transaction
+        .decode()
+        .ok_or(GetTransactionError::UndecodableTransaction { queried })?;
+    match decoded.signatures.first() {
+        Some(first) if *first == queried => Ok(()),
+        returned => Err(GetTransactionError::SignatureMismatch {
+            queried,
+            returned: returned.copied().map(Box::new),
+        }),
     }
 }
 
@@ -51,6 +73,13 @@ pub enum GetTransactionError {
     RpcError(RpcError),
     #[error("Inconsistent RPC results for transaction")]
     InconsistentRpcResults,
+    #[error("Transaction returned for {queried} cannot be decoded")]
+    UndecodableTransaction { queried: Signature },
+    #[error("Transaction returned for {queried} has first signature {returned:?}")]
+    SignatureMismatch {
+        queried: Signature,
+        returned: Option<Box<Signature>>,
+    },
 }
 
 impl From<GetTransactionError> for ProcessDepositError {
