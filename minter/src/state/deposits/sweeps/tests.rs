@@ -155,9 +155,11 @@ mod message {
     use super::{
         FEE_PER_SIGNATURE, MINTER_ADDRESS, Sweep, account, planned_sweep, queued_deposit_of,
     };
+    use crate::test_fixtures::deposit_address;
     use cksol_types::DepositSolId;
     use sol_rpc_types::Lamport;
     use solana_hash::Hash;
+    use solana_message::{Message, MessageHeader, compiled_instruction::CompiledInstruction};
 
     const SWEEPABLE_AMOUNTS: [Lamport; 3] = [30_000_000, 20_000_000, 10_000_000];
 
@@ -183,28 +185,54 @@ mod message {
         assert_eq!(transfers[2].amount, 10_000_000);
     }
 
-    /// Replaying a recorded sweep requires [`super::Sweep::recover`] to rebuild the submitted
-    /// message byte for byte, so the compiled message and its bincode encoding must stay
-    /// stable for a given plan. A failure here means a dependency bump would break the
-    /// replay of historical sweep events.
+    /// Replaying a recorded sweep requires [`super::Sweep::recover`] to rebuild a message
+    /// equal to the recorded one, so the message compiled for a given plan must never change.
+    /// A failure here means a dependency bump would break the replay of historical sweep
+    /// events.
     #[test]
-    fn should_build_the_same_encoded_message_as_when_recorded() {
+    fn should_build_the_message_recorded_for_the_plan() {
         let sweep = sweep_of(SWEEPABLE_AMOUNTS);
 
         let message = sweep.sweep_message(Hash::default());
 
         assert_eq!(
-            hex::encode(bincode::serialize(&message).expect("serializing a message succeeds")),
-            concat!(
-                "0300010577aea4326a834b92c9da0549da17eec698e9fa7dfc2fbe20cc0a7431d63bc6fa57a83ac2",
-                "0ed4c76c2053696833893a594022a3c4d935f0ebbc841c1b7ba65ef9cfec2767327a71f9540d5218",
-                "d52bea211f619c11d2761e9ae1fdee1eb8f6dc64db415b8eb85bd5127b0984723e0448054042cf40",
-                "e7a9c262ed0cc87ecea9834900000000000000000000000000000000000000000000000000000000",
-                "00000000000000000000000000000000000000000000000000000000000000000000000003040200",
-                "030c02000000e888c90100000000040202030c02000000002d310100000000040201030c02000000",
-                "8096980000000000",
-            )
+            message,
+            Message {
+                header: MessageHeader {
+                    num_required_signatures: 3,
+                    num_readonly_signed_accounts: 0,
+                    num_readonly_unsigned_accounts: 1,
+                },
+                account_keys: vec![
+                    deposit_address(account(1)),
+                    deposit_address(account(3)),
+                    deposit_address(account(2)),
+                    MINTER_ADDRESS,
+                    solana_system_interface::program::ID,
+                ],
+                recent_blockhash: Hash::default(),
+                instructions: vec![
+                    transfer_instruction(0, 30_000_000 - 3 * FEE_PER_SIGNATURE),
+                    transfer_instruction(2, 20_000_000),
+                    transfer_instruction(1, 10_000_000),
+                ],
+            }
         );
+    }
+
+    /// The compiled transfer of the given amount from the given account key to the minter
+    /// address, as recorded sweep messages contain it.
+    fn transfer_instruction(from_index: u8, amount: Lamport) -> CompiledInstruction {
+        const TRANSFER_DISCRIMINANT: u32 = 2;
+        const SYSTEM_PROGRAM_INDEX: u8 = 4;
+        const MINTER_ADDRESS_INDEX: u8 = 3;
+        let mut data = TRANSFER_DISCRIMINANT.to_le_bytes().to_vec();
+        data.extend_from_slice(&amount.to_le_bytes());
+        CompiledInstruction {
+            program_id_index: SYSTEM_PROGRAM_INDEX,
+            accounts: vec![from_index, MINTER_ADDRESS_INDEX],
+            data,
+        }
     }
 
     /// The sweep of the given sweepable amounts from the accounts `1..`, deposit ids from `0`.
