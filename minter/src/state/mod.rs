@@ -611,9 +611,8 @@ impl State {
             !self.failed_transactions.contains_key(signature),
             "Attempted to submit already failed transaction {signature:?}"
         );
-        let amount = match purpose {
+        match purpose {
             TransactionPurpose::ConsolidateDeposits { mint_indices } => {
-                let mut total: Lamport = 0;
                 let mut deposits = Vec::with_capacity(mint_indices.len());
                 for mint_index in mint_indices {
                     let (_account, deposit_amount) = self
@@ -622,12 +621,10 @@ impl State {
                         .unwrap_or_else(|| {
                             panic!("Attempted to consolidate unknown mint index: {mint_index:?}")
                         });
-                    total += deposit_amount;
                     deposits.push((*mint_index, deposit_amount));
                 }
                 self.consolidation_transactions
                     .insert(*signature, ConsolidationTransaction { deposits });
-                total
             }
             TransactionPurpose::WithdrawSol { burn_indices } => {
                 let mut total: Lamport = 0;
@@ -657,12 +654,11 @@ impl State {
                     .balance
                     .checked_sub(total + tx_fee)
                     .expect("BUG: insufficient minter balance for withdrawal");
-                total
             }
             TransactionPurpose::SweepDeposits { deposit_ids } => {
-                self.deposits.sweep(deposit_ids, transaction, signature)
+                self.deposits.sweep(deposit_ids, transaction, signature);
             }
-        };
+        }
         assert_eq!(
             self.submitted_transactions.insert(
                 *signature,
@@ -671,7 +667,6 @@ impl State {
                     signers: signers.to_vec(),
                     block_height,
                     purpose: purpose.clone(),
-                    amount,
                 }
             ),
             None,
@@ -733,9 +728,17 @@ impl State {
             });
         match transaction.purpose {
             TransactionPurpose::ConsolidateDeposits { .. } => {
+                let consolidation = self
+                    .consolidation_transactions
+                    .get(signature)
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "BUG: missing consolidation details for succeeded transaction {signature:?}"
+                        )
+                    });
                 let tx_fee = transaction.message.transaction_fee();
-                self.balance += transaction
-                    .amount
+                self.balance += consolidation
+                    .total_amount()
                     .checked_sub(tx_fee)
                     .expect("BUG: consolidation amount is less than transaction fee");
             }
@@ -972,6 +975,4 @@ pub struct SolanaTransaction {
     /// The block height of the block whose blockhash the transaction uses.
     pub block_height: BlockHeight,
     pub purpose: TransactionPurpose,
-    /// Total transfer amount in lamports (excluding fees).
-    pub amount: Lamport,
 }

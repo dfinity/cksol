@@ -94,21 +94,25 @@ mod sweep {
     };
 
     #[test]
-    fn should_move_queued_deposits_to_a_sweep_and_return_the_expected_received_amount() {
+    fn should_move_queued_deposits_to_a_sweep_with_the_expected_received_amount() {
         let mut deposits = Deposits::default();
         deposits.queue(0, queued_deposit(0));
         deposits.queue(1, queued_deposit(1));
         deposits.queue(2, queued_deposit(2));
         let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
 
-        let expected_received = deposits.sweep(
+        deposits.sweep(
             &[2, 0],
             &sweep_message([(0, queued_deposit(0)), (2, queued_deposit(2))]),
             &sweep_signature,
         );
 
         assert_eq!(
-            expected_received,
+            deposits
+                .swept()
+                .get(&sweep_signature)
+                .unwrap()
+                .expected_received(),
             queued_deposit(2).sweepable_amount() + queued_deposit(0).sweepable_amount()
                 - 2 * FEE_PER_SIGNATURE
         );

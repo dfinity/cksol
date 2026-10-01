@@ -136,11 +136,15 @@ mod swept_deposits {
                 ]))
             );
             assert_eq!(s.deposits().queued().keys().collect::<Vec<_>>(), vec![&1]);
-            let transaction = s.submitted_transactions().get(&sweep_signature).unwrap();
             assert_eq!(
-                transaction.amount,
+                s.deposits()
+                    .swept()
+                    .get(&sweep_signature)
+                    .unwrap()
+                    .expected_received(),
                 1_000_000 + 3_000_000 - 2 * FEE_PER_SIGNATURE
             );
+            let transaction = s.submitted_transactions().get(&sweep_signature).unwrap();
             assert_eq!(
                 transaction.signers,
                 vec![Signer::Account(account(3)), Signer::Account(account(1))]
