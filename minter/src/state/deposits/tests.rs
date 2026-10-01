@@ -1,6 +1,6 @@
 use super::{DepositBalance, Deposits};
 use crate::{
-    constants::RENT_EXEMPTION_THRESHOLD,
+    constants::{FEE_PER_SIGNATURE, RENT_EXEMPTION_THRESHOLD},
     test_fixtures::{planned_sweep, queued_deposit, queued_deposit_of, signature, sweep_message},
 };
 use cksol_types::DepositSolStatus;
@@ -89,27 +89,28 @@ mod queue {
 
 mod sweep {
     use super::{
-        BTreeMap, DepositSolStatus, Deposits, SWEEP_SIGNATURE_INDEX, planned_sweep, queued_deposit,
-        signature, sweep_message,
+        BTreeMap, DepositSolStatus, Deposits, FEE_PER_SIGNATURE, SWEEP_SIGNATURE_INDEX,
+        planned_sweep, queued_deposit, signature, sweep_message,
     };
 
     #[test]
-    fn should_move_queued_deposits_to_a_sweep_and_return_the_swept_amount() {
+    fn should_move_queued_deposits_to_a_sweep_and_return_the_expected_received_amount() {
         let mut deposits = Deposits::default();
         deposits.queue(0, queued_deposit(0));
         deposits.queue(1, queued_deposit(1));
         deposits.queue(2, queued_deposit(2));
         let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
 
-        let swept_amount = deposits.sweep(
+        let expected_received = deposits.sweep(
             &[2, 0],
             &sweep_message([(0, queued_deposit(0)), (2, queued_deposit(2))]),
             &sweep_signature,
         );
 
         assert_eq!(
-            swept_amount,
+            expected_received,
             queued_deposit(2).sweepable_amount() + queued_deposit(0).sweepable_amount()
+                - 2 * FEE_PER_SIGNATURE
         );
         assert_eq!(
             deposits.swept().get(&sweep_signature),

@@ -303,16 +303,6 @@ fn should_panic_when_inserting_a_sweep_whose_deposit_another_sweep_holds() {
 }
 
 #[test]
-fn should_sum_the_sweepable_amounts_of_the_deposits() {
-    let sweep = planned_sweep([
-        (0, queued_deposit_of(account(1), 1_000_000)),
-        (1, queued_deposit_of(account(2), 250_000)),
-    ]);
-
-    assert_eq!(sweep.swept_amount(), 1_250_000);
-}
-
-#[test]
 #[should_panic(expected = "without deposits")]
 fn should_panic_when_creating_a_sweep_without_deposits() {
     planned_sweep([]);

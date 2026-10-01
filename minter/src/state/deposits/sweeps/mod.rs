@@ -88,7 +88,6 @@ pub struct Sweep {
     minter_address: Address,
     transfers: Vec<Transfer>,
     expected_received: Lamport,
-    swept_amount: Lamport,
 }
 
 impl Sweep {
@@ -138,7 +137,6 @@ impl Sweep {
         }))
         .collect();
         let expected_received = transfers.iter().map(|transfer| transfer.amount).sum();
-        let swept_amount = unique.values().map(QueuedDeposit::sweepable_amount).sum();
         Self {
             deposits: unique,
             fee_payer,
@@ -146,7 +144,6 @@ impl Sweep {
             minter_address,
             transfers,
             expected_received,
-            swept_amount,
         }
     }
 
@@ -214,10 +211,6 @@ impl Sweep {
     /// The amount the minter address receives: the sweepable amounts minus the fee.
     pub fn expected_received(&self) -> Lamport {
         self.expected_received
-    }
-
-    pub fn swept_amount(&self) -> Lamport {
-        self.swept_amount
     }
 
     pub fn deposit_count(&self) -> usize {

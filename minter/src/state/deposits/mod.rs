@@ -108,9 +108,9 @@ impl Deposits {
             .collect();
         let sweep = Sweep::recover(deposits, message)
             .unwrap_or_else(|e| panic!("Attempted to sweep with transaction {signature}: {e}"));
-        let swept_amount = sweep.swept_amount();
+        let expected_received = sweep.expected_received();
         self.swept.insert(*signature, sweep);
-        swept_amount
+        expected_received
     }
 
     pub(super) fn resubmit_sweep(&mut self, old_signature: &Signature, new_signature: &Signature) {
