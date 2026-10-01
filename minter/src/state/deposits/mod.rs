@@ -153,6 +153,8 @@ impl DepositBalance {
 
     /// The balance minus the rent exemption threshold left on the deposit address.
     pub fn sweepable_amount(self) -> Lamport {
-        self.0 - RENT_EXEMPTION_THRESHOLD
+        self.0
+            .checked_sub(RENT_EXEMPTION_THRESHOLD)
+            .expect("BUG: a deposit balance covers the rent exemption threshold")
     }
 }
