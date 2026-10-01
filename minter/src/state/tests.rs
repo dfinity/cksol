@@ -225,7 +225,10 @@ mod swept_deposits {
         init_state();
         let sweep_signature = finalize_sweep_of_deposits_two_and_zero();
 
-        credit_sweep(sweep_signature, 3_990_000);
+        let amount_received =
+            planned_sweep([(0, queued_deposit(0)), (2, queued_deposit(2))]).expected_received();
+
+        credit_sweep(sweep_signature, amount_received);
 
         read_state(|s| {
             assert!(s.deposits().finalized().is_empty());
@@ -233,7 +236,7 @@ mod swept_deposits {
                 s.deposits().pending_mints().keys().collect::<Vec<_>>(),
                 vec![&0, &2]
             );
-            assert_eq!(s.balance(), 3_990_000);
+            assert_eq!(s.balance(), amount_received);
         });
     }
 

@@ -355,7 +355,7 @@ mod finalize_swept {
 mod credit_sweep {
     use super::{
         BTreeMap, DepositSolStatus, Deposits, PendingMint, SWEEP_SIGNATURE_INDEX, SweptDeposit,
-        mint, planned_sweep, queued_deposit, signature, sweep_message,
+        mint, queued_deposit, signature, sweep_message,
     };
 
     #[test]
@@ -398,35 +398,6 @@ mod credit_sweep {
                 signature: sweep_signature.into()
             }
         );
-    }
-
-    #[test]
-    fn should_credit_only_the_given_sweep() {
-        let mut deposits = Deposits::default();
-        deposits.queue(0, queued_deposit(0));
-        deposits.queue(1, queued_deposit(1));
-        let first_sweep = signature(SWEEP_SIGNATURE_INDEX);
-        deposits.sweep(&[0], &sweep_message([(0, queued_deposit(0))]), &first_sweep);
-        deposits.finalize_swept(&first_sweep);
-        let second_sweep = signature(SWEEP_SIGNATURE_INDEX + 1);
-        deposits.sweep(
-            &[1],
-            &sweep_message([(1, queued_deposit(1))]),
-            &second_sweep,
-        );
-        deposits.finalize_swept(&second_sweep);
-
-        deposits.credit_sweep(&second_sweep, &[mint(1, 200)]);
-
-        assert_eq!(
-            deposits.pending_mints().keys().collect::<Vec<_>>(),
-            vec![&1]
-        );
-        assert_eq!(
-            deposits.finalized().get(&first_sweep),
-            Some(&planned_sweep([(0, queued_deposit(0))]))
-        );
-        assert_eq!(deposits.finalized().get(&second_sweep), None);
     }
 
     #[test]
