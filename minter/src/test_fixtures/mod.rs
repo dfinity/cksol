@@ -450,7 +450,7 @@ pub mod devnet_sweep {
 /// All helpers operate on the global thread-local state via [`mutate_state`].
 pub mod events {
     use super::{
-        DEFAULT_BLOCK_HEIGHT, MANUAL_DEPOSIT_FEE, MINTER_ADDRESS, WITHDRAWAL_FEE,
+        DEFAULT_BLOCK_HEIGHT, MANUAL_DEPOSIT_FEE, MINTER_ADDRESS, WITHDRAWAL_FEE, queued_deposit,
         queued_deposit_of, runtime::TestCanisterRuntime,
     };
     use crate::deposit::sweep::deposit_status;
@@ -554,6 +554,15 @@ pub mod events {
         sweepable_amount: Lamport,
     ) -> DepositSolStatus {
         queue(deposit_id, queued_deposit_of(account, sweepable_amount))
+    }
+
+    /// Queues `N` distinct deposits under the ids `0..N` and returns them in that order.
+    pub fn queue_deposits<const N: usize>() -> [QueuedDeposit; N] {
+        std::array::from_fn(|index| {
+            let deposit = queued_deposit(index as DepositSolId);
+            queue(index as DepositSolId, deposit);
+            deposit
+        })
     }
 
     pub fn queue(deposit_id: DepositSolId, deposit: QueuedDeposit) -> DepositSolStatus {

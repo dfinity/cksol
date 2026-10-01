@@ -110,7 +110,7 @@ mod queued_deposits {
 
 mod swept_deposits {
     use super::*;
-    use crate::test_fixtures::events::{credit_sweep, queue_deposit, submit_sweep};
+    use crate::test_fixtures::events::{credit_sweep, queue_deposits, submit_sweep};
     use cksol_types::DepositSolStatus;
 
     const SWEEP_SIGNATURE_INDEX: usize = 0xAA;
@@ -118,7 +118,7 @@ mod swept_deposits {
     #[test]
     fn should_move_queued_deposits_to_swept_with_signature_and_received_amount() {
         init_state();
-        queue_three_deposits();
+        let [first, second, third] = queue_deposits();
         let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
 
         submit_sweep(sweep_signature, vec![2, 0]);
@@ -126,20 +126,20 @@ mod swept_deposits {
         read_state(|s| {
             assert_eq!(
                 s.deposits().swept().get(&sweep_signature),
-                Some(&planned_sweep([
-                    (0, queued_deposit(0)),
-                    (2, queued_deposit(2))
-                ]))
+                Some(&planned_sweep([(0, first), (2, third)]))
             );
             assert_eq!(s.deposits().queued().keys().collect::<Vec<_>>(), vec![&1]);
             let transaction = s.submitted_transactions().get(&sweep_signature).unwrap();
             assert_eq!(
                 transaction.amount,
-                1_000_000 + 3_000_000 - 2 * FEE_PER_SIGNATURE
+                first.sweepable_amount() + third.sweepable_amount() - 2 * FEE_PER_SIGNATURE
             );
             assert_eq!(
                 transaction.signers,
-                vec![Signer::Account(account(3)), Signer::Account(account(1))]
+                vec![
+                    Signer::Account(third.account),
+                    Signer::Account(first.account)
+                ]
             );
             assert_eq!(
                 transaction.purpose,
@@ -159,7 +159,7 @@ mod swept_deposits {
         assert_eq!(
             deposit_status(1),
             DepositSolStatus::Queued {
-                sweepable_amount: queued_deposit(1).sweepable_amount()
+                sweepable_amount: second.sweepable_amount()
             }
         );
         assert_eq!(
@@ -173,7 +173,9 @@ mod swept_deposits {
     #[test]
     fn should_finalize_the_sweep_when_the_transaction_succeeds() {
         init_state();
-        let sweep_signature = sweep_deposits_two_and_zero();
+        let [first, _, third] = queue_deposits();
+        let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
+        submit_sweep(sweep_signature, vec![2, 0]);
 
         succeed_transaction(sweep_signature);
 
@@ -182,10 +184,7 @@ mod swept_deposits {
             assert!(s.deposits().swept().is_empty());
             assert_eq!(
                 s.deposits().finalized().get(&sweep_signature),
-                Some(&planned_sweep([
-                    (0, queued_deposit(0)),
-                    (2, queued_deposit(2))
-                ]))
+                Some(&planned_sweep([(0, first), (2, third)]))
             );
             assert_eq!(s.balance(), 0);
         });
@@ -201,7 +200,9 @@ mod swept_deposits {
     #[test]
     fn should_keep_deposits_swept_and_balance_unchanged_when_the_sweep_fails() {
         init_state();
-        let sweep_signature = sweep_deposits_two_and_zero();
+        queue_deposits::<3>();
+        let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
+        submit_sweep(sweep_signature, vec![2, 0]);
 
         fail_transaction(sweep_signature);
 
@@ -223,10 +224,11 @@ mod swept_deposits {
     #[test]
     fn should_credit_the_balance_with_the_amount_received_by_the_sweep() {
         init_state();
-        let sweep_signature = finalize_sweep_of_deposits_two_and_zero();
-
-        let amount_received =
-            planned_sweep([(0, queued_deposit(0)), (2, queued_deposit(2))]).expected_received();
+        let [first, _, third] = queue_deposits();
+        let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
+        submit_sweep(sweep_signature, vec![2, 0]);
+        succeed_transaction(sweep_signature);
+        let amount_received = planned_sweep([(0, first), (2, third)]).expected_received();
 
         credit_sweep(sweep_signature, amount_received);
 
@@ -244,7 +246,10 @@ mod swept_deposits {
     #[should_panic(expected = "exceeding the 399 lamports received")]
     fn should_panic_when_the_mints_exceed_the_amount_received() {
         init_state();
-        let sweep_signature = finalize_sweep_of_deposits_two_and_zero();
+        queue_deposits::<3>();
+        let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
+        submit_sweep(sweep_signature, vec![2, 0]);
+        succeed_transaction(sweep_signature);
 
         mutate_state(|s| {
             process_event(
@@ -271,7 +276,9 @@ mod swept_deposits {
     #[test]
     fn should_queue_expired_sweep_for_resubmission_like_other_transactions() {
         init_state();
-        let sweep_signature = sweep_deposits_two_and_zero();
+        queue_deposits::<3>();
+        let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
+        submit_sweep(sweep_signature, vec![2, 0]);
 
         expire_transaction(sweep_signature);
 
@@ -293,7 +300,9 @@ mod swept_deposits {
     #[test]
     fn should_report_new_signature_after_resubmitting_expired_sweep() {
         init_state();
-        let expired_sweep_signature = sweep_deposits_two_and_zero();
+        queue_deposits::<3>();
+        let expired_sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
+        submit_sweep(expired_sweep_signature, vec![2, 0]);
         let unrelated_sweep_signature = signature(SWEEP_SIGNATURE_INDEX + 1);
         submit_sweep(unrelated_sweep_signature, vec![1]);
         expire_transaction(expired_sweep_signature);
@@ -330,26 +339,6 @@ mod swept_deposits {
             );
         }
         assert_in_flight_ids_unchanged();
-    }
-
-    fn queue_three_deposits() {
-        for deposit_id in 0..3 {
-            let deposit = queued_deposit(deposit_id);
-            queue_deposit(deposit_id, deposit.account, deposit.sweepable_amount());
-        }
-    }
-
-    fn sweep_deposits_two_and_zero() -> Signature {
-        queue_three_deposits();
-        let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
-        submit_sweep(sweep_signature, vec![2, 0]);
-        sweep_signature
-    }
-
-    fn finalize_sweep_of_deposits_two_and_zero() -> Signature {
-        let sweep_signature = sweep_deposits_two_and_zero();
-        succeed_transaction(sweep_signature);
-        sweep_signature
     }
 
     fn assert_in_flight_ids_unchanged() {
