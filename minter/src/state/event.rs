@@ -219,7 +219,7 @@ pub enum TransactionPurpose {
     /// Sweep the deposit addresses of deposits queued by `deposit_sol` into the minter's main account.
     #[n(2)]
     SweepDeposits {
-        /// The ids of the swept deposits, the fee payer first.
+        /// The ids of the swept deposits.
         #[n(0)]
         deposit_ids: Vec<DepositSolId>,
         /// The minter's main address the deposits are swept to.

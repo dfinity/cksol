@@ -104,7 +104,7 @@ async fn should_sweep_batch_with_largest_deposit_as_fee_payer() {
                         && signers.contains(&Signer::Account(account(3)))
                 );
                 assert_eq!(block_height, DEFAULT_BLOCK_HEIGHT);
-                assert_eq!(deposit_ids, vec![1, 2, 0]);
+                assert_eq!(deposit_ids, vec![0, 1, 2]);
                 assert_eq!(
                     transfers_to_minter_address(&message),
                     vec![
@@ -179,10 +179,9 @@ async fn should_split_deposits_into_batches_of_max_size() {
 
     sweep_queued_deposits(runtime.clone()).await;
 
-    let batch_1_ids: Vec<DepositSolId> = (0..MAX_DEPOSITS_PER_SWEEP as u64).rev().collect();
-    let batch_2_ids: Vec<DepositSolId> = (MAX_DEPOSITS_PER_SWEEP as u64..NUM_DEPOSITS as u64)
-        .rev()
-        .collect();
+    let batch_1_ids: Vec<DepositSolId> = (0..MAX_DEPOSITS_PER_SWEEP as u64).collect();
+    let batch_2_ids: Vec<DepositSolId> =
+        (MAX_DEPOSITS_PER_SWEEP as u64..NUM_DEPOSITS as u64).collect();
     let mut events_assert = EventsAssert::from_recorded();
     for _ in 0..NUM_DEPOSITS {
         events_assert =
