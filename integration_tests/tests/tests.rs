@@ -1496,8 +1496,8 @@ mod metrics_tests {
             .assert_contains_metric_matching(r#"stable_memory_bytes \d+ \d+"#)
             .assert_contains_metric_matching(r#"heap_memory_bytes \d+ \d+"#)
             .assert_contains_metric_matching(r#"cycle_balance\{canister="cksol-minter"\} \d+ \d+"#)
-            // Only the canister init event should have been recorded
-            .assert_contains_metric_matching(r#"total_event_count 1 \d+"#)
+            // Only the init and minter public key events should have been recorded
+            .assert_contains_metric_matching(r#"total_event_count 2 \d+"#)
             .assert_contains_metric_matching(r#"minter_balance 0 \d+"#)
             .into()
             .drop()
