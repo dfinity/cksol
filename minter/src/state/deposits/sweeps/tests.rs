@@ -183,6 +183,30 @@ mod message {
         assert_eq!(transfers[2].amount, 10_000_000);
     }
 
+    /// Replaying a recorded sweep requires [`super::Sweep::recover`] to rebuild the submitted
+    /// message byte for byte, so the compiled message and its bincode encoding must stay
+    /// stable for a given plan. A failure here means a dependency bump would break the
+    /// replay of historical sweep events.
+    #[test]
+    fn should_build_the_same_encoded_message_as_when_recorded() {
+        let sweep = sweep_of(SWEEPABLE_AMOUNTS);
+
+        let message = sweep.sweep_message(Hash::default());
+
+        assert_eq!(
+            hex::encode(bincode::serialize(&message).expect("serializing a message succeeds")),
+            concat!(
+                "0300010577aea4326a834b92c9da0549da17eec698e9fa7dfc2fbe20cc0a7431d63bc6fa57a83ac2",
+                "0ed4c76c2053696833893a594022a3c4d935f0ebbc841c1b7ba65ef9cfec2767327a71f9540d5218",
+                "d52bea211f619c11d2761e9ae1fdee1eb8f6dc64db415b8eb85bd5127b0984723e0448054042cf40",
+                "e7a9c262ed0cc87ecea9834900000000000000000000000000000000000000000000000000000000",
+                "00000000000000000000000000000000000000000000000000000000000000000000000003040200",
+                "030c02000000e888c90100000000040202030c02000000002d310100000000040201030c02000000",
+                "8096980000000000",
+            )
+        );
+    }
+
     /// The sweep of the given sweepable amounts from the accounts `1..`, deposit ids from `0`.
     fn sweep_of<const N: usize>(sweepable_amounts: [Lamport; N]) -> Sweep {
         planned_sweep(
