@@ -5,7 +5,10 @@ use crate::{
 use cksol_types::DepositSolId;
 use sol_rpc_types::Lamport;
 use solana_address::Address;
+use solana_hash::Hash;
 use solana_signature::Signature;
+use solana_system_interface::instruction;
+use solana_transaction::{Instruction, Message};
 use std::{cmp::Reverse, collections::BTreeMap};
 use thiserror::Error;
 
@@ -187,6 +190,20 @@ impl Sweep {
 
     pub fn minter_address(&self) -> Address {
         self.minter_address
+    }
+
+    /// The message of the sweep transaction: one transfer per deposit to the minter address,
+    /// in the order of the planned transfers, paid for by the fee payer.
+    pub fn sweep_message(&self, recent_blockhash: Hash) -> Message {
+        let instructions: Vec<Instruction> = self
+            .transfers
+            .iter()
+            .map(|transfer| {
+                instruction::transfer(&transfer.from, &self.minter_address, transfer.amount)
+            })
+            .collect();
+        let fee_payer = self.transfers.first().map(|transfer| &transfer.from);
+        Message::new_with_blockhash(&instructions, fee_payer, &recent_blockhash)
     }
 
     /// The transfers of the sweep transaction in their order, the fee payer first.
