@@ -481,21 +481,24 @@ pub mod events {
 #[cfg(test)]
 pub mod arb {
     use crate::{
-        constants::RENT_EXEMPTION_THRESHOLD,
+        constants::{FEE_PER_SIGNATURE, RENT_EXEMPTION_THRESHOLD},
         numeric::{LedgerBurnIndex, LedgerMintIndex},
         rpc::BlockHeight,
+        sol_transfer::MAX_SIGNATURES,
         state::{
-            DepositBalance,
+            DepositBalance, QueuedDeposit,
             event::{DepositId, Event, EventType, Signer, TransactionPurpose, WithdrawalRequest},
         },
     };
     use candid::Principal;
+    use cksol_types::DepositSolId;
     use cksol_types_internal::{Ed25519KeyName, InitArgs, SolanaNetwork, UpgradeArgs};
     use icrc_ledger_types::icrc1::account::Account;
     use proptest::prelude::{Just, Strategy, any, prop, prop_oneof};
     use solana_address::Address;
     use solana_message::{Hash, Instruction, Message};
     use solana_signature::Signature;
+    use std::collections::BTreeMap;
 
     pub fn arb_principal() -> impl Strategy<Value = Principal> {
         prop::collection::vec(any::<u8>(), 0..=29).prop_map(|bytes| Principal::from_slice(&bytes))
@@ -539,6 +542,30 @@ pub mod arb {
             DepositBalance::new(balance)
                 .expect("BUG: the balance covers the rent exemption threshold")
         })
+    }
+
+    /// A deposit whose sweepable amount covers the fee of a full sweep and whose balance,
+    /// multiplied by the deposits of a full sweep, fits in lamports.
+    pub fn arb_queued_deposit() -> impl Strategy<Value = QueuedDeposit> {
+        const MIN_BALANCE: u64 = RENT_EXEMPTION_THRESHOLD + FEE_PER_SIGNATURE * MAX_SIGNATURES;
+        const MAX_BALANCE: u64 = u64::MAX / MAX_SIGNATURES;
+        (arb_account(), arb_address(), MIN_BALANCE..=MAX_BALANCE).prop_map(
+            |(account, address, balance)| QueuedDeposit {
+                account,
+                address,
+                balance: DepositBalance::new(balance)
+                    .expect("BUG: the balance covers the rent exemption threshold"),
+            },
+        )
+    }
+
+    /// The deposits of one sweep: at least one, at most one per signature.
+    pub fn arb_sweep_deposits() -> impl Strategy<Value = BTreeMap<DepositSolId, QueuedDeposit>> {
+        prop::collection::btree_map(
+            any::<DepositSolId>(),
+            arb_queued_deposit(),
+            1..=MAX_SIGNATURES as usize,
+        )
     }
 
     pub fn arb_address() -> impl Strategy<Value = Address> {

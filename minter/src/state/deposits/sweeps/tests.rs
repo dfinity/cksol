@@ -204,8 +204,26 @@ mod recover {
         MINTER_ADDRESS, Sweep, SweepRecoveryError, VersionedMessage, planned_sweep, queued_deposit,
         sweep_message,
     };
+    use crate::test_fixtures::arb::{arb_address, arb_hash, arb_sweep_deposits};
+    use proptest::{prop_assert_eq, proptest};
     use solana_address::Address;
     use solana_hash::Hash;
+
+    proptest! {
+        #[test]
+        fn should_recover_the_planned_sweep_from_its_message(
+            deposits in arb_sweep_deposits(),
+            minter_address in arb_address(),
+            blockhash in arb_hash(),
+        ) {
+            let planned = Sweep::plan(deposits.clone(), minter_address);
+            let submitted = VersionedMessage::Legacy(planned.sweep_message(blockhash));
+
+            let recovered = Sweep::recover(deposits, &submitted);
+
+            prop_assert_eq!(recovered, Ok(planned));
+        }
+    }
 
     #[test]
     fn should_plan_the_sweep_to_the_destination_of_the_submitted_message() {
