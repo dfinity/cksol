@@ -1,4 +1,5 @@
 use crate::{
+    address::minter_address,
     constants::{FEE_PER_SIGNATURE, GET_TRANSACTION_CYCLES, RENT_EXEMPTION_THRESHOLD},
     ledger::client::LedgerClient,
     numeric::{LedgerBurnIndex, LedgerMintIndex},
@@ -660,7 +661,11 @@ impl State {
                 total
             }
             TransactionPurpose::SweepDeposits { deposit_ids } => {
-                self.deposits.sweep(deposit_ids, transaction, signature)
+                let sweep_destination = minter_address(self.minter_public_key.as_ref().expect(
+                    "BUG: a sweep was submitted before the minter public key was recorded",
+                ));
+                self.deposits
+                    .sweep(deposit_ids, sweep_destination, transaction, signature)
             }
         };
         assert_eq!(

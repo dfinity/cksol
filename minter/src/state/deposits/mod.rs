@@ -86,10 +86,12 @@ impl Deposits {
     }
 
     /// Moves the given queued deposits to the sweep submitted with the given message and
-    /// signature and returns the amount the sweep transfers to the main account.
+    /// signature, checked to sweep them to the given minter address, and returns the
+    /// amount the sweep transfers to the main account.
     pub(super) fn sweep(
         &mut self,
         deposit_ids: &[DepositSolId],
+        minter_address: Address,
         message: &VersionedMessage,
         signature: &Signature,
     ) -> Lamport {
@@ -106,7 +108,7 @@ impl Deposits {
                 (*deposit_id, deposit)
             })
             .collect();
-        let sweep = Sweep::recover(deposits, message)
+        let sweep = Sweep::recover(deposits, minter_address, message)
             .unwrap_or_else(|e| panic!("Attempted to sweep with transaction {signature}: {e}"));
         let expected_received = sweep.expected_received();
         self.swept.insert(*signature, sweep);

@@ -15,7 +15,8 @@ use crate::{
             fail_transaction, mint_deposit, resubmit_transaction, submit_withdrawal,
             succeed_transaction,
         },
-        init_balance, init_state, ledger_canister_id, planned_sweep, queued_deposit,
+        init_balance, init_schnorr_master_key, init_state, ledger_canister_id, planned_sweep,
+        queued_deposit,
         runtime::TestCanisterRuntime,
         signature, sol_rpc_canister_id, valid_init_args,
     },
@@ -146,6 +147,7 @@ mod swept_deposits {
     #[test]
     fn should_move_queued_deposits_to_swept_with_signature_and_received_amount() {
         init_state();
+        init_schnorr_master_key();
         queue_three_deposits();
         let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
 
@@ -209,6 +211,7 @@ mod swept_deposits {
             reset_state();
             reset_events();
             init_state();
+            init_schnorr_master_key();
             queue_three_deposits();
             let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
             submit_sweep(sweep_signature, vec![2, 0]);
@@ -235,6 +238,7 @@ mod swept_deposits {
     #[test]
     fn should_queue_expired_sweep_for_resubmission_like_other_transactions() {
         init_state();
+        init_schnorr_master_key();
         queue_three_deposits();
         let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
         submit_sweep(sweep_signature, vec![2, 0]);
@@ -259,6 +263,7 @@ mod swept_deposits {
     #[test]
     fn should_report_new_signature_after_resubmitting_expired_sweep() {
         init_state();
+        init_schnorr_master_key();
         queue_three_deposits();
         let expired_sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
         let unrelated_sweep_signature = signature(SWEEP_SIGNATURE_INDEX + 1);
@@ -298,6 +303,17 @@ mod swept_deposits {
             );
         }
         assert_in_flight_ids_unchanged();
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "BUG: a sweep was submitted before the minter public key was recorded"
+    )]
+    fn should_panic_when_a_sweep_is_submitted_without_the_minter_public_key() {
+        init_state();
+        queue_three_deposits();
+
+        submit_sweep(signature(SWEEP_SIGNATURE_INDEX), vec![2, 0]);
     }
 
     fn queue_three_deposits() {
