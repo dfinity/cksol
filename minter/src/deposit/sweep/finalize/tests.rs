@@ -50,7 +50,10 @@ async fn should_ask_for_another_round_only_after_crediting_with_sweeps_left_over
         finalize_devnet_sweep();
         let mut runtime = TestCanisterRuntime::new()
             .with_increasing_time()
-            .add_stub_response(devnet_sweep_response);
+            .expect_get_transaction(
+                signature(DEVNET_SWEEP_SIGNATURE_INDEX),
+                devnet_sweep_response,
+            );
         for index in 0..MAX_CONCURRENT_RPC_CALLS {
             let deposit_id = (devnet_sweep::DEPOSITS.len() + index) as DepositSolId;
             queue_deposit(
@@ -62,7 +65,10 @@ async fn should_ask_for_another_round_only_after_crediting_with_sweeps_left_over
             submit_sweep(sweep_signature, vec![deposit_id]);
             succeed_transaction(sweep_signature);
             if index + 1 < MAX_CONCURRENT_RPC_CALLS {
-                runtime = runtime.add_stub_response(GetTransactionResult::Consistent(Ok(None)));
+                runtime = runtime.expect_get_transaction(
+                    sweep_signature,
+                    GetTransactionResult::Consistent(Ok(None)),
+                );
             }
         }
 
@@ -90,7 +96,7 @@ async fn should_credit_the_amount_received_by_the_main_account() {
     setup();
     let sweep_signature = finalize_devnet_sweep();
 
-    credit_finalized_sweeps(&runtime_returning(devnet_sweep::outcome())).await;
+    credit_finalized_sweeps(&runtime_returning(sweep_signature, devnet_sweep::outcome())).await;
 
     EventsAssert::from_recorded().expect_contains_event_eq(EventType::CreditedSweep {
         signature: sweep_signature,
@@ -129,7 +135,7 @@ async fn should_keep_deposits_finalized_until_the_outcome_can_be_read() {
         let events_before = EventsAssert::from_recorded();
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
-            .add_stub_response(response());
+            .expect_get_transaction(sweep_signature, response());
 
         credit_finalized_sweeps(&runtime).await;
 
@@ -160,7 +166,7 @@ async fn should_quarantine_deposits_if_the_outcome_does_not_match_the_plan() {
     let mut outcome = devnet_sweep::outcome();
     devnet_sweep::set_balances(&mut outcome, devnet_sweep::MINTER_ADDRESS, 1, 0);
 
-    credit_finalized_sweeps(&runtime_returning(outcome)).await;
+    credit_finalized_sweeps(&runtime_returning(sweep_signature, outcome)).await;
 
     EventsAssert::from_recorded().expect_contains_event_eq(EventType::QuarantinedSweep {
         signature: sweep_signature,
@@ -204,10 +210,13 @@ fn finalize_devnet_sweep() -> Signature {
     sweep_signature
 }
 
-fn runtime_returning(outcome: EncodedConfirmedTransactionWithStatusMeta) -> TestCanisterRuntime {
+fn runtime_returning(
+    sweep_signature: Signature,
+    outcome: EncodedConfirmedTransactionWithStatusMeta,
+) -> TestCanisterRuntime {
     TestCanisterRuntime::new()
         .with_increasing_time()
-        .add_stub_response(transaction_response(outcome))
+        .expect_get_transaction(sweep_signature, transaction_response(outcome))
 }
 
 fn transaction_response(

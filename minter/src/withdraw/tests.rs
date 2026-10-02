@@ -18,13 +18,16 @@ use candid::{Nat, Principal};
 use canlog::Log;
 use cksol_types::TxFinalizedStatus;
 use cksol_types::WithdrawalStatus;
-use cksol_types::{WithdrawalError, WithdrawalOk};
+use cksol_types::{BurnMemo, Memo, WithdrawalError, WithdrawalOk};
 use cksol_types_internal::log::Priority;
 use ic_canister_runtime::IcError;
 use ic_cdk::call::CallRejected;
 use ic_cdk_management_canister::SignCallError;
-use icrc_ledger_types::{icrc1::account::Account, icrc2::transfer_from::TransferFromError};
-use sol_rpc_types::{MultiRpcResult, RpcError, Slot};
+use icrc_ledger_types::{
+    icrc1::account::Account,
+    icrc2::transfer_from::{TransferFromArgs, TransferFromError},
+};
+use sol_rpc_types::{MultiRpcResult, RpcError};
 use solana_signature::Signature;
 
 const VALID_ADDRESS: &str = "E4MpwNnMWs2XtW5gVrxZvyS7fMq31QD5HvbxmwP45Tz3";
@@ -33,11 +36,31 @@ fn test_caller() -> Account {
     Principal::from_slice(&[1_u8; 20]).into()
 }
 
+/// The `icrc2_transfer_from` arguments burning `amount` ckSOL from `from` for a withdrawal
+/// to [`VALID_ADDRESS`].
+fn burn_args(from: Account, amount: u64) -> TransferFromArgs {
+    let to_address: solana_address::Address = VALID_ADDRESS
+        .parse()
+        .expect("BUG: VALID_ADDRESS should parse");
+    TransferFromArgs {
+        spender_subaccount: None,
+        from,
+        to: MINTER_ACCOUNT,
+        fee: None,
+        created_at_time: None,
+        memo: Some(Memo::from(BurnMemo::convert(to_address)).into()),
+        amount: Nat::from(amount),
+    }
+}
+
 #[tokio::test]
 async fn should_return_error_if_calling_ledger_fails() {
     init_state();
 
-    let runtime = TestCanisterRuntime::new().add_stub_error(IcError::CallPerformFailed);
+    let runtime = TestCanisterRuntime::new().expect_icrc2_transfer_from(
+        burn_args(test_caller(), MINIMUM_WITHDRAWAL_AMOUNT),
+        IcError::CallPerformFailed,
+    );
 
     let result = withdraw(
         &runtime,
@@ -57,9 +80,10 @@ async fn should_return_error_if_calling_ledger_fails() {
 async fn should_return_error_if_ledger_unavailable() {
     init_state();
 
-    let runtime = TestCanisterRuntime::new().add_stub_response(Err::<Nat, TransferFromError>(
-        TransferFromError::TemporarilyUnavailable,
-    ));
+    let runtime = TestCanisterRuntime::new().expect_icrc2_transfer_from(
+        burn_args(test_caller(), MINIMUM_WITHDRAWAL_AMOUNT),
+        Err(TransferFromError::TemporarilyUnavailable),
+    );
 
     let result = withdraw(
         &runtime,
@@ -81,11 +105,12 @@ async fn should_return_error_if_ledger_unavailable() {
 async fn should_return_error_if_insufficient_allowance() {
     init_state();
 
-    let runtime = TestCanisterRuntime::new().add_stub_response(Err::<Nat, TransferFromError>(
-        TransferFromError::InsufficientAllowance {
+    let runtime = TestCanisterRuntime::new().expect_icrc2_transfer_from(
+        burn_args(test_caller(), MINIMUM_WITHDRAWAL_AMOUNT),
+        Err(TransferFromError::InsufficientAllowance {
             allowance: Nat::from(123u64),
-        },
-    ));
+        }),
+    );
 
     let result = withdraw(
         &runtime,
@@ -105,11 +130,12 @@ async fn should_return_error_if_insufficient_allowance() {
 async fn should_return_error_if_insufficient_funds() {
     init_state();
 
-    let runtime = TestCanisterRuntime::new().add_stub_response(Err::<Nat, TransferFromError>(
-        TransferFromError::InsufficientFunds {
+    let runtime = TestCanisterRuntime::new().expect_icrc2_transfer_from(
+        burn_args(test_caller(), MINIMUM_WITHDRAWAL_AMOUNT),
+        Err(TransferFromError::InsufficientFunds {
             balance: Nat::from(123u64),
-        },
-    ));
+        }),
+    );
 
     let result = withdraw(
         &runtime,
@@ -129,12 +155,13 @@ async fn should_return_error_if_insufficient_funds() {
 async fn should_return_temporarily_unavailable_on_generic_error() {
     init_state();
 
-    let runtime = TestCanisterRuntime::new().add_stub_response(Err::<Nat, TransferFromError>(
-        TransferFromError::GenericError {
+    let runtime = TestCanisterRuntime::new().expect_icrc2_transfer_from(
+        burn_args(test_caller(), MINIMUM_WITHDRAWAL_AMOUNT),
+        Err(TransferFromError::GenericError {
             error_code: Nat::from(123u64),
             message: "msg".to_string(),
-        },
-    ));
+        }),
+    );
 
     let result = withdraw(
         &runtime,
@@ -157,7 +184,10 @@ async fn should_return_ok_if_burn_succeeds() {
     init_state();
 
     let runtime = TestCanisterRuntime::new()
-        .add_stub_response(Ok::<Nat, TransferFromError>(Nat::from(123u64)))
+        .expect_icrc2_transfer_from(
+            burn_args(test_caller(), MINIMUM_WITHDRAWAL_AMOUNT),
+            Ok(Nat::from(123u64)),
+        )
         .with_increasing_time();
 
     let result = withdraw(
@@ -239,8 +269,6 @@ async fn should_return_error_if_already_processing() {
 mod process_pending_withdrawals_tests {
     use super::*;
 
-    type GetSlotResult = MultiRpcResult<Slot>;
-    type GetBlockResult = MultiRpcResult<sol_rpc_types::ConfirmedBlock>;
     type SendTransactionResult = MultiRpcResult<sol_rpc_types::Signature>;
 
     #[tokio::test]
@@ -313,7 +341,10 @@ mod process_pending_withdrawals_tests {
         let burn_block_index = 3_u64;
         let result = withdraw(
             &TestCanisterRuntime::new()
-                .add_stub_response(Ok::<Nat, TransferFromError>(Nat::from(burn_block_index)))
+                .expect_icrc2_transfer_from(
+                    burn_args(test_caller(), minter_balance + WITHDRAWAL_FEE),
+                    Ok(Nat::from(burn_block_index)),
+                )
                 .with_increasing_time(),
             test_caller(),
             minter_balance + WITHDRAWAL_FEE,
@@ -329,9 +360,7 @@ mod process_pending_withdrawals_tests {
 
         let events_before = EventsAssert::from_recorded();
 
-        let runtime = TestCanisterRuntime::new()
-            .add_recent_block(Ok(1))
-            .with_increasing_time();
+        let runtime = TestCanisterRuntime::new().with_increasing_time();
 
         process_pending_withdrawals(runtime).await;
 
@@ -362,7 +391,10 @@ mod process_pending_withdrawals_tests {
 
         let runtime = TestCanisterRuntime::new()
             .add_recent_block(Ok(slot))
-            .add_stub_response(SendTransactionResult::Consistent(Ok(tx_signature.into())))
+            .expect_send_transaction(
+                tx_signature,
+                SendTransactionResult::Consistent(Ok(tx_signature.into())),
+            )
             .add_signer(sign_as_minter())
             .with_increasing_time();
 
@@ -391,11 +423,11 @@ mod process_pending_withdrawals_tests {
 
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
-            .add_stub_response(GetSlotResult::Consistent(Ok(slot)))
-            .add_stub_response(GetBlockResult::Consistent(Ok(confirmed_block_at_height(
-                block_height,
-            ))))
-            .add_stub_response(SendTransactionResult::Consistent(Ok(tx_signature.into())))
+            .expect_recent_block(slot, confirmed_block_at_height(block_height))
+            .expect_send_transaction(
+                tx_signature,
+                SendTransactionResult::Consistent(Ok(tx_signature.into())),
+            )
             .add_signer(sign_as_minter());
 
         process_pending_withdrawals(runtime).await;
@@ -504,8 +536,14 @@ mod process_pending_withdrawals_tests {
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
             .add_recent_block(Ok(slot))
-            .add_stub_response(SendTransactionResult::Consistent(Ok(signature(1).into())))
-            .add_stub_response(SendTransactionResult::Consistent(Ok(signature(2).into())))
+            .expect_send_transaction(
+                minter_signature_nth(0),
+                SendTransactionResult::Consistent(Ok(signature(1).into())),
+            )
+            .expect_send_transaction(
+                minter_signature_nth(1),
+                SendTransactionResult::Consistent(Ok(signature(2).into())),
+            )
             .add_signer(sign_as_minter().times(2));
 
         process_pending_withdrawals(runtime).await;
@@ -538,10 +576,10 @@ mod process_pending_withdrawals_tests {
             .with_increasing_time()
             .add_recent_block(Ok(slot));
         for i in 0..MAX_CONCURRENT_RPC_CALLS {
-            runtime = runtime
-                .add_stub_response(SendTransactionResult::Consistent(Ok(
-                    signature(i + 1).into()
-                )));
+            runtime = runtime.expect_send_transaction(
+                minter_signature_nth(i),
+                SendTransactionResult::Consistent(Ok(signature(i + 1).into())),
+            );
         }
         let runtime = runtime.add_signer(sign_as_minter().times(MAX_CONCURRENT_RPC_CALLS));
 
@@ -559,9 +597,10 @@ mod process_pending_withdrawals_tests {
             .with_increasing_time()
             .add_recent_block(Ok(slot))
             .add_signer(sign_as_minter().expect([Ok(signature_continuing_round_1)]))
-            .add_stub_response(SendTransactionResult::Consistent(Ok(
-                signature_continuing_round_1.into(),
-            )));
+            .expect_send_transaction(
+                signature_continuing_round_1,
+                SendTransactionResult::Consistent(Ok(signature_continuing_round_1.into())),
+            );
 
         process_pending_withdrawals(runtime.clone()).await;
 
