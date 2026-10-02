@@ -14,6 +14,10 @@ pub const SWEEP_DEPOSITS_DELAY: Duration = Duration::from_mins(1);
 /// Interval of the timer minting the pending mints of credited sweeps.
 pub const PROCESS_PENDING_MINTS_DELAY: Duration = Duration::from_mins(1);
 
+/// Maximum number of pending mints sent to the ckSOL ledger, one after the other,
+/// in a single round of the minting timer.
+pub const MAX_PENDING_MINTS_PER_ROUND: usize = 10;
+
 /// The window within which the ckSOL ledger deduplicates transfers by their
 /// `created_at_time`, matching `TRANSACTION_WINDOW` of the ICRC-1 ledger:
 /// <https://github.com/dfinity/ic/blob/master/rs/ledger_suite/icrc1/ledger/src/lib.rs>
