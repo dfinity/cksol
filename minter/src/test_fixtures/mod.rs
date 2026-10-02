@@ -1,10 +1,11 @@
 use crate::{
-    address::{MINTER_DERIVATION_PATH, derivation_path},
+    address::{MINTER_DERIVATION_PATH, account_address, derivation_path},
+    constants::RENT_EXEMPTION_THRESHOLD,
     numeric::LedgerMintIndex,
     rpc::BlockHeight,
     state::{
-        QueuedDeposit, SchnorrPublicKey, State,
-        event::{DepositId, Event, EventType},
+        DepositBalance, QueuedDeposit, SchnorrPublicKey, State, Sweep,
+        event::{DepositId, Event, EventType, VersionedMessage},
         init_once_state, mutate_state,
     },
     storage::with_event_iter,
@@ -153,13 +154,44 @@ pub fn deposit_id(i: usize) -> DepositId {
     }
 }
 
-/// The deposit of `account(deposit_id + 1)` with `100 * (deposit_id + 1)` sweepable lamports,
-/// so that a sequence of deposits has distinct accounts and amounts.
+/// The deposit of `account(deposit_id + 1)` with `1_000_000 * (deposit_id + 1)` sweepable
+/// lamports, so that a sequence of deposits has distinct accounts and amounts, each covering
+/// the fee of a full sweep.
 pub fn queued_deposit(deposit_id: DepositSolId) -> QueuedDeposit {
+    queued_deposit_of(
+        account(deposit_id as usize + 1),
+        1_000_000 * (deposit_id + 1),
+    )
+}
+
+/// The deposit of the given account whose address holds the sweepable amount on top of the
+/// rent exemption threshold.
+pub fn queued_deposit_of(account: Account, sweepable_amount: Lamport) -> QueuedDeposit {
     QueuedDeposit {
-        account: account(deposit_id as usize + 1),
-        sweepable_amount: 100 * (deposit_id + 1),
+        account,
+        address: deposit_address(account),
+        balance: DepositBalance::new(sweepable_amount + RENT_EXEMPTION_THRESHOLD)
+            .expect("BUG: the balance covers the rent exemption threshold"),
     }
+}
+
+/// The sweep of the given deposits to [`MINTER_ADDRESS`].
+pub fn planned_sweep(deposits: impl IntoIterator<Item = (DepositSolId, QueuedDeposit)>) -> Sweep {
+    Sweep::plan(deposits, MINTER_ADDRESS)
+}
+
+/// The message submitted for the sweep of the given deposits to [`MINTER_ADDRESS`].
+pub fn sweep_message(
+    deposits: impl IntoIterator<Item = (DepositSolId, QueuedDeposit)>,
+) -> VersionedMessage {
+    planned_sweep(deposits)
+        .sweep_message(solana_hash::Hash::default())
+        .into()
+}
+
+/// The deposit address of the account under the master key of [`init_schnorr_master_key`].
+pub fn deposit_address(account: Account) -> solana_address::Address {
+    account_address(&schnorr_master_key(), &account)
 }
 
 /// Returns an [`Account`] with a deterministic principal derived from `i`.
@@ -201,7 +233,8 @@ pub fn minter_signature_nth(occurrence: usize) -> solana_signature::Signature {
 /// All helpers operate on the global thread-local state via [`mutate_state`].
 pub mod events {
     use super::{
-        DEFAULT_BLOCK_HEIGHT, MANUAL_DEPOSIT_FEE, WITHDRAWAL_FEE, runtime::TestCanisterRuntime,
+        DEFAULT_BLOCK_HEIGHT, MANUAL_DEPOSIT_FEE, WITHDRAWAL_FEE, queued_deposit_of,
+        runtime::TestCanisterRuntime, sweep_message,
     };
     use crate::deposit::sweep::deposit_status;
     use crate::{
@@ -307,7 +340,8 @@ pub mod events {
                 EventType::QueuedDeposit {
                     deposit_id,
                     account,
-                    sweepable_amount,
+                    address: queued_deposit_of(account, sweepable_amount).address,
+                    balance: queued_deposit_of(account, sweepable_amount).balance,
                 },
                 &runtime(),
             )
@@ -317,19 +351,25 @@ pub mod events {
 
     /// Submits a sweep of the given queued deposits, signed by their accounts in the given order.
     pub fn submit_sweep(signature: Signature, deposit_ids: Vec<DepositSolId>) {
-        let signers = read_state(|state| {
+        let deposits: Vec<_> = read_state(|state| {
             deposit_ids
                 .iter()
-                .filter_map(|deposit_id| state.deposits().queued().get(deposit_id))
-                .map(|deposit| Signer::Account(deposit.account))
+                .filter_map(|deposit_id| {
+                    let deposit = state.deposits().queued().get(deposit_id)?;
+                    Some((*deposit_id, *deposit))
+                })
                 .collect()
         });
+        let signers = deposits
+            .iter()
+            .map(|(_, deposit)| Signer::Account(deposit.account))
+            .collect();
         mutate_state(|state| {
             process_event(
                 state,
                 EventType::SubmittedTransaction {
                     signature,
-                    message: message().into(),
+                    message: sweep_message(deposits),
                     signers,
                     purpose: TransactionPurpose::SweepDeposits { deposit_ids },
                     block_height: DEFAULT_BLOCK_HEIGHT,
@@ -441,19 +481,24 @@ pub mod events {
 #[cfg(test)]
 pub mod arb {
     use crate::{
+        constants::{FEE_PER_SIGNATURE, RENT_EXEMPTION_THRESHOLD},
         numeric::{LedgerBurnIndex, LedgerMintIndex},
         rpc::BlockHeight,
-        state::event::{
-            DepositId, Event, EventType, Signer, TransactionPurpose, WithdrawalRequest,
+        sol_transfer::MAX_SIGNATURES,
+        state::{
+            DepositBalance, QueuedDeposit,
+            event::{DepositId, Event, EventType, Signer, TransactionPurpose, WithdrawalRequest},
         },
     };
     use candid::Principal;
+    use cksol_types::DepositSolId;
     use cksol_types_internal::{Ed25519KeyName, InitArgs, SolanaNetwork, UpgradeArgs};
     use icrc_ledger_types::icrc1::account::Account;
     use proptest::prelude::{Just, Strategy, any, prop, prop_oneof};
     use solana_address::Address;
     use solana_message::{Hash, Instruction, Message};
     use solana_signature::Signature;
+    use std::collections::BTreeMap;
 
     pub fn arb_principal() -> impl Strategy<Value = Principal> {
         prop::collection::vec(any::<u8>(), 0..=29).prop_map(|bytes| Principal::from_slice(&bytes))
@@ -490,6 +535,37 @@ pub mod arb {
 
     pub fn arb_ledger_mint_index() -> impl Strategy<Value = LedgerMintIndex> {
         any::<u64>().prop_map(LedgerMintIndex::from)
+    }
+
+    pub fn arb_deposit_balance() -> impl Strategy<Value = DepositBalance> {
+        (RENT_EXEMPTION_THRESHOLD..=u64::MAX).prop_map(|balance| {
+            DepositBalance::new(balance)
+                .expect("BUG: the balance covers the rent exemption threshold")
+        })
+    }
+
+    /// A deposit whose sweepable amount covers the fee of a full sweep and whose balance,
+    /// multiplied by the deposits of a full sweep, fits in lamports.
+    pub fn arb_queued_deposit() -> impl Strategy<Value = QueuedDeposit> {
+        const MIN_BALANCE: u64 = RENT_EXEMPTION_THRESHOLD + FEE_PER_SIGNATURE * MAX_SIGNATURES;
+        const MAX_BALANCE: u64 = u64::MAX / MAX_SIGNATURES;
+        (arb_account(), arb_address(), MIN_BALANCE..=MAX_BALANCE).prop_map(
+            |(account, address, balance)| QueuedDeposit {
+                account,
+                address,
+                balance: DepositBalance::new(balance)
+                    .expect("BUG: the balance covers the rent exemption threshold"),
+            },
+        )
+    }
+
+    /// The deposits of one sweep: at least one, at most one per signature.
+    pub fn arb_sweep_deposits() -> impl Strategy<Value = BTreeMap<DepositSolId, QueuedDeposit>> {
+        prop::collection::btree_map(
+            any::<DepositSolId>(),
+            arb_queued_deposit(),
+            1..=MAX_SIGNATURES as usize,
+        )
     }
 
     pub fn arb_address() -> impl Strategy<Value = Address> {
@@ -706,13 +782,20 @@ pub mod arb {
             arb_signature().prop_map(|signature| EventType::SucceededTransaction { signature }),
             arb_signature().prop_map(|signature| EventType::FailedTransaction { signature }),
             arb_signature().prop_map(|signature| EventType::ExpiredTransaction { signature }),
-            (any::<u64>(), arb_account(), any::<u64>()).prop_map(
-                |(deposit_id, account, sweepable_amount)| EventType::QueuedDeposit {
-                    deposit_id,
-                    account,
-                    sweepable_amount,
-                }
-            ),
+            (
+                any::<u64>(),
+                arb_account(),
+                arb_address(),
+                arb_deposit_balance(),
+            )
+                .prop_map(|(deposit_id, account, address, balance)| {
+                    EventType::QueuedDeposit {
+                        deposit_id,
+                        account,
+                        address,
+                        balance,
+                    }
+                },),
         ]
     }
 

@@ -1,6 +1,6 @@
 use crate::{
     constants::{GET_BALANCE_CYCLES, RENT_EXEMPTION_THRESHOLD},
-    deposit::sweep::{deposit_sol, deposit_status, sweepable_amount},
+    deposit::sweep::{deposit_sol, deposit_status},
     state::{event::EventType, read_state},
     storage::with_event_iter,
     test_fixtures::{
@@ -10,7 +10,7 @@ use crate::{
             DEPOSIT_AMOUNT, DEPOSITOR_ACCOUNT, accepted_deposit_event,
             deposit_id as manual_deposit_id, minted_event,
         },
-        events, init_schnorr_master_key, init_state,
+        events, init_schnorr_master_key, init_state, queued_deposit_of,
         runtime::TestCanisterRuntime,
     },
 };
@@ -27,19 +27,6 @@ const EXPLICIT_DEFAULT_SUBACCOUNT: Account = Account {
     subaccount: Some([0; 32]),
     ..DEPOSITOR_ACCOUNT
 };
-
-#[test]
-fn should_compute_sweepable_amount_above_rent_exemption_threshold() {
-    for (balance, expected) in [
-        (0, 0),
-        (RENT_EXEMPTION_THRESHOLD - 1, 0),
-        (RENT_EXEMPTION_THRESHOLD, 0),
-        (RENT_EXEMPTION_THRESHOLD + 1, 1),
-        (Lamport::MAX, Lamport::MAX - RENT_EXEMPTION_THRESHOLD),
-    ] {
-        assert_eq!(sweepable_amount(balance), expected, "balance {balance}");
-    }
-}
 
 #[test]
 fn should_report_unknown_deposit_as_not_found() {
@@ -242,10 +229,12 @@ async fn assert_second_call_returns_same_deposit(first: Account, second: Account
 }
 
 fn queued_deposit_event(deposit_id: u64, account: Account, sweepable_amount: Lamport) -> EventType {
+    let deposit = queued_deposit_of(account, sweepable_amount);
     EventType::QueuedDeposit {
         deposit_id,
         account,
-        sweepable_amount,
+        address: deposit.address,
+        balance: deposit.balance,
     }
 }
 

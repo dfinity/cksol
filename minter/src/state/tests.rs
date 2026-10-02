@@ -15,7 +15,7 @@ use crate::{
             fail_transaction, mint_deposit, resubmit_transaction, submit_withdrawal,
             succeed_transaction,
         },
-        init_balance, init_state, ledger_canister_id, queued_deposit,
+        init_balance, init_state, ledger_canister_id, planned_sweep, queued_deposit,
         runtime::TestCanisterRuntime,
         signature, sol_rpc_canister_id, valid_init_args,
     },
@@ -83,7 +83,8 @@ mod queued_deposits {
             payload: EventType::QueuedDeposit {
                 deposit_id,
                 account: queued_deposit(deposit_id).account,
-                sweepable_amount: queued_deposit(deposit_id).sweepable_amount,
+                address: queued_deposit(deposit_id).address,
+                balance: queued_deposit(deposit_id).balance,
             },
         };
         let init = Event {
@@ -93,7 +94,12 @@ mod queued_deposits {
         let mut expected = State::try_from(valid_init_args()).unwrap();
         for deposit_id in 0..2 {
             let deposit = queued_deposit(deposit_id);
-            expected.process_queued_deposit(deposit_id, &deposit.account, deposit.sweepable_amount);
+            expected.process_queued_deposit(
+                deposit_id,
+                &deposit.account,
+                &deposit.address,
+                deposit.balance,
+            );
         }
 
         let replayed = replay_events([init, queued(0), queued(1)]);
@@ -114,7 +120,7 @@ mod swept_deposits {
     const SWEEP_SIGNATURE_INDEX: usize = 0xAA;
 
     #[test]
-    fn should_move_queued_deposits_to_swept_with_signature_and_total_amount() {
+    fn should_move_queued_deposits_to_swept_with_signature_and_received_amount() {
         init_state();
         queue_three_deposits();
         let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
@@ -124,14 +130,17 @@ mod swept_deposits {
         read_state(|s| {
             assert_eq!(
                 s.deposits().swept().get(&sweep_signature),
-                Some(&Sweep::new([
+                Some(&planned_sweep([
                     (0, queued_deposit(0)),
                     (2, queued_deposit(2))
                 ]))
             );
             assert_eq!(s.deposits().queued().keys().collect::<Vec<_>>(), vec![&1]);
             let transaction = s.submitted_transactions().get(&sweep_signature).unwrap();
-            assert_eq!(transaction.amount, 100 + 300);
+            assert_eq!(
+                transaction.amount,
+                1_000_000 + 3_000_000 - 2 * FEE_PER_SIGNATURE
+            );
             assert_eq!(
                 transaction.signers,
                 vec![Signer::Account(account(3)), Signer::Account(account(1))]
@@ -139,7 +148,7 @@ mod swept_deposits {
             assert_eq!(
                 transaction.purpose,
                 TransactionPurpose::SweepDeposits {
-                    deposit_ids: vec![2, 0]
+                    deposit_ids: vec![2, 0],
                 }
             );
             assert_eq!(s.balance(), 0);
@@ -154,7 +163,7 @@ mod swept_deposits {
         assert_eq!(
             deposit_status(1),
             DepositSolStatus::Queued {
-                sweepable_amount: 200
+                sweepable_amount: queued_deposit(1).sweepable_amount()
             }
         );
         assert_eq!(
@@ -270,7 +279,7 @@ mod swept_deposits {
     fn queue_three_deposits() {
         for deposit_id in 0..3 {
             let deposit = queued_deposit(deposit_id);
-            queue_deposit(deposit_id, deposit.account, deposit.sweepable_amount);
+            queue_deposit(deposit_id, deposit.account, deposit.sweepable_amount());
         }
     }
 

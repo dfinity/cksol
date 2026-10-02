@@ -6,7 +6,7 @@ use crate::{
     constants::FEE_PER_SIGNATURE,
     runtime::CanisterRuntime,
     signer::{SchnorrSigner, sign_bytes},
-    state::event::Signer,
+    state::{Sweep, event::Signer},
 };
 use derive_more::From;
 use ic_cdk_management_canister::SignCallError;
@@ -119,6 +119,42 @@ pub async fn create_signed_consolidation_transaction<R: CanisterRuntime>(
     let derivation_paths: Vec<DerivationPath> =
         signers.iter().map(Signer::derivation_path).collect();
     sign_transaction(&mut transaction, derivation_paths, &runtime.signer()).await?;
+
+    Ok((transaction, signers))
+}
+
+/// Signs the transaction of a planned sweep with the deposit addresses it transfers from.
+///
+/// Returns the signed transaction and the signer accounts in the order of the signatures.
+pub async fn sign_sweep_transaction<R: CanisterRuntime>(
+    runtime: &R,
+    sweep: &Sweep,
+    recent_blockhash: Hash,
+) -> Result<(Transaction, Vec<Signer>), CreateTransferError> {
+    let mut transaction = Transaction::new_unsigned(sweep.sweep_message(recent_blockhash));
+    let accounts_by_address: BTreeMap<Address, Account> = sweep
+        .deposits()
+        .values()
+        .map(|deposit| (deposit.address, deposit.account))
+        .collect();
+    let signers: Vec<Signer> = transaction
+        .message
+        .signer_keys()
+        .iter()
+        .map(|key| {
+            let account = accounts_by_address.get(key).copied().unwrap_or_else(|| {
+                panic!("BUG: signer {key} is not a deposit address of the sweep")
+            });
+            Signer::Account(account)
+        })
+        .collect();
+
+    sign_transaction(
+        &mut transaction,
+        signers.iter().map(Signer::derivation_path),
+        &runtime.signer(),
+    )
+    .await?;
 
     Ok((transaction, signers))
 }

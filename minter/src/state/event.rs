@@ -3,6 +3,7 @@ use crate::{
     constants::FEE_PER_SIGNATURE,
     numeric::{LedgerBurnIndex, LedgerMintIndex},
     rpc::BlockHeight,
+    state::DepositBalance,
 };
 use cksol_types::DepositSolId;
 use cksol_types_internal::{InitArgs, UpgradeArgs};
@@ -11,6 +12,7 @@ use ic_stable_structures::{Storable, storable::Bound};
 use icrc_ledger_types::icrc1::account::Account;
 use minicbor::{Decode, Encode};
 use sol_rpc_types::Lamport;
+use solana_address::Address;
 use solana_message::Message;
 use solana_signature::Signature;
 use std::borrow::Cow;
@@ -150,8 +152,10 @@ pub enum EventType {
         deposit_id: DepositSolId,
         #[n(1)]
         account: Account,
-        #[n(2)]
-        sweepable_amount: Lamport,
+        #[cbor(n(2), with = "cbor::address")]
+        address: Address,
+        #[cbor(n(3), with = "cbor::deposit_balance")]
+        balance: DepositBalance,
     },
 }
 
@@ -216,7 +220,7 @@ pub enum TransactionPurpose {
     /// Sweep the deposit addresses of deposits queued by `deposit_sol` into the minter's main account.
     #[n(2)]
     SweepDeposits {
-        /// The ids of the swept deposits, the fee payer first.
+        /// The ids of the swept deposits.
         #[n(0)]
         deposit_ids: Vec<DepositSolId>,
     },
