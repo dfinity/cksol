@@ -177,9 +177,15 @@ impl Deposits {
             .swept
             .remove(signature)
             .unwrap_or_else(|| panic!("Attempted to drop sweep {signature} that is not swept"));
-        for (deposit_id, dropped) in swept_deposits(&sweep, signature) {
-            self.release_in_flight(deposit_id, &dropped.deposit.account);
-            self.dropped.insert(deposit_id, dropped);
+        for (deposit_id, deposit) in sweep.deposits() {
+            self.release_in_flight(*deposit_id, &deposit.account);
+            self.dropped.insert(
+                *deposit_id,
+                SweptDeposit {
+                    deposit: *deposit,
+                    signature: *signature,
+                },
+            );
         }
     }
 
@@ -189,7 +195,16 @@ impl Deposits {
         let sweep = self.finalized.remove(signature).unwrap_or_else(|| {
             panic!("Attempted to quarantine sweep {signature} that is not finalized")
         });
-        self.quarantined.extend(swept_deposits(&sweep, signature));
+        self.quarantined
+            .extend(sweep.deposits().iter().map(|(deposit_id, deposit)| {
+                (
+                    *deposit_id,
+                    SweptDeposit {
+                        deposit: *deposit,
+                        signature: *signature,
+                    },
+                )
+            }));
     }
 
     fn release_in_flight(&mut self, deposit_id: DepositSolId, account: &Account) {
@@ -251,21 +266,6 @@ impl Deposits {
             );
         }
     }
-}
-
-fn swept_deposits<'a>(
-    sweep: &'a Sweep,
-    signature: &'a Signature,
-) -> impl Iterator<Item = (DepositSolId, SweptDeposit)> + 'a {
-    sweep.deposits().iter().map(|(deposit_id, deposit)| {
-        (
-            *deposit_id,
-            SweptDeposit {
-                deposit: *deposit,
-                signature: *signature,
-            },
-        )
-    })
 }
 
 /// A deposit address queued for a sweep to the minter's main account.
