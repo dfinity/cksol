@@ -24,20 +24,26 @@ mod tests;
 ///
 /// ```text
 /// queued --sendTransaction--> swept --getSignatureStatuses--> finalized --getTransaction--> pending_mints
+///                                |                              |
+///                                +--failed or expired--> dropped  +--metadata mismatch--> quarantined
 /// ```
 ///
 /// * `queued`: the deposit address holds a sweepable amount and waits for a sweep transaction.
 ///   Deposits are keyed by id, so the sweep timer takes them in the order they were queued.
 /// * `swept`: a sweep transaction moving the deposits to the main account was submitted.
 ///   The deposits of one transaction are kept together under its signature, since the
-///   transaction is what the finalization timer tracks from here on. The signature changes
-///   whenever the sweep expires and is resubmitted with a fresh blockhash.
+///   transaction is what the finalization timer tracks from here on. A sweep is never
+///   resubmitted: when it fails or expires, its deposits are dropped and their accounts
+///   released, so that `deposit_sol` can queue a new sweep of the balance still on the
+///   deposit address.
 /// * `finalized`: `getSignatureStatuses` reported the sweep as finalized without error. The
 ///   amount received by the main account is still unknown, because Solana may charge a
 ///   different transaction fee than the sweep was built with.
 /// * `pending_mints`: the metadata returned by `getTransaction` was read and the transaction
 ///   fee of the sweep was shared between its deposits. Each deposit now carries the amount to
 ///   mint and only the mint on the ledger remains, so the deposits are tracked individually again.
+/// * `quarantined`: the metadata contradicts the minter's model of the sweep, so nothing is
+///   minted and the accounts stay rejected by `deposit_sol` until manual intervention.
 ///
 /// Every account has at most one deposit in flight, so that `deposit_sol` can report the
 /// deposit it is already tracking instead of queueing the same balance twice.
@@ -48,6 +54,8 @@ pub struct Deposits {
     swept: Sweeps,
     finalized: Sweeps,
     pending_mints: BTreeMap<DepositSolId, PendingMint>,
+    dropped: BTreeMap<DepositSolId, SweptDeposit>,
+    quarantined: BTreeMap<DepositSolId, SweptDeposit>,
     in_flight_ids: BTreeMap<Account, DepositSolId>,
 }
 
@@ -70,6 +78,14 @@ impl Deposits {
 
     pub fn pending_mints(&self) -> &BTreeMap<DepositSolId, PendingMint> {
         &self.pending_mints
+    }
+
+    pub fn dropped(&self) -> &BTreeMap<DepositSolId, SweptDeposit> {
+        &self.dropped
+    }
+
+    pub fn quarantined(&self) -> &BTreeMap<DepositSolId, SweptDeposit> {
+        &self.quarantined
     }
 
     pub fn in_flight_id(&self, account: &Account) -> Option<DepositSolId> {
@@ -95,6 +111,16 @@ impl Deposits {
         if let Some(pending) = self.pending_mints.get(&deposit_id) {
             return DepositSolStatus::Finalized {
                 signature: pending.deposit.signature.into(),
+            };
+        }
+        if let Some(dropped) = self.dropped.get(&deposit_id) {
+            return DepositSolStatus::Dropped {
+                signature: dropped.signature.into(),
+            };
+        }
+        if let Some(quarantined) = self.quarantined.get(&deposit_id) {
+            return DepositSolStatus::Quarantined {
+                signature: quarantined.signature.into(),
             };
         }
         DepositSolStatus::NotFound
@@ -145,10 +171,48 @@ impl Deposits {
         expected_received
     }
 
-    pub(super) fn resubmit_sweep(&mut self, old_signature: &Signature, new_signature: &Signature) {
-        if let Some(sweep) = self.swept.remove(old_signature) {
-            self.swept.insert(*new_signature, sweep);
+    /// Drops every deposit of the given swept sweep and releases their accounts.
+    pub(super) fn drop_swept(&mut self, signature: &Signature) {
+        let sweep = self
+            .swept
+            .remove(signature)
+            .unwrap_or_else(|| panic!("Attempted to drop sweep {signature} that is not swept"));
+        for (deposit_id, deposit) in sweep.deposits() {
+            self.release_in_flight(*deposit_id, &deposit.account);
+            self.dropped.insert(
+                *deposit_id,
+                SweptDeposit {
+                    deposit: *deposit,
+                    signature: *signature,
+                },
+            );
         }
+    }
+
+    /// Moves every deposit of the given finalized sweep to the quarantine, keeping their
+    /// accounts in flight.
+    pub(super) fn quarantine_sweep(&mut self, signature: &Signature) {
+        let sweep = self.finalized.remove(signature).unwrap_or_else(|| {
+            panic!("Attempted to quarantine sweep {signature} that is not finalized")
+        });
+        self.quarantined
+            .extend(sweep.deposits().iter().map(|(deposit_id, deposit)| {
+                (
+                    *deposit_id,
+                    SweptDeposit {
+                        deposit: *deposit,
+                        signature: *signature,
+                    },
+                )
+            }));
+    }
+
+    fn release_in_flight(&mut self, deposit_id: DepositSolId, account: &Account) {
+        assert_eq!(
+            self.in_flight_ids.remove(account),
+            Some(deposit_id),
+            "BUG: deposit {deposit_id} is not the in-flight deposit of account {account:?}"
+        );
     }
 
     pub(super) fn finalize_swept(&mut self, signature: &Signature) {
@@ -245,7 +309,7 @@ impl DepositBalance {
     }
 }
 
-/// A deposit together with the finalized sweep transaction that moved it to the main account.
+/// A deposit together with the sweep transaction that was submitted to move it to the main account.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SweptDeposit {
     pub deposit: QueuedDeposit,

@@ -124,8 +124,7 @@ pub type DepositSolId = u64;
 
 /// The status of a deposit queued by the `deposit_sol` ckSOL minter endpoint.
 ///
-/// Further variants (`Minted`, `Dropped`, `Quarantined`) will follow as the sweep
-/// flow is implemented.
+/// The `Minted` variant will follow as the sweep flow is implemented.
 #[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize, Serialize)]
 pub enum DepositSolStatus {
     /// No deposit with this identifier was queued.
@@ -147,11 +146,26 @@ pub enum DepositSolStatus {
         /// The signature of the sweep transaction.
         signature: Signature,
     },
+    /// The sweep transaction failed, or expired without ever being seen on chain, so no
+    /// ckSOL is owed. Calling `deposit_sol` again queues a new sweep of whatever balance
+    /// the deposit address still holds.
+    Dropped {
+        /// The signature of the sweep transaction.
+        signature: Signature,
+    },
+    /// The sweep transaction was finalized, but its outcome did not match the plan the
+    /// minter submitted it with, so the amount to credit cannot be determined safely and
+    /// no ckSOL was minted. This is not expected to happen and the minter does not
+    /// process the deposit any further: releasing or crediting it requires a minter
+    /// upgrade. Meanwhile the account stays in flight, so `deposit_sol` keeps rejecting
+    /// it and a new deposit has to use a different subaccount.
+    Quarantined {
+        /// The signature of the sweep transaction.
+        signature: Signature,
+    },
 }
 
 /// An error from the `deposit_sol` ckSOL minter endpoint.
-///
-/// Further variants will follow as the sweep flow is implemented.
 #[derive(Debug, Clone, PartialEq, CandidType, Deserialize, Error)]
 pub enum DepositSolError {
     /// Insufficient cycles attached by the caller to complete the `deposit_sol` call.
@@ -175,6 +189,15 @@ pub enum DepositSolError {
         balance: Lamport,
         /// The minimum deposit amount for the deposit to be queued.
         minimum_deposit_amount: Lamport,
+    },
+    /// The latest deposit of the account is quarantined: its sweep was finalized, but the
+    /// outcome did not match the plan the minter submitted, so the deposit could not be
+    /// credited safely. The account stays rejected until manual intervention resolves the
+    /// quarantined deposit.
+    #[error("The latest deposit {deposit_id} of this account is quarantined")]
+    Quarantined {
+        /// The identifier of the quarantined deposit.
+        deposit_id: DepositSolId,
     },
 }
 

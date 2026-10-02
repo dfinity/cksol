@@ -1,4 +1,4 @@
-use super::{DepositBalance, Deposits, PendingMint, SweptDeposit};
+use super::{DepositBalance, Deposits, PendingMint, QueuedDeposit, SweptDeposit};
 use crate::{
     constants::{FEE_PER_SIGNATURE, RENT_EXEMPTION_THRESHOLD},
     state::event::CreditedDeposit,
@@ -215,81 +215,50 @@ mod sweep {
     }
 }
 
-mod resubmit_sweep {
+mod drop_swept {
     use super::{
-        DepositSolStatus, Deposits, SWEEP_SIGNATURE_INDEX, planned_sweep, queued_deposit,
+        BTreeMap, DepositSolStatus, Deposits, SWEEP_SIGNATURE_INDEX, SweptDeposit, queue_deposits,
         signature, sweep_message,
     };
 
     #[test]
-    fn should_move_the_deposits_of_the_resubmitted_sweep_to_the_new_signature() {
+    fn should_move_the_deposits_of_the_sweep_to_dropped_and_release_their_accounts() {
         let mut deposits = Deposits::default();
-        deposits.queue(0, queued_deposit(0));
-        deposits.queue(1, queued_deposit(1));
-        deposits.queue(2, queued_deposit(2));
-        let expired_sweep = signature(SWEEP_SIGNATURE_INDEX);
-        deposits.sweep(
-            &[2, 0],
-            &sweep_message([(0, queued_deposit(0)), (2, queued_deposit(2))]),
-            &expired_sweep,
-        );
-        let unrelated_sweep = signature(SWEEP_SIGNATURE_INDEX + 1);
-        deposits.sweep(
-            &[1],
-            &sweep_message([(1, queued_deposit(1))]),
-            &unrelated_sweep,
-        );
-        let resubmitted_sweep = signature(SWEEP_SIGNATURE_INDEX + 2);
-
-        deposits.resubmit_sweep(&expired_sweep, &resubmitted_sweep);
-
-        assert_eq!(deposits.swept().get(&expired_sweep), None);
-        assert_eq!(
-            deposits.swept().get(&resubmitted_sweep),
-            Some(&planned_sweep([
-                (0, queued_deposit(0)),
-                (2, queued_deposit(2))
-            ]))
-        );
-        assert_eq!(
-            deposits.swept().get(&unrelated_sweep),
-            Some(&planned_sweep([(1, queued_deposit(1))]))
-        );
-        assert_eq!(
-            deposits.status(0),
-            DepositSolStatus::Swept {
-                signature: resubmitted_sweep.into()
-            }
-        );
-        for deposit_id in 0..3 {
-            assert_eq!(
-                deposits.in_flight_id(&queued_deposit(deposit_id).account),
-                Some(deposit_id)
-            );
-        }
-    }
-
-    #[test]
-    fn should_ignore_a_resubmitted_transaction_that_is_not_a_sweep() {
-        let mut deposits = Deposits::default();
-        deposits.queue(0, queued_deposit(0));
+        let [first, second, third] = queue_deposits(&mut deposits);
         let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
         deposits.sweep(
-            &[0],
-            &sweep_message([(0, queued_deposit(0))]),
+            &[2, 0],
+            &sweep_message([(0, first), (2, third)]),
             &sweep_signature,
         );
 
-        deposits.resubmit_sweep(
-            &signature(SWEEP_SIGNATURE_INDEX + 1),
-            &signature(SWEEP_SIGNATURE_INDEX + 2),
-        );
+        deposits.drop_swept(&sweep_signature);
 
-        assert_eq!(deposits.swept().len(), 1);
+        assert!(deposits.swept().is_empty());
+        let dropped = |deposit| SweptDeposit {
+            deposit,
+            signature: sweep_signature,
+        };
         assert_eq!(
-            deposits.swept().get(&sweep_signature),
-            Some(&planned_sweep([(0, queued_deposit(0))]))
+            deposits.dropped(),
+            &BTreeMap::from([(0, dropped(first)), (2, dropped(third))])
         );
+        for (deposit_id, deposit) in [(0, first), (2, third)] {
+            assert_eq!(deposits.in_flight_id(&deposit.account), None);
+            assert_eq!(
+                deposits.status(deposit_id),
+                DepositSolStatus::Dropped {
+                    signature: sweep_signature.into()
+                }
+            );
+        }
+        assert_eq!(deposits.in_flight_id(&second.account), Some(1));
+    }
+
+    #[test]
+    #[should_panic(expected = "Attempted to drop sweep")]
+    fn should_panic_when_dropping_a_sweep_that_is_not_swept() {
+        Deposits::default().drop_swept(&signature(SWEEP_SIGNATURE_INDEX));
     }
 }
 
@@ -485,6 +454,70 @@ mod credit_sweep {
             &[mint(0, queued_deposit(0).sweepable_amount() + 1)],
         );
     }
+}
+
+mod quarantine_sweep {
+    use super::{
+        BTreeMap, DepositSolStatus, Deposits, SWEEP_SIGNATURE_INDEX, SweptDeposit, queue_deposits,
+        signature, sweep_message,
+    };
+
+    #[test]
+    fn should_move_the_deposits_of_the_sweep_to_quarantined_and_keep_their_accounts_in_flight() {
+        let mut deposits = Deposits::default();
+        let [first, second, third] = queue_deposits(&mut deposits);
+        let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
+        deposits.sweep(
+            &[2, 0],
+            &sweep_message([(2, third), (0, first)]),
+            &sweep_signature,
+        );
+        deposits.finalize_swept(&sweep_signature);
+
+        deposits.quarantine_sweep(&sweep_signature);
+
+        assert!(deposits.finalized().is_empty());
+        assert!(deposits.pending_mints().is_empty());
+        let quarantined = |deposit| SweptDeposit {
+            deposit,
+            signature: sweep_signature,
+        };
+        assert_eq!(
+            deposits.quarantined(),
+            &BTreeMap::from([(0, quarantined(first)), (2, quarantined(third))])
+        );
+        for (deposit_id, deposit) in [(0, first), (1, second), (2, third)] {
+            assert_eq!(deposits.in_flight_id(&deposit.account), Some(deposit_id));
+        }
+        for deposit_id in [0, 2] {
+            assert_eq!(
+                deposits.status(deposit_id),
+                DepositSolStatus::Quarantined {
+                    signature: sweep_signature.into()
+                }
+            );
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "Attempted to quarantine sweep")]
+    fn should_panic_when_the_sweep_is_not_finalized() {
+        let mut deposits = Deposits::default();
+        let [deposit] = queue_deposits(&mut deposits);
+        let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
+        deposits.sweep(&[0], &sweep_message([(0, deposit)]), &sweep_signature);
+
+        deposits.quarantine_sweep(&sweep_signature);
+    }
+}
+
+/// Queues `N` distinct deposits under the ids `0..N` and returns them in that order.
+fn queue_deposits<const N: usize>(deposits: &mut Deposits) -> [QueuedDeposit; N] {
+    std::array::from_fn(|index| {
+        let deposit = queued_deposit(index as DepositSolId);
+        deposits.queue(index as DepositSolId, deposit);
+        deposit
+    })
 }
 
 fn mint(deposit_id: DepositSolId, amount_to_mint: Lamport) -> CreditedDeposit {

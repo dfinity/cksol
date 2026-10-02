@@ -7,6 +7,7 @@ use cksol_int_tests::{
         DEFAULT_CALLER_ACCOUNT, DEFAULT_CALLER_DEPOSIT_ADDRESS, DEPOSIT_AMOUNT,
         EXPECTED_MINT_AMOUNT, MockBuilder, RENT_EXEMPTION_THRESHOLD, SharedMockHttpOutcalls,
         default_process_deposit_args, deposit_transaction_signature,
+        get_deposit_transaction_response,
     },
 };
 use cksol_types::{
@@ -1200,7 +1201,7 @@ mod deposit_sol_tests {
     }
 
     #[tokio::test]
-    async fn should_report_resubmitted_signature_after_sweep_expires() {
+    async fn should_drop_deposit_and_release_account_after_sweep_expires() {
         let setup = SetupBuilder::new().with_proxy_canister().build().await;
         let deposit_id = setup
             .minter()
@@ -1220,7 +1221,7 @@ mod deposit_sol_tests {
                     .build(),
             )
             .await;
-        let submitted_sweep_signature = assert_matches!(
+        let sweep_signature = assert_matches!(
             setup.minter().deposit_status(deposit_id).await,
             DepositSolStatus::Swept { signature } => signature
         );
@@ -1233,31 +1234,111 @@ mod deposit_sol_tests {
                     .build(),
             )
             .await;
-        setup.advance_time(RESUBMIT_TRANSACTIONS_DELAY).await;
+
+        assert_eq!(
+            setup.minter().deposit_status(deposit_id).await,
+            DepositSolStatus::Dropped {
+                signature: sweep_signature.clone()
+            }
+        );
+        setup.minter().assert_that_events().await.satisfy(|events| {
+            check!(events.iter().any(|e| matches!(
+                e,
+                EventType::ExpiredTransaction { signature } if *signature == sweep_signature
+            )));
+            check!(
+                !events
+                    .iter()
+                    .any(|e| matches!(e, EventType::ResubmittedTransaction { .. }))
+            );
+        });
+        let setup = setup
+            .check_metrics()
+            .await
+            .assert_contains_metric_matching(r"dropped_deposits 1 \d+")
+            .into();
+
+        let deposit_id_after_drop = setup
+            .minter()
+            .with_http_mocks(
+                MockBuilder::with_start_id(28)
+                    .get_balance(BALANCE_ABOVE_MINIMUM)
+                    .build(),
+            )
+            .deposit_sol(DEFAULT_CALLER_ACCOUNT)
+            .await
+            .expect("a dropped deposit releases the account for a new sweep");
+        assert_eq!(deposit_id_after_drop, deposit_id + 1);
+
+        setup.drop().await;
+    }
+
+    #[tokio::test]
+    async fn should_quarantine_deposit_when_finalized_sweep_does_not_match_its_plan() {
+        let setup = SetupBuilder::new().with_proxy_canister().build().await;
+        let deposit_id = setup
+            .minter()
+            .with_http_mocks(
+                MockBuilder::new()
+                    .get_balance(BALANCE_ABOVE_MINIMUM)
+                    .build(),
+            )
+            .deposit_sol(DEFAULT_CALLER_ACCOUNT)
+            .await
+            .expect("deposit_sol should queue a sweep");
+        setup.advance_time(SWEEP_DEPOSITS_DELAY).await;
         setup
             .execute_http_mocks(
-                MockBuilder::with_start_id(28)
-                    .resubmit_transaction(EXPIRY_BLOCK_HEIGHT)
+                MockBuilder::with_start_id(4)
+                    .submit_transaction(SUBMISSION_BLOCK_HEIGHT)
+                    .build(),
+            )
+            .await;
+        let sweep_signature = assert_matches!(
+            setup.minter().deposit_status(deposit_id).await,
+            DepositSolStatus::Swept { signature } => signature
+        );
+
+        setup.advance_time(FINALIZE_TRANSACTIONS_DELAY).await;
+        let outcome_of_another_transaction = get_deposit_transaction_response();
+        setup
+            .execute_http_mocks(
+                MockBuilder::with_start_id(16)
+                    .finalize_transaction(SUBMISSION_BLOCK_HEIGHT)
+                    .get_transaction_with_signature(
+                        &sweep_signature,
+                        outcome_of_another_transaction,
+                    )
                     .build(),
             )
             .await;
 
-        let resubmitted_sweep_signature = assert_matches!(
+        assert_eq!(
             setup.minter().deposit_status(deposit_id).await,
-            DepositSolStatus::Swept { signature } => signature
+            DepositSolStatus::Quarantined {
+                signature: sweep_signature.clone()
+            }
         );
-        assert_ne!(resubmitted_sweep_signature, submitted_sweep_signature);
         setup.minter().assert_that_events().await.satisfy(|events| {
             check!(events.iter().any(|e| matches!(
                 e,
-                EventType::ResubmittedTransaction {
-                    old_signature,
-                    new_signature,
-                    ..
-                } if *old_signature == submitted_sweep_signature
-                    && *new_signature == resubmitted_sweep_signature
+                EventType::QuarantinedSweep { signature } if *signature == sweep_signature
             )));
+            check!(
+                !events
+                    .iter()
+                    .any(|e| matches!(e, EventType::CreditedSweep { .. }))
+            );
         });
+        let setup = setup
+            .check_metrics()
+            .await
+            .assert_contains_metric_matching(r"quarantined_swept_deposits 1 \d+")
+            .into();
+
+        let result = setup.minter().deposit_sol(DEFAULT_CALLER_ACCOUNT).await;
+
+        assert_eq!(result, Err(DepositSolError::Quarantined { deposit_id }));
 
         setup.drop().await;
     }
