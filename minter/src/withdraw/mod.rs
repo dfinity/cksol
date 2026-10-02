@@ -9,6 +9,7 @@ use canlog::log;
 use cksol_types_internal::log::Priority;
 
 use crate::{
+    address::minter_public_key,
     consolidate::consolidate_deposits,
     constants::MAX_CONCURRENT_RPC_CALLS,
     guard::{TimerGuard, withdrawal_guard},
@@ -130,6 +131,12 @@ pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: R) {
 
     if batches.is_empty() {
         // Nothing to process
+        scopeguard::ScopeGuard::into_inner(reschedule);
+        return;
+    }
+
+    if let Err(e) = minter_public_key() {
+        log!(Priority::Info, "Skipping withdrawal processing: {e}");
         scopeguard::ScopeGuard::into_inner(reschedule);
         return;
     }

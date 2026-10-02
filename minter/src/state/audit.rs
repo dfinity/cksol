@@ -1,7 +1,7 @@
 use crate::{
     runtime::CanisterRuntime,
     state::{
-        State,
+        SchnorrPublicKey, State,
         event::{Event, EventType},
     },
     storage,
@@ -86,6 +86,15 @@ fn apply_state_transition(state: &mut State, payload: &EventType, timestamp: u64
             mints,
         } => {
             state.process_credited_sweep(signature, *amount_received, mints);
+        }
+        EventType::MinterPublicKeyFetched {
+            public_key,
+            chain_code,
+        } => {
+            state.cache_minter_public_key(SchnorrPublicKey {
+                public_key: *public_key,
+                chain_code: *chain_code,
+            });
         }
     }
 }

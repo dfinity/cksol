@@ -1,7 +1,7 @@
 use crate::{
     address::{
-        DerivationPath, derivation_path, derive_public_key, lazy_get_schnorr_master_key,
-        minter_address,
+        DerivationPath, MinterPublicKeyNotYetAvailable, derivation_path, derive_public_key,
+        minter_address, minter_public_key,
     },
     constants::FEE_PER_SIGNATURE,
     runtime::CanisterRuntime,
@@ -39,6 +39,8 @@ pub enum CreateTransferError {
     TransactionTooLarge { max: usize, got: usize },
     #[error("signing failed: {0}")]
     SigningFailed(SignCallError),
+    #[error(transparent)]
+    MinterPublicKeyNotYetAvailable(MinterPublicKeyNotYetAvailable),
 }
 
 /// Creates a signed Solana transaction that transfers lamports from
@@ -61,7 +63,7 @@ pub async fn create_signed_consolidation_transaction<R: CanisterRuntime>(
 ) -> Result<(Transaction, Vec<Signer>), CreateTransferError> {
     assert!(!sources.is_empty(), "BUG: sources must not be empty");
 
-    let master_public_key = lazy_get_schnorr_master_key(runtime).await;
+    let master_public_key = minter_public_key()?;
     let target_address = minter_address(&master_public_key);
     let addresses: Vec<Address> = sources
         .iter()
@@ -173,7 +175,7 @@ pub async fn create_signed_batch_withdrawal_transaction<R: CanisterRuntime>(
     targets: &[(Address, Lamport)],
     recent_blockhash: Hash,
 ) -> Result<(Transaction, Vec<Signer>), CreateTransferError> {
-    let master_public_key = lazy_get_schnorr_master_key(runtime).await;
+    let master_public_key = minter_public_key()?;
     let fee_payer_address = minter_address(&master_public_key);
 
     let instructions: Vec<Instruction> = targets

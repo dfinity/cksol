@@ -1,5 +1,5 @@
 use crate::{
-    address::{account_address, lazy_get_schnorr_master_key},
+    address::{account_address, minter_public_key},
     constants::GET_BALANCE_CYCLES,
     cycles::{RpcCallCharge, charge_rpc_call, check_caller_available_cycles},
     guard::deposit_sol_guard,
@@ -56,7 +56,8 @@ pub async fn deposit_sol<R: CanisterRuntime>(
         ));
     }
 
-    let master_key = lazy_get_schnorr_master_key(runtime).await;
+    let master_key =
+        minter_public_key().map_err(|e| DepositSolError::TemporarilyUnavailable(e.to_string()))?;
     let deposit_address = account_address(&master_key, &account);
     let result = get_balance(runtime, deposit_address)
         .await

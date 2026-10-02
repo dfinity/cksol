@@ -9,7 +9,7 @@ use crate::{
     test_fixtures::{
         DEFAULT_BLOCK_HEIGHT, EventsAssert, MINIMUM_DEPOSIT_AMOUNT, MINTER_ADDRESS, account,
         account_signature, deposit_address, events::queue_deposit, init_schnorr_master_key,
-        init_state, runtime::TestCanisterRuntime, schnorr_master_key_response, signer::sign_for,
+        init_state, runtime::TestCanisterRuntime, signer::sign_for,
     },
 };
 use assert_matches::assert_matches;
@@ -256,10 +256,10 @@ async fn should_reschedule_until_all_deposits_swept() {
 }
 
 #[tokio::test]
-async fn should_fetch_the_master_key_once_for_all_batches_of_a_round() {
+async fn should_sweep_all_batches_of_a_round_without_fetching_the_master_key() {
     const NUM_DEPOSITS: usize = MAX_DEPOSITS_PER_SWEEP + 1;
     const NUM_BATCHES: usize = 2;
-    init_state();
+    setup();
     queue_deposits_with_increasing_amounts(NUM_DEPOSITS);
     let fee_payer_1 = account(MAX_DEPOSITS_PER_SWEEP - 1);
     let fee_payer_2 = account(NUM_DEPOSITS - 1);
@@ -270,12 +270,11 @@ async fn should_fetch_the_master_key_once_for_all_batches_of_a_round() {
         .add_signers((0..MAX_DEPOSITS_PER_SWEEP - 1).map(account))
         .build()
         .transaction_builder(fee_payer_2, account_signature(&fee_payer_2))
-        .build()
-        .with_schnorr_public_key(schnorr_master_key_response());
+        .build();
 
     sweep_queued_deposits(runtime.clone()).await;
 
-    assert_eq!(runtime.schnorr_public_key_call_count(), 1);
+    assert_eq!(runtime.schnorr_public_key_call_count(), 0);
     read_state(|s| {
         assert_eq!(s.submitted_transactions().len(), NUM_BATCHES);
         assert_eq!(s.deposits().swept().deposit_count(), NUM_DEPOSITS);

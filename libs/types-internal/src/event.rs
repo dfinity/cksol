@@ -132,6 +132,14 @@ pub enum EventType {
         /// The mint enqueued for each deposit of the sweep.
         mints: Vec<CreditedDeposit>,
     },
+    /// The minter fetched its Schnorr Ed25519 master public key, from which
+    /// its main address and all deposit addresses are derived.
+    MinterPublicKeyFetched {
+        /// The raw Ed25519 master public key (32 bytes).
+        public_key: Vec<u8>,
+        /// The chain code used to derive subkeys (32 bytes).
+        chain_code: Vec<u8>,
+    },
 }
 
 /// The mint enqueued for one deposit of a `CreditedSweep` event.

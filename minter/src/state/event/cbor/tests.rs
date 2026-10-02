@@ -4,7 +4,9 @@ use crate::{
         DepositBalance,
         event::{VersionedMessage, cbor},
     },
-    test_fixtures::arb::{arb_address, arb_deposit_balance, arb_message, arb_signature},
+    test_fixtures::arb::{
+        arb_address, arb_deposit_balance, arb_ed25519_public_key, arb_message, arb_signature,
+    },
 };
 use proptest::{prop_assert_eq, proptest};
 
@@ -98,6 +100,44 @@ mod address_tests {
     fn decode_address(bytes: &[u8]) -> solana_address::Address {
         let mut decoder = minicbor::Decoder::new(bytes);
         cbor::address::decode(&mut decoder, &mut ()).unwrap()
+    }
+}
+
+mod ed25519_public_key_tests {
+    use super::*;
+    use ic_ed25519::PublicKey;
+
+    proptest! {
+        #[test]
+        fn ed25519_public_key_minicbor_roundtrip(public_key in arb_ed25519_public_key()) {
+            let encoded = encode_public_key(&public_key);
+            let decoded = decode_public_key(&encoded).unwrap();
+            prop_assert_eq!(public_key, decoded);
+        }
+    }
+
+    #[test]
+    fn should_reject_bytes_that_are_not_a_public_key() {
+        let mut encoded = Vec::new();
+        minicbor::Encoder::new(&mut encoded)
+            .bytes(&[0xFF; 31])
+            .unwrap();
+
+        let decoded = decode_public_key(&encoded);
+
+        assert!(decoded.is_err());
+    }
+
+    fn encode_public_key(public_key: &PublicKey) -> Vec<u8> {
+        let mut buf = Vec::new();
+        let mut encoder = minicbor::Encoder::new(&mut buf);
+        cbor::ed25519_public_key::encode(public_key, &mut encoder, &mut ()).unwrap();
+        buf
+    }
+
+    fn decode_public_key(bytes: &[u8]) -> Result<PublicKey, minicbor::decode::Error> {
+        let mut decoder = minicbor::Decoder::new(bytes);
+        cbor::ed25519_public_key::decode(&mut decoder, &mut ())
     }
 }
 
