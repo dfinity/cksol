@@ -13,6 +13,7 @@ use canlog::log;
 use cksol_types::{DepositSolId, Memo, MintMemo};
 use cksol_types_internal::log::Priority;
 use icrc_ledger_types::icrc1::transfer::{NumTokens, TransferArg, TransferError};
+use scopeguard::ScopeGuard;
 use std::time::Duration;
 
 #[cfg(test)]
@@ -80,6 +81,10 @@ async fn process_pending_mint<R: CanisterRuntime>(
         return;
     }
 
+    let quarantine_unless_defused = scopeguard::guard(deposit_id, |deposit_id| {
+        record_quarantined_pending_mint(runtime, deposit_id);
+    });
+
     let client = read_state(|state| state.ledger_client(runtime.inter_canister_call_runtime()));
     match client
         .transfer(mint_transfer_arg(deposit_id, &pending))
@@ -93,6 +98,7 @@ async fn process_pending_mint<R: CanisterRuntime>(
                 pending.amount_to_mint,
                 mint_block_index.get()
             );
+            ScopeGuard::into_inner(quarantine_unless_defused);
         }
         Ok(Err(TransferError::Duplicate { duplicate_of })) => {
             let mint_block_index = to_ledger_mint_index(duplicate_of);
@@ -102,13 +108,13 @@ async fn process_pending_mint<R: CanisterRuntime>(
                 "Mint of deposit {deposit_id} was deduplicated by the ledger (ledger block index {})",
                 mint_block_index.get()
             );
+            ScopeGuard::into_inner(quarantine_unless_defused);
         }
         Ok(Err(TransferError::TooOld)) => {
             log!(
                 Priority::Error,
                 "Quarantining deposit {deposit_id}: the ledger rejected its mint as outside the deduplication window"
             );
-            record_quarantined_pending_mint(runtime, deposit_id);
         }
         Ok(Err(
             rejection @ (TransferError::BadFee { .. }
@@ -119,19 +125,20 @@ async fn process_pending_mint<R: CanisterRuntime>(
                 Priority::Error,
                 "Quarantining deposit {deposit_id}: the ledger definitively rejected its mint from the minting account: {rejection:?}"
             );
-            record_quarantined_pending_mint(runtime, deposit_id);
         }
         Ok(Err(
             transient @ (TransferError::TemporarilyUnavailable
             | TransferError::GenericError { .. }
             | TransferError::CreatedInFuture { .. }),
         )) => {
+            ScopeGuard::into_inner(quarantine_unless_defused);
             log!(
                 Priority::Info,
                 "Failed to mint deposit {deposit_id}, retrying on the next round: {transient:?}"
             );
         }
         Err(ic_error) => {
+            ScopeGuard::into_inner(quarantine_unless_defused);
             log!(
                 Priority::Info,
                 "Failed to mint deposit {deposit_id}, retrying on the next round: {ic_error}"
