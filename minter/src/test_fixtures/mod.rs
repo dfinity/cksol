@@ -16,7 +16,7 @@ use cksol_types_internal::{Ed25519KeyName, InitArgs, SolanaNetwork};
 use ic_cdk_management_canister::SchnorrPublicKeyResult;
 use ic_ed25519::{PocketIcMasterPublicKeyId, PublicKey};
 use icrc_ledger_types::icrc1::account::Account;
-use sol_rpc_types::Lamport;
+use sol_rpc_types::{Lamport, MultiRpcResult};
 use solana_address::{Address, address};
 use solana_transaction::versioned::TransactionVersion;
 use solana_transaction_status_client_types::{
@@ -31,6 +31,9 @@ pub mod signer;
 mod stubs;
 #[cfg(test)]
 mod tests;
+
+pub type GetTransactionResult =
+    MultiRpcResult<Option<sol_rpc_types::EncodedConfirmedTransactionWithStatusMeta>>;
 
 pub const BLOCK_INDEX: u64 = 98763_u64;
 pub const MANUAL_DEPOSIT_FEE: Lamport = 10_000; // 0.00001 SOL
@@ -237,19 +240,247 @@ pub fn minter_signature_nth(occurrence: usize) -> solana_signature::Signature {
     signer::derivation_path_signature(&MINTER_DERIVATION_PATH, occurrence)
 }
 
+/// A sweep of four deposits that the minter submitted on devnet as transaction
+/// `59vLxkN5YGgBrHGTQMCrntNi7CrAxfkQxYek2v3hUgKfujgGtfkSDZZmFyVw6S59uTH2FEwWcvntPiEkdN5Ep5W2`,
+/// with the `getTransaction` response the minter settles it against, and ways to deviate
+/// from that response.
+pub mod devnet_sweep {
+    use super::account;
+    use crate::state::{DepositBalance, QueuedDeposit, Sweep, event::CreditedDeposit};
+    use base64::{Engine, engine::general_purpose::STANDARD};
+    use cksol_types::DepositSolId;
+    use serde_json::json;
+    use sol_rpc_types::Lamport;
+    use solana_address::{Address, address};
+    use solana_message::Message;
+    use solana_transaction::{Transaction, versioned::VersionedTransaction};
+    use solana_transaction_status_client_types::{
+        EncodedConfirmedTransactionWithStatusMeta, EncodedTransaction, TransactionBinaryEncoding,
+        UiTransactionError, UiTransactionStatusMeta,
+    };
+
+    pub const MINTER_ADDRESS: Address = address!("5yazYQT1Kwm3jEjMp58J5329gzbxA232fnPajemCeKbL");
+
+    /// Caches the devnet master public key, whose main address is [`MINTER_ADDRESS`],
+    /// so that a sweep submitted to the state plans toward the devnet destination.
+    pub fn init_master_key() {
+        let public_key = ic_ed25519::PublicKey::deserialize_raw(MINTER_ADDRESS.as_ref())
+            .expect("BUG: the devnet minter address is a valid Ed25519 public key");
+        crate::state::mutate_state(|s| {
+            s.cache_minter_public_key(crate::state::SchnorrPublicKey {
+                public_key,
+                chain_code: [0; 32],
+            })
+        });
+    }
+    pub const FEE: Lamport = 20_000;
+    pub const AMOUNT_RECEIVED: Lamport = 2_396_416_480;
+    /// The deposit addresses with their balances when queued, the fee payer first.
+    pub const DEPOSITS: [(Address, Lamport); 4] = [
+        (
+            address!("FkEEvAwZNvSziMAkmt13z2L9Loy4MjJE2qDbRserzt5Z"),
+            1_300_000_000,
+        ),
+        (
+            address!("5tEJDWwGGG54bv2xzrphSieXSAYjLkxzdMEPGe53JaTj"),
+            600_000_000,
+        ),
+        (
+            address!("6rXWHNpqRuNuGdUvJbRdV9wgRRggBVSEeCsnqJYDh7K9"),
+            300_000_000,
+        ),
+        (
+            address!("AwgbdmwCfwc6qaZAVH2K5juuP7HL21kotkVreWym6Eq4"),
+            200_000_000,
+        ),
+    ];
+    /// The sweepable amount of each deposit minus its share of the fee.
+    pub const AMOUNTS_TO_MINT: [Lamport; 4] =
+        [1_299_104_120, 599_104_120, 299_104_120, 199_104_120];
+
+    /// The deposits of the sweep under the ids `0..`, owned by the accounts `1..`.
+    pub fn deposits() -> Vec<(DepositSolId, QueuedDeposit)> {
+        DEPOSITS
+            .into_iter()
+            .enumerate()
+            .map(|(index, (address, balance))| {
+                (
+                    index as DepositSolId,
+                    QueuedDeposit {
+                        account: account(index + 1),
+                        address,
+                        balance: DepositBalance::new(balance)
+                            .expect("BUG: the balance covers the rent exemption threshold"),
+                    },
+                )
+            })
+            .collect()
+    }
+
+    pub fn sweep() -> Sweep {
+        Sweep::plan(deposits(), MINTER_ADDRESS)
+    }
+
+    pub fn mints() -> Vec<CreditedDeposit> {
+        AMOUNTS_TO_MINT
+            .into_iter()
+            .enumerate()
+            .map(|(index, amount_to_mint)| CreditedDeposit {
+                deposit_id: index as DepositSolId,
+                amount_to_mint,
+            })
+            .collect()
+    }
+
+    pub fn outcome() -> EncodedConfirmedTransactionWithStatusMeta {
+        serde_json::from_value(json!({
+          "blockTime": 1790862585u64,
+          "meta": {
+            "computeUnitsConsumed": 600,
+            "costUnits": 5000,
+            "err": null,
+            "fee": 20000,
+            "innerInstructions": [],
+            "loadedAddresses": {
+              "readonly": [],
+              "writable": []
+            },
+            "logMessages": [
+              "Program 11111111111111111111111111111111 invoke [1]",
+              "Program 11111111111111111111111111111111 success",
+              "Program 11111111111111111111111111111111 invoke [1]",
+              "Program 11111111111111111111111111111111 success",
+              "Program 11111111111111111111111111111111 invoke [1]",
+              "Program 11111111111111111111111111111111 success",
+              "Program 11111111111111111111111111111111 invoke [1]",
+              "Program 11111111111111111111111111111111 success"
+            ],
+            "postBalances": [
+              890880u64,
+              890880u64,
+              890880u64,
+              890880u64,
+              2396416480u64,
+              1u64
+            ],
+            "postTokenBalances": [],
+            "preBalances": [
+              1300000000u64,
+              600000000u64,
+              300000000u64,
+              200000000u64,
+              0u64,
+              1u64
+            ],
+            "preTokenBalances": [],
+            "rewards": [],
+            "status": {
+              "Ok": null
+            }
+          },
+          "slot": 506293219u64,
+          "transaction": [
+            "BM/CkSfTLKj3DZWIrizfXnF5M3TkH8RSgdpeALtgF5kmrNP8FVTpK7Uf75LMGvYrva7zdm5QGoyS2Ueu/BiZ5wvlpcLP4yd/Dq2R6/jnNyCzL3z2+K8WjFpXVEQmm0Mmpg0w20rlMMTRkeuTGNDEKkHu6wGivLwDOGlmEFlFKHEC01HYieqayyULa8H7zVMIxZ2tQgsSf/ZVEuK4Z+G3XaJ6DyhniFeZX3Z/sWLFiCnVBICA6yx3wueXGPbKuXSLC63gH2PkNasWcMp9T9PfKEraBwgu/eQDV1XAd+IzOmzgBbcpLjfsPt9O75qIwG2r0murfk/UMKATNvuQTQC8XgYEAAEG2xaP7ReiK7O/RyEMJK1y9oOUrRiIYixAgLbM81sLmMxIjmdbL31Vgaf52SlZWAP86sW6R0T6zA2hJjN7zYaxulb6YuCssGYBUTmCdb/38AL/yA3X2RJ8oD8BfyVye+uUk7tRk1tfdTVCsZXY9DqmOyL02mxVyqvO8TNExRK7+P9J7bU/SB+jWFVOOkEkrbUMHK3C368iWfar8UzS8WpUhwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAE0o5/SLfZEhVop1j2SvWQVHZzfaoABQ2jhOLKuv+goIEBQIABAwCAAAA4IZuTQAAAAAFAgEEDAIAAAAArrUjAAAAAAUCAgQMAgAAAAAL1BEAAAAABQIDBAwCAAAAACreCwAAAAA=",
+            "base64"
+          ],
+          "transactionIndex": 9,
+          "version": "legacy"
+        }))
+        .expect("BUG: the getTransaction result should deserialize")
+    }
+
+    pub fn meta(
+        outcome: &mut EncodedConfirmedTransactionWithStatusMeta,
+    ) -> &mut UiTransactionStatusMeta {
+        outcome
+            .transaction
+            .meta
+            .as_mut()
+            .expect("BUG: the devnet response has a meta field")
+    }
+
+    pub fn balances(
+        outcome: &EncodedConfirmedTransactionWithStatusMeta,
+        address: Address,
+    ) -> (Lamport, Lamport) {
+        let index = account_index(outcome, address);
+        let meta = outcome
+            .transaction
+            .meta
+            .as_ref()
+            .expect("BUG: the devnet response has a meta field");
+        (meta.pre_balances[index], meta.post_balances[index])
+    }
+
+    pub fn set_balances(
+        outcome: &mut EncodedConfirmedTransactionWithStatusMeta,
+        address: Address,
+        pre: Lamport,
+        post: Lamport,
+    ) {
+        let index = account_index(outcome, address);
+        let meta = meta(outcome);
+        meta.pre_balances[index] = pre;
+        meta.post_balances[index] = post;
+    }
+
+    pub fn set_error(
+        outcome: &mut EncodedConfirmedTransactionWithStatusMeta,
+        error: UiTransactionError,
+    ) {
+        let meta = meta(outcome);
+        meta.err = Some(error.clone());
+        meta.status = Err(error);
+    }
+
+    pub fn set_message(outcome: &mut EncodedConfirmedTransactionWithStatusMeta, message: Message) {
+        let transaction = VersionedTransaction::from(Transaction::new_unsigned(message));
+        let encoded = STANDARD.encode(
+            bincode::serialize(&transaction)
+                .expect("BUG: serializing the transaction should succeed"),
+        );
+        outcome.transaction.transaction =
+            EncodedTransaction::Binary(encoded, TransactionBinaryEncoding::Base64);
+    }
+
+    pub fn corrupt_transaction(outcome: &mut EncodedConfirmedTransactionWithStatusMeta) {
+        match &mut outcome.transaction.transaction {
+            EncodedTransaction::Binary(blob, _) => blob.push('!'),
+            other => panic!("BUG: expected a binary transaction, got {other:?}"),
+        }
+    }
+
+    fn account_index(
+        outcome: &EncodedConfirmedTransactionWithStatusMeta,
+        address: Address,
+    ) -> usize {
+        outcome
+            .transaction
+            .transaction
+            .decode()
+            .expect("BUG: the transaction should decode")
+            .message
+            .static_account_keys()
+            .iter()
+            .position(|key| *key == address)
+            .unwrap_or_else(|| panic!("BUG: {address} is not an account of the transaction"))
+    }
+}
+
 /// Helpers for constructing state transitions via [`process_event`] in tests.
 ///
 /// All helpers operate on the global thread-local state via [`mutate_state`].
 pub mod events {
     use super::{
-        DEFAULT_BLOCK_HEIGHT, MANUAL_DEPOSIT_FEE, WITHDRAWAL_FEE, queued_deposit_of,
-        runtime::TestCanisterRuntime, sweep_message,
+        DEFAULT_BLOCK_HEIGHT, MANUAL_DEPOSIT_FEE, MINTER_ADDRESS, WITHDRAWAL_FEE, queued_deposit,
+        queued_deposit_of, runtime::TestCanisterRuntime,
     };
     use crate::deposit::sweep::deposit_status;
     use crate::{
         numeric::{LedgerBurnIndex, LedgerMintIndex},
         rpc::BlockHeight,
         state::{
+            QueuedDeposit, Sweep,
             audit::process_event,
             event::{DepositId, EventType, Signer, TransactionPurpose, WithdrawalRequest},
             mutate_state, read_state,
@@ -258,6 +489,7 @@ pub mod events {
     use cksol_types::{DepositSolId, DepositSolStatus};
     use icrc_ledger_types::icrc1::account::Account;
     use sol_rpc_types::Lamport;
+    use solana_address::Address;
     use solana_signature::Signature;
 
     fn message() -> solana_message::Message {
@@ -343,14 +575,27 @@ pub mod events {
         account: Account,
         sweepable_amount: Lamport,
     ) -> DepositSolStatus {
+        queue(deposit_id, queued_deposit_of(account, sweepable_amount))
+    }
+
+    /// Queues `N` distinct deposits under the ids `0..N` and returns them in that order.
+    pub fn queue_deposits<const N: usize>() -> [QueuedDeposit; N] {
+        std::array::from_fn(|index| {
+            let deposit = queued_deposit(index as DepositSolId);
+            queue(index as DepositSolId, deposit);
+            deposit
+        })
+    }
+
+    pub fn queue(deposit_id: DepositSolId, deposit: QueuedDeposit) -> DepositSolStatus {
         mutate_state(|state| {
             process_event(
                 state,
                 EventType::QueuedDeposit {
                     deposit_id,
-                    account,
-                    address: queued_deposit_of(account, sweepable_amount).address,
-                    balance: queued_deposit_of(account, sweepable_amount).balance,
+                    account: deposit.account,
+                    address: deposit.address,
+                    balance: deposit.balance,
                 },
                 &runtime(),
             )
@@ -358,8 +603,17 @@ pub mod events {
         deposit_status(deposit_id)
     }
 
-    /// Submits a sweep of the given queued deposits, signed by their accounts in the given order.
+    /// Submits a sweep of the given queued deposits to [`MINTER_ADDRESS`], signed by their
+    /// accounts in the given order.
     pub fn submit_sweep(signature: Signature, deposit_ids: Vec<DepositSolId>) {
+        submit_sweep_to(signature, deposit_ids, MINTER_ADDRESS)
+    }
+
+    pub fn submit_sweep_to(
+        signature: Signature,
+        deposit_ids: Vec<DepositSolId>,
+        minter_address: Address,
+    ) {
         let deposits: Vec<_> = read_state(|state| {
             deposit_ids
                 .iter()
@@ -378,10 +632,34 @@ pub mod events {
                 state,
                 EventType::SubmittedTransaction {
                     signature,
-                    message: sweep_message(deposits),
+                    message: Sweep::plan(deposits, minter_address)
+                        .sweep_message(solana_hash::Hash::default())
+                        .into(),
                     signers,
                     purpose: TransactionPurpose::SweepDeposits { deposit_ids },
                     block_height: DEFAULT_BLOCK_HEIGHT,
+                },
+                &runtime(),
+            )
+        });
+    }
+
+    pub fn credit_sweep(signature: Signature, amount_received: Lamport) {
+        let mints = read_state(|state| {
+            state
+                .deposits()
+                .finalized()
+                .get(&signature)
+                .expect("BUG: no finalized sweep with the given signature")
+                .mints()
+        });
+        mutate_state(|state| {
+            process_event(
+                state,
+                EventType::CreditedSweep {
+                    signature,
+                    amount_received,
+                    mints,
                 },
                 &runtime(),
             )
@@ -496,7 +774,10 @@ pub mod arb {
         sol_transfer::MAX_SIGNATURES,
         state::{
             DepositBalance, QueuedDeposit,
-            event::{DepositId, Event, EventType, Signer, TransactionPurpose, WithdrawalRequest},
+            event::{
+                CreditedDeposit, DepositId, Event, EventType, Signer, TransactionPurpose,
+                WithdrawalRequest,
+            },
         },
     };
     use candid::Principal;
@@ -810,6 +1091,18 @@ pub mod arb {
                         balance,
                     }
                 },),
+            (
+                arb_signature(),
+                any::<u64>(),
+                prop::collection::vec(arb_credited_deposit(), 0..10)
+            )
+                .prop_map(|(signature, amount_received, mints)| {
+                    EventType::CreditedSweep {
+                        signature,
+                        amount_received,
+                        mints,
+                    }
+                }),
             (arb_ed25519_public_key(), any::<[u8; 32]>()).prop_map(|(public_key, chain_code)| {
                 EventType::MinterPublicKeyFetched {
                     public_key,
@@ -817,6 +1110,13 @@ pub mod arb {
                 }
             }),
         ]
+    }
+
+    fn arb_credited_deposit() -> impl Strategy<Value = CreditedDeposit> {
+        (any::<u64>(), any::<u64>()).prop_map(|(deposit_id, amount_to_mint)| CreditedDeposit {
+            deposit_id,
+            amount_to_mint,
+        })
     }
 
     pub fn arb_event() -> impl Strategy<Value = Event> {

@@ -158,15 +158,39 @@ pub enum EventType {
         #[cbor(n(3), with = "cbor::deposit_balance")]
         balance: DepositBalance,
     },
+    /// The minter read the amount that the finalized sweep transaction moved to its
+    /// main account and enqueued a pending mint for each deposit of that sweep.
+    #[n(12)]
+    CreditedSweep {
+        /// The signature of the finalized sweep transaction.
+        #[cbor(n(0), with = "cbor::signature")]
+        signature: Signature,
+        /// The increase of the main account balance reported by the transaction metadata.
+        #[n(1)]
+        amount_received: Lamport,
+        /// The mint enqueued for each deposit of the sweep.
+        #[n(2)]
+        mints: Vec<CreditedDeposit>,
+    },
     /// The minter fetched its Schnorr Ed25519 master public key, from which
     /// its main address and all deposit addresses are derived.
-    #[n(12)]
+    #[n(13)]
     MinterPublicKeyFetched {
         #[cbor(n(0), with = "cbor::ed25519_public_key")]
         public_key: PublicKey,
         #[cbor(n(1), with = "minicbor::bytes")]
         chain_code: [u8; 32],
     },
+}
+
+/// The mint enqueued for one deposit of a `CreditedSweep` event.
+#[derive(Clone, Copy, Eq, PartialEq, Debug, Decode, Encode)]
+pub struct CreditedDeposit {
+    #[n(0)]
+    pub deposit_id: DepositSolId,
+    /// The sweepable amount minus the deposit's share of the transaction fee of the sweep.
+    #[n(1)]
+    pub amount_to_mint: Lamport,
 }
 
 /// Payload of the `AcceptedWithdrawalRequest` event.

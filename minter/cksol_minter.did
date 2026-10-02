@@ -142,8 +142,8 @@ type DepositSolId = nat64;
 
 // The status of a deposit queued by the `deposit_sol` endpoint.
 //
-// Further variants (`Finalized`, `Minted`, `Dropped`, `Quarantined`)
-// will follow as the sweep flow is implemented.
+// Further variants (`Minted`, `Dropped`, `Quarantined`) will follow as the
+// sweep flow is implemented.
 type DepositSolStatus = variant {
     // No deposit with this identifier was queued.
     NotFound;
@@ -155,6 +155,12 @@ type DepositSolStatus = variant {
     // A Solana transaction sweeping the deposit address to the minter's main
     // account has been submitted but is not yet finalized.
     Swept : record {
+        // The signature of the sweep transaction.
+        signature: Signature;
+    };
+    // The sweep transaction was finalized successfully, so the deposited SOL
+    // reached the minter's main account, but the ckSOL mint has not landed yet.
+    Finalized : record {
         // The signature of the sweep transaction.
         signature: Signature;
     };
@@ -321,6 +327,17 @@ type WithdrawalStatus = variant {
     TxFinalized : TxFinalizedStatus;
 };
 
+// The mint enqueued for one deposit of a `CreditedSweep` event.
+//
+// *WARNING*: This type is used exclusively by the debug `get_events` endpoint.
+// Backwards-compatibility is not guaranteed.
+type CreditedDeposit = record {
+    // The identifier of the deposit.
+    deposit_id: DepositSolId;
+    // The sweepable amount minus the deposit's share of the transaction fee of the sweep.
+    amount_to_mint: Lamport;
+};
+
 // Event payload for an accepted ckSOL-to-Solana withdrawal request.
 //
 // *WARNING*: This type is used exclusively by the debug `get_events` endpoint.
@@ -482,6 +499,16 @@ type EventType = variant {
         address: Address;
         // The balance of the deposit address when the deposit was queued.
         balance: Lamport;
+    };
+    // The minter read the amount that the finalized sweep transaction moved to
+    // its main account and enqueued a pending mint for each deposit of that sweep.
+    CreditedSweep : record {
+        // The signature of the finalized sweep transaction.
+        signature: Signature;
+        // The increase of the main account balance reported by the transaction metadata.
+        amount_received: Lamport;
+        // The mint enqueued for each deposit of the sweep, by increasing deposit id.
+        mints: vec CreditedDeposit;
     };
     // The minter fetched its Schnorr Ed25519 master public key, from which
     // its main address and all deposit addresses are derived.

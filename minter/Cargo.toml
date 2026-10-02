@@ -56,9 +56,11 @@ solana-transaction-status-client-types = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
+base64 = { workspace = true }
 candid_parser = { workspace = true }
 mockall = { workspace = true }
 proptest = { workspace = true }
 scraper = { workspace = true }
+serde_json = { workspace = true }
 sha2 = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
