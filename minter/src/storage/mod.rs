@@ -6,7 +6,7 @@ use ic_stable_structures::{
     DefaultMemoryImpl, StableLog,
     memory_manager::{MemoryId, MemoryManager, VirtualMemory},
 };
-use std::cell::RefCell;
+use std::{cell::RefCell, collections::BTreeMap};
 
 const EVENT_LOG_INDEX_MEMORY_ID: MemoryId = MemoryId::new(0);
 const EVENT_LOG_DATA_MEMORY_ID: MemoryId = MemoryId::new(1);
@@ -36,14 +36,51 @@ thread_local! {
 #[derive(Default)]
 pub(crate) struct Metrics {
     pub post_upgrade_instructions_consumed: u64,
+    pub failed_credit_attempts: BTreeMap<FailedCreditReason, u64>,
 }
 
 impl Metrics {
     const fn new() -> Self {
         Self {
             post_upgrade_instructions_consumed: 0,
+            failed_credit_attempts: BTreeMap::new(),
         }
     }
+}
+
+/// Why an attempt to credit the deposits of a finalized sweep failed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum FailedCreditReason {
+    NotFound,
+    RpcError,
+    Unreadable,
+    Mismatch,
+}
+
+impl FailedCreditReason {
+    pub const ALL: [Self; 4] = [
+        Self::NotFound,
+        Self::RpcError,
+        Self::Unreadable,
+        Self::Mismatch,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::NotFound => "not_found",
+            Self::RpcError => "rpc_error",
+            Self::Unreadable => "unreadable",
+            Self::Mismatch => "mismatch",
+        }
+    }
+}
+
+pub(crate) fn record_failed_credit_attempt(reason: FailedCreditReason) {
+    with_unstable_metrics_mut(|m| *m.failed_credit_attempts.entry(reason).or_insert(0) += 1);
+}
+
+pub(crate) fn failed_credit_attempt_count(reason: FailedCreditReason) -> u64 {
+    with_unstable_metrics(|m| m.failed_credit_attempts.get(&reason).copied().unwrap_or(0))
 }
 
 /// Appends the event to the event log.

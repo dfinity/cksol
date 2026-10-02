@@ -3,7 +3,7 @@ use crate::{
     constants::MAX_CONCURRENT_RPC_CALLS,
     deposit::sweep::deposit_status,
     state::{event::EventType, read_state, reset_state},
-    storage::reset_events,
+    storage::{FailedCreditReason, failed_credit_attempt_count, reset_events},
     test_fixtures::{
         EventsAssert, GetTransactionResult, account, devnet_sweep,
         events::{queue, queue_deposit, submit_sweep, submit_sweep_to, succeed_transaction},
@@ -104,31 +104,46 @@ async fn should_credit_the_amount_received_by_the_main_account() {
             devnet_sweep::DEPOSITS.len()
         );
     });
+    for reason in FailedCreditReason::ALL {
+        assert_eq!(failed_credit_attempt_count(reason), 0, "{reason:?}");
+    }
 }
 
 #[tokio::test]
 async fn should_keep_deposits_finalized_when_the_outcome_cannot_be_settled() {
     type Response = fn() -> GetTransactionResult;
-    let cases: [(&str, Response); 4] = [
-        ("the transaction is not returned", || {
-            GetTransactionResult::Consistent(Ok(None))
-        }),
-        ("fetching the transaction fails", || {
-            GetTransactionResult::Inconsistent(vec![])
-        }),
-        ("the metadata cannot be read", || {
-            let mut outcome = devnet_sweep::outcome();
-            outcome.transaction.meta = None;
-            transaction_response(outcome)
-        }),
-        ("the outcome does not match the plan", || {
-            let mut outcome = devnet_sweep::outcome();
-            devnet_sweep::set_balances(&mut outcome, devnet_sweep::MINTER_ADDRESS, 1, 0);
-            transaction_response(outcome)
-        }),
+    let cases: [(&str, Response, FailedCreditReason); 4] = [
+        (
+            "the transaction is not returned",
+            || GetTransactionResult::Consistent(Ok(None)),
+            FailedCreditReason::NotFound,
+        ),
+        (
+            "fetching the transaction fails",
+            || GetTransactionResult::Inconsistent(vec![]),
+            FailedCreditReason::RpcError,
+        ),
+        (
+            "the metadata cannot be read",
+            || {
+                let mut outcome = devnet_sweep::outcome();
+                outcome.transaction.meta = None;
+                transaction_response(outcome)
+            },
+            FailedCreditReason::Unreadable,
+        ),
+        (
+            "the outcome does not match the plan",
+            || {
+                let mut outcome = devnet_sweep::outcome();
+                devnet_sweep::set_balances(&mut outcome, devnet_sweep::MINTER_ADDRESS, 1, 0);
+                transaction_response(outcome)
+            },
+            FailedCreditReason::Mismatch,
+        ),
     ];
 
-    for (name, response) in cases {
+    for (name, response, expected_reason) in cases {
         setup();
         let sweep_signature = finalize_devnet_sweep();
         let events_before = EventsAssert::from_recorded();
@@ -154,6 +169,7 @@ async fn should_keep_deposits_finalized_when_the_outcome_cannot_be_settled() {
             },
             "{name}"
         );
+        assert_eq!(failed_credit_attempt_count(expected_reason), 1, "{name}");
     }
 }
 
