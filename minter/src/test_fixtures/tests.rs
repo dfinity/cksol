@@ -236,3 +236,89 @@ async fn should_panic_when_a_given_sequence_is_not_exhausted() {
 
     assert_eq!(sign(&signer, &account(1)).await, signature(0xAA));
 }
+
+mod inter_canister_calls {
+    use crate::{
+        runtime::CanisterRuntime,
+        test_fixtures::{ledger_canister_id, runtime::TestCanisterRuntime},
+    };
+    use candid::Nat;
+    use ic_canister_runtime::{IcError, Runtime};
+    use icrc_ledger_types::{
+        icrc1::{account::Account, transfer::BlockIndex},
+        icrc2::transfer_from::{TransferFromArgs, TransferFromError},
+    };
+    use sol_rpc_types::MultiRpcResult;
+
+    type TransferFromResult = Result<BlockIndex, TransferFromError>;
+
+    #[tokio::test]
+    async fn should_answer_the_call_matching_an_expectation() {
+        let runtime = TestCanisterRuntime::new()
+            .expect_icrc2_transfer_from(transfer_from_args(7), Ok(BlockIndex::from(42_u64)));
+
+        let response: TransferFromResult = transfer_from(&runtime, transfer_from_args(7))
+            .await
+            .expect("the call should be answered");
+
+        assert_eq!(response, Ok(BlockIndex::from(42_u64)));
+    }
+
+    #[tokio::test]
+    async fn should_fail_the_call_with_the_expected_error() {
+        let runtime = TestCanisterRuntime::new()
+            .expect_icrc2_transfer_from(transfer_from_args(7), IcError::CallPerformFailed);
+
+        let response = transfer_from(&runtime, transfer_from_args(7)).await;
+
+        assert_eq!(response, Err(IcError::CallPerformFailed));
+    }
+
+    #[tokio::test]
+    #[should_panic(expected = "No matching expectation found")]
+    async fn should_panic_on_a_call_without_a_matching_expectation() {
+        let runtime = TestCanisterRuntime::new();
+
+        let _ = transfer_from(&runtime, transfer_from_args(7)).await;
+    }
+
+    #[tokio::test]
+    #[should_panic(expected = "No matching expectation found")]
+    async fn should_panic_on_a_call_with_unexpected_arguments() {
+        let runtime = TestCanisterRuntime::new()
+            .expect_icrc2_transfer_from(transfer_from_args(7), Ok(BlockIndex::from(42_u64)));
+
+        let _ = transfer_from(&runtime, transfer_from_args(8)).await;
+    }
+
+    #[test]
+    #[should_panic(expected = "fewer than expected")]
+    fn should_panic_on_an_expectation_that_is_never_called() {
+        let runtime =
+            TestCanisterRuntime::new().expect_get_slot(MultiRpcResult::Consistent(Ok(42)));
+
+        drop(runtime);
+    }
+
+    async fn transfer_from(
+        runtime: &TestCanisterRuntime,
+        args: TransferFromArgs,
+    ) -> Result<TransferFromResult, IcError> {
+        runtime
+            .inter_canister_call_runtime()
+            .update_call(ledger_canister_id(), "icrc2_transfer_from", (args,), 0)
+            .await
+    }
+
+    fn transfer_from_args(amount: u64) -> TransferFromArgs {
+        TransferFromArgs {
+            spender_subaccount: None,
+            from: Account::from(candid::Principal::from_slice(&[1])),
+            to: Account::from(candid::Principal::from_slice(&[2])),
+            fee: None,
+            created_at_time: None,
+            memo: None,
+            amount: Nat::from(amount),
+        }
+    }
+}
