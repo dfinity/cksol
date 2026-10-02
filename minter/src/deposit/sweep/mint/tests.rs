@@ -379,7 +379,7 @@ fn expected_transfer_arg(sweep_signature: Signature) -> TransferArg {
         to: account(1),
         fee: None,
         created_at_time: Some(CREDITED_AT_TIME),
-        memo: Some(Memo::from(MintMemo::convert(sweep_signature)).into()),
+        memo: Some(Memo::from(MintMemo::sweep(sweep_signature, 0)).into()),
         amount: NumTokens::from(MINTED_AMOUNT),
     }
 }

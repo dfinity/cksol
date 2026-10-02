@@ -81,7 +81,10 @@ async fn process_pending_mint<R: CanisterRuntime>(
     }
 
     let client = read_state(|state| state.ledger_client(runtime.inter_canister_call_runtime()));
-    match client.transfer(mint_transfer_arg(&pending)).await {
+    match client
+        .transfer(mint_transfer_arg(deposit_id, &pending))
+        .await
+    {
         Ok(Ok(mint_block_index)) => {
             record_minted_swept_deposit(runtime, deposit_id, mint_block_index);
             log!(
@@ -142,13 +145,13 @@ fn is_beyond_deduplication_window(pending: &PendingMint, now: u64) -> bool {
     age > LEDGER_DEDUPLICATION_WINDOW
 }
 
-fn mint_transfer_arg(pending: &PendingMint) -> TransferArg {
+fn mint_transfer_arg(deposit_id: DepositSolId, pending: &PendingMint) -> TransferArg {
     TransferArg {
         from_subaccount: None,
         to: pending.account(),
         fee: None,
         created_at_time: Some(pending.created_at_time),
-        memo: Some(Memo::from(MintMemo::convert(pending.sweep_signature())).into()),
+        memo: Some(Memo::from(MintMemo::sweep(pending.sweep_signature(), deposit_id)).into()),
         amount: NumTokens::from(pending.amount_to_mint),
     }
 }

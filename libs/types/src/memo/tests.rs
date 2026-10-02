@@ -1,5 +1,5 @@
 use crate::{
-    BurnMemo,
+    BurnMemo, DepositSolId,
     memo::{MAX_SERIALIZED_MEMO_BYTES, Memo as CkSolMinterMemo, MintMemo},
 };
 use icrc_ledger_types::icrc1::transfer::Memo as Icrc1Memo;
@@ -22,9 +22,17 @@ fn arb_memo() -> impl Strategy<Value = CkSolMinterMemo> {
 }
 
 fn arb_mint_memo() -> impl Strategy<Value = MintMemo> {
-    arb_signature().prop_map(|signature| MintMemo::Convert {
-        signature: signature.into(),
-    })
+    prop_oneof![
+        arb_signature().prop_map(|signature| MintMemo::Convert {
+            signature: signature.into(),
+        }),
+        (arb_signature(), any::<DepositSolId>()).prop_map(|(signature, deposit_id)| {
+            MintMemo::Sweep {
+                signature: signature.into(),
+                deposit_id,
+            }
+        }),
+    ]
 }
 
 fn arb_signature() -> impl Strategy<Value = solana_signature::Signature> {
