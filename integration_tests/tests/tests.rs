@@ -1237,10 +1237,14 @@ mod deposit_sol_tests {
         assert_eq!(
             setup.minter().deposit_status(deposit_id).await,
             DepositSolStatus::Dropped {
-                signature: sweep_signature
+                signature: sweep_signature.clone()
             }
         );
         setup.minter().assert_that_events().await.satisfy(|events| {
+            check!(events.iter().any(|e| matches!(
+                e,
+                EventType::ExpiredTransaction { signature } if *signature == sweep_signature
+            )));
             check!(
                 !events
                     .iter()
