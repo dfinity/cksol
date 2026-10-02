@@ -170,9 +170,10 @@ type DepositSolStatus = variant {
         // The signature of the sweep transaction.
         signature: Signature;
     };
-    // The deposited SOL reached the minter's main account, but the minter could
-    // not determine how much was received, so no ckSOL was minted. The deposit
-    // is not processed further without manual intervention.
+    // The sweep transaction was finalized, but its outcome did not match the
+    // plan the minter submitted it with, so the amount to credit cannot be
+    // determined safely and no ckSOL was minted. The deposit is not processed
+    // further without manual intervention.
     Quarantined : record {
         // The signature of the sweep transaction.
         signature: Signature;
@@ -502,7 +503,8 @@ type EventType = variant {
     };
     // A previously submitted Solana transaction has an expired blockhash
     // and a null on-chain status, meaning it will never be executed.
-    // The transaction has been marked for resubmission.
+    // A withdrawal or consolidation transaction is marked for resubmission;
+    // the deposits of a sweep transaction are dropped instead.
     ExpiredTransaction : record {
         // The signature of the expired Solana transaction.
         signature: Signature;
@@ -528,9 +530,9 @@ type EventType = variant {
         // The mint enqueued for each deposit of the sweep, by increasing deposit id.
         mints: vec CreditedDeposit;
     };
-    // The deposits of a finalized sweep transaction reached the minter's main
-    // account, but the transaction metadata did not match the minter's model of
-    // the sweep, so the amount received cannot be credited.
+    // The outcome of a finalized sweep transaction did not match the plan the
+    // minter submitted it with, so the amount to credit cannot be determined
+    // safely.
     //
     // The deposits are quarantined to avoid any double minting and will not be
     // further processed without manual intervention.

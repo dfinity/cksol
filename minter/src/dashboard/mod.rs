@@ -38,6 +38,7 @@ pub(crate) const DEFAULT_PAGE_SIZE: usize = 100;
 
 #[derive(Default, Clone)]
 pub struct DashboardPaginationParameters {
+    pub quarantined_swept_deposits_start: usize,
     pub minted_deposits_start: usize,
     pub withdrawals_start: usize,
     pub consolidations_start: usize,
@@ -54,6 +55,7 @@ impl DashboardPaginationParameters {
         }
 
         Ok(Self {
+            quarantined_swept_deposits_start: parse(req, "quarantined_swept_deposits_start")?,
             minted_deposits_start: parse(req, "minted_deposits_start")?,
             withdrawals_start: parse(req, "withdrawals_start")?,
             consolidations_start: parse(req, "consolidations_start")?,
@@ -63,6 +65,10 @@ impl DashboardPaginationParameters {
     /// Returns a query string fragment with all pagination params except `exclude`.
     fn other_params(&self, exclude: &str) -> String {
         [
+            (
+                "quarantined_swept_deposits_start",
+                self.quarantined_swept_deposits_start,
+            ),
             ("minted_deposits_start", self.minted_deposits_start),
             ("withdrawals_start", self.withdrawals_start),
             ("consolidations_start", self.consolidations_start),
@@ -197,14 +203,14 @@ pub struct DashboardWithdrawal {
     pub status: &'static str,
 }
 
-/// A swept deposit that reached the minter's main account but could not be credited,
-/// shown so that an operator can resolve it manually.
+/// A deposit of a finalized sweep whose outcome did not match its plan, shown with the
+/// amount the sweep planned to move so that an operator can resolve it manually.
 #[derive(Clone)]
 pub struct DashboardQuarantinedDeposit {
     pub deposit_id: String,
     pub account: String,
     pub signature: String,
-    pub swept_amount: String,
+    pub planned_amount: String,
 }
 
 #[derive(Clone)]
@@ -232,7 +238,7 @@ pub struct DashboardTemplate {
     pub minimum_deposit_amount: String,
     pub minimum_withdrawal_amount: String,
     pub balance: String,
-    pub quarantined_swept_deposits: Vec<DashboardQuarantinedDeposit>,
+    pub quarantined_swept_deposits_table: DashboardPaginatedTable<DashboardQuarantinedDeposit>,
     pub deposits_table: DashboardPaginatedTable<DashboardDeposit>,
     pub consolidations_table: DashboardPaginatedTable<DashboardConsolidation>,
     pub withdrawals_table: DashboardPaginatedTable<DashboardWithdrawal>,
@@ -299,7 +305,7 @@ impl DashboardTemplate {
             );
         }
 
-        let quarantined_swept_deposits = state
+        let quarantined_swept_deposits: Vec<DashboardQuarantinedDeposit> = state
             .deposits()
             .quarantined()
             .iter()
@@ -308,9 +314,18 @@ impl DashboardTemplate {
                 deposit_id: deposit_id.to_string(),
                 account: quarantined.deposit.account.to_string(),
                 signature: quarantined.signature.to_string(),
-                swept_amount: lamports_to_sol(quarantined.deposit.sweepable_amount()),
+                planned_amount: lamports_to_sol(quarantined.deposit.sweepable_amount()),
             })
             .collect();
+        let quarantined_swept_deposits_table = DashboardPaginatedTable::from_items(
+            &quarantined_swept_deposits,
+            pagination.quarantined_swept_deposits_start,
+            DEFAULT_PAGE_SIZE,
+            4,
+            "quarantined-swept-deposits",
+            "quarantined_swept_deposits_start",
+            pagination.other_params("quarantined_swept_deposits_start"),
+        );
 
         let deposits_table = DashboardPaginatedTable::from_items(
             &deposits,
@@ -455,7 +470,7 @@ impl DashboardTemplate {
             minimum_deposit_amount: lamports_to_sol(state.minimum_deposit_amount()),
             minimum_withdrawal_amount: lamports_to_sol(state.minimum_withdrawal_amount()),
             balance: lamports_to_sol(state.balance()),
-            quarantined_swept_deposits,
+            quarantined_swept_deposits_table,
             deposits_table,
             consolidations_table,
             withdrawals_table,

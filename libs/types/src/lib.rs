@@ -153,9 +153,10 @@ pub enum DepositSolStatus {
         /// The signature of the sweep transaction.
         signature: Signature,
     },
-    /// The deposited SOL reached the minter's main account, but the minter could not
-    /// determine how much was received, so no ckSOL was minted. The deposit is not
-    /// processed further without manual intervention.
+    /// The sweep transaction was finalized, but its outcome did not match the plan the
+    /// minter submitted it with, so the amount to credit cannot be determined safely and
+    /// no ckSOL was minted. The deposit is not processed further without manual
+    /// intervention.
     Quarantined {
         /// The signature of the sweep transaction.
         signature: Signature,

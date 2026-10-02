@@ -262,6 +262,56 @@ fn should_paginate_minted_deposits_across_multiple_pages() {
     assert_eq!(page3.deposits_table.pagination.current_page_index, 3);
 }
 
+#[test]
+fn should_paginate_quarantined_swept_deposits_across_multiple_pages() {
+    use crate::dashboard::DEFAULT_PAGE_SIZE;
+
+    init_state();
+
+    let total_deposits = DEFAULT_PAGE_SIZE + 1;
+    for deposit_id in 0..total_deposits {
+        let sweep_signature = signature(deposit_id);
+        queue_deposit(deposit_id as u64, account(deposit_id), 400_000_000);
+        submit_sweep(sweep_signature, vec![deposit_id as u64]);
+        succeed_transaction(sweep_signature);
+        quarantine_sweep(sweep_signature);
+    }
+
+    let page1 = dashboard();
+    assert_eq!(
+        page1.quarantined_swept_deposits_table.current_page.len(),
+        DEFAULT_PAGE_SIZE
+    );
+    assert_eq!(
+        page1
+            .quarantined_swept_deposits_table
+            .pagination
+            .pages
+            .len(),
+        2
+    );
+    assert_eq!(
+        page1
+            .quarantined_swept_deposits_table
+            .pagination
+            .current_page_index,
+        1
+    );
+
+    let page2 = dashboard_with_pagination(DashboardPaginationParameters {
+        quarantined_swept_deposits_start: DEFAULT_PAGE_SIZE,
+        ..Default::default()
+    });
+    assert_eq!(page2.quarantined_swept_deposits_table.current_page.len(), 1);
+    assert_eq!(
+        page2
+            .quarantined_swept_deposits_table
+            .pagination
+            .current_page_index,
+        2
+    );
+}
+
 // --- Withdrawal table tests ---
 
 #[test]
