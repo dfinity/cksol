@@ -248,7 +248,8 @@ icp canister call -e prod cksol_minter withdrawal_status \
 
 Install [`mise`](https://mise.jdx.dev/) and then provision the pinned toolchain
 (Rust with the `wasm32-unknown-unknown` target, `cargo-sort`,
-[`ic-wasm`](https://github.com/dfinity/ic-wasm), `cargo-llvm-cov` and `jq`):
+[`ic-wasm`](https://github.com/dfinity/ic-wasm), `cargo-llvm-cov`, `cargo-mutants`
+and `jq`):
 
 ```sh
 mise install
@@ -325,6 +326,21 @@ cargo test -p cksol-int-tests --test solana_test_validator
 ```
 
 This writes `coverage/`, including a browsable report at `coverage/html/index.html`. CI runs the same script and publishes the summary and the report as a build artifact.
+
+**Mutation testing** — checks that the unit tests actually fail when the code under test is changed. A surviving ("missed") mutant marks behaviour that no test pins down:
+
+```sh
+cargo mutants
+```
+
+A full run covers around 465 mutants and takes a while, so pass `--in-diff` to check only your own changes:
+
+```sh
+git diff origin/main.. > mutants.diff
+cargo mutants --in-diff mutants.diff
+```
+
+CI runs the `--in-diff` form on every pull request. It reports surviving mutants without blocking the merge, and uploads `mutants.out` as a build artifact. What gets mutated is configured in [`.cargo/mutants.toml`](./.cargo/mutants.toml).
 
 <a id="related-projects"></a>
 ## 🔗 Related Projects
