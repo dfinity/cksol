@@ -167,7 +167,8 @@ fn setup() {
 }
 
 /// Queues the deposits of the devnet sweep before the devnet master key is recorded,
-/// as on a deployment whose deposits predate the key event, then submits and finalizes it.
+/// since their real addresses cannot be derived from the synthetic test accounts,
+/// then submits and finalizes it.
 fn finalize_devnet_sweep() -> Signature {
     let deposits = devnet_sweep::deposits();
     for (deposit_id, deposit) in &deposits {

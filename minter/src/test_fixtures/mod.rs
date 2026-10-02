@@ -277,8 +277,8 @@ pub mod devnet_sweep {
         }
     }
 
-    /// A deposit queued after the devnet sweep, with its address derived from the
-    /// devnet master key like every deposit queued while that key is recorded.
+    /// A deposit queued while the devnet master key is recorded, so its address
+    /// must be derived from that key.
     pub fn fresh_deposit(account: Account, sweepable_amount: Lamport) -> QueuedDeposit {
         QueuedDeposit {
             account,
