@@ -80,6 +80,13 @@ fn apply_state_transition(state: &mut State, payload: &EventType, timestamp: u64
         } => {
             state.process_queued_deposit(*deposit_id, account, address, *balance);
         }
+        EventType::CreditedSweep {
+            signature,
+            amount_received,
+            mints,
+        } => {
+            state.process_credited_sweep(signature, *amount_received, mints);
+        }
     }
 }
 

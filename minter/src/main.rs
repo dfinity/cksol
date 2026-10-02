@@ -234,6 +234,21 @@ fn get_events(
                 address: address.into(),
                 balance: balance.into(),
             },
+            EventType::CreditedSweep {
+                signature,
+                amount_received,
+                mints,
+            } => event::EventType::CreditedSweep {
+                signature: signature.into(),
+                amount_received,
+                mints: mints
+                    .into_iter()
+                    .map(|mint| event::CreditedDeposit {
+                        deposit_id: mint.deposit_id,
+                        amount_to_mint: mint.amount_to_mint,
+                    })
+                    .collect(),
+            },
         }
     }
 
