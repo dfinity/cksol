@@ -3,6 +3,8 @@ use crate::{
     runtime::CanisterRuntime,
     state::{SchnorrPublicKey, audit::process_event, event::EventType, mutate_state, read_state},
 };
+use canlog::log;
+use cksol_types_internal::log::Priority;
 use ic_cdk_management_canister::{SchnorrAlgorithm, SchnorrKeyId, SchnorrPublicKeyArgs};
 use ic_ed25519::{DerivationIndex, DerivationPath as IcDerivationPath, PublicKey};
 use icrc_ledger_types::icrc1::account::Account;
@@ -81,7 +83,16 @@ pub async fn fetch_and_record_minter_public_key<R: CanisterRuntime>(runtime: R) 
             name: key_name.to_string(),
         },
     };
-    let response = retry.schnorr_public_key(arg).await;
+    let response = match retry.schnorr_public_key(arg).await {
+        Ok(response) => response,
+        Err(e) => {
+            log!(
+                Priority::Error,
+                "Failed to fetch the minter public key, retrying: {e}"
+            );
+            return;
+        }
+    };
 
     let public_key = PublicKey::deserialize_raw(response.public_key.as_slice())
         .expect("the management canister returns a valid Ed25519 public key");

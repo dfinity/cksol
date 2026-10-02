@@ -144,6 +144,18 @@ mod fetch_and_record_minter_public_key_tests {
     }
 
     #[tokio::test]
+    async fn reschedules_the_fetch_after_a_failed_call() {
+        init_state();
+        let runtime = TestCanisterRuntime::new().with_schnorr_public_key_call_failure();
+
+        fetch_and_record_minter_public_key(runtime.clone()).await;
+
+        assert_eq!(runtime.set_timer_call_count(), 1);
+        assert_eq!(read_state(|s| s.minter_public_key().cloned()), None);
+        EventsAssert::from_recorded().assert_no_more_events();
+    }
+
+    #[tokio::test]
     async fn reschedules_the_fetch_after_a_trap() {
         init_state();
         let runtime = TestCanisterRuntime::new();
