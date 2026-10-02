@@ -9,7 +9,6 @@ use canlog::log;
 use cksol_types_internal::log::Priority;
 
 use crate::{
-    consolidate::consolidate_deposits,
     constants::MAX_CONCURRENT_RPC_CALLS,
     guard::{TimerGuard, withdrawal_guard},
     ledger::{BurnError, burn},
@@ -102,27 +101,14 @@ pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: R) {
         }
     };
 
-    let (batches, more_to_process, num_pending_withdrawals) = read_state(|state| {
+    let (batches, more_to_process) = read_state(|state| {
         let mut affordable_batches = state.withdrawal_batches().peekable();
         let batches: Vec<Vec<_>> = affordable_batches
             .by_ref()
             .take(MAX_CONCURRENT_RPC_CALLS)
             .collect();
-        (
-            batches,
-            affordable_batches.peek().is_some(),
-            state.pending_withdrawal_requests().len(),
-        )
+        (batches, affordable_batches.peek().is_some())
     });
-
-    let num_affordable_withdrawals: usize = batches.iter().map(Vec::len).sum();
-    if !more_to_process && num_affordable_withdrawals < num_pending_withdrawals {
-        log!(
-            Priority::Info,
-            "Insufficient minter balance for some withdrawal requests, scheduling consolidation"
-        );
-        runtime.set_timer(Duration::ZERO, consolidate_deposits);
-    }
 
     let reschedule = scopeguard::guard(runtime.clone(), |runtime| {
         runtime.set_timer(Duration::ZERO, process_pending_withdrawals);

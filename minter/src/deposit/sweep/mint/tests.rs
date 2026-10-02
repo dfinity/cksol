@@ -8,8 +8,7 @@ use crate::{
     state::{TaskType, event::EventType, mutate_state, read_state, reset_state},
     storage::reset_events,
     test_fixtures::{
-        BLOCK_INDEX, EventsAssert, MINIMUM_DEPOSIT_AMOUNT, PROCESS_DEPOSIT_REQUIRED_CYCLES,
-        account,
+        BLOCK_INDEX, DEPOSIT_SOL_REQUIRED_CYCLES, EventsAssert, MINIMUM_DEPOSIT_AMOUNT, account,
         events::{credit_sweep, credit_sweep_at, queue_deposit, submit_sweep, succeed_transaction},
         init_schnorr_master_key, init_state,
         runtime::TestCanisterRuntime,
@@ -171,7 +170,7 @@ async fn should_quarantine_stale_pending_mint_without_calling_the_ledger() {
     assert_eq!(runtime.set_timer_call_count(), 0);
 
     let result = deposit_sol(
-        &TestCanisterRuntime::new().add_msg_cycles_available(PROCESS_DEPOSIT_REQUIRED_CYCLES),
+        &TestCanisterRuntime::new().add_msg_cycles_available(DEPOSIT_SOL_REQUIRED_CYCLES),
         account(1),
     )
     .await;
@@ -366,7 +365,7 @@ fn deposit_sol_runtime() -> TestCanisterRuntime {
     TestCanisterRuntime::new()
         .with_increasing_time()
         .expecting_charges()
-        .add_msg_cycles_available(PROCESS_DEPOSIT_REQUIRED_CYCLES)
+        .add_msg_cycles_available(DEPOSIT_SOL_REQUIRED_CYCLES)
         .add_msg_cycles_refunded(GET_BALANCE_CYCLES / 2)
         .add_stub_response(MultiRpcResult::<Lamport>::Consistent(Ok(
             MINIMUM_DEPOSIT_AMOUNT,

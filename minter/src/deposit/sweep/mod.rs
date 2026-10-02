@@ -35,7 +35,7 @@ pub async fn deposit_sol<R: CanisterRuntime>(
     let (required_cycles, deposit_consolidation_fee, minimum_deposit_amount) =
         read_state(|state| {
             (
-                state.process_deposit_required_cycles(),
+                state.deposit_sol_required_cycles(),
                 state.deposit_consolidation_fee(),
                 state.minimum_deposit_amount(),
             )
@@ -61,18 +61,6 @@ pub async fn deposit_sol<R: CanisterRuntime>(
                 "BUG: in-flight deposit {deposit_id} of account {account:?} has status {status:?}"
             ),
         };
-    }
-
-    // TODO hq-3k1.6: This check only exists while `process_deposit` still mints before the
-    // deposit is consolidated, and will be removed together with that endpoint by the last PR
-    // of the stack. Without it, a `deposit_sol` call between a `process_deposit` mint and its
-    // consolidation would sweep lamports that were already credited and mint them twice.
-    if read_state(|state| state.has_deposit_awaiting_consolidation(&account)) {
-        return Err(DepositSolError::TemporarilyUnavailable(
-            "a deposit accepted by process_deposit for this account is awaiting consolidation, \
-             try again once it has been consolidated"
-                .to_string(),
-        ));
     }
 
     let master_key = lazy_get_schnorr_master_key(runtime).await;

@@ -2,9 +2,9 @@ use crate::{events::MinterEventAssert, ledger_init_args::ledger_init_args};
 use candid::{CandidType, Decode, Encode, Nat, Principal, utils::ArgumentEncoder};
 use canlog::{Log, LogEntry};
 use cksol_types::{
-    Address, DepositSolArgs, DepositSolError, DepositSolId, DepositSolStatus, DepositStatus,
-    GetDepositAddressArgs, MinterInfo, ProcessDepositArgs, ProcessDepositError, WithdrawalArgs,
-    WithdrawalError, WithdrawalOk, WithdrawalStatus, WithdrawalStatusArgs,
+    Address, DepositSolArgs, DepositSolError, DepositSolId, DepositSolStatus,
+    GetDepositAddressArgs, MinterInfo, WithdrawalArgs, WithdrawalError, WithdrawalOk,
+    WithdrawalStatus, WithdrawalStatusArgs,
 };
 use cksol_types_internal::{
     MinterArg,
@@ -98,13 +98,12 @@ pub struct Setup {
 }
 
 impl Setup {
-    pub const DEFAULT_MANUAL_DEPOSIT_FEE: Lamport = 10_000; // 0.00001 SOL
     pub const DEFAULT_AUTOMATED_DEPOSIT_FEE: Lamport = 10_000_000; // 0.01 SOL
     pub const DEFAULT_DEPOSIT_CONSOLIDATION_FEE: u128 = 10_000_000_000; // 0.01T cycles
     pub const DEFAULT_WITHDRAWAL_FEE: Lamport = 1_000_000; // 0.001 SOL
     pub const DEFAULT_CONTROLLER: Principal = Principal::from_slice(&[0x9d, 0xf7, 0x01]);
     pub const DEFAULT_MINIMUM_DEPOSIT_AMOUNT: Lamport = 20_000_000; // 0.02 SOL
-    pub const DEFAULT_PROCESS_DEPOSIT_REQUIRED_CYCLES: u128 = 1_000_000_000_000;
+    pub const DEFAULT_DEPOSIT_SOL_REQUIRED_CYCLES: u128 = 1_000_000_000_000;
     pub const DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT: Lamport = 2_000_000; // 0.002 SOL
     pub const DEFAULT_CALLER: Principal =
         Principal::from_slice(&[0xff, 0xff, 0xff, 0xff, 0xff, 0xe0, 0x0, 0x3, 0x1, 0x1]);
@@ -393,42 +392,6 @@ impl CkSolMinter<'_> {
             .await
     }
 
-    pub async fn process_deposit(
-        &self,
-        args: ProcessDepositArgs,
-    ) -> Result<DepositStatus, ProcessDepositError> {
-        self.try_process_deposit(args)
-            .await
-            .expect("process_deposit failed")
-    }
-
-    pub async fn process_deposit_with_cycles(
-        &self,
-        args: ProcessDepositArgs,
-        cycles: u128,
-    ) -> Result<DepositStatus, ProcessDepositError> {
-        self.try_process_deposit_with_cycles(args, cycles)
-            .await
-            .expect("process_deposit failed")
-    }
-
-    pub async fn try_process_deposit(
-        &self,
-        args: ProcessDepositArgs,
-    ) -> Result<Result<DepositStatus, ProcessDepositError>, String> {
-        self.try_process_deposit_with_cycles(args, Setup::DEFAULT_PROCESS_DEPOSIT_REQUIRED_CYCLES)
-            .await
-    }
-
-    pub async fn try_process_deposit_with_cycles(
-        &self,
-        args: ProcessDepositArgs,
-        cycles: u128,
-    ) -> Result<Result<DepositStatus, ProcessDepositError>, String> {
-        self.try_update_call("process_deposit", (args,), cycles)
-            .await
-    }
-
     pub async fn deposit_sol(
         &self,
         args: impl Into<DepositSolArgs>,
@@ -452,7 +415,7 @@ impl CkSolMinter<'_> {
         &self,
         args: impl Into<DepositSolArgs>,
     ) -> Result<Result<DepositSolId, DepositSolError>, String> {
-        self.try_deposit_sol_with_cycles(args, Setup::DEFAULT_PROCESS_DEPOSIT_REQUIRED_CYCLES)
+        self.try_deposit_sol_with_cycles(args, Setup::DEFAULT_DEPOSIT_SOL_REQUIRED_CYCLES)
             .await
     }
 
@@ -723,13 +686,12 @@ fn cksol_minter_init_args(
     MinterArg::Init(InitArgs {
         sol_rpc_canister_id,
         ledger_canister_id,
-        manual_deposit_fee: Setup::DEFAULT_MANUAL_DEPOSIT_FEE,
         automated_deposit_fee: Setup::DEFAULT_AUTOMATED_DEPOSIT_FEE,
         master_key_name: Ed25519KeyName::MainnetProdKey1,
         minimum_withdrawal_amount: Setup::DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT,
         minimum_deposit_amount: Setup::DEFAULT_MINIMUM_DEPOSIT_AMOUNT,
         withdrawal_fee: Setup::DEFAULT_WITHDRAWAL_FEE,
-        process_deposit_required_cycles: Setup::DEFAULT_PROCESS_DEPOSIT_REQUIRED_CYCLES as u64,
+        deposit_sol_required_cycles: Setup::DEFAULT_DEPOSIT_SOL_REQUIRED_CYCLES as u64,
         solana_network: SolanaNetwork::Mainnet,
         deposit_consolidation_fee: Setup::DEFAULT_DEPOSIT_CONSOLIDATION_FEE as u64,
     })

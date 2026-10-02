@@ -1,24 +1,22 @@
 use crate::{
     address::{MINTER_DERIVATION_PATH, account_address, derivation_path},
     constants::RENT_EXEMPTION_THRESHOLD,
-    numeric::LedgerMintIndex,
     rpc::BlockHeight,
     state::{
         DepositBalance, QueuedDeposit, SchnorrPublicKey, State, Sweep,
-        event::{DepositId, Event, EventType, VersionedMessage},
+        event::{Event, EventType, VersionedMessage},
         init_once_state, mutate_state,
     },
     storage::with_event_iter,
 };
 use candid::Principal;
-use cksol_types::{DepositSolId, DepositStatus};
+use cksol_types::DepositSolId;
 use cksol_types_internal::{Ed25519KeyName, InitArgs, SolanaNetwork};
 use ic_cdk_management_canister::SchnorrPublicKeyResult;
 use ic_ed25519::{PocketIcMasterPublicKeyId, PublicKey};
 use icrc_ledger_types::icrc1::account::Account;
 use sol_rpc_types::{Lamport, MultiRpcResult};
 use solana_address::{Address, address};
-use solana_transaction::versioned::TransactionVersion;
 use solana_transaction_status_client_types::{
     EncodedConfirmedTransactionWithStatusMeta, EncodedTransaction,
     EncodedTransactionWithStatusMeta, TransactionBinaryEncoding, UiLoadedAddresses,
@@ -36,7 +34,6 @@ pub type GetTransactionResult =
     MultiRpcResult<Option<sol_rpc_types::EncodedConfirmedTransactionWithStatusMeta>>;
 
 pub const BLOCK_INDEX: u64 = 98763_u64;
-pub const MANUAL_DEPOSIT_FEE: Lamport = 10_000; // 0.00001 SOL
 pub const AUTOMATED_DEPOSIT_FEE: Lamport = 10_000_000; // 0.01 SOL
 pub const DEPOSIT_CONSOLIDATION_FEE: u128 = 10_000_000_000; // 0.01T cycles
 pub const WITHDRAWAL_FEE: Lamport = 1_000_000; // 0.001 SOL
@@ -48,7 +45,7 @@ pub const MINTER_ACCOUNT: Account = Account {
 /// The minter's main Solana address under the test master key: the raw master public key.
 pub const MINTER_ADDRESS: Address = address!("Fkt68XQXBDDBGBNNjFh8GM27ffpZGmncUdDG19njnRvY");
 pub const MINIMUM_DEPOSIT_AMOUNT: Lamport = 20_000_000; // 0.02 SOL
-pub const PROCESS_DEPOSIT_REQUIRED_CYCLES: u128 = 1_000_000_000_000;
+pub const DEPOSIT_SOL_REQUIRED_CYCLES: u128 = 1_000_000_000_000;
 
 pub fn sol_rpc_canister_id() -> Principal {
     Principal::from_slice(&[1_u8; 20])
@@ -62,13 +59,12 @@ pub fn valid_init_args() -> InitArgs {
     InitArgs {
         sol_rpc_canister_id: sol_rpc_canister_id(),
         ledger_canister_id: ledger_canister_id(),
-        manual_deposit_fee: MANUAL_DEPOSIT_FEE,
         automated_deposit_fee: AUTOMATED_DEPOSIT_FEE,
         master_key_name: Ed25519KeyName::default(),
         minimum_withdrawal_amount: MINIMUM_WITHDRAWAL_AMOUNT,
         minimum_deposit_amount: MINIMUM_DEPOSIT_AMOUNT,
         withdrawal_fee: WITHDRAWAL_FEE,
-        process_deposit_required_cycles: PROCESS_DEPOSIT_REQUIRED_CYCLES as u64,
+        deposit_sol_required_cycles: DEPOSIT_SOL_REQUIRED_CYCLES as u64,
         solana_network: SolanaNetwork::Mainnet,
         deposit_consolidation_fee: DEPOSIT_CONSOLIDATION_FEE as u64,
     }
@@ -86,15 +82,17 @@ pub fn init_balance() {
     init_balance_to(u64::MAX / 2);
 }
 
+/// Credits the minter balance with exactly `amount` by sweeping a deposit of a
+/// dedicated account through the whole flow, so the account is released again.
 pub fn init_balance_to(amount: Lamport) {
-    let id = deposit_id(0xFD);
-    let mint_index = 0xFE;
-    let consolidation_signature = signature(0xFF);
+    let funding_deposit_id = crate::state::read_state(|state| state.deposits().next_id());
+    let sweep_signature = signature(0xFF00 + funding_deposit_id as usize);
 
-    events::accept_deposit(id, amount);
-    events::mint_deposit(id, mint_index);
-    events::submit_consolidation(consolidation_signature, account(0xFD), vec![mint_index]);
-    events::succeed_transaction(consolidation_signature);
+    events::queue_deposit(funding_deposit_id, account(0xFD), amount);
+    events::submit_sweep(sweep_signature, vec![funding_deposit_id]);
+    events::succeed_transaction(sweep_signature);
+    events::credit_sweep(sweep_signature, amount);
+    events::mint_swept_deposit(funding_deposit_id, 0xFE00 + funding_deposit_id);
 }
 
 pub fn init_schnorr_master_key() {
@@ -149,14 +147,7 @@ pub fn confirmed_block_at_height(block_height: BlockHeight) -> sol_rpc_types::Co
     }
 }
 
-/// Returns a [`DepositId`] with deterministic signature and account derived from `i`.
-pub fn deposit_id(i: usize) -> DepositId {
-    DepositId {
-        signature: signature(i),
-        account: account(i),
-    }
-}
-
+/// Returns an [`Account`] with a deterministic principal derived from `i`.
 /// The deposit of `account(deposit_id + 1)` with `1_000_000 * (deposit_id + 1)` sweepable
 /// lamports, so that a sequence of deposits has distinct accounts and amounts, each covering
 /// the fee of a full sweep.
@@ -450,8 +441,8 @@ pub mod devnet_sweep {
 /// All helpers operate on the global thread-local state via [`mutate_state`].
 pub mod events {
     use super::{
-        DEFAULT_BLOCK_HEIGHT, MANUAL_DEPOSIT_FEE, MINTER_ADDRESS, WITHDRAWAL_FEE, queued_deposit,
-        queued_deposit_of, runtime::TestCanisterRuntime,
+        DEFAULT_BLOCK_HEIGHT, MINTER_ADDRESS, WITHDRAWAL_FEE, queued_deposit, queued_deposit_of,
+        runtime::TestCanisterRuntime,
     };
     use crate::deposit::sweep::deposit_status;
     use crate::{
@@ -460,7 +451,7 @@ pub mod events {
         state::{
             QueuedDeposit, Sweep,
             audit::process_event,
-            event::{DepositId, EventType, Signer, TransactionPurpose, WithdrawalRequest},
+            event::{EventType, Signer, TransactionPurpose, WithdrawalRequest},
             mutate_state, read_state,
         },
     };
@@ -483,69 +474,6 @@ pub mod events {
     /// for the state transition and for the event log entry.
     fn runtime() -> TestCanisterRuntime {
         TestCanisterRuntime::new().add_times([0, 0])
-    }
-
-    pub fn accept_deposit(deposit_id: DepositId, amount: Lamport) {
-        mutate_state(|state| {
-            process_event(
-                state,
-                EventType::AcceptedManualDeposit {
-                    deposit_id,
-                    deposit_amount: amount,
-                    amount_to_mint: amount - MANUAL_DEPOSIT_FEE,
-                },
-                &runtime(),
-            )
-        });
-    }
-
-    pub fn quarantine_deposit(deposit_id: DepositId) {
-        mutate_state(|state| {
-            process_event(state, EventType::QuarantinedDeposit(deposit_id), &runtime())
-        });
-    }
-
-    pub fn mint_deposit(deposit_id: DepositId, mint_index: u64) {
-        mutate_state(|state| {
-            process_event(
-                state,
-                EventType::Minted {
-                    deposit_id,
-                    mint_block_index: LedgerMintIndex::from(mint_index),
-                },
-                &runtime(),
-            )
-        });
-    }
-
-    pub fn submit_consolidation(signature: Signature, fee_payer: Account, mint_indices: Vec<u64>) {
-        submit_consolidation_at_height(signature, fee_payer, DEFAULT_BLOCK_HEIGHT, mint_indices);
-    }
-
-    pub fn submit_consolidation_at_height(
-        signature: Signature,
-        fee_payer: Account,
-        block_height: BlockHeight,
-        mint_indices: Vec<u64>,
-    ) {
-        mutate_state(|state| {
-            process_event(
-                state,
-                EventType::SubmittedTransaction {
-                    signature,
-                    message: message().into(),
-                    signers: vec![Signer::Account(fee_payer)],
-                    purpose: TransactionPurpose::ConsolidateDeposits {
-                        mint_indices: mint_indices
-                            .into_iter()
-                            .map(LedgerMintIndex::from)
-                            .collect(),
-                    },
-                    block_height,
-                },
-                &runtime(),
-            )
-        });
     }
 
     pub fn queue_deposit(
@@ -786,8 +714,7 @@ pub mod arb {
         state::{
             DepositBalance, QueuedDeposit,
             event::{
-                CreditedDeposit, DepositId, Event, EventType, Signer, TransactionPurpose,
-                WithdrawalRequest,
+                CreditedDeposit, Event, EventType, Signer, TransactionPurpose, WithdrawalRequest,
             },
         },
     };
@@ -823,11 +750,6 @@ pub mod arb {
             Just(Signer::Minter),
             arb_account().prop_map(Signer::Account),
         ]
-    }
-
-    pub fn arb_deposit_id() -> impl Strategy<Value = DepositId> {
-        (arb_signature(), arb_account())
-            .prop_map(|(signature, account)| DepositId { signature, account })
     }
 
     pub fn arb_block_height() -> impl Strategy<Value = BlockHeight> {
@@ -927,7 +849,6 @@ pub mod arb {
             arb_principal(),
             arb_principal(),
             any::<u64>(),
-            any::<u64>(),
             arb_ed25519_key_name(),
             any::<u64>(),
             any::<u64>(),
@@ -940,26 +861,24 @@ pub mod arb {
                 |(
                     sol_rpc_canister_id,
                     ledger_canister_id,
-                    manual_deposit_fee,
                     automated_deposit_fee,
                     master_key_name,
                     minimum_withdrawal_amount,
                     minimum_deposit_amount,
                     withdrawal_fee,
-                    process_deposit_required_cycles,
+                    deposit_sol_required_cycles,
                     solana_network,
                     deposit_consolidation_fee,
                 )| {
                     InitArgs {
                         sol_rpc_canister_id,
                         ledger_canister_id,
-                        manual_deposit_fee,
                         automated_deposit_fee,
                         master_key_name,
                         minimum_withdrawal_amount,
                         minimum_deposit_amount,
                         withdrawal_fee,
-                        process_deposit_required_cycles,
+                        deposit_sol_required_cycles,
                         solana_network,
                         deposit_consolidation_fee,
                     }
@@ -976,26 +895,23 @@ pub mod arb {
             prop::option::of(any::<u64>()),
             prop::option::of(any::<u64>()),
             prop::option::of(any::<u64>()),
-            prop::option::of(any::<u64>()),
         )
             .prop_map(
                 |(
                     sol_rpc_canister_id,
-                    manual_deposit_fee,
                     automated_deposit_fee,
                     minimum_withdrawal_amount,
                     minimum_deposit_amount,
                     withdrawal_fee,
-                    process_deposit_required_cycles,
+                    deposit_sol_required_cycles,
                     deposit_consolidation_fee,
                 )| UpgradeArgs {
                     sol_rpc_canister_id,
-                    manual_deposit_fee,
                     automated_deposit_fee,
                     minimum_withdrawal_amount,
                     minimum_deposit_amount,
                     withdrawal_fee,
-                    process_deposit_required_cycles,
+                    deposit_sol_required_cycles,
                     deposit_consolidation_fee,
                 },
             )
@@ -1031,30 +947,11 @@ pub mod arb {
             arb_init_args().prop_map(EventType::Init),
             arb_upgrade_args().prop_map(EventType::Upgrade),
             arb_withdrawal_request().prop_map(EventType::AcceptedWithdrawalRequest),
-            (arb_deposit_id(), any::<u64>(), any::<u64>()).prop_map(
-                |(deposit_id, deposit_amount, amount_to_mint)| {
-                    EventType::AcceptedManualDeposit {
-                        deposit_id,
-                        deposit_amount,
-                        amount_to_mint,
-                    }
-                }
-            ),
-            arb_deposit_id().prop_map(EventType::QuarantinedDeposit),
-            (arb_deposit_id(), arb_ledger_mint_index()).prop_map(
-                |(deposit_id, mint_block_index)| EventType::Minted {
-                    deposit_id,
-                    mint_block_index,
-                }
-            ),
             (
                 arb_signature(),
                 arb_message(),
                 prop::collection::vec(arb_signer(), 1..10),
                 prop_oneof![
-                    prop::collection::vec(arb_ledger_mint_index(), 1..10).prop_map(
-                        |mint_indices| TransactionPurpose::ConsolidateDeposits { mint_indices }
-                    ),
                     prop::collection::vec(arb_ledger_burn_index(), 1..10)
                         .prop_map(|burn_indices| TransactionPurpose::WithdrawSol { burn_indices }),
                     prop::collection::vec(any::<u64>(), 1..10)
@@ -1144,102 +1041,6 @@ pub mod deposit {
         subaccount: None,
     };
 
-    pub fn deposit_status_processing() -> DepositStatus {
-        DepositStatus::Processing {
-            deposit_amount: DEPOSIT_AMOUNT,
-            amount_to_mint: DEPOSIT_AMOUNT - MANUAL_DEPOSIT_FEE,
-            deposit_id: deposit_id().into(),
-        }
-    }
-
-    pub fn deposit_status_quarantined() -> DepositStatus {
-        DepositStatus::Quarantined(deposit_id().into())
-    }
-
-    pub fn deposit_status_minted() -> DepositStatus {
-        DepositStatus::Minted {
-            block_index: BLOCK_INDEX,
-            minted_amount: DEPOSIT_AMOUNT - MANUAL_DEPOSIT_FEE,
-            deposit_id: deposit_id().into(),
-        }
-    }
-
-    pub fn accepted_deposit_event() -> EventType {
-        EventType::AcceptedManualDeposit {
-            deposit_id: deposit_id(),
-            deposit_amount: DEPOSIT_AMOUNT,
-            amount_to_mint: DEPOSIT_AMOUNT - MANUAL_DEPOSIT_FEE,
-        }
-    }
-
-    pub fn quarantined_deposit_event() -> EventType {
-        EventType::QuarantinedDeposit(deposit_id())
-    }
-
-    pub fn minted_event(mint_block_index: impl Into<LedgerMintIndex>) -> EventType {
-        EventType::Minted {
-            deposit_id: deposit_id(),
-            mint_block_index: mint_block_index.into(),
-        }
-    }
-
-    pub fn deposit_id() -> DepositId {
-        DepositId {
-            signature: legacy_deposit_transaction_signature(),
-            account: DEPOSITOR_ACCOUNT,
-        }
-    }
-
-    // Anonymized v0 transaction: 0.5 SOL transfer to DEPOSIT_ADDRESS (BVH7GZXRdqyZLSLBS4cm1Yom8Yvekw6ytgSFz9y9on4e).
-    // Derived from a real devnet v0 transaction with sender, signature, and amount replaced by dummy values.
-    pub fn v0_deposit_transaction_signature() -> solana_signature::Signature {
-        solana_signature::Signature::from([0x42; 64])
-    }
-
-    // v0 (versioned) 0.5 SOL transfer to DEPOSITOR_ACCOUNT's deposit address (BVH7GZXRdqyZLSLBS4cm1Yom8Yvekw6ytgSFz9y9on4e).
-    pub fn v0_deposit_transaction() -> EncodedConfirmedTransactionWithStatusMeta {
-        const ENCODED: &str = "AUJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkKAAQACBBERERERERERERERERERERERERERERERERERERERERERm9NYan1lUBJ+p+uJV+FG8uZ+ZU5ZkqbFoBB9YL+y21cDBkZv5SEXMv/srbpyw5vnvIzlu8X3EmssQ5s6QAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVUDAgAJA9i4BQAAAAAAAgAFAkANAwADAgABDAIAAAAAZc0dAAAAAAA=";
-        EncodedConfirmedTransactionWithStatusMeta {
-            slot: 457247193,
-            transaction: EncodedTransactionWithStatusMeta {
-                transaction: EncodedTransaction::Binary(
-                    ENCODED.to_string(),
-                    TransactionBinaryEncoding::Base64,
-                ),
-                meta: Some(UiTransactionStatusMeta {
-                    compute_units_consumed: OptionSerializer::Some(450),
-                    cost_units: OptionSerializer::Some(1784),
-                    err: None,
-                    fee: 80000,
-                    inner_instructions: OptionSerializer::Some(vec![]),
-                    loaded_addresses: OptionSerializer::Some(UiLoadedAddresses {
-                        writable: vec![],
-                        readonly: vec![],
-                    }),
-                    log_messages: OptionSerializer::Some(vec![
-                        "Program ComputeBudget111111111111111111111111111111 invoke [1]"
-                            .to_string(),
-                        "Program ComputeBudget111111111111111111111111111111 success".to_string(),
-                        "Program ComputeBudget111111111111111111111111111111 invoke [1]"
-                            .to_string(),
-                        "Program ComputeBudget111111111111111111111111111111 success".to_string(),
-                        "Program 11111111111111111111111111111111 invoke [1]".to_string(),
-                        "Program 11111111111111111111111111111111 success".to_string(),
-                    ]),
-                    post_balances: vec![4499920000, 500000000, 1, 1],
-                    post_token_balances: OptionSerializer::Some(vec![]),
-                    pre_balances: vec![5000000000, 0, 1, 1],
-                    pre_token_balances: OptionSerializer::Some(vec![]),
-                    rewards: OptionSerializer::None,
-                    status: Ok(()),
-                    return_data: OptionSerializer::Skip,
-                }),
-                version: Some(TransactionVersion::Number(0)),
-            },
-            block_time: Some(1776843321),
-        }
-    }
-
     // Legacy (non-versioned) deposit transaction.
     // https://explorer.solana.com/tx/49aFRmEtgnVN3UetkKHJbz3ZMcDY6pgS9oDoN4Y4NQYfHSx4nsDsx3PSKubxfmY69URcosJj3CWu4aypeddduZYX?cluster=devnet
     pub fn legacy_deposit_transaction_signature() -> solana_signature::Signature {
@@ -1283,103 +1084,6 @@ pub mod deposit {
                 version: None,
             },
             block_time: Some(1771582425),
-        }
-    }
-
-    // https://explorer.solana.com/tx/3wuW2SB8BzrMZSL1KNuibQ17NKTAjS565mnMvt86smJXaMq99mPsD9QpCRXSfNRziXaxwrt9k1wDE1WFahPv4GgA?cluster=devnet
-    pub fn deposit_transaction_to_wrong_address_signature() -> solana_signature::Signature {
-        const SIGNATURE: &str = "3wuW2SB8BzrMZSL1KNuibQ17NKTAjS565mnMvt86smJXaMq99mPsD9QpCRXSfNRziXaxwrt9k1wDE1WFahPv4GgA";
-        solana_signature::Signature::from_str(SIGNATURE).unwrap()
-    }
-
-    // 0.5 SOL transfer to 6sCCyJVCPgzu6VEgeqJyxhW9X2W6ijAAReCRTfD5iecH
-    // https://explorer.solana.com/tx/3wuW2SB8BzrMZSL1KNuibQ17NKTAjS565mnMvt86smJXaMq99mPsD9QpCRXSfNRziXaxwrt9k1wDE1WFahPv4GgA?cluster=devnet
-    pub fn deposit_transaction_to_wrong_address() -> EncodedConfirmedTransactionWithStatusMeta {
-        const ENCODED_DEPOSIT_TRANSACTION: &str = "AZNh0+eJqGMu6d/1B6we8EPvCIQzZRV+VwGmaUsRncA9vy9LpqYzvs7XCzDZFvqUf0nmZPbLJxNsf/+MtMKdyQMBAAEDIg5JU11WGypQAKfOpxcE0+UIiKney1G6hf+6GRXcmsdXJiVs5okiCEmlhqTw1NKb4zDN/LDw/Yn6SZn3ERUu2gAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAfYVT4I2211RPtd7dum+9C2LuW1CxTsXdP5SBBrw5HE4BAgIAAQwCAAAAAGXNHQAAAAA=";
-        EncodedConfirmedTransactionWithStatusMeta {
-            slot: 443004539,
-            transaction: EncodedTransactionWithStatusMeta {
-                transaction: EncodedTransaction::Binary(
-                    ENCODED_DEPOSIT_TRANSACTION.to_string(),
-                    TransactionBinaryEncoding::Base64,
-                ),
-                meta: Some(UiTransactionStatusMeta {
-                    compute_units_consumed: OptionSerializer::Some(150),
-                    cost_units: OptionSerializer::Some(1481),
-                    err: None,
-                    fee: 5000,
-                    inner_instructions: OptionSerializer::Some(vec![]),
-                    loaded_addresses: OptionSerializer::Some(UiLoadedAddresses {
-                        writable: vec![],
-                        readonly: vec![],
-                    }),
-                    log_messages: OptionSerializer::Some(vec![
-                        "Program 11111111111111111111111111111111 invoke [1]".to_string(),
-                        "Program 11111111111111111111111111111111 success".to_string(),
-                    ]),
-                    post_balances: vec![2895831440, 500000000, 1],
-                    post_token_balances: OptionSerializer::Some(vec![]),
-                    pre_balances: vec![3395836440, 0, 1],
-                    pre_token_balances: OptionSerializer::Some(vec![]),
-                    rewards: OptionSerializer::None,
-                    status: Ok(()),
-                    return_data: OptionSerializer::None,
-                }),
-                version: None,
-            },
-            block_time: Some(1771421240),
-        }
-    }
-
-    // https://explorer.solana.com/tx/56LyqGhjJV4epkZbn9Q1bW1Qf6L5jP1oF7rRkSt9zWtDPpxdyBVxc73NfQxADBhdXjshGQi8WQJokGWjT9Z8z97v?cluster=devnet
-    pub fn deposit_transaction_to_multiple_accounts_signature() -> solana_signature::Signature {
-        const SIGNATURE: &str = "56LyqGhjJV4epkZbn9Q1bW1Qf6L5jP1oF7rRkSt9zWtDPpxdyBVxc73NfQxADBhdXjshGQi8WQJokGWjT9Z8z97v";
-        solana_signature::Signature::from_str(SIGNATURE).unwrap()
-    }
-
-    // Single transaction that transfers funds to multiple accounts:
-    //  - 0.1 SOL to BVH7GZXRdqyZLSLBS4cm1Yom8Yvekw6ytgSFz9y9on4e
-    //  - 0.2 SOL to 36nNQ1JxjZ9tSN8WWqGPjV9H3FexvsMC5gEnkmUhigpY
-    //  - 0.3 SOL to 75H1btFeRrFySZuKyZGPpvYcy3uDkcMoj5EL2mpsFUvr
-    // https://explorer.solana.com/tx/56LyqGhjJV4epkZbn9Q1bW1Qf6L5jP1oF7rRkSt9zWtDPpxdyBVxc73NfQxADBhdXjshGQi8WQJokGWjT9Z8z97v?cluster=devnet
-    pub fn deposit_transaction_to_multiple_accounts() -> EncodedConfirmedTransactionWithStatusMeta {
-        const ENCODED_DEPOSIT_TRANSACTION: &str = "AcytR2Rq+c0hM6m/Fka99Q4d7R4Nin2Ic4z/c1DLSmPLkhiLffSIvYlQLLKH/zvcy3JgP/umG5TN9TLv9oSUYAkBAAEFIg5JU11WGypQAKfOpxcE0+UIiKney1G6hf+6GRXcmscfMpOhqUYjXIxXvJp/bhOwZFCsImXzz5iVqw/g+bBPiVo+jDsfe97gI2/mJd+TXE7nJj+D6zIOZsV4YmKTgeUvm9NYan1lUBJ+p+uJV+FG8uZ+ZU5ZkqbFoBB9YL+y21cAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAN9p0fDGOCOG2Vh6Cbo7MPuOUKoG2zX1iTCguRzb3oKRAwQCAAMMAgAAAADh9QUAAAAABAIAAQwCAAAAAMLrCwAAAAAEAgACDAIAAAAAo+ERAAAAAA==";
-        EncodedConfirmedTransactionWithStatusMeta {
-            slot: 445682829,
-            transaction: EncodedTransactionWithStatusMeta {
-                transaction: EncodedTransaction::Binary(
-                    ENCODED_DEPOSIT_TRANSACTION.to_string(),
-                    TransactionBinaryEncoding::Base64,
-                ),
-                meta: Some(UiTransactionStatusMeta {
-                    compute_units_consumed: OptionSerializer::Some(450),
-                    cost_units: OptionSerializer::Some(2387),
-                    err: None,
-                    fee: 5000,
-                    inner_instructions: OptionSerializer::Some(vec![]),
-                    loaded_addresses: OptionSerializer::Some(UiLoadedAddresses {
-                        writable: vec![],
-                        readonly: vec![],
-                    }),
-                    log_messages: OptionSerializer::Some(vec![
-                        "Program 11111111111111111111111111111111 invoke [1]".to_string(),
-                        "Program 11111111111111111111111111111111 success".to_string(),
-                        "Program 11111111111111111111111111111111 invoke [1]".to_string(),
-                        "Program 11111111111111111111111111111111 success".to_string(),
-                        "Program 11111111111111111111111111111111 invoke [1]".to_string(),
-                        "Program 11111111111111111111111111111111 success".to_string(),
-                    ]),
-                    post_balances: vec![4295796440, 200000000, 300000000, 600000000, 1],
-                    post_token_balances: OptionSerializer::Some(vec![]),
-                    pre_balances: vec![4895801440, 0, 0, 500000000, 1],
-                    pre_token_balances: OptionSerializer::Some(vec![]),
-                    rewards: OptionSerializer::None,
-                    status: Ok(()),
-                    return_data: OptionSerializer::Skip,
-                }),
-                version: None,
-            },
-            block_time: Some(1772447561),
         }
     }
 }
