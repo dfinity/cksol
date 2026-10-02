@@ -6,6 +6,7 @@ use crate::{
         Sweep, SweepSettlementError, audit::process_event, event::EventType, mutate_state,
         read_state,
     },
+    storage::{FailedCreditReason, record_failed_credit_attempt},
 };
 use canlog::log;
 use cksol_types_internal::log::Priority;
@@ -56,6 +57,7 @@ pub async fn credit_finalized_sweeps<R: CanisterRuntime>(runtime: &R) -> bool {
                     Priority::Info,
                     "Finalized sweep {signature} was not returned by getTransaction, retrying later"
                 );
+                record_failed_credit_attempt(FailedCreditReason::NotFound);
                 continue;
             }
             Err(e) => {
@@ -63,6 +65,7 @@ pub async fn credit_finalized_sweeps<R: CanisterRuntime>(runtime: &R) -> bool {
                     Priority::Info,
                     "Failed to fetch finalized sweep {signature}: {e}, retrying later"
                 );
+                record_failed_credit_attempt(FailedCreditReason::RpcError);
                 continue;
             }
         };
@@ -73,6 +76,7 @@ pub async fn credit_finalized_sweeps<R: CanisterRuntime>(runtime: &R) -> bool {
                     Priority::Info,
                     "Could not read the outcome of sweep {signature}: {e}, retrying later"
                 );
+                record_failed_credit_attempt(FailedCreditReason::Unreadable);
                 continue;
             }
             Err(SweepSettlementError::Mismatch(e)) => {
@@ -80,6 +84,7 @@ pub async fn credit_finalized_sweeps<R: CanisterRuntime>(runtime: &R) -> bool {
                     Priority::Error,
                     "The outcome of sweep {signature} does not match its plan: {e}, retrying later"
                 );
+                record_failed_credit_attempt(FailedCreditReason::Mismatch);
                 continue;
             }
         };

@@ -49,6 +49,7 @@ pub struct Deposits {
     finalized: Sweeps,
     pending_mints: BTreeMap<DepositSolId, PendingMint>,
     in_flight_ids: BTreeMap<Account, DepositSolId>,
+    queued_at_by_id: BTreeMap<DepositSolId, u64>,
 }
 
 impl Deposits {
@@ -76,6 +77,13 @@ impl Deposits {
         self.in_flight_ids.get(account).copied()
     }
 
+    /// Returns the timestamp (in nanoseconds) at which the oldest in-flight deposit was queued.
+    /// A deposit is in flight from the moment it is queued until its ckSOL mint, whatever
+    /// sweep stage it has reached.
+    pub fn oldest_in_flight_queued_at(&self) -> Option<u64> {
+        self.queued_at_by_id.values().min().copied()
+    }
+
     pub fn status(&self, deposit_id: DepositSolId) -> DepositSolStatus {
         if let Some(deposit) = self.queued.get(&deposit_id) {
             return DepositSolStatus::Queued {
@@ -100,7 +108,12 @@ impl Deposits {
         DepositSolStatus::NotFound
     }
 
-    pub(super) fn queue(&mut self, deposit_id: DepositSolId, deposit: QueuedDeposit) {
+    pub(super) fn queue(
+        &mut self,
+        deposit_id: DepositSolId,
+        deposit: QueuedDeposit,
+        queued_at: u64,
+    ) {
         assert_eq!(
             deposit_id, self.next_id,
             "Attempted to queue deposit {deposit_id} out of sequence, expected {}",
@@ -114,6 +127,7 @@ impl Deposits {
             deposit.account
         );
         self.queued.insert(deposit_id, deposit);
+        self.queued_at_by_id.insert(deposit_id, queued_at);
         self.next_id += 1;
     }
 

@@ -473,6 +473,7 @@ impl State {
         account: &Account,
         address: &Address,
         balance: DepositBalance,
+        queued_at: u64,
     ) {
         self.deposits.queue(
             deposit_id,
@@ -481,6 +482,7 @@ impl State {
                 address: *address,
                 balance,
             },
+            queued_at,
         );
     }
 

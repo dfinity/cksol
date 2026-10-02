@@ -45,8 +45,8 @@ mod queue {
     #[test]
     fn should_assign_sequential_ids_and_keep_accounts_in_flight() {
         let mut deposits = Deposits::default();
-        deposits.queue(0, queued_deposit(0));
-        deposits.queue(1, queued_deposit(1));
+        deposits.queue(0, queued_deposit(0), 0);
+        deposits.queue(1, queued_deposit(1), 0);
 
         assert_eq!(deposits.next_id(), 2);
         assert_eq!(
@@ -61,7 +61,7 @@ mod queue {
     #[test]
     fn should_report_the_status_of_queued_and_unknown_deposits() {
         let mut deposits = Deposits::default();
-        deposits.queue(0, queued_deposit(0));
+        deposits.queue(0, queued_deposit(0), 0);
 
         assert_eq!(
             deposits.status(0),
@@ -75,16 +75,16 @@ mod queue {
     #[test]
     #[should_panic(expected = "out of sequence")]
     fn should_panic_if_deposit_id_out_of_sequence() {
-        Deposits::default().queue(1, queued_deposit(1));
+        Deposits::default().queue(1, queued_deposit(1), 0);
     }
 
     #[test]
     #[should_panic(expected = "already has one in flight")]
     fn should_panic_if_account_already_in_flight() {
         let mut deposits = Deposits::default();
-        deposits.queue(0, queued_deposit(0));
+        deposits.queue(0, queued_deposit(0), 0);
 
-        deposits.queue(1, queued_deposit_of(queued_deposit(0).account, 200));
+        deposits.queue(1, queued_deposit_of(queued_deposit(0).account, 200), 0);
     }
 }
 
@@ -97,9 +97,9 @@ mod sweep {
     #[test]
     fn should_move_queued_deposits_to_a_sweep_and_return_the_expected_received_amount() {
         let mut deposits = Deposits::default();
-        deposits.queue(0, queued_deposit(0));
-        deposits.queue(1, queued_deposit(1));
-        deposits.queue(2, queued_deposit(2));
+        deposits.queue(0, queued_deposit(0), 0);
+        deposits.queue(1, queued_deposit(1), 0);
+        deposits.queue(2, queued_deposit(2), 0);
         let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
 
         let expected_received = deposits.sweep(
@@ -156,7 +156,7 @@ mod sweep {
     #[should_panic(expected = "Attempted to sweep unknown or already swept deposit 0")]
     fn should_panic_when_sweeping_already_swept_deposit() {
         let mut deposits = Deposits::default();
-        deposits.queue(0, queued_deposit(0));
+        deposits.queue(0, queued_deposit(0), 0);
         deposits.sweep(
             &[0],
             &sweep_message([(0, queued_deposit(0))]),
@@ -174,8 +174,8 @@ mod sweep {
     #[should_panic(expected = "the plan builds")]
     fn should_panic_when_the_message_does_not_match_the_plan() {
         let mut deposits = Deposits::default();
-        deposits.queue(0, queued_deposit(0));
-        deposits.queue(1, queued_deposit(1));
+        deposits.queue(0, queued_deposit(0), 0);
+        deposits.queue(1, queued_deposit(1), 0);
 
         deposits.sweep(
             &[0, 1],
@@ -198,8 +198,8 @@ mod sweep {
     #[should_panic(expected = "Attempted to record sweep")]
     fn should_panic_when_reusing_a_sweep_signature() {
         let mut deposits = Deposits::default();
-        deposits.queue(0, queued_deposit(0));
-        deposits.queue(1, queued_deposit(1));
+        deposits.queue(0, queued_deposit(0), 0);
+        deposits.queue(1, queued_deposit(1), 0);
         let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
         deposits.sweep(
             &[0],
@@ -224,9 +224,9 @@ mod resubmit_sweep {
     #[test]
     fn should_move_the_deposits_of_the_resubmitted_sweep_to_the_new_signature() {
         let mut deposits = Deposits::default();
-        deposits.queue(0, queued_deposit(0));
-        deposits.queue(1, queued_deposit(1));
-        deposits.queue(2, queued_deposit(2));
+        deposits.queue(0, queued_deposit(0), 0);
+        deposits.queue(1, queued_deposit(1), 0);
+        deposits.queue(2, queued_deposit(2), 0);
         let expired_sweep = signature(SWEEP_SIGNATURE_INDEX);
         deposits.sweep(
             &[2, 0],
@@ -272,7 +272,7 @@ mod resubmit_sweep {
     #[test]
     fn should_ignore_a_resubmitted_transaction_that_is_not_a_sweep() {
         let mut deposits = Deposits::default();
-        deposits.queue(0, queued_deposit(0));
+        deposits.queue(0, queued_deposit(0), 0);
         let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
         deposits.sweep(
             &[0],
@@ -302,9 +302,9 @@ mod finalize_swept {
     #[test]
     fn should_move_the_sweep_to_finalized() {
         let mut deposits = Deposits::default();
-        deposits.queue(0, queued_deposit(0));
-        deposits.queue(1, queued_deposit(1));
-        deposits.queue(2, queued_deposit(2));
+        deposits.queue(0, queued_deposit(0), 0);
+        deposits.queue(1, queued_deposit(1), 0);
+        deposits.queue(2, queued_deposit(2), 0);
         let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
         deposits.sweep(
             &[2, 0],
@@ -361,9 +361,9 @@ mod credit_sweep {
     #[test]
     fn should_move_the_deposits_of_the_sweep_to_pending_mints_with_the_given_amounts() {
         let mut deposits = Deposits::default();
-        deposits.queue(0, queued_deposit(0));
-        deposits.queue(1, queued_deposit(1));
-        deposits.queue(2, queued_deposit(2));
+        deposits.queue(0, queued_deposit(0), 0);
+        deposits.queue(1, queued_deposit(1), 0);
+        deposits.queue(2, queued_deposit(2), 0);
         let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
         deposits.sweep(
             &[2, 0],
@@ -404,7 +404,7 @@ mod credit_sweep {
     #[should_panic(expected = "Attempted to credit sweep")]
     fn should_panic_when_the_sweep_is_not_finalized() {
         let mut deposits = Deposits::default();
-        deposits.queue(0, queued_deposit(0));
+        deposits.queue(0, queued_deposit(0), 0);
         let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
         deposits.sweep(
             &[0],
@@ -419,8 +419,8 @@ mod credit_sweep {
     #[should_panic(expected = "with 1 mints for 2 deposits")]
     fn should_panic_when_a_deposit_of_the_sweep_has_no_mint() {
         let mut deposits = Deposits::default();
-        deposits.queue(0, queued_deposit(0));
-        deposits.queue(1, queued_deposit(1));
+        deposits.queue(0, queued_deposit(0), 0);
+        deposits.queue(1, queued_deposit(1), 0);
         let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
         deposits.sweep(
             &[0, 1],
@@ -436,9 +436,9 @@ mod credit_sweep {
     #[should_panic(expected = "is not part of sweep")]
     fn should_panic_when_a_mint_is_for_a_deposit_of_another_sweep() {
         let mut deposits = Deposits::default();
-        deposits.queue(0, queued_deposit(0));
-        deposits.queue(1, queued_deposit(1));
-        deposits.queue(2, queued_deposit(2));
+        deposits.queue(0, queued_deposit(0), 0);
+        deposits.queue(1, queued_deposit(1), 0);
+        deposits.queue(2, queued_deposit(2), 0);
         let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
         deposits.sweep(
             &[0, 2],
@@ -454,8 +454,8 @@ mod credit_sweep {
     #[should_panic(expected = "Attempted to credit deposit 0 twice")]
     fn should_panic_when_a_deposit_is_minted_twice() {
         let mut deposits = Deposits::default();
-        deposits.queue(0, queued_deposit(0));
-        deposits.queue(1, queued_deposit(1));
+        deposits.queue(0, queued_deposit(0), 0);
+        deposits.queue(1, queued_deposit(1), 0);
         let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
         deposits.sweep(
             &[0, 1],
@@ -471,7 +471,7 @@ mod credit_sweep {
     #[should_panic(expected = "beyond its sweepable amount")]
     fn should_panic_when_a_mint_exceeds_the_sweepable_amount() {
         let mut deposits = Deposits::default();
-        deposits.queue(0, queued_deposit(0));
+        deposits.queue(0, queued_deposit(0), 0);
         let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
         deposits.sweep(
             &[0],
@@ -484,6 +484,37 @@ mod credit_sweep {
             &sweep_signature,
             &[mint(0, queued_deposit(0).sweepable_amount() + 1)],
         );
+    }
+}
+
+mod oldest_in_flight {
+    use super::{Deposits, SWEEP_SIGNATURE_INDEX, mint, queued_deposit, signature, sweep_message};
+
+    #[test]
+    fn should_report_no_queued_at_without_in_flight_deposits() {
+        assert_eq!(Deposits::default().oldest_in_flight_queued_at(), None);
+    }
+
+    #[test]
+    fn should_report_the_oldest_queued_at_through_every_sweep_stage() {
+        let mut deposits = Deposits::default();
+        deposits.queue(0, queued_deposit(0), 10);
+        deposits.queue(1, queued_deposit(1), 20);
+        assert_eq!(deposits.oldest_in_flight_queued_at(), Some(10));
+
+        let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
+        deposits.sweep(
+            &[0],
+            &sweep_message([(0, queued_deposit(0))]),
+            &sweep_signature,
+        );
+        assert_eq!(deposits.oldest_in_flight_queued_at(), Some(10));
+
+        deposits.finalize_swept(&sweep_signature);
+        assert_eq!(deposits.oldest_in_flight_queued_at(), Some(10));
+
+        deposits.credit_sweep(&sweep_signature, &[mint(0, 95)]);
+        assert_eq!(deposits.oldest_in_flight_queued_at(), Some(10));
     }
 }
 
