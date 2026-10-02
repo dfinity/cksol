@@ -7,6 +7,7 @@ use crate::{
 };
 use cksol_types::{DepositSolId, DepositSolStatus};
 use sol_rpc_types::Lamport;
+use solana_signature::Signature;
 use std::collections::BTreeMap;
 
 const SWEEP_SIGNATURE_INDEX: usize = 0xAA;
@@ -474,27 +475,13 @@ mod credit_sweep {
 
 mod mint {
     use super::{
-        BTreeMap, CREDIT_TIMESTAMP, DepositSolStatus, Deposits, LedgerMintIndex, MintedSweep,
-        SWEEP_SIGNATURE_INDEX, SweptDeposit, mint, queued_deposit, signature, sweep_message,
+        BTreeMap, DepositSolStatus, Deposits, LedgerMintIndex, MintedSweep, SweptDeposit,
+        credited_sweep, mint, queued_deposit,
     };
 
     #[test]
     fn should_move_the_pending_mint_to_minted_and_release_its_account() {
-        let mut deposits = Deposits::default();
-        deposits.queue(0, queued_deposit(0));
-        deposits.queue(1, queued_deposit(1));
-        let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
-        deposits.sweep(
-            &[0, 1],
-            &sweep_message([(0, queued_deposit(0)), (1, queued_deposit(1))]),
-            &sweep_signature,
-        );
-        deposits.finalize_swept(&sweep_signature);
-        deposits.credit_sweep(
-            &sweep_signature,
-            &[mint(0, 100), mint(1, 200)],
-            CREDIT_TIMESTAMP,
-        );
+        let (mut deposits, sweep_signature) = credited_sweep(&[mint(0, 100), mint(1, 200)]);
 
         deposits.mint(0, LedgerMintIndex::from(42));
 
@@ -541,28 +528,11 @@ mod mint {
 }
 
 mod quarantine_pending_mint {
-    use super::{
-        CREDIT_TIMESTAMP, DepositSolStatus, Deposits, SWEEP_SIGNATURE_INDEX, mint, queued_deposit,
-        signature, sweep_message,
-    };
+    use super::{DepositSolStatus, Deposits, credited_sweep, mint, queued_deposit};
 
     #[test]
     fn should_move_the_pending_mint_to_quarantined_without_releasing_its_account() {
-        let mut deposits = Deposits::default();
-        deposits.queue(0, queued_deposit(0));
-        deposits.queue(1, queued_deposit(1));
-        let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
-        deposits.sweep(
-            &[0, 1],
-            &sweep_message([(0, queued_deposit(0)), (1, queued_deposit(1))]),
-            &sweep_signature,
-        );
-        deposits.finalize_swept(&sweep_signature);
-        deposits.credit_sweep(
-            &sweep_signature,
-            &[mint(0, 100), mint(1, 200)],
-            CREDIT_TIMESTAMP,
-        );
+        let (mut deposits, sweep_signature) = credited_sweep(&[mint(0, 100), mint(1, 200)]);
 
         deposits.quarantine_pending_mint(0);
 
@@ -662,4 +632,23 @@ fn mint(deposit_id: DepositSolId, amount_to_mint: Lamport) -> CreditedDeposit {
         deposit_id,
         amount_to_mint,
     }
+}
+
+/// Queues the deposit of every mint, sweeps them in that order under one signature,
+/// finalizes the sweep and credits it with the given mints at [`CREDIT_TIMESTAMP`].
+fn credited_sweep(mints: &[CreditedDeposit]) -> (Deposits, Signature) {
+    let mut deposits = Deposits::default();
+    let swept: Vec<_> = mints
+        .iter()
+        .map(|mint| {
+            deposits.queue(mint.deposit_id, queued_deposit(mint.deposit_id));
+            (mint.deposit_id, queued_deposit(mint.deposit_id))
+        })
+        .collect();
+    let deposit_ids: Vec<_> = swept.iter().map(|(deposit_id, _)| *deposit_id).collect();
+    let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
+    deposits.sweep(&deposit_ids, &sweep_message(swept), &sweep_signature);
+    deposits.finalize_swept(&sweep_signature);
+    deposits.credit_sweep(&sweep_signature, mints, CREDIT_TIMESTAMP);
+    (deposits, sweep_signature)
 }
