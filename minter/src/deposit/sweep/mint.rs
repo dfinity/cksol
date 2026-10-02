@@ -1,5 +1,5 @@
 use crate::{
-    constants::{LEDGER_DEDUPLICATION_WINDOW, MAX_CONCURRENT_RPC_CALLS},
+    constants::{LEDGER_DEDUPLICATION_WINDOW, MAX_PENDING_MINTS_PER_ROUND},
     guard::TimerGuard,
     ledger::client::to_ledger_mint_index,
     numeric::LedgerMintIndex,
@@ -28,22 +28,20 @@ pub async fn process_pending_mints<R: CanisterRuntime>(runtime: R) {
         pending_mints,
         pending_mints_before_round,
     } = read_state(MintRound::next);
+
     if pending_mints.is_empty() {
         return;
     }
 
-    futures::future::join_all(
-        pending_mints
-            .into_iter()
-            .map(async |(deposit_id, pending)| {
-                process_pending_mint(&runtime, deposit_id, pending).await
-            }),
-    )
-    .await;
+    for (deposit_id, pending) in pending_mints {
+        process_pending_mint(&runtime, deposit_id, pending).await;
+    }
 
     let pending_mints_after_round = read_state(|state| state.deposits().pending_mints().len());
     let round_made_progress = pending_mints_after_round < pending_mints_before_round;
-    if round_made_progress && pending_mints_after_round > 0 {
+    let more_pending_mints_than_one_round =
+        pending_mints_before_round > MAX_PENDING_MINTS_PER_ROUND;
+    if round_made_progress && more_pending_mints_than_one_round {
         runtime.set_timer(Duration::ZERO, process_pending_mints);
     }
 }
@@ -61,7 +59,7 @@ impl MintRound {
                 .pending_mints()
                 .iter()
                 .map(|(deposit_id, pending)| (*deposit_id, *pending))
-                .take(MAX_CONCURRENT_RPC_CALLS)
+                .take(MAX_PENDING_MINTS_PER_ROUND)
                 .collect(),
             pending_mints_before_round: state.deposits().pending_mints().len(),
         }

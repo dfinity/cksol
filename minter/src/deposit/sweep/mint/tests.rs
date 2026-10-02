@@ -2,7 +2,7 @@ use super::process_pending_mints;
 use crate::{
     constants::{
         FEE_PER_SIGNATURE, GET_BALANCE_CYCLES, LEDGER_DEDUPLICATION_WINDOW,
-        MAX_CONCURRENT_RPC_CALLS,
+        MAX_PENDING_MINTS_PER_ROUND,
     },
     deposit::sweep::{deposit_sol, timer::MAX_DEPOSITS_PER_SWEEP},
     state::{TaskType, event::EventType, mutate_state, read_state, reset_state},
@@ -199,22 +199,22 @@ async fn should_quarantine_pending_mint_the_ledger_rejects_as_too_old() {
 
 #[tokio::test]
 async fn should_reschedule_until_all_pending_mints_are_processed() {
-    const NUM_DEPOSITS: usize = MAX_CONCURRENT_RPC_CALLS + 1;
+    const NUM_DEPOSITS: usize = MAX_PENDING_MINTS_PER_ROUND + 1;
     setup();
     credit_sweeps_of_deposits(NUM_DEPOSITS);
     let runtime = mint_runtime(
-        (0..MAX_CONCURRENT_RPC_CALLS as u64).map(|block_index| Ok(block_index.into())),
+        (0..MAX_PENDING_MINTS_PER_ROUND as u64).map(|block_index| Ok(block_index.into())),
     );
 
     process_pending_mints(runtime.clone()).await;
 
     read_state(|s| {
-        assert_eq!(s.deposits().minted().len(), MAX_CONCURRENT_RPC_CALLS);
+        assert_eq!(s.deposits().minted().len(), MAX_PENDING_MINTS_PER_ROUND);
         assert_eq!(s.deposits().pending_mints().len(), 1);
     });
     assert_eq!(runtime.set_timer_call_count(), 1);
 
-    let runtime = mint_runtime([Ok((MAX_CONCURRENT_RPC_CALLS as u64).into())]);
+    let runtime = mint_runtime([Ok((MAX_PENDING_MINTS_PER_ROUND as u64).into())]);
 
     process_pending_mints(runtime.clone()).await;
 
@@ -290,11 +290,11 @@ async fn should_quarantine_pending_mint_on_deterministic_ledger_rejection() {
 
 #[tokio::test]
 async fn should_not_reschedule_after_a_round_of_transient_failures() {
-    const NUM_DEPOSITS: usize = MAX_CONCURRENT_RPC_CALLS + 1;
+    const NUM_DEPOSITS: usize = MAX_PENDING_MINTS_PER_ROUND + 1;
     setup();
     credit_sweeps_of_deposits(NUM_DEPOSITS);
     let runtime = mint_runtime(
-        (0..MAX_CONCURRENT_RPC_CALLS).map(|_| Err(TransferError::TemporarilyUnavailable)),
+        (0..MAX_PENDING_MINTS_PER_ROUND).map(|_| Err(TransferError::TemporarilyUnavailable)),
     );
 
     process_pending_mints(runtime.clone()).await;
@@ -305,7 +305,7 @@ async fn should_not_reschedule_after_a_round_of_transient_failures() {
     });
     assert_eq!(
         transfer_args_sent_by(&runtime).len(),
-        MAX_CONCURRENT_RPC_CALLS
+        MAX_PENDING_MINTS_PER_ROUND
     );
     assert_eq!(runtime.set_timer_call_count(), 0);
 }
