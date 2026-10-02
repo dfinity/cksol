@@ -1,16 +1,13 @@
 use super::process_pending_mints;
 use crate::{
-    constants::{
-        FEE_PER_SIGNATURE, GET_BALANCE_CYCLES, LEDGER_DEDUPLICATION_WINDOW,
-        MAX_PENDING_MINTS_PER_ROUND,
-    },
+    constants::{GET_BALANCE_CYCLES, LEDGER_DEDUPLICATION_WINDOW, MAX_PENDING_MINTS_PER_ROUND},
     deposit::sweep::{deposit_sol, timer::MAX_DEPOSITS_PER_SWEEP},
     state::{TaskType, event::EventType, mutate_state, read_state, reset_state},
     storage::reset_events,
     test_fixtures::{
         BLOCK_INDEX, EventsAssert, MINIMUM_DEPOSIT_AMOUNT, PROCESS_DEPOSIT_REQUIRED_CYCLES,
         account,
-        events::{credit_sweep, credit_sweep_at, queue_deposit, submit_sweep, succeed_transaction},
+        flow::deposit::{DepositFlow, PendingMintFlow, SweepFlow},
         init_schnorr_master_key, init_state,
         runtime::TestCanisterRuntime,
         signature,
@@ -22,14 +19,12 @@ use futures::FutureExt;
 use ic_canister_runtime::IcError;
 use icrc_ledger_types::icrc1::transfer::{BlockIndex, NumTokens, TransferArg, TransferError};
 use sol_rpc_types::{Lamport, MultiRpcResult};
-use solana_signature::Signature;
 use std::panic::AssertUnwindSafe;
 
 type MintResult = Result<BlockIndex, TransferError>;
 
 const SWEEP_SIGNATURE_INDEX: usize = 0xAA;
 const SWEEPABLE_AMOUNT: Lamport = 25_000_000;
-const MINTED_AMOUNT: Lamport = SWEEPABLE_AMOUNT - FEE_PER_SIGNATURE;
 const CREDITED_AT_TIME: u64 = 1_234;
 
 #[tokio::test]
@@ -46,7 +41,7 @@ async fn should_return_early_if_no_pending_mints() {
 #[tokio::test]
 async fn should_return_early_if_task_already_active() {
     setup();
-    credit_sweep_of_deposit_zero();
+    credited_pending_mint();
     let events_before = EventsAssert::from_recorded();
     mutate_state(|s| {
         s.active_tasks_mut().insert(TaskType::Mint);
@@ -62,36 +57,36 @@ async fn should_return_early_if_task_already_active() {
 #[tokio::test]
 async fn should_mint_pending_deposit_and_release_the_account() {
     setup();
-    let sweep_signature = credit_sweep_of_deposit_zero();
+    let pending = credited_pending_mint();
     let runtime = mint_runtime([Ok(BLOCK_INDEX.into())]);
 
     process_pending_mints(runtime.clone()).await;
 
     assert_eq!(
-        deposit_status(0),
+        deposit_status(pending.deposit_id),
         DepositSolStatus::Minted {
             block_index: BLOCK_INDEX,
-            minted_amount: MINTED_AMOUNT,
+            minted_amount: pending.amount_to_mint,
         }
     );
     EventsAssert::from_recorded().expect_contains_event_eq(EventType::MintedSweptDeposit {
-        deposit_id: 0,
+        deposit_id: pending.deposit_id,
         mint_block_index: BLOCK_INDEX.into(),
     });
     assert_eq!(
         transfer_args_sent_by(&runtime),
-        vec![expected_transfer_arg(sweep_signature)]
+        vec![expected_transfer_arg(&pending)]
     );
     assert_eq!(runtime.set_timer_call_count(), 0);
 
-    let new_deposit_id = deposit_sol(&deposit_sol_runtime(), account(1)).await;
-    assert_eq!(new_deposit_id, Ok(1));
+    let new_deposit_id = deposit_sol(&deposit_sol_runtime(), pending.account).await;
+    assert_eq!(new_deposit_id, Ok(pending.deposit_id + 1));
 }
 
 #[tokio::test]
 async fn should_record_duplicate_reply_as_minted() {
     setup();
-    credit_sweep_of_deposit_zero();
+    let pending = credited_pending_mint();
     let runtime = mint_runtime([Err(TransferError::Duplicate {
         duplicate_of: BlockIndex::from(BLOCK_INDEX),
     })]);
@@ -99,14 +94,14 @@ async fn should_record_duplicate_reply_as_minted() {
     process_pending_mints(runtime).await;
 
     assert_eq!(
-        deposit_status(0),
+        deposit_status(pending.deposit_id),
         DepositSolStatus::Minted {
             block_index: BLOCK_INDEX,
-            minted_amount: MINTED_AMOUNT,
+            minted_amount: pending.amount_to_mint,
         }
     );
     EventsAssert::from_recorded().expect_contains_event_eq(EventType::MintedSweptDeposit {
-        deposit_id: 0,
+        deposit_id: pending.deposit_id,
         mint_block_index: BLOCK_INDEX.into(),
     });
 }
@@ -136,16 +131,16 @@ async fn should_retry_after_transient_failure_with_exactly_the_same_arguments() 
 
     for (name, add_failure) in transient_failures {
         setup();
-        let sweep_signature = credit_sweep_of_deposit_zero();
+        let pending = credited_pending_mint();
         let events_before = EventsAssert::from_recorded();
         let failing_runtime = add_failure(TestCanisterRuntime::new().with_increasing_time());
 
         process_pending_mints(failing_runtime.clone()).await;
 
         assert_eq!(
-            deposit_status(0),
+            deposit_status(pending.deposit_id),
             DepositSolStatus::Finalized {
-                signature: sweep_signature.into()
+                signature: pending.sweep_signature.into()
             },
             "{name}"
         );
@@ -156,10 +151,10 @@ async fn should_retry_after_transient_failure_with_exactly_the_same_arguments() 
         process_pending_mints(retrying_runtime.clone()).await;
 
         assert_eq!(
-            deposit_status(0),
+            deposit_status(pending.deposit_id),
             DepositSolStatus::Minted {
                 block_index: BLOCK_INDEX,
-                minted_amount: MINTED_AMOUNT,
+                minted_amount: pending.amount_to_mint,
             },
             "{name}"
         );
@@ -167,7 +162,7 @@ async fn should_retry_after_transient_failure_with_exactly_the_same_arguments() 
         let retry = transfer_args_sent_by(&retrying_runtime);
         assert_eq!(
             first_attempt,
-            vec![expected_transfer_arg(sweep_signature)],
+            vec![expected_transfer_arg(&pending)],
             "{name}"
         );
         assert_eq!(first_attempt, retry, "{name}");
@@ -236,7 +231,7 @@ async fn should_quarantine_pending_mint() {
     } in cases
     {
         setup();
-        let sweep_signature = credit_sweep_of_deposit_zero();
+        let pending = credited_pending_mint();
 
         let outcome = AssertUnwindSafe(process_pending_mints(runtime.clone()))
             .catch_unwind()
@@ -249,14 +244,15 @@ async fn should_quarantine_pending_mint() {
             "{name}"
         );
         assert_eq!(
-            deposit_status(0),
+            deposit_status(pending.deposit_id),
             DepositSolStatus::Quarantined {
-                signature: sweep_signature.into()
+                signature: pending.sweep_signature.into()
             },
             "{name}"
         );
-        EventsAssert::from_recorded()
-            .expect_contains_event_eq(EventType::QuarantinedPendingMint { deposit_id: 0 });
+        EventsAssert::from_recorded().expect_contains_event_eq(EventType::QuarantinedPendingMint {
+            deposit_id: pending.deposit_id,
+        });
         assert_eq!(runtime.set_timer_call_count(), 0, "{name}");
     }
 }
@@ -318,41 +314,29 @@ fn setup() {
     init_schnorr_master_key();
 }
 
-fn credit_sweep_of_deposit_zero() -> Signature {
-    queue_deposit(0, account(1), SWEEPABLE_AMOUNT);
-    let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
-    submit_sweep(sweep_signature, vec![0]);
-    succeed_transaction(sweep_signature);
-    credit_sweep_at(sweep_signature, SWEEPABLE_AMOUNT, CREDITED_AT_TIME);
-    sweep_signature
+fn credited_pending_mint() -> PendingMintFlow {
+    DepositFlow::queue(account(1), SWEEPABLE_AMOUNT)
+        .sweep(signature(SWEEP_SIGNATURE_INDEX))
+        .succeed()
+        .credit_at(CREDITED_AT_TIME)
+        .single_pending_mint()
 }
 
-fn credit_sweeps_of_deposits(num_deposits: usize) {
-    assert!(num_deposits <= 2 * MAX_DEPOSITS_PER_SWEEP);
-    for deposit_id in 0..num_deposits {
-        queue_deposit(
-            deposit_id as DepositSolId,
-            account(deposit_id + 1),
-            SWEEPABLE_AMOUNT,
-        );
-    }
-    for (sweep_index, deposit_ids) in [
-        (0..num_deposits.min(MAX_DEPOSITS_PER_SWEEP)),
-        (num_deposits.min(MAX_DEPOSITS_PER_SWEEP)..num_deposits),
-    ]
-    .into_iter()
-    .enumerate()
-    {
-        if deposit_ids.is_empty() {
-            continue;
-        }
-        let sweep_signature = signature(SWEEP_SIGNATURE_INDEX + sweep_index);
-        let deposit_ids: Vec<DepositSolId> = deposit_ids.map(|id| id as DepositSolId).collect();
-        let swept_amount = SWEEPABLE_AMOUNT * deposit_ids.len() as u64;
-        submit_sweep(sweep_signature, deposit_ids);
-        succeed_transaction(sweep_signature);
-        credit_sweep(sweep_signature, swept_amount);
-    }
+fn credit_sweeps_of_deposits(num_deposits: usize) -> Vec<PendingMintFlow> {
+    let deposits: Vec<_> = (0..num_deposits)
+        .map(|index| DepositFlow::queue(account(index + 1), SWEEPABLE_AMOUNT))
+        .collect();
+    deposits
+        .chunks(MAX_DEPOSITS_PER_SWEEP)
+        .enumerate()
+        .flat_map(|(sweep_index, deposits)| {
+            SweepFlow::of(deposits.iter().copied())
+                .submit(signature(SWEEP_SIGNATURE_INDEX + sweep_index))
+                .succeed()
+                .credit()
+                .mints
+        })
+        .collect()
 }
 
 fn mint_runtime<I: IntoIterator<Item = MintResult>>(results: I) -> TestCanisterRuntime {
@@ -374,14 +358,14 @@ fn deposit_sol_runtime() -> TestCanisterRuntime {
         )))
 }
 
-fn expected_transfer_arg(sweep_signature: Signature) -> TransferArg {
+fn expected_transfer_arg(pending: &PendingMintFlow) -> TransferArg {
     TransferArg {
         from_subaccount: None,
-        to: account(1),
+        to: pending.account,
         fee: None,
-        created_at_time: Some(CREDITED_AT_TIME),
-        memo: Some(Memo::from(MintMemo::sweep(sweep_signature, 0)).into()),
-        amount: NumTokens::from(MINTED_AMOUNT),
+        created_at_time: Some(pending.created_at_time),
+        memo: Some(Memo::from(MintMemo::sweep(pending.sweep_signature, pending.deposit_id)).into()),
+        amount: NumTokens::from(pending.amount_to_mint),
     }
 }
 
