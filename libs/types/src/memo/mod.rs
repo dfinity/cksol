@@ -1,3 +1,4 @@
+use crate::DepositSolId;
 use derive_more::From;
 use minicbor::{Decode, Encode, Encoder};
 use solana_address::Address;
@@ -26,7 +27,7 @@ mod tests;
 /// ```
 ///
 /// [ICRC-1 memo]: icrc_ledger_types::icrc1::transfer::Memo
-pub const MAX_SERIALIZED_MEMO_BYTES: u16 = 80;
+pub const MAX_SERIALIZED_MEMO_BYTES: u16 = 96;
 
 /// A ckSOL minter ledger memo.
 #[derive(Clone, Eq, PartialEq, Debug, Decode, Encode, From)]
@@ -49,6 +50,16 @@ pub enum MintMemo {
         #[cbor(n(0), with = "minicbor::bytes")]
         signature: [u8; 64],
     },
+    /// The minter converted a deposit swept to its main account to ckSOL.
+    #[n(1)]
+    Sweep {
+        /// The transaction signature of the sweep that moved the deposit.
+        #[cbor(n(0), with = "minicbor::bytes")]
+        signature: [u8; 64],
+        /// The identifier of the swept deposit in the minter.
+        #[n(1)]
+        deposit_id: DepositSolId,
+    },
 }
 
 /// The minter burned some ckSOL tokens.
@@ -70,6 +81,20 @@ impl MintMemo {
     pub fn convert(signature: impl Into<solana_signature::Signature>) -> Self {
         Self::Convert {
             signature: <[u8; SIGNATURE_BYTES]>::from(signature.into()),
+        }
+    }
+
+    /// Create a [`MintMemo::Sweep`] memo instance from the [`Signature`] of the sweep
+    /// and the identifier of the swept deposit.
+    ///
+    /// [`Signature`]: solana_signature::Signature
+    pub fn sweep(
+        signature: impl Into<solana_signature::Signature>,
+        deposit_id: DepositSolId,
+    ) -> Self {
+        Self::Sweep {
+            signature: <[u8; SIGNATURE_BYTES]>::from(signature.into()),
+            deposit_id,
         }
     }
 }

@@ -26,6 +26,7 @@ use solana_transaction_status_client_types::{
 };
 use std::{collections::VecDeque, str::FromStr};
 
+pub mod flow;
 pub mod runtime;
 pub mod signer;
 mod stubs;
@@ -623,6 +624,10 @@ pub mod events {
     }
 
     pub fn credit_sweep(signature: Signature, amount_received: Lamport) {
+        credit_sweep_at(signature, amount_received, 0);
+    }
+
+    pub fn credit_sweep_at(signature: Signature, amount_received: Lamport, timestamp: u64) {
         let mints = read_state(|state| {
             state
                 .deposits()
@@ -639,6 +644,29 @@ pub mod events {
                     amount_received,
                     mints,
                 },
+                &TestCanisterRuntime::new().add_times([timestamp, timestamp]),
+            )
+        });
+    }
+
+    pub fn mint_swept_deposit(deposit_id: DepositSolId, mint_block_index: u64) {
+        mutate_state(|state| {
+            process_event(
+                state,
+                EventType::MintedSweptDeposit {
+                    deposit_id,
+                    mint_block_index: LedgerMintIndex::from(mint_block_index),
+                },
+                &runtime(),
+            )
+        });
+    }
+
+    pub fn quarantine_pending_mint(deposit_id: DepositSolId) {
+        mutate_state(|state| {
+            process_event(
+                state,
+                EventType::QuarantinedPendingMint { deposit_id },
                 &runtime(),
             )
         });
@@ -1083,6 +1111,13 @@ pub mod arb {
                     }
                 }),
             arb_signature().prop_map(|signature| EventType::QuarantinedSweep { signature }),
+            (any::<u64>(), arb_ledger_mint_index()).prop_map(|(deposit_id, mint_block_index)| {
+                EventType::MintedSweptDeposit {
+                    deposit_id,
+                    mint_block_index,
+                }
+            }),
+            any::<u64>().prop_map(|deposit_id| EventType::QuarantinedPendingMint { deposit_id }),
         ]
     }
 

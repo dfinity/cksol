@@ -3,7 +3,10 @@ use canlog::{Log, Sort};
 use cksol_minter::{
     address::lazy_get_schnorr_master_key,
     consolidate::{DEPOSIT_CONSOLIDATION_DELAY, consolidate_deposits},
-    deposit::sweep::{SWEEP_DEPOSITS_DELAY, sweep_queued_deposits},
+    deposit::sweep::{
+        PROCESS_PENDING_MINTS_DELAY, SWEEP_DEPOSITS_DELAY, process_pending_mints,
+        sweep_queued_deposits,
+    },
     monitor::{
         FINALIZE_TRANSACTIONS_DELAY, RESUBMIT_TRANSACTIONS_DELAY, finalize_transactions,
         resubmit_transactions,
@@ -252,6 +255,16 @@ fn get_events(
             EventType::QuarantinedSweep { signature } => event::EventType::QuarantinedSweep {
                 signature: signature.into(),
             },
+            EventType::MintedSweptDeposit {
+                deposit_id,
+                mint_block_index,
+            } => event::EventType::MintedSweptDeposit {
+                deposit_id,
+                mint_block_index: *mint_block_index.get(),
+            },
+            EventType::QuarantinedPendingMint { deposit_id } => {
+                event::EventType::QuarantinedPendingMint { deposit_id }
+            }
         }
     }
 
@@ -412,6 +425,9 @@ fn setup_timers() {
     });
     ic_cdk_timers::set_timer_interval(SWEEP_DEPOSITS_DELAY, async || {
         sweep_queued_deposits(IcCanisterRuntime::new()).await;
+    });
+    ic_cdk_timers::set_timer_interval(PROCESS_PENDING_MINTS_DELAY, async || {
+        process_pending_mints(IcCanisterRuntime::new()).await;
     });
     ic_cdk_timers::set_timer_interval(FINALIZE_TRANSACTIONS_DELAY, async || {
         finalize_transactions(IcCanisterRuntime::new()).await;

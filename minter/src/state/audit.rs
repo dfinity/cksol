@@ -85,10 +85,19 @@ fn apply_state_transition(state: &mut State, payload: &EventType, timestamp: u64
             amount_received,
             mints,
         } => {
-            state.process_credited_sweep(signature, *amount_received, mints);
+            state.process_credited_sweep(signature, *amount_received, mints, timestamp);
         }
         EventType::QuarantinedSweep { signature } => {
             state.process_quarantined_sweep(signature);
+        }
+        EventType::MintedSweptDeposit {
+            deposit_id,
+            mint_block_index,
+        } => {
+            state.process_minted_swept_deposit(*deposit_id, mint_block_index);
+        }
+        EventType::QuarantinedPendingMint { deposit_id } => {
+            state.process_quarantined_pending_mint(*deposit_id);
         }
     }
 }

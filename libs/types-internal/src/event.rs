@@ -142,6 +142,31 @@ pub enum EventType {
         /// The signature of the finalized sweep transaction.
         signature: Signature,
     },
+    /// The minter minted ckSOL on the ledger for a swept deposit whose sweep
+    /// was credited.
+    MintedSweptDeposit {
+        /// The identifier of the minted deposit.
+        deposit_id: u64,
+        /// The mint transaction index on the ckSOL ledger.
+        mint_block_index: u64,
+    },
+    /// The pending mint of a swept deposit cannot be retried: either it became
+    /// older than the 24-hour deduplication window of the ckSOL ledger, or the
+    /// ledger definitively rejected it. Retrying the transfer with the same
+    /// arguments fails forever, and fresh arguments could double mint.
+    ///
+    /// The deposit is quarantined to avoid any double minting and will not be
+    /// further processed without manual intervention.
+    ///
+    /// If the minter was down past the deduplication window, the underlying
+    /// transfer may nevertheless have landed on the ledger. Manual resolution
+    /// must therefore first search the ledger for a mint whose memo carries the
+    /// sweep signature before crediting by hand, otherwise a double mint
+    /// results.
+    QuarantinedPendingMint {
+        /// The identifier of the deposit whose pending mint was quarantined.
+        deposit_id: u64,
+    },
 }
 
 /// The mint enqueued for one deposit of a `CreditedSweep` event.
