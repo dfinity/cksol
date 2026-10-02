@@ -87,6 +87,9 @@ fn apply_state_transition(state: &mut State, payload: &EventType, timestamp: u64
         } => {
             state.process_credited_sweep(signature, *amount_received, mints);
         }
+        EventType::QuarantinedSweep { signature } => {
+            state.process_quarantined_sweep(signature);
+        }
     }
 }
 

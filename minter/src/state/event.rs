@@ -137,7 +137,8 @@ pub enum EventType {
     },
     /// A previously submitted Solana transaction has an expired blockhash
     /// and a null on-chain status, meaning it will never be executed.
-    /// The transaction has been marked for resubmission.
+    /// A withdrawal or consolidation transaction is marked for resubmission;
+    /// the deposits of a sweep transaction are dropped instead.
     #[n(10)]
     ExpiredTransaction {
         /// The signature of the expired Solana transaction.
@@ -170,6 +171,17 @@ pub enum EventType {
         /// The mint enqueued for each deposit of the sweep.
         #[n(2)]
         mints: Vec<CreditedDeposit>,
+    },
+    /// The outcome of a finalized sweep transaction did not match the plan the minter
+    /// submitted it with, so the amount to credit cannot be determined safely.
+    ///
+    /// The deposits are quarantined to avoid any double minting and will not be further
+    /// processed without manual intervention.
+    #[n(13)]
+    QuarantinedSweep {
+        /// The signature of the finalized sweep transaction.
+        #[cbor(n(0), with = "cbor::signature")]
+        signature: Signature,
     },
 }
 

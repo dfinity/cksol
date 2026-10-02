@@ -249,6 +249,9 @@ fn get_events(
                     })
                     .collect(),
             },
+            EventType::QuarantinedSweep { signature } => event::EventType::QuarantinedSweep {
+                signature: signature.into(),
+            },
         }
     }
 
