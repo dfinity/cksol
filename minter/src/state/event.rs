@@ -183,6 +183,36 @@ pub enum EventType {
         #[cbor(n(0), with = "cbor::signature")]
         signature: Signature,
     },
+    /// The minter minted ckSOL on the ledger for a swept deposit whose sweep
+    /// was credited.
+    #[n(14)]
+    MintedSweptDeposit {
+        /// The identifier of the minted deposit.
+        #[n(0)]
+        deposit_id: DepositSolId,
+        /// The mint transaction index on the ckSOL ledger.
+        #[cbor(n(1), with = "cbor::id")]
+        mint_block_index: LedgerMintIndex,
+    },
+    /// The pending mint of a swept deposit cannot be retried: either it became
+    /// older than the 24-hour deduplication window of the ckSOL ledger, or the
+    /// ledger definitively rejected it. Retrying the transfer with the same
+    /// arguments fails forever, and fresh arguments could double mint.
+    ///
+    /// The deposit is quarantined to avoid any double minting and will not be
+    /// further processed without manual intervention.
+    ///
+    /// If the minter was down past the deduplication window, the underlying
+    /// transfer may nevertheless have landed on the ledger. Manual resolution
+    /// must therefore first search the ledger for a mint whose memo carries the
+    /// sweep signature before crediting by hand, otherwise a double mint
+    /// results.
+    #[n(15)]
+    QuarantinedPendingMint {
+        /// The identifier of the deposit whose pending mint was quarantined.
+        #[n(0)]
+        deposit_id: DepositSolId,
+    },
 }
 
 /// The mint enqueued for one deposit of a `CreditedSweep` event.

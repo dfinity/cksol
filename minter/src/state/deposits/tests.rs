@@ -1,6 +1,7 @@
-use super::{DepositBalance, Deposits, PendingMint, QueuedDeposit, SweptDeposit};
+use super::{DepositBalance, Deposits, MintedSweep, PendingMint, QueuedDeposit, SweptDeposit};
 use crate::{
     constants::{FEE_PER_SIGNATURE, RENT_EXEMPTION_THRESHOLD},
+    numeric::LedgerMintIndex,
     state::event::CreditedDeposit,
     test_fixtures::{planned_sweep, queued_deposit, queued_deposit_of, signature, sweep_message},
 };
@@ -9,6 +10,7 @@ use sol_rpc_types::Lamport;
 use std::collections::BTreeMap;
 
 const SWEEP_SIGNATURE_INDEX: usize = 0xAA;
+const CREDIT_TIMESTAMP: u64 = 1_234;
 
 mod deposit_balance {
     use super::{DepositBalance, Lamport, RENT_EXEMPTION_THRESHOLD};
@@ -323,8 +325,8 @@ mod finalize_swept {
 
 mod credit_sweep {
     use super::{
-        BTreeMap, DepositSolStatus, Deposits, PendingMint, SWEEP_SIGNATURE_INDEX, SweptDeposit,
-        mint, queued_deposit, signature, sweep_message,
+        BTreeMap, CREDIT_TIMESTAMP, DepositSolStatus, Deposits, PendingMint, SWEEP_SIGNATURE_INDEX,
+        SweptDeposit, mint, queued_deposit, signature, sweep_message,
     };
 
     #[test]
@@ -341,7 +343,11 @@ mod credit_sweep {
         );
         deposits.finalize_swept(&sweep_signature);
 
-        deposits.credit_sweep(&sweep_signature, &[mint(2, 295), mint(0, 95)]);
+        deposits.credit_sweep(
+            &sweep_signature,
+            &[mint(2, 295), mint(0, 95)],
+            CREDIT_TIMESTAMP,
+        );
 
         assert!(deposits.finalized().is_empty());
         let pending_mint = |deposit_id, amount_to_mint| PendingMint {
@@ -350,6 +356,7 @@ mod credit_sweep {
                 signature: sweep_signature,
             },
             amount_to_mint,
+            created_at_time: CREDIT_TIMESTAMP,
         };
         assert_eq!(
             deposits.pending_mints(),
@@ -381,7 +388,7 @@ mod credit_sweep {
             &sweep_signature,
         );
 
-        deposits.credit_sweep(&sweep_signature, &[mint(0, 100)]);
+        deposits.credit_sweep(&sweep_signature, &[mint(0, 100)], CREDIT_TIMESTAMP);
     }
 
     #[test]
@@ -398,7 +405,7 @@ mod credit_sweep {
         );
         deposits.finalize_swept(&sweep_signature);
 
-        deposits.credit_sweep(&sweep_signature, &[mint(1, 200)]);
+        deposits.credit_sweep(&sweep_signature, &[mint(1, 200)], CREDIT_TIMESTAMP);
     }
 
     #[test]
@@ -416,7 +423,11 @@ mod credit_sweep {
         );
         deposits.finalize_swept(&sweep_signature);
 
-        deposits.credit_sweep(&sweep_signature, &[mint(0, 100), mint(1, 200)]);
+        deposits.credit_sweep(
+            &sweep_signature,
+            &[mint(0, 100), mint(1, 200)],
+            CREDIT_TIMESTAMP,
+        );
     }
 
     #[test]
@@ -433,7 +444,11 @@ mod credit_sweep {
         );
         deposits.finalize_swept(&sweep_signature);
 
-        deposits.credit_sweep(&sweep_signature, &[mint(0, 100), mint(0, 100)]);
+        deposits.credit_sweep(
+            &sweep_signature,
+            &[mint(0, 100), mint(0, 100)],
+            CREDIT_TIMESTAMP,
+        );
     }
 
     #[test]
@@ -452,7 +467,129 @@ mod credit_sweep {
         deposits.credit_sweep(
             &sweep_signature,
             &[mint(0, queued_deposit(0).sweepable_amount() + 1)],
+            CREDIT_TIMESTAMP,
         );
+    }
+}
+
+mod mint {
+    use super::{
+        BTreeMap, CREDIT_TIMESTAMP, DepositSolStatus, Deposits, LedgerMintIndex, MintedSweep,
+        SWEEP_SIGNATURE_INDEX, SweptDeposit, mint, queued_deposit, signature, sweep_message,
+    };
+
+    #[test]
+    fn should_move_the_pending_mint_to_minted_and_release_its_account() {
+        let mut deposits = Deposits::default();
+        deposits.queue(0, queued_deposit(0));
+        deposits.queue(1, queued_deposit(1));
+        let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
+        deposits.sweep(
+            &[0, 1],
+            &sweep_message([(0, queued_deposit(0)), (1, queued_deposit(1))]),
+            &sweep_signature,
+        );
+        deposits.finalize_swept(&sweep_signature);
+        deposits.credit_sweep(
+            &sweep_signature,
+            &[mint(0, 100), mint(1, 200)],
+            CREDIT_TIMESTAMP,
+        );
+
+        deposits.mint(0, LedgerMintIndex::from(42));
+
+        assert_eq!(
+            deposits.pending_mints().keys().collect::<Vec<_>>(),
+            vec![&1]
+        );
+        assert_eq!(
+            deposits.minted(),
+            &BTreeMap::from([(
+                0,
+                MintedSweep {
+                    deposit: SweptDeposit {
+                        deposit: queued_deposit(0),
+                        signature: sweep_signature,
+                    },
+                    minted_amount: 100,
+                    mint_block_index: LedgerMintIndex::from(42),
+                }
+            )])
+        );
+        assert_eq!(deposits.in_flight_id(&queued_deposit(0).account), None);
+        assert_eq!(deposits.in_flight_id(&queued_deposit(1).account), Some(1));
+        assert_eq!(
+            deposits.status(0),
+            DepositSolStatus::Minted {
+                block_index: 42,
+                minted_amount: 100,
+            }
+        );
+        assert_eq!(
+            deposits.status(1),
+            DepositSolStatus::Finalized {
+                signature: sweep_signature.into()
+            }
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "Attempted to mint deposit 0 that has no pending mint")]
+    fn should_panic_without_pending_mint() {
+        Deposits::default().mint(0, LedgerMintIndex::from(42));
+    }
+}
+
+mod quarantine_pending_mint {
+    use super::{
+        CREDIT_TIMESTAMP, DepositSolStatus, Deposits, SWEEP_SIGNATURE_INDEX, mint, queued_deposit,
+        signature, sweep_message,
+    };
+
+    #[test]
+    fn should_move_the_pending_mint_to_quarantined_without_releasing_its_account() {
+        let mut deposits = Deposits::default();
+        deposits.queue(0, queued_deposit(0));
+        deposits.queue(1, queued_deposit(1));
+        let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
+        deposits.sweep(
+            &[0, 1],
+            &sweep_message([(0, queued_deposit(0)), (1, queued_deposit(1))]),
+            &sweep_signature,
+        );
+        deposits.finalize_swept(&sweep_signature);
+        deposits.credit_sweep(
+            &sweep_signature,
+            &[mint(0, 100), mint(1, 200)],
+            CREDIT_TIMESTAMP,
+        );
+
+        deposits.quarantine_pending_mint(0);
+
+        assert_eq!(
+            deposits.pending_mints().keys().collect::<Vec<_>>(),
+            vec![&1]
+        );
+        assert!(deposits.minted().is_empty());
+        assert_eq!(deposits.quarantined().keys().collect::<Vec<_>>(), vec![&0]);
+        for deposit_id in 0..2 {
+            assert_eq!(
+                deposits.in_flight_id(&queued_deposit(deposit_id).account),
+                Some(deposit_id)
+            );
+        }
+        assert_eq!(
+            deposits.status(0),
+            DepositSolStatus::Quarantined {
+                signature: sweep_signature.into()
+            }
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "Attempted to quarantine deposit 0 that has no pending mint")]
+    fn should_panic_without_pending_mint() {
+        Deposits::default().quarantine_pending_mint(0);
     }
 }
 
