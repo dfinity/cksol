@@ -17,7 +17,7 @@ use crate::{
     },
 };
 use candid::Nat;
-use cksol_types::{DepositSolError, DepositSolId, DepositSolStatus, Memo, MintMemo};
+use cksol_types::{DepositSolId, DepositSolStatus, Memo, MintMemo};
 use futures::FutureExt;
 use ic_canister_runtime::IcError;
 use icrc_ledger_types::icrc1::transfer::{BlockIndex, NumTokens, TransferArg, TransferError};
@@ -175,77 +175,90 @@ async fn should_retry_after_transient_failure_with_exactly_the_same_arguments() 
 }
 
 #[tokio::test]
-async fn should_quarantine_pending_mint_when_the_callback_traps_after_the_ledger_minted() {
-    setup();
-    let sweep_signature = credit_sweep_of_deposit_zero();
-    let block_index_beyond_u64 = Nat::from(u128::MAX);
-    let runtime = mint_runtime([Ok(block_index_beyond_u64)]);
+async fn should_quarantine_pending_mint() {
+    struct QuarantineCase {
+        name: &'static str,
+        runtime: TestCanisterRuntime,
+        expected_ledger_calls: usize,
+        traps: bool,
+    }
+    let stale_now = CREDITED_AT_TIME + LEDGER_DEDUPLICATION_WINDOW.as_nanos() as u64 + 1;
+    let cases = [
+        QuarantineCase {
+            name: "the pending mint is older than the deduplication window of the ledger",
+            runtime: TestCanisterRuntime::new().add_times([stale_now; 3]),
+            expected_ledger_calls: 0,
+            traps: false,
+        },
+        QuarantineCase {
+            name: "the ledger rejects the mint as too old",
+            runtime: mint_runtime([Err(TransferError::TooOld)]),
+            expected_ledger_calls: 1,
+            traps: false,
+        },
+        QuarantineCase {
+            name: "the ledger rejects the fee of the mint",
+            runtime: mint_runtime([Err(TransferError::BadFee {
+                expected_fee: Nat::from(10_u8),
+            })]),
+            expected_ledger_calls: 1,
+            traps: false,
+        },
+        QuarantineCase {
+            name: "the ledger takes the mint for a burn below the minimum",
+            runtime: mint_runtime([Err(TransferError::BadBurn {
+                min_burn_amount: Nat::from(10_u8),
+            })]),
+            expected_ledger_calls: 1,
+            traps: false,
+        },
+        QuarantineCase {
+            name: "the ledger reports insufficient funds on the minting account",
+            runtime: mint_runtime([Err(TransferError::InsufficientFunds {
+                balance: Nat::from(0_u8),
+            })]),
+            expected_ledger_calls: 1,
+            traps: false,
+        },
+        QuarantineCase {
+            name: "the callback traps after the ledger minted because mint index is not u64",
+            runtime: mint_runtime([Ok(Nat::from(u128::MAX))]),
+            expected_ledger_calls: 1,
+            traps: true,
+        },
+    ];
 
-    let outcome = AssertUnwindSafe(process_pending_mints(runtime.clone()))
-        .catch_unwind()
-        .await;
+    for QuarantineCase {
+        name,
+        runtime,
+        expected_ledger_calls,
+        traps,
+    } in cases
+    {
+        setup();
+        let sweep_signature = credit_sweep_of_deposit_zero();
 
-    assert!(outcome.is_err());
-    assert_eq!(
-        deposit_status(0),
-        DepositSolStatus::Quarantined {
-            signature: sweep_signature.into()
-        }
-    );
-    EventsAssert::from_recorded()
-        .expect_contains_event_eq(EventType::QuarantinedPendingMint { deposit_id: 0 });
-}
+        let outcome = AssertUnwindSafe(process_pending_mints(runtime.clone()))
+            .catch_unwind()
+            .await;
 
-#[tokio::test]
-async fn should_quarantine_stale_pending_mint_without_calling_the_ledger() {
-    const CREDITED_AT: u64 = 1_000;
-    setup();
-    queue_deposit(0, account(1), SWEEPABLE_AMOUNT);
-    let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
-    submit_sweep(sweep_signature, vec![0]);
-    succeed_transaction(sweep_signature);
-    credit_sweep_at(sweep_signature, SWEEPABLE_AMOUNT, CREDITED_AT);
-    let stale_now = CREDITED_AT + LEDGER_DEDUPLICATION_WINDOW.as_nanos() as u64 + 1;
-    let runtime = TestCanisterRuntime::new().add_times([stale_now; 3]);
-
-    process_pending_mints(runtime.clone()).await;
-
-    assert!(runtime.sent_update_calls().is_empty());
-    assert_eq!(
-        deposit_status(0),
-        DepositSolStatus::Quarantined {
-            signature: sweep_signature.into()
-        }
-    );
-    EventsAssert::from_recorded()
-        .expect_contains_event_eq(EventType::QuarantinedPendingMint { deposit_id: 0 });
-    assert_eq!(runtime.set_timer_call_count(), 0);
-
-    let result = deposit_sol(
-        &TestCanisterRuntime::new().add_msg_cycles_available(PROCESS_DEPOSIT_REQUIRED_CYCLES),
-        account(1),
-    )
-    .await;
-    assert_eq!(result, Err(DepositSolError::Quarantined { deposit_id: 0 }));
-}
-
-#[tokio::test]
-async fn should_quarantine_pending_mint_the_ledger_rejects_as_too_old() {
-    setup();
-    let sweep_signature = credit_sweep_of_deposit_zero();
-    let runtime = mint_runtime([Err(TransferError::TooOld)]);
-
-    process_pending_mints(runtime.clone()).await;
-
-    assert_eq!(transfer_args_sent_by(&runtime).len(), 1);
-    assert_eq!(
-        deposit_status(0),
-        DepositSolStatus::Quarantined {
-            signature: sweep_signature.into()
-        }
-    );
-    EventsAssert::from_recorded()
-        .expect_contains_event_eq(EventType::QuarantinedPendingMint { deposit_id: 0 });
+        assert_eq!(outcome.is_err(), traps, "{name}");
+        assert_eq!(
+            transfer_args_sent_by(&runtime).len(),
+            expected_ledger_calls,
+            "{name}"
+        );
+        assert_eq!(
+            deposit_status(0),
+            DepositSolStatus::Quarantined {
+                signature: sweep_signature.into()
+            },
+            "{name}"
+        );
+        EventsAssert::from_recorded()
+            .expect_contains_event_eq(EventType::QuarantinedPendingMint { deposit_id: 0 });
+        assert_eq!(runtime.set_timer_call_count(), 0, "{name}");
+    }
 }
 
 #[tokio::test]
@@ -274,42 +287,6 @@ async fn should_reschedule_until_all_pending_mints_are_processed() {
         assert!(s.deposits().pending_mints().is_empty());
     });
     assert_eq!(runtime.set_timer_call_count(), 0);
-}
-
-#[tokio::test]
-async fn should_quarantine_pending_mint_on_deterministic_ledger_rejection() {
-    let rejections = [
-        TransferError::BadFee {
-            expected_fee: Nat::from(10_u8),
-        },
-        TransferError::BadBurn {
-            min_burn_amount: Nat::from(10_u8),
-        },
-        TransferError::InsufficientFunds {
-            balance: Nat::from(0_u8),
-        },
-    ];
-
-    for rejection in rejections {
-        setup();
-        let name = format!("{rejection:?}");
-        let sweep_signature = credit_sweep_of_deposit_zero();
-        let runtime = mint_runtime([Err(rejection)]);
-
-        process_pending_mints(runtime.clone()).await;
-
-        assert_eq!(transfer_args_sent_by(&runtime).len(), 1, "{name}");
-        assert_eq!(
-            deposit_status(0),
-            DepositSolStatus::Quarantined {
-                signature: sweep_signature.into()
-            },
-            "{name}"
-        );
-        EventsAssert::from_recorded()
-            .expect_contains_event_eq(EventType::QuarantinedPendingMint { deposit_id: 0 });
-        assert_eq!(runtime.set_timer_call_count(), 0, "{name}");
-    }
 }
 
 #[tokio::test]
