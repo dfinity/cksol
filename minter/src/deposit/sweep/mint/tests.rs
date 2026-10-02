@@ -18,10 +18,12 @@ use crate::{
 };
 use candid::Nat;
 use cksol_types::{DepositSolError, DepositSolId, DepositSolStatus, Memo, MintMemo};
+use futures::FutureExt;
 use ic_canister_runtime::IcError;
 use icrc_ledger_types::icrc1::transfer::{BlockIndex, NumTokens, TransferArg, TransferError};
 use sol_rpc_types::{Lamport, MultiRpcResult};
 use solana_signature::Signature;
+use std::panic::AssertUnwindSafe;
 
 type MintResult = Result<BlockIndex, TransferError>;
 
@@ -170,6 +172,28 @@ async fn should_retry_after_transient_failure_with_exactly_the_same_arguments() 
         );
         assert_eq!(first_attempt, retry, "{name}");
     }
+}
+
+#[tokio::test]
+async fn should_quarantine_pending_mint_when_the_callback_traps_after_the_ledger_minted() {
+    setup();
+    let sweep_signature = credit_sweep_of_deposit_zero();
+    let block_index_beyond_u64 = Nat::from(u128::MAX);
+    let runtime = mint_runtime([Ok(block_index_beyond_u64)]);
+
+    let outcome = AssertUnwindSafe(process_pending_mints(runtime.clone()))
+        .catch_unwind()
+        .await;
+
+    assert!(outcome.is_err());
+    assert_eq!(
+        deposit_status(0),
+        DepositSolStatus::Quarantined {
+            signature: sweep_signature.into()
+        }
+    );
+    EventsAssert::from_recorded()
+        .expect_contains_event_eq(EventType::QuarantinedPendingMint { deposit_id: 0 });
 }
 
 #[tokio::test]
