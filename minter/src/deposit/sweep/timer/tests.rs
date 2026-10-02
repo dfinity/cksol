@@ -18,11 +18,7 @@ use crate::{
 };
 use assert_matches::assert_matches;
 use cksol_types::{DepositSolId, DepositSolStatus};
-use sol_rpc_types::{
-    CommitmentLevel, GetBlockCommitmentLevel, GetBlockParams, GetSlotParams, GetSlotRpcConfig,
-    Lamport, MultiRpcResult, RpcConfig, RpcError, RpcSources, SendTransactionParams, Signature,
-    Slot,
-};
+use sol_rpc_types::{CommitmentLevel, Lamport, MultiRpcResult, RpcError, Signature, Slot};
 use solana_address::Address;
 use solana_system_interface::instruction::SystemInstruction;
 
@@ -83,8 +79,10 @@ async fn should_not_submit_if_fetching_blockhash_fails() {
     setup();
     let status_before = queue_deposit(0, account(1), MINIMUM_DEPOSIT_AMOUNT);
     let events_before = EventsAssert::from_recorded();
-    let runtime = TestCanisterRuntime::new()
-        .add_recent_block(Err(RpcError::ValidationError("Error".to_string())));
+    let runtime = TestCanisterRuntime::new().add_recent_block(
+        CommitmentLevel::Confirmed,
+        Err(RpcError::ValidationError("Error".to_string())),
+    );
 
     sweep_queued_deposits(runtime.clone()).await;
 
@@ -107,7 +105,7 @@ async fn should_sweep_batch_with_largest_deposit_as_fee_payer() {
     let fee_payer_signature = account_signature(&account(2));
     let runtime = TestCanisterRuntime::new()
         .with_increasing_time()
-        .add_recent_block(Ok(SLOT))
+        .add_recent_block(CommitmentLevel::Confirmed, Ok(SLOT))
         .transaction_builder(account(2), fee_payer_signature)
         .add_signers([account(1), account(3)])
         .build();
@@ -164,8 +162,12 @@ async fn should_record_event_even_if_transaction_submission_fails() {
     let fee_payer_signature = account_signature(&account(1));
     let runtime = TestCanisterRuntime::new()
         .with_increasing_time()
-        .add_recent_block(Ok(SLOT))
-        .add_stub_response(SendTransactionResult::Inconsistent(vec![]))
+        .add_recent_block(CommitmentLevel::Confirmed, Ok(SLOT))
+        .expect_send_transaction(
+            fee_payer_signature,
+            CommitmentLevel::Confirmed,
+            SendTransactionResult::Inconsistent(vec![]),
+        )
         .add_signer(sign_for(&account(1)));
 
     sweep_queued_deposits(runtime).await;
@@ -194,40 +196,15 @@ async fn should_build_and_simulate_the_sweep_at_confirmed_commitment() {
     queue_deposit(0, account(1), MINIMUM_DEPOSIT_AMOUNT);
     let runtime = TestCanisterRuntime::new()
         .with_increasing_time()
-        .add_recent_block(Ok(SLOT))
-        .add_stub_response(SendTransactionResult::Consistent(Ok(account_signature(
-            &account(1),
+        .add_recent_block(CommitmentLevel::Confirmed, Ok(SLOT))
+        .expect_send_transaction(
+            account_signature(&account(1)),
+            CommitmentLevel::Confirmed,
+            SendTransactionResult::Consistent(Ok(account_signature(&account(1)).into())),
         )
-        .into())))
         .add_signer(sign_for(&account(1)));
 
-    sweep_queued_deposits(runtime.clone()).await;
-
-    let [get_slot, get_block, send_transaction] = runtime.sent_update_calls().try_into().unwrap();
-    assert_eq!(get_slot.method, "getSlot");
-    let (_sources, _config, slot_params): (
-        RpcSources,
-        Option<GetSlotRpcConfig>,
-        Option<GetSlotParams>,
-    ) = get_slot.args();
-    assert_eq!(
-        slot_params.and_then(|params| params.commitment),
-        Some(CommitmentLevel::Confirmed)
-    );
-    assert_eq!(get_block.method, "getBlock");
-    let (_sources, _config, block_params): (RpcSources, Option<RpcConfig>, GetBlockParams) =
-        get_block.args();
-    assert_eq!(
-        block_params.commitment,
-        Some(GetBlockCommitmentLevel::Confirmed)
-    );
-    assert_eq!(send_transaction.method, "sendTransaction");
-    let (_sources, _config, send_params): (RpcSources, Option<RpcConfig>, SendTransactionParams) =
-        send_transaction.args();
-    assert_eq!(
-        send_params.preflight_commitment,
-        Some(CommitmentLevel::Confirmed)
-    );
+    sweep_queued_deposits(runtime).await;
 }
 
 #[tokio::test]
@@ -241,7 +218,7 @@ async fn should_split_deposits_into_batches_of_max_size() {
     let fee_payer_signature_2 = account_signature(&fee_payer_2);
     let runtime = TestCanisterRuntime::new()
         .with_increasing_time()
-        .add_recent_block(Ok(SLOT))
+        .add_recent_block(CommitmentLevel::Confirmed, Ok(SLOT))
         .transaction_builder(fee_payer_1, fee_payer_signature_1)
         .add_signers((0..MAX_DEPOSITS_PER_SWEEP - 1).map(account))
         .build()
@@ -287,7 +264,7 @@ async fn should_reschedule_until_all_deposits_swept() {
     let swept_in_first_round = num_deposits - 1;
     let mut runtime = TestCanisterRuntime::new()
         .with_increasing_time()
-        .add_recent_block(Ok(SLOT));
+        .add_recent_block(CommitmentLevel::Confirmed, Ok(SLOT));
     for batch in 0..MAX_CONCURRENT_RPC_CALLS {
         let first_in_batch = batch * MAX_DEPOSITS_PER_SWEEP;
         let fee_payer_index = first_in_batch + MAX_DEPOSITS_PER_SWEEP - 1;
@@ -310,7 +287,7 @@ async fn should_reschedule_until_all_deposits_swept() {
     let last_account = account(num_deposits - 1);
     let runtime = TestCanisterRuntime::new()
         .with_increasing_time()
-        .add_recent_block(Ok(SLOT))
+        .add_recent_block(CommitmentLevel::Confirmed, Ok(SLOT))
         .transaction_builder(last_account, account_signature(&last_account))
         .build();
 
@@ -337,7 +314,7 @@ async fn should_sweep_all_batches_of_a_round_without_fetching_the_master_key() {
     let fee_payer_2 = account(NUM_DEPOSITS - 1);
     let runtime = TestCanisterRuntime::new()
         .with_increasing_time()
-        .add_recent_block(Ok(SLOT))
+        .add_recent_block(CommitmentLevel::Confirmed, Ok(SLOT))
         .transaction_builder(fee_payer_1, account_signature(&fee_payer_1))
         .add_signers((0..MAX_DEPOSITS_PER_SWEEP - 1).map(account))
         .build()
