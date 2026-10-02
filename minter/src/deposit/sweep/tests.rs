@@ -5,9 +5,9 @@ use crate::{
     storage::with_event_iter,
     test_fixtures::{
         DEPOSIT_CONSOLIDATION_FEE, DEPOSIT_SOL_REQUIRED_CYCLES, EventsAssert,
-        MINIMUM_DEPOSIT_AMOUNT, MINTER_ACCOUNT, account, deposit::DEPOSITOR_ACCOUNT, events,
-        init_schnorr_master_key, init_state, queued_deposit_of, runtime::TestCanisterRuntime,
-        signature,
+        MINIMUM_DEPOSIT_AMOUNT, MINTER_ACCOUNT, account, deposit::DEPOSITOR_ACCOUNT,
+        deposit_address, events, init_schnorr_master_key, init_state, queued_deposit_of,
+        runtime::TestCanisterRuntime, signature,
     },
 };
 use assert_matches::assert_matches;
@@ -56,10 +56,13 @@ async fn should_fail_if_insufficient_cycles_attached() {
 async fn should_fail_and_charge_balance_read_if_get_balance_is_rejected() {
     init_state();
     init_schnorr_master_key();
-    let runtime = runtime().add_stub_error(IcError::CallRejected {
-        code: RejectCode::SysTransient,
-        message: "SOL RPC canister is stopped".to_string(),
-    });
+    let runtime = runtime().expect_get_balance(
+        deposit_address(DEPOSITOR_ACCOUNT),
+        IcError::CallRejected {
+            code: RejectCode::SysTransient,
+            message: "SOL RPC canister is stopped".to_string(),
+        },
+    );
 
     let result = deposit_sol(&runtime, DEPOSITOR_ACCOUNT).await;
 
@@ -78,7 +81,7 @@ async fn should_fail_and_charge_balance_read_if_get_balance_is_rejected() {
 async fn should_fail_and_charge_balance_read_if_balance_below_minimum() {
     init_state();
     init_schnorr_master_key();
-    let runtime = runtime().add_get_balance_response(MINIMUM_DEPOSIT_AMOUNT - 1);
+    let runtime = runtime().add_get_balance_response(DEPOSITOR_ACCOUNT, MINIMUM_DEPOSIT_AMOUNT - 1);
 
     let result = deposit_sol(&runtime, DEPOSITOR_ACCOUNT).await;
 
@@ -106,7 +109,7 @@ async fn should_queue_deposits_from_minimum_with_sequential_ids() {
         (0, DEPOSITOR_ACCOUNT, MINIMUM_DEPOSIT_AMOUNT),
         (1, other_account, MINIMUM_DEPOSIT_AMOUNT + 1),
     ] {
-        let runtime = runtime().add_get_balance_response(balance);
+        let runtime = runtime().add_get_balance_response(depositor, balance);
 
         let deposit_id = deposit_sol(&runtime, depositor).await;
 
@@ -190,7 +193,7 @@ async fn assert_second_call_returns_same_deposit(first: Account, second: Account
     init_state();
     init_schnorr_master_key();
     let deposit_id = deposit_sol(
-        &runtime().add_get_balance_response(MINIMUM_DEPOSIT_AMOUNT),
+        &runtime().add_get_balance_response(first, MINIMUM_DEPOSIT_AMOUNT),
         first,
     )
     .await
@@ -230,7 +233,7 @@ fn queued_deposit_event(deposit_id: u64, account: Account, sweepable_amount: Lam
 }
 
 /// Runtime for a `deposit_sol` call that makes a `getBalance` call
-/// whose stub response or error the caller chains.
+/// whose expected response or error the caller chains.
 fn runtime() -> TestCanisterRuntime {
     TestCanisterRuntime::new()
         .with_increasing_time()
@@ -240,11 +243,14 @@ fn runtime() -> TestCanisterRuntime {
 }
 
 trait GetBalanceRuntimeExt: Sized {
-    fn add_get_balance_response(self, balance: Lamport) -> Self;
+    fn add_get_balance_response(self, depositor: Account, balance: Lamport) -> Self;
 }
 
 impl GetBalanceRuntimeExt for TestCanisterRuntime {
-    fn add_get_balance_response(self, balance: Lamport) -> Self {
-        self.add_stub_response(MultiRpcResult::<Lamport>::Consistent(Ok(balance)))
+    fn add_get_balance_response(self, depositor: Account, balance: Lamport) -> Self {
+        self.expect_get_balance(
+            deposit_address(depositor),
+            MultiRpcResult::Consistent(Ok(balance)),
+        )
     }
 }

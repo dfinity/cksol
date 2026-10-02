@@ -127,7 +127,7 @@ pub fn signature(i: usize) -> solana_signature::Signature {
 pub const DEFAULT_BLOCK_HEIGHT: BlockHeight = BlockHeight::new(400_000_000);
 
 /// Returns a [`ConfirmedBlock`] with a deterministic blockhash at
-/// [`DEFAULT_BLOCK_HEIGHT`], for use in RPC mock stubs.
+/// [`DEFAULT_BLOCK_HEIGHT`], for use in expected RPC responses.
 pub fn confirmed_block() -> sol_rpc_types::ConfirmedBlock {
     confirmed_block_at_height(DEFAULT_BLOCK_HEIGHT)
 }
