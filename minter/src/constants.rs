@@ -11,6 +11,10 @@ pub const GET_RECENT_BLOCK_MAX_TRIES: NonZeroUsize =
 /// Interval of the timer sweeping queued deposits, the same as withdrawal processing.
 pub const SWEEP_DEPOSITS_DELAY: Duration = Duration::from_mins(1);
 
+/// Delay before retrying the minter public key fetch after it trapped. Deposits and
+/// transfer creation stay unavailable until the key is recorded, so the retry is quick.
+pub const MINTER_PUBLIC_KEY_RETRY_DELAY: Duration = Duration::from_secs(5);
+
 /// Matches the ICP HTTPS outcall response limit for variable-length RPC calls
 /// such as `getTransaction` and `getSignatureStatuses`:
 /// https://docs.internetcomputer.org/references/ic-interface-spec#ic-http_request

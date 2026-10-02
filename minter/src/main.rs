@@ -389,7 +389,7 @@ fn assert_valid_deposit_account(
 
 fn setup_timers() {
     ic_cdk_timers::set_timer(Duration::from_secs(0), async {
-        fetch_and_record_minter_public_key(&IcCanisterRuntime::new()).await;
+        fetch_and_record_minter_public_key(IcCanisterRuntime::new()).await;
     });
     ic_cdk_timers::set_timer_interval(DEPOSIT_CONSOLIDATION_DELAY, async || {
         consolidate_deposits(IcCanisterRuntime::new()).await;

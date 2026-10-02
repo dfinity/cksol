@@ -1,4 +1,5 @@
 use crate::{
+    constants::MINTER_PUBLIC_KEY_RETRY_DELAY,
     runtime::CanisterRuntime,
     state::{SchnorrPublicKey, audit::process_event, event::EventType, mutate_state, read_state},
 };
@@ -56,11 +57,19 @@ pub fn minter_public_key() -> Result<SchnorrPublicKey, MinterPublicKeyNotYetAvai
 ///
 /// Returns without fetching once the key is available, so the event is recorded
 /// at most once over the lifetime of the minter. Concurrent calls may each fetch
-/// the key, but only the first one records the event.
-pub async fn fetch_and_record_minter_public_key<R: CanisterRuntime>(runtime: &R) {
+/// the key, but only the first one records the event. A fetch that traps, for
+/// example on a rejected management canister call, reschedules itself after
+/// [`MINTER_PUBLIC_KEY_RETRY_DELAY`].
+pub async fn fetch_and_record_minter_public_key<R: CanisterRuntime>(runtime: R) {
     if read_state(|s| s.minter_public_key().is_some()) {
         return;
     }
+    let retry = scopeguard::guard(runtime.clone(), |runtime| {
+        runtime.set_timer(
+            MINTER_PUBLIC_KEY_RETRY_DELAY,
+            fetch_and_record_minter_public_key,
+        );
+    });
 
     let key_name = read_state(|s| s.master_key_name());
 
@@ -72,7 +81,7 @@ pub async fn fetch_and_record_minter_public_key<R: CanisterRuntime>(runtime: &R)
             name: key_name.to_string(),
         },
     };
-    let response = runtime.schnorr_public_key(arg).await;
+    let response = retry.schnorr_public_key(arg).await;
 
     let public_key = PublicKey::deserialize_raw(response.public_key.as_slice())
         .expect("the management canister returns a valid Ed25519 public key");
@@ -82,6 +91,7 @@ pub async fn fetch_and_record_minter_public_key<R: CanisterRuntime>(runtime: &R)
         .try_into()
         .expect("the management canister returns a 32-byte chain code");
 
+    let runtime = scopeguard::ScopeGuard::into_inner(retry);
     mutate_state(|state| {
         if state.minter_public_key().is_some() {
             return;
@@ -92,7 +102,7 @@ pub async fn fetch_and_record_minter_public_key<R: CanisterRuntime>(runtime: &R)
                 public_key,
                 chain_code,
             },
-            runtime,
+            &runtime,
         );
     });
 }

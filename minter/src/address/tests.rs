@@ -9,11 +9,12 @@ use crate::{
         runtime::TestCanisterRuntime,
     },
 };
-use futures::join;
+use futures::{FutureExt, join};
 use ic_cdk_management_canister::SchnorrPublicKeyResult;
 use ic_ed25519::{PocketIcMasterPublicKeyId, PublicKey};
 use icrc_ledger_types::icrc1::account::Account;
 use solana_address::Address;
+use std::panic::AssertUnwindSafe;
 
 #[test]
 fn test_derive_default_subaccount() {
@@ -99,7 +100,7 @@ mod fetch_and_record_minter_public_key_tests {
             .with_increasing_time()
             .with_schnorr_public_key(test_key_result());
 
-        fetch_and_record_minter_public_key(&runtime).await;
+        fetch_and_record_minter_public_key(runtime.clone()).await;
 
         assert_eq!(
             read_state(|s| s.minter_public_key().cloned()),
@@ -109,9 +110,10 @@ mod fetch_and_record_minter_public_key_tests {
             .expect_event_eq(test_key_fetched_event())
             .assert_no_more_events();
 
-        fetch_and_record_minter_public_key(&runtime).await;
+        fetch_and_record_minter_public_key(runtime.clone()).await;
 
         assert_eq!(runtime.schnorr_public_key_call_count(), 1);
+        assert_eq!(runtime.set_timer_call_count(), 0);
         EventsAssert::from_recorded()
             .expect_event_eq(test_key_fetched_event())
             .assert_no_more_events();
@@ -126,11 +128,12 @@ mod fetch_and_record_minter_public_key_tests {
             .with_schnorr_public_key(test_key_result());
 
         join!(
-            fetch_and_record_minter_public_key(&runtime),
-            fetch_and_record_minter_public_key(&runtime)
+            fetch_and_record_minter_public_key(runtime.clone()),
+            fetch_and_record_minter_public_key(runtime.clone())
         );
 
         assert_eq!(runtime.schnorr_public_key_call_count(), 2);
+        assert_eq!(runtime.set_timer_call_count(), 0);
         assert_eq!(
             read_state(|s| s.minter_public_key().cloned()),
             Some(test_key())
@@ -138,6 +141,21 @@ mod fetch_and_record_minter_public_key_tests {
         EventsAssert::from_recorded()
             .expect_event_eq(test_key_fetched_event())
             .assert_no_more_events();
+    }
+
+    #[tokio::test]
+    async fn reschedules_the_fetch_after_a_trap() {
+        init_state();
+        let runtime = TestCanisterRuntime::new();
+
+        let fetch = AssertUnwindSafe(fetch_and_record_minter_public_key(runtime.clone()))
+            .catch_unwind()
+            .await;
+
+        assert!(fetch.is_err());
+        assert_eq!(runtime.set_timer_call_count(), 1);
+        assert_eq!(read_state(|s| s.minter_public_key().cloned()), None);
+        EventsAssert::from_recorded().assert_no_more_events();
     }
 
     fn test_key_fetched_event() -> EventType {
