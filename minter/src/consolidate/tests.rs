@@ -52,6 +52,19 @@ async fn should_return_early_if_task_already_active() {
 }
 
 #[tokio::test]
+async fn should_not_fetch_a_block_while_the_minter_public_key_is_unavailable() {
+    init_state();
+    add_funds_to_consolidate(&[(deposit_id(0), 1_000_000_000)]);
+    let events_before = EventsAssert::from_recorded();
+    let runtime = TestCanisterRuntime::new();
+
+    consolidate_deposits(runtime.clone()).await;
+
+    assert_eq!(events_before, EventsAssert::from_recorded());
+    assert_eq!(runtime.set_timer_call_count(), 0);
+}
+
+#[tokio::test]
 async fn should_return_early_if_fetching_blockhash_fails() {
     setup();
 
