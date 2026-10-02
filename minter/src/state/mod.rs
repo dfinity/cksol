@@ -1,5 +1,5 @@
 use crate::{
-    address::minter_address,
+    address::{account_address, minter_address},
     constants::{FEE_PER_SIGNATURE, GET_TRANSACTION_CYCLES, RENT_EXEMPTION_THRESHOLD},
     ledger::client::LedgerClient,
     numeric::{LedgerBurnIndex, LedgerMintIndex},
@@ -475,6 +475,14 @@ impl State {
         address: &Address,
         balance: DepositBalance,
     ) {
+        #[cfg(debug_assertions)]
+        if let Some(master_key) = self.minter_public_key.as_ref() {
+            assert_eq!(
+                *address,
+                account_address(master_key, account),
+                "Attempted to queue deposit {deposit_id} with address {address} not derived from account {account:?}",
+            );
+        }
         self.deposits.queue(
             deposit_id,
             QueuedDeposit {

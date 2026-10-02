@@ -6,7 +6,7 @@ use crate::{
     storage::reset_events,
     test_fixtures::{
         EventsAssert, GetTransactionResult, account, devnet_sweep,
-        events::{queue, queue_deposit, submit_sweep_to, succeed_transaction},
+        events::{queue, submit_sweep_to, succeed_transaction},
         init_state,
         runtime::TestCanisterRuntime,
         signature,
@@ -53,10 +53,9 @@ async fn should_ask_for_another_round_only_after_crediting_with_sweeps_left_over
             .add_stub_response(devnet_sweep_response);
         for index in 0..MAX_CONCURRENT_RPC_CALLS {
             let deposit_id = (devnet_sweep::DEPOSITS.len() + index) as DepositSolId;
-            queue_deposit(
+            queue(
                 deposit_id,
-                account(deposit_id as usize + 1),
-                SWEEPABLE_AMOUNT,
+                devnet_sweep::fresh_deposit(account(deposit_id as usize + 1), SWEEPABLE_AMOUNT),
             );
             let sweep_signature = signature(DEVNET_SWEEP_SIGNATURE_INDEX + 1 + index);
             submit_sweep_to(
@@ -165,15 +164,16 @@ fn setup() {
     reset_state();
     reset_events();
     init_state();
-    devnet_sweep::init_master_key();
 }
 
-/// Queues the deposits of the devnet sweep, submits it and finalizes it.
+/// Queues the deposits of the devnet sweep before the devnet master key is recorded,
+/// as on a deployment whose deposits predate the key event, then submits and finalizes it.
 fn finalize_devnet_sweep() -> Signature {
     let deposits = devnet_sweep::deposits();
     for (deposit_id, deposit) in &deposits {
         queue(*deposit_id, *deposit);
     }
+    devnet_sweep::init_master_key();
     let sweep_signature = signature(DEVNET_SWEEP_SIGNATURE_INDEX);
     submit_sweep_to(
         sweep_signature,

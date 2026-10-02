@@ -249,6 +249,7 @@ pub mod devnet_sweep {
     use crate::state::{DepositBalance, QueuedDeposit, Sweep, event::CreditedDeposit};
     use base64::{Engine, engine::general_purpose::STANDARD};
     use cksol_types::DepositSolId;
+    use icrc_ledger_types::icrc1::account::Account;
     use serde_json::json;
     use sol_rpc_types::Lamport;
     use solana_address::{Address, address};
@@ -264,14 +265,29 @@ pub mod devnet_sweep {
     /// Caches the devnet master public key, whose main address is [`MINTER_ADDRESS`],
     /// so that a sweep submitted to the state plans toward the devnet destination.
     pub fn init_master_key() {
+        crate::state::mutate_state(|s| s.cache_minter_public_key(master_key()));
+    }
+
+    pub fn master_key() -> crate::state::SchnorrPublicKey {
         let public_key = ic_ed25519::PublicKey::deserialize_raw(MINTER_ADDRESS.as_ref())
             .expect("BUG: the devnet minter address is a valid Ed25519 public key");
-        crate::state::mutate_state(|s| {
-            s.cache_minter_public_key(crate::state::SchnorrPublicKey {
-                public_key,
-                chain_code: [0; 32],
-            })
-        });
+        crate::state::SchnorrPublicKey {
+            public_key,
+            chain_code: [0; 32],
+        }
+    }
+
+    /// A deposit queued after the devnet sweep, with its address derived from the
+    /// devnet master key like every deposit queued while that key is recorded.
+    pub fn fresh_deposit(account: Account, sweepable_amount: Lamport) -> QueuedDeposit {
+        QueuedDeposit {
+            account,
+            address: crate::address::account_address(&master_key(), &account),
+            balance: DepositBalance::new(
+                sweepable_amount + crate::constants::RENT_EXEMPTION_THRESHOLD,
+            )
+            .expect("BUG: the balance covers the rent exemption threshold"),
+        }
     }
     pub const FEE: Lamport = 20_000;
     pub const AMOUNT_RECEIVED: Lamport = 2_396_416_480;
