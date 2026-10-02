@@ -116,7 +116,12 @@ mod queued_deposits {
             timestamp: 0,
             payload: EventType::Init(valid_init_args()),
         };
+        let key_fetched = Event {
+            timestamp: 0,
+            payload: crate::test_fixtures::minter_public_key_fetched_event(),
+        };
         let mut expected = State::try_from(valid_init_args()).unwrap();
+        expected.cache_minter_public_key(crate::test_fixtures::schnorr_master_key());
         for deposit_id in 0..2 {
             let deposit = queued_deposit(deposit_id);
             expected.process_queued_deposit(
@@ -127,7 +132,7 @@ mod queued_deposits {
             );
         }
 
-        let replayed = replay_events([init, queued(0), queued(1)]);
+        let replayed = replay_events([init, key_fetched, queued(0), queued(1)]);
 
         assert_eq!(replayed, expected);
     }
@@ -135,7 +140,11 @@ mod queued_deposits {
 
 mod swept_deposits {
     use super::*;
-    use crate::test_fixtures::events::{credit_sweep, queue_deposits, submit_sweep};
+    use crate::test_fixtures::{
+        DEFAULT_BLOCK_HEIGHT,
+        events::{credit_sweep, queue_deposits, submit_sweep},
+        sweep_message,
+    };
     use cksol_types::DepositSolStatus;
 
     const SWEEP_SIGNATURE_INDEX: usize = 0xAA;
@@ -378,10 +387,17 @@ mod swept_deposits {
         expected = "BUG: a sweep was submitted before the minter public key was recorded"
     )]
     fn should_panic_when_a_sweep_is_submitted_without_the_minter_public_key() {
-        init_state();
-        queue_deposits::<3>();
+        let mut state = State::try_from(valid_init_args()).unwrap();
 
-        submit_sweep(signature(SWEEP_SIGNATURE_INDEX), vec![2, 0]);
+        state.process_transaction_submitted(
+            &signature(SWEEP_SIGNATURE_INDEX),
+            &sweep_message([(0, queued_deposit(0))]),
+            &[Signer::Account(queued_deposit(0).account)],
+            &TransactionPurpose::SweepDeposits {
+                deposit_ids: vec![0],
+            },
+            DEFAULT_BLOCK_HEIGHT,
+        );
     }
 
     fn assert_in_flight_ids_unchanged() {

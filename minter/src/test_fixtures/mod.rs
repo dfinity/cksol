@@ -249,7 +249,6 @@ pub mod devnet_sweep {
     use crate::state::{DepositBalance, QueuedDeposit, Sweep, event::CreditedDeposit};
     use base64::{Engine, engine::general_purpose::STANDARD};
     use cksol_types::DepositSolId;
-    use icrc_ledger_types::icrc1::account::Account;
     use serde_json::json;
     use sol_rpc_types::Lamport;
     use solana_address::{Address, address};
@@ -262,32 +261,63 @@ pub mod devnet_sweep {
 
     pub const MINTER_ADDRESS: Address = address!("5yazYQT1Kwm3jEjMp58J5329gzbxA232fnPajemCeKbL");
 
-    /// Caches the devnet master public key, whose main address is [`MINTER_ADDRESS`],
-    /// so that a sweep submitted to the state plans toward the devnet destination.
-    pub fn init_master_key() {
-        crate::state::mutate_state(|s| s.cache_minter_public_key(master_key()));
+    /// The devnet deposits with their addresses replaced by ones the test master key
+    /// derives, so the sweep can flow through the event-sourced state.
+    pub fn derived_deposits() -> Vec<(DepositSolId, QueuedDeposit)> {
+        DEPOSITS
+            .into_iter()
+            .enumerate()
+            .map(|(index, (_, balance))| {
+                let account = account(index + 1);
+                (
+                    index as DepositSolId,
+                    QueuedDeposit {
+                        account,
+                        address: super::deposit_address(account),
+                        balance: DepositBalance::new(balance)
+                            .expect("BUG: the balance covers the rent exemption threshold"),
+                    },
+                )
+            })
+            .collect()
     }
 
-    pub fn master_key() -> crate::state::SchnorrPublicKey {
-        let public_key = ic_ed25519::PublicKey::deserialize_raw(MINTER_ADDRESS.as_ref())
-            .expect("BUG: the devnet minter address is a valid Ed25519 public key");
-        crate::state::SchnorrPublicKey {
-            public_key,
-            chain_code: [0; 32],
-        }
+    pub fn derived_sweep() -> Sweep {
+        Sweep::plan(derived_deposits(), super::MINTER_ADDRESS)
     }
 
-    /// A deposit queued while the devnet master key is recorded, so its address
-    /// must be derived from that key.
-    pub fn fresh_deposit(account: Account, sweepable_amount: Lamport) -> QueuedDeposit {
-        QueuedDeposit {
-            account,
-            address: crate::address::account_address(&master_key(), &account),
-            balance: DepositBalance::new(
-                sweepable_amount + crate::constants::RENT_EXEMPTION_THRESHOLD,
-            )
-            .expect("BUG: the balance covers the rent exemption threshold"),
+    /// The devnet outcome rewritten over [`derived_deposits`]: the message is rebuilt
+    /// from the plan with the recorded blockhash and the balances are remapped to the
+    /// new account order, while the signatures, fee and amounts stay the devnet ones.
+    pub fn derived_outcome() -> EncodedConfirmedTransactionWithStatusMeta {
+        let mut outcome = outcome();
+        let transaction = outcome
+            .transaction
+            .transaction
+            .decode()
+            .expect("BUG: the devnet transaction should decode");
+        let message = derived_sweep().sweep_message(*transaction.message.recent_blockhash());
+        let patched = VersionedTransaction {
+            signatures: transaction.signatures,
+            message: solana_message::VersionedMessage::Legacy(message),
+        };
+        outcome.transaction.transaction = EncodedTransaction::Binary(
+            STANDARD.encode(
+                bincode::serialize(&patched).expect("BUG: the transaction should serialize"),
+            ),
+            TransactionBinaryEncoding::Base64,
+        );
+        for (deposit_id, deposit) in derived_deposits() {
+            set_balances(
+                &mut outcome,
+                deposit.address,
+                DEPOSITS[deposit_id as usize].1,
+                crate::constants::RENT_EXEMPTION_THRESHOLD,
+            );
         }
+        set_balances(&mut outcome, super::MINTER_ADDRESS, 0, AMOUNT_RECEIVED);
+        set_balances(&mut outcome, solana_system_interface::program::ID, 1, 1);
+        outcome
     }
     pub const FEE: Lamport = 20_000;
     pub const AMOUNT_RECEIVED: Lamport = 2_396_416_480;

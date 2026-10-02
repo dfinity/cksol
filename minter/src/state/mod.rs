@@ -475,14 +475,16 @@ impl State {
         address: &Address,
         balance: DepositBalance,
     ) {
-        #[cfg(debug_assertions)]
-        if let Some(master_key) = self.minter_public_key.as_ref() {
-            assert_eq!(
-                *address,
-                account_address(master_key, account),
-                "Attempted to queue deposit {deposit_id} with address {address} not derived from account {account:?}",
-            );
-        }
+        debug_assert_eq!(
+            *address,
+            account_address(
+                self.minter_public_key
+                    .as_ref()
+                    .expect("BUG: a deposit was queued before the minter public key was recorded"),
+                account,
+            ),
+            "Attempted to queue deposit {deposit_id} with address {address} not derived from account {account:?}",
+        );
         self.deposits.queue(
             deposit_id,
             QueuedDeposit {

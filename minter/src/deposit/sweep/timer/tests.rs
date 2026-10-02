@@ -282,19 +282,6 @@ async fn should_sweep_all_batches_of_a_round_without_fetching_the_master_key() {
     });
 }
 
-#[tokio::test]
-async fn should_not_sweep_while_the_minter_public_key_is_unavailable() {
-    init_state();
-    queue_deposit(0, account(1), MINIMUM_DEPOSIT_AMOUNT);
-    let events_before = EventsAssert::from_recorded();
-    let runtime = TestCanisterRuntime::new();
-
-    sweep_queued_deposits(runtime.clone()).await;
-
-    assert_eq!(events_before, EventsAssert::from_recorded());
-    assert_eq!(runtime.set_timer_call_count(), 0);
-}
-
 fn setup() {
     init_state();
     init_schnorr_master_key();
