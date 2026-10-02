@@ -7,7 +7,8 @@ use crate::{
     test_fixtures::{
         confirmed_block, confirmed_block_at_height,
         deposit::{
-            DEPOSIT_ADDRESS, legacy_deposit_transaction, legacy_deposit_transaction_signature,
+            DEPOSIT_ADDRESS, deposit_transaction_to_wrong_address_signature,
+            legacy_deposit_transaction, legacy_deposit_transaction_signature,
         },
         init_state,
         runtime::TestCanisterRuntime,
@@ -17,6 +18,7 @@ use assert_matches::assert_matches;
 use ic_canister_runtime::IcError;
 use sol_rpc_types::{HttpOutcallError, RpcError, RpcSource, SupportedRpcProviderId};
 use solana_transaction::{Message, Transaction};
+use solana_transaction_status_client_types::{EncodedTransaction, TransactionBinaryEncoding};
 
 mod get_balance_tests {
     use super::*;
@@ -140,6 +142,50 @@ mod get_transaction_tests {
         let result = get_transaction(&runtime, legacy_deposit_transaction_signature()).await;
 
         assert_eq!(result, Ok(None))
+    }
+
+    #[tokio::test]
+    async fn should_fail_if_returned_transaction_has_another_signature() {
+        init_state();
+
+        let runtime = TestCanisterRuntime::new().add_stub_response(MultiRpcResult::Consistent(Ok(
+            Some(legacy_deposit_transaction().try_into().unwrap()),
+        )));
+
+        let result =
+            get_transaction(&runtime, deposit_transaction_to_wrong_address_signature()).await;
+
+        assert_eq!(
+            result,
+            Err(GetTransactionError::SignatureMismatch {
+                queried: deposit_transaction_to_wrong_address_signature(),
+                returned: Some(Box::new(legacy_deposit_transaction_signature())),
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn should_fail_if_returned_transaction_cannot_be_decoded() {
+        init_state();
+
+        let mut transaction = legacy_deposit_transaction();
+        transaction.transaction.transaction = EncodedTransaction::Binary(
+            "not a transaction".to_string(),
+            TransactionBinaryEncoding::Base64,
+        );
+
+        let runtime = TestCanisterRuntime::new().add_stub_response(MultiRpcResult::Consistent(Ok(
+            Some(transaction.try_into().unwrap()),
+        )));
+
+        let result = get_transaction(&runtime, legacy_deposit_transaction_signature()).await;
+
+        assert_eq!(
+            result,
+            Err(GetTransactionError::UndecodableTransaction {
+                queried: legacy_deposit_transaction_signature()
+            })
+        );
     }
 
     #[tokio::test]
