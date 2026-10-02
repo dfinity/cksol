@@ -1,14 +1,14 @@
-use crate::constants::FEE_PER_SIGNATURE;
 use crate::dashboard::{DashboardPaginationParameters, DashboardTemplate, lamports_to_sol};
 use crate::state::read_state;
 use crate::test_fixtures::{
     AUTOMATED_DEPOSIT_FEE, MANUAL_DEPOSIT_FEE, MINIMUM_DEPOSIT_AMOUNT, MINIMUM_WITHDRAWAL_AMOUNT,
     WITHDRAWAL_FEE, account, deposit_id,
     events::{
-        accept_deposit, accept_withdrawal, credit_sweep, fail_transaction, mint_deposit,
-        mint_swept_deposit, quarantine_deposit, quarantine_sweep, queue_deposit,
-        submit_consolidation, submit_sweep, submit_withdrawal, succeed_transaction,
+        accept_deposit, accept_withdrawal, fail_transaction, mint_deposit, quarantine_deposit,
+        quarantine_sweep, queue_deposit, submit_consolidation, submit_sweep, submit_withdrawal,
+        succeed_transaction,
     },
+    flow::deposit::DepositFlow,
     init_balance, init_schnorr_master_key, init_state, init_state_with_args, ledger_canister_id,
     signature, sol_rpc_canister_id, valid_init_args,
 };
@@ -215,21 +215,20 @@ fn should_display_quarantined_swept_deposits_with_the_sweep_signature() {
 #[test]
 fn should_display_minted_swept_deposits_with_amount_and_block_index() {
     init_state();
-    let sweep_signature = signature(0xAA);
-    let sweepable_amount = 400_000_000;
-    queue_deposit(0, account(1), sweepable_amount);
-    submit_sweep(sweep_signature, vec![0]);
-    succeed_transaction(sweep_signature);
-    credit_sweep(sweep_signature, sweepable_amount);
-    mint_swept_deposit(0, 42);
+    let minted = DepositFlow::queue(account(1), 400_000_000)
+        .sweep(signature(0xAA))
+        .succeed()
+        .credit()
+        .single_pending_mint()
+        .mint(42);
 
     DashboardAssert::assert_that(dashboard()).has_table_row_value(
         "#minted-sweeps + table > tbody > tr:nth-child(1)",
         &[
-            "0",
-            &account(1).to_string(),
-            &lamports_to_sol(sweepable_amount - FEE_PER_SIGNATURE),
-            "42",
+            &minted.deposit_id.to_string(),
+            &minted.account.to_string(),
+            &lamports_to_sol(minted.minted_amount),
+            &minted.mint_block_index.to_string(),
         ],
         "minted swept deposits",
     );
@@ -243,12 +242,12 @@ fn should_paginate_minted_swept_deposits_across_multiple_pages() {
 
     let total_minted_sweeps = DEFAULT_PAGE_SIZE + 1;
     for i in 0..total_minted_sweeps {
-        let sweep_signature = signature(i);
-        queue_deposit(i as u64, account(i + 1), 400_000_000);
-        submit_sweep(sweep_signature, vec![i as u64]);
-        succeed_transaction(sweep_signature);
-        credit_sweep(sweep_signature, 400_000_000);
-        mint_swept_deposit(i as u64, i as u64);
+        DepositFlow::queue(account(i + 1), 400_000_000)
+            .sweep(signature(i))
+            .succeed()
+            .credit()
+            .single_pending_mint()
+            .mint(i as u64);
     }
 
     let page1 = dashboard();

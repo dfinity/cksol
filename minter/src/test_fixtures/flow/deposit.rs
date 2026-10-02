@@ -1,7 +1,7 @@
 use crate::{
     state::read_state,
     test_fixtures::{
-        events::{credit_sweep_at, queue, submit_sweep, succeed_transaction},
+        events::{credit_sweep_at, mint_swept_deposit, queue, submit_sweep, succeed_transaction},
         queued_deposit_of,
     },
 };
@@ -167,4 +167,35 @@ pub struct PendingMintFlow {
     pub amount_to_mint: Lamport,
     pub sweep_signature: Signature,
     pub created_at_time: u64,
+}
+
+impl PendingMintFlow {
+    /// Records the mint of the deposit on the ledger under `block_index`, which releases
+    /// its account for a new deposit.
+    pub fn mint(self, block_index: u64) -> MintedDepositFlow {
+        mint_swept_deposit(self.deposit_id, block_index);
+        let minted = read_state(|state| {
+            *state
+                .deposits()
+                .minted()
+                .get(&self.deposit_id)
+                .expect("BUG: the deposit was just minted")
+        });
+        MintedDepositFlow {
+            deposit_id: self.deposit_id,
+            account: self.account,
+            minted_amount: minted.minted_amount,
+            sweep_signature: self.sweep_signature,
+            mint_block_index: *minted.mint_block_index.get(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MintedDepositFlow {
+    pub deposit_id: DepositSolId,
+    pub account: Account,
+    pub minted_amount: Lamport,
+    pub sweep_signature: Signature,
+    pub mint_block_index: u64,
 }
