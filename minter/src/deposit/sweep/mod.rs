@@ -47,10 +47,15 @@ pub async fn deposit_sol<R: CanisterRuntime>(
             .map(|deposit_id| (deposit_id, state.deposits().status(deposit_id)))
     }) {
         return match status {
+            DepositSolStatus::Queued { .. }
+            | DepositSolStatus::Swept { .. }
+            | DepositSolStatus::Finalized { .. } => Ok(deposit_id),
             DepositSolStatus::Quarantined { .. } => {
                 Err(DepositSolError::Quarantined { deposit_id })
             }
-            _ => Ok(deposit_id),
+            DepositSolStatus::Dropped { .. } | DepositSolStatus::NotFound => panic!(
+                "BUG: in-flight deposit {deposit_id} of account {account:?} has status {status:?}"
+            ),
         };
     }
 
