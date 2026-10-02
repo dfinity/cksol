@@ -1609,6 +1609,17 @@ mod metrics_tests {
             // Only the init and minter public key events should have been recorded
             .assert_contains_metric_matching(r#"total_event_count 2 \d+"#)
             .assert_contains_metric_matching(r#"minter_balance 0 \d+"#)
+            .assert_contains_metric_matching(r#"oldest_in_flight_deposit_age_seconds 0 \d+"#)
+            .assert_contains_metric_matching(
+                r#"failed_credit_attempts\{reason="not_found"\} 0 \d+"#,
+            )
+            .assert_contains_metric_matching(
+                r#"failed_credit_attempts\{reason="rpc_error"\} 0 \d+"#,
+            )
+            .assert_contains_metric_matching(
+                r#"failed_credit_attempts\{reason="unreadable"\} 0 \d+"#,
+            )
+            .assert_contains_metric_matching(r#"failed_credit_attempts\{reason="mismatch"\} 0 \d+"#)
             .into()
             .drop()
             .await;

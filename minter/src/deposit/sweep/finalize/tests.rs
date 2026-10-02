@@ -3,7 +3,7 @@ use crate::{
     constants::MAX_CONCURRENT_RPC_CALLS,
     deposit::sweep::deposit_status,
     state::{event::EventType, read_state, reset_state},
-    storage::reset_events,
+    storage::{FailedCreditReason, failed_credit_attempt_count, reset_events},
     test_fixtures::{
         EventsAssert, GetTransactionResult, MINTER_ADDRESS, account, devnet_sweep,
         events::{queue, queue_deposit, submit_sweep, succeed_transaction},
@@ -104,26 +104,37 @@ async fn should_credit_the_amount_received_by_the_main_account() {
             devnet_sweep::DEPOSITS.len()
         );
     });
+    for reason in FailedCreditReason::ALL {
+        assert_eq!(failed_credit_attempt_count(reason), 0, "{reason:?}");
+    }
 }
 
 #[tokio::test]
 async fn should_keep_deposits_finalized_until_the_outcome_can_be_read() {
     type Response = fn() -> GetTransactionResult;
-    let cases: [(&str, Response); 3] = [
-        ("the transaction is not returned", || {
-            GetTransactionResult::Consistent(Ok(None))
-        }),
-        ("fetching the transaction fails", || {
-            GetTransactionResult::Inconsistent(vec![])
-        }),
-        ("the metadata cannot be read", || {
-            let mut outcome = devnet_sweep::derived_outcome();
-            outcome.transaction.meta = None;
-            transaction_response(outcome)
-        }),
+    let cases: [(&str, Response, FailedCreditReason); 3] = [
+        (
+            "the transaction is not returned",
+            || GetTransactionResult::Consistent(Ok(None)),
+            FailedCreditReason::NotFound,
+        ),
+        (
+            "fetching the transaction fails",
+            || GetTransactionResult::Inconsistent(vec![]),
+            FailedCreditReason::RpcError,
+        ),
+        (
+            "the metadata cannot be read",
+            || {
+                let mut outcome = devnet_sweep::derived_outcome();
+                outcome.transaction.meta = None;
+                transaction_response(outcome)
+            },
+            FailedCreditReason::Unreadable,
+        ),
     ];
 
-    for (name, response) in cases {
+    for (name, response, expected_reason) in cases {
         setup();
         let sweep_signature = finalize_devnet_sweep();
         let events_before = EventsAssert::from_recorded();
@@ -150,6 +161,7 @@ async fn should_keep_deposits_finalized_until_the_outcome_can_be_read() {
             },
             "{name}"
         );
+        assert_eq!(failed_credit_attempt_count(expected_reason), 1, "{name}");
     }
 }
 
@@ -179,6 +191,7 @@ async fn should_quarantine_deposits_if_the_outcome_does_not_match_the_plan() {
             signature: sweep_signature.into()
         }
     );
+    assert_eq!(failed_credit_attempt_count(FailedCreditReason::Mismatch), 1);
 }
 
 fn setup() {

@@ -479,6 +479,7 @@ impl State {
         account: &Account,
         address: &Address,
         balance: DepositBalance,
+        queued_at: u64,
     ) {
         debug_assert_eq!(
             *address,
@@ -497,6 +498,7 @@ impl State {
                 address: *address,
                 balance,
             },
+            queued_at,
         );
     }
 
