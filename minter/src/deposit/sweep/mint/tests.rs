@@ -31,6 +31,33 @@ const MINTED_AMOUNT: Lamport = SWEEPABLE_AMOUNT - FEE_PER_SIGNATURE;
 const CREDITED_AT_TIME: u64 = 1_234;
 
 #[tokio::test]
+async fn should_return_early_if_no_pending_mints() {
+    init_state();
+    let runtime = TestCanisterRuntime::new();
+
+    process_pending_mints(runtime.clone()).await;
+
+    EventsAssert::assert_no_events_recorded();
+    assert_eq!(runtime.set_timer_call_count(), 0);
+}
+
+#[tokio::test]
+async fn should_return_early_if_task_already_active() {
+    setup();
+    credit_sweep_of_deposit_zero();
+    let events_before = EventsAssert::from_recorded();
+    mutate_state(|s| {
+        s.active_tasks_mut().insert(TaskType::Mint);
+    });
+    let runtime = TestCanisterRuntime::new();
+
+    process_pending_mints(runtime.clone()).await;
+
+    assert_eq!(events_before, EventsAssert::from_recorded());
+    assert!(runtime.sent_update_calls().is_empty());
+}
+
+#[tokio::test]
 async fn should_mint_pending_deposit_and_release_the_account() {
     setup();
     let sweep_signature = credit_sweep_of_deposit_zero();
@@ -222,33 +249,6 @@ async fn should_reschedule_until_all_pending_mints_are_processed() {
         assert_eq!(s.deposits().minted().len(), NUM_DEPOSITS);
         assert!(s.deposits().pending_mints().is_empty());
     });
-    assert_eq!(runtime.set_timer_call_count(), 0);
-}
-
-#[tokio::test]
-async fn should_return_early_if_task_already_active() {
-    setup();
-    credit_sweep_of_deposit_zero();
-    let events_before = EventsAssert::from_recorded();
-    mutate_state(|s| {
-        s.active_tasks_mut().insert(TaskType::Mint);
-    });
-    let runtime = TestCanisterRuntime::new();
-
-    process_pending_mints(runtime.clone()).await;
-
-    assert_eq!(events_before, EventsAssert::from_recorded());
-    assert!(runtime.sent_update_calls().is_empty());
-}
-
-#[tokio::test]
-async fn should_return_early_if_no_pending_mints() {
-    setup();
-    let runtime = TestCanisterRuntime::new();
-
-    process_pending_mints(runtime.clone()).await;
-
-    EventsAssert::assert_no_events_recorded();
     assert_eq!(runtime.set_timer_call_count(), 0);
 }
 
