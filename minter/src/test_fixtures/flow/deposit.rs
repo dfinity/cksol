@@ -1,7 +1,10 @@
 use crate::{
     state::read_state,
     test_fixtures::{
-        events::{credit_sweep_at, mint_swept_deposit, queue, submit_sweep, succeed_transaction},
+        events::{
+            credit_sweep_at, mint_swept_deposit, quarantine_pending_mint, queue, submit_sweep,
+            succeed_transaction,
+        },
         queued_deposit_of,
     },
 };
@@ -135,6 +138,7 @@ impl FinalizedSweepFlow {
         });
         CreditedSweepFlow {
             signature: self.signature,
+            amount_received: self.expected_received,
             mints,
         }
     }
@@ -143,6 +147,8 @@ impl FinalizedSweepFlow {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CreditedSweepFlow {
     pub signature: Signature,
+    pub amount_received: Lamport,
+    /// The pending mints of the sweep, in the order of its deposits.
     pub mints: Vec<PendingMintFlow>,
 }
 
@@ -157,6 +163,20 @@ impl CreditedSweepFlow {
                 mints.len()
             ),
         }
+    }
+
+    /// The pending mints of a sweep of exactly `N` deposits, in the order of its deposits.
+    pub fn pending_mints<const N: usize>(&self) -> [PendingMintFlow; N] {
+        self.mints
+            .clone()
+            .try_into()
+            .unwrap_or_else(|mints: Vec<_>| {
+                panic!(
+                    "BUG: expected the sweep {} to have exactly {N} pending mints, got {}",
+                    self.signature,
+                    mints.len()
+                )
+            })
     }
 }
 
@@ -189,6 +209,25 @@ impl PendingMintFlow {
             mint_block_index: *minted.mint_block_index.get(),
         }
     }
+}
+
+impl PendingMintFlow {
+    /// Quarantines the pending mint, which keeps its account in flight.
+    pub fn quarantine(self) -> QuarantinedDepositFlow {
+        quarantine_pending_mint(self.deposit_id);
+        QuarantinedDepositFlow {
+            deposit_id: self.deposit_id,
+            account: self.account,
+            sweep_signature: self.sweep_signature,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct QuarantinedDepositFlow {
+    pub deposit_id: DepositSolId,
+    pub account: Account,
+    pub sweep_signature: Signature,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
