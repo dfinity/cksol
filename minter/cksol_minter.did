@@ -163,17 +163,18 @@ type DepositSolStatus = variant {
         // The signature of the sweep transaction.
         signature: Signature;
     };
-    // The sweep transaction failed or expired, so the deposited SOL is still on
-    // the deposit address and no ckSOL is owed. Calling `deposit_sol` again
-    // queues a new sweep of that balance.
+    // The sweep transaction failed, or expired without ever being seen on chain,
+    // so no ckSOL is owed. Calling `deposit_sol` again queues a new sweep of
+    // whatever balance the deposit address still holds.
     Dropped : record {
         // The signature of the sweep transaction.
         signature: Signature;
     };
     // The sweep transaction was finalized, but its outcome did not match the
     // plan the minter submitted it with, so the amount to credit cannot be
-    // determined safely and no ckSOL was minted. The deposit is not processed
-    // further without manual intervention.
+    // determined safely and no ckSOL was minted. This is not expected to happen
+    // and the minter does not process the deposit any further: releasing or
+    // crediting it requires a minter upgrade.
     Quarantined : record {
         // The signature of the sweep transaction.
         signature: Signature;
@@ -201,8 +202,9 @@ type DepositSolError = variant {
     };
     // The latest deposit of the account is quarantined: its sweep was finalized,
     // but the outcome did not match the plan the minter submitted, so the deposit
-    // could not be credited safely. The account stays rejected until manual
-    // intervention resolves the quarantined deposit.
+    // could not be credited safely. The account stays rejected until a minter
+    // upgrade resolves the quarantined deposit; a new deposit has to use a
+    // different subaccount.
     Quarantined : record {
         // The identifier of the quarantined deposit.
         deposit_id: DepositSolId;

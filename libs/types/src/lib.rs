@@ -146,17 +146,19 @@ pub enum DepositSolStatus {
         /// The signature of the sweep transaction.
         signature: Signature,
     },
-    /// The sweep transaction failed or expired, so the deposited SOL is still on the
-    /// deposit address and no ckSOL is owed. Calling `deposit_sol` again queues a new
-    /// sweep of that balance.
+    /// The sweep transaction failed, or expired without ever being seen on chain, so no
+    /// ckSOL is owed. Calling `deposit_sol` again queues a new sweep of whatever balance
+    /// the deposit address still holds.
     Dropped {
         /// The signature of the sweep transaction.
         signature: Signature,
     },
     /// The sweep transaction was finalized, but its outcome did not match the plan the
     /// minter submitted it with, so the amount to credit cannot be determined safely and
-    /// no ckSOL was minted. The deposit is not processed further without manual
-    /// intervention.
+    /// no ckSOL was minted. This is not expected to happen and the minter does not
+    /// process the deposit any further: releasing or crediting it requires a minter
+    /// upgrade. Meanwhile the account stays in flight, so `deposit_sol` keeps rejecting
+    /// it and a new deposit has to use a different subaccount.
     Quarantined {
         /// The signature of the sweep transaction.
         signature: Signature,
