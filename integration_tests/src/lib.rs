@@ -326,6 +326,20 @@ impl Setup {
         tokio::time::sleep(OUTCALL_SETTLE_DELAY).await;
     }
 
+    /// Advances time until the deposit is minted and returns the minted amount.
+    pub async fn wait_for_deposit_minted(&self, deposit_id: DepositSolId) -> Lamport {
+        const MAX_ITERATIONS: usize = 30;
+        for _ in 0..MAX_ITERATIONS {
+            if let DepositSolStatus::Minted { minted_amount, .. } =
+                self.minter().deposit_status(deposit_id).await
+            {
+                return minted_amount;
+            }
+            self.advance_time_and_settle(Duration::from_mins(1)).await;
+        }
+        panic!("Deposit {deposit_id} was not minted within timeout");
+    }
+
     pub async fn execute_http_mocks(&self, mut mocks: impl ExecuteHttpOutcallMocks) {
         const MAX_ITERATIONS: usize = 30;
         let env = self.env.as_ref().unwrap();
