@@ -43,7 +43,7 @@ mod tests;
 ///   fee of the sweep was shared between its deposits. Each deposit now carries the amount to
 ///   mint and only the mint on the ledger remains, so the deposits are tracked individually again.
 /// * `quarantined`: the metadata contradicts the minter's model of the sweep, so nothing is
-///   minted and the accounts stay rejected by `deposit_sol` until manual intervention.
+///   minted and the accounts stay rejected by `deposit_sol` until a minter upgrade.
 ///
 /// Every account has at most one deposit in flight, so that `deposit_sol` can report the
 /// deposit it is already tracking instead of queueing the same balance twice.

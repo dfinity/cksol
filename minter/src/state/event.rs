@@ -176,7 +176,7 @@ pub enum EventType {
     /// submitted it with, so the amount to credit cannot be determined safely.
     ///
     /// The deposits are quarantined to avoid any double minting and will not be further
-    /// processed without manual intervention.
+    /// processed without a minter upgrade.
     #[n(13)]
     QuarantinedSweep {
         /// The signature of the finalized sweep transaction.

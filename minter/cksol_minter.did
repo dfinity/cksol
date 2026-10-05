@@ -174,7 +174,9 @@ type DepositSolStatus = variant {
     // plan the minter submitted it with, so the amount to credit cannot be
     // determined safely and no ckSOL was minted. This is not expected to happen
     // and the minter does not process the deposit any further: releasing or
-    // crediting it requires a minter upgrade.
+    // crediting it requires a minter upgrade. Meanwhile the account stays in
+    // flight, so `deposit_sol` keeps rejecting it and a new deposit has to
+    // use a different subaccount.
     Quarantined : record {
         // The signature of the sweep transaction.
         signature: Signature;
@@ -538,7 +540,7 @@ type EventType = variant {
     // safely.
     //
     // The deposits are quarantined to avoid any double minting and will not be
-    // further processed without manual intervention.
+    // further processed without a minter upgrade.
     QuarantinedSweep : record {
         // The signature of the finalized sweep transaction.
         signature: Signature;
