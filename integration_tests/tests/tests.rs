@@ -195,6 +195,7 @@ mod lifecycle {
             .upgrade(UpgradeArgs::default())
             .await
             .expect("upgrade failed");
+        wait_for_cached_minter_address(&setup).await;
 
         let minter_info = setup.minter().get_minter_info().await;
         assert_eq!(minter_info, initial_minter_info);
@@ -214,6 +215,7 @@ mod lifecycle {
             })
             .await
             .expect("upgrade failed");
+        wait_for_cached_minter_address(&setup).await;
 
         let minter_info = setup.minter().get_minter_info().await;
         assert_eq!(
@@ -275,6 +277,24 @@ mod lifecycle {
         });
 
         setup.drop().await;
+    }
+
+    /// Polls until the minter has fetched its Schnorr master key again, which
+    /// an upgrade discards together with the rest of the transient state.
+    async fn wait_for_cached_minter_address(setup: &Setup) {
+        for _ in 0..10 {
+            if setup
+                .minter()
+                .get_minter_info()
+                .await
+                .minter_address
+                .is_some()
+            {
+                return;
+            }
+            setup.tick().await;
+        }
+        panic!("Minter address was not cached within timeout");
     }
 }
 
