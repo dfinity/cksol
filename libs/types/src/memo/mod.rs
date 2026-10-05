@@ -9,6 +9,25 @@ mod tests;
 
 /// Maximum size in bytes of a [`Memo`] when serialized into an [ICRC-1 memo].
 ///
+/// The largest memo is a [`MintMemo::Sweep`], which encodes to 81 bytes:
+///
+/// | Bytes | Content |
+/// | --- | --- |
+/// | 2 | the [`Memo`] enum, as an array holding the index of [`Memo::Mint`] |
+/// | 1 | the array holding the single field of [`Memo::Mint`] |
+/// | 2 | the [`MintMemo`] enum, as an array holding the index of [`MintMemo::Sweep`] |
+/// | 1 | the array holding the two fields of [`MintMemo::Sweep`] |
+/// | 2 | the byte string header of the signature, whose length needs a byte of its own |
+/// | 64 | the sweep signature |
+/// | 9 | the deposit id, as an unsigned integer |
+///
+/// Only the deposit id varies, since CBOR encodes an integer in as few bytes as
+/// possible: it takes nine bytes above [`u32::MAX`] and at most five below, which
+/// keeps the memo within 80 bytes for every deposit id reachable in practice.
+///
+/// The ckSOL ledger must be deployed with a `max_memo_length` of at least this
+/// value, otherwise it rejects every mint.
+///
 /// # Example
 ///
 /// ```rust
@@ -27,7 +46,7 @@ mod tests;
 /// ```
 ///
 /// [ICRC-1 memo]: icrc_ledger_types::icrc1::transfer::Memo
-pub const MAX_SERIALIZED_MEMO_BYTES: u16 = 96;
+pub const MAX_SERIALIZED_MEMO_BYTES: u16 = 81;
 
 /// A ckSOL minter ledger memo.
 #[derive(Clone, Eq, PartialEq, Debug, Decode, Encode, From)]
