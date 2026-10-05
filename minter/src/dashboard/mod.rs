@@ -100,7 +100,36 @@ impl<T: Clone> DashboardPaginatedTable<T> {
         page_offset_query_param: &str,
         other_query_params: String,
     ) -> Self {
-        let total_items = items.len();
+        Self::from_rows(
+            items.iter(),
+            Clone::clone,
+            current_page_offset,
+            page_size,
+            num_cols,
+            table_reference,
+            page_offset_query_param,
+            other_query_params,
+        )
+    }
+
+    /// Paginates without materializing the whole table: only the rows of the current page
+    /// go through `to_row`, so rendering one page stays constant in the number of rows.
+    #[allow(clippy::too_many_arguments)]
+    pub fn from_rows<I, F>(
+        rows: I,
+        to_row: F,
+        current_page_offset: usize,
+        page_size: usize,
+        num_cols: usize,
+        table_reference: &str,
+        page_offset_query_param: &str,
+        other_query_params: String,
+    ) -> Self
+    where
+        I: ExactSizeIterator,
+        F: Fn(I::Item) -> T,
+    {
+        let total_items = rows.len();
 
         // Align offset to page boundary and clamp to the last valid page.
         let offset = if page_size == 0 || total_items == 0 {
@@ -112,7 +141,7 @@ impl<T: Clone> DashboardPaginatedTable<T> {
         };
 
         Self {
-            current_page: items.iter().skip(offset).take(page_size).cloned().collect(),
+            current_page: rows.skip(offset).take(page_size).map(to_row).collect(),
             pagination: DashboardTablePagination::new(
                 total_items,
                 offset,
@@ -340,20 +369,14 @@ impl DashboardTemplate {
             pagination.other_params("quarantined_swept_deposits_start"),
         );
 
-        let minted_sweeps: Vec<DashboardMintedSweep> = state
-            .deposits()
-            .minted()
-            .iter()
-            .rev()
-            .map(|(deposit_id, minted)| DashboardMintedSweep {
+        let minted_sweeps_table = DashboardPaginatedTable::from_rows(
+            state.deposits().minted().iter().rev(),
+            |(deposit_id, minted)| DashboardMintedSweep {
                 deposit_id: deposit_id.to_string(),
                 account: minted.deposit.deposit.account.to_string(),
                 minted_amount: lamports_to_sol(minted.minted_amount),
                 mint_block_index: minted.mint_block_index.to_string(),
-            })
-            .collect();
-        let minted_sweeps_table = DashboardPaginatedTable::from_items(
-            &minted_sweeps,
+            },
             pagination.minted_sweeps_start,
             DEFAULT_PAGE_SIZE,
             4,
