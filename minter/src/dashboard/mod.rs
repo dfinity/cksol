@@ -354,9 +354,9 @@ impl DashboardTemplate {
             .rev()
             .map(|(deposit_id, quarantined)| DashboardQuarantinedDeposit {
                 deposit_id: deposit_id.to_string(),
-                account: quarantined.deposit.account.to_string(),
-                signature: quarantined.signature.to_string(),
-                planned_amount: lamports_to_sol(quarantined.deposit.sweepable_amount()),
+                account: quarantined.account().to_string(),
+                signature: quarantined.sweep_signature().to_string(),
+                planned_amount: lamports_to_sol(quarantined.planned_amount()),
             })
             .collect();
         let quarantined_swept_deposits_table = DashboardPaginatedTable::from_items(

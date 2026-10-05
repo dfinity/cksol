@@ -35,9 +35,9 @@ mod deposits;
 pub mod event;
 
 pub use deposits::{
-    DepositBalance, Deposits, MintedSweep, PendingMint, QueuedDeposit, SettledSweep, Sweep,
-    SweepMismatch, SweepRecoveryError, SweepSettlementError, Sweeps, SweptDeposit, Transfer,
-    UnreadableOutcome,
+    DepositBalance, Deposits, MintedSweep, PendingMint, QuarantineCause, QuarantinedDeposit,
+    QueuedDeposit, SettledSweep, Sweep, SweepMismatch, SweepRecoveryError, SweepSettlementError,
+    Sweeps, SweptDeposit, Transfer, UnreadableOutcome,
 };
 
 thread_local! {

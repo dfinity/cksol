@@ -1,4 +1,7 @@
-use super::{DepositBalance, Deposits, MintedSweep, PendingMint, QueuedDeposit, SweptDeposit};
+use super::{
+    DepositBalance, Deposits, MintedSweep, PendingMint, QuarantineCause, QuarantinedDeposit,
+    QueuedDeposit, SweptDeposit,
+};
 use crate::{
     constants::{FEE_PER_SIGNATURE, RENT_EXEMPTION_THRESHOLD},
     numeric::LedgerMintIndex,
@@ -496,7 +499,10 @@ mod mint {
 }
 
 mod quarantine_pending_mint {
-    use super::{DepositSolStatus, Deposits, credited_sweep, mint, queued_deposit};
+    use super::{
+        BTreeMap, CREDIT_TIMESTAMP, DepositSolStatus, Deposits, QuarantineCause,
+        QuarantinedDeposit, SweptDeposit, credited_sweep, mint, queued_deposit,
+    };
 
     #[test]
     fn should_move_the_pending_mint_to_quarantined_without_releasing_its_account() {
@@ -509,7 +515,22 @@ mod quarantine_pending_mint {
             vec![&1]
         );
         assert!(deposits.minted().is_empty());
-        assert_eq!(deposits.quarantined().keys().collect::<Vec<_>>(), vec![&0]);
+        assert_eq!(
+            deposits.quarantined(),
+            &BTreeMap::from([(
+                0,
+                QuarantinedDeposit {
+                    deposit: SweptDeposit {
+                        deposit: queued_deposit(0),
+                        signature: sweep_signature,
+                    },
+                    cause: QuarantineCause::MintUnresolved {
+                        amount_to_mint: 100,
+                        created_at_time: CREDIT_TIMESTAMP,
+                    },
+                },
+            )])
+        );
         for deposit_id in 0..2 {
             assert_eq!(
                 deposits.in_flight_id(&queued_deposit(deposit_id).account),
@@ -533,8 +554,8 @@ mod quarantine_pending_mint {
 
 mod quarantine_sweep {
     use super::{
-        BTreeMap, DepositSolStatus, Deposits, MINTER_ADDRESS, SWEEP_SIGNATURE_INDEX, SweptDeposit,
-        queue_deposits, signature, sweep_message,
+        BTreeMap, DepositSolStatus, Deposits, MINTER_ADDRESS, QuarantineCause, QuarantinedDeposit,
+        SWEEP_SIGNATURE_INDEX, SweptDeposit, queue_deposits, signature, sweep_message,
     };
 
     #[test]
@@ -554,9 +575,12 @@ mod quarantine_sweep {
 
         assert!(deposits.finalized().is_empty());
         assert!(deposits.pending_mints().is_empty());
-        let quarantined = |deposit| SweptDeposit {
-            deposit,
-            signature: sweep_signature,
+        let quarantined = |deposit| QuarantinedDeposit {
+            deposit: SweptDeposit {
+                deposit,
+                signature: sweep_signature,
+            },
+            cause: QuarantineCause::SweepUnreadable,
         };
         assert_eq!(
             deposits.quarantined(),
