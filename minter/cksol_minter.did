@@ -176,13 +176,16 @@ type DepositSolStatus = variant {
         // The signature of the sweep transaction.
         signature: Signature;
     };
-    // The sweep transaction was finalized, but its outcome did not match the
-    // plan the minter submitted it with, so the amount to credit cannot be
-    // determined safely and no ckSOL was minted. This is not expected to happen
-    // and the minter does not process the deposit any further: releasing or
-    // crediting it requires a minter upgrade. Meanwhile the account stays in
-    // flight, so `deposit_sol` keeps rejecting it and a new deposit has to
-    // use a different subaccount.
+    // The minter stopped processing the deposit: either the finalized sweep's
+    // outcome did not match the plan the minter submitted it with, so the
+    // amount to credit cannot be determined safely and no ckSOL was minted, or
+    // the ckSOL mint of the credited deposit could not be completed, in which
+    // case the mint may nevertheless have landed on the ledger. This is not
+    // expected to happen and resolving it requires a minter upgrade: before
+    // minting by hand, search the ledger for a mint whose memo carries the
+    // sweep signature and the deposit id, otherwise a double mint results.
+    // Meanwhile the account stays in flight, so `deposit_sol` keeps rejecting
+    // it and a new deposit has to use a different subaccount.
     Quarantined : record {
         // The signature of the sweep transaction.
         signature: Signature;
