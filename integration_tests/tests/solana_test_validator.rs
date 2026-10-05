@@ -187,7 +187,7 @@ async fn should_add_an_operator_created_nonce_account_through_an_upgrade() {
         setup.minter().get_minter_info().await.nonce_accounts,
         Vec::<String>::new()
     );
-    let authority = wait_for_minter_address(&setup).await;
+    let authority = setup.wait_for_minter_address().await;
 
     let nonce_accounts: Vec<String> = validator
         .create_nonce_accounts(1, &authority)
@@ -211,18 +211,6 @@ async fn should_add_an_operator_created_nonce_account_through_an_upgrade() {
     );
 
     setup.drop().await;
-}
-
-async fn wait_for_minter_address(setup: &Setup) -> Address {
-    for _ in 0..30 {
-        if let Some(address) = setup.minter().get_minter_info().await.minter_address {
-            return address
-                .parse()
-                .expect("the minter reported a malformed main address");
-        }
-        setup.advance_time_and_settle(Duration::from_secs(1)).await;
-    }
-    panic!("Minter address was not available within timeout");
 }
 
 async fn wait_for_minter_balance(setup: &Setup, expected_balance: Lamport) {

@@ -375,6 +375,24 @@ impl Setup {
         }
     }
 
+    /// Polls `get_minter_info` until the minter reports its main Solana address,
+    /// advancing time between polls so the timer fetching the Schnorr master key fires.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the address is not reported within the timeout.
+    pub async fn wait_for_minter_address(&self) -> solana_address::Address {
+        for _ in 0..30 {
+            if let Some(address) = self.minter().get_minter_info().await.minter_address {
+                return address
+                    .parse()
+                    .expect("the minter reported a malformed main address");
+            }
+            self.advance_time_and_settle(Duration::from_secs(1)).await;
+        }
+        panic!("Minter address was not available within timeout");
+    }
+
     pub async fn check_metrics(self) -> ic_metrics_assert::MetricsAssert<Self> {
         ic_metrics_assert::MetricsAssert::from_async_http_query(self).await
     }
