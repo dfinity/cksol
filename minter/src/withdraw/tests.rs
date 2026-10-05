@@ -200,78 +200,37 @@ async fn should_return_error_if_address_malformed() {
 }
 
 #[tokio::test]
-async fn should_reject_withdrawal_to_system_program() {
+async fn should_reject_withdrawal_to_invalid_destinations() {
     const SYSTEM_PROGRAM_ID: &str = "11111111111111111111111111111111";
-    init_state();
-    init_schnorr_master_key();
-
-    let runtime = TestCanisterRuntime::new();
-
-    let result = withdraw(
-        &runtime,
-        test_caller(),
-        MINIMUM_WITHDRAWAL_AMOUNT,
-        SYSTEM_PROGRAM_ID.to_string(),
-    )
-    .await;
-
-    assert_matches!(result, Err(WithdrawalError::InvalidDestination(_)));
-    EventsAssert::assert_no_events_recorded();
-}
-
-#[tokio::test]
-async fn should_reject_withdrawal_to_sysvar() {
     const CLOCK_SYSVAR_ID: &str = "SysvarC1ock11111111111111111111111111111111";
     init_state();
     init_schnorr_master_key();
 
     let runtime = TestCanisterRuntime::new();
 
-    let result = withdraw(
-        &runtime,
-        test_caller(),
-        MINIMUM_WITHDRAWAL_AMOUNT,
-        CLOCK_SYSVAR_ID.to_string(),
-    )
-    .await;
+    let cases = [
+        ("the system program", SYSTEM_PROGRAM_ID.to_string()),
+        ("a sysvar", CLOCK_SYSVAR_ID.to_string()),
+        ("the minter's main address", MINTER_ADDRESS.to_string()),
+        ("a nonce account of the pool", NONCE_ACCOUNT.to_string()),
+    ];
 
-    assert_matches!(result, Err(WithdrawalError::InvalidDestination(_)));
-}
+    for (name, destination) in cases {
+        let result = withdraw(
+            &runtime,
+            test_caller(),
+            MINIMUM_WITHDRAWAL_AMOUNT,
+            destination,
+        )
+        .await;
 
-#[tokio::test]
-async fn should_reject_withdrawal_to_minter_address() {
-    init_state();
-    init_schnorr_master_key();
-
-    let runtime = TestCanisterRuntime::new();
-
-    let result = withdraw(
-        &runtime,
-        test_caller(),
-        MINIMUM_WITHDRAWAL_AMOUNT,
-        MINTER_ADDRESS.to_string(),
-    )
-    .await;
-
-    assert_matches!(result, Err(WithdrawalError::InvalidDestination(_)));
-}
-
-#[tokio::test]
-async fn should_reject_withdrawal_to_nonce_pool_account() {
-    init_state();
-    init_schnorr_master_key();
-
-    let runtime = TestCanisterRuntime::new();
-
-    let result = withdraw(
-        &runtime,
-        test_caller(),
-        MINIMUM_WITHDRAWAL_AMOUNT,
-        NONCE_ACCOUNT.to_string(),
-    )
-    .await;
-
-    assert_matches!(result, Err(WithdrawalError::InvalidDestination(_)));
+        assert_matches!(
+            result,
+            Err(WithdrawalError::InvalidDestination(_)),
+            "{name}"
+        );
+        EventsAssert::assert_no_events_recorded();
+    }
 }
 
 #[tokio::test]
