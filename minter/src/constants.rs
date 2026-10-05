@@ -24,7 +24,7 @@ pub const MAX_PENDING_MINTS_PER_ROUND: usize = 10;
 
 /// The window within which the ckSOL ledger deduplicates transfers by their
 /// `created_at_time`, matching `TRANSACTION_WINDOW` of the ICRC-1 ledger:
-/// <https://github.com/dfinity/ic/blob/master/rs/ledger_suite/icrc1/ledger/src/lib.rs>
+/// <https://github.com/dfinity/ic/blob/d3b3351fa343a893aea2cfa8d39ac6b0d507b477/rs/ledger_suite/icrc1/ledger/src/lib.rs#L65>
 ///
 /// Retrying a pending mint beyond this window is no longer deduplicated, so a
 /// pending mint older than that is quarantined instead of retried.
