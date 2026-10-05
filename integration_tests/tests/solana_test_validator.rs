@@ -6,6 +6,7 @@ use cksol_int_tests::{
     validator::{FEE_PER_SIGNATURE, SolanaTestValidator, wait_for_withdrawal_finalized},
 };
 use cksol_types::{DepositSolId, DepositSolStatus, Signature, WithdrawalArgs};
+use cksol_types_internal::UpgradeArgs;
 use icrc_ledger_types::icrc1::account::Account;
 use sol_rpc_types::Lamport;
 use solana_address::Address;
@@ -175,6 +176,53 @@ async fn should_deposit_and_withdraw() {
     }
 
     setup.drop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn should_add_an_operator_created_nonce_account_through_an_upgrade() {
+    let validator = SolanaTestValidator::start().await;
+    let setup = validator.setup().await;
+
+    assert_eq!(
+        setup.minter().get_minter_info().await.nonce_accounts,
+        Vec::<String>::new()
+    );
+    let authority = wait_for_minter_address(&setup).await;
+
+    let nonce_accounts: Vec<String> = validator
+        .create_nonce_accounts(1, &authority)
+        .await
+        .iter()
+        .map(Address::to_string)
+        .collect();
+
+    setup
+        .minter()
+        .upgrade(UpgradeArgs {
+            nonce_accounts_to_add: Some(nonce_accounts.clone()),
+            ..UpgradeArgs::default()
+        })
+        .await
+        .expect("upgrade should succeed");
+
+    assert_eq!(
+        setup.minter().get_minter_info().await.nonce_accounts,
+        nonce_accounts
+    );
+
+    setup.drop().await;
+}
+
+async fn wait_for_minter_address(setup: &Setup) -> Address {
+    for _ in 0..30 {
+        if let Some(address) = setup.minter().get_minter_info().await.minter_address {
+            return address
+                .parse()
+                .expect("the minter reported a malformed main address");
+        }
+        setup.advance_time_and_settle(Duration::from_secs(1)).await;
+    }
+    panic!("Minter address was not available within timeout");
 }
 
 async fn wait_for_minter_balance(setup: &Setup, expected_balance: Lamport) {
