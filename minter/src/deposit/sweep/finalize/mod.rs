@@ -18,12 +18,12 @@ mod tests;
 ///
 /// Each sweep is settled against the plan it was submitted with, so that only an outcome
 /// matching exactly what the minter built is credited. A sweep whose outcome cannot be read
-/// is left finalized and retried on the next run, and so is a sweep whose outcome does not
-/// match its plan.
+/// is left finalized and retried on the next run, while a sweep whose outcome does not match
+/// its plan is quarantined instead of credited.
 ///
 /// Returns whether the finalization timer must run again immediately, which is the case
-/// only when this round credited a sweep and finalized sweeps are left. A round whose
-/// fetches all failed is retried at the timer interval instead of in a hot loop.
+/// only when this round credited or quarantined a sweep and finalized sweeps are left. A
+/// round whose fetches all failed is retried at the timer interval instead of in a hot loop.
 pub async fn credit_finalized_sweeps<R: CanisterRuntime>(runtime: &R) -> bool {
     let (finalized_count, round): (usize, Vec<(Signature, Sweep)>) = read_state(|state| {
         let finalized = state.deposits().finalized();
@@ -47,7 +47,7 @@ pub async fn credit_finalized_sweeps<R: CanisterRuntime>(runtime: &R) -> bool {
     )
     .await;
 
-    let mut credited_count = 0;
+    let mut settled_count = 0;
     for ((signature, sweep), outcome) in round.into_iter().zip(outcomes) {
         let outcome = match outcome {
             Ok(Some(outcome)) => outcome,
@@ -66,8 +66,12 @@ pub async fn credit_finalized_sweeps<R: CanisterRuntime>(runtime: &R) -> bool {
                 continue;
             }
         };
-        let settled = match sweep.settle(&outcome) {
-            Ok(settled) => settled,
+        let event = match sweep.settle(&outcome) {
+            Ok(settled) => EventType::CreditedSweep {
+                signature,
+                amount_received: settled.amount_received(),
+                mints: settled.into_mints(),
+            },
             Err(SweepSettlementError::Unreadable(e)) => {
                 log!(
                     Priority::Info,
@@ -78,19 +82,14 @@ pub async fn credit_finalized_sweeps<R: CanisterRuntime>(runtime: &R) -> bool {
             Err(SweepSettlementError::Mismatch(e)) => {
                 log!(
                     Priority::Error,
-                    "The outcome of sweep {signature} does not match its plan: {e}, retrying later"
+                    "Quarantining the deposits of sweep {signature}: {e}"
                 );
-                continue;
+                EventType::QuarantinedSweep { signature }
             }
         };
-        let event = EventType::CreditedSweep {
-            signature,
-            amount_received: settled.amount_received(),
-            mints: settled.into_mints(),
-        };
         mutate_state(|state| process_event(state, event, runtime));
-        credited_count += 1;
+        settled_count += 1;
     }
 
-    credited_count > 0 && credited_count < finalized_count
+    settled_count > 0 && settled_count < finalized_count
 }

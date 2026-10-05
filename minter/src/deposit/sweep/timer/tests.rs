@@ -8,8 +8,12 @@ use crate::{
     },
     test_fixtures::{
         DEFAULT_BLOCK_HEIGHT, EventsAssert, MINIMUM_DEPOSIT_AMOUNT, MINTER_ADDRESS, account,
-        account_signature, deposit_address, events::queue_deposit, init_schnorr_master_key,
-        init_state, runtime::TestCanisterRuntime, schnorr_master_key_response, signer::sign_for,
+        account_signature, deposit_address,
+        events::{quarantine_sweep, queue_deposit, submit_sweep, succeed_transaction},
+        init_schnorr_master_key, init_state,
+        runtime::TestCanisterRuntime,
+        schnorr_master_key_response, signature,
+        signer::sign_for,
     },
 };
 use assert_matches::assert_matches;
@@ -30,6 +34,29 @@ async fn should_return_early_if_no_deposits_queued() {
     sweep_queued_deposits(runtime.clone()).await;
 
     EventsAssert::assert_no_events_recorded();
+    assert_eq!(runtime.set_timer_call_count(), 0);
+}
+
+#[tokio::test]
+async fn should_not_sweep_a_quarantined_deposit_again() {
+    setup();
+    let sweep_signature = signature(0xAA);
+    queue_deposit(0, account(1), MINIMUM_DEPOSIT_AMOUNT);
+    submit_sweep(sweep_signature, vec![0]);
+    succeed_transaction(sweep_signature);
+    quarantine_sweep(sweep_signature);
+    let events_before = EventsAssert::from_recorded();
+    let runtime = TestCanisterRuntime::new();
+
+    sweep_queued_deposits(runtime.clone()).await;
+
+    assert_eq!(events_before, EventsAssert::from_recorded());
+    assert_eq!(
+        deposit_status(0),
+        DepositSolStatus::Quarantined {
+            signature: sweep_signature.into()
+        }
+    );
     assert_eq!(runtime.set_timer_call_count(), 0);
 }
 

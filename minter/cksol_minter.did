@@ -142,8 +142,7 @@ type DepositSolId = nat64;
 
 // The status of a deposit queued by the `deposit_sol` endpoint.
 //
-// Further variants (`Minted`, `Dropped`, `Quarantined`) will follow as the
-// sweep flow is implemented.
+// The `Minted` variant will follow as the sweep flow is implemented.
 type DepositSolStatus = variant {
     // No deposit with this identifier was queued.
     NotFound;
@@ -164,11 +163,27 @@ type DepositSolStatus = variant {
         // The signature of the sweep transaction.
         signature: Signature;
     };
+    // The sweep transaction failed, or expired without ever being seen on chain,
+    // so no ckSOL is owed. Calling `deposit_sol` again queues a new sweep of
+    // whatever balance the deposit address still holds.
+    Dropped : record {
+        // The signature of the sweep transaction.
+        signature: Signature;
+    };
+    // The sweep transaction was finalized, but its outcome did not match the
+    // plan the minter submitted it with, so the amount to credit cannot be
+    // determined safely and no ckSOL was minted. This is not expected to happen
+    // and the minter does not process the deposit any further: releasing or
+    // crediting it requires a minter upgrade. Meanwhile the account stays in
+    // flight, so `deposit_sol` keeps rejecting it and a new deposit has to
+    // use a different subaccount.
+    Quarantined : record {
+        // The signature of the sweep transaction.
+        signature: Signature;
+    };
 };
 
 // An error from the `deposit_sol` endpoint.
-//
-// Further variants will follow as the sweep flow is implemented.
 type DepositSolError = variant {
     // Insufficient cycles attached by the caller to complete the `deposit_sol` call.
     InsufficientCycles : InsufficientCyclesError;
@@ -186,6 +201,15 @@ type DepositSolError = variant {
         balance: Lamport;
         // The minimum deposit amount for the deposit to be queued.
         minimum_deposit_amount: Lamport;
+    };
+    // The latest deposit of the account is quarantined: its sweep was finalized,
+    // but the outcome did not match the plan the minter submitted, so the deposit
+    // could not be credited safely. The account stays rejected until a minter
+    // upgrade resolves the quarantined deposit; a new deposit has to use a
+    // different subaccount.
+    Quarantined : record {
+        // The identifier of the quarantined deposit.
+        deposit_id: DepositSolId;
     };
 };
 
@@ -484,7 +508,8 @@ type EventType = variant {
     };
     // A previously submitted Solana transaction has an expired blockhash
     // and a null on-chain status, meaning it will never be executed.
-    // The transaction has been marked for resubmission.
+    // A withdrawal or consolidation transaction is marked for resubmission;
+    // the deposits of a sweep transaction are dropped instead.
     ExpiredTransaction : record {
         // The signature of the expired Solana transaction.
         signature: Signature;
@@ -509,6 +534,16 @@ type EventType = variant {
         amount_received: Lamport;
         // The mint enqueued for each deposit of the sweep, by increasing deposit id.
         mints: vec CreditedDeposit;
+    };
+    // The outcome of a finalized sweep transaction did not match the plan the
+    // minter submitted it with, so the amount to credit cannot be determined
+    // safely.
+    //
+    // The deposits are quarantined to avoid any double minting and will not be
+    // further processed without a minter upgrade.
+    QuarantinedSweep : record {
+        // The signature of the finalized sweep transaction.
+        signature: Signature;
     };
 };
 
