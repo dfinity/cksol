@@ -57,12 +57,18 @@ fn ensure_signed_with(
         .decode()
         .ok_or(GetTransactionError::UndecodableTransaction { queried })?;
     match decoded.signatures.first() {
-        Some(first) if *first == queried => Ok(()),
-        returned => Err(GetTransactionError::SignatureMismatch {
-            queried,
-            returned: returned.copied().map(Box::new),
-        }),
+        Some(first) if *first == queried => {}
+        returned => {
+            return Err(GetTransactionError::SignatureMismatch {
+                queried,
+                returned: returned.copied().map(Box::new),
+            });
+        }
     }
+    if decoded.verify_with_results().first() != Some(&true) {
+        return Err(GetTransactionError::InvalidSignature { queried });
+    }
+    Ok(())
 }
 
 #[derive(Debug, PartialEq, Error, From)]
@@ -74,12 +80,16 @@ pub enum GetTransactionError {
     #[error("Inconsistent RPC results for transaction")]
     InconsistentRpcResults,
     #[error("Transaction returned for {queried} cannot be decoded")]
+    #[from(ignore)]
     UndecodableTransaction { queried: Signature },
     #[error("Transaction returned for {queried} has first signature {returned:?}")]
     SignatureMismatch {
         queried: Signature,
         returned: Option<Box<Signature>>,
     },
+    #[error("Transaction returned for {queried} is not signed by its fee payer")]
+    #[from(ignore)]
+    InvalidSignature { queried: Signature },
 }
 
 impl From<GetTransactionError> for ProcessDepositError {

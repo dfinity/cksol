@@ -1313,19 +1313,43 @@ pub mod deposit {
     }
 
     // Anonymized v0 transaction: 0.5 SOL transfer to DEPOSIT_ADDRESS (BVH7GZXRdqyZLSLBS4cm1Yom8Yvekw6ytgSFz9y9on4e).
-    // Derived from a real devnet v0 transaction with sender, signature, and amount replaced by dummy values.
+    // Derived from a real devnet v0 transaction with the amount replaced and the sender
+    // replaced by a key generated from a fixed seed, which re-signs the message.
     pub fn v0_deposit_transaction_signature() -> solana_signature::Signature {
-        solana_signature::Signature::from([0x42; 64])
+        v0_signed_transaction().signatures[0]
+    }
+
+    fn v0_signed_transaction() -> solana_transaction::versioned::VersionedTransaction {
+        const ENCODED: &str = "AUJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkKAAQACBBERERERERERERERERERERERERERERERERERERERERERm9NYan1lUBJ+p+uJV+FG8uZ+ZU5ZkqbFoBB9YL+y21cDBkZv5SEXMv/srbpyw5vnvIzlu8X3EmssQ5s6QAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVUDAgAJA9i4BQAAAAAAAgAFAkANAwADAgABDAIAAAAAZc0dAAAAAAA=";
+        let sender = ic_ed25519::PrivateKey::generate_from_seed(b"v0 deposit sender");
+        let mut transaction: solana_transaction::versioned::VersionedTransaction =
+            bincode::deserialize(
+                &base64::Engine::decode(&base64::engine::general_purpose::STANDARD, ENCODED)
+                    .expect("BUG: the v0 transaction fixture is valid base64"),
+            )
+            .expect("BUG: the v0 transaction fixture should deserialize");
+        let solana_message::VersionedMessage::V0(message) = &mut transaction.message else {
+            panic!("BUG: the fixture is a v0 transaction");
+        };
+        message.account_keys[0] =
+            solana_address::Address::from(sender.public_key().serialize_raw());
+        transaction.signatures[0] = solana_signature::Signature::from(
+            sender.sign_message(&transaction.message.serialize()),
+        );
+        transaction
     }
 
     // v0 (versioned) 0.5 SOL transfer to DEPOSITOR_ACCOUNT's deposit address (BVH7GZXRdqyZLSLBS4cm1Yom8Yvekw6ytgSFz9y9on4e).
     pub fn v0_deposit_transaction() -> EncodedConfirmedTransactionWithStatusMeta {
-        const ENCODED: &str = "AUJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkKAAQACBBERERERERERERERERERERERERERERERERERERERERERm9NYan1lUBJ+p+uJV+FG8uZ+ZU5ZkqbFoBB9YL+y21cDBkZv5SEXMv/srbpyw5vnvIzlu8X3EmssQ5s6QAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVUDAgAJA9i4BQAAAAAAAgAFAkANAwADAgABDAIAAAAAZc0dAAAAAAA=";
         EncodedConfirmedTransactionWithStatusMeta {
             slot: 457247193,
             transaction: EncodedTransactionWithStatusMeta {
                 transaction: EncodedTransaction::Binary(
-                    ENCODED.to_string(),
+                    base64::Engine::encode(
+                        &base64::engine::general_purpose::STANDARD,
+                        bincode::serialize(&v0_signed_transaction())
+                            .expect("BUG: the v0 transaction should serialize"),
+                    ),
                     TransactionBinaryEncoding::Base64,
                 ),
                 meta: Some(UiTransactionStatusMeta {

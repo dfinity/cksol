@@ -189,6 +189,42 @@ mod get_transaction_tests {
     }
 
     #[tokio::test]
+    async fn should_fail_if_the_signature_does_not_sign_the_returned_message() {
+        init_state();
+
+        let mut transaction = legacy_deposit_transaction();
+        let mut decoded = transaction
+            .transaction
+            .transaction
+            .decode()
+            .expect("BUG: the fixture transaction should decode");
+        let solana_message::VersionedMessage::Legacy(message) = &mut decoded.message else {
+            panic!("BUG: the fixture is a legacy transaction");
+        };
+        message.recent_blockhash = solana_hash::Hash::new_from_array([0x5A; 32]);
+        transaction.transaction.transaction = EncodedTransaction::Binary(
+            base64::Engine::encode(
+                &base64::engine::general_purpose::STANDARD,
+                bincode::serialize(&decoded).expect("BUG: the transaction should serialize"),
+            ),
+            TransactionBinaryEncoding::Base64,
+        );
+
+        let runtime = TestCanisterRuntime::new().add_stub_response(MultiRpcResult::Consistent(Ok(
+            Some(transaction.try_into().unwrap()),
+        )));
+
+        let result = get_transaction(&runtime, legacy_deposit_transaction_signature()).await;
+
+        assert_eq!(
+            result,
+            Err(GetTransactionError::InvalidSignature {
+                queried: legacy_deposit_transaction_signature()
+            })
+        );
+    }
+
+    #[tokio::test]
     async fn should_return_transaction() {
         init_state();
 
