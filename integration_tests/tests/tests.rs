@@ -1391,7 +1391,9 @@ mod deposit_sol_tests {
         let setup = setup
             .check_metrics()
             .await
-            .assert_contains_metric_matching(r"quarantined_swept_deposits 1 \d+")
+            .assert_contains_metric_matching(
+                r#"quarantined_swept_deposits\{cause="sweep_unreadable"\} 1 \d+"#,
+            )
             .into();
 
         let result = setup.minter().deposit_sol(DEFAULT_CALLER_ACCOUNT).await;
