@@ -172,6 +172,16 @@ impl MockBuilder {
         self.get_transaction(get_deposit_transaction_response())
     }
 
+    /// Mock for `getTransaction` of the transaction with the given signature, answering
+    /// with the given response.
+    pub fn get_transaction_with_signature(
+        self,
+        signature: &Signature,
+        response: JsonRpcResponse,
+    ) -> Self {
+        self.expect(get_transaction_request(&signature.to_string()), response)
+    }
+
     /// Mock for `getBalance` returning the given balance for any address.
     pub fn get_balance(self, balance: Lamport) -> Self {
         self.expect(get_balance_request(), get_balance_response(balance))
@@ -229,8 +239,12 @@ impl MockBuilder {
 
 /// [`getTransaction`] request for [`DEPOSIT_TRANSACTION_SIGNATURE`].
 fn get_deposit_transaction_request() -> JsonRpcRequestMatcher {
+    get_transaction_request(DEPOSIT_TRANSACTION_SIGNATURE)
+}
+
+fn get_transaction_request(signature: &str) -> JsonRpcRequestMatcher {
     JsonRpcRequestMatcher::with_method("getTransaction").with_params(json!([
-        DEPOSIT_TRANSACTION_SIGNATURE,
+        signature,
         {"encoding": "base64", "commitment": "finalized", "maxSupportedTransactionVersion": 0}
     ]))
 }
@@ -250,7 +264,7 @@ fn get_deposit_transaction_request() -> JsonRpcRequestMatcher {
 ///     ]
 /// }'
 /// ```
-fn get_deposit_transaction_response() -> JsonRpcResponse {
+pub fn get_deposit_transaction_response() -> JsonRpcResponse {
     JsonRpcResponse::from(json!({
         "jsonrpc": "2.0",
         "result": {

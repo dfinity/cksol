@@ -252,6 +252,10 @@ impl State {
             .unwrap_or_else(|| {
                 panic!("BUG: cannot mark non-submitted transaction {signature} for resubmission")
             });
+        if let TransactionPurpose::SweepDeposits { .. } = &transaction.purpose {
+            self.deposits.drop_swept(signature);
+            return;
+        }
         assert!(
             self.transactions_to_resubmit
                 .insert(*signature, transaction)
@@ -510,6 +514,10 @@ impl State {
         self.balance += amount_received;
     }
 
+    fn process_quarantined_sweep(&mut self, signature: &Signature) {
+        self.deposits.quarantine_sweep(signature);
+    }
+
     fn process_quarantined_deposit(&mut self, deposit_id: &DepositId) {
         assert!(
             !self.minted_deposits.contains_key(deposit_id),
@@ -725,6 +733,13 @@ impl State {
                 panic!("Attempted to resubmit unknown transaction with signature {old_signature:?}")
             });
         assert!(
+            !matches!(
+                old_transaction.purpose,
+                TransactionPurpose::SweepDeposits { .. }
+            ),
+            "BUG: sweep transaction {old_signature} must be dropped instead of resubmitted"
+        );
+        assert!(
             !self.succeeded_transactions.contains(new_signature),
             "Attempted to resubmit with signature {new_signature:?} that already succeeded"
         );
@@ -750,7 +765,6 @@ impl State {
                 sent.signature = *new_signature;
             }
         }
-        self.deposits.resubmit_sweep(old_signature, new_signature);
     }
 
     fn process_transaction_succeeded(&mut self, signature: &Signature) {
@@ -805,6 +819,9 @@ impl State {
             !self.transactions_to_resubmit.contains_key(signature),
             "BUG: transaction {signature} is queued for resubmission but is being marked as failed"
         );
+        if let TransactionPurpose::SweepDeposits { .. } = &transaction.purpose {
+            self.deposits.drop_swept(signature);
+        }
         assert_eq!(
             self.failed_transactions.insert(*signature, transaction),
             None,

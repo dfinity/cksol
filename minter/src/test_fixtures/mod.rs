@@ -712,6 +712,12 @@ pub mod events {
         });
     }
 
+    pub fn quarantine_sweep(signature: Signature) {
+        mutate_state(|state| {
+            process_event(state, EventType::QuarantinedSweep { signature }, &runtime())
+        });
+    }
+
     pub fn accept_withdrawal(account: Account, burn_index: u64, amount: Lamport) {
         accept_withdrawal_at(account, burn_index, amount, 0);
     }
@@ -1149,6 +1155,7 @@ pub mod arb {
                         mints,
                     }
                 }),
+            arb_signature().prop_map(|signature| EventType::QuarantinedSweep { signature }),
             (arb_ed25519_public_key(), any::<[u8; 32]>()).prop_map(|(public_key, chain_code)| {
                 EventType::MinterPublicKeyFetched {
                     public_key,

@@ -40,8 +40,23 @@ pub async fn deposit_sol<R: CanisterRuntime>(
         });
     check_caller_available_cycles(runtime, required_cycles)?;
 
-    if let Some(deposit_id) = read_state(|state| state.deposits().in_flight_id(&account)) {
-        return Ok(deposit_id);
+    if let Some((deposit_id, status)) = read_state(|state| {
+        state
+            .deposits()
+            .in_flight_id(&account)
+            .map(|deposit_id| (deposit_id, state.deposits().status(deposit_id)))
+    }) {
+        return match status {
+            DepositSolStatus::Queued { .. }
+            | DepositSolStatus::Swept { .. }
+            | DepositSolStatus::Finalized { .. } => Ok(deposit_id),
+            DepositSolStatus::Quarantined { .. } => {
+                Err(DepositSolError::Quarantined { deposit_id })
+            }
+            DepositSolStatus::Dropped { .. } | DepositSolStatus::NotFound => panic!(
+                "BUG: in-flight deposit {deposit_id} of account {account:?} has status {status:?}"
+            ),
+        };
     }
 
     // TODO hq-3k1.6: This check only exists while `process_deposit` still mints before the

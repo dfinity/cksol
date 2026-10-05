@@ -107,9 +107,9 @@ async fn should_credit_the_amount_received_by_the_main_account() {
 }
 
 #[tokio::test]
-async fn should_keep_deposits_finalized_when_the_outcome_cannot_be_settled() {
+async fn should_keep_deposits_finalized_until_the_outcome_can_be_read() {
     type Response = fn() -> GetTransactionResult;
-    let cases: [(&str, Response); 4] = [
+    let cases: [(&str, Response); 3] = [
         ("the transaction is not returned", || {
             GetTransactionResult::Consistent(Ok(None))
         }),
@@ -119,11 +119,6 @@ async fn should_keep_deposits_finalized_when_the_outcome_cannot_be_settled() {
         ("the metadata cannot be read", || {
             let mut outcome = devnet_sweep::derived_outcome();
             outcome.transaction.meta = None;
-            transaction_response(outcome)
-        }),
-        ("the outcome does not match the plan", || {
-            let mut outcome = devnet_sweep::derived_outcome();
-            devnet_sweep::set_balances(&mut outcome, MINTER_ADDRESS, 1, 0);
             transaction_response(outcome)
         }),
     ];
@@ -146,6 +141,7 @@ async fn should_keep_deposits_finalized_when_the_outcome_cannot_be_settled() {
                 "{name}"
             );
             assert!(state.deposits().pending_mints().is_empty(), "{name}");
+            assert!(state.deposits().quarantined().is_empty(), "{name}");
         });
         assert_eq!(
             deposit_status(0),
@@ -155,6 +151,34 @@ async fn should_keep_deposits_finalized_when_the_outcome_cannot_be_settled() {
             "{name}"
         );
     }
+}
+
+#[tokio::test]
+async fn should_quarantine_deposits_if_the_outcome_does_not_match_the_plan() {
+    setup();
+    let sweep_signature = finalize_devnet_sweep();
+    let mut outcome = devnet_sweep::derived_outcome();
+    devnet_sweep::set_balances(&mut outcome, MINTER_ADDRESS, 1, 0);
+
+    credit_finalized_sweeps(&runtime_returning(outcome)).await;
+
+    EventsAssert::from_recorded().expect_contains_event_eq(EventType::QuarantinedSweep {
+        signature: sweep_signature,
+    });
+    read_state(|state| {
+        assert!(state.deposits().finalized().is_empty());
+        assert!(state.deposits().pending_mints().is_empty());
+        assert_eq!(
+            state.deposits().quarantined().len(),
+            devnet_sweep::DEPOSITS.len()
+        );
+    });
+    assert_eq!(
+        deposit_status(0),
+        DepositSolStatus::Quarantined {
+            signature: sweep_signature.into()
+        }
+    );
 }
 
 fn setup() {
