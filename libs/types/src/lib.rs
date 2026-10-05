@@ -202,6 +202,9 @@ pub enum WithdrawalError {
     },
     /// The Solana address is not valid.
     MalformedAddress(String),
+    /// The destination address cannot receive a withdrawal.
+    /// The payload contains a human-readable message explaining why the destination was rejected.
+    InvalidDestination(String),
     /// The withdrawal account does not hold the requested ckSOL amount.
     InsufficientFunds {
         /// The current balance of the withdrawal account.
