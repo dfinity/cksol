@@ -380,10 +380,17 @@ mod swept_deposits {
         let recorded_events: Vec<Event> = with_event_iter(|events| events.collect());
 
         let replayed = replay_events(
-            std::iter::once(Event {
-                timestamp: 0,
-                payload: EventType::Init(valid_init_args()),
-            })
+            [
+                Event {
+                    timestamp: 0,
+                    payload: EventType::Init(valid_init_args()),
+                },
+                Event {
+                    timestamp: 0,
+                    payload: crate::test_fixtures::minter_public_key_fetched_event(),
+                },
+            ]
+            .into_iter()
             .chain(recorded_events),
         );
 
@@ -395,6 +402,7 @@ mod swept_deposits {
     }
 
     fn credit_sweep_of_two_deposits(credited_at: u64) -> CreditedSweepFlow {
+        init_schnorr_master_key();
         let deposits = [1, 2].map(|i| DepositFlow::queue(account(i), 1_000_000 * i as u64));
         SweepFlow::of(deposits)
             .submit(signature(SWEEP_SIGNATURE_INDEX))

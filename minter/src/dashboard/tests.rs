@@ -215,6 +215,7 @@ fn should_display_quarantined_swept_deposits_with_the_sweep_signature() {
 #[test]
 fn should_display_minted_swept_deposits_with_amount_and_block_index() {
     init_state();
+    init_schnorr_master_key();
     let minted = DepositFlow::queue(account(1), 400_000_000)
         .sweep(signature(0xAA))
         .succeed()
@@ -239,6 +240,7 @@ fn should_paginate_minted_swept_deposits_across_multiple_pages() {
     use crate::dashboard::DEFAULT_PAGE_SIZE;
 
     init_state();
+    init_schnorr_master_key();
 
     let total_minted_sweeps = DEFAULT_PAGE_SIZE + 1;
     for i in 0..total_minted_sweeps {
