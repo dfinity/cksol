@@ -112,7 +112,9 @@
                     <th>Deposit Id</th>
                     <th>Account</th>
                     <th>Sweep Txn</th>
+                    <th>Cause</th>
                     <th>Planned Amount (SOL)</th>
+                    <th>Amount to Mint (SOL)</th>
                 </tr>
                 </thead>
                 <tbody>
@@ -121,7 +123,9 @@
                     <td>{{ deposit.deposit_id }}</td>
                     <td><code>{{ deposit.account }}</code></td>
                     <td>{% call solscan_tx_link(deposit.signature) %}</td>
+                    <td>{{ deposit.cause }}</td>
                     <td>{{ deposit.planned_amount }}</td>
+                    <td>{{ deposit.amount_to_mint }}</td>
                 </tr>
                 {% endfor %}
                 {% if quarantined_swept_deposits_table.has_more_than_one_page() %}{{ quarantined_swept_deposits_table.pagination|safe }}{% endif %}

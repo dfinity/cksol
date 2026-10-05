@@ -1,6 +1,6 @@
 use crate::{
     address::minter_address,
-    state::{ConsolidationTransaction, State},
+    state::{ConsolidationTransaction, QuarantineCause, State},
 };
 use askama::Template;
 use candid::Principal;
@@ -242,7 +242,10 @@ pub struct DashboardQuarantinedDeposit {
     pub deposit_id: String,
     pub account: String,
     pub signature: String,
+    pub cause: &'static str,
     pub planned_amount: String,
+    /// The mint the deposit is still owed, or `-` when the sweep was never credited.
+    pub amount_to_mint: String,
 }
 
 /// A swept deposit whose ckSOL mint landed on the ledger.
@@ -356,14 +359,24 @@ impl DashboardTemplate {
                 deposit_id: deposit_id.to_string(),
                 account: quarantined.account().to_string(),
                 signature: quarantined.sweep_signature().to_string(),
+                cause: match quarantined.cause {
+                    QuarantineCause::SweepUnreadable => "Sweep unreadable",
+                    QuarantineCause::MintUnresolved { .. } => "Mint unresolved",
+                },
                 planned_amount: lamports_to_sol(quarantined.planned_amount()),
+                amount_to_mint: match quarantined.cause {
+                    QuarantineCause::SweepUnreadable => "-".to_string(),
+                    QuarantineCause::MintUnresolved { amount_to_mint, .. } => {
+                        lamports_to_sol(amount_to_mint)
+                    }
+                },
             })
             .collect();
         let quarantined_swept_deposits_table = DashboardPaginatedTable::from_items(
             &quarantined_swept_deposits,
             pagination.quarantined_swept_deposits_start,
             DEFAULT_PAGE_SIZE,
-            4,
+            6,
             "quarantined-swept-deposits",
             "quarantined_swept_deposits_start",
             pagination.other_params("quarantined_swept_deposits_start"),

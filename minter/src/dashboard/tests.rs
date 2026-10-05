@@ -202,7 +202,9 @@ fn should_display_quarantined_swept_deposits_with_the_sweep_signature() {
                 "0",
                 &account(1).to_string(),
                 &sweep_signature.to_string(),
+                "Sweep unreadable",
                 &lamports_to_sol(sweepable_amount),
+                "-",
             ],
             "quarantined swept deposits",
         )
@@ -210,6 +212,33 @@ fn should_display_quarantined_swept_deposits_with_the_sweep_signature() {
             |href| href.contains("solscan.io/tx/"),
             |href| href.contains(&sweep_signature.to_string()),
         );
+}
+
+#[test]
+fn should_display_a_quarantined_pending_mint_with_the_amount_it_is_owed() {
+    init_state();
+    init_schnorr_master_key();
+    let sweepable_amount = 400_000_000;
+    let pending = DepositFlow::queue(account(1), sweepable_amount)
+        .sweep(signature(0xAA))
+        .succeed()
+        .credit()
+        .single_pending_mint();
+    let amount_to_mint = pending.amount_to_mint;
+    let quarantined = pending.quarantine();
+
+    DashboardAssert::assert_that(dashboard()).has_table_row_value(
+        "#quarantined-swept-deposits + table > tbody > tr:nth-child(1)",
+        &[
+            &quarantined.deposit_id.to_string(),
+            &quarantined.account.to_string(),
+            &quarantined.sweep_signature.to_string(),
+            "Mint unresolved",
+            &lamports_to_sol(sweepable_amount),
+            &lamports_to_sol(amount_to_mint),
+        ],
+        "quarantined swept deposits",
+    );
 }
 
 #[test]
