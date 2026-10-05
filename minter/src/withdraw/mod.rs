@@ -9,7 +9,7 @@ use canlog::log;
 use cksol_types_internal::log::Priority;
 
 use crate::{
-    address::minter_public_key,
+    address::{minter_address, minter_public_key},
     constants::MAX_CONCURRENT_RPC_CALLS,
     guard::{TimerGuard, withdrawal_guard},
     ledger::{BurnError, burn},
@@ -98,7 +98,19 @@ fn validate_destination(destination: &Address) -> Result<(), WithdrawalError> {
             "{destination} is an account key reserved by the Solana runtime"
         )));
     }
-    Ok(())
+    read_state(|s| {
+        let master_key = s.minter_public_key().ok_or_else(|| {
+            WithdrawalError::TemporarilyUnavailable(
+                "Minter public key is not yet available, try again later".to_string(),
+            )
+        })?;
+        if destination == &minter_address(master_key) {
+            return Err(WithdrawalError::InvalidDestination(format!(
+                "{destination} is the ckSOL minter's main address"
+            )));
+        }
+        Ok(())
+    })
 }
 
 pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: R) {

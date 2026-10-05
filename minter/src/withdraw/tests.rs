@@ -6,10 +6,10 @@ use crate::{
     sol_transfer::MAX_WITHDRAWALS_PER_TX,
     state::{TaskType, event::TransactionPurpose, read_state},
     test_fixtures::{
-        EventsAssert, MINIMUM_WITHDRAWAL_AMOUNT, MINTER_ACCOUNT, WITHDRAWAL_FEE, account,
-        confirmed_block_at_height, events, init_balance, init_balance_to, init_schnorr_master_key,
-        init_state, minter_signature, minter_signature_nth, runtime::TestCanisterRuntime,
-        signature,
+        EventsAssert, MINIMUM_WITHDRAWAL_AMOUNT, MINTER_ACCOUNT, MINTER_ADDRESS, WITHDRAWAL_FEE,
+        account, confirmed_block_at_height, events, init_balance, init_balance_to,
+        init_schnorr_master_key, init_state, minter_signature, minter_signature_nth,
+        runtime::TestCanisterRuntime, signature,
     },
     withdraw::{process_pending_withdrawals, withdraw, withdrawal_status},
 };
@@ -36,6 +36,7 @@ fn test_caller() -> Account {
 #[tokio::test]
 async fn should_return_error_if_calling_ledger_fails() {
     init_state();
+    init_schnorr_master_key();
 
     let runtime = TestCanisterRuntime::new().add_stub_error(IcError::CallPerformFailed);
 
@@ -56,6 +57,7 @@ async fn should_return_error_if_calling_ledger_fails() {
 #[tokio::test]
 async fn should_return_error_if_ledger_unavailable() {
     init_state();
+    init_schnorr_master_key();
 
     let runtime = TestCanisterRuntime::new().add_stub_response(Err::<Nat, TransferFromError>(
         TransferFromError::TemporarilyUnavailable,
@@ -80,6 +82,7 @@ async fn should_return_error_if_ledger_unavailable() {
 #[tokio::test]
 async fn should_return_error_if_insufficient_allowance() {
     init_state();
+    init_schnorr_master_key();
 
     let runtime = TestCanisterRuntime::new().add_stub_response(Err::<Nat, TransferFromError>(
         TransferFromError::InsufficientAllowance {
@@ -104,6 +107,7 @@ async fn should_return_error_if_insufficient_allowance() {
 #[tokio::test]
 async fn should_return_error_if_insufficient_funds() {
     init_state();
+    init_schnorr_master_key();
 
     let runtime = TestCanisterRuntime::new().add_stub_response(Err::<Nat, TransferFromError>(
         TransferFromError::InsufficientFunds {
@@ -128,6 +132,7 @@ async fn should_return_error_if_insufficient_funds() {
 #[tokio::test]
 async fn should_return_temporarily_unavailable_on_generic_error() {
     init_state();
+    init_schnorr_master_key();
 
     let runtime = TestCanisterRuntime::new().add_stub_response(Err::<Nat, TransferFromError>(
         TransferFromError::GenericError {
@@ -155,6 +160,7 @@ async fn should_return_temporarily_unavailable_on_generic_error() {
 #[tokio::test]
 async fn should_return_ok_if_burn_succeeds() {
     init_state();
+    init_schnorr_master_key();
 
     let runtime = TestCanisterRuntime::new()
         .add_stub_response(Ok::<Nat, TransferFromError>(Nat::from(123u64)))
@@ -233,6 +239,41 @@ async fn should_reject_withdrawal_to_sysvar() {
 }
 
 #[tokio::test]
+async fn should_reject_withdrawal_to_minter_address() {
+    init_state();
+    init_schnorr_master_key();
+
+    let runtime = TestCanisterRuntime::new();
+
+    let result = withdraw(
+        &runtime,
+        test_caller(),
+        MINIMUM_WITHDRAWAL_AMOUNT,
+        MINTER_ADDRESS.to_string(),
+    )
+    .await;
+
+    assert_matches!(result, Err(WithdrawalError::InvalidDestination(_)));
+}
+
+#[tokio::test]
+async fn should_be_temporarily_unavailable_if_minter_public_key_not_cached() {
+    init_state();
+
+    let runtime = TestCanisterRuntime::new();
+
+    let result = withdraw(
+        &runtime,
+        test_caller(),
+        MINIMUM_WITHDRAWAL_AMOUNT,
+        VALID_ADDRESS.to_string(),
+    )
+    .await;
+
+    assert_matches!(result, Err(WithdrawalError::TemporarilyUnavailable(_)));
+}
+
+#[tokio::test]
 async fn should_return_error_if_amount_too_low() {
     init_state();
 
@@ -258,6 +299,7 @@ async fn should_return_error_if_amount_too_low() {
 #[tokio::test]
 async fn should_return_error_if_already_processing() {
     init_state();
+    init_schnorr_master_key();
 
     let from = test_caller();
     let _guard = withdrawal_guard(from).unwrap();
