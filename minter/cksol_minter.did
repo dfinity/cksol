@@ -186,6 +186,8 @@ type MinterInfo = record {
     withdrawal_fee : Lamport;
     deposit_sol_required_cycles : nat;
     balance : Lamport;
+    minter_address : opt text;
+    nonce_accounts : vec text;
 };
 
 // The ckSOL minter service arguments.

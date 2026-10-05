@@ -4,8 +4,8 @@ use candid::{Nat, Principal};
 use cksol_int_tests::{
     CkSolMinter, Setup, SetupBuilder,
     fixtures::{
-        DEFAULT_CALLER_ACCOUNT, DEFAULT_CALLER_DEPOSIT_ADDRESS, DEPOSIT_AMOUNT, MockBuilder,
-        RENT_EXEMPTION_THRESHOLD, SharedMockHttpOutcalls,
+        DEFAULT_CALLER_ACCOUNT, DEFAULT_CALLER_DEPOSIT_ADDRESS, DEPOSIT_AMOUNT, MINTER_ADDRESS,
+        MockBuilder, RENT_EXEMPTION_THRESHOLD, SharedMockHttpOutcalls,
     },
     validator::FEE_PER_SIGNATURE,
 };
@@ -184,6 +184,8 @@ mod lifecycle {
                 withdrawal_fee: Setup::DEFAULT_WITHDRAWAL_FEE,
                 deposit_sol_required_cycles: Setup::DEFAULT_DEPOSIT_SOL_REQUIRED_CYCLES,
                 balance: 0,
+                minter_address: Some(MINTER_ADDRESS.to_string()),
+                nonce_accounts: vec![],
             }
         );
 
@@ -223,6 +225,8 @@ mod lifecycle {
                 withdrawal_fee: NEW_WITHDRAWAL_FEE,
                 deposit_sol_required_cycles: NEW_DEPOSIT_SOL_REQUIRED_CYCLES,
                 balance: 0,
+                minter_address: Some(MINTER_ADDRESS.to_string()),
+                nonce_accounts: vec![],
             }
         );
 

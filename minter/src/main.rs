@@ -1,7 +1,7 @@
 use candid::Principal;
 use canlog::{Log, Sort};
 use cksol_minter::{
-    address::fetch_and_record_minter_public_key,
+    address::{fetch_and_record_minter_public_key, minter_address},
     deposit::sweep::{
         PROCESS_PENDING_MINTS_DELAY, SWEEP_DEPOSITS_DELAY, process_pending_mints,
         sweep_queued_deposits,
@@ -255,6 +255,14 @@ fn get_minter_info() -> MinterInfo {
         withdrawal_fee: s.withdrawal_fee(),
         deposit_sol_required_cycles: s.deposit_sol_required_cycles(),
         balance: s.balance(),
+        minter_address: s
+            .minter_public_key()
+            .map(|key| minter_address(key).to_string()),
+        nonce_accounts: s
+            .nonce_pool()
+            .addresses()
+            .map(|address| address.to_string())
+            .collect(),
     })
 }
 
