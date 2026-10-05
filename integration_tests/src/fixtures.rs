@@ -310,6 +310,42 @@ pub fn get_deposit_transaction_response() -> JsonRpcResponse {
     }))
 }
 
+/// `getTransaction` response for a single-deposit sweep: the given base64-encoded
+/// signed transaction with balances for its three accounts (deposit, minter, system).
+pub fn get_sweep_transaction_response(
+    transaction_base64: String,
+    pre_balances: [Lamport; 3],
+    post_balances: [Lamport; 3],
+) -> JsonRpcResponse {
+    JsonRpcResponse::from(json!({
+        "jsonrpc": "2.0",
+        "result": {
+            "blockTime": 1772109375,
+            "meta": {
+                "computeUnitsConsumed": 150,
+                "costUnits": 1481,
+                "err": null,
+                "fee": 5000,
+                "innerInstructions": [],
+                "loadedAddresses": { "readonly": [], "writable": [] },
+                "logMessages": [
+                    "Program 11111111111111111111111111111111 invoke [1]",
+                    "Program 11111111111111111111111111111111 success"
+                ],
+                "postBalances": post_balances,
+                "postTokenBalances": [],
+                "preBalances": pre_balances,
+                "preTokenBalances": [],
+                "rewards": [],
+                "status": { "Ok": null }
+            },
+            "slot": 444797867,
+            "transaction": [transaction_base64, "base64"]
+        },
+        "id": 1
+    }))
+}
+
 fn get_balance_request() -> JsonRpcRequestMatcher {
     JsonRpcRequestMatcher::with_method("getBalance")
 }

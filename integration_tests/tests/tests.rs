@@ -7,7 +7,7 @@ use cksol_int_tests::{
         DEFAULT_CALLER_ACCOUNT, DEFAULT_CALLER_DEPOSIT_ADDRESS, DEPOSIT_AMOUNT,
         EXPECTED_MINT_AMOUNT, MockBuilder, RENT_EXEMPTION_THRESHOLD, SharedMockHttpOutcalls,
         default_process_deposit_args, deposit_transaction_signature,
-        get_deposit_transaction_response,
+        get_sweep_transaction_response,
     },
 };
 use cksol_types::{
@@ -1010,8 +1010,41 @@ mod process_deposit_tests {
 
 mod deposit_sol_tests {
     use super::*;
+    use cksol_types_internal::event::VersionedTransactionMessage;
+    use std::str::FromStr;
 
     const BALANCE_ABOVE_MINIMUM: Lamport = Setup::DEFAULT_MINIMUM_DEPOSIT_AMOUNT + 1;
+    const FEE_PER_SIGNATURE: Lamport = 5_000;
+    const EXPECTED_RECEIVED: Lamport =
+        BALANCE_ABOVE_MINIMUM - RENT_EXEMPTION_THRESHOLD - FEE_PER_SIGNATURE;
+
+    /// The signed transaction of the single-signer sweep, reassembled from its
+    /// signature and the message recorded in the `SubmittedTransaction` event.
+    async fn signed_sweep_transaction_base64(
+        setup: &Setup,
+        sweep_signature: &cksol_types::Signature,
+    ) -> String {
+        let message_bytes = setup
+            .minter()
+            .get_all_events()
+            .await
+            .into_iter()
+            .find_map(|event| match event.payload {
+                EventType::SubmittedTransaction {
+                    signature,
+                    transaction: VersionedTransactionMessage::Legacy(bytes),
+                    ..
+                } if signature == *sweep_signature => Some(bytes),
+                _ => None,
+            })
+            .expect("the submitted sweep should be recorded");
+        let signature = solana_signature::Signature::from_str(&sweep_signature.to_string())
+            .expect("the sweep signature should be valid base58");
+        let mut wire = vec![1u8];
+        wire.extend_from_slice(signature.as_ref());
+        wire.extend_from_slice(&message_bytes);
+        base64::Engine::encode(&base64::engine::general_purpose::STANDARD, wire)
+    }
 
     #[tokio::test]
     async fn should_queue_deposit_for_caller_if_owner_is_omitted() {
@@ -1331,14 +1364,18 @@ mod deposit_sol_tests {
         );
 
         setup.advance_time(FINALIZE_TRANSACTIONS_DELAY).await;
-        let outcome_of_another_transaction = get_deposit_transaction_response();
+        let outcome_with_wrong_amount_received = get_sweep_transaction_response(
+            signed_sweep_transaction_base64(&setup, &sweep_signature).await,
+            [BALANCE_ABOVE_MINIMUM, 0, 1],
+            [RENT_EXEMPTION_THRESHOLD, EXPECTED_RECEIVED + 1, 1],
+        );
         setup
             .execute_http_mocks(
                 MockBuilder::with_start_id(16)
                     .finalize_transaction(SUBMISSION_BLOCK_HEIGHT)
                     .get_transaction_with_signature(
                         &sweep_signature,
-                        outcome_of_another_transaction,
+                        outcome_with_wrong_amount_received,
                     )
                     .build(),
             )
