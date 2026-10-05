@@ -337,6 +337,50 @@ mod withdrawal_tests {
     }
 
     #[tokio::test]
+    async fn should_reject_withdrawal_to_reserved_account_key() {
+        const SYSTEM_PROGRAM_ID: &str = "11111111111111111111111111111111";
+        const WITHDRAWAL_AMOUNT: u64 = 100_000_000;
+
+        let setup = SetupBuilder::new()
+            .with_initial_ledger_balances(vec![(
+                DEFAULT_CALLER_ACCOUNT,
+                Nat::from(WITHDRAWAL_AMOUNT),
+            )])
+            .build()
+            .await;
+
+        setup
+            .ledger()
+            .approve(
+                None,
+                u64::MAX,
+                Account {
+                    owner: setup.minter_canister_id(),
+                    subaccount: None,
+                },
+            )
+            .await;
+        let balance_before_withdrawal = setup.ledger().balance_of(DEFAULT_CALLER_ACCOUNT).await;
+
+        let result = setup
+            .minter()
+            .withdraw(WithdrawalArgs {
+                from_subaccount: None,
+                amount: Setup::DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT,
+                address: SYSTEM_PROGRAM_ID.to_string(),
+            })
+            .await;
+
+        assert_matches!(result, Err(WithdrawalError::InvalidDestination(_)));
+        assert_eq!(
+            setup.ledger().balance_of(DEFAULT_CALLER_ACCOUNT).await,
+            balance_before_withdrawal
+        );
+
+        setup.drop().await;
+    }
+
+    #[tokio::test]
     async fn should_check_minimum_withdrawal_amount() {
         let setup = SetupBuilder::new().build().await;
 
