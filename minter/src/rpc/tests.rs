@@ -365,6 +365,32 @@ mod get_nonce_account_tests {
     }
 
     #[tokio::test]
+    async fn should_fail_if_account_not_owned_by_the_system_program() {
+        init_state();
+
+        let foreign_owner_account = sol_rpc_types::AccountInfo {
+            owner: MINTER_ADDRESS.to_string(),
+            ..nonce_account_info(MINTER_ADDRESS, 1)
+        };
+        let executable_account = sol_rpc_types::AccountInfo {
+            executable: true,
+            ..nonce_account_info(MINTER_ADDRESS, 1)
+        };
+
+        for account in [foreign_owner_account, executable_account] {
+            let runtime = TestCanisterRuntime::new()
+                .add_stub_response(GetAccountInfoResult::Consistent(Ok(Some(account))));
+
+            let result = get_nonce_account(&runtime, nonce_account_address()).await;
+
+            assert_matches!(
+                result,
+                Err(GetNonceAccountError::NotOwnedBySystemProgram { .. })
+            );
+        }
+    }
+
+    #[tokio::test]
     async fn should_fail_if_account_is_not_an_initialized_nonce_account() {
         init_state();
 

@@ -18,6 +18,7 @@ use solana_account_decoder_client_types::UiAccount;
 use solana_address::Address;
 use solana_hash::Hash;
 use solana_nonce::{state::State as NonceState, versions::Versions as NonceVersions};
+use solana_sdk_ids::system_program;
 use solana_signature::Signature;
 use solana_transaction::{Transaction, versioned::VersionedTransaction};
 use solana_transaction_status_client_types::{
@@ -210,6 +211,12 @@ impl TryFrom<UiAccount> for NonceAccount {
     type Error = GetNonceAccountError;
 
     fn try_from(account: UiAccount) -> Result<Self, Self::Error> {
+        if account.owner != system_program::ID.to_string() || account.executable {
+            return Err(GetNonceAccountError::NotOwnedBySystemProgram {
+                owner: account.owner,
+                executable: account.executable,
+            });
+        }
         let data = account.data.decode().ok_or_else(|| {
             GetNonceAccountError::NotAnInitializedNonceAccount(
                 "undecodable account data".to_string(),
@@ -239,6 +246,8 @@ pub enum GetNonceAccountError {
     InconsistentRpcResults,
     #[error("Nonce account not found")]
     AccountNotFound,
+    #[error("Account owned by {owner} (executable: {executable}) instead of the system program")]
+    NotOwnedBySystemProgram { owner: String, executable: bool },
     #[error("Not an initialized nonce account: {0}")]
     NotAnInitializedNonceAccount(String),
 }
