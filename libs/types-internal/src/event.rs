@@ -106,7 +106,8 @@ pub enum EventType {
     },
     /// A previously submitted Solana transaction has an expired blockhash
     /// and a null on-chain status, meaning it will never be executed.
-    /// The transaction has been marked for resubmission.
+    /// A withdrawal or consolidation transaction is marked for resubmission;
+    /// the deposits of a sweep transaction are dropped instead.
     ExpiredTransaction {
         /// The signature of the expired Solana transaction.
         signature: Signature,
@@ -117,9 +118,47 @@ pub enum EventType {
         deposit_id: u64,
         /// The account to which the minter should mint ckSOL once the sweep is finalized.
         account: Account,
-        /// The amount that will be swept from the deposit address.
-        sweepable_amount: Lamport,
+        /// The deposit address derived from the account.
+        address: Address,
+        /// The balance of the deposit address when the deposit was queued.
+        balance: Lamport,
     },
+    /// The minter read the amount that the finalized sweep transaction moved to its
+    /// main account and enqueued a pending mint for each deposit of that sweep.
+    CreditedSweep {
+        /// The signature of the finalized sweep transaction.
+        signature: Signature,
+        /// The increase of the main account balance reported by the transaction metadata.
+        amount_received: Lamport,
+        /// The mint enqueued for each deposit of the sweep.
+        mints: Vec<CreditedDeposit>,
+    },
+    /// The outcome of a finalized sweep transaction did not match the plan the minter
+    /// submitted it with, so the amount to credit cannot be determined safely.
+    ///
+    /// The deposits are quarantined to avoid any double minting and will not be further
+    /// processed without a minter upgrade.
+    QuarantinedSweep {
+        /// The signature of the finalized sweep transaction.
+        signature: Signature,
+    },
+    /// The minter fetched its Schnorr Ed25519 master public key, from which
+    /// its main address and all deposit addresses are derived.
+    MinterPublicKeyFetched {
+        /// The raw Ed25519 master public key (32 bytes).
+        public_key: Vec<u8>,
+        /// The chain code used to derive subkeys (32 bytes).
+        chain_code: Vec<u8>,
+    },
+}
+
+/// The mint enqueued for one deposit of a `CreditedSweep` event.
+#[derive(Clone, Copy, Debug, PartialEq, CandidType, Deserialize)]
+pub struct CreditedDeposit {
+    /// The identifier of the deposit.
+    pub deposit_id: u64,
+    /// The sweepable amount minus the deposit's share of the transaction fee of the sweep.
+    pub amount_to_mint: Lamport,
 }
 
 /// The key that produced one signature of a submitted Solana transaction.
@@ -148,7 +187,7 @@ pub enum TransactionPurpose {
     },
     /// Sweep the deposit addresses of deposits queued by `deposit_sol` into the minter's main account.
     SweepDeposits {
-        /// The ids of the swept deposits, the fee payer first.
+        /// The ids of the swept deposits.
         deposit_ids: Vec<u64>,
     },
 }

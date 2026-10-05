@@ -1,6 +1,6 @@
 use crate::{
     constants::{GET_BALANCE_CYCLES, RENT_EXEMPTION_THRESHOLD},
-    deposit::sweep::{deposit_sol, deposit_status, sweepable_amount},
+    deposit::sweep::{deposit_sol, deposit_status},
     state::{event::EventType, read_state},
     storage::with_event_iter,
     test_fixtures::{
@@ -10,8 +10,9 @@ use crate::{
             DEPOSIT_AMOUNT, DEPOSITOR_ACCOUNT, accepted_deposit_event,
             deposit_id as manual_deposit_id, minted_event,
         },
-        events, init_schnorr_master_key, init_state,
+        events, init_schnorr_master_key, init_state, queued_deposit_of,
         runtime::TestCanisterRuntime,
+        signature,
     },
 };
 use assert_matches::assert_matches;
@@ -27,19 +28,6 @@ const EXPLICIT_DEFAULT_SUBACCOUNT: Account = Account {
     subaccount: Some([0; 32]),
     ..DEPOSITOR_ACCOUNT
 };
-
-#[test]
-fn should_compute_sweepable_amount_above_rent_exemption_threshold() {
-    for (balance, expected) in [
-        (0, 0),
-        (RENT_EXEMPTION_THRESHOLD - 1, 0),
-        (RENT_EXEMPTION_THRESHOLD, 0),
-        (RENT_EXEMPTION_THRESHOLD + 1, 1),
-        (Lamport::MAX, Lamport::MAX - RENT_EXEMPTION_THRESHOLD),
-    ] {
-        assert_eq!(sweepable_amount(balance), expected, "balance {balance}");
-    }
-}
 
 #[test]
 fn should_report_unknown_deposit_as_not_found() {
@@ -64,6 +52,22 @@ async fn should_fail_if_insufficient_cycles_attached() {
                 received: PROCESS_DEPOSIT_REQUIRED_CYCLES - 1,
             }
         ))
+    );
+    assert!(runtime.msg_cycles_accepted().is_empty());
+    EventsAssert::assert_no_events_recorded();
+}
+
+#[tokio::test]
+async fn should_fail_while_the_minter_public_key_is_unavailable() {
+    init_state();
+    let runtime =
+        TestCanisterRuntime::new().add_msg_cycles_available(PROCESS_DEPOSIT_REQUIRED_CYCLES);
+
+    let result = deposit_sol(&runtime, DEPOSITOR_ACCOUNT).await;
+
+    assert_matches!(
+        result,
+        Err(DepositSolError::TemporarilyUnavailable(e)) => assert!(e.contains("minter public key"))
     );
     assert!(runtime.msg_cycles_accepted().is_empty());
     EventsAssert::assert_no_events_recorded();
@@ -176,6 +180,24 @@ async fn should_fail_while_process_deposit_deposit_awaits_consolidation() {
 }
 
 #[tokio::test]
+async fn should_reject_an_account_whose_latest_deposit_is_quarantined() {
+    init_state();
+    init_schnorr_master_key();
+    let sweep_signature = signature(0xAA);
+    events::queue_deposit(0, DEPOSITOR_ACCOUNT, MINIMUM_DEPOSIT_AMOUNT);
+    events::submit_sweep(sweep_signature, vec![0]);
+    events::succeed_transaction(sweep_signature);
+    events::quarantine_sweep(sweep_signature);
+    let runtime =
+        TestCanisterRuntime::new().add_msg_cycles_available(PROCESS_DEPOSIT_REQUIRED_CYCLES);
+
+    let result = deposit_sol(&runtime, DEPOSITOR_ACCOUNT).await;
+
+    assert_eq!(result, Err(DepositSolError::Quarantined { deposit_id: 0 }));
+    assert!(runtime.msg_cycles_accepted().is_empty());
+}
+
+#[tokio::test]
 async fn should_return_existing_deposit_id_without_reading_balance() {
     assert_second_call_returns_same_deposit(DEPOSITOR_ACCOUNT, DEPOSITOR_ACCOUNT).await;
 }
@@ -242,10 +264,12 @@ async fn assert_second_call_returns_same_deposit(first: Account, second: Account
 }
 
 fn queued_deposit_event(deposit_id: u64, account: Account, sweepable_amount: Lamport) -> EventType {
+    let deposit = queued_deposit_of(account, sweepable_amount);
     EventType::QueuedDeposit {
         deposit_id,
         account,
-        sweepable_amount,
+        address: deposit.address,
+        balance: deposit.balance,
     }
 }
 

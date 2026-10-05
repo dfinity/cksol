@@ -1,11 +1,11 @@
 use crate::{
-    address::{account_address, lazy_get_schnorr_master_key},
-    constants::{GET_BALANCE_CYCLES, RENT_EXEMPTION_THRESHOLD},
+    address::{account_address, minter_public_key},
+    constants::GET_BALANCE_CYCLES,
     cycles::{RpcCallCharge, charge_rpc_call, check_caller_available_cycles},
     guard::deposit_sol_guard,
     rpc::get_balance,
     runtime::CanisterRuntime,
-    state::{audit::process_event, event::EventType, mutate_state, read_state},
+    state::{DepositBalance, audit::process_event, event::EventType, mutate_state, read_state},
     utils::assert_valid_deposit_owner,
 };
 use canlog::log;
@@ -16,9 +16,11 @@ use icrc_ledger_types::icrc1::account::Account;
 #[cfg(test)]
 mod tests;
 
+mod finalize;
 mod timer;
 
 pub use crate::constants::SWEEP_DEPOSITS_DELAY;
+pub use finalize::credit_finalized_sweeps;
 pub use timer::sweep_queued_deposits;
 
 pub async fn deposit_sol<R: CanisterRuntime>(
@@ -38,8 +40,23 @@ pub async fn deposit_sol<R: CanisterRuntime>(
         });
     check_caller_available_cycles(runtime, required_cycles)?;
 
-    if let Some(deposit_id) = read_state(|state| state.deposits().in_flight_id(&account)) {
-        return Ok(deposit_id);
+    if let Some((deposit_id, status)) = read_state(|state| {
+        state
+            .deposits()
+            .in_flight_id(&account)
+            .map(|deposit_id| (deposit_id, state.deposits().status(deposit_id)))
+    }) {
+        return match status {
+            DepositSolStatus::Queued { .. }
+            | DepositSolStatus::Swept { .. }
+            | DepositSolStatus::Finalized { .. } => Ok(deposit_id),
+            DepositSolStatus::Quarantined { .. } => {
+                Err(DepositSolError::Quarantined { deposit_id })
+            }
+            DepositSolStatus::Dropped { .. } | DepositSolStatus::NotFound => panic!(
+                "BUG: in-flight deposit {deposit_id} of account {account:?} has status {status:?}"
+            ),
+        };
     }
 
     // TODO hq-3k1.6: This check only exists while `process_deposit` still mints before the
@@ -54,12 +71,13 @@ pub async fn deposit_sol<R: CanisterRuntime>(
         ));
     }
 
-    let master_key = lazy_get_schnorr_master_key(runtime).await;
+    let master_key =
+        minter_public_key().map_err(|e| DepositSolError::TemporarilyUnavailable(e.to_string()))?;
     let deposit_address = account_address(&master_key, &account);
     let result = get_balance(runtime, deposit_address)
         .await
         .map_err(DepositSolError::from)
-        .and_then(|balance| sweepable_amount_above_minimum(balance, minimum_deposit_amount));
+        .and_then(|balance| balance_above_minimum(balance, minimum_deposit_amount));
     charge_rpc_call(
         runtime,
         RpcCallCharge {
@@ -68,7 +86,8 @@ pub async fn deposit_sol<R: CanisterRuntime>(
         },
         &result,
     );
-    let sweepable_amount = result?;
+    let balance = DepositBalance::new(result?)
+        .expect("BUG: the minimum deposit amount covers the rent exemption threshold");
 
     let deposit_id = mutate_state(|state| {
         let deposit_id = state.deposits().next_id();
@@ -77,7 +96,8 @@ pub async fn deposit_sol<R: CanisterRuntime>(
             EventType::QueuedDeposit {
                 deposit_id,
                 account,
-                sweepable_amount,
+                address: deposit_address,
+                balance,
             },
             runtime,
         );
@@ -85,7 +105,8 @@ pub async fn deposit_sol<R: CanisterRuntime>(
     });
     log!(
         Priority::Info,
-        "Queued deposit {deposit_id} for account {account:?}: {sweepable_amount} lamports sweepable from {deposit_address}"
+        "Queued deposit {deposit_id} for account {account:?}: {} lamports sweepable from {deposit_address}",
+        balance.sweepable_amount()
     );
     Ok(deposit_id)
 }
@@ -94,7 +115,7 @@ pub fn deposit_status(deposit_id: DepositSolId) -> DepositSolStatus {
     read_state(|state| state.deposits().status(deposit_id))
 }
 
-fn sweepable_amount_above_minimum(
+fn balance_above_minimum(
     balance: Lamport,
     minimum_deposit_amount: Lamport,
 ) -> Result<Lamport, DepositSolError> {
@@ -104,9 +125,5 @@ fn sweepable_amount_above_minimum(
             minimum_deposit_amount,
         });
     }
-    Ok(sweepable_amount(balance))
-}
-
-fn sweepable_amount(balance: Lamport) -> Lamport {
-    balance.saturating_sub(RENT_EXEMPTION_THRESHOLD)
+    Ok(balance)
 }

@@ -1,12 +1,12 @@
 use crate::{
     address::{
-        DerivationPath, derivation_path, derive_public_key, lazy_get_schnorr_master_key,
-        minter_address,
+        DerivationPath, MinterPublicKeyNotYetAvailable, derivation_path, derive_public_key,
+        minter_address, minter_public_key,
     },
     constants::FEE_PER_SIGNATURE,
     runtime::CanisterRuntime,
     signer::{SchnorrSigner, sign_bytes},
-    state::event::Signer,
+    state::{Sweep, event::Signer},
 };
 use derive_more::From;
 use ic_cdk_management_canister::SignCallError;
@@ -39,6 +39,8 @@ pub enum CreateTransferError {
     TransactionTooLarge { max: usize, got: usize },
     #[error("signing failed: {0}")]
     SigningFailed(SignCallError),
+    #[error(transparent)]
+    MinterPublicKeyNotYetAvailable(MinterPublicKeyNotYetAvailable),
 }
 
 /// Creates a signed Solana transaction that transfers lamports from
@@ -61,7 +63,7 @@ pub async fn create_signed_consolidation_transaction<R: CanisterRuntime>(
 ) -> Result<(Transaction, Vec<Signer>), CreateTransferError> {
     assert!(!sources.is_empty(), "BUG: sources must not be empty");
 
-    let master_public_key = lazy_get_schnorr_master_key(runtime).await;
+    let master_public_key = minter_public_key()?;
     let target_address = minter_address(&master_public_key);
     let addresses: Vec<Address> = sources
         .iter()
@@ -123,6 +125,42 @@ pub async fn create_signed_consolidation_transaction<R: CanisterRuntime>(
     Ok((transaction, signers))
 }
 
+/// Signs the transaction of a planned sweep with the deposit addresses it transfers from.
+///
+/// Returns the signed transaction and the signer accounts in the order of the signatures.
+pub async fn sign_sweep_transaction<R: CanisterRuntime>(
+    runtime: &R,
+    sweep: &Sweep,
+    recent_blockhash: Hash,
+) -> Result<(Transaction, Vec<Signer>), CreateTransferError> {
+    let mut transaction = Transaction::new_unsigned(sweep.sweep_message(recent_blockhash));
+    let accounts_by_address: BTreeMap<Address, Account> = sweep
+        .deposits()
+        .values()
+        .map(|deposit| (deposit.address, deposit.account))
+        .collect();
+    let signers: Vec<Signer> = transaction
+        .message
+        .signer_keys()
+        .iter()
+        .map(|key| {
+            let account = accounts_by_address.get(key).copied().unwrap_or_else(|| {
+                panic!("BUG: signer {key} is not a deposit address of the sweep")
+            });
+            Signer::Account(account)
+        })
+        .collect();
+
+    sign_transaction(
+        &mut transaction,
+        signers.iter().map(Signer::derivation_path),
+        &runtime.signer(),
+    )
+    .await?;
+
+    Ok((transaction, signers))
+}
+
 /// Creates a signed Solana transaction that transfers lamports from a single
 /// minter-controlled address (the fee payer) to multiple target addresses.
 ///
@@ -137,7 +175,7 @@ pub async fn create_signed_batch_withdrawal_transaction<R: CanisterRuntime>(
     targets: &[(Address, Lamport)],
     recent_blockhash: Hash,
 ) -> Result<(Transaction, Vec<Signer>), CreateTransferError> {
-    let master_public_key = lazy_get_schnorr_master_key(runtime).await;
+    let master_public_key = minter_public_key()?;
     let fee_payer_address = minter_address(&master_public_key);
 
     let instructions: Vec<Instruction> = targets

@@ -3,14 +3,17 @@ use crate::{
     constants::FEE_PER_SIGNATURE,
     numeric::{LedgerBurnIndex, LedgerMintIndex},
     rpc::BlockHeight,
+    state::DepositBalance,
 };
 use cksol_types::DepositSolId;
 use cksol_types_internal::{InitArgs, UpgradeArgs};
 use derive_more::From;
+use ic_ed25519::PublicKey;
 use ic_stable_structures::{Storable, storable::Bound};
 use icrc_ledger_types::icrc1::account::Account;
 use minicbor::{Decode, Encode};
 use sol_rpc_types::Lamport;
+use solana_address::Address;
 use solana_message::Message;
 use solana_signature::Signature;
 use std::borrow::Cow;
@@ -135,7 +138,8 @@ pub enum EventType {
     },
     /// A previously submitted Solana transaction has an expired blockhash
     /// and a null on-chain status, meaning it will never be executed.
-    /// The transaction has been marked for resubmission.
+    /// A withdrawal or consolidation transaction is marked for resubmission;
+    /// the deposits of a sweep transaction are dropped instead.
     #[n(10)]
     ExpiredTransaction {
         /// The signature of the expired Solana transaction.
@@ -150,9 +154,55 @@ pub enum EventType {
         deposit_id: DepositSolId,
         #[n(1)]
         account: Account,
-        #[n(2)]
-        sweepable_amount: Lamport,
+        #[cbor(n(2), with = "cbor::address")]
+        address: Address,
+        #[cbor(n(3), with = "cbor::deposit_balance")]
+        balance: DepositBalance,
     },
+    /// The minter read the amount that the finalized sweep transaction moved to its
+    /// main account and enqueued a pending mint for each deposit of that sweep.
+    #[n(12)]
+    CreditedSweep {
+        /// The signature of the finalized sweep transaction.
+        #[cbor(n(0), with = "cbor::signature")]
+        signature: Signature,
+        /// The increase of the main account balance reported by the transaction metadata.
+        #[n(1)]
+        amount_received: Lamport,
+        /// The mint enqueued for each deposit of the sweep.
+        #[n(2)]
+        mints: Vec<CreditedDeposit>,
+    },
+    /// The outcome of a finalized sweep transaction did not match the plan the minter
+    /// submitted it with, so the amount to credit cannot be determined safely.
+    ///
+    /// The deposits are quarantined to avoid any double minting and will not be further
+    /// processed without a minter upgrade.
+    #[n(13)]
+    QuarantinedSweep {
+        /// The signature of the finalized sweep transaction.
+        #[cbor(n(0), with = "cbor::signature")]
+        signature: Signature,
+    },
+    /// The minter fetched its Schnorr Ed25519 master public key, from which
+    /// its main address and all deposit addresses are derived.
+    #[n(14)]
+    MinterPublicKeyFetched {
+        #[cbor(n(0), with = "cbor::ed25519_public_key")]
+        public_key: PublicKey,
+        #[cbor(n(1), with = "minicbor::bytes")]
+        chain_code: [u8; 32],
+    },
+}
+
+/// The mint enqueued for one deposit of a `CreditedSweep` event.
+#[derive(Clone, Copy, Eq, PartialEq, Debug, Decode, Encode)]
+pub struct CreditedDeposit {
+    #[n(0)]
+    pub deposit_id: DepositSolId,
+    /// The sweepable amount minus the deposit's share of the transaction fee of the sweep.
+    #[n(1)]
+    pub amount_to_mint: Lamport,
 }
 
 /// Payload of the `AcceptedWithdrawalRequest` event.
@@ -216,7 +266,7 @@ pub enum TransactionPurpose {
     /// Sweep the deposit addresses of deposits queued by `deposit_sol` into the minter's main account.
     #[n(2)]
     SweepDeposits {
-        /// The ids of the swept deposits, the fee payer first.
+        /// The ids of the swept deposits.
         #[n(0)]
         deposit_ids: Vec<DepositSolId>,
     },

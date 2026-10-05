@@ -4,8 +4,8 @@ use crate::{
     state::event::{DepositId, EventType},
     storage::reset_events,
     test_fixtures::{
-        BLOCK_INDEX, DEPOSIT_CONSOLIDATION_FEE, EventsAssert, MANUAL_DEPOSIT_FEE,
-        PROCESS_DEPOSIT_REQUIRED_CYCLES,
+        BLOCK_INDEX, DEPOSIT_CONSOLIDATION_FEE, EventsAssert, GetTransactionResult,
+        MANUAL_DEPOSIT_FEE, PROCESS_DEPOSIT_REQUIRED_CYCLES,
         deposit::{
             DEPOSIT_AMOUNT, DEPOSITOR_ACCOUNT, DEPOSITOR_PRINCIPAL, accepted_deposit_event,
             deposit_status_minted, deposit_status_processing, deposit_status_quarantined,
@@ -29,9 +29,8 @@ use icrc_ledger_types::icrc1::{
     account::Account,
     transfer::{BlockIndex, TransferError},
 };
-use sol_rpc_types::{EncodedConfirmedTransactionWithStatusMeta, Lamport, MultiRpcResult};
+use sol_rpc_types::{EncodedConfirmedTransactionWithStatusMeta, Lamport};
 
-type GetTransactionResult = MultiRpcResult<Option<EncodedConfirmedTransactionWithStatusMeta>>;
 type MintResult = Result<BlockIndex, TransferError>;
 
 mod process_deposit_tests {
@@ -59,6 +58,28 @@ mod process_deposit_tests {
                     received: PROCESS_DEPOSIT_REQUIRED_CYCLES - 1,
                 }
             ))
+        );
+        assert!(runtime.msg_cycles_accepted().is_empty());
+        EventsAssert::assert_no_events_recorded();
+    }
+
+    #[tokio::test]
+    async fn should_fail_while_the_minter_public_key_is_unavailable() {
+        init_state();
+
+        let runtime =
+            TestCanisterRuntime::new().add_msg_cycles_available(PROCESS_DEPOSIT_REQUIRED_CYCLES);
+
+        let result = process_deposit(
+            runtime.clone(),
+            DEPOSITOR_ACCOUNT,
+            legacy_deposit_transaction_signature(),
+        )
+        .await;
+
+        assert_matches!(
+            result,
+            Err(ProcessDepositError::TemporarilyUnavailable(e)) => assert!(e.contains("minter public key"))
         );
         assert!(runtime.msg_cycles_accepted().is_empty());
         EventsAssert::assert_no_events_recorded();

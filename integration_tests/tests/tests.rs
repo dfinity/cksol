@@ -7,6 +7,7 @@ use cksol_int_tests::{
         DEFAULT_CALLER_ACCOUNT, DEFAULT_CALLER_DEPOSIT_ADDRESS, DEPOSIT_AMOUNT,
         EXPECTED_MINT_AMOUNT, MockBuilder, RENT_EXEMPTION_THRESHOLD, SharedMockHttpOutcalls,
         default_process_deposit_args, deposit_transaction_signature,
+        get_deposit_transaction_response,
     },
 };
 use cksol_types::{
@@ -237,7 +238,12 @@ mod lifecycle {
         let minter = setup.minter();
 
         minter.assert_that_events().await.satisfy(|events| {
-            check!(events.len() == 1 && matches!(events[0], EventType::Init(_)));
+            check!(matches!(events[0], EventType::Init(_)));
+            check!(
+                events[1..]
+                    .iter()
+                    .all(|e| matches!(e, EventType::MinterPublicKeyFetched { .. }))
+            );
         });
 
         minter
@@ -246,7 +252,25 @@ mod lifecycle {
             .expect("upgrade failed");
 
         minter.assert_that_events().await.satisfy(|events| {
-            check!(events.len() == 2 && matches!(events[1], EventType::Upgrade(_)));
+            check!(matches!(events[0], EventType::Init(_)));
+            check!(
+                events
+                    .iter()
+                    .filter(|e| matches!(e, EventType::Upgrade(_)))
+                    .count()
+                    == 1
+            );
+            check!(
+                events
+                    .iter()
+                    .filter(|e| matches!(e, EventType::MinterPublicKeyFetched { .. }))
+                    .count()
+                    <= 1
+            );
+            check!(events[1..].iter().all(|e| matches!(
+                e,
+                EventType::Upgrade(_) | EventType::MinterPublicKeyFetched { .. }
+            )));
         });
 
         setup.drop().await;
@@ -1015,16 +1039,28 @@ mod deposit_sol_tests {
             }
         );
         let proxy = setup.proxy_canister_id();
+        let deposit_address = setup
+            .minter()
+            .get_deposit_address(GetDepositAddressArgs {
+                owner: None,
+                subaccount,
+            })
+            .await;
         setup.minter().assert_that_events().await.satisfy(|events| {
+            let deposit_events: Vec<&EventType> = events[1..]
+                .iter()
+                .filter(|e| !matches!(e, EventType::MinterPublicKeyFetched { .. }))
+                .collect();
             check!(
-                events[1..]
-                    == [EventType::QueuedDeposit {
+                deposit_events
+                    == [&EventType::QueuedDeposit {
                         deposit_id,
                         account: Account {
                             owner: proxy,
                             subaccount,
                         },
-                        sweepable_amount: BALANCE_ABOVE_MINIMUM - RENT_EXEMPTION_THRESHOLD,
+                        address: deposit_address.clone(),
+                        balance: BALANCE_ABOVE_MINIMUM,
                     }]
             );
         });
@@ -1089,13 +1125,22 @@ mod deposit_sol_tests {
             .await;
 
         assert_eq!(result, Ok(deposit_id));
+        let deposit_address = setup
+            .minter()
+            .get_deposit_address(DEFAULT_CALLER_ACCOUNT)
+            .await;
         setup.minter().assert_that_events().await.satisfy(|events| {
+            let deposit_events: Vec<&EventType> = events[1..]
+                .iter()
+                .filter(|e| !matches!(e, EventType::MinterPublicKeyFetched { .. }))
+                .collect();
             check!(
-                events[1..]
-                    == [EventType::QueuedDeposit {
+                deposit_events
+                    == [&EventType::QueuedDeposit {
                         deposit_id,
                         account: DEFAULT_CALLER_ACCOUNT,
-                        sweepable_amount: BALANCE_ABOVE_MINIMUM - RENT_EXEMPTION_THRESHOLD,
+                        address: deposit_address.clone(),
+                        balance: BALANCE_ABOVE_MINIMUM,
                     }]
             );
         });
@@ -1187,7 +1232,7 @@ mod deposit_sol_tests {
     }
 
     #[tokio::test]
-    async fn should_report_resubmitted_signature_after_sweep_expires() {
+    async fn should_drop_deposit_and_release_account_after_sweep_expires() {
         let setup = SetupBuilder::new().with_proxy_canister().build().await;
         let deposit_id = setup
             .minter()
@@ -1207,7 +1252,7 @@ mod deposit_sol_tests {
                     .build(),
             )
             .await;
-        let submitted_sweep_signature = assert_matches!(
+        let sweep_signature = assert_matches!(
             setup.minter().deposit_status(deposit_id).await,
             DepositSolStatus::Swept { signature } => signature
         );
@@ -1220,31 +1265,111 @@ mod deposit_sol_tests {
                     .build(),
             )
             .await;
-        setup.advance_time(RESUBMIT_TRANSACTIONS_DELAY).await;
+
+        assert_eq!(
+            setup.minter().deposit_status(deposit_id).await,
+            DepositSolStatus::Dropped {
+                signature: sweep_signature.clone()
+            }
+        );
+        setup.minter().assert_that_events().await.satisfy(|events| {
+            check!(events.iter().any(|e| matches!(
+                e,
+                EventType::ExpiredTransaction { signature } if *signature == sweep_signature
+            )));
+            check!(
+                !events
+                    .iter()
+                    .any(|e| matches!(e, EventType::ResubmittedTransaction { .. }))
+            );
+        });
+        let setup = setup
+            .check_metrics()
+            .await
+            .assert_contains_metric_matching(r"dropped_deposits 1 \d+")
+            .into();
+
+        let deposit_id_after_drop = setup
+            .minter()
+            .with_http_mocks(
+                MockBuilder::with_start_id(28)
+                    .get_balance(BALANCE_ABOVE_MINIMUM)
+                    .build(),
+            )
+            .deposit_sol(DEFAULT_CALLER_ACCOUNT)
+            .await
+            .expect("a dropped deposit releases the account for a new sweep");
+        assert_eq!(deposit_id_after_drop, deposit_id + 1);
+
+        setup.drop().await;
+    }
+
+    #[tokio::test]
+    async fn should_quarantine_deposit_when_finalized_sweep_does_not_match_its_plan() {
+        let setup = SetupBuilder::new().with_proxy_canister().build().await;
+        let deposit_id = setup
+            .minter()
+            .with_http_mocks(
+                MockBuilder::new()
+                    .get_balance(BALANCE_ABOVE_MINIMUM)
+                    .build(),
+            )
+            .deposit_sol(DEFAULT_CALLER_ACCOUNT)
+            .await
+            .expect("deposit_sol should queue a sweep");
+        setup.advance_time(SWEEP_DEPOSITS_DELAY).await;
         setup
             .execute_http_mocks(
-                MockBuilder::with_start_id(28)
-                    .resubmit_transaction(EXPIRY_BLOCK_HEIGHT)
+                MockBuilder::with_start_id(4)
+                    .submit_transaction(SUBMISSION_BLOCK_HEIGHT)
+                    .build(),
+            )
+            .await;
+        let sweep_signature = assert_matches!(
+            setup.minter().deposit_status(deposit_id).await,
+            DepositSolStatus::Swept { signature } => signature
+        );
+
+        setup.advance_time(FINALIZE_TRANSACTIONS_DELAY).await;
+        let outcome_of_another_transaction = get_deposit_transaction_response();
+        setup
+            .execute_http_mocks(
+                MockBuilder::with_start_id(16)
+                    .finalize_transaction(SUBMISSION_BLOCK_HEIGHT)
+                    .get_transaction_with_signature(
+                        &sweep_signature,
+                        outcome_of_another_transaction,
+                    )
                     .build(),
             )
             .await;
 
-        let resubmitted_sweep_signature = assert_matches!(
+        assert_eq!(
             setup.minter().deposit_status(deposit_id).await,
-            DepositSolStatus::Swept { signature } => signature
+            DepositSolStatus::Quarantined {
+                signature: sweep_signature.clone()
+            }
         );
-        assert_ne!(resubmitted_sweep_signature, submitted_sweep_signature);
         setup.minter().assert_that_events().await.satisfy(|events| {
             check!(events.iter().any(|e| matches!(
                 e,
-                EventType::ResubmittedTransaction {
-                    old_signature,
-                    new_signature,
-                    ..
-                } if *old_signature == submitted_sweep_signature
-                    && *new_signature == resubmitted_sweep_signature
+                EventType::QuarantinedSweep { signature } if *signature == sweep_signature
             )));
+            check!(
+                !events
+                    .iter()
+                    .any(|e| matches!(e, EventType::CreditedSweep { .. }))
+            );
         });
+        let setup = setup
+            .check_metrics()
+            .await
+            .assert_contains_metric_matching(r"quarantined_swept_deposits 1 \d+")
+            .into();
+
+        let result = setup.minter().deposit_sol(DEFAULT_CALLER_ACCOUNT).await;
+
+        assert_eq!(result, Err(DepositSolError::Quarantined { deposit_id }));
 
         setup.drop().await;
     }
@@ -1452,8 +1577,8 @@ mod metrics_tests {
             .assert_contains_metric_matching(r#"stable_memory_bytes \d+ \d+"#)
             .assert_contains_metric_matching(r#"heap_memory_bytes \d+ \d+"#)
             .assert_contains_metric_matching(r#"cycle_balance\{canister="cksol-minter"\} \d+ \d+"#)
-            // Only the canister init event should have been recorded
-            .assert_contains_metric_matching(r#"total_event_count 1 \d+"#)
+            // Only the init and minter public key events should have been recorded
+            .assert_contains_metric_matching(r#"total_event_count 2 \d+"#)
             .assert_contains_metric_matching(r#"minter_balance 0 \d+"#)
             .into()
             .drop()

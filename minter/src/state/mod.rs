@@ -1,10 +1,13 @@
 use crate::{
+    address::{account_address, minter_address},
     constants::{FEE_PER_SIGNATURE, GET_TRANSACTION_CYCLES, RENT_EXEMPTION_THRESHOLD},
     ledger::client::LedgerClient,
     numeric::{LedgerBurnIndex, LedgerMintIndex},
     rpc::BlockHeight,
     sol_transfer::{BATCH_WITHDRAWAL_TX_FEE, MAX_SIGNATURES, MAX_WITHDRAWALS_PER_TX},
-    state::event::{DepositId, Signer, TransactionPurpose, VersionedMessage, WithdrawalRequest},
+    state::event::{
+        CreditedDeposit, DepositId, Signer, TransactionPurpose, VersionedMessage, WithdrawalRequest,
+    },
     utils::insertion_ordered_map::InsertionOrderedMap,
 };
 use candid::Principal;
@@ -16,6 +19,7 @@ use ic_ed25519::PublicKey;
 use icrc_ledger_types::icrc1::account::Account;
 use sol_rpc_client::SolRpcClient;
 use sol_rpc_types::{ConsensusStrategy, Lamport, RpcSources, SolanaCluster};
+use solana_address::Address;
 use solana_signature::Signature;
 use std::{
     cell::RefCell,
@@ -30,7 +34,10 @@ pub mod audit;
 mod deposits;
 pub mod event;
 
-pub use deposits::{Deposits, QueuedDeposit, Sweep, Sweeps};
+pub use deposits::{
+    DepositBalance, Deposits, PendingMint, QueuedDeposit, SettledSweep, Sweep, SweepMismatch,
+    SweepRecoveryError, SweepSettlementError, Sweeps, SweptDeposit, Transfer, UnreadableOutcome,
+};
 
 thread_local! {
     static STATE: RefCell<Option<State>> = RefCell::default();
@@ -245,6 +252,10 @@ impl State {
             .unwrap_or_else(|| {
                 panic!("BUG: cannot mark non-submitted transaction {signature} for resubmission")
             });
+        if let TransactionPurpose::SweepDeposits { .. } = &transaction.purpose {
+            self.deposits.drop_swept(signature);
+            return;
+        }
         assert!(
             self.transactions_to_resubmit
                 .insert(*signature, transaction)
@@ -465,15 +476,46 @@ impl State {
         &mut self,
         deposit_id: DepositSolId,
         account: &Account,
-        sweepable_amount: Lamport,
+        address: &Address,
+        balance: DepositBalance,
     ) {
+        debug_assert_eq!(
+            *address,
+            account_address(
+                self.minter_public_key
+                    .as_ref()
+                    .expect("BUG: a deposit was queued before the minter public key was recorded"),
+                account,
+            ),
+            "Attempted to queue deposit {deposit_id} with address {address} not derived from account {account:?}",
+        );
         self.deposits.queue(
             deposit_id,
             QueuedDeposit {
                 account: *account,
-                sweepable_amount,
+                address: *address,
+                balance,
             },
         );
+    }
+
+    fn process_credited_sweep(
+        &mut self,
+        signature: &Signature,
+        amount_received: Lamport,
+        mints: &[CreditedDeposit],
+    ) {
+        let amount_to_mint: Lamport = mints.iter().map(|mint| mint.amount_to_mint).sum();
+        assert!(
+            amount_to_mint <= amount_received,
+            "Attempted to credit sweep {signature} with mints of {amount_to_mint} lamports exceeding the {amount_received} lamports received"
+        );
+        self.deposits.credit_sweep(signature, mints);
+        self.balance += amount_received;
+    }
+
+    fn process_quarantined_sweep(&mut self, signature: &Signature) {
+        self.deposits.quarantine_sweep(signature);
     }
 
     fn process_quarantined_deposit(&mut self, deposit_id: &DepositId) {
@@ -655,7 +697,11 @@ impl State {
                 total
             }
             TransactionPurpose::SweepDeposits { deposit_ids } => {
-                self.deposits.sweep(deposit_ids, signature)
+                let sweep_destination = minter_address(self.minter_public_key.as_ref().expect(
+                    "BUG: a sweep was submitted before the minter public key was recorded",
+                ));
+                self.deposits
+                    .sweep(deposit_ids, sweep_destination, transaction, signature)
             }
         };
         assert_eq!(
@@ -687,6 +733,13 @@ impl State {
                 panic!("Attempted to resubmit unknown transaction with signature {old_signature:?}")
             });
         assert!(
+            !matches!(
+                old_transaction.purpose,
+                TransactionPurpose::SweepDeposits { .. }
+            ),
+            "BUG: sweep transaction {old_signature} must be dropped instead of resubmitted"
+        );
+        assert!(
             !self.succeeded_transactions.contains(new_signature),
             "Attempted to resubmit with signature {new_signature:?} that already succeeded"
         );
@@ -712,7 +765,6 @@ impl State {
                 sent.signature = *new_signature;
             }
         }
-        self.deposits.resubmit_sweep(old_signature, new_signature);
     }
 
     fn process_transaction_succeeded(&mut self, signature: &Signature) {
@@ -726,7 +778,7 @@ impl State {
             .unwrap_or_else(|| {
                 panic!("Attempted to mark unknown transaction {signature:?} as succeeded")
             });
-        match transaction.purpose {
+        match &transaction.purpose {
             TransactionPurpose::ConsolidateDeposits { .. } => {
                 let tx_fee = transaction.message.transaction_fee();
                 self.balance += transaction
@@ -734,7 +786,8 @@ impl State {
                     .checked_sub(tx_fee)
                     .expect("BUG: consolidation amount is less than transaction fee");
             }
-            TransactionPurpose::WithdrawSol { .. } | TransactionPurpose::SweepDeposits { .. } => {}
+            TransactionPurpose::WithdrawSol { .. } => {}
+            TransactionPurpose::SweepDeposits { .. } => self.deposits.finalize_swept(signature),
         }
         assert!(
             !self.transactions_to_resubmit.contains_key(signature),
@@ -766,6 +819,9 @@ impl State {
             !self.transactions_to_resubmit.contains_key(signature),
             "BUG: transaction {signature} is queued for resubmission but is being marked as failed"
         );
+        if let TransactionPurpose::SweepDeposits { .. } = &transaction.purpose {
+            self.deposits.drop_swept(signature);
+        }
         assert_eq!(
             self.failed_transactions.insert(*signature, transaction),
             None,
