@@ -1,6 +1,26 @@
 # Chain-Key SOL (ckSOL) Design
 
-This document is a port of the original ckSOL scoping and design document. Diagrams were redrawn as Mermaid diagrams from the original figures.
+- [1. High-Level Goal](#1-high-level-goal)
+- [2. Overview](#2-overview)
+- [3. Technical Details](#3-technical-details)
+  - [3.1. Converting SOL to ckSOL](#31-converting-sol-to-cksol)
+    - [3.1.1. Validating a Solana Deposit Transaction](#311-validating-a-solana-deposit-transaction)
+    - [3.1.2. Automated Flow (Outdated)](#312-automated-flow-outdated)
+    - [3.1.3. Manual Flow](#313-manual-flow)
+    - [3.1.4. Consolidation](#314-consolidation)
+  - [3.2. Converting ckSOL to SOL](#32-converting-cksol-to-sol)
+    - [3.2.1. Durable Nonce Accounts](#321-durable-nonce-accounts)
+    - [3.2.2. Submitting Withdrawal Requests](#322-submitting-withdrawal-requests)
+    - [3.2.3. Finalization and Resubmissions](#323-finalization-and-resubmissions)
+  - [3.3. Fees & Minimum Swap Amounts](#33-fees--minimum-swap-amounts)
+    - [3.3.1. ckSOL Ledger Fees](#331-cksol-ledger-fees)
+    - [3.3.2. ckSOL Minter Fees](#332-cksol-minter-fees)
+    - [3.3.3. Minimum Swap Amounts](#333-minimum-swap-amounts)
+    - [3.3.4. Parameter Constraints](#334-parameter-constraints)
+  - [3.4. OFAC Checks](#34-ofac-checks)
+  - [3.5. Events](#35-events)
+  - [3.6. API](#36-api)
+- [4. Testing](#4-testing)
 
 ## 1. High-Level Goal
 
