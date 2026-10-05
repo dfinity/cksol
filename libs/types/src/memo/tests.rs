@@ -85,12 +85,7 @@ fn arb_memo() -> impl Strategy<Value = CkSolMinterMemo> {
 }
 
 fn arb_mint_memo() -> impl Strategy<Value = MintMemo> {
-    prop_oneof![
-        arb_signature().prop_map(|signature| MintMemo::Convert {
-            signature: signature.into(),
-        }),
-        arb_sweep_mint_memo(any::<DepositSolId>()),
-    ]
+    arb_sweep_mint_memo(any::<DepositSolId>())
 }
 
 fn arb_sweep_mint_memo(

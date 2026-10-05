@@ -39,9 +39,7 @@ mod tests;
 ///
 /// let signature = Signature::from_str("5pf5fC9WRhdvE5y6eUkxons4btM3Tfi7koj4W1Q2kLztP8oZoLVn516XuuvG7cY61wLoyVAoakm1wz1z8V67rvh").unwrap();
 ///
-/// let memo = Memo::Mint(MintMemo::Convert {
-///     signature: signature.into()
-/// });
+/// let memo = Memo::Mint(MintMemo::sweep(signature, u64::MAX));
 ///
 /// assert!(Icrc1Memo::from(memo).0.len() <= MAX_SERIALIZED_MEMO_BYTES as usize)
 /// ```
@@ -63,13 +61,6 @@ pub enum Memo {
 /// The minter minted some ckSOL tokens.
 #[derive(Clone, Eq, PartialEq, Debug, Decode, Encode)]
 pub enum MintMemo {
-    /// The minter converted a deposit transaction to ckSOL.
-    #[n(0)]
-    Convert {
-        /// The transaction signature of the accepted deposit.
-        #[cbor(n(0), with = "minicbor::bytes")]
-        signature: [u8; 64],
-    },
     /// The minter converted a deposit swept to its main account to ckSOL.
     #[n(1)]
     Sweep {
@@ -95,15 +86,6 @@ pub enum BurnMemo {
 }
 
 impl MintMemo {
-    /// Create a [`MintMemo::Convert`] memo instance from a [`Signature`].
-    ///
-    /// [`Signature`]: solana_signature::Signature
-    pub fn convert(signature: impl Into<solana_signature::Signature>) -> Self {
-        Self::Convert {
-            signature: <[u8; SIGNATURE_BYTES]>::from(signature.into()),
-        }
-    }
-
     /// Create a [`MintMemo::Sweep`] memo instance from the [`Signature`] of the sweep
     /// and the identifier of the swept deposit.
     ///
