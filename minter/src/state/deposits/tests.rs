@@ -339,23 +339,13 @@ mod finalize_swept {
 mod credit_sweep {
     use super::{
         BTreeMap, CREDIT_TIMESTAMP, DepositSolStatus, Deposits, MINTER_ADDRESS, PendingMint,
-        SWEEP_SIGNATURE_INDEX, SweptDeposit, mint, queued_deposit, signature, sweep_message,
+        SWEEP_SIGNATURE_INDEX, SweptDeposit, finalized_sweep, mint, queued_deposit, signature,
+        sweep_message,
     };
 
     #[test]
     fn should_move_the_deposits_of_the_sweep_to_pending_mints_with_the_given_amounts() {
-        let mut deposits = Deposits::default();
-        deposits.queue(0, queued_deposit(0));
-        deposits.queue(1, queued_deposit(1));
-        deposits.queue(2, queued_deposit(2));
-        let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
-        deposits.sweep(
-            &[2, 0],
-            MINTER_ADDRESS,
-            &sweep_message([(2, queued_deposit(2)), (0, queued_deposit(0))]),
-            &sweep_signature,
-        );
-        deposits.finalize_swept(&sweep_signature);
+        let (mut deposits, sweep_signature) = finalized_sweep(&[2, 0]);
 
         deposits.credit_sweep(
             &sweep_signature,
@@ -409,17 +399,7 @@ mod credit_sweep {
     #[test]
     #[should_panic(expected = "with 1 mints for 2 deposits")]
     fn should_panic_when_a_deposit_of_the_sweep_has_no_mint() {
-        let mut deposits = Deposits::default();
-        deposits.queue(0, queued_deposit(0));
-        deposits.queue(1, queued_deposit(1));
-        let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
-        deposits.sweep(
-            &[0, 1],
-            MINTER_ADDRESS,
-            &sweep_message([(0, queued_deposit(0)), (1, queued_deposit(1))]),
-            &sweep_signature,
-        );
-        deposits.finalize_swept(&sweep_signature);
+        let (mut deposits, sweep_signature) = finalized_sweep(&[0, 1]);
 
         deposits.credit_sweep(&sweep_signature, &[mint(1, 200)], CREDIT_TIMESTAMP);
     }
@@ -427,18 +407,7 @@ mod credit_sweep {
     #[test]
     #[should_panic(expected = "is not part of sweep")]
     fn should_panic_when_a_mint_is_for_a_deposit_of_another_sweep() {
-        let mut deposits = Deposits::default();
-        deposits.queue(0, queued_deposit(0));
-        deposits.queue(1, queued_deposit(1));
-        deposits.queue(2, queued_deposit(2));
-        let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
-        deposits.sweep(
-            &[0, 2],
-            MINTER_ADDRESS,
-            &sweep_message([(0, queued_deposit(0)), (2, queued_deposit(2))]),
-            &sweep_signature,
-        );
-        deposits.finalize_swept(&sweep_signature);
+        let (mut deposits, sweep_signature) = finalized_sweep(&[0, 2]);
 
         deposits.credit_sweep(
             &sweep_signature,
@@ -450,17 +419,7 @@ mod credit_sweep {
     #[test]
     #[should_panic(expected = "Attempted to credit deposit 0 twice")]
     fn should_panic_when_a_deposit_is_minted_twice() {
-        let mut deposits = Deposits::default();
-        deposits.queue(0, queued_deposit(0));
-        deposits.queue(1, queued_deposit(1));
-        let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
-        deposits.sweep(
-            &[0, 1],
-            MINTER_ADDRESS,
-            &sweep_message([(0, queued_deposit(0)), (1, queued_deposit(1))]),
-            &sweep_signature,
-        );
-        deposits.finalize_swept(&sweep_signature);
+        let (mut deposits, sweep_signature) = finalized_sweep(&[0, 1]);
 
         deposits.credit_sweep(
             &sweep_signature,
@@ -472,16 +431,7 @@ mod credit_sweep {
     #[test]
     #[should_panic(expected = "beyond its sweepable amount")]
     fn should_panic_when_a_mint_exceeds_the_sweepable_amount() {
-        let mut deposits = Deposits::default();
-        deposits.queue(0, queued_deposit(0));
-        let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
-        deposits.sweep(
-            &[0],
-            MINTER_ADDRESS,
-            &sweep_message([(0, queued_deposit(0))]),
-            &sweep_signature,
-        );
-        deposits.finalize_swept(&sweep_signature);
+        let (mut deposits, sweep_signature) = finalized_sweep(&[0]);
 
         deposits.credit_sweep(
             &sweep_signature,
@@ -658,26 +608,40 @@ fn mint(deposit_id: DepositSolId, amount_to_mint: Lamport) -> CreditedDeposit {
     }
 }
 
-/// Queues the deposit of every mint, sweeps them in that order under one signature,
-/// finalizes the sweep and credits it with the given mints at [`CREDIT_TIMESTAMP`].
-fn credited_sweep(mints: &[CreditedDeposit]) -> (Deposits, Signature) {
-    let mut deposits = Deposits::default();
-    let swept: Vec<_> = mints
+/// Sweeps the given deposits in that order under one signature and finalizes the
+/// sweep.
+///
+/// Deposit ids are queued in sequence, so every id up to the highest swept one is
+/// queued, which leaves the ids in between queued but not swept.
+fn finalized_sweep(deposit_ids: &[DepositSolId]) -> (Deposits, Signature) {
+    let highest_swept = *deposit_ids
         .iter()
-        .map(|mint| {
-            deposits.queue(mint.deposit_id, queued_deposit(mint.deposit_id));
-            (mint.deposit_id, queued_deposit(mint.deposit_id))
-        })
+        .max()
+        .expect("BUG: a sweep needs at least one deposit");
+    let mut deposits = Deposits::default();
+    for deposit_id in 0..=highest_swept {
+        deposits.queue(deposit_id, queued_deposit(deposit_id));
+    }
+    let swept: Vec<_> = deposit_ids
+        .iter()
+        .map(|&deposit_id| (deposit_id, queued_deposit(deposit_id)))
         .collect();
-    let deposit_ids: Vec<_> = swept.iter().map(|(deposit_id, _)| *deposit_id).collect();
     let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
     deposits.sweep(
-        &deposit_ids,
+        deposit_ids,
         MINTER_ADDRESS,
         &sweep_message(swept),
         &sweep_signature,
     );
     deposits.finalize_swept(&sweep_signature);
+    (deposits, sweep_signature)
+}
+
+/// Queues the deposit of every mint, sweeps and finalizes them in that order under
+/// one signature and credits the sweep with the given mints at [`CREDIT_TIMESTAMP`].
+fn credited_sweep(mints: &[CreditedDeposit]) -> (Deposits, Signature) {
+    let deposit_ids: Vec<_> = mints.iter().map(|mint| mint.deposit_id).collect();
+    let (mut deposits, sweep_signature) = finalized_sweep(&deposit_ids);
     deposits.credit_sweep(&sweep_signature, mints, CREDIT_TIMESTAMP);
     (deposits, sweep_signature)
 }
