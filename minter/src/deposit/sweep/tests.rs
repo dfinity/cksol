@@ -58,6 +58,22 @@ async fn should_fail_if_insufficient_cycles_attached() {
 }
 
 #[tokio::test]
+async fn should_fail_while_the_minter_public_key_is_unavailable() {
+    init_state();
+    let runtime =
+        TestCanisterRuntime::new().add_msg_cycles_available(PROCESS_DEPOSIT_REQUIRED_CYCLES);
+
+    let result = deposit_sol(&runtime, DEPOSITOR_ACCOUNT).await;
+
+    assert_matches!(
+        result,
+        Err(DepositSolError::TemporarilyUnavailable(e)) => assert!(e.contains("minter public key"))
+    );
+    assert!(runtime.msg_cycles_accepted().is_empty());
+    EventsAssert::assert_no_events_recorded();
+}
+
+#[tokio::test]
 async fn should_fail_and_charge_balance_read_if_get_balance_is_rejected() {
     init_state();
     init_schnorr_master_key();

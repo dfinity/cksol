@@ -2,7 +2,9 @@ use super::{DepositBalance, Deposits, PendingMint, QueuedDeposit, SweptDeposit};
 use crate::{
     constants::{FEE_PER_SIGNATURE, RENT_EXEMPTION_THRESHOLD},
     state::event::CreditedDeposit,
-    test_fixtures::{planned_sweep, queued_deposit, queued_deposit_of, signature, sweep_message},
+    test_fixtures::{
+        MINTER_ADDRESS, planned_sweep, queued_deposit, queued_deposit_of, signature, sweep_message,
+    },
 };
 use cksol_types::{DepositSolId, DepositSolStatus};
 use sol_rpc_types::Lamport;
@@ -90,8 +92,8 @@ mod queue {
 
 mod sweep {
     use super::{
-        BTreeMap, DepositSolStatus, Deposits, FEE_PER_SIGNATURE, SWEEP_SIGNATURE_INDEX,
-        planned_sweep, queued_deposit, signature, sweep_message,
+        BTreeMap, DepositSolStatus, Deposits, FEE_PER_SIGNATURE, MINTER_ADDRESS,
+        SWEEP_SIGNATURE_INDEX, planned_sweep, queued_deposit, signature, sweep_message,
     };
 
     #[test]
@@ -104,6 +106,7 @@ mod sweep {
 
         let expected_received = deposits.sweep(
             &[2, 0],
+            MINTER_ADDRESS,
             &sweep_message([(0, queued_deposit(0)), (2, queued_deposit(2))]),
             &sweep_signature,
         );
@@ -147,6 +150,7 @@ mod sweep {
     fn should_panic_when_sweeping_unknown_deposit() {
         Deposits::default().sweep(
             &[3],
+            MINTER_ADDRESS,
             &sweep_message([(3, queued_deposit(3))]),
             &signature(SWEEP_SIGNATURE_INDEX),
         );
@@ -159,12 +163,14 @@ mod sweep {
         deposits.queue(0, queued_deposit(0));
         deposits.sweep(
             &[0],
+            MINTER_ADDRESS,
             &sweep_message([(0, queued_deposit(0))]),
             &signature(SWEEP_SIGNATURE_INDEX),
         );
 
         deposits.sweep(
             &[0],
+            MINTER_ADDRESS,
             &sweep_message([(0, queued_deposit(0))]),
             &signature(SWEEP_SIGNATURE_INDEX + 1),
         );
@@ -179,6 +185,7 @@ mod sweep {
 
         deposits.sweep(
             &[0, 1],
+            MINTER_ADDRESS,
             &sweep_message([(0, queued_deposit(0))]),
             &signature(SWEEP_SIGNATURE_INDEX),
         );
@@ -189,6 +196,7 @@ mod sweep {
     fn should_panic_when_sweeping_no_deposits() {
         Deposits::default().sweep(
             &[],
+            MINTER_ADDRESS,
             &sweep_message([(0, queued_deposit(0))]),
             &signature(SWEEP_SIGNATURE_INDEX),
         );
@@ -203,12 +211,14 @@ mod sweep {
         let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
         deposits.sweep(
             &[0],
+            MINTER_ADDRESS,
             &sweep_message([(0, queued_deposit(0))]),
             &sweep_signature,
         );
 
         deposits.sweep(
             &[1],
+            MINTER_ADDRESS,
             &sweep_message([(1, queued_deposit(1))]),
             &sweep_signature,
         );
@@ -217,8 +227,8 @@ mod sweep {
 
 mod drop_swept {
     use super::{
-        BTreeMap, DepositSolStatus, Deposits, SWEEP_SIGNATURE_INDEX, SweptDeposit, queue_deposits,
-        signature, sweep_message,
+        BTreeMap, DepositSolStatus, Deposits, MINTER_ADDRESS, SWEEP_SIGNATURE_INDEX, SweptDeposit,
+        queue_deposits, signature, sweep_message,
     };
 
     #[test]
@@ -228,6 +238,7 @@ mod drop_swept {
         let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
         deposits.sweep(
             &[2, 0],
+            MINTER_ADDRESS,
             &sweep_message([(0, first), (2, third)]),
             &sweep_signature,
         );
@@ -264,8 +275,8 @@ mod drop_swept {
 
 mod finalize_swept {
     use super::{
-        BTreeMap, DepositSolStatus, Deposits, SWEEP_SIGNATURE_INDEX, planned_sweep, queued_deposit,
-        signature, sweep_message,
+        BTreeMap, DepositSolStatus, Deposits, MINTER_ADDRESS, SWEEP_SIGNATURE_INDEX, planned_sweep,
+        queued_deposit, signature, sweep_message,
     };
 
     #[test]
@@ -277,6 +288,7 @@ mod finalize_swept {
         let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
         deposits.sweep(
             &[2, 0],
+            MINTER_ADDRESS,
             &sweep_message([(2, queued_deposit(2)), (0, queued_deposit(0))]),
             &sweep_signature,
         );
@@ -323,8 +335,8 @@ mod finalize_swept {
 
 mod credit_sweep {
     use super::{
-        BTreeMap, DepositSolStatus, Deposits, PendingMint, SWEEP_SIGNATURE_INDEX, SweptDeposit,
-        mint, queued_deposit, signature, sweep_message,
+        BTreeMap, DepositSolStatus, Deposits, MINTER_ADDRESS, PendingMint, SWEEP_SIGNATURE_INDEX,
+        SweptDeposit, mint, queued_deposit, signature, sweep_message,
     };
 
     #[test]
@@ -336,6 +348,7 @@ mod credit_sweep {
         let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
         deposits.sweep(
             &[2, 0],
+            MINTER_ADDRESS,
             &sweep_message([(2, queued_deposit(2)), (0, queued_deposit(0))]),
             &sweep_signature,
         );
@@ -377,6 +390,7 @@ mod credit_sweep {
         let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
         deposits.sweep(
             &[0],
+            MINTER_ADDRESS,
             &sweep_message([(0, queued_deposit(0))]),
             &sweep_signature,
         );
@@ -393,6 +407,7 @@ mod credit_sweep {
         let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
         deposits.sweep(
             &[0, 1],
+            MINTER_ADDRESS,
             &sweep_message([(0, queued_deposit(0)), (1, queued_deposit(1))]),
             &sweep_signature,
         );
@@ -411,6 +426,7 @@ mod credit_sweep {
         let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
         deposits.sweep(
             &[0, 2],
+            MINTER_ADDRESS,
             &sweep_message([(0, queued_deposit(0)), (2, queued_deposit(2))]),
             &sweep_signature,
         );
@@ -428,6 +444,7 @@ mod credit_sweep {
         let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
         deposits.sweep(
             &[0, 1],
+            MINTER_ADDRESS,
             &sweep_message([(0, queued_deposit(0)), (1, queued_deposit(1))]),
             &sweep_signature,
         );
@@ -444,6 +461,7 @@ mod credit_sweep {
         let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
         deposits.sweep(
             &[0],
+            MINTER_ADDRESS,
             &sweep_message([(0, queued_deposit(0))]),
             &sweep_signature,
         );
@@ -458,8 +476,8 @@ mod credit_sweep {
 
 mod quarantine_sweep {
     use super::{
-        BTreeMap, DepositSolStatus, Deposits, SWEEP_SIGNATURE_INDEX, SweptDeposit, queue_deposits,
-        signature, sweep_message,
+        BTreeMap, DepositSolStatus, Deposits, MINTER_ADDRESS, SWEEP_SIGNATURE_INDEX, SweptDeposit,
+        queue_deposits, signature, sweep_message,
     };
 
     #[test]
@@ -469,6 +487,7 @@ mod quarantine_sweep {
         let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
         deposits.sweep(
             &[2, 0],
+            MINTER_ADDRESS,
             &sweep_message([(2, third), (0, first)]),
             &sweep_signature,
         );
@@ -505,7 +524,12 @@ mod quarantine_sweep {
         let mut deposits = Deposits::default();
         let [deposit] = queue_deposits(&mut deposits);
         let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
-        deposits.sweep(&[0], &sweep_message([(0, deposit)]), &sweep_signature);
+        deposits.sweep(
+            &[0],
+            MINTER_ADDRESS,
+            &sweep_message([(0, deposit)]),
+            &sweep_signature,
+        );
 
         deposits.quarantine_sweep(&sweep_signature);
     }

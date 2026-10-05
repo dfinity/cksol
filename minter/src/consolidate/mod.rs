@@ -1,4 +1,5 @@
 use crate::{
+    address::minter_public_key,
     constants::MAX_CONCURRENT_RPC_CALLS,
     guard::TimerGuard,
     numeric::LedgerMintIndex,
@@ -52,6 +53,12 @@ pub async fn consolidate_deposits<R: CanisterRuntime>(runtime: R) {
 
     if batches.is_empty() {
         // Nothing to process
+        scopeguard::ScopeGuard::into_inner(reschedule);
+        return;
+    }
+
+    if let Err(e) = minter_public_key() {
+        log!(Priority::Info, "Skipping deposit consolidation: {e}");
         scopeguard::ScopeGuard::into_inner(reschedule);
         return;
     }

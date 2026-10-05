@@ -8,6 +8,7 @@ use crate::{
 use cksol_types::DepositSolId;
 use cksol_types_internal::{InitArgs, UpgradeArgs};
 use derive_more::From;
+use ic_ed25519::PublicKey;
 use ic_stable_structures::{Storable, storable::Bound};
 use icrc_ledger_types::icrc1::account::Account;
 use minicbor::{Decode, Encode};
@@ -182,6 +183,15 @@ pub enum EventType {
         /// The signature of the finalized sweep transaction.
         #[cbor(n(0), with = "cbor::signature")]
         signature: Signature,
+    },
+    /// The minter fetched its Schnorr Ed25519 master public key, from which
+    /// its main address and all deposit addresses are derived.
+    #[n(14)]
+    MinterPublicKeyFetched {
+        #[cbor(n(0), with = "cbor::ed25519_public_key")]
+        public_key: PublicKey,
+        #[cbor(n(1), with = "minicbor::bytes")]
+        chain_code: [u8; 32],
     },
 }
 

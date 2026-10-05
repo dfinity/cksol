@@ -8,6 +8,7 @@ use crate::{
 };
 use candid::{CandidType, Principal};
 use ic_canister_runtime::{IcError, Runtime, StubRuntime};
+use ic_cdk::call::{CallPerformFailed, Error as CallError};
 use ic_cdk_management_canister::{SchnorrPublicKeyArgs, SchnorrPublicKeyResult};
 use icrc_ledger_types::icrc1::account::Account;
 use sol_rpc_types::{MultiRpcResult, RpcResult, Signature, Slot};
@@ -30,7 +31,7 @@ pub struct TestCanisterRuntime {
     msg_cycles_available: Stubs<u128>,
     msg_cycles_refunded: Stubs<u128>,
     set_timer_call_count: Arc<Mutex<usize>>,
-    schnorr_public_key_results: Stubs<SchnorrPublicKeyResult>,
+    schnorr_public_key_results: Stubs<Result<SchnorrPublicKeyResult, CallError>>,
     schnorr_public_key_call_count: Arc<Mutex<usize>>,
 }
 
@@ -115,7 +116,14 @@ impl TestCanisterRuntime {
     }
 
     pub fn with_schnorr_public_key(mut self, result: SchnorrPublicKeyResult) -> Self {
-        self.schnorr_public_key_results = self.schnorr_public_key_results.add(result);
+        self.schnorr_public_key_results = self.schnorr_public_key_results.add(Ok(result));
+        self
+    }
+
+    pub fn with_schnorr_public_key_call_failure(mut self) -> Self {
+        self.schnorr_public_key_results = self
+            .schnorr_public_key_results
+            .add(Err(CallPerformFailed.into()));
         self
     }
 
@@ -179,7 +187,10 @@ impl CanisterRuntime for TestCanisterRuntime {
         Default::default()
     }
 
-    async fn schnorr_public_key(&self, _args: SchnorrPublicKeyArgs) -> SchnorrPublicKeyResult {
+    async fn schnorr_public_key(
+        &self,
+        _args: SchnorrPublicKeyArgs,
+    ) -> Result<SchnorrPublicKeyResult, CallError> {
         *self.schnorr_public_key_call_count.lock().unwrap() += 1;
         suspend_like_an_inter_canister_call().await;
         self.schnorr_public_key_results.next()

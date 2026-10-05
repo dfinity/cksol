@@ -186,6 +186,7 @@ fn should_display_all_deposit_statuses() {
 #[test]
 fn should_display_quarantined_swept_deposits_with_the_sweep_signature() {
     init_state();
+    init_schnorr_master_key();
     let sweep_signature = signature(0xAA);
     let sweepable_amount = 400_000_000;
     queue_deposit(0, account(1), sweepable_amount);
@@ -226,6 +227,7 @@ fn should_paginate_minted_deposits_across_multiple_pages() {
     use crate::dashboard::DEFAULT_PAGE_SIZE;
 
     init_state();
+    init_schnorr_master_key();
 
     let total_deposits = DEFAULT_PAGE_SIZE * 2 + 1;
     let remainder = total_deposits - DEFAULT_PAGE_SIZE * 2;
@@ -267,6 +269,7 @@ fn should_paginate_quarantined_swept_deposits_across_multiple_pages() {
     use crate::dashboard::DEFAULT_PAGE_SIZE;
 
     init_state();
+    init_schnorr_master_key();
 
     let total_deposits = DEFAULT_PAGE_SIZE + 1;
     for deposit_id in 0..total_deposits {

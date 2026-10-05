@@ -1,4 +1,5 @@
 use crate::{
+    address::minter_public_key,
     constants::GET_TRANSACTION_CYCLES,
     cycles::{RpcCallCharge, charge_rpc_call, check_caller_available_cycles},
     deposit::fetch_and_validate_deposit,
@@ -78,8 +79,10 @@ async fn try_accept_deposit<R: CanisterRuntime>(
         )
     });
     check_caller_available_cycles(runtime, cycles_to_attach)?;
+    let master_key = minter_public_key()
+        .map_err(|e| ProcessDepositError::TemporarilyUnavailable(e.to_string()))?;
 
-    let result = fetch_and_validate_deposit(runtime, account, signature, fee).await;
+    let result = fetch_and_validate_deposit(runtime, &master_key, account, signature, fee).await;
     charge_rpc_call(
         runtime,
         RpcCallCharge {

@@ -238,7 +238,12 @@ mod lifecycle {
         let minter = setup.minter();
 
         minter.assert_that_events().await.satisfy(|events| {
-            check!(events.len() == 1 && matches!(events[0], EventType::Init(_)));
+            check!(matches!(events[0], EventType::Init(_)));
+            check!(
+                events[1..]
+                    .iter()
+                    .all(|e| matches!(e, EventType::MinterPublicKeyFetched { .. }))
+            );
         });
 
         minter
@@ -247,7 +252,25 @@ mod lifecycle {
             .expect("upgrade failed");
 
         minter.assert_that_events().await.satisfy(|events| {
-            check!(events.len() == 2 && matches!(events[1], EventType::Upgrade(_)));
+            check!(matches!(events[0], EventType::Init(_)));
+            check!(
+                events
+                    .iter()
+                    .filter(|e| matches!(e, EventType::Upgrade(_)))
+                    .count()
+                    == 1
+            );
+            check!(
+                events
+                    .iter()
+                    .filter(|e| matches!(e, EventType::MinterPublicKeyFetched { .. }))
+                    .count()
+                    <= 1
+            );
+            check!(events[1..].iter().all(|e| matches!(
+                e,
+                EventType::Upgrade(_) | EventType::MinterPublicKeyFetched { .. }
+            )));
         });
 
         setup.drop().await;
@@ -1024,9 +1047,13 @@ mod deposit_sol_tests {
             })
             .await;
         setup.minter().assert_that_events().await.satisfy(|events| {
+            let deposit_events: Vec<&EventType> = events[1..]
+                .iter()
+                .filter(|e| !matches!(e, EventType::MinterPublicKeyFetched { .. }))
+                .collect();
             check!(
-                events[1..]
-                    == [EventType::QueuedDeposit {
+                deposit_events
+                    == [&EventType::QueuedDeposit {
                         deposit_id,
                         account: Account {
                             owner: proxy,
@@ -1103,9 +1130,13 @@ mod deposit_sol_tests {
             .get_deposit_address(DEFAULT_CALLER_ACCOUNT)
             .await;
         setup.minter().assert_that_events().await.satisfy(|events| {
+            let deposit_events: Vec<&EventType> = events[1..]
+                .iter()
+                .filter(|e| !matches!(e, EventType::MinterPublicKeyFetched { .. }))
+                .collect();
             check!(
-                events[1..]
-                    == [EventType::QueuedDeposit {
+                deposit_events
+                    == [&EventType::QueuedDeposit {
                         deposit_id,
                         account: DEFAULT_CALLER_ACCOUNT,
                         address: deposit_address.clone(),
@@ -1546,8 +1577,8 @@ mod metrics_tests {
             .assert_contains_metric_matching(r#"stable_memory_bytes \d+ \d+"#)
             .assert_contains_metric_matching(r#"heap_memory_bytes \d+ \d+"#)
             .assert_contains_metric_matching(r#"cycle_balance\{canister="cksol-minter"\} \d+ \d+"#)
-            // Only the canister init event should have been recorded
-            .assert_contains_metric_matching(r#"total_event_count 1 \d+"#)
+            // Only the init and minter public key events should have been recorded
+            .assert_contains_metric_matching(r#"total_event_count 2 \d+"#)
             .assert_contains_metric_matching(r#"minter_balance 0 \d+"#)
             .into()
             .drop()

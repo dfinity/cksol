@@ -111,10 +111,19 @@ pub fn schnorr_master_key_response() -> SchnorrPublicKeyResult {
     }
 }
 
-fn schnorr_master_key() -> SchnorrPublicKey {
+pub fn schnorr_master_key() -> SchnorrPublicKey {
     SchnorrPublicKey {
         public_key: PublicKey::pocketic_key(PocketIcMasterPublicKeyId::Key1),
         chain_code: [1; 32],
+    }
+}
+
+/// The event recorded when the minter fetches the master key of [`init_schnorr_master_key`].
+pub fn minter_public_key_fetched_event() -> EventType {
+    let master_key = schnorr_master_key();
+    EventType::MinterPublicKeyFetched {
+        public_key: master_key.public_key,
+        chain_code: master_key.chain_code,
     }
 }
 
@@ -251,6 +260,65 @@ pub mod devnet_sweep {
     };
 
     pub const MINTER_ADDRESS: Address = address!("5yazYQT1Kwm3jEjMp58J5329gzbxA232fnPajemCeKbL");
+
+    /// The devnet deposits with their addresses replaced by ones the test master key
+    /// derives, so the sweep can flow through the event-sourced state.
+    pub fn derived_deposits() -> Vec<(DepositSolId, QueuedDeposit)> {
+        DEPOSITS
+            .into_iter()
+            .enumerate()
+            .map(|(index, (_, balance))| {
+                let account = account(index + 1);
+                (
+                    index as DepositSolId,
+                    QueuedDeposit {
+                        account,
+                        address: super::deposit_address(account),
+                        balance: DepositBalance::new(balance)
+                            .expect("BUG: the balance covers the rent exemption threshold"),
+                    },
+                )
+            })
+            .collect()
+    }
+
+    pub fn derived_sweep() -> Sweep {
+        Sweep::plan(derived_deposits(), super::MINTER_ADDRESS)
+    }
+
+    /// The devnet outcome rewritten over [`derived_deposits`]: the message is rebuilt
+    /// from the plan with the recorded blockhash and the balances are remapped to the
+    /// new account order, while the signatures, fee and amounts stay the devnet ones.
+    pub fn derived_outcome() -> EncodedConfirmedTransactionWithStatusMeta {
+        let mut outcome = outcome();
+        let transaction = outcome
+            .transaction
+            .transaction
+            .decode()
+            .expect("BUG: the devnet transaction should decode");
+        let message = derived_sweep().sweep_message(*transaction.message.recent_blockhash());
+        let patched = VersionedTransaction {
+            signatures: transaction.signatures,
+            message: solana_message::VersionedMessage::Legacy(message),
+        };
+        outcome.transaction.transaction = EncodedTransaction::Binary(
+            STANDARD.encode(
+                bincode::serialize(&patched).expect("BUG: the transaction should serialize"),
+            ),
+            TransactionBinaryEncoding::Base64,
+        );
+        for (deposit_id, deposit) in derived_deposits() {
+            set_balances(
+                &mut outcome,
+                deposit.address,
+                DEPOSITS[deposit_id as usize].1,
+                crate::constants::RENT_EXEMPTION_THRESHOLD,
+            );
+        }
+        set_balances(&mut outcome, super::MINTER_ADDRESS, 0, AMOUNT_RECEIVED);
+        set_balances(&mut outcome, solana_system_interface::program::ID, 1, 1);
+        outcome
+    }
     pub const FEE: Lamport = 20_000;
     pub const AMOUNT_RECEIVED: Lamport = 2_396_416_480;
     /// The deposit addresses with their balances when queued, the fee payer first.
@@ -767,6 +835,7 @@ pub mod arb {
     use candid::Principal;
     use cksol_types::DepositSolId;
     use cksol_types_internal::{Ed25519KeyName, InitArgs, SolanaNetwork, UpgradeArgs};
+    use ic_ed25519::{PrivateKey, PublicKey};
     use icrc_ledger_types::icrc1::account::Account;
     use proptest::prelude::{Just, Strategy, any, prop, prop_oneof};
     use solana_address::Address;
@@ -844,6 +913,10 @@ pub mod arb {
 
     pub fn arb_address() -> impl Strategy<Value = Address> {
         any::<[u8; 32]>().prop_map(Address::from)
+    }
+
+    pub fn arb_ed25519_public_key() -> impl Strategy<Value = PublicKey> {
+        any::<[u8; 32]>().prop_map(|seed| PrivateKey::generate_from_seed(&seed).public_key())
     }
 
     pub fn arb_hash() -> impl Strategy<Value = Hash> {
@@ -1083,6 +1156,12 @@ pub mod arb {
                     }
                 }),
             arb_signature().prop_map(|signature| EventType::QuarantinedSweep { signature }),
+            (arb_ed25519_public_key(), any::<[u8; 32]>()).prop_map(|(public_key, chain_code)| {
+                EventType::MinterPublicKeyFetched {
+                    public_key,
+                    chain_code,
+                }
+            }),
         ]
     }
 

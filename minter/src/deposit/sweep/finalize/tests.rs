@@ -5,8 +5,8 @@ use crate::{
     state::{event::EventType, read_state, reset_state},
     storage::reset_events,
     test_fixtures::{
-        EventsAssert, GetTransactionResult, account, devnet_sweep,
-        events::{queue, queue_deposit, submit_sweep, submit_sweep_to, succeed_transaction},
+        EventsAssert, GetTransactionResult, MINTER_ADDRESS, account, devnet_sweep,
+        events::{queue, queue_deposit, submit_sweep, succeed_transaction},
         init_schnorr_master_key, init_state,
         runtime::TestCanisterRuntime,
         signature,
@@ -35,7 +35,7 @@ async fn should_ask_for_another_round_only_after_crediting_with_sweeps_left_over
     let cases = [
         (
             "the devnet sweep was credited",
-            transaction_response(devnet_sweep::outcome()),
+            transaction_response(devnet_sweep::derived_outcome()),
             true,
         ),
         (
@@ -90,7 +90,7 @@ async fn should_credit_the_amount_received_by_the_main_account() {
     setup();
     let sweep_signature = finalize_devnet_sweep();
 
-    credit_finalized_sweeps(&runtime_returning(devnet_sweep::outcome())).await;
+    credit_finalized_sweeps(&runtime_returning(devnet_sweep::derived_outcome())).await;
 
     EventsAssert::from_recorded().expect_contains_event_eq(EventType::CreditedSweep {
         signature: sweep_signature,
@@ -117,7 +117,7 @@ async fn should_keep_deposits_finalized_until_the_outcome_can_be_read() {
             GetTransactionResult::Inconsistent(vec![])
         }),
         ("the metadata cannot be read", || {
-            let mut outcome = devnet_sweep::outcome();
+            let mut outcome = devnet_sweep::derived_outcome();
             outcome.transaction.meta = None;
             transaction_response(outcome)
         }),
@@ -157,8 +157,8 @@ async fn should_keep_deposits_finalized_until_the_outcome_can_be_read() {
 async fn should_quarantine_deposits_if_the_outcome_does_not_match_the_plan() {
     setup();
     let sweep_signature = finalize_devnet_sweep();
-    let mut outcome = devnet_sweep::outcome();
-    devnet_sweep::set_balances(&mut outcome, devnet_sweep::MINTER_ADDRESS, 1, 0);
+    let mut outcome = devnet_sweep::derived_outcome();
+    devnet_sweep::set_balances(&mut outcome, MINTER_ADDRESS, 1, 0);
 
     credit_finalized_sweeps(&runtime_returning(outcome)).await;
 
@@ -190,15 +190,14 @@ fn setup() {
 
 /// Queues the deposits of the devnet sweep, submits it and finalizes it.
 fn finalize_devnet_sweep() -> Signature {
-    let deposits = devnet_sweep::deposits();
+    let deposits = devnet_sweep::derived_deposits();
     for (deposit_id, deposit) in &deposits {
         queue(*deposit_id, *deposit);
     }
     let sweep_signature = signature(DEVNET_SWEEP_SIGNATURE_INDEX);
-    submit_sweep_to(
+    submit_sweep(
         sweep_signature,
         deposits.iter().map(|(deposit_id, _)| *deposit_id).collect(),
-        devnet_sweep::MINTER_ADDRESS,
     );
     succeed_transaction(sweep_signature);
     sweep_signature

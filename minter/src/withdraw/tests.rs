@@ -432,8 +432,24 @@ mod process_pending_withdrawals_tests {
     }
 
     #[tokio::test]
+    async fn should_not_fetch_a_block_while_the_minter_public_key_is_unavailable() {
+        init_state();
+        init_balance();
+        events::accept_withdrawal(account(1), 1, MINIMUM_WITHDRAWAL_AMOUNT);
+        let events_before = EventsAssert::from_recorded();
+        let runtime = TestCanisterRuntime::new();
+
+        process_pending_withdrawals(runtime.clone()).await;
+
+        assert_eq!(events_before, EventsAssert::from_recorded());
+        assert_eq!(runtime.set_timer_call_count(), 0);
+        assert_eq!(withdrawal_status(1), WithdrawalStatus::Pending);
+    }
+
+    #[tokio::test]
     async fn should_log_error_when_blockhash_fetch_fails() {
         init_state();
+        init_schnorr_master_key();
         init_balance();
 
         events::accept_withdrawal(account(1), 1, MINIMUM_WITHDRAWAL_AMOUNT);
