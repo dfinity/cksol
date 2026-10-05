@@ -240,10 +240,6 @@ pub fn minter_signature_nth(occurrence: usize) -> solana_signature::Signature {
     signer::derivation_path_signature(&MINTER_DERIVATION_PATH, occurrence)
 }
 
-/// A sweep of four deposits that the minter submitted on devnet as transaction
-/// `59vLxkN5YGgBrHGTQMCrntNi7CrAxfkQxYek2v3hUgKfujgGtfkSDZZmFyVw6S59uTH2FEwWcvntPiEkdN5Ep5W2`,
-/// with the `getTransaction` response the minter settles it against, and ways to deviate
-/// from that response.
 /// The [`FetchedTransaction`] that [`rpc::get_transaction`] returns for the given
 /// `getTransaction` output.
 pub fn fetched(outcome: EncodedConfirmedTransactionWithStatusMeta) -> FetchedTransaction {
@@ -257,6 +253,10 @@ pub fn fetched(outcome: EncodedConfirmedTransactionWithStatusMeta) -> FetchedTra
     }
 }
 
+/// A sweep of four deposits that the minter submitted on devnet as transaction
+/// `59vLxkN5YGgBrHGTQMCrntNi7CrAxfkQxYek2v3hUgKfujgGtfkSDZZmFyVw6S59uTH2FEwWcvntPiEkdN5Ep5W2`,
+/// with the `getTransaction` response the minter settles it against, and ways to deviate
+/// from that response.
 pub mod devnet_sweep {
     use super::account;
     use crate::state::{DepositBalance, QueuedDeposit, Sweep, event::CreditedDeposit};
