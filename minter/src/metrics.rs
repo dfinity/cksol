@@ -68,7 +68,7 @@ pub fn encode_metrics(w: &mut MetricsEncoder<Vec<u8>>, s: &State) -> std::io::Re
     w.encode_gauge(
         "quarantined_swept_deposits",
         s.deposits().quarantined().len().metric_value(),
-        "Number of quarantined deposits whose finalized sweep did not match its plan and could not be credited.",
+        "Number of quarantined deposits: their finalized sweep did not match its plan, or their pending ckSOL mint could not be completed.",
     )?;
     w.encode_gauge(
         "deposits_to_consolidate",
