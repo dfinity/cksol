@@ -8,8 +8,8 @@ use crate::{
     test_fixtures::{
         EventsAssert, MINIMUM_WITHDRAWAL_AMOUNT, MINTER_ACCOUNT, MINTER_ADDRESS, WITHDRAWAL_FEE,
         account, confirmed_block_at_height, events, init_balance, init_balance_to,
-        init_schnorr_master_key, init_state, minter_signature, minter_signature_nth,
-        runtime::TestCanisterRuntime, signature,
+        init_schnorr_master_key, init_state, init_state_with_args, minter_signature,
+        minter_signature_nth, runtime::TestCanisterRuntime, signature, valid_init_args,
     },
     withdraw::{process_pending_withdrawals, withdraw, withdrawal_status},
 };
@@ -19,12 +19,13 @@ use canlog::Log;
 use cksol_types::TxFinalizedStatus;
 use cksol_types::WithdrawalStatus;
 use cksol_types::{WithdrawalError, WithdrawalOk};
-use cksol_types_internal::log::Priority;
+use cksol_types_internal::{InitArgs, log::Priority};
 use ic_canister_runtime::IcError;
 use ic_cdk::call::CallRejected;
 use ic_cdk_management_canister::SignCallError;
 use icrc_ledger_types::{icrc1::account::Account, icrc2::transfer_from::TransferFromError};
 use sol_rpc_types::{MultiRpcResult, RpcError, Slot};
+use solana_address::Address;
 use solana_signature::Signature;
 
 const VALID_ADDRESS: &str = "E4MpwNnMWs2XtW5gVrxZvyS7fMq31QD5HvbxmwP45Tz3";
@@ -250,6 +251,28 @@ async fn should_reject_withdrawal_to_minter_address() {
         test_caller(),
         MINIMUM_WITHDRAWAL_AMOUNT,
         MINTER_ADDRESS.to_string(),
+    )
+    .await;
+
+    assert_matches!(result, Err(WithdrawalError::InvalidDestination(_)));
+}
+
+#[tokio::test]
+async fn should_reject_withdrawal_to_nonce_pool_account() {
+    let nonce_account = Address::from([7_u8; 32]);
+    init_state_with_args(InitArgs {
+        nonce_accounts: vec![nonce_account.to_string()],
+        ..valid_init_args()
+    });
+    init_schnorr_master_key();
+
+    let runtime = TestCanisterRuntime::new();
+
+    let result = withdraw(
+        &runtime,
+        test_caller(),
+        MINIMUM_WITHDRAWAL_AMOUNT,
+        nonce_account.to_string(),
     )
     .await;
 

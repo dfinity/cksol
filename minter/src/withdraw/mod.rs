@@ -109,6 +109,11 @@ fn validate_destination(destination: &Address) -> Result<(), WithdrawalError> {
                 "{destination} is the ckSOL minter's main address"
             )));
         }
+        if s.nonce_pool().contains(destination) {
+            return Err(WithdrawalError::InvalidDestination(format!(
+                "{destination} is a durable nonce account of the ckSOL minter"
+            )));
+        }
         Ok(())
     })
 }

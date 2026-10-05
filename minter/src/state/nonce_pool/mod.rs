@@ -43,6 +43,10 @@ impl DurableNoncePool {
     pub fn addresses(&self) -> impl Iterator<Item = &Address> {
         self.accounts.keys()
     }
+
+    pub fn contains(&self, address: &Address) -> bool {
+        self.accounts.contains_key(address)
+    }
 }
 
 /// The lifecycle state of a durable nonce account in the pool.
