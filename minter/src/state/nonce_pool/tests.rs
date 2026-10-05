@@ -1,4 +1,7 @@
-use crate::state::nonce_pool::{DurableNoncePool, NoncePoolError};
+use crate::{
+    state::nonce_pool::{DurableNoncePool, NoncePoolError},
+    test_fixtures::address,
+};
 use solana_address::Address;
 
 #[test]
@@ -44,8 +47,4 @@ fn should_remove_a_free_address() {
 
 fn pool_of(addresses: impl IntoIterator<Item = Address>) -> DurableNoncePool {
     DurableNoncePool::new(addresses).expect("the addresses are pairwise distinct")
-}
-
-fn address(byte: u8) -> Address {
-    Address::from([byte; 32])
 }

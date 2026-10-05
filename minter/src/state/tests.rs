@@ -6,7 +6,7 @@ use crate::{
     state::{audit::process_event, read_state},
     test_fixtures::{
         DEPOSIT_SOL_FEE, DEPOSIT_SOL_REQUIRED_CYCLES, MINIMUM_DEPOSIT_AMOUNT,
-        MINIMUM_WITHDRAWAL_AMOUNT, WITHDRAWAL_FEE, account,
+        MINIMUM_WITHDRAWAL_AMOUNT, WITHDRAWAL_FEE, account, address,
         arb::arb_event,
         deposit_id,
         events::{
@@ -476,8 +476,8 @@ mod nonce_accounts {
         assert_eq!(pool_addresses(&replayed), vec![nonce_account(2)]);
     }
 
-    fn nonce_account(byte: u8) -> String {
-        Address::from([byte; 32]).to_string()
+    fn nonce_account(i: usize) -> String {
+        address(i).to_string()
     }
 
     fn pool_addresses(state: &State) -> Vec<String> {

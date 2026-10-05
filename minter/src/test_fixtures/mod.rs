@@ -135,6 +135,13 @@ pub fn signature(i: usize) -> solana_signature::Signature {
     solana_signature::Signature::from(bytes)
 }
 
+/// Returns an [`Address`] unique for any `usize` index, derived from `i as u64` via le_bytes.
+pub fn address(i: usize) -> Address {
+    let mut bytes = [0u8; 32];
+    bytes[..8].copy_from_slice(&(i as u64).to_le_bytes());
+    Address::from(bytes)
+}
+
 /// The block height used by fixtures whose test does not care about blockhash expiry.
 pub const DEFAULT_BLOCK_HEIGHT: BlockHeight = BlockHeight::new(400_000_000);
 
