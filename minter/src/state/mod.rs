@@ -247,6 +247,9 @@ impl State {
         &self.nonce_pool
     }
 
+    pub fn nonce_pool_addresses(&self) -> BTreeSet<Address> {
+        self.nonce_pool.addresses().copied().collect()
+    }
 
     pub fn sol_rpc_client<R: Runtime>(&self, runtime: R) -> SolRpcClient<R> {
         SolRpcClient::builder(runtime, self.sol_rpc_canister_id)

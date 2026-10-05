@@ -482,8 +482,8 @@ mod nonce_accounts {
 
     fn pool_addresses(state: &State) -> Vec<String> {
         state
-            .nonce_pool()
-            .addresses()
+            .nonce_pool_addresses()
+            .iter()
             .map(Address::to_string)
             .collect()
     }

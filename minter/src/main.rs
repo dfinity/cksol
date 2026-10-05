@@ -259,8 +259,8 @@ fn get_minter_info() -> MinterInfo {
             .minter_public_key()
             .map(|key| minter_address(key).to_string()),
         nonce_accounts: s
-            .nonce_pool()
-            .addresses()
+            .nonce_pool_addresses()
+            .iter()
             .map(|address| address.to_string())
             .collect(),
     })
