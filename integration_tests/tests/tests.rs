@@ -33,7 +33,6 @@ const FINALIZE_TRANSACTIONS_DELAY: Duration = Duration::from_mins(2);
 const RESUBMIT_TRANSACTIONS_DELAY: Duration = Duration::from_mins(3);
 const DEPOSIT_CONSOLIDATION_DELAY: Duration = Duration::from_mins(10);
 const SWEEP_DEPOSITS_DELAY: Duration = Duration::from_mins(1);
-const PROCESS_PENDING_MINTS_DELAY: Duration = Duration::from_mins(1);
 /// Number of blocks a blockhash stays valid for, as the minter counts them.
 const MAX_BLOCKHASH_AGE_IN_BLOCKS: u64 = 150;
 /// Height of the block whose blockhash the mocks hand a timer for a first submission.
@@ -1241,10 +1240,7 @@ mod deposit_sol_tests {
             )
             .await;
 
-        setup.advance_time(PROCESS_PENDING_MINTS_DELAY).await;
-        for _ in 0..10 {
-            setup.tick().await;
-        }
+        setup.wait_for_deposit_minted(deposit_id).await;
 
         let minted_amount = SWEEPABLE_AMOUNT - FEE_PER_SIGNATURE;
         assert_eq!(
