@@ -47,6 +47,7 @@ pub async fn withdraw<R: CanisterRuntime>(
     let solana_address = Address::from_str(&address)
         .map_err(|e| WithdrawalError::MalformedAddress(e.to_string()))?;
     validate_destination(&solana_address)?;
+    validate_nonce_pool_not_empty()?;
 
     let _guard = withdrawal_guard(from)?;
 
@@ -116,6 +117,15 @@ fn validate_destination(destination: &Address) -> Result<(), WithdrawalError> {
         }
         Ok(())
     })
+}
+
+fn validate_nonce_pool_not_empty() -> Result<(), WithdrawalError> {
+    if read_state(|s| s.nonce_pool().is_empty()) {
+        return Err(WithdrawalError::TemporarilyUnavailable(
+            "The durable nonce account pool is empty, no withdrawal can be processed".to_string(),
+        ));
+    }
+    Ok(())
 }
 
 pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: R) {

@@ -53,7 +53,10 @@ pub struct SetupBuilder {
 
 impl SetupBuilder {
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            nonce_accounts: vec![Setup::DEFAULT_NONCE_ACCOUNT.to_string()],
+            ..Self::default()
+        }
     }
 
     pub fn with_nonce_accounts(mut self, nonce_accounts: Vec<String>) -> Self {
@@ -116,6 +119,7 @@ impl Setup {
     pub const DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT: Lamport = 2_000_000; // 0.002 SOL
     pub const DEFAULT_CALLER: Principal =
         Principal::from_slice(&[0xff, 0xff, 0xff, 0xff, 0xff, 0xe0, 0x0, 0x3, 0x1, 0x1]);
+    pub const DEFAULT_NONCE_ACCOUNT: &'static str = "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx";
 
     pub async fn new(
         make_live: PocketIcMode,

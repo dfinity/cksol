@@ -181,7 +181,11 @@ async fn should_deposit_and_withdraw() {
 #[tokio::test(flavor = "multi_thread")]
 async fn should_add_an_operator_created_nonce_account_through_an_upgrade() {
     let validator = SolanaTestValidator::start().await;
-    let setup = validator.setup().await;
+    let setup = validator
+        .setup_builder()
+        .with_nonce_accounts(Vec::new())
+        .build()
+        .await;
 
     assert_eq!(
         setup.minter().get_minter_info().await.nonce_accounts,

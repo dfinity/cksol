@@ -6,8 +6,8 @@ use crate::{
     sol_transfer::MAX_WITHDRAWALS_PER_TX,
     state::{TaskType, event::TransactionPurpose, read_state},
     test_fixtures::{
-        EventsAssert, MINIMUM_WITHDRAWAL_AMOUNT, MINTER_ACCOUNT, MINTER_ADDRESS, WITHDRAWAL_FEE,
-        account, confirmed_block_at_height, events, init_balance, init_balance_to,
+        EventsAssert, MINIMUM_WITHDRAWAL_AMOUNT, MINTER_ACCOUNT, MINTER_ADDRESS, NONCE_ACCOUNT,
+        WITHDRAWAL_FEE, account, confirmed_block_at_height, events, init_balance, init_balance_to,
         init_schnorr_master_key, init_state, init_state_with_args, minter_signature,
         minter_signature_nth, runtime::TestCanisterRuntime, signature, valid_init_args,
     },
@@ -25,7 +25,6 @@ use ic_cdk::call::CallRejected;
 use ic_cdk_management_canister::SignCallError;
 use icrc_ledger_types::{icrc1::account::Account, icrc2::transfer_from::TransferFromError};
 use sol_rpc_types::{MultiRpcResult, RpcError, Slot};
-use solana_address::Address;
 use solana_signature::Signature;
 
 const VALID_ADDRESS: &str = "E4MpwNnMWs2XtW5gVrxZvyS7fMq31QD5HvbxmwP45Tz3";
@@ -259,9 +258,26 @@ async fn should_reject_withdrawal_to_minter_address() {
 
 #[tokio::test]
 async fn should_reject_withdrawal_to_nonce_pool_account() {
-    let nonce_account = Address::from([7_u8; 32]);
+    init_state();
+    init_schnorr_master_key();
+
+    let runtime = TestCanisterRuntime::new();
+
+    let result = withdraw(
+        &runtime,
+        test_caller(),
+        MINIMUM_WITHDRAWAL_AMOUNT,
+        NONCE_ACCOUNT.to_string(),
+    )
+    .await;
+
+    assert_matches!(result, Err(WithdrawalError::InvalidDestination(_)));
+}
+
+#[tokio::test]
+async fn should_be_temporarily_unavailable_if_nonce_pool_empty() {
     init_state_with_args(InitArgs {
-        nonce_accounts: vec![nonce_account.to_string()],
+        nonce_accounts: vec![],
         ..valid_init_args()
     });
     init_schnorr_master_key();
@@ -272,11 +288,15 @@ async fn should_reject_withdrawal_to_nonce_pool_account() {
         &runtime,
         test_caller(),
         MINIMUM_WITHDRAWAL_AMOUNT,
-        nonce_account.to_string(),
+        VALID_ADDRESS.to_string(),
     )
     .await;
 
-    assert_matches!(result, Err(WithdrawalError::InvalidDestination(_)));
+    assert_matches!(
+        result,
+        Err(WithdrawalError::TemporarilyUnavailable(e)) => assert!(e.contains("nonce"))
+    );
+    EventsAssert::assert_no_events_recorded();
 }
 
 #[tokio::test]

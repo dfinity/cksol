@@ -129,6 +129,11 @@ impl SolanaTestValidator {
 
     /// Creates a test setup whose SOL RPC canister talks to this validator.
     pub async fn setup(&self) -> Setup {
+        self.setup_builder().build().await
+    }
+
+    /// A [`SetupBuilder`] preconfigured so the SOL RPC canister talks to this validator.
+    pub fn setup_builder(&self) -> SetupBuilder {
         SetupBuilder::new()
             .with_proxy_canister()
             .with_pocket_ic_live_mode()
@@ -141,8 +146,6 @@ impl SolanaTestValidator {
                 }),
                 ..InstallArgs::default()
             })
-            .build()
-            .await
     }
 
     /// Transfers `amount` to the deposit address of `account`, waits for the
