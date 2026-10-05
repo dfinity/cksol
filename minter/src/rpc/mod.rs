@@ -92,8 +92,26 @@ pub enum GetTransactionError {
     InvalidSignature { queried: Signature },
 }
 
+impl GetTransactionError {
+    /// A consistent response that cannot be attributed to the queried signature points
+    /// to a misbehaving provider or SOL RPC canister, not to a transient error.
+    pub fn is_response_untrustworthy(&self) -> bool {
+        match self {
+            GetTransactionError::UndecodableTransaction { .. }
+            | GetTransactionError::SignatureMismatch { .. }
+            | GetTransactionError::InvalidSignature { .. } => true,
+            GetTransactionError::IcError(_)
+            | GetTransactionError::RpcError(_)
+            | GetTransactionError::InconsistentRpcResults => false,
+        }
+    }
+}
+
 impl From<GetTransactionError> for ProcessDepositError {
     fn from(error: GetTransactionError) -> Self {
+        if error.is_response_untrustworthy() {
+            return ProcessDepositError::InvalidDepositTransaction(error.to_string());
+        }
         ProcessDepositError::TemporarilyUnavailable(error.to_string())
     }
 }

@@ -224,6 +224,26 @@ mod get_transaction_tests {
         );
     }
 
+    #[test]
+    fn should_reject_an_untrustworthy_response_as_an_invalid_deposit() {
+        use cksol_types::ProcessDepositError;
+
+        let untrustworthy = || GetTransactionError::SignatureMismatch {
+            queried: legacy_deposit_transaction_signature(),
+            returned: None,
+        };
+        let transient = || GetTransactionError::InconsistentRpcResults;
+
+        assert_eq!(
+            ProcessDepositError::from(untrustworthy()),
+            ProcessDepositError::InvalidDepositTransaction(untrustworthy().to_string())
+        );
+        assert_eq!(
+            ProcessDepositError::from(transient()),
+            ProcessDepositError::TemporarilyUnavailable(transient().to_string())
+        );
+    }
+
     #[tokio::test]
     async fn should_return_transaction() {
         init_state();

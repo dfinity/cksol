@@ -33,8 +33,13 @@ pub async fn fetch_and_validate_deposit<R: CanisterRuntime>(
     let deposit_address = account_address(master_key, &account);
 
     let maybe_transaction = get_transaction(runtime, signature).await.map_err(|e| {
+        let priority = if e.is_response_untrustworthy() {
+            Priority::Error
+        } else {
+            Priority::Info
+        };
         log!(
-            Priority::Info,
+            priority,
             "Error fetching transaction for deposit {deposit_id:?}: {e}"
         );
         ProcessDepositError::from(e)

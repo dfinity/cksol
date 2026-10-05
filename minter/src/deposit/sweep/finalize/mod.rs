@@ -59,8 +59,13 @@ pub async fn credit_finalized_sweeps<R: CanisterRuntime>(runtime: &R) -> bool {
                 continue;
             }
             Err(e) => {
+                let priority = if e.is_response_untrustworthy() {
+                    Priority::Error
+                } else {
+                    Priority::Info
+                };
                 log!(
-                    Priority::Info,
+                    priority,
                     "Failed to fetch finalized sweep {signature}: {e}, retrying later"
                 );
                 continue;
