@@ -175,6 +175,7 @@ type InitArgs = record {
     withdrawal_fee : Lamport;
     deposit_sol_required_cycles : nat64;
     solana_network : SolanaNetwork;
+    nonce_accounts : vec text;
 };
 
 // Information about the ckSOL minter canister.
@@ -207,6 +208,8 @@ type UpgradeArgs = record {
     minimum_deposit_amount : opt Lamport;
     withdrawal_fee : opt Lamport;
     deposit_sol_required_cycles : opt nat64;
+    nonce_accounts_to_add : opt vec text;
+    nonce_accounts_to_remove : opt vec text;
 };
 
 type WithdrawalArgs = record {

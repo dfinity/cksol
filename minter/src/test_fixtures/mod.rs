@@ -66,6 +66,7 @@ pub fn valid_init_args() -> InitArgs {
         deposit_sol_required_cycles: DEPOSIT_SOL_REQUIRED_CYCLES as u64,
         solana_network: SolanaNetwork::Mainnet,
         deposit_sol_fee: DEPOSIT_SOL_FEE as u64,
+        nonce_accounts: vec![],
     }
 }
 
@@ -934,7 +935,7 @@ pub mod arb {
             any::<u64>(),
             any::<u64>(),
             arb_solana_network(),
-            any::<u64>(),
+            (any::<u64>(), arb_nonce_accounts()),
         )
             .prop_map(
                 |(
@@ -946,7 +947,7 @@ pub mod arb {
                     withdrawal_fee,
                     deposit_sol_required_cycles,
                     solana_network,
-                    deposit_sol_fee,
+                    (deposit_sol_fee, nonce_accounts),
                 )| {
                     InitArgs {
                         sol_rpc_canister_id,
@@ -958,9 +959,14 @@ pub mod arb {
                         deposit_sol_required_cycles,
                         solana_network,
                         deposit_sol_fee,
+                        nonce_accounts,
                     }
                 },
             )
+    }
+
+    fn arb_nonce_accounts() -> impl Strategy<Value = Vec<String>> {
+        prop::collection::vec(arb_address().prop_map(|address| address.to_string()), 0..5)
     }
 
     pub fn arb_upgrade_args() -> impl Strategy<Value = UpgradeArgs> {
@@ -971,6 +977,8 @@ pub mod arb {
             prop::option::of(any::<u64>()),
             prop::option::of(any::<u64>()),
             prop::option::of(any::<u64>()),
+            prop::option::of(arb_nonce_accounts()),
+            prop::option::of(arb_nonce_accounts()),
         )
             .prop_map(
                 |(
@@ -980,6 +988,8 @@ pub mod arb {
                     withdrawal_fee,
                     deposit_sol_required_cycles,
                     deposit_sol_fee,
+                    nonce_accounts_to_add,
+                    nonce_accounts_to_remove,
                 )| UpgradeArgs {
                     sol_rpc_canister_id,
                     minimum_withdrawal_amount,
@@ -987,6 +997,8 @@ pub mod arb {
                     withdrawal_fee,
                     deposit_sol_required_cycles,
                     deposit_sol_fee,
+                    nonce_accounts_to_add,
+                    nonce_accounts_to_remove,
                 },
             )
     }

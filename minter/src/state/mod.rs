@@ -25,6 +25,7 @@ use std::{
     cell::RefCell,
     collections::{BTreeMap, BTreeSet, btree_map},
     iter::Peekable,
+    str::FromStr,
 };
 
 #[cfg(test)]
@@ -33,12 +34,14 @@ mod tests;
 pub mod audit;
 mod deposits;
 pub mod event;
+mod nonce_pool;
 
 pub use deposits::{
     DepositBalance, Deposits, MintedSweep, PendingMint, QuarantineCause, QuarantinedDeposit,
     QueuedDeposit, SettledSweep, Sweep, SweepMismatch, SweepRecoveryError, SweepSettlementError,
     Sweeps, SweptDeposit, Transfer, UnreadableOutcome,
 };
+pub use nonce_pool::{DurableNoncePool, NoncePoolError};
 
 thread_local! {
     static STATE: RefCell<Option<State>> = RefCell::default();
@@ -112,6 +115,7 @@ pub struct State {
     transactions_to_resubmit: InsertionOrderedMap<Signature, SolanaTransaction>,
     succeeded_transactions: BTreeSet<Signature>,
     failed_transactions: InsertionOrderedMap<Signature, SolanaTransaction>,
+    nonce_pool: DurableNoncePool,
     active_tasks: BTreeSet<TaskType>,
     balance: Lamport,
 }
@@ -239,6 +243,11 @@ impl State {
         self.balance
     }
 
+    pub fn nonce_pool(&self) -> &DurableNoncePool {
+        &self.nonce_pool
+    }
+
+
     pub fn sol_rpc_client<R: Runtime>(&self, runtime: R) -> SolRpcClient<R> {
         SolRpcClient::builder(runtime, self.sol_rpc_canister_id)
             .with_rpc_sources(RpcSources::Default(SolanaCluster::from(
@@ -324,6 +333,8 @@ impl State {
             withdrawal_fee,
             deposit_sol_required_cycles,
             deposit_sol_fee,
+            nonce_accounts_to_add,
+            nonce_accounts_to_remove,
         }: UpgradeArgs,
     ) -> Result<(), InvalidStateError> {
         if let Some(sol_rpc_canister_id) = sol_rpc_canister_id {
@@ -343,6 +354,14 @@ impl State {
         }
         if let Some(deposit_sol_fee) = deposit_sol_fee {
             self.deposit_sol_fee = deposit_sol_fee as u128;
+        }
+        if let Some(nonce_accounts) = nonce_accounts_to_add {
+            self.nonce_pool
+                .add_accounts(parse_nonce_accounts(nonce_accounts)?)?;
+        }
+        if let Some(nonce_accounts) = nonce_accounts_to_remove {
+            self.nonce_pool
+                .remove_accounts(parse_nonce_accounts(nonce_accounts)?)?;
         }
         self.validate()
     }
@@ -668,6 +687,31 @@ pub enum InvalidStateError {
         get_balance_cycles: u128,
         deposit_sol_fee: u128,
     },
+    InvalidNonceAccount(String),
+    DuplicateNonceAccount(Address),
+    UnknownNonceAccount(Address),
+}
+
+impl From<NoncePoolError> for InvalidStateError {
+    fn from(error: NoncePoolError) -> Self {
+        match error {
+            NoncePoolError::DuplicateAccount(address) => Self::DuplicateNonceAccount(address),
+            NoncePoolError::UnknownAccount(address) => Self::UnknownNonceAccount(address),
+        }
+    }
+}
+
+fn parse_nonce_accounts(addresses: Vec<String>) -> Result<Vec<Address>, InvalidStateError> {
+    addresses
+        .into_iter()
+        .map(|address| {
+            Address::from_str(&address).map_err(|error| {
+                InvalidStateError::InvalidNonceAccount(format!(
+                    "ERROR: failed to parse nonce account {address}: {error}"
+                ))
+            })
+        })
+        .collect()
 }
 
 impl TryFrom<InitArgs> for State {
@@ -684,8 +728,10 @@ impl TryFrom<InitArgs> for State {
             deposit_sol_required_cycles,
             solana_network,
             deposit_sol_fee,
+            nonce_accounts,
         }: InitArgs,
     ) -> Result<Self, Self::Error> {
+        let nonce_pool = DurableNoncePool::new(parse_nonce_accounts(nonce_accounts)?)?;
         let state = Self {
             minter_public_key: None,
             master_key_name,
@@ -708,6 +754,7 @@ impl TryFrom<InitArgs> for State {
             transactions_to_resubmit: InsertionOrderedMap::new(),
             succeeded_transactions: BTreeSet::new(),
             failed_transactions: InsertionOrderedMap::new(),
+            nonce_pool,
             active_tasks: BTreeSet::new(),
             balance: 0,
         };

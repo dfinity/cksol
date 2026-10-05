@@ -408,6 +408,87 @@ mod swept_deposits {
     }
 }
 
+mod nonce_accounts {
+    use super::*;
+    use crate::state::audit::replay_events;
+
+    #[test]
+    fn should_fail_init_with_malformed_nonce_account() {
+        let err = State::try_from(InitArgs {
+            nonce_accounts: vec!["not-a-base58-address".to_string()],
+            ..valid_init_args()
+        })
+        .unwrap_err();
+
+        assert_matches!(err, InvalidStateError::InvalidNonceAccount(_));
+    }
+
+    #[test]
+    fn should_round_trip_nonce_accounts_through_upgrades() {
+        let mut state = State::try_from(valid_init_args()).unwrap();
+
+        state
+            .upgrade(UpgradeArgs {
+                nonce_accounts_to_add: Some(vec![nonce_account(1), nonce_account(2)]),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(
+            pool_addresses(&state),
+            vec![nonce_account(1), nonce_account(2)]
+        );
+
+        state
+            .upgrade(UpgradeArgs {
+                nonce_accounts_to_remove: Some(vec![nonce_account(1), nonce_account(2)]),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(state, State::try_from(valid_init_args()).unwrap());
+    }
+
+    #[test]
+    fn should_replay_nonce_accounts_like_direct_transitions() {
+        let init_args = InitArgs {
+            nonce_accounts: vec![nonce_account(1)],
+            ..valid_init_args()
+        };
+        let upgrade_args = UpgradeArgs {
+            nonce_accounts_to_add: Some(vec![nonce_account(2)]),
+            nonce_accounts_to_remove: Some(vec![nonce_account(1)]),
+            ..Default::default()
+        };
+        let mut expected = State::try_from(init_args.clone()).unwrap();
+        expected.upgrade(upgrade_args.clone()).unwrap();
+
+        let replayed = replay_events([
+            Event {
+                timestamp: 0,
+                payload: EventType::Init(init_args),
+            },
+            Event {
+                timestamp: 1,
+                payload: EventType::Upgrade(upgrade_args),
+            },
+        ]);
+
+        assert_eq!(replayed, expected);
+        assert_eq!(pool_addresses(&replayed), vec![nonce_account(2)]);
+    }
+
+    fn nonce_account(byte: u8) -> String {
+        Address::from([byte; 32]).to_string()
+    }
+
+    fn pool_addresses(state: &State) -> Vec<String> {
+        state
+            .nonce_pool()
+            .addresses()
+            .map(Address::to_string)
+            .collect()
+    }
+}
+
 mod state_validation {
     use super::*;
 
@@ -614,6 +695,7 @@ mod state_from_init_args {
                 transactions_to_resubmit: InsertionOrderedMap::new(),
                 succeeded_transactions: BTreeSet::new(),
                 failed_transactions: InsertionOrderedMap::new(),
+                nonce_pool: DurableNoncePool::default(),
                 active_tasks: BTreeSet::new(),
                 balance: 0,
             }

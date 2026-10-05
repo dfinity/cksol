@@ -57,6 +57,9 @@ pub struct InitArgs {
     /// Extra cycles charged per `deposit_sol` call to offset the cost of the sweep.
     #[cfg_attr(feature = "event", n(8))]
     pub deposit_sol_fee: u64,
+    /// The base58 addresses of the durable nonce accounts reserved for withdrawal transactions.
+    #[cfg_attr(feature = "event", n(9))]
+    pub nonce_accounts: Vec<String>,
 }
 
 /// The upgrade args for the ckSOL minter canister.
@@ -81,6 +84,12 @@ pub struct UpgradeArgs {
     /// New extra cycles charged per `deposit_sol` call to offset the cost of the sweep.
     #[cfg_attr(feature = "event", n(5))]
     pub deposit_sol_fee: Option<u64>,
+    /// The base58 addresses of durable nonce accounts to add to the withdrawal pool.
+    #[cfg_attr(feature = "event", n(6))]
+    pub nonce_accounts_to_add: Option<Vec<String>>,
+    /// The base58 addresses of durable nonce accounts to remove from the withdrawal pool.
+    #[cfg_attr(feature = "event", n(7))]
+    pub nonce_accounts_to_remove: Option<Vec<String>>,
 }
 
 /// The Solana network to connect to via the SOL RPC canister.
