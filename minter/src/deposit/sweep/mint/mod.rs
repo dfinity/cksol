@@ -27,21 +27,27 @@ pub async fn process_pending_mints<R: CanisterRuntime>(runtime: R) {
 
     let MintRound {
         pending_mints,
-        pending_mints_before_round,
+        more_pending_mints_than_one_round,
     } = read_state(MintRound::next);
 
     if pending_mints.is_empty() {
         return;
     }
 
+    let selected_deposit_ids: Vec<DepositSolId> = pending_mints
+        .iter()
+        .map(|(deposit_id, _)| *deposit_id)
+        .collect();
+
     for (deposit_id, pending) in pending_mints {
         process_pending_mint(&runtime, deposit_id, pending).await;
     }
 
-    let pending_mints_after_round = read_state(|state| state.deposits().pending_mints().len());
-    let round_made_progress = pending_mints_after_round < pending_mints_before_round;
-    let more_pending_mints_than_one_round =
-        pending_mints_before_round > MAX_PENDING_MINTS_PER_ROUND;
+    let round_made_progress = read_state(|state| {
+        selected_deposit_ids
+            .iter()
+            .any(|deposit_id| !state.deposits().pending_mints().contains_key(deposit_id))
+    });
     if round_made_progress && more_pending_mints_than_one_round {
         runtime.set_timer(Duration::ZERO, process_pending_mints);
     }
@@ -49,7 +55,7 @@ pub async fn process_pending_mints<R: CanisterRuntime>(runtime: R) {
 
 struct MintRound {
     pending_mints: Vec<(DepositSolId, PendingMint)>,
-    pending_mints_before_round: usize,
+    more_pending_mints_than_one_round: bool,
 }
 
 impl MintRound {
@@ -62,7 +68,8 @@ impl MintRound {
                 .map(|(deposit_id, pending)| (*deposit_id, *pending))
                 .take(MAX_PENDING_MINTS_PER_ROUND)
                 .collect(),
-            pending_mints_before_round: state.deposits().pending_mints().len(),
+            more_pending_mints_than_one_round: state.deposits().pending_mints().len()
+                > MAX_PENDING_MINTS_PER_ROUND,
         }
     }
 }
