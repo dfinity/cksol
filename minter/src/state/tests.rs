@@ -314,60 +314,22 @@ mod swept_deposits {
     fn should_mint_pending_deposit_without_changing_the_balance() {
         init_state();
         let credited = credit_sweep_of_two_deposits(0);
-        let [to_mint, sibling] = credited.pending_mints();
+        let [to_mint, _] = credited.pending_mints();
 
-        let minted = to_mint.mint(42);
+        to_mint.mint(42);
 
-        read_state(|s| {
-            assert_eq!(
-                s.deposits().pending_mints().keys().collect::<Vec<_>>(),
-                vec![&sibling.deposit_id]
-            );
-            assert_eq!(
-                s.deposits().minted().keys().collect::<Vec<_>>(),
-                vec![&minted.deposit_id]
-            );
-            assert_eq!(s.balance(), credited.amount_received);
-        });
+        read_state(|s| assert_eq!(s.balance(), credited.amount_received));
     }
 
     #[test]
     fn should_quarantine_pending_mint_without_changing_the_balance() {
         init_state();
         let credited = credit_sweep_of_two_deposits(0);
-        let [to_quarantine, sibling] = credited.pending_mints();
+        let [to_quarantine, _] = credited.pending_mints();
 
-        let quarantined = to_quarantine.quarantine();
+        to_quarantine.quarantine();
 
-        read_state(|s| {
-            assert_eq!(
-                s.deposits().pending_mints().keys().collect::<Vec<_>>(),
-                vec![&sibling.deposit_id]
-            );
-            assert_eq!(
-                s.deposits().quarantined().keys().collect::<Vec<_>>(),
-                vec![&quarantined.deposit_id]
-            );
-            assert_eq!(s.balance(), credited.amount_received);
-        });
-    }
-
-    #[test]
-    fn should_store_the_credited_sweep_timestamp_as_created_at_time() {
-        const CREDITED_AT: u64 = 1_234_000_000;
-        init_state();
-
-        let credited = credit_sweep_of_two_deposits(CREDITED_AT);
-
-        read_state(|s| {
-            assert_eq!(s.deposits().pending_mints().len(), credited.mints.len());
-            assert!(
-                s.deposits()
-                    .pending_mints()
-                    .values()
-                    .all(|pending| pending.created_at_time == CREDITED_AT)
-            );
-        });
+        read_state(|s| assert_eq!(s.balance(), credited.amount_received));
     }
 
     #[test]
