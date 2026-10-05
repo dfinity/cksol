@@ -10,7 +10,7 @@ use crate::{
             DEPOSIT_ADDRESS, deposit_transaction_to_wrong_address_signature,
             legacy_deposit_transaction, legacy_deposit_transaction_signature,
         },
-        init_state,
+        fetched, init_state,
         runtime::TestCanisterRuntime,
     },
 };
@@ -254,7 +254,7 @@ mod get_transaction_tests {
 
         let result = get_transaction(&runtime, legacy_deposit_transaction_signature()).await;
 
-        assert_eq!(result, Ok(Some(legacy_deposit_transaction())))
+        assert_eq!(result, Ok(Some(fetched(legacy_deposit_transaction()))))
     }
 }
 

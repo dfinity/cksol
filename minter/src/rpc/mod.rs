@@ -16,17 +16,28 @@ use sol_rpc_types::{
 use solana_address::Address;
 use solana_hash::Hash;
 use solana_signature::Signature;
-use solana_transaction::Transaction;
-use solana_transaction_status_client_types::EncodedConfirmedTransactionWithStatusMeta;
+use solana_transaction::{Transaction, versioned::VersionedTransaction};
+use solana_transaction_status_client_types::{
+    EncodedConfirmedTransactionWithStatusMeta, UiTransactionStatusMeta,
+};
 use thiserror::Error;
 
 #[cfg(test)]
 mod tests;
 
+/// A `getTransaction` response attributed to the queried signature: the transaction
+/// decoded by [`get_transaction`], whose first signature is the queried one and signs
+/// the message.
+#[derive(Debug, PartialEq)]
+pub struct FetchedTransaction {
+    pub transaction: VersionedTransaction,
+    pub meta: Option<UiTransactionStatusMeta>,
+}
+
 pub async fn get_transaction<R: CanisterRuntime>(
     runtime: &R,
     signature: Signature,
-) -> Result<Option<EncodedConfirmedTransactionWithStatusMeta>, GetTransactionError> {
+) -> Result<Option<FetchedTransaction>, GetTransactionError> {
     let result = read_state(|state| state.sol_rpc_client(runtime.inter_canister_call_runtime()))
         .get_transaction(signature)
         .with_encoding(GetTransactionEncoding::Base64)
@@ -37,9 +48,12 @@ pub async fn get_transaction<R: CanisterRuntime>(
         .try_send()
         .await;
     match result? {
-        MultiRpcResult::Consistent(Ok(Some(transaction))) => {
-            ensure_signed_with(&transaction, signature)?;
-            Ok(Some(transaction))
+        MultiRpcResult::Consistent(Ok(Some(outcome))) => {
+            let transaction = ensure_signed_with(&outcome, signature)?;
+            Ok(Some(FetchedTransaction {
+                transaction,
+                meta: outcome.transaction.meta,
+            }))
         }
         MultiRpcResult::Consistent(Ok(None)) => Ok(None),
         MultiRpcResult::Consistent(Err(e)) => Err(GetTransactionError::RpcError(e)),
@@ -48,10 +62,10 @@ pub async fn get_transaction<R: CanisterRuntime>(
 }
 
 fn ensure_signed_with(
-    transaction: &EncodedConfirmedTransactionWithStatusMeta,
+    outcome: &EncodedConfirmedTransactionWithStatusMeta,
     queried: Signature,
-) -> Result<(), GetTransactionError> {
-    let decoded = transaction
+) -> Result<VersionedTransaction, GetTransactionError> {
+    let decoded = outcome
         .transaction
         .transaction
         .decode()
@@ -68,7 +82,7 @@ fn ensure_signed_with(
     if decoded.verify_with_results().first() != Some(&true) {
         return Err(GetTransactionError::InvalidSignature { queried });
     }
-    Ok(())
+    Ok(decoded)
 }
 
 #[derive(Debug, PartialEq, Error, From)]

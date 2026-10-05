@@ -71,7 +71,7 @@ pub async fn credit_finalized_sweeps<R: CanisterRuntime>(runtime: &R) -> bool {
                 continue;
             }
         };
-        let event = match sweep.settle(&outcome) {
+        let event = match sweep.settle(&outcome.transaction, outcome.meta.as_ref()) {
             Ok(settled) => EventType::CreditedSweep {
                 signature,
                 amount_received: settled.amount_received(),

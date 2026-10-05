@@ -2,7 +2,7 @@ use crate::{
     address::{MINTER_DERIVATION_PATH, account_address, derivation_path},
     constants::RENT_EXEMPTION_THRESHOLD,
     numeric::LedgerMintIndex,
-    rpc::BlockHeight,
+    rpc::{BlockHeight, FetchedTransaction},
     state::{
         DepositBalance, QueuedDeposit, SchnorrPublicKey, State, Sweep,
         event::{DepositId, Event, EventType, VersionedMessage},
@@ -244,6 +244,19 @@ pub fn minter_signature_nth(occurrence: usize) -> solana_signature::Signature {
 /// `59vLxkN5YGgBrHGTQMCrntNi7CrAxfkQxYek2v3hUgKfujgGtfkSDZZmFyVw6S59uTH2FEwWcvntPiEkdN5Ep5W2`,
 /// with the `getTransaction` response the minter settles it against, and ways to deviate
 /// from that response.
+/// The [`FetchedTransaction`] that [`rpc::get_transaction`] returns for the given
+/// `getTransaction` output.
+pub fn fetched(outcome: EncodedConfirmedTransactionWithStatusMeta) -> FetchedTransaction {
+    FetchedTransaction {
+        transaction: outcome
+            .transaction
+            .transaction
+            .decode()
+            .expect("BUG: the fixture transaction should decode"),
+        meta: outcome.transaction.meta,
+    }
+}
+
 pub mod devnet_sweep {
     use super::account;
     use crate::state::{DepositBalance, QueuedDeposit, Sweep, event::CreditedDeposit};

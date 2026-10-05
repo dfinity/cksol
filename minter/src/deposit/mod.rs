@@ -1,6 +1,6 @@
 use crate::{
     address::account_address,
-    rpc::get_transaction,
+    rpc::{FetchedTransaction, get_transaction},
     runtime::CanisterRuntime,
     state::{SchnorrPublicKey, event::DepositId, read_state},
 };
@@ -11,9 +11,7 @@ use icrc_ledger_types::icrc1::account::Account;
 use sol_rpc_types::Lamport;
 use solana_address::Address;
 use solana_signature::Signature;
-use solana_transaction_status_client_types::{
-    EncodedConfirmedTransactionWithStatusMeta, UiTransactionError,
-};
+use solana_transaction_status_client_types::UiTransactionError;
 use thiserror::Error;
 
 #[cfg(test)]
@@ -51,7 +49,7 @@ pub async fn fetch_and_validate_deposit<R: CanisterRuntime>(
     };
 
     let deposit_amount =
-        get_deposit_amount_to_address(transaction, deposit_address).map_err(|e| {
+        get_deposit_amount_to_address(&transaction, deposit_address).map_err(|e| {
             log!(
                 Priority::Info,
                 "Error parsing deposit transaction with signature {signature}: {e}"
@@ -75,17 +73,10 @@ pub async fn fetch_and_validate_deposit<R: CanisterRuntime>(
 }
 
 pub fn get_deposit_amount_to_address(
-    transaction: EncodedConfirmedTransactionWithStatusMeta,
+    transaction: &FetchedTransaction,
     deposit_address: Address,
 ) -> Result<Lamport, GetDepositAmountError> {
-    let message = transaction
-        .transaction
-        .transaction
-        .decode()
-        .ok_or(GetDepositAmountError::TransactionParsingFailed(
-            "Transaction decoding failed".to_string(),
-        ))?
-        .message;
+    let message = &transaction.transaction.message;
 
     // Search only static account keys, which guarantees the deposit address
     // is sourced from the transaction itself (not an address lookup table).
@@ -108,14 +99,14 @@ pub fn get_deposit_amount_to_address(
     );
 
     let meta = transaction
-        .transaction
         .meta
+        .as_ref()
         .ok_or(GetDepositAmountError::NoMetaField)?;
 
     // Sanity check: a failed transaction shouldn't affect post balances, but
     // we reject it explicitly rather than relying on that invariant.
-    if let Some(err) = meta.err {
-        return Err(GetDepositAmountError::TransactionFailed(err));
+    if let Some(err) = &meta.err {
+        return Err(GetDepositAmountError::TransactionFailed(err.clone()));
     }
 
     let pre_balance = *meta.pre_balances.get(deposit_address_index).ok_or(
