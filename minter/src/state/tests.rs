@@ -167,22 +167,26 @@ mod swept_deposits {
                 Some(&planned_sweep([(0, first), (2, third)]))
             );
             assert_eq!(s.deposits().queued().keys().collect::<Vec<_>>(), vec![&1]);
-            let transaction = s.submitted_transactions().get(&sweep_signature).unwrap();
-            assert_eq!(
-                transaction.amount,
-                first.sweepable_amount() + third.sweepable_amount() - 2 * FEE_PER_SIGNATURE
-            );
-            assert_eq!(
-                transaction.signers,
-                vec![
-                    Signer::Account(third.account),
-                    Signer::Account(first.account)
-                ]
-            );
-            assert_eq!(
-                transaction.purpose,
-                TransactionPurpose::SweepDeposits {
-                    deposit_ids: vec![2, 0],
+            assert_matches!(
+                s.submitted_transactions().get(&sweep_signature).unwrap(),
+                MinterTransaction::SweepDeposit {
+                    signers,
+                    amount,
+                    deposit_ids,
+                    ..
+                } => {
+                    assert_eq!(
+                        *amount,
+                        first.sweepable_amount() + third.sweepable_amount() - 2 * FEE_PER_SIGNATURE
+                    );
+                    assert_eq!(
+                        *signers,
+                        vec![
+                            Signer::Account(third.account),
+                            Signer::Account(first.account)
+                        ]
+                    );
+                    assert_eq!(*deposit_ids, vec![2, 0]);
                 }
             );
             assert_eq!(s.balance(), 0);

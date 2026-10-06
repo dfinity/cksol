@@ -71,7 +71,7 @@ async fn check_submitted_transactions<R: CanisterRuntime>(runtime: &R) -> bool {
         state
             .submitted_transactions()
             .iter()
-            .map(|(sig, tx)| (*sig, tx.block_height))
+            .map(|(sig, tx)| (*sig, tx.block_height()))
             .collect()
     });
     if all_transactions.is_empty() {
@@ -162,8 +162,8 @@ pub async fn resubmit_transactions<R: CanisterRuntime>(runtime: R) {
             .map(|(sig, tx)| {
                 (
                     *sig,
-                    tx.message.clone(),
-                    tx.signers
+                    tx.message().clone(),
+                    tx.signers()
                         .iter()
                         .map(Signer::derivation_path)
                         .collect::<Vec<DerivationPath>>(),
