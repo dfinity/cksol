@@ -6,8 +6,11 @@ use solana_sdk_ids::{
     zk_token_proof_program,
 };
 
+#[cfg(test)]
+mod tests;
+
 /// The account keys reserved by the Solana runtime, vendored from
-/// `ReservedAccountKeys::new_all_activated()` in `agave-reserved-account-keys` v3.1.11,
+/// `ReservedAccountKeys::new_all_activated()` in `agave-reserved-account-keys` v3.1.14,
 /// which does not build for the wasm32 target.
 const RESERVED_ACCOUNT_KEYS: [Address; 31] = [
     address_lookup_table::ID,
