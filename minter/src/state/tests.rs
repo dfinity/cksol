@@ -846,6 +846,7 @@ fn should_track_balance_through_deposits_withdrawals_and_failures() {
     }
 
     init_state();
+    init_schnorr_master_key();
     assert_eq!(read_state(|s| s.balance()), 0);
 
     // Queueing and sweeping deposits does not change the balance

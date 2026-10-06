@@ -85,7 +85,10 @@ pub fn init_balance() {
 
 /// Credits the minter balance with exactly `amount` by sweeping a deposit of a
 /// dedicated account through the whole flow, so the account is released again.
+///
+/// Queueing the funding deposit needs the minter public key, so this records it.
 pub fn init_balance_to(amount: Lamport) {
+    init_schnorr_master_key();
     let funding_deposit_id = crate::state::read_state(|state| state.deposits().next_id());
     let sweep_signature = signature(0xFF00 + funding_deposit_id as usize);
 
