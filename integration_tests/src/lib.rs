@@ -42,7 +42,6 @@ pub enum PocketIcMode {
     NonLiveMode,
 }
 
-#[derive(Default)]
 pub struct SetupBuilder {
     make_live: Option<PocketIcMode>,
     sol_rpc_install_args: Option<sol_rpc_types::InstallArgs>,
@@ -51,12 +50,21 @@ pub struct SetupBuilder {
     nonce_accounts: Vec<String>,
 }
 
+impl Default for SetupBuilder {
+    fn default() -> Self {
+        Self {
+            make_live: None,
+            sol_rpc_install_args: None,
+            initial_ledger_balances: None,
+            proxy_canister: false,
+            nonce_accounts: vec![Setup::DEFAULT_NONCE_ACCOUNT.to_string()],
+        }
+    }
+}
+
 impl SetupBuilder {
     pub fn new() -> Self {
-        Self {
-            nonce_accounts: vec![Setup::DEFAULT_NONCE_ACCOUNT.to_string()],
-            ..Self::default()
-        }
+        Self::default()
     }
 
     pub fn with_nonce_accounts(mut self, nonce_accounts: Vec<String>) -> Self {
