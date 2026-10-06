@@ -344,7 +344,7 @@ mod swept_deposits {
             [
                 Event {
                     timestamp: 0,
-                    payload: EventType::Init(valid_init_args()),
+                    payload: EventType::Init(crate::test_fixtures::init_args_with_nonce_account()),
                 },
                 Event {
                     timestamp: 0,

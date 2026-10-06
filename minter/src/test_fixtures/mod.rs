@@ -73,10 +73,14 @@ pub fn valid_init_args() -> InitArgs {
 }
 
 pub fn init_state() {
-    init_state_with_args(InitArgs {
+    init_state_with_args(init_args_with_nonce_account());
+}
+
+pub fn init_args_with_nonce_account() -> InitArgs {
+    InitArgs {
         nonce_accounts: vec![NONCE_ACCOUNT.to_string()],
         ..valid_init_args()
-    });
+    }
 }
 
 pub fn init_state_with_args(init_args: InitArgs) {
