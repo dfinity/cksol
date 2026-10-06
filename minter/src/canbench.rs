@@ -1,11 +1,12 @@
 use crate::{
+    address::minter_address,
     constants::RENT_EXEMPTION_THRESHOLD,
     lifecycle,
     numeric::{LedgerBurnIndex, LedgerMintIndex},
     rpc::BlockHeight,
     runtime::IcCanisterRuntime,
     state::{
-        DepositBalance, QueuedDeposit, Sweep,
+        DepositBalance, QueuedDeposit, SchnorrPublicKey, Sweep,
         audit::{process_event, replay_events},
         event::{
             CreditedDeposit, EventType, Signer, TransactionPurpose, VersionedMessage,
@@ -18,6 +19,7 @@ use crate::{
 use canbench_rs::bench;
 use candid::Principal;
 use cksol_types_internal::{Ed25519KeyName, InitArgs, SolanaNetwork};
+use ic_ed25519::{PocketIcMasterPublicKeyId, PublicKey};
 use icrc_ledger_types::icrc1::account::Account;
 use solana_signature::Signature;
 
@@ -61,7 +63,14 @@ fn account(i: usize) -> Account {
     }
 }
 
-const MINTER_ADDRESS: solana_address::Address = solana_address::Address::new_from_array([0x43; 32]);
+/// The master key the generator records, as the management canister returns it
+/// under PocketIC, so the sweep destination matches the one the state derives.
+fn master_key() -> SchnorrPublicKey {
+    SchnorrPublicKey {
+        public_key: PublicKey::pocketic_key(PocketIcMasterPublicKeyId::Key1),
+        chain_code: [1; 32],
+    }
+}
 
 fn message() -> solana_message::Message {
     let payer = solana_address::Address::from([0x42; 32]);
@@ -87,7 +96,7 @@ fn queue_and_sweep(deposit_id: u64, account_index: usize, amount: u64, sig: Sign
         address: deposit.address,
         balance: deposit.balance,
     });
-    let sweep = Sweep::plan([(deposit_id, deposit)], MINTER_ADDRESS);
+    let sweep = Sweep::plan([(deposit_id, deposit)], minter_address(&master_key()));
     record(EventType::SubmittedTransaction {
         signature: sig,
         message: VersionedMessage::Legacy(sweep.sweep_message(solana_message::Hash::default())),
@@ -136,6 +145,14 @@ fn setup_10k_events() {
 
     let runtime = IcCanisterRuntime::new();
     lifecycle::init(init_args(), runtime);
+
+    // A sweep takes its destination from the recorded minter public key, so the
+    // log starts with the event that records it.
+    let master_key = master_key();
+    record(EventType::MinterPublicKeyFetched {
+        public_key: master_key.public_key,
+        chain_code: master_key.chain_code,
+    });
 
     const SWEEP_FEE: u64 = 5_000;
     let amount: u64 = 1_000_000_000;
@@ -216,8 +233,8 @@ fn setup_10k_events() {
         record(EventType::SucceededTransaction { signature: new_sig });
     }
 
-    // Total: 1 (init) + 5000 + 800 + 1500 + 1500 + 1500 = 10301 events
-    assert_eq!(total_event_count(), 10301);
+    // Total: 1 (init) + 1 (minter public key) + 5000 + 800 + 1500 + 1500 + 1500 = 10302 events
+    assert_eq!(total_event_count(), 10302);
     reset_state();
 }
 
