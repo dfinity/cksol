@@ -5,7 +5,7 @@ use crate::{
     sol_transfer::MAX_SIGNATURES,
     state::{audit::process_event, read_state},
     test_fixtures::{
-        DEPOSIT_CONSOLIDATION_FEE, DEPOSIT_SOL_REQUIRED_CYCLES, MINIMUM_DEPOSIT_AMOUNT,
+        DEPOSIT_SOL_FEE, DEPOSIT_SOL_REQUIRED_CYCLES, MINIMUM_DEPOSIT_AMOUNT,
         MINIMUM_WITHDRAWAL_AMOUNT, WITHDRAWAL_FEE, account,
         arb::arb_event,
         deposit_id,
@@ -476,7 +476,7 @@ mod state_validation {
             },
             |e| matches!(e, InvalidStateError::InvalidMinimumWithdrawalAmount { .. }),
         );
-        let minimum_required = GET_BALANCE_CYCLES + DEPOSIT_CONSOLIDATION_FEE;
+        let minimum_required = GET_BALANCE_CYCLES + DEPOSIT_SOL_FEE;
         assert_fails_both(
             InitArgs {
                 deposit_sol_required_cycles: (minimum_required - 1) as u64,
@@ -490,25 +490,25 @@ mod state_validation {
                 e == &InvalidStateError::DepositSolRequiredCyclesTooLow {
                     required_cycles: minimum_required - 1,
                     get_balance_cycles: GET_BALANCE_CYCLES,
-                    consolidation_fee: DEPOSIT_CONSOLIDATION_FEE,
+                    deposit_sol_fee: DEPOSIT_SOL_FEE,
                 }
             },
         );
         let maximum_fee = DEPOSIT_SOL_REQUIRED_CYCLES - GET_BALANCE_CYCLES;
         assert_fails_both(
             InitArgs {
-                deposit_consolidation_fee: (maximum_fee + 1) as u64,
+                deposit_sol_fee: (maximum_fee + 1) as u64,
                 ..valid_init_args()
             },
             UpgradeArgs {
-                deposit_consolidation_fee: Some((maximum_fee + 1) as u64),
+                deposit_sol_fee: Some((maximum_fee + 1) as u64),
                 ..Default::default()
             },
             |e| {
                 e == &InvalidStateError::DepositSolRequiredCyclesTooLow {
                     required_cycles: DEPOSIT_SOL_REQUIRED_CYCLES,
                     get_balance_cycles: GET_BALANCE_CYCLES,
-                    consolidation_fee: maximum_fee + 1,
+                    deposit_sol_fee: maximum_fee + 1,
                 }
             },
         );
@@ -540,7 +540,7 @@ mod state_validation {
                 ..Default::default()
             },
         );
-        let minimum_required = GET_BALANCE_CYCLES + DEPOSIT_CONSOLIDATION_FEE;
+        let minimum_required = GET_BALANCE_CYCLES + DEPOSIT_SOL_FEE;
         assert_succeeds_both(
             InitArgs {
                 deposit_sol_required_cycles: minimum_required as u64,
@@ -554,11 +554,11 @@ mod state_validation {
         let maximum_fee = DEPOSIT_SOL_REQUIRED_CYCLES - GET_BALANCE_CYCLES;
         assert_succeeds_both(
             InitArgs {
-                deposit_consolidation_fee: maximum_fee as u64,
+                deposit_sol_fee: maximum_fee as u64,
                 ..valid_init_args()
             },
             UpgradeArgs {
-                deposit_consolidation_fee: Some(maximum_fee as u64),
+                deposit_sol_fee: Some(maximum_fee as u64),
                 ..Default::default()
             },
         );
@@ -598,7 +598,7 @@ mod state_from_init_args {
                 ledger_canister_id: ledger_canister_id(),
                 sol_rpc_canister_id: sol_rpc_canister_id(),
                 solana_network: SolanaNetwork::Mainnet,
-                deposit_consolidation_fee: DEPOSIT_CONSOLIDATION_FEE,
+                deposit_sol_fee: DEPOSIT_SOL_FEE,
                 withdrawal_fee: WITHDRAWAL_FEE,
                 minimum_withdrawal_amount: MINIMUM_WITHDRAWAL_AMOUNT,
                 minimum_deposit_amount: MINIMUM_DEPOSIT_AMOUNT,

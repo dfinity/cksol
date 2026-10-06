@@ -56,7 +56,7 @@ pub struct InitArgs {
     pub solana_network: SolanaNetwork,
     /// Extra cycles charged per `deposit_sol` call to offset the cost of the sweep.
     #[cfg_attr(feature = "event", n(8))]
-    pub deposit_consolidation_fee: u64,
+    pub deposit_sol_fee: u64,
 }
 
 /// The upgrade args for the ckSOL minter canister.
@@ -80,7 +80,7 @@ pub struct UpgradeArgs {
     pub deposit_sol_required_cycles: Option<u64>,
     /// New extra cycles charged per `deposit_sol` call to offset the cost of the sweep.
     #[cfg_attr(feature = "event", n(5))]
-    pub deposit_consolidation_fee: Option<u64>,
+    pub deposit_sol_fee: Option<u64>,
 }
 
 /// The Solana network to connect to via the SOL RPC canister.

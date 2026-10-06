@@ -32,14 +32,13 @@ pub async fn deposit_sol<R: CanisterRuntime>(
     assert_valid_deposit_owner(&account, runtime.canister_self());
     let _guard = deposit_sol_guard(account)?;
 
-    let (required_cycles, deposit_consolidation_fee, minimum_deposit_amount) =
-        read_state(|state| {
-            (
-                state.deposit_sol_required_cycles(),
-                state.deposit_consolidation_fee(),
-                state.minimum_deposit_amount(),
-            )
-        });
+    let (required_cycles, deposit_sol_fee, minimum_deposit_amount) = read_state(|state| {
+        (
+            state.deposit_sol_required_cycles(),
+            state.deposit_sol_fee(),
+            state.minimum_deposit_amount(),
+        )
+    });
     check_caller_available_cycles(runtime, required_cycles)?;
 
     if let Some((deposit_id, status)) = read_state(|state| {
@@ -74,7 +73,7 @@ pub async fn deposit_sol<R: CanisterRuntime>(
         runtime,
         RpcCallCharge {
             attached_cycles: GET_BALANCE_CYCLES,
-            fee_on_success: deposit_consolidation_fee,
+            fee_on_success: deposit_sol_fee,
         },
         &result,
     );

@@ -4,10 +4,9 @@ use crate::{
     state::{event::EventType, read_state},
     storage::with_event_iter,
     test_fixtures::{
-        DEPOSIT_CONSOLIDATION_FEE, DEPOSIT_SOL_REQUIRED_CYCLES, EventsAssert,
-        MINIMUM_DEPOSIT_AMOUNT, MINTER_ACCOUNT, account, deposit::DEPOSITOR_ACCOUNT, events,
-        init_schnorr_master_key, init_state, queued_deposit_of, runtime::TestCanisterRuntime,
-        signature,
+        DEPOSIT_SOL_FEE, DEPOSIT_SOL_REQUIRED_CYCLES, EventsAssert, MINIMUM_DEPOSIT_AMOUNT,
+        MINTER_ACCOUNT, account, deposit::DEPOSITOR_ACCOUNT, events, init_schnorr_master_key,
+        init_state, queued_deposit_of, runtime::TestCanisterRuntime, signature,
     },
 };
 use assert_matches::assert_matches;
@@ -134,7 +133,7 @@ async fn should_queue_deposits_from_minimum_with_sequential_ids() {
         );
         assert_eq!(
             runtime.msg_cycles_accepted(),
-            [GET_BALANCE_CYCLES - GET_BALANCE_REFUND + DEPOSIT_CONSOLIDATION_FEE]
+            [GET_BALANCE_CYCLES - GET_BALANCE_REFUND + DEPOSIT_SOL_FEE]
         );
     }
     assert_eq!(deposit_status(2), DepositSolStatus::NotFound);

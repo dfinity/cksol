@@ -100,7 +100,7 @@ pub struct State {
     minimum_withdrawal_amount: Lamport,
     minimum_deposit_amount: Lamport,
     deposit_sol_required_cycles: u128,
-    deposit_consolidation_fee: u128,
+    deposit_sol_fee: u128,
     pending_deposit_sol_request_guards: BTreeSet<Account>,
     pending_withdrawal_request_guards: BTreeSet<Account>,
     deposits: Deposits,
@@ -150,8 +150,8 @@ impl State {
         self.master_key_name
     }
 
-    pub fn deposit_consolidation_fee(&self) -> u128 {
-        self.deposit_consolidation_fee
+    pub fn deposit_sol_fee(&self) -> u128 {
+        self.deposit_sol_fee
     }
 
     pub fn withdrawal_fee(&self) -> u64 {
@@ -305,11 +305,11 @@ impl State {
                 rent_exemption_threshold: RENT_EXEMPTION_THRESHOLD,
             });
         }
-        if self.deposit_sol_required_cycles < GET_BALANCE_CYCLES + self.deposit_consolidation_fee {
+        if self.deposit_sol_required_cycles < GET_BALANCE_CYCLES + self.deposit_sol_fee {
             return Err(InvalidStateError::DepositSolRequiredCyclesTooLow {
                 required_cycles: self.deposit_sol_required_cycles,
                 get_balance_cycles: GET_BALANCE_CYCLES,
-                consolidation_fee: self.deposit_consolidation_fee,
+                deposit_sol_fee: self.deposit_sol_fee,
             });
         }
         Ok(())
@@ -323,7 +323,7 @@ impl State {
             minimum_deposit_amount,
             withdrawal_fee,
             deposit_sol_required_cycles,
-            deposit_consolidation_fee,
+            deposit_sol_fee,
         }: UpgradeArgs,
     ) -> Result<(), InvalidStateError> {
         if let Some(sol_rpc_canister_id) = sol_rpc_canister_id {
@@ -341,8 +341,8 @@ impl State {
         if let Some(deposit_sol_required_cycles) = deposit_sol_required_cycles {
             self.deposit_sol_required_cycles = deposit_sol_required_cycles as u128;
         }
-        if let Some(deposit_consolidation_fee) = deposit_consolidation_fee {
-            self.deposit_consolidation_fee = deposit_consolidation_fee as u128;
+        if let Some(deposit_sol_fee) = deposit_sol_fee {
+            self.deposit_sol_fee = deposit_sol_fee as u128;
         }
         self.validate()
     }
@@ -666,7 +666,7 @@ pub enum InvalidStateError {
     DepositSolRequiredCyclesTooLow {
         required_cycles: u128,
         get_balance_cycles: u128,
-        consolidation_fee: u128,
+        deposit_sol_fee: u128,
     },
 }
 
@@ -683,7 +683,7 @@ impl TryFrom<InitArgs> for State {
             withdrawal_fee,
             deposit_sol_required_cycles,
             solana_network,
-            deposit_consolidation_fee,
+            deposit_sol_fee,
         }: InitArgs,
     ) -> Result<Self, Self::Error> {
         let state = Self {
@@ -696,7 +696,7 @@ impl TryFrom<InitArgs> for State {
             minimum_withdrawal_amount,
             minimum_deposit_amount,
             deposit_sol_required_cycles: deposit_sol_required_cycles as u128,
-            deposit_consolidation_fee: deposit_consolidation_fee as u128,
+            deposit_sol_fee: deposit_sol_fee as u128,
             pending_deposit_sol_request_guards: BTreeSet::new(),
             pending_withdrawal_request_guards: BTreeSet::new(),
             deposits: Deposits::default(),

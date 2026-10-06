@@ -178,7 +178,7 @@ mod lifecycle {
         assert_eq!(
             initial_minter_info,
             MinterInfo {
-                deposit_consolidation_fee: Setup::DEFAULT_DEPOSIT_CONSOLIDATION_FEE,
+                deposit_sol_fee: Setup::DEFAULT_DEPOSIT_SOL_FEE,
                 minimum_withdrawal_amount: Setup::DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT,
                 minimum_deposit_amount: Setup::DEFAULT_MINIMUM_DEPOSIT_AMOUNT,
                 withdrawal_fee: Setup::DEFAULT_WITHDRAWAL_FEE,
@@ -206,7 +206,7 @@ mod lifecycle {
                 minimum_deposit_amount: Some(NEW_MINIMUM_DEPOSIT_AMOUNT),
                 withdrawal_fee: Some(NEW_WITHDRAWAL_FEE),
                 deposit_sol_required_cycles: Some(NEW_DEPOSIT_SOL_REQUIRED_CYCLES as u64),
-                deposit_consolidation_fee: None,
+                deposit_sol_fee: None,
             })
             .await
             .expect("upgrade failed");
@@ -215,7 +215,7 @@ mod lifecycle {
         assert_eq!(
             minter_info,
             MinterInfo {
-                deposit_consolidation_fee: Setup::DEFAULT_DEPOSIT_CONSOLIDATION_FEE,
+                deposit_sol_fee: Setup::DEFAULT_DEPOSIT_SOL_FEE,
                 minimum_withdrawal_amount: NEW_MINIMUM_WITHDRAWAL_AMOUNT,
                 minimum_deposit_amount: NEW_MINIMUM_DEPOSIT_AMOUNT,
                 withdrawal_fee: NEW_WITHDRAWAL_FEE,
@@ -818,7 +818,7 @@ mod deposit_sol_tests {
     }
 
     #[tokio::test]
-    async fn should_charge_balance_read_and_consolidation_fee() {
+    async fn should_charge_balance_read_and_deposit_sol_fee() {
         let setup = SetupBuilder::new().with_proxy_canister().build().await;
         let get_balance_cycles_cost = get_balance_cycles_cost(&setup).await;
         assert!(get_balance_cycles_cost > 0);
@@ -840,11 +840,11 @@ mod deposit_sol_tests {
         let minter_cycles_after = setup.minter().cycle_balance().await;
         assert_eq!(
             caller_cycles_before - caller_cycles_after,
-            get_balance_cycles_cost + Setup::DEFAULT_DEPOSIT_CONSOLIDATION_FEE
+            get_balance_cycles_cost + Setup::DEFAULT_DEPOSIT_SOL_FEE
         );
         assert_eq!(
             minter_cycles_after - minter_cycles_before,
-            Setup::DEFAULT_DEPOSIT_CONSOLIDATION_FEE
+            Setup::DEFAULT_DEPOSIT_SOL_FEE
         );
 
         setup.drop().await;

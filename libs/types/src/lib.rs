@@ -253,7 +253,7 @@ pub enum WithdrawalStatus {
 #[derive(Clone, Debug, Eq, PartialEq, CandidType, Deserialize, Serialize)]
 pub struct MinterInfo {
     /// Extra cycles charged per `deposit_sol` call to offset the cost of the sweep.
-    pub deposit_consolidation_fee: u128,
+    pub deposit_sol_fee: u128,
     /// Minimum withdrawal amount in lamports.
     pub minimum_withdrawal_amount: Lamport,
     /// Minimum deposit amount in lamports.

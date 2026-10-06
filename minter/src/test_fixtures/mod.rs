@@ -35,7 +35,7 @@ pub type GetTransactionResult =
     MultiRpcResult<Option<sol_rpc_types::EncodedConfirmedTransactionWithStatusMeta>>;
 
 pub const BLOCK_INDEX: u64 = 98763_u64;
-pub const DEPOSIT_CONSOLIDATION_FEE: u128 = 10_000_000_000; // 0.01T cycles
+pub const DEPOSIT_SOL_FEE: u128 = 10_000_000_000; // 0.01T cycles
 pub const WITHDRAWAL_FEE: Lamport = 1_000_000; // 0.001 SOL
 pub const MINIMUM_WITHDRAWAL_AMOUNT: Lamport = 2_000_000; // 0.002 SOL
 pub const MINTER_ACCOUNT: Account = Account {
@@ -65,7 +65,7 @@ pub fn valid_init_args() -> InitArgs {
         withdrawal_fee: WITHDRAWAL_FEE,
         deposit_sol_required_cycles: DEPOSIT_SOL_REQUIRED_CYCLES as u64,
         solana_network: SolanaNetwork::Mainnet,
-        deposit_consolidation_fee: DEPOSIT_CONSOLIDATION_FEE as u64,
+        deposit_sol_fee: DEPOSIT_SOL_FEE as u64,
     }
 }
 
@@ -946,7 +946,7 @@ pub mod arb {
                     withdrawal_fee,
                     deposit_sol_required_cycles,
                     solana_network,
-                    deposit_consolidation_fee,
+                    deposit_sol_fee,
                 )| {
                     InitArgs {
                         sol_rpc_canister_id,
@@ -957,7 +957,7 @@ pub mod arb {
                         withdrawal_fee,
                         deposit_sol_required_cycles,
                         solana_network,
-                        deposit_consolidation_fee,
+                        deposit_sol_fee,
                     }
                 },
             )
@@ -979,14 +979,14 @@ pub mod arb {
                     minimum_deposit_amount,
                     withdrawal_fee,
                     deposit_sol_required_cycles,
-                    deposit_consolidation_fee,
+                    deposit_sol_fee,
                 )| UpgradeArgs {
                     sol_rpc_canister_id,
                     minimum_withdrawal_amount,
                     minimum_deposit_amount,
                     withdrawal_fee,
                     deposit_sol_required_cycles,
-                    deposit_consolidation_fee,
+                    deposit_sol_fee,
                 },
             )
     }

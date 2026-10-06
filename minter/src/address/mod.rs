@@ -30,7 +30,7 @@ pub fn get_deposit_address(account: &Account) -> Address {
     account_address(&master_key, account)
 }
 
-/// The minter's main Solana address, holding the consolidated funds:
+/// The minter's main Solana address, holding the swept funds:
 /// the master public key itself, on [`MINTER_DERIVATION_PATH`].
 pub fn minter_address(master_key: &SchnorrPublicKey) -> Address {
     master_key.public_key.serialize_raw().into()

@@ -249,7 +249,7 @@ fn get_events(
 #[ic_cdk::query]
 fn get_minter_info() -> MinterInfo {
     read_state(|s| MinterInfo {
-        deposit_consolidation_fee: s.deposit_consolidation_fee(),
+        deposit_sol_fee: s.deposit_sol_fee(),
         minimum_withdrawal_amount: s.minimum_withdrawal_amount(),
         minimum_deposit_amount: s.minimum_deposit_amount(),
         withdrawal_fee: s.withdrawal_fee(),

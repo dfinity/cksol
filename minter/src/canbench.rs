@@ -39,7 +39,7 @@ fn init_args() -> InitArgs {
         withdrawal_fee: 5_000_000,
         deposit_sol_required_cycles: 1_000_000_000_000,
         solana_network: SolanaNetwork::Mainnet,
-        deposit_consolidation_fee: 10_000_000_000,
+        deposit_sol_fee: 10_000_000_000,
     }
 }
 

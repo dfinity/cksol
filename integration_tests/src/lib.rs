@@ -101,7 +101,7 @@ pub struct Setup {
 }
 
 impl Setup {
-    pub const DEFAULT_DEPOSIT_CONSOLIDATION_FEE: u128 = 10_000_000_000; // 0.01T cycles
+    pub const DEFAULT_DEPOSIT_SOL_FEE: u128 = 10_000_000_000; // 0.01T cycles
     pub const DEFAULT_WITHDRAWAL_FEE: Lamport = 1_000_000; // 0.001 SOL
     pub const DEFAULT_CONTROLLER: Principal = Principal::from_slice(&[0x9d, 0xf7, 0x01]);
     pub const DEFAULT_MINIMUM_DEPOSIT_AMOUNT: Lamport = 20_000_000; // 0.02 SOL
@@ -721,7 +721,7 @@ fn cksol_minter_init_args(
         withdrawal_fee: Setup::DEFAULT_WITHDRAWAL_FEE,
         deposit_sol_required_cycles: Setup::DEFAULT_DEPOSIT_SOL_REQUIRED_CYCLES as u64,
         solana_network: SolanaNetwork::Mainnet,
-        deposit_consolidation_fee: Setup::DEFAULT_DEPOSIT_CONSOLIDATION_FEE as u64,
+        deposit_sol_fee: Setup::DEFAULT_DEPOSIT_SOL_FEE as u64,
     })
 }
 
