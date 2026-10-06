@@ -109,10 +109,12 @@ pub struct State {
     pending_withdrawal_request_guards: BTreeSet<Account>,
     deposits: Deposits,
     pending_withdrawal_requests: BTreeMap<LedgerBurnIndex, PendingWithdrawalRequest>,
+    created_withdrawal_requests: BTreeMap<LedgerBurnIndex, PendingWithdrawalRequest>,
     sent_withdrawal_requests: BTreeMap<LedgerBurnIndex, SentWithdrawalRequest>,
     successful_withdrawal_requests: BTreeMap<LedgerBurnIndex, SentWithdrawalRequest>,
     failed_withdrawal_requests: BTreeMap<LedgerBurnIndex, SentWithdrawalRequest>,
     submitted_transactions: InsertionOrderedMap<Signature, MinterTransaction>,
+    created_withdrawal_txs: BTreeMap<Address, CreatedWithdrawalTransaction>,
     transactions_to_resubmit: InsertionOrderedMap<Signature, MinterTransaction>,
     succeeded_transactions: BTreeSet<Signature>,
     failed_transactions: InsertionOrderedMap<Signature, MinterTransaction>,
@@ -199,6 +201,10 @@ impl State {
 
     pub fn submitted_transactions(&self) -> &InsertionOrderedMap<Signature, MinterTransaction> {
         &self.submitted_transactions
+    }
+
+    pub fn created_withdrawal_txs(&self) -> &BTreeMap<Address, CreatedWithdrawalTransaction> {
+        &self.created_withdrawal_txs
     }
 
     pub fn transactions_to_resubmit(&self) -> &InsertionOrderedMap<Signature, MinterTransaction> {
@@ -378,6 +384,7 @@ impl State {
         let incomplete_destinations: BTreeSet<Address> = self
             .pending_withdrawal_requests
             .values()
+            .chain(self.created_withdrawal_requests.values())
             .map(|pending| &pending.request)
             .chain(
                 self.sent_withdrawal_requests
@@ -458,7 +465,9 @@ impl State {
 
     pub fn withdrawal_status(&self, block_index: u64) -> WithdrawalStatus {
         let burn_index = LedgerBurnIndex::from(block_index);
-        if self.pending_withdrawal_requests.contains_key(&burn_index) {
+        if self.pending_withdrawal_requests.contains_key(&burn_index)
+            || self.created_withdrawal_requests.contains_key(&burn_index)
+        {
             return WithdrawalStatus::Pending;
         }
         if let Some(sent) = self.sent_withdrawal_requests.get(&burn_index) {
@@ -486,6 +495,12 @@ impl State {
         &self.pending_withdrawal_requests
     }
 
+    pub fn created_withdrawal_requests(
+        &self,
+    ) -> &BTreeMap<LedgerBurnIndex, PendingWithdrawalRequest> {
+        &self.created_withdrawal_requests
+    }
+
     pub fn withdrawal_batches(&self) -> WithdrawalBatches<'_> {
         WithdrawalBatches {
             pending_requests: self.pending_withdrawal_requests.values().peekable(),
@@ -500,8 +515,12 @@ impl State {
             .pending_withdrawal_requests
             .values()
             .map(|r| r.created_at);
+        let created = self
+            .created_withdrawal_requests
+            .values()
+            .map(|r| r.created_at);
         let sent = self.sent_withdrawal_requests.values().map(|r| r.created_at);
-        pending.chain(sent).min()
+        pending.chain(created).chain(sent).min()
     }
 
     fn process_accepted_withdrawal(&mut self, request: &WithdrawalRequest, created_at: u64) {
@@ -590,6 +609,94 @@ impl State {
                 .insert(*signature, submitted_transaction),
             None,
             "Attempted to submit transaction with signature {signature:?} twice"
+        );
+    }
+
+    fn process_transaction_created(
+        &mut self,
+        message: &VersionedMessage,
+        burn_indices: &[LedgerBurnIndex],
+        nonce_account: &Address,
+        nonce_value: Hash,
+    ) {
+        self.nonce_pool.bind(nonce_account, nonce_value);
+        let mut total: Lamport = 0;
+        for burn_index in burn_indices {
+            let pending = self
+                .pending_withdrawal_requests
+                .remove(burn_index)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "Attempted to create transaction for unknown withdrawal request: {burn_index:?}"
+                    )
+                });
+            total += pending.request.amount_to_transfer;
+            assert_eq!(
+                self.created_withdrawal_requests
+                    .insert(*burn_index, pending),
+                None,
+                "Attempted to create transaction for already created withdrawal request: {burn_index:?}"
+            );
+        }
+        self.balance = self
+            .balance
+            .checked_sub(total + message.transaction_fee())
+            .expect("BUG: insufficient minter balance for withdrawal");
+        assert_eq!(
+            self.created_withdrawal_txs.insert(
+                *nonce_account,
+                CreatedWithdrawalTransaction {
+                    message: message.clone(),
+                    nonce_value,
+                    burn_indices: burn_indices.to_vec(),
+                }
+            ),
+            None,
+            "BUG: nonce account {nonce_account} already has a created transaction"
+        );
+    }
+
+    fn process_transaction_signed(&mut self, signature: &Signature, nonce_account: &Address) {
+        let created = self
+            .created_withdrawal_txs
+            .remove(nonce_account)
+            .unwrap_or_else(|| {
+                panic!("Attempted to sign unknown created transaction for nonce account {nonce_account}")
+            });
+        for burn_index in &created.burn_indices {
+            let pending = self
+                .created_withdrawal_requests
+                .remove(burn_index)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "BUG: withdrawal request {burn_index:?} of a created transaction is not in the created bucket"
+                    )
+                });
+            assert_eq!(
+                self.sent_withdrawal_requests.insert(
+                    *burn_index,
+                    SentWithdrawalRequest {
+                        request: pending.request,
+                        signature: *signature,
+                        created_at: pending.created_at,
+                    },
+                ),
+                None,
+                "Attempted to send transaction for already sent withdrawal request: {burn_index:?}"
+            );
+        }
+        assert_eq!(
+            self.submitted_transactions.insert(
+                *signature,
+                MinterTransaction::NonceWithdrawal {
+                    message: created.message,
+                    signers: vec![Signer::Minter],
+                    nonce_account: *nonce_account,
+                    nonce_value: created.nonce_value,
+                }
+            ),
+            None,
+            "Attempted to sign withdrawal transaction {signature} twice"
         );
     }
 
@@ -793,10 +900,12 @@ impl TryFrom<InitArgs> for State {
             pending_withdrawal_request_guards: BTreeSet::new(),
             deposits: Deposits::default(),
             pending_withdrawal_requests: BTreeMap::new(),
+            created_withdrawal_requests: BTreeMap::new(),
             sent_withdrawal_requests: BTreeMap::new(),
             successful_withdrawal_requests: BTreeMap::new(),
             failed_withdrawal_requests: BTreeMap::new(),
             submitted_transactions: InsertionOrderedMap::new(),
+            created_withdrawal_txs: BTreeMap::new(),
             transactions_to_resubmit: InsertionOrderedMap::new(),
             succeeded_transactions: BTreeSet::new(),
             failed_transactions: InsertionOrderedMap::new(),
@@ -854,6 +963,16 @@ impl Iterator for WithdrawalBatches<'_> {
         }
         if batch.is_empty() { None } else { Some(batch) }
     }
+}
+
+/// A withdrawal transaction recorded before its threshold signature was
+/// requested, so that a signing failure leads to re-signing the identical
+/// message instead of building a new one for the same nonce value.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CreatedWithdrawalTransaction {
+    pub message: VersionedMessage,
+    pub nonce_value: Hash,
+    pub burn_indices: Vec<LedgerBurnIndex>,
 }
 
 /// A withdrawal request that has been submitted in a Solana transaction.

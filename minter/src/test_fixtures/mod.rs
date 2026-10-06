@@ -691,8 +691,8 @@ pub mod devnet_sweep {
 /// All helpers operate on the global thread-local state via [`mutate_state`].
 pub mod events {
     use super::{
-        DEFAULT_BLOCK_HEIGHT, MINTER_ADDRESS, WITHDRAWAL_FEE, queued_deposit, queued_deposit_of,
-        runtime::TestCanisterRuntime,
+        DEFAULT_BLOCK_HEIGHT, MINTER_ADDRESS, NONCE_ACCOUNT, WITHDRAWAL_FEE, durable_nonce,
+        queued_deposit, queued_deposit_of, runtime::TestCanisterRuntime,
     };
     use crate::deposit::sweep::deposit_status;
     use crate::{
@@ -876,6 +876,41 @@ pub mod events {
                     burned_amount: amount,
                 }),
                 &TestCanisterRuntime::new().add_times([timestamp, timestamp]),
+            )
+        });
+    }
+
+    /// Records a `CreatedTransaction` for the given withdrawals, binding
+    /// [`NONCE_ACCOUNT`] to the nonce value of `nonce_seed`.
+    pub fn create_withdrawal(nonce_seed: usize, burn_indices: Vec<u64>) {
+        mutate_state(|state| {
+            process_event(
+                state,
+                EventType::CreatedTransaction {
+                    message: message().into(),
+                    burn_indices: burn_indices
+                        .into_iter()
+                        .map(LedgerBurnIndex::from)
+                        .collect(),
+                    nonce_account: NONCE_ACCOUNT,
+                    nonce_value: durable_nonce(nonce_seed),
+                },
+                &runtime(),
+            )
+        });
+    }
+
+    /// Records a `SignedTransaction` for the created transaction bound to
+    /// [`NONCE_ACCOUNT`].
+    pub fn sign_withdrawal(signature: Signature) {
+        mutate_state(|state| {
+            process_event(
+                state,
+                EventType::SignedTransaction {
+                    signature,
+                    nonce_account: NONCE_ACCOUNT,
+                },
+                &runtime(),
             )
         });
     }
@@ -1277,6 +1312,26 @@ pub mod arb {
                 }
             }),
             any::<u64>().prop_map(|deposit_id| EventType::QuarantinedPendingMint { deposit_id }),
+            (
+                arb_message(),
+                prop::collection::vec(arb_ledger_burn_index(), 1..10),
+                arb_address(),
+                arb_hash(),
+            )
+                .prop_map(|(message, burn_indices, nonce_account, nonce_value)| {
+                    EventType::CreatedTransaction {
+                        message: message.into(),
+                        burn_indices,
+                        nonce_account,
+                        nonce_value,
+                    }
+                }),
+            (arb_signature(), arb_address()).prop_map(|(signature, nonce_account)| {
+                EventType::SignedTransaction {
+                    signature,
+                    nonce_account,
+                }
+            }),
         ]
     }
 

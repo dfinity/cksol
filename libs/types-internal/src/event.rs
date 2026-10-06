@@ -4,7 +4,7 @@ use crate::{InitArgs, UpgradeArgs};
 use candid::CandidType;
 use icrc_ledger_types::icrc1::account::Account;
 use serde::Deserialize;
-use sol_rpc_types::{Lamport, Pubkey as Address, Signature};
+use sol_rpc_types::{Hash, Lamport, Pubkey as Address, Signature};
 
 /// A minter event that can be serialized to Candid.
 #[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]
@@ -138,6 +138,27 @@ pub enum EventType {
     QuarantinedPendingMint {
         /// The identifier of the deposit whose pending mint was quarantined.
         deposit_id: u64,
+    },
+    /// The minter built a withdrawal transaction message carrying a durable
+    /// nonce and bound the nonce account to it, before requesting the
+    /// threshold signature.
+    CreatedTransaction {
+        /// The unsigned transaction message.
+        transaction: VersionedTransactionMessage,
+        /// The ledger burn indices of the withdrawal requests served by this transaction.
+        burn_indices: Vec<u64>,
+        /// The durable nonce account bound to this transaction.
+        nonce_account: Address,
+        /// The nonce value the transaction carries in place of a recent blockhash.
+        nonce_value: Hash,
+    },
+    /// The minter signed the withdrawal transaction previously recorded by
+    /// `CreatedTransaction` for the given nonce account.
+    SignedTransaction {
+        /// The transaction signature.
+        signature: Signature,
+        /// The durable nonce account bound to the signed transaction.
+        nonce_account: Address,
     },
 }
 

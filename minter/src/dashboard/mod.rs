@@ -331,7 +331,12 @@ impl DashboardTemplate {
         }
 
         // Pending and sent (active) newest-first, then finalized (succeeded/failed) newest-first.
-        for (burn_index, pending) in state.pending_withdrawal_requests().iter().rev() {
+        for (burn_index, pending) in state
+            .pending_withdrawal_requests()
+            .iter()
+            .rev()
+            .chain(state.created_withdrawal_requests().iter().rev())
+        {
             push_withdrawal(
                 &mut withdrawals,
                 burn_index,

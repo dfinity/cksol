@@ -27,7 +27,6 @@ const INDEX_OFFSET_QUARANTINE: usize = 10_000;
 const INDEX_OFFSET_WITHDRAWAL: usize = 20_000;
 const INDEX_OFFSET_DROPPED: usize = 30_000;
 const INDEX_OFFSET_EXPIRED: usize = 40_000;
-const INDEX_OFFSET_RESUBMIT: usize = 50_000;
 
 fn init_args() -> InitArgs {
     InitArgs {
@@ -40,8 +39,18 @@ fn init_args() -> InitArgs {
         deposit_sol_required_cycles: 1_000_000_000_000,
         solana_network: SolanaNetwork::Mainnet,
         deposit_sol_fee: 10_000_000_000,
-        nonce_accounts: vec![],
+        nonce_accounts: vec![nonce_account().to_string()],
     }
+}
+
+fn nonce_account() -> solana_address::Address {
+    solana_address::Address::from([0x4E; 32])
+}
+
+fn nonce_value(i: usize) -> solana_hash::Hash {
+    let mut bytes = [0u8; 32];
+    bytes[..8].copy_from_slice(&(i as u64).to_le_bytes());
+    solana_hash::Hash::from(bytes)
 }
 
 fn signature(i: usize) -> Signature {
@@ -114,7 +123,7 @@ fn deposit_address(account_index: usize) -> solana_address::Address {
     solana_address::Address::from(bytes)
 }
 
-fn accept_and_submit_withdrawal(account_index: usize, burn_index: u64, sig: Signature) {
+fn accept_and_sign_withdrawal(account_index: usize, burn_index: u64, sig: Signature) {
     const WITHDRAWAL_FEE: u64 = 5_000_000;
     const WITHDRAWAL_AMOUNT: u64 = 10_000_000;
 
@@ -125,14 +134,15 @@ fn accept_and_submit_withdrawal(account_index: usize, burn_index: u64, sig: Sign
         burned_amount: WITHDRAWAL_AMOUNT,
         amount_to_transfer: WITHDRAWAL_AMOUNT - WITHDRAWAL_FEE,
     }));
-    record(EventType::SubmittedTransaction {
-        signature: sig,
+    record(EventType::CreatedTransaction {
         message: VersionedMessage::Legacy(message()),
-        signers: vec![Signer::Minter],
-        purpose: TransactionPurpose::WithdrawSol {
-            burn_indices: vec![LedgerBurnIndex::from(burn_index)],
-        },
-        block_height: BlockHeight::new(0),
+        burn_indices: vec![LedgerBurnIndex::from(burn_index)],
+        nonce_account: nonce_account(),
+        nonce_value: nonce_value(account_index),
+    });
+    record(EventType::SignedTransaction {
+        signature: sig,
+        nonce_account: nonce_account(),
     });
 }
 
@@ -193,12 +203,12 @@ fn setup_10k_events() {
         record(EventType::QuarantinedSweep { signature: sig });
     }
 
-    // Withdrawal cycles: accept withdrawal → submit withdrawal → succeed
-    // 500 × 3 = 1500 events
+    // Withdrawal cycles: accept withdrawal → create transaction → sign → succeed
+    // 500 × 4 = 2000 events
     for i in 0..500 {
         let sig = signature(INDEX_OFFSET_WITHDRAWAL + i);
 
-        accept_and_submit_withdrawal(i, i as u64, sig);
+        accept_and_sign_withdrawal(i, i as u64, sig);
         record(EventType::SucceededTransaction { signature: sig });
     }
 
@@ -213,28 +223,19 @@ fn setup_10k_events() {
         record(EventType::FailedTransaction { signature: sig });
     }
 
-    // Expired + resubmitted withdrawal cycles: accept → submit → expire → resubmit → succeed
-    // 300 × 5 = 1500 events
+    // Expired sweeps: queue → sweep → expire
+    // 300 × 3 = 900 events
     for i in 0..300 {
-        let old_sig = signature(INDEX_OFFSET_EXPIRED + i);
-        let new_sig = signature(INDEX_OFFSET_RESUBMIT + i);
+        let deposit_id = next_deposit_id;
+        next_deposit_id += 1;
+        let sig = signature(INDEX_OFFSET_EXPIRED + i);
 
-        accept_and_submit_withdrawal(
-            INDEX_OFFSET_EXPIRED + i,
-            (INDEX_OFFSET_EXPIRED + i) as u64,
-            old_sig,
-        );
-        record(EventType::ExpiredTransaction { signature: old_sig });
-        record(EventType::ResubmittedTransaction {
-            old_signature: old_sig,
-            new_signature: new_sig,
-            new_block_height: BlockHeight::new(1),
-        });
-        record(EventType::SucceededTransaction { signature: new_sig });
+        queue_and_sweep(deposit_id, INDEX_OFFSET_EXPIRED + i, amount, sig);
+        record(EventType::ExpiredTransaction { signature: sig });
     }
 
-    // Total: 1 (init) + 1 (minter public key) + 5000 + 800 + 1500 + 1500 + 1500 = 10302 events
-    assert_eq!(total_event_count(), 10302);
+    // Total: 1 (init) + 1 (minter public key) + 5000 + 800 + 2000 + 1500 + 900 = 10202 events
+    assert_eq!(total_event_count(), 10202);
     reset_state();
 }
 

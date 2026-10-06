@@ -35,6 +35,10 @@ type GetDepositAddressArgs = record {
 // Example: "5LrcE2f6uvydKRquEJ8xp19heGxSvqsVbcqUeFoiWbXe8JNip7ftPQNTAVPyTK7ijVdpkzmKKaAQR7MWMmujAhXD"
 type Signature = text;
 
+// A 32-byte Solana hash as a base-58 encoded string,
+// such as the nonce value stored by a durable nonce account.
+type Hash = text;
+
 // Smallest denomination of SOL, the native token on Solana,
 // i.e. 1_000_000_000 Lamports is 1 SOL
 type Lamport = nat64;
@@ -475,6 +479,27 @@ type EventType = variant {
     QuarantinedPendingMint : record {
         // The identifier of the deposit whose pending mint was quarantined.
         deposit_id: DepositSolId;
+    };
+    // The minter built a withdrawal transaction message carrying a durable
+    // nonce and bound the nonce account to it, before requesting the
+    // threshold signature.
+    CreatedTransaction : record {
+        // The unsigned transaction message.
+        transaction: VersionedTransactionMessage;
+        // The ledger burn indices of the withdrawal requests served by this transaction.
+        burn_indices: vec LedgerBurnIndex;
+        // The durable nonce account bound to this transaction.
+        nonce_account: Address;
+        // The nonce value the transaction carries in place of a recent blockhash.
+        nonce_value: Hash;
+    };
+    // The minter signed the withdrawal transaction previously recorded by
+    // `CreatedTransaction` for the given nonce account.
+    SignedTransaction : record {
+        // The transaction signature.
+        signature: Signature;
+        // The durable nonce account bound to the signed transaction.
+        nonce_account: Address;
     };
 };
 
