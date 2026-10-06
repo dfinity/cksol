@@ -12,7 +12,7 @@ use crate::{
         events::{
             accept_withdrawal, accept_withdrawal_at, create_withdrawal, credit_sweep,
             expire_transaction, fail_transaction, queue_deposit, resubmit_transaction,
-            sign_withdrawal, submit_sweep, submit_withdrawal, succeed_transaction,
+            submit_nonce_withdrawal, submit_sweep, submit_withdrawal, succeed_transaction,
         },
         init_balance, init_schnorr_master_key, init_state, ledger_canister_id, planned_sweep,
         queued_deposit,
@@ -34,6 +34,29 @@ proptest! {
         let decoded = Event::from_bytes(Cow::Borrowed(&bytes));
         assert_eq!(event, decoded);
     }
+}
+
+#[test]
+fn should_decode_a_submitted_transaction_encoded_with_a_mandatory_block_height() {
+    const ENCODED: &str = "8200820385584001010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101820081582500000000000000000000000000000000000000000000000000000000000000000000000000818200808200818107182a";
+
+    let decoded = Event::from_bytes(Cow::Owned(hex::decode(ENCODED).unwrap()));
+
+    assert_eq!(
+        decoded,
+        Event {
+            timestamp: 0,
+            payload: EventType::SubmittedTransaction {
+                signature: solana_signature::Signature::from([1; 64]),
+                message: VersionedMessage::Legacy(solana_message::Message::default()),
+                signers: vec![Signer::Minter],
+                purpose: TransactionPurpose::WithdrawSol {
+                    burn_indices: vec![7_u64.into()],
+                },
+                block_height: Some(BlockHeight::new(42)),
+            },
+        }
+    );
 }
 
 mod cache_minter_public_key {
@@ -397,7 +420,7 @@ mod swept_deposits {
             &TransactionPurpose::SweepDeposits {
                 deposit_ids: vec![0],
             },
-            DEFAULT_BLOCK_HEIGHT,
+            Some(DEFAULT_BLOCK_HEIGHT),
         );
     }
 }
@@ -436,7 +459,7 @@ mod nonce_accounts {
             ))
         );
 
-        sign_withdrawal(signature(1));
+        submit_nonce_withdrawal(signature(1), 1, vec![0]);
         assert_eq!(
             add_destination(),
             Err(InvalidStateError::NonceAccountIsWithdrawalDestination(
@@ -911,7 +934,7 @@ fn should_track_balance_through_deposits_withdrawals_and_failures() {
                     message: message_with_signers(num_signers).into(),
                     signers,
                     purpose,
-                    block_height: BlockHeight::new(0),
+                    block_height: Some(BlockHeight::new(0)),
                 },
                 &TestCanisterRuntime::new().add_times([0, 0]),
             )
@@ -1248,9 +1271,10 @@ mod withdrawal_transactions {
         sol_transfer::BATCH_WITHDRAWAL_TX_FEE,
         state::audit::replay_events,
         test_fixtures::{
-            NONCE_ACCOUNT, durable_nonce,
-            events::{create_withdrawal, sign_withdrawal},
-            minter_public_key_fetched_event, queued_deposit_of, sweep_message,
+            MINTER_ADDRESS, NONCE_ACCOUNT, durable_nonce,
+            events::{create_withdrawal, submit_nonce_withdrawal},
+            minter_public_key_fetched_event, nonce_withdrawal_message, queued_deposit_of,
+            sweep_message,
         },
     };
     use cksol_types::{TxFinalizedStatus, WithdrawalStatus};
@@ -1279,15 +1303,17 @@ mod withdrawal_transactions {
     }
 
     #[test]
-    fn should_move_the_created_transaction_in_flight_once_signed() {
+    fn should_move_the_created_transaction_in_flight_once_submitted() {
         init_state();
         init_balance();
         accept_withdrawal(account(1), 0, MINIMUM_WITHDRAWAL_AMOUNT);
         create_withdrawal(1, vec![0]);
+        let balance_after_creation = read_state(|s| s.balance());
 
-        sign_withdrawal(signature(7));
+        submit_nonce_withdrawal(signature(7), 1, vec![0]);
 
         read_state(|s| {
+            assert_eq!(s.balance(), balance_after_creation);
             assert!(s.created_withdrawal_txs().is_empty());
             assert!(s.created_withdrawal_requests().is_empty());
             let transaction = s.submitted_transactions().get(&signature(7)).unwrap();
@@ -1316,7 +1342,7 @@ mod withdrawal_transactions {
         init_balance();
         accept_withdrawal(account(1), 0, MINIMUM_WITHDRAWAL_AMOUNT);
         create_withdrawal(1, vec![0]);
-        sign_withdrawal(signature(7));
+        submit_nonce_withdrawal(signature(7), 1, vec![0]);
 
         succeed_transaction(signature(7));
 
@@ -1339,7 +1365,7 @@ mod withdrawal_transactions {
         init_balance();
         accept_withdrawal(account(1), 0, MINIMUM_WITHDRAWAL_AMOUNT);
         create_withdrawal(1, vec![0]);
-        sign_withdrawal(signature(7));
+        submit_nonce_withdrawal(signature(7), 1, vec![0]);
 
         fail_transaction(signature(7));
 
@@ -1384,11 +1410,16 @@ mod withdrawal_transactions {
     }
 
     #[test]
-    fn should_rebuild_the_in_flight_map_from_a_log_ending_after_signing() {
+    fn should_rebuild_the_in_flight_map_from_a_log_ending_after_submission() {
         let mut events = funded_log_until_created_transaction();
-        events.push(EventType::SignedTransaction {
+        events.push(EventType::SubmittedTransaction {
             signature: signature(7),
-            nonce_account: NONCE_ACCOUNT,
+            message: nonce_withdrawal_message(NONCE_ACCOUNT, durable_nonce(1)).into(),
+            signers: vec![Signer::Minter],
+            purpose: TransactionPurpose::WithdrawSol {
+                burn_indices: vec![0_u64.into()],
+            },
+            block_height: None,
         });
 
         let replayed = replay_events(log_of(events));
@@ -1416,15 +1447,62 @@ mod withdrawal_transactions {
         );
     }
 
+    #[test]
+    #[should_panic(expected = "does not start with an AdvanceNonceAccount instruction")]
+    fn should_panic_when_a_nonce_withdrawal_does_not_advance_a_nonce_account() {
+        init_state();
+        init_balance();
+        accept_withdrawal(account(1), 0, MINIMUM_WITHDRAWAL_AMOUNT);
+        create_withdrawal(1, vec![0]);
+        let message_without_nonce_advance = solana_message::Message::new_with_blockhash(
+            &[solana_system_interface::instruction::transfer(
+                &MINTER_ADDRESS,
+                &NONCE_ACCOUNT,
+                AMOUNT_TO_TRANSFER,
+            )],
+            Some(&MINTER_ADDRESS),
+            &durable_nonce(1),
+        );
+
+        mutate_state(|s| {
+            s.process_transaction_submitted(
+                &signature(7),
+                &message_without_nonce_advance.into(),
+                &[Signer::Minter],
+                &TransactionPurpose::WithdrawSol {
+                    burn_indices: vec![0_u64.into()],
+                },
+                None,
+            )
+        });
+    }
+
+    #[test]
+    #[should_panic(expected = "does not carry the nonce value bound to nonce account")]
+    fn should_panic_when_a_nonce_withdrawal_carries_another_nonce_value() {
+        init_state();
+        init_balance();
+        accept_withdrawal(account(1), 0, MINIMUM_WITHDRAWAL_AMOUNT);
+        create_withdrawal(1, vec![0]);
+
+        submit_nonce_withdrawal(signature(7), 2, vec![0]);
+    }
+
+    #[test]
+    #[should_panic(expected = "does not serve the withdrawal requests bound to nonce account")]
+    fn should_panic_when_a_nonce_withdrawal_serves_other_withdrawal_requests() {
+        init_state();
+        init_balance();
+        accept_withdrawal(account(1), 0, MINIMUM_WITHDRAWAL_AMOUNT);
+        accept_withdrawal(account(2), 1, MINIMUM_WITHDRAWAL_AMOUNT);
+        create_withdrawal(1, vec![0, 1]);
+
+        submit_nonce_withdrawal(signature(7), 1, vec![0]);
+    }
+
     const DEPOSIT_AMOUNT: u64 = 500_000_000;
 
     fn funded_log_until_created_transaction() -> Vec<EventType> {
-        let message: VersionedMessage = solana_message::Message::new_with_blockhash(
-            &[],
-            Some(&solana_address::Address::from([0x42; 32])),
-            &solana_message::Hash::default(),
-        )
-        .into();
         let credited_amount = DEPOSIT_AMOUNT - FEE_PER_SIGNATURE;
         let funding_deposit = queued_deposit_of(account(9), credited_amount);
         vec![
@@ -1442,7 +1520,7 @@ mod withdrawal_transactions {
                 purpose: TransactionPurpose::SweepDeposits {
                     deposit_ids: vec![deposit_id(0)],
                 },
-                block_height: BlockHeight::new(0),
+                block_height: Some(BlockHeight::new(0)),
             },
             EventType::SucceededTransaction {
                 signature: signature(9),
@@ -1467,7 +1545,6 @@ mod withdrawal_transactions {
                 amount_to_transfer: AMOUNT_TO_TRANSFER,
             }),
             EventType::CreatedTransaction {
-                message,
                 burn_indices: vec![0_u64.into()],
                 nonce_account: NONCE_ACCOUNT,
                 nonce_value: durable_nonce(1),

@@ -16,7 +16,9 @@ use sol_rpc_types::Lamport;
 use solana_address::Address;
 use solana_hash::Hash;
 use solana_message::Message;
+use solana_sdk_ids::system_program;
 use solana_signature::Signature;
+use solana_system_interface::instruction::SystemInstruction;
 use std::borrow::Cow;
 
 /// A versioned Solana transaction message, allowing the minter to support
@@ -35,6 +37,36 @@ impl VersionedMessage {
     pub fn transaction_fee(&self) -> Lamport {
         let VersionedMessage::Legacy(message) = self;
         FEE_PER_SIGNATURE * message.header.num_required_signatures as u64
+    }
+
+    /// The recent blockhash of the message, which is the nonce value for a
+    /// durable-nonce transaction.
+    pub fn recent_blockhash(&self) -> Hash {
+        let VersionedMessage::Legacy(message) = self;
+        message.recent_blockhash
+    }
+
+    /// The nonce account advanced by the first instruction of the message,
+    /// or `None` if the first instruction is not a system-program
+    /// `AdvanceNonceAccount` instruction.
+    pub fn advanced_nonce_account(&self) -> Option<Address> {
+        let VersionedMessage::Legacy(message) = self;
+        let instruction = message.instructions.first()?;
+        let program_id = message
+            .account_keys
+            .get(usize::from(instruction.program_id_index))?;
+        let is_advance_nonce_account = matches!(
+            bincode::deserialize(&instruction.data),
+            Ok(SystemInstruction::AdvanceNonceAccount)
+        );
+        if *program_id != system_program::ID || !is_advance_nonce_account {
+            return None;
+        }
+        let nonce_account_index = instruction.accounts.first()?;
+        message
+            .account_keys
+            .get(usize::from(*nonce_account_index))
+            .copied()
     }
 }
 
@@ -79,8 +111,10 @@ pub enum EventType {
         purpose: TransactionPurpose,
         /// The block height of the block whose blockhash the transaction uses.
         /// The blockhash is valid for 150 blocks after that height.
+        /// `None` for a durable-nonce transaction, which carries a nonce value
+        /// instead of a blockhash and never expires.
         #[n(4)]
-        block_height: BlockHeight,
+        block_height: Option<BlockHeight>,
     },
     /// A previously submitted transaction was resubmitted with a new signature.
     /// The transaction message and signers remain the same.
@@ -197,36 +231,23 @@ pub enum EventType {
         #[n(0)]
         deposit_id: DepositSolId,
     },
-    /// The minter built a withdrawal transaction message carrying a durable
-    /// nonce and bound the nonce account to it, before requesting the
-    /// threshold signature, so that a signing failure never leads to a second
-    /// message being signed for the same nonce value.
+    /// The minter bound a durable nonce account and its nonce value to the
+    /// withdrawal requests of the given burn indices, before requesting the
+    /// threshold signature. Since each burn index identifies a withdrawal
+    /// request, the binding determines the transaction message, so that a
+    /// signing failure leads to re-signing the identical message and never to
+    /// a second message being signed for the same nonce value.
     #[n(14)]
     CreatedTransaction {
-        /// The unsigned transaction message.
-        #[n(0)]
-        message: VersionedMessage,
         /// The ledger burn indices of the withdrawal requests served by this transaction.
-        #[cbor(n(1), with = "cbor::id_vec")]
+        #[cbor(n(0), with = "cbor::id_vec")]
         burn_indices: Vec<LedgerBurnIndex>,
         /// The durable nonce account bound to this transaction.
-        #[cbor(n(2), with = "cbor::address")]
-        nonce_account: Address,
-        /// The nonce value the transaction carries in place of a recent blockhash.
-        #[cbor(n(3), with = "cbor::hash")]
-        nonce_value: Hash,
-    },
-    /// The minter signed the withdrawal transaction previously recorded by
-    /// `CreatedTransaction` for the given nonce account, so that the identical
-    /// transaction can later be re-broadcast.
-    #[n(15)]
-    SignedTransaction {
-        /// The transaction signature.
-        #[cbor(n(0), with = "cbor::signature")]
-        signature: Signature,
-        /// The durable nonce account bound to the signed transaction.
         #[cbor(n(1), with = "cbor::address")]
         nonce_account: Address,
+        /// The nonce value the transaction carries in place of a recent blockhash.
+        #[cbor(n(2), with = "cbor::hash")]
+        nonce_value: Hash,
     },
 }
 

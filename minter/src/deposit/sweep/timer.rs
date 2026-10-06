@@ -137,7 +137,7 @@ async fn submit_sweep_transaction<R: CanisterRuntime>(
                 purpose: TransactionPurpose::SweepDeposits {
                     deposit_ids: sweep.deposits().keys().copied().collect(),
                 },
-                block_height: block.block_height,
+                block_height: Some(block.block_height),
             },
             runtime,
         )

@@ -544,7 +544,7 @@ impl State {
         transaction: &VersionedMessage,
         signers: &[Signer],
         purpose: &TransactionPurpose,
-        block_height: BlockHeight,
+        block_height: Option<BlockHeight>,
     ) {
         assert!(
             !self.succeeded_transactions.contains(signature),
@@ -556,8 +556,8 @@ impl State {
         );
         let message = transaction.clone();
         let signers = signers.to_vec();
-        let submitted_transaction = match purpose {
-            TransactionPurpose::WithdrawSol { burn_indices } => {
+        let submitted_transaction = match (purpose, block_height) {
+            (TransactionPurpose::WithdrawSol { burn_indices }, Some(block_height)) => {
                 let mut total: Lamport = 0;
                 for burn_index in burn_indices {
                     let pending = self
@@ -591,7 +591,10 @@ impl State {
                     block_height,
                 }
             }
-            TransactionPurpose::SweepDeposits { deposit_ids } => {
+            (TransactionPurpose::WithdrawSol { burn_indices }, None) => {
+                self.send_nonce_withdrawal(signature, message, signers, burn_indices)
+            }
+            (TransactionPurpose::SweepDeposits { deposit_ids }, Some(block_height)) => {
                 let sweep_destination = minter_address(self.minter_public_key.as_ref().expect(
                     "BUG: a sweep was submitted before the minter public key was recorded",
                 ));
@@ -602,6 +605,9 @@ impl State {
                     signers,
                     block_height,
                 }
+            }
+            (TransactionPurpose::SweepDeposits { .. }, None) => {
+                panic!("BUG: sweep transaction {signature} does not use a recent blockhash")
             }
         };
         assert_eq!(
@@ -614,7 +620,6 @@ impl State {
 
     fn process_transaction_created(
         &mut self,
-        message: &VersionedMessage,
         burn_indices: &[LedgerBurnIndex],
         nonce_account: &Address,
         nonce_value: Hash,
@@ -640,13 +645,12 @@ impl State {
         }
         self.balance = self
             .balance
-            .checked_sub(total + message.transaction_fee())
+            .checked_sub(total + BATCH_WITHDRAWAL_TX_FEE)
             .expect("BUG: insufficient minter balance for withdrawal");
         assert_eq!(
             self.created_withdrawal_txs.insert(
                 *nonce_account,
                 CreatedWithdrawalTransaction {
-                    message: message.clone(),
                     nonce_value,
                     burn_indices: burn_indices.to_vec(),
                 }
@@ -656,13 +660,33 @@ impl State {
         );
     }
 
-    fn process_transaction_signed(&mut self, signature: &Signature, nonce_account: &Address) {
+    fn send_nonce_withdrawal(
+        &mut self,
+        signature: &Signature,
+        message: VersionedMessage,
+        signers: Vec<Signer>,
+        burn_indices: &[LedgerBurnIndex],
+    ) -> MinterTransaction {
+        let nonce_account = message.advanced_nonce_account().unwrap_or_else(|| {
+            panic!("BUG: withdrawal transaction {signature} does not start with an AdvanceNonceAccount instruction")
+        });
         let created = self
             .created_withdrawal_txs
-            .remove(nonce_account)
+            .remove(&nonce_account)
             .unwrap_or_else(|| {
-                panic!("Attempted to sign unknown created transaction for nonce account {nonce_account}")
+                panic!(
+                    "BUG: no withdrawal transaction was created for nonce account {nonce_account}"
+                )
             });
+        assert_eq!(
+            message.recent_blockhash(),
+            created.nonce_value,
+            "BUG: withdrawal transaction {signature} does not carry the nonce value bound to nonce account {nonce_account}"
+        );
+        assert_eq!(
+            burn_indices, created.burn_indices,
+            "BUG: withdrawal transaction {signature} does not serve the withdrawal requests bound to nonce account {nonce_account}"
+        );
         for burn_index in &created.burn_indices {
             let pending = self
                 .created_withdrawal_requests
@@ -685,19 +709,12 @@ impl State {
                 "Attempted to send transaction for already sent withdrawal request: {burn_index:?}"
             );
         }
-        assert_eq!(
-            self.submitted_transactions.insert(
-                *signature,
-                MinterTransaction::NonceWithdrawal {
-                    message: created.message,
-                    signers: vec![Signer::Minter],
-                    nonce_account: *nonce_account,
-                    nonce_value: created.nonce_value,
-                }
-            ),
-            None,
-            "Attempted to sign withdrawal transaction {signature} twice"
-        );
+        MinterTransaction::NonceWithdrawal {
+            message,
+            signers,
+            nonce_account,
+            nonce_value: created.nonce_value,
+        }
     }
 
     fn process_transaction_resubmitted(
@@ -965,12 +982,13 @@ impl Iterator for WithdrawalBatches<'_> {
     }
 }
 
-/// A withdrawal transaction recorded before its threshold signature was
-/// requested, so that a signing failure leads to re-signing the identical
-/// message instead of building a new one for the same nonce value.
+/// The binding of a durable nonce account and its nonce value to the
+/// withdrawal requests of a transaction whose threshold signature was not yet
+/// recorded. The binding determines the transaction message, so that a signing
+/// failure leads to re-signing the identical message instead of building a new
+/// one for the same nonce value.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CreatedWithdrawalTransaction {
-    pub message: VersionedMessage,
     pub nonce_value: Hash,
     pub burn_indices: Vec<LedgerBurnIndex>,
 }

@@ -185,6 +185,23 @@ pub fn nonce_account_address() -> Address {
     Address::from([0x4E; 32])
 }
 
+/// Returns a durable-nonce withdrawal message of [`MINTER_ADDRESS`] that
+/// advances `nonce_account` and carries `nonce_value` in place of a recent
+/// blockhash, without any transfer.
+pub fn nonce_withdrawal_message(
+    nonce_account: Address,
+    nonce_value: solana_hash::Hash,
+) -> solana_message::Message {
+    solana_message::Message::new_with_blockhash(
+        &[solana_system_interface::instruction::advance_nonce_account(
+            &nonce_account,
+            &MINTER_ADDRESS,
+        )],
+        Some(&MINTER_ADDRESS),
+        &nonce_value,
+    )
+}
+
 /// Returns the nonce value stored by [`nonce_account_info`] for the same `nonce_seed`.
 pub fn durable_nonce(nonce_seed: usize) -> solana_hash::Hash {
     *DurableNonce::from_blockhash(&seed_hash(nonce_seed)).as_hash()
@@ -692,7 +709,7 @@ pub mod devnet_sweep {
 pub mod events {
     use super::{
         DEFAULT_BLOCK_HEIGHT, MINTER_ADDRESS, NONCE_ACCOUNT, WITHDRAWAL_FEE, durable_nonce,
-        queued_deposit, queued_deposit_of, runtime::TestCanisterRuntime,
+        nonce_withdrawal_message, queued_deposit, queued_deposit_of, runtime::TestCanisterRuntime,
     };
     use crate::deposit::sweep::deposit_status;
     use crate::{
@@ -793,7 +810,7 @@ pub mod events {
                         .into(),
                     signers,
                     purpose: TransactionPurpose::SweepDeposits { deposit_ids },
-                    block_height: DEFAULT_BLOCK_HEIGHT,
+                    block_height: Some(DEFAULT_BLOCK_HEIGHT),
                 },
                 &runtime(),
             )
@@ -887,7 +904,6 @@ pub mod events {
             process_event(
                 state,
                 EventType::CreatedTransaction {
-                    message: message().into(),
                     burn_indices: burn_indices
                         .into_iter()
                         .map(LedgerBurnIndex::from)
@@ -900,15 +916,29 @@ pub mod events {
         });
     }
 
-    /// Records a `SignedTransaction` for the created transaction bound to
-    /// [`NONCE_ACCOUNT`].
-    pub fn sign_withdrawal(signature: Signature) {
+    /// Records a `SubmittedTransaction` for the durable-nonce withdrawal
+    /// transaction advancing [`NONCE_ACCOUNT`] with the nonce value of
+    /// `nonce_seed`.
+    pub fn submit_nonce_withdrawal(
+        signature: Signature,
+        nonce_seed: usize,
+        burn_indices: Vec<u64>,
+    ) {
         mutate_state(|state| {
             process_event(
                 state,
-                EventType::SignedTransaction {
+                EventType::SubmittedTransaction {
                     signature,
-                    nonce_account: NONCE_ACCOUNT,
+                    message: nonce_withdrawal_message(NONCE_ACCOUNT, durable_nonce(nonce_seed))
+                        .into(),
+                    signers: vec![Signer::Minter],
+                    purpose: TransactionPurpose::WithdrawSol {
+                        burn_indices: burn_indices
+                            .into_iter()
+                            .map(LedgerBurnIndex::from)
+                            .collect(),
+                    },
+                    block_height: None,
                 },
                 &runtime(),
             )
@@ -937,7 +967,7 @@ pub mod events {
                             .map(LedgerBurnIndex::from)
                             .collect(),
                     },
-                    block_height,
+                    block_height: Some(block_height),
                 },
                 &runtime(),
             )
@@ -1249,7 +1279,7 @@ pub mod arb {
                     prop::collection::vec(any::<u64>(), 1..10)
                         .prop_map(|deposit_ids| TransactionPurpose::SweepDeposits { deposit_ids }),
                 ],
-                arb_block_height(),
+                proptest::option::of(arb_block_height()),
             )
                 .prop_map(|(signature, message, signers, purpose, block_height)| {
                     EventType::SubmittedTransaction {
@@ -1313,25 +1343,17 @@ pub mod arb {
             }),
             any::<u64>().prop_map(|deposit_id| EventType::QuarantinedPendingMint { deposit_id }),
             (
-                arb_message(),
                 prop::collection::vec(arb_ledger_burn_index(), 1..10),
                 arb_address(),
                 arb_hash(),
             )
-                .prop_map(|(message, burn_indices, nonce_account, nonce_value)| {
+                .prop_map(|(burn_indices, nonce_account, nonce_value)| {
                     EventType::CreatedTransaction {
-                        message: message.into(),
                         burn_indices,
                         nonce_account,
                         nonce_value,
                     }
                 }),
-            (arb_signature(), arb_address()).prop_map(|(signature, nonce_account)| {
-                EventType::SignedTransaction {
-                    signature,
-                    nonce_account,
-                }
-            }),
         ]
     }
 

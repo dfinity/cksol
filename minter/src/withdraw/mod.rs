@@ -227,7 +227,7 @@ async fn submit_withdrawal_transaction<R: CanisterRuntime>(
                 purpose: TransactionPurpose::WithdrawSol {
                     burn_indices: burn_indices.clone(),
                 },
-                block_height: block.block_height,
+                block_height: Some(block.block_height),
             },
             runtime,
         )

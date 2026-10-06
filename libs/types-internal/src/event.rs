@@ -46,8 +46,9 @@ pub enum EventType {
         signers: Vec<Signer>,
         /// The purpose of this transaction.
         purpose: TransactionPurpose,
-        /// The block height of the block whose blockhash the transaction uses.
-        block_height: u64,
+        /// The block height of the block whose blockhash the transaction uses,
+        /// or `None` for a durable-nonce transaction, which never expires.
+        block_height: Option<u64>,
     },
     /// A previously submitted transaction was resubmitted with a new signature.
     ResubmittedTransaction {
@@ -139,26 +140,16 @@ pub enum EventType {
         /// The identifier of the deposit whose pending mint was quarantined.
         deposit_id: u64,
     },
-    /// The minter built a withdrawal transaction message carrying a durable
-    /// nonce and bound the nonce account to it, before requesting the
-    /// threshold signature.
+    /// The minter bound a durable nonce account and its nonce value to the
+    /// withdrawal requests of the given burn indices, before requesting the
+    /// threshold signature. The binding determines the transaction message.
     CreatedTransaction {
-        /// The unsigned transaction message.
-        transaction: VersionedTransactionMessage,
         /// The ledger burn indices of the withdrawal requests served by this transaction.
         burn_indices: Vec<u64>,
         /// The durable nonce account bound to this transaction.
         nonce_account: Address,
         /// The nonce value the transaction carries in place of a recent blockhash.
         nonce_value: Hash,
-    },
-    /// The minter signed the withdrawal transaction previously recorded by
-    /// `CreatedTransaction` for the given nonce account.
-    SignedTransaction {
-        /// The transaction signature.
-        signature: Signature,
-        /// The durable nonce account bound to the signed transaction.
-        nonce_account: Address,
     },
 }
 

@@ -752,7 +752,7 @@ mod withdrawal_tests {
                     block_height,
                     ..
                 } if burn_indices == &[block_index]
-                  && block_height == &SUBMISSION_BLOCK_HEIGHT
+                  && block_height == &Some(SUBMISSION_BLOCK_HEIGHT)
             )));
         });
 

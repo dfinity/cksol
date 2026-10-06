@@ -22,6 +22,7 @@ use cksol_types_internal::{Ed25519KeyName, InitArgs, SolanaNetwork};
 use ic_ed25519::{PocketIcMasterPublicKeyId, PublicKey};
 use icrc_ledger_types::icrc1::account::Account;
 use solana_signature::Signature;
+use solana_system_interface::instruction;
 
 const INDEX_OFFSET_QUARANTINE: usize = 10_000;
 const INDEX_OFFSET_WITHDRAWAL: usize = 20_000;
@@ -81,9 +82,20 @@ fn master_key() -> SchnorrPublicKey {
     }
 }
 
-fn message() -> solana_message::Message {
-    let payer = solana_address::Address::from([0x42; 32]);
-    solana_message::Message::new_with_blockhash(&[], Some(&payer), &solana_message::Hash::default())
+fn nonce_withdrawal_message(
+    nonce_value: solana_hash::Hash,
+    destination: solana_address::Address,
+    amount: u64,
+) -> solana_message::Message {
+    let minter_address = minter_address(&master_key());
+    solana_message::Message::new_with_blockhash(
+        &[
+            instruction::advance_nonce_account(&nonce_account(), &minter_address),
+            instruction::transfer(&minter_address, &destination, amount),
+        ],
+        Some(&minter_address),
+        &nonce_value,
+    )
 }
 
 fn record(event: EventType) {
@@ -113,7 +125,7 @@ fn queue_and_sweep(deposit_id: u64, account_index: usize, amount: u64, sig: Sign
         purpose: TransactionPurpose::SweepDeposits {
             deposit_ids: vec![deposit_id],
         },
-        block_height: BlockHeight::new(0),
+        block_height: Some(BlockHeight::new(0)),
     });
 }
 
@@ -123,26 +135,35 @@ fn deposit_address(account_index: usize) -> solana_address::Address {
     solana_address::Address::from(bytes)
 }
 
-fn accept_and_sign_withdrawal(account_index: usize, burn_index: u64, sig: Signature) {
+fn accept_and_submit_withdrawal(account_index: usize, burn_index: u64, sig: Signature) {
     const WITHDRAWAL_FEE: u64 = 5_000_000;
     const WITHDRAWAL_AMOUNT: u64 = 10_000_000;
+    const AMOUNT_TO_TRANSFER: u64 = WITHDRAWAL_AMOUNT - WITHDRAWAL_FEE;
 
+    let destination = [0u8; 32];
+    let burn_indices = vec![LedgerBurnIndex::from(burn_index)];
     record(EventType::AcceptedWithdrawalRequest(WithdrawalRequest {
         account: account(account_index),
-        solana_address: [0u8; 32],
+        solana_address: destination,
         burn_block_index: LedgerBurnIndex::from(burn_index),
         burned_amount: WITHDRAWAL_AMOUNT,
-        amount_to_transfer: WITHDRAWAL_AMOUNT - WITHDRAWAL_FEE,
+        amount_to_transfer: AMOUNT_TO_TRANSFER,
     }));
     record(EventType::CreatedTransaction {
-        message: VersionedMessage::Legacy(message()),
-        burn_indices: vec![LedgerBurnIndex::from(burn_index)],
+        burn_indices: burn_indices.clone(),
         nonce_account: nonce_account(),
         nonce_value: nonce_value(account_index),
     });
-    record(EventType::SignedTransaction {
+    record(EventType::SubmittedTransaction {
         signature: sig,
-        nonce_account: nonce_account(),
+        message: VersionedMessage::Legacy(nonce_withdrawal_message(
+            nonce_value(account_index),
+            solana_address::Address::from(destination),
+            AMOUNT_TO_TRANSFER,
+        )),
+        signers: vec![Signer::Minter],
+        purpose: TransactionPurpose::WithdrawSol { burn_indices },
+        block_height: None,
     });
 }
 
@@ -203,12 +224,12 @@ fn setup_10k_events() {
         record(EventType::QuarantinedSweep { signature: sig });
     }
 
-    // Withdrawal cycles: accept withdrawal → create transaction → sign → succeed
+    // Withdrawal cycles: accept withdrawal → create transaction → submit → succeed
     // 500 × 4 = 2000 events
     for i in 0..500 {
         let sig = signature(INDEX_OFFSET_WITHDRAWAL + i);
 
-        accept_and_sign_withdrawal(i, i as u64, sig);
+        accept_and_submit_withdrawal(i, i as u64, sig);
         record(EventType::SucceededTransaction { signature: sig });
     }
 

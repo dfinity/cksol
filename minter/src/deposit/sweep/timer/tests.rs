@@ -130,7 +130,7 @@ async fn should_sweep_batch_with_largest_deposit_as_fee_payer() {
                     signers.contains(&Signer::Account(account(1)))
                         && signers.contains(&Signer::Account(account(3)))
                 );
-                assert_eq!(block_height, DEFAULT_BLOCK_HEIGHT);
+                assert_eq!(block_height, Some(DEFAULT_BLOCK_HEIGHT));
                 assert_eq!(deposit_ids, vec![0, 1, 2]);
                 assert_eq!(
                     transfers_to_minter_address(&message),

@@ -146,7 +146,14 @@ fn get_events(
                 };
                 event::EventType::SubmittedTransaction {
                     signature: signature.into(),
-                    transaction: map_message(message),
+                    transaction: match message {
+                        VersionedMessage::Legacy(message) => {
+                            event::VersionedTransactionMessage::Legacy(
+                                bincode::serialize(&message)
+                                    .expect("serializing transaction should succeed"),
+                            )
+                        }
+                    },
                     signers: signers
                         .into_iter()
                         .map(|signer| match signer {
@@ -155,7 +162,7 @@ fn get_events(
                         })
                         .collect(),
                     purpose,
-                    block_height: block_height.get(),
+                    block_height: block_height.map(|height| height.get()),
                 }
             }
             EventType::ResubmittedTransaction {
@@ -225,31 +232,14 @@ fn get_events(
                 event::EventType::QuarantinedPendingMint { deposit_id }
             }
             EventType::CreatedTransaction {
-                message,
                 burn_indices,
                 nonce_account,
                 nonce_value,
             } => event::EventType::CreatedTransaction {
-                transaction: map_message(message),
                 burn_indices: burn_indices.iter().map(|idx| *idx.get()).collect(),
                 nonce_account: nonce_account.into(),
                 nonce_value: nonce_value.into(),
             },
-            EventType::SignedTransaction {
-                signature,
-                nonce_account,
-            } => event::EventType::SignedTransaction {
-                signature: signature.into(),
-                nonce_account: nonce_account.into(),
-            },
-        }
-    }
-
-    fn map_message(message: VersionedMessage) -> event::VersionedTransactionMessage {
-        match message {
-            VersionedMessage::Legacy(message) => event::VersionedTransactionMessage::Legacy(
-                bincode::serialize(&message).expect("serializing transaction should succeed"),
-            ),
         }
     }
 
