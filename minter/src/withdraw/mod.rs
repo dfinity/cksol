@@ -3,7 +3,10 @@ use std::time::Duration;
 
 use cksol_types::{WithdrawalError, WithdrawalOk, WithdrawalStatus};
 use icrc_ledger_types::icrc1::account::Account;
+use sol_rpc_types::Lamport;
 use solana_address::Address;
+use solana_message::Message;
+use solana_transaction::Transaction;
 
 use canlog::log;
 use cksol_types_internal::log::Priority;
@@ -13,18 +16,21 @@ use crate::{
     constants::MAX_CONCURRENT_RPC_CALLS,
     guard::{TimerGuard, withdrawal_guard},
     ledger::{BurnError, burn},
-    rpc::{Block, get_recent_block, submit_transaction},
+    numeric::LedgerBurnIndex,
+    rpc::submit_transaction_skipping_preflight,
     runtime::CanisterRuntime,
-    sol_transfer::create_signed_batch_withdrawal_transaction,
+    sol_transfer::{build_batch_withdrawal_message, sign_batch_withdrawal_message},
     state::{
-        TaskType,
+        State, TaskType,
         audit::process_event,
-        event::{EventType, TransactionPurpose, VersionedMessage, WithdrawalRequest},
+        event::{EventType, Signer, TransactionPurpose, WithdrawalRequest},
         mutate_state, read_state,
     },
+    withdraw::nonce::read_verified_nonce,
 };
 
 pub const WITHDRAWAL_PROCESSING_DELAY: Duration = Duration::from_mins(1);
+pub const WITHDRAWAL_PROCESSING_RETRY_DELAY: Duration = Duration::from_secs(10);
 
 pub mod nonce;
 mod reserved_account_keys;
@@ -136,114 +142,248 @@ pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: R) {
         }
     };
 
-    let (batches, more_to_process) = read_state(|state| {
-        let mut affordable_batches = state.withdrawal_batches().peekable();
-        let batches: Vec<Vec<_>> = affordable_batches
-            .by_ref()
-            .take(MAX_CONCURRENT_RPC_CALLS)
-            .collect();
-        (batches, affordable_batches.peek().is_some())
-    });
-
-    let reschedule = scopeguard::guard(runtime.clone(), |runtime| {
-        runtime.set_timer(Duration::ZERO, process_pending_withdrawals);
-    });
-
-    if batches.is_empty() {
-        // Nothing to process
-        scopeguard::ScopeGuard::into_inner(reschedule);
+    let Some(minter_address) = read_state(|s| s.minter_public_key().map(minter_address)) else {
+        log!(
+            Priority::Info,
+            "Minter public key is not yet available, skipping withdrawal processing"
+        );
         return;
-    }
-
-    if let Err(e) = minter_public_key() {
-        log!(Priority::Info, "Skipping withdrawal processing: {e}");
-        scopeguard::ScopeGuard::into_inner(reschedule);
-        return;
-    }
-
-    let block = match get_recent_block(&runtime).await {
-        Ok(block) => block,
-        Err(e) => {
-            log!(Priority::Info, "Failed to fetch recent blockhash: {e}");
-            return;
-        }
     };
 
-    futures::future::join_all(
-        batches
-            .into_iter()
-            .map(async |batch| submit_withdrawal_transaction(&runtime, batch, block).await),
-    )
-    .await;
+    create_transactions_batch(&runtime, minter_address).await;
+    let signed_transactions = sign_transactions_batch(&runtime, minter_address).await;
+    send_transactions_batch(&runtime, signed_transactions).await;
 
-    if !more_to_process {
-        // All work fits in this round
-        scopeguard::ScopeGuard::into_inner(reschedule);
+    if read_state(|s| s.can_create_withdrawal_transaction()) {
+        runtime.set_timer(
+            WITHDRAWAL_PROCESSING_RETRY_DELAY,
+            process_pending_withdrawals,
+        );
     }
 }
 
-async fn submit_withdrawal_transaction<R: CanisterRuntime>(
-    runtime: &R,
+struct ReservedBatch {
+    nonce_account: Address,
     requests: Vec<WithdrawalRequest>,
-    block: Block,
-) {
-    let targets: Vec<_> = requests
-        .iter()
-        .map(|request| {
-            let destination = Address::from(request.solana_address);
-            (destination, request.amount_to_transfer)
-        })
-        .collect();
+}
 
-    let (signed_tx, signers) = match create_signed_batch_withdrawal_transaction(
-        runtime,
-        &targets,
-        block.blockhash,
+struct BoundWithdrawal {
+    nonce_account: Address,
+    burn_indices: Vec<LedgerBurnIndex>,
+    message: Message,
+}
+
+async fn create_transactions_batch<R: CanisterRuntime>(runtime: &R, minter_address: Address) {
+    let reserved_batches: Vec<ReservedBatch> = mutate_state(|state| {
+        let max_batches = state
+            .nonce_pool()
+            .num_free_accounts()
+            .min(MAX_CONCURRENT_RPC_CALLS);
+        let batches: Vec<_> = state.withdrawal_batches().take(max_batches).collect();
+        state
+            .reserve_nonce_accounts(batches.len())
+            .into_iter()
+            .zip(batches)
+            .map(|(nonce_account, requests)| ReservedBatch {
+                nonce_account,
+                requests,
+            })
+            .collect()
+    });
+
+    futures::future::join_all(
+        reserved_batches
+            .into_iter()
+            .map(async |batch| create_transaction(runtime, minter_address, batch).await),
     )
-    .await
-    {
-        Ok(tx) => tx,
+    .await;
+}
+
+async fn create_transaction<R: CanisterRuntime>(
+    runtime: &R,
+    minter_address: Address,
+    batch: ReservedBatch,
+) {
+    let ReservedBatch {
+        nonce_account,
+        requests,
+    } = batch;
+    let unreserve = scopeguard::guard((), |()| {
+        mutate_state(|state| state.unreserve_nonce_account(&nonce_account));
+    });
+
+    let nonce_value = match read_verified_nonce(runtime, nonce_account, minter_address).await {
+        Ok(nonce_value) => nonce_value,
         Err(e) => {
-            let burn_indices: Vec<_> = requests.iter().map(|r| r.burn_block_index).collect();
             log!(
-                Priority::Error,
-                "Failed to create batch withdrawal transaction for burn indices {burn_indices:?}: {e}"
+                Priority::Info,
+                "Failed to read nonce account {nonce_account}, skipping withdrawal batch this round: {e}"
             );
             return;
         }
     };
+    if read_state(|state| state.nonce_pool().has_seen(&nonce_account, &nonce_value)) {
+        log!(
+            Priority::Info,
+            "Read a stale nonce value for account {nonce_account}, skipping withdrawal batch this round"
+        );
+        return;
+    }
 
-    let signature = signed_tx.signatures[0];
-    let message = VersionedMessage::Legacy(signed_tx.message.clone());
     let burn_indices: Vec<_> = requests.iter().map(|r| r.burn_block_index).collect();
+    if let Err(e) = build_batch_withdrawal_message(
+        &minter_address,
+        &nonce_account,
+        nonce_value,
+        &withdrawal_transfers(&requests),
+    ) {
+        log!(
+            Priority::Error,
+            "Failed to build batch withdrawal transaction for burn indices {burn_indices:?}: {e}"
+        );
+        return;
+    }
 
+    scopeguard::ScopeGuard::into_inner(unreserve);
     mutate_state(|state| {
         process_event(
             state,
-            EventType::SubmittedTransaction {
-                signature,
-                message,
-                signers,
-                purpose: TransactionPurpose::Withdrawal {
-                    burn_indices: burn_indices.clone(),
-                    block_height: block.block_height,
-                },
+            EventType::CreatedWithdrawalTransaction {
+                burn_indices,
+                nonce_account,
+                nonce_value,
             },
             runtime,
         )
     });
+}
 
-    match submit_transaction(runtime, signed_tx).await {
+async fn sign_transactions_batch<R: CanisterRuntime>(
+    runtime: &R,
+    minter_address: Address,
+) -> Vec<Transaction> {
+    let bound_withdrawals = read_state(|state| bound_withdrawals(state, &minter_address));
+    futures::future::join_all(
+        bound_withdrawals
+            .into_iter()
+            .map(async |withdrawal| sign_transaction(runtime, withdrawal).await),
+    )
+    .await
+    .into_iter()
+    .flatten()
+    .collect()
+}
+
+fn bound_withdrawals(state: &State, minter_address: &Address) -> Vec<BoundWithdrawal> {
+    state
+        .created_withdrawal_txs()
+        .iter()
+        .filter_map(|(nonce_account, created)| {
+            let requests: Vec<WithdrawalRequest> = created
+                .burn_indices
+                .iter()
+                .map(|burn_index| {
+                    state
+                        .created_withdrawal_requests()
+                        .get(burn_index)
+                        .unwrap_or_else(|| {
+                            panic!("BUG: withdrawal request {burn_index:?} of a created transaction is not in the created bucket")
+                        })
+                        .request
+                        .clone()
+                })
+                .collect();
+            match build_batch_withdrawal_message(
+                minter_address,
+                nonce_account,
+                created.nonce_value,
+                &withdrawal_transfers(&requests),
+            ) {
+                Ok(message) => Some(BoundWithdrawal {
+                    nonce_account: *nonce_account,
+                    burn_indices: created.burn_indices.clone(),
+                    message,
+                }),
+                Err(e) => {
+                    log!(
+                        Priority::Error,
+                        "Failed to rebuild withdrawal transaction bound to nonce account {nonce_account}: {e}"
+                    );
+                    None
+                }
+            }
+        })
+        .collect()
+}
+
+fn withdrawal_transfers(requests: &[WithdrawalRequest]) -> Vec<(Address, Lamport)> {
+    requests
+        .iter()
+        .map(|request| {
+            (
+                Address::from(request.solana_address),
+                request.amount_to_transfer,
+            )
+        })
+        .collect()
+}
+
+async fn sign_transaction<R: CanisterRuntime>(
+    runtime: &R,
+    withdrawal: BoundWithdrawal,
+) -> Option<Transaction> {
+    let BoundWithdrawal {
+        nonce_account,
+        burn_indices,
+        message,
+    } = withdrawal;
+    let transaction = match sign_batch_withdrawal_message(runtime, message).await {
+        Ok(transaction) => transaction,
+        Err(e) => {
+            log!(
+                Priority::Error,
+                "Failed to sign withdrawal transaction bound to nonce account {nonce_account} (will be re-signed next round): {e}"
+            );
+            return None;
+        }
+    };
+    mutate_state(|state| {
+        process_event(
+            state,
+            EventType::SubmittedTransaction {
+                signature: transaction.signatures[0],
+                message: transaction.message.clone().into(),
+                signers: vec![Signer::Minter],
+                purpose: TransactionPurpose::Withdrawal { burn_indices },
+            },
+            runtime,
+        )
+    });
+    Some(transaction)
+}
+
+async fn send_transactions_batch<R: CanisterRuntime>(runtime: &R, transactions: Vec<Transaction>) {
+    futures::future::join_all(
+        transactions
+            .into_iter()
+            .map(async |transaction| send_transaction(runtime, transaction).await),
+    )
+    .await;
+}
+
+async fn send_transaction<R: CanisterRuntime>(runtime: &R, transaction: Transaction) {
+    let signature = transaction.signatures[0];
+    match submit_transaction_skipping_preflight(runtime, transaction).await {
         Ok(_) => {
             log!(
                 Priority::Info,
-                "Submitted withdrawal transaction {signature} for burn indices {burn_indices:?}"
+                "Submitted withdrawal transaction {signature}"
             );
         }
         Err(e) => {
             log!(
                 Priority::Info,
-                "Failed to send withdrawal transaction {signature} (will be resubmitted): {e}"
+                "Failed to send withdrawal transaction {signature}: {e}"
             );
         }
     }

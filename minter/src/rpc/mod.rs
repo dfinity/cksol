@@ -162,8 +162,38 @@ pub async fn submit_transaction<R: CanisterRuntime>(
     runtime: &R,
     transaction: Transaction,
 ) -> Result<Signature, SubmitTransactionError> {
+    send_transaction(runtime, transaction, Preflight::Simulate).await
+}
+
+/// Submits a withdrawal transaction without the providers' preflight
+/// simulation, so that a doomed transaction lands and fails on-chain,
+/// advancing its nonce and freeing its nonce account, instead of staying
+/// unbroadcast and occupying the account until an operator intervenes.
+pub async fn submit_transaction_skipping_preflight<R: CanisterRuntime>(
+    runtime: &R,
+    transaction: Transaction,
+) -> Result<Signature, SubmitTransactionError> {
+    send_transaction(runtime, transaction, Preflight::Skip).await
+}
+
+enum Preflight {
+    Simulate,
+    Skip,
+}
+
+async fn send_transaction<R: CanisterRuntime>(
+    runtime: &R,
+    transaction: Transaction,
+    preflight: Preflight,
+) -> Result<Signature, SubmitTransactionError> {
     let client = read_state(|state| state.sol_rpc_client(runtime.inter_canister_call_runtime()));
-    match client.send_transaction(transaction).try_send().await {
+    let request = match preflight {
+        Preflight::Simulate => client.send_transaction(transaction),
+        Preflight::Skip => client
+            .send_transaction(transaction)
+            .with_skip_preflight(true),
+    };
+    match request.try_send().await {
         Ok(MultiRpcResult::Consistent(Ok(signature))) => Ok(signature),
         Ok(MultiRpcResult::Consistent(Err(e))) => Err(SubmitTransactionError::RpcError(e)),
         Ok(MultiRpcResult::Inconsistent(_)) => Err(SubmitTransactionError::InconsistentRpcResults),

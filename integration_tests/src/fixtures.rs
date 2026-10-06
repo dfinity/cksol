@@ -14,6 +14,11 @@ use pocket_ic::nonblocking::PocketIc;
 use serde_json::json;
 use sol_rpc_types::Lamport;
 use solana_address::{Address, address};
+use solana_hash::Hash;
+use solana_nonce::{
+    state::{Data, DurableNonce, State},
+    versions::Versions,
+};
 use solana_transaction::Transaction;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -150,6 +155,31 @@ impl MockBuilder {
             )
     }
 
+    /// Mock for `getAccountInfo` returning an initialized durable nonce account
+    /// whose nonce authority is the minter's main address.
+    pub fn get_nonce_account(self) -> Self {
+        self.expect(
+            get_account_info_request(),
+            get_account_info_nonce_response(),
+        )
+    }
+
+    /// Mocks for the withdrawal timer submitting a durable-nonce transaction:
+    /// `getAccountInfo` reading the nonce account → `sendTransaction`.
+    pub fn submit_withdrawal_transaction(self) -> Self {
+        self.get_nonce_account().expect(
+            send_transaction_request(),
+            send_transaction_response(SUBMITTED_SIGNATURE),
+        )
+    }
+
+    /// Mocks for `finalize_transactions` finding only in-flight withdrawal
+    /// transactions, which carry a durable nonce and need no current block:
+    /// a single `getSignatureStatuses` reporting them as finalized.
+    pub fn finalize_withdrawal_transaction(self, signature: &Signature) -> Self {
+        self.check_signature_statuses(signature, get_signature_statuses_finalized_response())
+    }
+
     /// Mocks for `finalize_transactions` finding the pending transaction with the given
     /// signature expired at `block_height`: `getSlot` → `getBlock` → `getSignatureStatuses`
     /// reporting it as not found.
@@ -247,6 +277,40 @@ fn sweep_transaction_response(sweep: &Transaction, sweepable_amount: Lamport) ->
         },
         "id": 1
     }))
+}
+
+fn get_account_info_request() -> JsonRpcRequestMatcher {
+    JsonRpcRequestMatcher::with_method("getAccountInfo")
+}
+
+fn get_account_info_nonce_response() -> JsonRpcResponse {
+    JsonRpcResponse::from(json!({
+        "jsonrpc": "2.0",
+        "result": {
+            "context": { "apiVersion": "2.0.15", "slot": 341_197_053 },
+            "value": {
+                "data": [nonce_account_data(), "base64"],
+                "executable": false,
+                "lamports": 1_447_680,
+                "owner": "11111111111111111111111111111111",
+                "rentEpoch": 18_446_744_073_709_551_615_u64,
+                "space": 80
+            }
+        },
+        "id": 1
+    }))
+}
+
+fn nonce_account_data() -> String {
+    let nonce_account = Versions::new(State::Initialized(Data::new(
+        MINTER_ADDRESS,
+        DurableNonce::from_blockhash(&Hash::from([0x4E; 32])),
+        FEE_PER_SIGNATURE,
+    )));
+    STANDARD.encode(
+        bincode::serialize(&nonce_account)
+            .expect("BUG: serializing a nonce account should succeed"),
+    )
 }
 
 fn get_balance_request() -> JsonRpcRequestMatcher {

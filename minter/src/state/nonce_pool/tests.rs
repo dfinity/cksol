@@ -33,6 +33,43 @@ fn should_leave_the_pool_unchanged_when_an_add_fails() {
 }
 
 #[test]
+fn should_reserve_at_most_the_free_accounts() {
+    let mut pool = pool_of([address(1), address(2)]);
+
+    assert_eq!(pool.reserve_accounts(3), vec![address(1), address(2)]);
+    assert_eq!(pool.reserve_accounts(1), vec![]);
+}
+
+#[test]
+fn should_not_reserve_a_bound_account() {
+    let mut pool = pool_of([address(1), address(2)]);
+    pool.bind(&address(1), durable_nonce(1));
+
+    assert_eq!(pool.reserve_accounts(2), vec![address(2)]);
+}
+
+#[test]
+fn should_reserve_an_unreserved_account_again() {
+    let mut pool = pool_of([address(1)]);
+    assert_eq!(pool.reserve_accounts(1), vec![address(1)]);
+
+    pool.unreserve(&address(1));
+
+    assert_eq!(pool.reserve_accounts(1), vec![address(1)]);
+}
+
+#[test]
+fn should_free_a_bound_account_for_a_new_reservation() {
+    let mut pool = pool_of([address(1)]);
+    pool.bind(&address(1), durable_nonce(1));
+    assert_eq!(pool.reserve_accounts(1), vec![]);
+
+    pool.free(&address(1));
+
+    assert_eq!(pool.reserve_accounts(1), vec![address(1)]);
+}
+
+#[test]
 #[should_panic(expected = "already bound")]
 fn should_panic_when_binding_a_bound_account() {
     let mut pool = pool_of([address(1)]);
@@ -66,6 +103,34 @@ fn should_panic_when_freeing_an_unbound_account() {
     let mut pool = pool_of([address(1)]);
 
     pool.free(&address(1));
+}
+
+#[test]
+fn should_remember_the_nonce_values_of_past_bindings() {
+    let mut pool = pool_of([address(1)]);
+    pool.bind(&address(1), durable_nonce(1));
+    pool.free(&address(1));
+    pool.bind(&address(1), durable_nonce(2));
+
+    assert!(pool.has_seen(&address(1), &durable_nonce(1)));
+    assert!(pool.has_seen(&address(1), &durable_nonce(2)));
+    assert!(!pool.has_seen(&address(1), &durable_nonce(3)));
+}
+
+#[test]
+fn should_count_no_free_accounts_in_an_empty_pool() {
+    assert_eq!(DurableNoncePool::default().num_free_accounts(), 0);
+}
+
+#[test]
+fn should_count_only_the_free_accounts() {
+    let mut pool = pool_of([address(1), address(2), address(3)]);
+    assert_eq!(pool.num_free_accounts(), 3);
+
+    pool.bind(&address(1), durable_nonce(1));
+    assert_eq!(pool.reserve_accounts(1), vec![address(2)]);
+
+    assert_eq!(pool.num_free_accounts(), 1);
 }
 
 fn pool_of(addresses: impl IntoIterator<Item = Address>) -> DurableNoncePool {

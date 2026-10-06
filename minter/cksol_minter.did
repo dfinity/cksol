@@ -358,18 +358,10 @@ type TransactionPurpose = variant {
         // The block height of the block whose blockhash the transaction uses.
         block_height: nat64;
     };
-    // Withdraw SOL to users' Solana addresses. The transaction uses a recent
-    // blockhash and is resubmitted once the blockhash expires.
-    Withdrawal : record {
-        // The ledger burn indices of the withdrawal requests included in this transaction.
-        burn_indices: vec LedgerBurnIndex;
-        // The block height of the block whose blockhash the transaction uses.
-        block_height: nat64;
-    };
     // Withdraw SOL to users' Solana addresses. The transaction carries the
     // nonce value of a durable nonce account instead of a recent blockhash,
     // so it never expires.
-    NonceWithdrawal : record {
+    Withdrawal : record {
         // The ledger burn indices of the withdrawal requests included in this transaction.
         burn_indices: vec LedgerBurnIndex;
     };

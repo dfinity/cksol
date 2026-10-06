@@ -886,38 +886,6 @@ fn should_track_balance_through_deposits_withdrawals_and_failures() {
     const TRANSFER_1: u64 = WITHDRAWAL_1 - WITHDRAWAL_FEE;
     const TRANSFER_2: u64 = WITHDRAWAL_2 - WITHDRAWAL_FEE;
 
-    /// Creates a Solana message with the given number of required signatures.
-    fn message_with_signers(num_signers: u8) -> solana_message::Message {
-        solana_message::Message {
-            header: solana_message::MessageHeader {
-                num_required_signatures: num_signers,
-                num_readonly_signed_accounts: 0,
-                num_readonly_unsigned_accounts: 0,
-            },
-            account_keys: vec![],
-            recent_blockhash: Default::default(),
-            instructions: vec![],
-        }
-    }
-
-    fn submit_transaction(sig: Signature, num_signers: u8, purpose: TransactionPurpose) {
-        let signers: Vec<_> = (0..num_signers)
-            .map(|i| Signer::Account(account(100 + i as usize)))
-            .collect();
-        mutate_state(|state| {
-            process_event(
-                state,
-                EventType::SubmittedTransaction {
-                    signature: sig,
-                    message: message_with_signers(num_signers).into(),
-                    signers,
-                    purpose,
-                },
-                &TestCanisterRuntime::new().add_times([0, 0]),
-            )
-        });
-    }
-
     init_state();
     init_schnorr_master_key();
     assert_eq!(read_state(|s| s.balance()), 0);
@@ -942,15 +910,8 @@ fn should_track_balance_through_deposits_withdrawals_and_failures() {
     accept_withdrawal(account(4), 1, WITHDRAWAL_2);
     assert_eq!(read_state(|s| s.balance()), expected);
 
-    // Submitting a withdrawal (1 signer): balance -= total_transfers + tx_fee
-    submit_transaction(
-        signature(0xBB),
-        1,
-        TransactionPurpose::Withdrawal {
-            burn_indices: vec![0.into(), 1.into()],
-            block_height: BlockHeight::new(0),
-        },
-    );
+    // Creating a withdrawal transaction (1 signature): balance -= total_transfers + tx_fee
+    submit_withdrawal(signature(0xBB), vec![0, 1]);
     let expected = expected - TRANSFER_1 - TRANSFER_2 - FEE_PER_SIGNATURE;
     assert_eq!(read_state(|s| s.balance()), expected);
 
@@ -1068,50 +1029,22 @@ mod oldest_incomplete_withdrawal_created_at {
             None
         );
     }
-
-    #[test]
-    fn should_preserve_created_at_through_resubmission() {
-        init_state();
-        init_balance();
-        accept_withdrawal_at(account(1), 0, AMOUNT, 1_000_000_000);
-        accept_withdrawal_at(account(2), 1, AMOUNT, 2_000_000_000);
-
-        submit_withdrawal(signature(0xAA), vec![0, 1]);
-
-        assert_eq!(
-            read_state(|s| s.oldest_incomplete_withdrawal_created_at()),
-            Some(1_000_000_000)
-        );
-
-        // Expire then resubmit the transaction with a new signature
-        expire_transaction(signature(0xAA));
-        resubmit_transaction(signature(0xAA), signature(0xBB));
-
-        // created_at timestamps should be unchanged
-        assert_eq!(
-            read_state(|s| s.oldest_incomplete_withdrawal_created_at()),
-            Some(1_000_000_000)
-        );
-
-        // Finalize the resubmitted transaction
-        succeed_transaction(signature(0xBB));
-
-        assert_eq!(
-            read_state(|s| s.oldest_incomplete_withdrawal_created_at()),
-            None
-        );
-    }
 }
 
 mod withdrawal_batches {
     use super::*;
-    use crate::sol_transfer::{BATCH_WITHDRAWAL_TX_FEE, MAX_WITHDRAWALS_PER_TX};
+    use crate::{
+        sol_transfer::{BATCH_WITHDRAWAL_TX_FEE, MAX_WITHDRAWALS_PER_NONCE_TX},
+        test_fixtures::durable_nonce,
+    };
 
-    const MAX_AMOUNT_TO_TRANSFER: Lamport = u64::MAX - WITHDRAWAL_FEE - BATCH_WITHDRAWAL_TX_FEE;
-    const NUM_REQUESTS_FOR_TWO_BATCHES: usize = MAX_WITHDRAWALS_PER_TX + 1;
+    const MAX_AMOUNT_TO_TRANSFER: Lamport =
+        u64::MAX - WITHDRAWAL_FEE - BATCH_WITHDRAWAL_TX_FEE - RENT_EXEMPTION_THRESHOLD;
+    const NUM_REQUESTS_FOR_TWO_BATCHES: usize = MAX_WITHDRAWALS_PER_NONCE_TX + 1;
     const COST_OF_TWO_BATCHES: Lamport = NUM_REQUESTS_FOR_TWO_BATCHES as u64
         * MINIMUM_WITHDRAWAL_AMOUNT
-        + 2 * BATCH_WITHDRAWAL_TX_FEE;
+        + 2 * BATCH_WITHDRAWAL_TX_FEE
+        + RENT_EXEMPTION_THRESHOLD;
 
     #[test]
     fn should_be_empty_when_no_pending_withdrawals() {
@@ -1126,7 +1059,7 @@ mod withdrawal_batches {
             amount_to_transfer in MINIMUM_WITHDRAWAL_AMOUNT..=MAX_AMOUNT_TO_TRANSFER
         ) {
             let mut state = state();
-            state.balance = amount_to_transfer + BATCH_WITHDRAWAL_TX_FEE;
+            state.balance = amount_to_transfer + BATCH_WITHDRAWAL_TX_FEE + RENT_EXEMPTION_THRESHOLD;
             let requests = [withdrawal_request(0, amount_to_transfer)];
             accept_withdrawal_requests(&mut state, requests.clone());
 
@@ -1141,7 +1074,8 @@ mod withdrawal_batches {
             shortfall in 1..=MINIMUM_WITHDRAWAL_AMOUNT + BATCH_WITHDRAWAL_TX_FEE
         ) {
             let mut state = state();
-            state.balance = amount_to_transfer + BATCH_WITHDRAWAL_TX_FEE - shortfall;
+            state.balance = amount_to_transfer + BATCH_WITHDRAWAL_TX_FEE + RENT_EXEMPTION_THRESHOLD
+                - shortfall;
             let requests = [withdrawal_request(0, amount_to_transfer)];
             accept_withdrawal_requests(&mut state, requests);
 
@@ -1162,8 +1096,8 @@ mod withdrawal_batches {
             prop_assert_eq!(
                 batches,
                 vec![
-                    requests[..MAX_WITHDRAWALS_PER_TX].to_vec(),
-                    requests[MAX_WITHDRAWALS_PER_TX..].to_vec()
+                    requests[..MAX_WITHDRAWALS_PER_NONCE_TX].to_vec(),
+                    requests[MAX_WITHDRAWALS_PER_NONCE_TX..].to_vec()
                 ]
             );
         }
@@ -1179,8 +1113,23 @@ mod withdrawal_batches {
 
             let batches: Vec<_> = state.withdrawal_batches().collect();
 
-            prop_assert_eq!(batches, vec![requests[..MAX_WITHDRAWALS_PER_TX].to_vec()]);
+            prop_assert_eq!(batches, vec![requests[..MAX_WITHDRAWALS_PER_NONCE_TX].to_vec()]);
         }
+    }
+
+    #[test]
+    fn should_hold_back_the_rent_exemption_threshold() {
+        let mut state = state();
+        let requests = [withdrawal_request(0, MINIMUM_WITHDRAWAL_AMOUNT)];
+        accept_withdrawal_requests(&mut state, requests.clone());
+        state.balance =
+            MINIMUM_WITHDRAWAL_AMOUNT + BATCH_WITHDRAWAL_TX_FEE + RENT_EXEMPTION_THRESHOLD - 1;
+
+        assert_eq!(state.withdrawal_batches().next(), None);
+
+        state.balance += 1;
+
+        assert_eq!(state.withdrawal_batches().next(), Some(requests.to_vec()));
     }
 
     #[test]
@@ -1200,7 +1149,8 @@ mod withdrawal_batches {
     #[test]
     fn should_stop_at_first_unaffordable_request_without_skipping_it() {
         let mut state = state();
-        state.balance = 2 * MINIMUM_WITHDRAWAL_AMOUNT + BATCH_WITHDRAWAL_TX_FEE;
+        state.balance =
+            2 * MINIMUM_WITHDRAWAL_AMOUNT + BATCH_WITHDRAWAL_TX_FEE + RENT_EXEMPTION_THRESHOLD;
         let requests = [
             withdrawal_request(0, MINIMUM_WITHDRAWAL_AMOUNT),
             withdrawal_request(1, 2 * MINIMUM_WITHDRAWAL_AMOUNT),
@@ -1211,6 +1161,57 @@ mod withdrawal_batches {
         let batches: Vec<_> = state.withdrawal_batches().collect();
 
         assert_eq!(batches, vec![vec![requests[0].clone()]]);
+    }
+
+    #[test]
+    fn should_not_create_a_transaction_without_pending_withdrawals() {
+        let mut state = state();
+        state.balance = u64::MAX;
+        state.nonce_pool.add_accounts([address(1)]).unwrap();
+
+        assert!(!state.can_create_withdrawal_transaction());
+    }
+
+    #[test]
+    fn should_not_create_a_transaction_without_a_free_nonce_account() {
+        let mut state = state();
+        state.balance = u64::MAX;
+        accept_withdrawal_requests(
+            &mut state,
+            [withdrawal_request(0, MINIMUM_WITHDRAWAL_AMOUNT)],
+        );
+        state.nonce_pool.add_accounts([address(1)]).unwrap();
+        state.nonce_pool.bind(&address(1), durable_nonce(1));
+
+        assert!(!state.can_create_withdrawal_transaction());
+    }
+
+    #[test]
+    fn should_not_create_a_transaction_without_an_affordable_batch() {
+        let mut state = state();
+        state.balance =
+            MINIMUM_WITHDRAWAL_AMOUNT + BATCH_WITHDRAWAL_TX_FEE + RENT_EXEMPTION_THRESHOLD - 1;
+        accept_withdrawal_requests(
+            &mut state,
+            [withdrawal_request(0, MINIMUM_WITHDRAWAL_AMOUNT)],
+        );
+        state.nonce_pool.add_accounts([address(1)]).unwrap();
+
+        assert!(!state.can_create_withdrawal_transaction());
+    }
+
+    #[test]
+    fn should_create_a_transaction_with_an_affordable_batch_and_a_free_nonce_account() {
+        let mut state = state();
+        state.balance =
+            MINIMUM_WITHDRAWAL_AMOUNT + BATCH_WITHDRAWAL_TX_FEE + RENT_EXEMPTION_THRESHOLD;
+        accept_withdrawal_requests(
+            &mut state,
+            [withdrawal_request(0, MINIMUM_WITHDRAWAL_AMOUNT)],
+        );
+        state.nonce_pool.add_accounts([address(1)]).unwrap();
+
+        assert!(state.can_create_withdrawal_transaction());
     }
 
     fn state() -> State {
@@ -1295,7 +1296,7 @@ mod withdrawal_transactions {
             assert!(s.created_withdrawal_txs().is_empty());
             assert!(s.created_withdrawal_requests().is_empty());
             let transaction = s.submitted_transactions().get(&signature(7)).unwrap();
-            let MinterTransaction::NonceWithdrawal {
+            let MinterTransaction::Withdrawal {
                 nonce_account,
                 nonce_value,
                 ..
@@ -1351,7 +1352,7 @@ mod withdrawal_transactions {
             assert!(s.submitted_transactions().is_empty());
             assert_matches!(
                 s.failed_transactions().get(&signature(7)),
-                Some(MinterTransaction::NonceWithdrawal { .. })
+                Some(MinterTransaction::Withdrawal { .. })
             );
             assert_eq!(
                 s.withdrawal_status(0),
@@ -1365,7 +1366,7 @@ mod withdrawal_transactions {
 
     #[test]
     fn should_rebuild_the_bound_pool_and_created_bucket_from_a_log_ending_after_creation() {
-        let replayed = replay_events(log_of(funded_log_until_created_transaction()));
+        let mut replayed = replay_events(log_of(funded_log_until_created_transaction()));
 
         assert_eq!(
             replayed.balance(),
@@ -1384,7 +1385,7 @@ mod withdrawal_transactions {
             Some(durable_nonce(1))
         );
         assert_eq!(replayed.withdrawal_status(0), WithdrawalStatus::Pending);
-        assert_eq!(replayed.nonce_pool, pool_bound_to(durable_nonce(1)));
+        assert_eq!(replayed.reserve_nonce_accounts(1), vec![]);
     }
 
     #[test]
@@ -1399,7 +1400,7 @@ mod withdrawal_transactions {
             )
             .into(),
             signers: vec![Signer::Minter],
-            purpose: TransactionPurpose::NonceWithdrawal {
+            purpose: TransactionPurpose::Withdrawal {
                 burn_indices: vec![0_u64.into()],
             },
         });
@@ -1411,7 +1412,7 @@ mod withdrawal_transactions {
             .submitted_transactions()
             .get(&signature(7))
             .unwrap();
-        let MinterTransaction::NonceWithdrawal {
+        let MinterTransaction::Withdrawal {
             nonce_account,
             nonce_value,
             ..
@@ -1451,7 +1452,7 @@ mod withdrawal_transactions {
                 &signature(7),
                 &message_without_nonce_advance.into(),
                 &[Signer::Minter],
-                &TransactionPurpose::NonceWithdrawal {
+                &TransactionPurpose::Withdrawal {
                     burn_indices: vec![0_u64.into()],
                 },
             )
@@ -1476,7 +1477,7 @@ mod withdrawal_transactions {
                 &signature(7),
                 &message_with_another_amount.into(),
                 &[Signer::Minter],
-                &TransactionPurpose::NonceWithdrawal {
+                &TransactionPurpose::Withdrawal {
                     burn_indices: vec![0_u64.into()],
                 },
             )
@@ -1561,15 +1562,7 @@ mod withdrawal_transactions {
     }
 
     fn assert_nonce_account_free() {
-        let mut expected = pool_bound_to(durable_nonce(1));
-        expected.free(&NONCE_ACCOUNT);
-        read_state(|s| assert_eq!(s.nonce_pool, expected));
-    }
-
-    fn pool_bound_to(nonce_value: solana_hash::Hash) -> DurableNoncePool {
-        let mut pool = DurableNoncePool::new([NONCE_ACCOUNT])
-            .expect("a single nonce account is pairwise distinct");
-        pool.bind(&NONCE_ACCOUNT, nonce_value);
-        pool
+        mutate_state(|s| assert_eq!(s.reserve_nonce_accounts(1), vec![NONCE_ACCOUNT]));
+        mutate_state(|s| s.unreserve_nonce_account(&NONCE_ACCOUNT));
     }
 }

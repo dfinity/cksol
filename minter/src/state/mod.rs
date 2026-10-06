@@ -5,7 +5,7 @@ use crate::{
     numeric::{LedgerBurnIndex, LedgerMintIndex},
     rpc::BlockHeight,
     sol_transfer::{
-        BATCH_WITHDRAWAL_TX_FEE, MAX_SIGNATURES, MAX_WITHDRAWALS_PER_TX,
+        BATCH_WITHDRAWAL_TX_FEE, MAX_SIGNATURES, MAX_WITHDRAWALS_PER_NONCE_TX,
         build_batch_withdrawal_message,
     },
     state::event::{
@@ -211,6 +211,19 @@ impl State {
         &self.created_withdrawal_txs
     }
 
+    /// Transiently reserves up to `max` free durable nonce accounts for
+    /// withdrawal batches being processed, so that concurrently processed
+    /// batches can never pick the same account.
+    pub fn reserve_nonce_accounts(&mut self, max: usize) -> Vec<Address> {
+        self.nonce_pool.reserve_accounts(max)
+    }
+
+    /// Releases the transient reservation of a nonce account whose batch was
+    /// not submitted.
+    pub fn unreserve_nonce_account(&mut self, address: &Address) {
+        self.nonce_pool.unreserve(address);
+    }
+
     pub fn transactions_to_resubmit(&self) -> &InsertionOrderedMap<Signature, MinterTransaction> {
         &self.transactions_to_resubmit
     }
@@ -232,13 +245,7 @@ impl State {
             });
         match transaction {
             MinterTransaction::SweepDeposit { .. } => self.deposits.drop_swept(signature),
-            MinterTransaction::Withdrawal { .. } => assert!(
-                self.transactions_to_resubmit
-                    .insert(*signature, transaction)
-                    .is_none(),
-                "BUG: transaction {signature} is already queued for resubmission"
-            ),
-            MinterTransaction::NonceWithdrawal { .. } => {
+            MinterTransaction::Withdrawal { .. } => {
                 panic!("BUG: durable-nonce withdrawal transaction {signature} cannot expire")
             }
         }
@@ -508,8 +515,12 @@ impl State {
     pub fn withdrawal_batches(&self) -> WithdrawalBatches<'_> {
         WithdrawalBatches {
             pending_requests: self.pending_withdrawal_requests.values().peekable(),
-            available_balance: self.balance,
+            available_balance: self.balance.saturating_sub(RENT_EXEMPTION_THRESHOLD),
         }
+    }
+
+    pub fn can_create_withdrawal_transaction(&self) -> bool {
+        self.nonce_pool.num_free_accounts() > 0 && self.withdrawal_batches().next().is_some()
     }
 
     /// Returns the creation timestamp (in nanoseconds) of the oldest incomplete withdrawal request.
@@ -560,44 +571,7 @@ impl State {
         let message = transaction.clone();
         let signers = signers.to_vec();
         let submitted_transaction = match purpose {
-            TransactionPurpose::Withdrawal {
-                burn_indices,
-                block_height,
-            } => {
-                let mut total: Lamport = 0;
-                for burn_index in burn_indices {
-                    let pending = self
-                        .pending_withdrawal_requests
-                        .remove(burn_index)
-                        .unwrap_or_else(|| {
-                            panic!("Attempted to send transaction for unknown withdrawal request: {burn_index:?}")
-                        });
-                    total += pending.request.amount_to_transfer;
-                    assert_eq!(
-                        self.sent_withdrawal_requests.insert(
-                            *burn_index,
-                            SentWithdrawalRequest {
-                                request: pending.request,
-                                signature: *signature,
-                                created_at: pending.created_at,
-                            },
-                        ),
-                        None,
-                        "Attempted to send transaction for already sent withdrawal request: {burn_index:?}"
-                    );
-                }
-                let tx_fee = transaction.transaction_fee();
-                self.balance = self
-                    .balance
-                    .checked_sub(total + tx_fee)
-                    .expect("BUG: insufficient minter balance for withdrawal");
-                MinterTransaction::Withdrawal {
-                    message,
-                    signers,
-                    block_height: *block_height,
-                }
-            }
-            TransactionPurpose::NonceWithdrawal { burn_indices } => {
+            TransactionPurpose::Withdrawal { burn_indices } => {
                 self.send_nonce_withdrawal(signature, message, signers, burn_indices)
             }
             TransactionPurpose::SweepDeposit {
@@ -722,7 +696,7 @@ impl State {
                 "Attempted to send transaction for already sent withdrawal request: {burn_index:?}"
             );
         }
-        MinterTransaction::NonceWithdrawal {
+        MinterTransaction::Withdrawal {
             message,
             signers,
             nonce_account,
@@ -772,8 +746,8 @@ impl State {
     fn process_transaction_resubmitted(
         &mut self,
         old_signature: &Signature,
-        new_signature: &Signature,
-        new_block_height: BlockHeight,
+        _new_signature: &Signature,
+        _new_block_height: BlockHeight,
     ) {
         let old_transaction = self
             .transactions_to_resubmit
@@ -781,41 +755,13 @@ impl State {
             .unwrap_or_else(|| {
                 panic!("Attempted to resubmit unknown transaction with signature {old_signature:?}")
             });
-        let new_transaction = match old_transaction {
+        match old_transaction {
             MinterTransaction::SweepDeposit { .. } => panic!(
                 "BUG: sweep transaction {old_signature} must be dropped instead of resubmitted"
             ),
-            MinterTransaction::Withdrawal {
-                message,
-                signers,
-                block_height: _,
-            } => MinterTransaction::Withdrawal {
-                message,
-                signers,
-                block_height: new_block_height,
-            },
-            MinterTransaction::NonceWithdrawal { .. } => panic!(
+            MinterTransaction::Withdrawal { .. } => panic!(
                 "BUG: durable-nonce withdrawal transaction {old_signature} must never be resubmitted"
             ),
-        };
-        assert!(
-            !self.succeeded_transactions.contains(new_signature),
-            "Attempted to resubmit with signature {new_signature:?} that already succeeded"
-        );
-        assert!(
-            !self.failed_transactions.contains_key(new_signature),
-            "Attempted to resubmit with signature {new_signature:?} that already failed"
-        );
-        assert_eq!(
-            self.submitted_transactions
-                .insert(*new_signature, new_transaction),
-            None,
-            "Attempted to resubmit transaction with signature {new_signature:?} that already exists"
-        );
-        for sent in self.sent_withdrawal_requests.values_mut() {
-            if &sent.signature == old_signature {
-                sent.signature = *new_signature;
-            }
         }
     }
 
@@ -832,8 +778,7 @@ impl State {
             });
         match transaction {
             MinterTransaction::SweepDeposit { .. } => self.deposits.finalize_swept(signature),
-            MinterTransaction::Withdrawal { .. } => {}
-            MinterTransaction::NonceWithdrawal { nonce_account, .. } => {
+            MinterTransaction::Withdrawal { nonce_account, .. } => {
                 self.nonce_pool.free(&nonce_account)
             }
         }
@@ -865,8 +810,7 @@ impl State {
             });
         match &transaction {
             MinterTransaction::SweepDeposit { .. } => self.deposits.drop_swept(signature),
-            MinterTransaction::Withdrawal { .. } => {}
-            MinterTransaction::NonceWithdrawal { nonce_account, .. } => {
+            MinterTransaction::Withdrawal { nonce_account, .. } => {
                 self.nonce_pool.free(nonce_account)
             }
         }
@@ -995,7 +939,9 @@ pub struct PendingWithdrawalRequest {
 }
 
 /// Groups pending withdrawal requests, oldest first, into batches that the
-/// minter balance can pay for, including one transaction fee per batch.
+/// minter balance can pay for, including one transaction fee per batch and
+/// holding back the rent exemption threshold so a withdrawal transaction can
+/// never leave the main address below it.
 ///
 /// Iteration stops at the first request the remaining balance cannot cover,
 /// so requests are never reordered or skipped.
@@ -1009,7 +955,7 @@ impl Iterator for WithdrawalBatches<'_> {
 
     fn next(&mut self) -> Option<Self::Item> {
         let mut batch = Vec::new();
-        while batch.len() < MAX_WITHDRAWALS_PER_TX {
+        while batch.len() < MAX_WITHDRAWALS_PER_NONCE_TX {
             let reserved_fee = if batch.is_empty() {
                 BATCH_WITHDRAWAL_TX_FEE
             } else {
@@ -1076,15 +1022,9 @@ pub enum MinterTransaction {
         /// The block height of the block whose blockhash the transaction uses.
         block_height: BlockHeight,
     },
-    Withdrawal {
-        message: VersionedMessage,
-        signers: Vec<Signer>,
-        /// The block height of the block whose blockhash the transaction uses.
-        block_height: BlockHeight,
-    },
     /// A durable-nonce withdrawal transaction, which never expires: it stays
     /// in flight until it is finalized.
-    NonceWithdrawal {
+    Withdrawal {
         message: VersionedMessage,
         signers: Vec<Signer>,
         /// The durable nonce account whose nonce value the transaction uses.
@@ -1098,16 +1038,14 @@ impl MinterTransaction {
     pub fn message(&self) -> &VersionedMessage {
         match self {
             MinterTransaction::SweepDeposit { message, .. }
-            | MinterTransaction::Withdrawal { message, .. }
-            | MinterTransaction::NonceWithdrawal { message, .. } => message,
+            | MinterTransaction::Withdrawal { message, .. } => message,
         }
     }
 
     pub fn signers(&self) -> &[Signer] {
         match self {
             MinterTransaction::SweepDeposit { signers, .. }
-            | MinterTransaction::Withdrawal { signers, .. }
-            | MinterTransaction::NonceWithdrawal { signers, .. } => signers,
+            | MinterTransaction::Withdrawal { signers, .. } => signers,
         }
     }
 
@@ -1115,9 +1053,8 @@ impl MinterTransaction {
     /// or `None` for a durable-nonce transaction, which never expires.
     pub fn block_height(&self) -> Option<BlockHeight> {
         match self {
-            MinterTransaction::SweepDeposit { block_height, .. }
-            | MinterTransaction::Withdrawal { block_height, .. } => Some(*block_height),
-            MinterTransaction::NonceWithdrawal { .. } => None,
+            MinterTransaction::SweepDeposit { block_height, .. } => Some(*block_height),
+            MinterTransaction::Withdrawal { .. } => None,
         }
     }
 }

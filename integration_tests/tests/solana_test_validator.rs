@@ -142,12 +142,23 @@ async fn should_deposit_and_withdraw() {
             ))
             .await;
 
+        let nonce_account: Address = setup.minter().get_minter_info().await.nonce_accounts[0]
+            .parse()
+            .expect("the minter reports well-formed nonce accounts");
+        let nonce_value_before = validator.get_nonce_value(&nonce_account).await;
+
         // Advance time to trigger withdrawal processing and monitor timers
         setup.advance_time(Duration::from_mins(10)).await;
 
         for &burn_index in &burn_indices {
             wait_for_withdrawal_finalized(&setup, burn_index).await;
         }
+
+        // The landed withdrawal transaction advanced the durable nonce it carried.
+        assert_ne!(
+            validator.get_nonce_value(&nonce_account).await,
+            nonce_value_before
+        );
 
         // Verify all ICRC accounts are drained
         for account in &accounts {
