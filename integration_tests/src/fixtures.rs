@@ -149,12 +149,12 @@ impl MockBuilder {
             )
     }
 
-    /// Mocks for `finalize_transactions` finding the pending transaction expired at
-    /// `block_height`: `getSlot` → `getBlock` → `getSignatureStatuses` reporting it as not
-    /// found.
-    pub fn mark_transaction_expired(self, block_height: u64) -> Self {
+    /// Mocks for `finalize_transactions` finding the pending transaction with the given
+    /// signature expired at `block_height`: `getSlot` → `getBlock` → `getSignatureStatuses`
+    /// reporting it as not found.
+    pub fn mark_transaction_expired(self, signature: &Signature, block_height: u64) -> Self {
         self.get_current_block(block_height, IGNORED_BLOCKHASH)
-            .check_signature_statuses(get_signature_statuses_not_found_response())
+            .check_signature_statuses(signature, get_signature_statuses_not_found_response())
     }
 
     /// Mocks for `resubmit_transactions` sending the replacement transaction, built on the
@@ -167,11 +167,11 @@ impl MockBuilder {
             )
     }
 
-    /// Mocks for `finalize_transactions` reporting the pending transaction as finalized at
-    /// `block_height`.
-    pub fn finalize_transaction(self, block_height: u64) -> Self {
+    /// Mocks for `finalize_transactions` reporting the pending transaction with the given
+    /// signature as finalized at `block_height`.
+    pub fn finalize_transaction(self, signature: &Signature, block_height: u64) -> Self {
         self.get_current_block(block_height, IGNORED_BLOCKHASH)
-            .check_signature_statuses(get_signature_statuses_finalized_response())
+            .check_signature_statuses(signature, get_signature_statuses_finalized_response())
     }
 
     /// Mock for `getTransaction` for a sweep of [`DEFAULT_CALLER_DEPOSIT_ADDRESS`] under the
@@ -184,8 +184,8 @@ impl MockBuilder {
         )
     }
 
-    fn check_signature_statuses(self, response: JsonRpcResponse) -> Self {
-        self.expect(get_signature_statuses_request(), response)
+    fn check_signature_statuses(self, signature: &Signature, response: JsonRpcResponse) -> Self {
+        self.expect(get_signature_statuses_request(signature), response)
     }
 
     fn get_current_block(self, block_height: u64, blockhash: &str) -> Self {
@@ -311,8 +311,11 @@ fn get_block_response(block_height: u64, blockhash: &str) -> JsonRpcResponse {
     }))
 }
 
-fn get_signature_statuses_request() -> JsonRpcRequestMatcher {
-    JsonRpcRequestMatcher::with_method("getSignatureStatuses")
+fn get_signature_statuses_request(signature: &Signature) -> JsonRpcRequestMatcher {
+    JsonRpcRequestMatcher::with_method("getSignatureStatuses").with_params(json!([
+        [signature.to_string()],
+        {"searchTransactionHistory": true}
+    ]))
 }
 
 /// Response to a `getSignatureStatuses` request for the single pending transaction,
