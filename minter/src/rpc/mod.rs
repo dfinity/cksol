@@ -212,7 +212,7 @@ impl TryFrom<UiAccount> for NonceAccount {
 
     fn try_from(account: UiAccount) -> Result<Self, Self::Error> {
         if account.owner != system_program::ID.to_string() || account.executable {
-            return Err(GetNonceAccountError::NotOwnedBySystemProgram {
+            return Err(GetNonceAccountError::UnexpectedAccountMetadata {
                 owner: account.owner,
                 executable: account.executable,
             });
@@ -246,8 +246,10 @@ pub enum GetNonceAccountError {
     InconsistentRpcResults,
     #[error("Nonce account not found")]
     AccountNotFound,
-    #[error("Account owned by {owner} (executable: {executable}) instead of the system program")]
-    NotOwnedBySystemProgram { owner: String, executable: bool },
+    #[error(
+        "Expected a non-executable account owned by the system program, got owner {owner} (executable: {executable})"
+    )]
+    UnexpectedAccountMetadata { owner: String, executable: bool },
     #[error("Not an initialized nonce account: {0}")]
     NotAnInitializedNonceAccount(String),
 }

@@ -365,7 +365,7 @@ mod get_nonce_account_tests {
     }
 
     #[tokio::test]
-    async fn should_fail_if_account_not_owned_by_the_system_program() {
+    async fn should_fail_if_account_is_not_a_non_executable_system_program_account() {
         init_state();
 
         let foreign_owner_account = sol_rpc_types::AccountInfo {
@@ -385,7 +385,7 @@ mod get_nonce_account_tests {
 
             assert_matches!(
                 result,
-                Err(GetNonceAccountError::NotOwnedBySystemProgram { .. })
+                Err(GetNonceAccountError::UnexpectedAccountMetadata { .. })
             );
         }
     }
