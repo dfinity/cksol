@@ -6,7 +6,7 @@ use crate::{
     state::{audit::process_event, read_state},
     test_fixtures::{
         DEPOSIT_SOL_FEE, DEPOSIT_SOL_REQUIRED_CYCLES, MINIMUM_DEPOSIT_AMOUNT,
-        MINIMUM_WITHDRAWAL_AMOUNT, WITHDRAWAL_FEE, account,
+        MINIMUM_WITHDRAWAL_AMOUNT, WITHDRAWAL_FEE, account, address,
         arb::arb_event,
         deposit_id,
         events::{
@@ -408,6 +408,119 @@ mod swept_deposits {
     }
 }
 
+mod nonce_accounts {
+    use super::*;
+    use crate::state::audit::replay_events;
+
+    #[test]
+    fn should_only_add_a_nonce_account_once_no_incomplete_withdrawal_targets_it() {
+        init_state();
+        init_balance();
+        let destination = address(0);
+        let add_destination = || {
+            mutate_state(|s| {
+                s.upgrade(UpgradeArgs {
+                    nonce_accounts_to_add: Some(vec![destination.to_string()]),
+                    ..Default::default()
+                })
+            })
+        };
+
+        accept_withdrawal(account(1), 0, MINIMUM_WITHDRAWAL_AMOUNT);
+        assert_eq!(
+            add_destination(),
+            Err(InvalidStateError::NonceAccountIsWithdrawalDestination(
+                destination
+            ))
+        );
+
+        submit_withdrawal(signature(1), vec![0]);
+        assert_eq!(
+            add_destination(),
+            Err(InvalidStateError::NonceAccountIsWithdrawalDestination(
+                destination
+            ))
+        );
+
+        succeed_transaction(signature(1));
+        add_destination().unwrap();
+        assert!(read_state(|s| s
+            .nonce_pool_addresses()
+            .contains(&destination)));
+    }
+
+    #[test]
+    fn should_fail_init_with_malformed_nonce_account() {
+        let err = State::try_from(InitArgs {
+            nonce_accounts: vec!["not-a-base58-address".to_string()],
+            ..valid_init_args()
+        })
+        .unwrap_err();
+
+        assert_matches!(err, InvalidStateError::InvalidNonceAccount(_));
+    }
+
+    #[test]
+    fn should_add_nonce_accounts_through_upgrades() {
+        let mut state = State::try_from(valid_init_args()).unwrap();
+
+        state
+            .upgrade(UpgradeArgs {
+                nonce_accounts_to_add: Some(vec![nonce_account(1), nonce_account(2)]),
+                ..Default::default()
+            })
+            .unwrap();
+
+        assert_eq!(
+            pool_addresses(&state),
+            vec![nonce_account(1), nonce_account(2)]
+        );
+    }
+
+    #[test]
+    fn should_replay_nonce_accounts_like_direct_transitions() {
+        let init_args = InitArgs {
+            nonce_accounts: vec![nonce_account(1)],
+            ..valid_init_args()
+        };
+        let upgrade_args = UpgradeArgs {
+            nonce_accounts_to_add: Some(vec![nonce_account(2)]),
+            ..Default::default()
+        };
+        let mut expected = State::try_from(init_args.clone()).unwrap();
+        expected.upgrade(upgrade_args.clone()).unwrap();
+
+        let replayed = replay_events([
+            Event {
+                timestamp: 0,
+                payload: EventType::Init(init_args),
+            },
+            Event {
+                timestamp: 1,
+                payload: EventType::Upgrade(upgrade_args),
+            },
+        ]);
+
+        assert_eq!(replayed, expected);
+        assert_eq!(
+            pool_addresses(&replayed),
+            vec![nonce_account(1), nonce_account(2)]
+        );
+    }
+
+    fn nonce_account(i: usize) -> String {
+        address(i).to_string()
+    }
+
+    fn pool_addresses(state: &State) -> Vec<String> {
+        state
+            .nonce_pool_addresses()
+            .iter()
+            .map(Address::to_string)
+            .collect()
+    }
+}
+
 mod state_validation {
     use super::*;
 
@@ -614,6 +727,7 @@ mod state_from_init_args {
                 transactions_to_resubmit: InsertionOrderedMap::new(),
                 succeeded_transactions: BTreeSet::new(),
                 failed_transactions: InsertionOrderedMap::new(),
+                nonce_pool: DurableNoncePool::default(),
                 active_tasks: BTreeSet::new(),
                 balance: 0,
             }

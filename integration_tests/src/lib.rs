@@ -48,11 +48,17 @@ pub struct SetupBuilder {
     sol_rpc_install_args: Option<sol_rpc_types::InstallArgs>,
     initial_ledger_balances: Option<Vec<(Account, Nat)>>,
     proxy_canister: bool,
+    nonce_accounts: Vec<String>,
 }
 
 impl SetupBuilder {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn with_nonce_accounts(mut self, nonce_accounts: Vec<String>) -> Self {
+        self.nonce_accounts = nonce_accounts;
+        self
     }
 
     pub fn with_initial_ledger_balances(
@@ -84,6 +90,7 @@ impl SetupBuilder {
             self.sol_rpc_install_args.unwrap_or_default(),
             self.initial_ledger_balances,
             self.proxy_canister,
+            self.nonce_accounts,
         )
         .await
     }
@@ -115,6 +122,7 @@ impl Setup {
         sol_rpc_install_args: sol_rpc_types::InstallArgs,
         initial_ledger_balances: Option<Vec<(Account, Nat)>>,
         with_proxy_canister: bool,
+        nonce_accounts: Vec<String>,
     ) -> Self {
         let env = PocketIcBuilder::new()
             .with_nns_subnet() //make_live requires NNS subnet.
@@ -158,6 +166,7 @@ impl Setup {
             Encode!(&cksol_minter_init_args(
                 sol_rpc_canister_id,
                 ledger_canister_id,
+                nonce_accounts,
             ))
             .unwrap(),
             Some(Self::DEFAULT_CONTROLLER),
@@ -364,6 +373,24 @@ impl Setup {
 
             mocks.execute_http_outcall_mocks(env).await;
         }
+    }
+
+    /// Polls `get_minter_info` until the minter reports its main Solana address,
+    /// advancing time between polls so the timer fetching the Schnorr master key fires.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the address is not reported within the timeout.
+    pub async fn wait_for_minter_address(&self) -> solana_address::Address {
+        for _ in 0..30 {
+            if let Some(address) = self.minter().get_minter_info().await.minter_address {
+                return address
+                    .parse()
+                    .expect("the minter reported a malformed main address");
+            }
+            self.advance_time_and_settle(Duration::from_secs(1)).await;
+        }
+        panic!("Minter address was not available within timeout");
     }
 
     pub async fn check_metrics(self) -> ic_metrics_assert::MetricsAssert<Self> {
@@ -710,6 +737,7 @@ fn cksol_minter_wasm() -> Vec<u8> {
 fn cksol_minter_init_args(
     sol_rpc_canister_id: Principal,
     ledger_canister_id: Principal,
+    nonce_accounts: Vec<String>,
 ) -> MinterArg {
     use cksol_types_internal::{Ed25519KeyName, InitArgs, MinterArg, SolanaNetwork};
     MinterArg::Init(InitArgs {
@@ -722,6 +750,7 @@ fn cksol_minter_init_args(
         deposit_sol_required_cycles: Setup::DEFAULT_DEPOSIT_SOL_REQUIRED_CYCLES as u64,
         solana_network: SolanaNetwork::Mainnet,
         deposit_sol_fee: Setup::DEFAULT_DEPOSIT_SOL_FEE as u64,
+        nonce_accounts,
     })
 }
 

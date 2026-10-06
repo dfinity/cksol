@@ -9,6 +9,8 @@ use solana_client::{
 };
 use solana_keypair::{Keypair, Signer};
 use solana_signature::Signature;
+use solana_system_interface::instruction::create_nonce_account;
+use solana_transaction::Transaction;
 use std::{
     net::{TcpListener, UdpSocket},
     ops::RangeInclusive,
@@ -23,6 +25,9 @@ use std::{
 
 /// Solana base fee per signature included in a transaction.
 pub const FEE_PER_SIGNATURE: Lamport = 5_000;
+
+/// Rent exemption minimum of a durable nonce account for its 80 bytes of state.
+pub const NONCE_ACCOUNT_RENT_EXEMPTION: Lamport = 1_447_680;
 
 /// A `solana-test-validator` process owned by a single test.
 ///
@@ -219,6 +224,40 @@ impl SolanaTestValidator {
         self.confirm_transaction(&signature, CommitmentConfig::finalized())
             .await;
         signature
+    }
+
+    /// Creates `count` durable nonce accounts with `authority` as their nonce
+    /// authority, funded by a freshly airdropped account, and returns their
+    /// addresses once their creation is finalized.
+    pub async fn create_nonce_accounts(&self, count: usize, authority: &Address) -> Vec<Address> {
+        let funder = Keypair::new();
+        let cost_per_account = NONCE_ACCOUNT_RENT_EXEMPTION + 2 * FEE_PER_SIGNATURE;
+        self.airdrop_and_confirm(funder.pubkey(), 2 * count as u64 * cost_per_account)
+            .await;
+
+        let rpc = self.rpc_client();
+        let mut addresses = Vec::with_capacity(count);
+        for _ in 0..count {
+            let nonce_account = Keypair::new();
+            let instructions = create_nonce_account(
+                &funder.pubkey(),
+                &nonce_account.pubkey(),
+                authority,
+                NONCE_ACCOUNT_RENT_EXEMPTION,
+            );
+            let blockhash = rpc.get_latest_blockhash().await.unwrap();
+            let transaction = Transaction::new_signed_with_payer(
+                &instructions,
+                Some(&funder.pubkey()),
+                &[&funder, &nonce_account],
+                blockhash,
+            );
+            let signature = rpc.send_transaction(&transaction).await.unwrap();
+            self.confirm_transaction(&signature, CommitmentConfig::finalized())
+                .await;
+            addresses.push(nonce_account.pubkey());
+        }
+        addresses
     }
 
     pub async fn airdrop_and_confirm(&self, address: Address, airdrop_amount: Lamport) {

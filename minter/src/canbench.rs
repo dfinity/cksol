@@ -40,6 +40,7 @@ fn init_args() -> InitArgs {
         deposit_sol_required_cycles: 1_000_000_000_000,
         solana_network: SolanaNetwork::Mainnet,
         deposit_sol_fee: 10_000_000_000,
+        nonce_accounts: vec![],
     }
 }
 

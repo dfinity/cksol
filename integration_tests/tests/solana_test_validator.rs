@@ -6,6 +6,7 @@ use cksol_int_tests::{
     validator::{FEE_PER_SIGNATURE, SolanaTestValidator, wait_for_withdrawal_finalized},
 };
 use cksol_types::{DepositSolId, DepositSolStatus, Signature, WithdrawalArgs};
+use cksol_types_internal::UpgradeArgs;
 use icrc_ledger_types::icrc1::account::Account;
 use sol_rpc_types::Lamport;
 use solana_address::Address;
@@ -173,6 +174,41 @@ async fn should_deposit_and_withdraw() {
             "Minter SOL balance should not decrease"
         );
     }
+
+    setup.drop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn should_add_an_operator_created_nonce_account_through_an_upgrade() {
+    let validator = SolanaTestValidator::start().await;
+    let setup = validator.setup().await;
+
+    assert_eq!(
+        setup.minter().get_minter_info().await.nonce_accounts,
+        Vec::<String>::new()
+    );
+    let authority = setup.wait_for_minter_address().await;
+
+    let nonce_accounts: Vec<String> = validator
+        .create_nonce_accounts(1, &authority)
+        .await
+        .iter()
+        .map(Address::to_string)
+        .collect();
+
+    setup
+        .minter()
+        .upgrade(UpgradeArgs {
+            nonce_accounts_to_add: Some(nonce_accounts.clone()),
+            ..UpgradeArgs::default()
+        })
+        .await
+        .expect("upgrade should succeed");
+
+    assert_eq!(
+        setup.minter().get_minter_info().await.nonce_accounts,
+        nonce_accounts
+    );
 
     setup.drop().await;
 }

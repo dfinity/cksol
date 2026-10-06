@@ -4,8 +4,8 @@ use candid::{Nat, Principal};
 use cksol_int_tests::{
     CkSolMinter, Setup, SetupBuilder,
     fixtures::{
-        DEFAULT_CALLER_ACCOUNT, DEFAULT_CALLER_DEPOSIT_ADDRESS, DEPOSIT_AMOUNT, MockBuilder,
-        RENT_EXEMPTION_THRESHOLD, SharedMockHttpOutcalls,
+        DEFAULT_CALLER_ACCOUNT, DEFAULT_CALLER_DEPOSIT_ADDRESS, DEPOSIT_AMOUNT, MINTER_ADDRESS,
+        MockBuilder, RENT_EXEMPTION_THRESHOLD, SharedMockHttpOutcalls,
     },
     validator::FEE_PER_SIGNATURE,
 };
@@ -173,6 +173,7 @@ mod lifecycle {
         const NEW_DEPOSIT_SOL_REQUIRED_CYCLES: u128 = 500_000_000_000;
 
         let setup = SetupBuilder::new().build().await;
+        wait_for_initial_minter_address(&setup).await;
 
         let initial_minter_info = setup.minter().get_minter_info().await;
         assert_eq!(
@@ -184,6 +185,8 @@ mod lifecycle {
                 withdrawal_fee: Setup::DEFAULT_WITHDRAWAL_FEE,
                 deposit_sol_required_cycles: Setup::DEFAULT_DEPOSIT_SOL_REQUIRED_CYCLES,
                 balance: 0,
+                minter_address: Some(MINTER_ADDRESS.to_string()),
+                nonce_accounts: vec![],
             }
         );
 
@@ -207,6 +210,7 @@ mod lifecycle {
                 withdrawal_fee: Some(NEW_WITHDRAWAL_FEE),
                 deposit_sol_required_cycles: Some(NEW_DEPOSIT_SOL_REQUIRED_CYCLES as u64),
                 deposit_sol_fee: None,
+                nonce_accounts_to_add: None,
             })
             .await
             .expect("upgrade failed");
@@ -221,6 +225,8 @@ mod lifecycle {
                 withdrawal_fee: NEW_WITHDRAWAL_FEE,
                 deposit_sol_required_cycles: NEW_DEPOSIT_SOL_REQUIRED_CYCLES,
                 balance: 0,
+                minter_address: Some(MINTER_ADDRESS.to_string()),
+                nonce_accounts: vec![],
             }
         );
 
@@ -269,6 +275,25 @@ mod lifecycle {
         });
 
         setup.drop().await;
+    }
+
+    /// Polls until the minter has fetched its Schnorr master key for the first
+    /// time. The fetch is recorded in a `MinterPublicKeyFetched` event, so the
+    /// key survives upgrades and the address stays available without waiting.
+    async fn wait_for_initial_minter_address(setup: &Setup) {
+        for _ in 0..10 {
+            if setup
+                .minter()
+                .get_minter_info()
+                .await
+                .minter_address
+                .is_some()
+            {
+                return;
+            }
+            setup.tick().await;
+        }
+        panic!("Minter address was not cached within timeout");
     }
 }
 

@@ -66,6 +66,7 @@ pub fn valid_init_args() -> InitArgs {
         deposit_sol_required_cycles: DEPOSIT_SOL_REQUIRED_CYCLES as u64,
         solana_network: SolanaNetwork::Mainnet,
         deposit_sol_fee: DEPOSIT_SOL_FEE as u64,
+        nonce_accounts: vec![],
     }
 }
 
@@ -132,6 +133,13 @@ pub fn signature(i: usize) -> solana_signature::Signature {
     let mut bytes = [0u8; 64];
     bytes[..8].copy_from_slice(&(i as u64).to_le_bytes());
     solana_signature::Signature::from(bytes)
+}
+
+/// Returns an [`Address`] unique for any `usize` index, derived from `i as u64` via le_bytes.
+pub fn address(i: usize) -> Address {
+    let mut bytes = [0u8; 32];
+    bytes[..8].copy_from_slice(&(i as u64).to_le_bytes());
+    Address::from(bytes)
 }
 
 /// The block height used by fixtures whose test does not care about blockhash expiry.
@@ -934,7 +942,7 @@ pub mod arb {
             any::<u64>(),
             any::<u64>(),
             arb_solana_network(),
-            any::<u64>(),
+            (any::<u64>(), arb_nonce_accounts()),
         )
             .prop_map(
                 |(
@@ -946,7 +954,7 @@ pub mod arb {
                     withdrawal_fee,
                     deposit_sol_required_cycles,
                     solana_network,
-                    deposit_sol_fee,
+                    (deposit_sol_fee, nonce_accounts),
                 )| {
                     InitArgs {
                         sol_rpc_canister_id,
@@ -958,9 +966,14 @@ pub mod arb {
                         deposit_sol_required_cycles,
                         solana_network,
                         deposit_sol_fee,
+                        nonce_accounts,
                     }
                 },
             )
+    }
+
+    fn arb_nonce_accounts() -> impl Strategy<Value = Vec<String>> {
+        prop::collection::vec(arb_address().prop_map(|address| address.to_string()), 0..5)
     }
 
     pub fn arb_upgrade_args() -> impl Strategy<Value = UpgradeArgs> {
@@ -971,6 +984,7 @@ pub mod arb {
             prop::option::of(any::<u64>()),
             prop::option::of(any::<u64>()),
             prop::option::of(any::<u64>()),
+            prop::option::of(arb_nonce_accounts()),
         )
             .prop_map(
                 |(
@@ -980,6 +994,7 @@ pub mod arb {
                     withdrawal_fee,
                     deposit_sol_required_cycles,
                     deposit_sol_fee,
+                    nonce_accounts_to_add,
                 )| UpgradeArgs {
                     sol_rpc_canister_id,
                     minimum_withdrawal_amount,
@@ -987,6 +1002,7 @@ pub mod arb {
                     withdrawal_fee,
                     deposit_sol_required_cycles,
                     deposit_sol_fee,
+                    nonce_accounts_to_add,
                 },
             )
     }
