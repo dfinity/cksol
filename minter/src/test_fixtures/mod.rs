@@ -205,10 +205,25 @@ pub fn uninitialized_nonce_account_info() -> sol_rpc_types::AccountInfo {
     nonce_account_info_in_state(NonceState::Uninitialized)
 }
 
+/// Returns a `getAccountInfo` response for an initialized nonce account in the legacy format.
+pub fn legacy_nonce_account_info(authority: Address) -> sol_rpc_types::AccountInfo {
+    nonce_account_info_in_versions(NonceVersions::Legacy(Box::new(NonceState::Initialized(
+        NonceData::new(
+            authority,
+            DurableNonce::from_blockhash(&seed_hash(1)),
+            FEE_PER_SIGNATURE,
+        ),
+    ))))
+}
+
 fn nonce_account_info_in_state(state: NonceState) -> sol_rpc_types::AccountInfo {
+    nonce_account_info_in_versions(NonceVersions::new(state))
+}
+
+fn nonce_account_info_in_versions(versions: NonceVersions) -> sol_rpc_types::AccountInfo {
     const SYSTEM_PROGRAM_ID: &str = "11111111111111111111111111111111";
-    let data = bincode::serialize(&NonceVersions::new(state))
-        .expect("BUG: serializing a nonce account should succeed");
+    let data =
+        bincode::serialize(&versions).expect("BUG: serializing a nonce account should succeed");
     sol_rpc_types::AccountInfo {
         lamports: 1_447_680,
         space: data.len() as u64,

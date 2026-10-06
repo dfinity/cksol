@@ -10,7 +10,8 @@ use crate::{
         deposit::{
             DEPOSIT_ADDRESS, legacy_deposit_transaction, legacy_deposit_transaction_signature,
         },
-        durable_nonce, fetched, init_state, nonce_account_address, nonce_account_info,
+        durable_nonce, fetched, init_state, legacy_nonce_account_info, nonce_account_address,
+        nonce_account_info,
         runtime::TestCanisterRuntime,
         uninitialized_nonce_account_info,
     },
@@ -388,6 +389,19 @@ mod get_nonce_account_tests {
                 Err(GetNonceAccountError::UnexpectedAccountMetadata { .. })
             );
         }
+    }
+
+    #[tokio::test]
+    async fn should_fail_if_account_is_a_legacy_nonce_account() {
+        init_state();
+
+        let runtime = TestCanisterRuntime::new().add_stub_response(
+            GetAccountInfoResult::Consistent(Ok(Some(legacy_nonce_account_info(MINTER_ADDRESS)))),
+        );
+
+        let result = get_nonce_account(&runtime, nonce_account_address()).await;
+
+        assert_eq!(result, Err(GetNonceAccountError::LegacyNonceAccount));
     }
 
     #[tokio::test]

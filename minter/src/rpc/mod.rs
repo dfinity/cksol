@@ -224,7 +224,11 @@ impl TryFrom<UiAccount> for NonceAccount {
         })?;
         let versions: NonceVersions = bincode::deserialize(&data)
             .map_err(|e| GetNonceAccountError::NotAnInitializedNonceAccount(e.to_string()))?;
-        match versions.state() {
+        let state = match versions {
+            NonceVersions::Legacy(_) => return Err(GetNonceAccountError::LegacyNonceAccount),
+            NonceVersions::Current(state) => state,
+        };
+        match *state {
             NonceState::Uninitialized => Err(GetNonceAccountError::NotAnInitializedNonceAccount(
                 "the nonce account is uninitialized".to_string(),
             )),
@@ -252,6 +256,8 @@ pub enum GetNonceAccountError {
     UnexpectedAccountMetadata { owner: String, executable: bool },
     #[error("Not an initialized nonce account: {0}")]
     NotAnInitializedNonceAccount(String),
+    #[error("Legacy nonce account, which cannot back a durable transaction")]
+    LegacyNonceAccount,
 }
 
 pub async fn get_recent_block<R: CanisterRuntime>(
