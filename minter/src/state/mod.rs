@@ -20,6 +20,7 @@ use icrc_ledger_types::icrc1::account::Account;
 use sol_rpc_client::SolRpcClient;
 use sol_rpc_types::{ConsensusStrategy, Lamport, RpcSources, SolanaCluster};
 use solana_address::Address;
+use solana_hash::Hash;
 use solana_signature::Signature;
 use std::{
     cell::RefCell,
@@ -227,6 +228,9 @@ impl State {
                     .is_none(),
                 "BUG: transaction {signature} is already queued for resubmission"
             ),
+            MinterTransaction::NonceWithdrawal { .. } => {
+                panic!("BUG: durable-nonce withdrawal transaction {signature} cannot expire")
+            }
         }
     }
 
@@ -614,6 +618,9 @@ impl State {
                 signers,
                 block_height: new_block_height,
             },
+            MinterTransaction::NonceWithdrawal { .. } => panic!(
+                "BUG: durable-nonce withdrawal transaction {old_signature} must never be resubmitted"
+            ),
         };
         assert!(
             !self.succeeded_transactions.contains(new_signature),
@@ -650,6 +657,9 @@ impl State {
         match transaction {
             MinterTransaction::SweepDeposit { .. } => self.deposits.finalize_swept(signature),
             MinterTransaction::Withdrawal { .. } => {}
+            MinterTransaction::NonceWithdrawal { nonce_account, .. } => {
+                self.nonce_pool.free(&nonce_account)
+            }
         }
         assert!(
             !self.transactions_to_resubmit.contains_key(signature),
@@ -677,18 +687,21 @@ impl State {
             .unwrap_or_else(|| {
                 panic!("Attempted to mark unknown transaction {signature:?} as failed")
             });
-        assert!(
-            !self.transactions_to_resubmit.contains_key(signature),
-            "BUG: transaction {signature} is queued for resubmission but is being marked as failed"
-        );
-        match transaction {
+        match &transaction {
             MinterTransaction::SweepDeposit { .. } => self.deposits.drop_swept(signature),
             MinterTransaction::Withdrawal { .. } => {}
+            MinterTransaction::NonceWithdrawal { nonce_account, .. } => {
+                self.nonce_pool.free(nonce_account)
+            }
         }
         assert_eq!(
             self.failed_transactions.insert(*signature, transaction),
             None,
             "Attempted to fail transaction {signature:?} twice"
+        );
+        assert!(
+            !self.transactions_to_resubmit.contains_key(signature),
+            "BUG: transaction {signature} is queued for resubmission but is being marked as failed"
         );
         self.sent_withdrawal_requests
             .extract_if(.., |_, sent| &sent.signature == signature)
@@ -880,27 +893,42 @@ pub enum MinterTransaction {
         /// The block height of the block whose blockhash the transaction uses.
         block_height: BlockHeight,
     },
+    /// A durable-nonce withdrawal transaction, which never expires: it stays
+    /// in flight until it is finalized.
+    NonceWithdrawal {
+        message: VersionedMessage,
+        signers: Vec<Signer>,
+        /// The durable nonce account whose nonce value the transaction uses.
+        nonce_account: Address,
+        /// The durable nonce value the transaction uses instead of a recent blockhash.
+        nonce_value: Hash,
+    },
 }
 
 impl MinterTransaction {
     pub fn message(&self) -> &VersionedMessage {
         match self {
             MinterTransaction::SweepDeposit { message, .. }
-            | MinterTransaction::Withdrawal { message, .. } => message,
+            | MinterTransaction::Withdrawal { message, .. }
+            | MinterTransaction::NonceWithdrawal { message, .. } => message,
         }
     }
 
     pub fn signers(&self) -> &[Signer] {
         match self {
             MinterTransaction::SweepDeposit { signers, .. }
-            | MinterTransaction::Withdrawal { signers, .. } => signers,
+            | MinterTransaction::Withdrawal { signers, .. }
+            | MinterTransaction::NonceWithdrawal { signers, .. } => signers,
         }
     }
 
-    pub fn block_height(&self) -> BlockHeight {
+    /// The block height of the block whose blockhash the transaction uses,
+    /// or `None` for a durable-nonce transaction, which never expires.
+    pub fn block_height(&self) -> Option<BlockHeight> {
         match self {
             MinterTransaction::SweepDeposit { block_height, .. }
-            | MinterTransaction::Withdrawal { block_height, .. } => *block_height,
+            | MinterTransaction::Withdrawal { block_height, .. } => Some(*block_height),
+            MinterTransaction::NonceWithdrawal { .. } => None,
         }
     }
 }

@@ -67,14 +67,20 @@ pub async fn finalize_transactions<R: CanisterRuntime>(runtime: R) {
 
 /// Returns whether the finalization timer must run again immediately.
 async fn check_submitted_transactions<R: CanisterRuntime>(runtime: &R) -> bool {
-    let all_transactions: BTreeMap<Signature, BlockHeight> = read_state(|state| {
-        state
-            .submitted_transactions()
-            .iter()
-            .map(|(sig, tx)| (*sig, tx.block_height()))
-            .collect()
+    let (signatures, blockhash_transactions): (
+        BTreeSet<Signature>,
+        BTreeMap<Signature, BlockHeight>,
+    ) = read_state(|state| {
+        let submitted = state.submitted_transactions();
+        (
+            submitted.iter().map(|(sig, _)| *sig).collect(),
+            submitted
+                .iter()
+                .filter_map(|(sig, tx)| tx.block_height().map(|height| (*sig, height)))
+                .collect(),
+        )
     });
-    if all_transactions.is_empty() {
+    if signatures.is_empty() {
         return false;
     }
 
@@ -89,8 +95,8 @@ async fn check_submitted_transactions<R: CanisterRuntime>(runtime: &R) -> bool {
         }
     };
 
-    let signatures: Vec<Signature> = all_transactions.keys().copied().collect();
-    let statuses = check_transaction_statuses(runtime, signatures).await;
+    let num_transactions = signatures.len();
+    let statuses = check_transaction_statuses(runtime, signatures.into_iter().collect()).await;
 
     for (signature, error) in &statuses.errored {
         log!(
@@ -122,7 +128,10 @@ async fn check_submitted_transactions<R: CanisterRuntime>(runtime: &R) -> bool {
     }
 
     for signature in &statuses.not_found {
-        if !is_blockhash_expired(all_transactions[signature], current_block.block_height) {
+        let Some(transaction_block_height) = blockhash_transactions.get(signature) else {
+            continue;
+        };
+        if !is_blockhash_expired(*transaction_block_height, current_block.block_height) {
             continue;
         }
         log!(Priority::Info, "Transaction {signature} expired");
@@ -137,7 +146,7 @@ async fn check_submitted_transactions<R: CanisterRuntime>(runtime: &R) -> bool {
         });
     }
 
-    all_transactions.len() > MAX_CONCURRENT_RPC_CALLS * MAX_SIGNATURES_PER_STATUS_CHECK
+    num_transactions > MAX_CONCURRENT_RPC_CALLS * MAX_SIGNATURES_PER_STATUS_CHECK
 }
 
 fn is_blockhash_expired(

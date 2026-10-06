@@ -400,7 +400,7 @@ mod resubmission {
         read_state(|s| {
             assert_eq!(s.submitted_transactions().len(), 1);
             let resubmitted = s.submitted_transactions().get(&new_signature).unwrap();
-            assert_eq!(resubmitted.block_height(), RESUBMISSION_BLOCK_HEIGHT);
+            assert_eq!(resubmitted.block_height(), Some(RESUBMISSION_BLOCK_HEIGHT));
         });
     }
 
