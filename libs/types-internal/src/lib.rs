@@ -36,33 +36,27 @@ pub struct InitArgs {
     /// The canister ID of the ckSOL ledger canister.
     #[cfg_attr(feature = "event", n(1), cbor(with = "icrc_cbor::principal"))]
     pub ledger_canister_id: Principal,
-    /// The deposit fee in lamports for the manual deposit flow.
-    #[cfg_attr(feature = "event", n(2))]
-    pub manual_deposit_fee: Lamport,
-    /// The deposit fee in lamports for the automated deposit flow.
-    #[cfg_attr(feature = "event", n(10))]
-    pub automated_deposit_fee: Lamport,
     /// The master Ed25519 key name.
-    #[cfg_attr(feature = "event", n(3))]
+    #[cfg_attr(feature = "event", n(2))]
     pub master_key_name: Ed25519KeyName,
     /// Minimum withdrawal amount in lamports.
-    #[cfg_attr(feature = "event", n(4))]
+    #[cfg_attr(feature = "event", n(3))]
     pub minimum_withdrawal_amount: Lamport,
     /// Minimum deposit amount in lamports.
-    #[cfg_attr(feature = "event", n(5))]
+    #[cfg_attr(feature = "event", n(4))]
     pub minimum_deposit_amount: Lamport,
     /// The withdrawal fee in lamports.
-    #[cfg_attr(feature = "event", n(6))]
+    #[cfg_attr(feature = "event", n(5))]
     pub withdrawal_fee: Lamport,
-    /// Minimum cycles the caller must attach when calling `process_deposit`.
-    #[cfg_attr(feature = "event", n(7))]
-    pub process_deposit_required_cycles: u64,
+    /// Minimum cycles the caller must attach when calling `deposit_sol`.
+    #[cfg_attr(feature = "event", n(6))]
+    pub deposit_sol_required_cycles: u64,
     /// The Solana network to use.
-    #[cfg_attr(feature = "event", n(8))]
+    #[cfg_attr(feature = "event", n(7))]
     pub solana_network: SolanaNetwork,
-    /// Extra cycles charged per `process_deposit` call to offset the cost of consolidation transactions.
-    #[cfg_attr(feature = "event", n(9))]
-    pub deposit_consolidation_fee: u64,
+    /// Extra cycles charged per `deposit_sol` call to offset the cost of the sweep.
+    #[cfg_attr(feature = "event", n(8))]
+    pub deposit_sol_fee: u64,
 }
 
 /// The upgrade args for the ckSOL minter canister.
@@ -72,27 +66,21 @@ pub struct UpgradeArgs {
     /// The canister ID of the SOL RPC canister.
     #[cfg_attr(feature = "event", n(0), cbor(with = "icrc_cbor::principal::option"))]
     pub sol_rpc_canister_id: Option<Principal>,
-    /// The new deposit fee in lamports for the manual deposit flow.
-    #[cfg_attr(feature = "event", n(1))]
-    pub manual_deposit_fee: Option<Lamport>,
-    /// The new deposit fee in lamports for the automated deposit flow.
-    #[cfg_attr(feature = "event", n(7))]
-    pub automated_deposit_fee: Option<Lamport>,
     /// The new minimum withdrawal amount in lamports.
-    #[cfg_attr(feature = "event", n(2))]
+    #[cfg_attr(feature = "event", n(1))]
     pub minimum_withdrawal_amount: Option<Lamport>,
     /// The new minimum deposit amount in lamports.
-    #[cfg_attr(feature = "event", n(3))]
+    #[cfg_attr(feature = "event", n(2))]
     pub minimum_deposit_amount: Option<Lamport>,
     /// The new withdrawal fee in lamports.
-    #[cfg_attr(feature = "event", n(4))]
+    #[cfg_attr(feature = "event", n(3))]
     pub withdrawal_fee: Option<Lamport>,
-    /// New minimum cycles the caller must attach when calling `process_deposit`.
+    /// New minimum cycles the caller must attach when calling `deposit_sol`.
+    #[cfg_attr(feature = "event", n(4))]
+    pub deposit_sol_required_cycles: Option<u64>,
+    /// New extra cycles charged per `deposit_sol` call to offset the cost of the sweep.
     #[cfg_attr(feature = "event", n(5))]
-    pub process_deposit_required_cycles: Option<u64>,
-    /// New extra cycles charged per `process_deposit` call to offset consolidation costs.
-    #[cfg_attr(feature = "event", n(6))]
-    pub deposit_consolidation_fee: Option<u64>,
+    pub deposit_sol_fee: Option<u64>,
 }
 
 /// The Solana network to connect to via the SOL RPC canister.

@@ -7,9 +7,9 @@ use crate::{
     state::{TaskType, event::TransactionPurpose, read_state},
     test_fixtures::{
         EventsAssert, MINIMUM_WITHDRAWAL_AMOUNT, MINTER_ACCOUNT, WITHDRAWAL_FEE, account,
-        confirmed_block_at_height, deposit_id, events, init_balance, init_balance_to,
-        init_schnorr_master_key, init_state, minter_signature, minter_signature_nth,
-        runtime::TestCanisterRuntime, signature,
+        confirmed_block_at_height, events, init_balance, init_balance_to, init_schnorr_master_key,
+        init_state, minter_signature, minter_signature_nth, runtime::TestCanisterRuntime,
+        signature,
     },
     withdraw::{process_pending_withdrawals, withdraw, withdrawal_status},
 };
@@ -304,29 +304,11 @@ mod process_pending_withdrawals_tests {
         init_state();
         init_schnorr_master_key();
 
-        let consolidated_deposit = deposit_id(1);
-        let consolidated_deposit_amount = 12_500_000;
-        let consolidated_mint_index = 1_u64;
-        let consolidation_signature = signature(0x10);
-        events::accept_deposit(consolidated_deposit, consolidated_deposit_amount);
-        events::mint_deposit(consolidated_deposit, consolidated_mint_index);
-        events::submit_consolidation(
-            consolidation_signature,
-            MINTER_ACCOUNT,
-            vec![consolidated_mint_index],
-        );
-        events::succeed_transaction(consolidation_signature);
-
-        let unconsolidated_deposit = deposit_id(2);
-        let unconsolidated_mint_index = 2_u64;
-        events::accept_deposit(unconsolidated_deposit, 12_500_000);
-        events::mint_deposit(unconsolidated_deposit, unconsolidated_mint_index);
+        let credited_amount = 12_500_000 - FEE_PER_SIGNATURE;
+        init_balance_to(credited_amount);
 
         let minter_balance = read_state(|s| s.balance());
-        assert_eq!(
-            minter_balance,
-            consolidated_deposit_amount - FEE_PER_SIGNATURE
-        );
+        assert_eq!(minter_balance, credited_amount);
 
         let burn_block_index = 3_u64;
         let result = withdraw(
@@ -429,21 +411,6 @@ mod process_pending_withdrawals_tests {
                 }
             );
         });
-    }
-
-    #[tokio::test]
-    async fn should_not_fetch_a_block_while_the_minter_public_key_is_unavailable() {
-        init_state();
-        init_balance();
-        events::accept_withdrawal(account(1), 1, MINIMUM_WITHDRAWAL_AMOUNT);
-        let events_before = EventsAssert::from_recorded();
-        let runtime = TestCanisterRuntime::new();
-
-        process_pending_withdrawals(runtime.clone()).await;
-
-        assert_eq!(events_before, EventsAssert::from_recorded());
-        assert_eq!(runtime.set_timer_call_count(), 0);
-        assert_eq!(withdrawal_status(1), WithdrawalStatus::Pending);
     }
 
     #[tokio::test]

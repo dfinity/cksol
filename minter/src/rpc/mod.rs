@@ -6,7 +6,7 @@ use crate::{
     runtime::CanisterRuntime,
     state::read_state,
 };
-use cksol_types::{DepositSolError, ProcessDepositError};
+use cksol_types::DepositSolError;
 use derive_more::From;
 use ic_canister_runtime::IcError;
 use minicbor::{Decode, Encode};
@@ -51,12 +51,6 @@ pub enum GetTransactionError {
     RpcError(RpcError),
     #[error("Inconsistent RPC results for transaction")]
     InconsistentRpcResults,
-}
-
-impl From<GetTransactionError> for ProcessDepositError {
-    fn from(error: GetTransactionError) -> Self {
-        ProcessDepositError::TemporarilyUnavailable(error.to_string())
-    }
 }
 
 pub async fn get_balance<R: CanisterRuntime>(

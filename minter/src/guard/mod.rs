@@ -1,5 +1,5 @@
 use crate::state::{State, TaskType, mutate_state};
-use cksol_types::{DepositSolError, ProcessDepositError, WithdrawalError};
+use cksol_types::{DepositSolError, WithdrawalError};
 use icrc_ledger_types::icrc1::account::Account;
 use std::{collections::BTreeSet, marker::PhantomData};
 
@@ -12,17 +12,6 @@ const MAX_CONCURRENT: usize = 100;
 pub enum GuardError {
     AlreadyProcessing,
     TooManyConcurrentRequests,
-}
-
-impl From<GuardError> for ProcessDepositError {
-    fn from(e: GuardError) -> Self {
-        match e {
-            GuardError::AlreadyProcessing => Self::AlreadyProcessing,
-            GuardError::TooManyConcurrentRequests => {
-                Self::TemporarilyUnavailable("too many concurrent requests".to_string())
-            }
-        }
-    }
 }
 
 impl From<GuardError> for DepositSolError {
@@ -49,14 +38,6 @@ impl From<GuardError> for WithdrawalError {
 
 pub trait PendingRequests {
     fn pending_requests(state: &mut State) -> &mut BTreeSet<Account>;
-}
-
-pub struct PendingProcessDepositRequests;
-
-impl PendingRequests for PendingProcessDepositRequests {
-    fn pending_requests(state: &mut State) -> &mut BTreeSet<Account> {
-        state.pending_process_deposit_request_guards_mut()
-    }
 }
 
 /// Guards a block from executing twice when called by the same user and from being
@@ -109,12 +90,6 @@ impl PendingRequests for PendingWithdrawalRequests {
     fn pending_requests(state: &mut State) -> &mut BTreeSet<Account> {
         state.pending_withdrawal_request_guards_mut()
     }
-}
-
-pub fn process_deposit_guard(
-    account: Account,
-) -> Result<Guard<PendingProcessDepositRequests>, GuardError> {
-    Guard::new(account)
 }
 
 pub fn deposit_sol_guard(account: Account) -> Result<Guard<PendingDepositSolRequests>, GuardError> {

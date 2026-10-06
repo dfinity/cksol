@@ -1,5 +1,4 @@
 pub mod address;
-pub mod consolidate;
 mod constants;
 mod cycles;
 pub mod dashboard;

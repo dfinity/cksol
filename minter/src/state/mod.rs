@@ -1,17 +1,17 @@
 use crate::{
     address::{account_address, minter_address},
-    constants::{FEE_PER_SIGNATURE, GET_TRANSACTION_CYCLES, RENT_EXEMPTION_THRESHOLD},
+    constants::{FEE_PER_SIGNATURE, GET_BALANCE_CYCLES, RENT_EXEMPTION_THRESHOLD},
     ledger::client::LedgerClient,
     numeric::{LedgerBurnIndex, LedgerMintIndex},
     rpc::BlockHeight,
     sol_transfer::{BATCH_WITHDRAWAL_TX_FEE, MAX_SIGNATURES, MAX_WITHDRAWALS_PER_TX},
     state::event::{
-        CreditedDeposit, DepositId, Signer, TransactionPurpose, VersionedMessage, WithdrawalRequest,
+        CreditedDeposit, Signer, TransactionPurpose, VersionedMessage, WithdrawalRequest,
     },
     utils::insertion_ordered_map::InsertionOrderedMap,
 };
 use candid::Principal;
-use cksol_types::{DepositSolId, DepositStatus, TxFinalizedStatus, WithdrawalStatus};
+use cksol_types::{DepositSolId, TxFinalizedStatus, WithdrawalStatus};
 use cksol_types_internal::SolanaNetwork;
 use cksol_types_internal::{Ed25519KeyName, InitArgs, UpgradeArgs};
 use ic_canister_runtime::Runtime;
@@ -96,30 +96,22 @@ pub struct State {
     ledger_canister_id: Principal,
     sol_rpc_canister_id: Principal,
     solana_network: SolanaNetwork,
-    manual_deposit_fee: Lamport,
-    automated_deposit_fee: Lamport,
     withdrawal_fee: Lamport,
     minimum_withdrawal_amount: Lamport,
     minimum_deposit_amount: Lamport,
-    process_deposit_required_cycles: u128,
-    deposit_consolidation_fee: u128,
-    pending_process_deposit_request_guards: BTreeSet<Account>,
+    deposit_sol_required_cycles: u128,
+    deposit_sol_fee: u128,
     pending_deposit_sol_request_guards: BTreeSet<Account>,
     pending_withdrawal_request_guards: BTreeSet<Account>,
     deposits: Deposits,
-    accepted_deposits: InsertionOrderedMap<DepositId, Deposit>,
-    quarantined_deposits: InsertionOrderedMap<DepositId, Deposit>,
-    minted_deposits: InsertionOrderedMap<DepositId, MintedDeposit>,
     pending_withdrawal_requests: BTreeMap<LedgerBurnIndex, PendingWithdrawalRequest>,
     sent_withdrawal_requests: BTreeMap<LedgerBurnIndex, SentWithdrawalRequest>,
     successful_withdrawal_requests: BTreeMap<LedgerBurnIndex, SentWithdrawalRequest>,
     failed_withdrawal_requests: BTreeMap<LedgerBurnIndex, SentWithdrawalRequest>,
-    deposits_to_consolidate: BTreeMap<LedgerMintIndex, (Account, Lamport)>,
     submitted_transactions: InsertionOrderedMap<Signature, SolanaTransaction>,
     transactions_to_resubmit: InsertionOrderedMap<Signature, SolanaTransaction>,
     succeeded_transactions: BTreeSet<Signature>,
     failed_transactions: InsertionOrderedMap<Signature, SolanaTransaction>,
-    consolidation_transactions: InsertionOrderedMap<Signature, ConsolidationTransaction>,
     active_tasks: BTreeSet<TaskType>,
     balance: Lamport,
 }
@@ -158,16 +150,8 @@ impl State {
         self.master_key_name
     }
 
-    pub fn manual_deposit_fee(&self) -> u64 {
-        self.manual_deposit_fee
-    }
-
-    pub fn automated_deposit_fee(&self) -> u64 {
-        self.automated_deposit_fee
-    }
-
-    pub fn deposit_consolidation_fee(&self) -> u128 {
-        self.deposit_consolidation_fee
+    pub fn deposit_sol_fee(&self) -> u128 {
+        self.deposit_sol_fee
     }
 
     pub fn withdrawal_fee(&self) -> u64 {
@@ -186,24 +170,12 @@ impl State {
         self.solana_network
     }
 
-    pub fn process_deposit_required_cycles(&self) -> u128 {
-        self.process_deposit_required_cycles
-    }
-
-    pub fn accepted_deposits(&self) -> &InsertionOrderedMap<DepositId, Deposit> {
-        &self.accepted_deposits
+    pub fn deposit_sol_required_cycles(&self) -> u128 {
+        self.deposit_sol_required_cycles
     }
 
     pub fn deposits(&self) -> &Deposits {
         &self.deposits
-    }
-
-    pub fn quarantined_deposits(&self) -> &InsertionOrderedMap<DepositId, Deposit> {
-        &self.quarantined_deposits
-    }
-
-    pub fn minted_deposits(&self) -> &InsertionOrderedMap<DepositId, MintedDeposit> {
-        &self.minted_deposits
     }
 
     pub fn sent_withdrawal_requests(&self) -> &BTreeMap<LedgerBurnIndex, SentWithdrawalRequest> {
@@ -218,16 +190,6 @@ impl State {
 
     pub fn failed_withdrawal_requests(&self) -> &BTreeMap<LedgerBurnIndex, SentWithdrawalRequest> {
         &self.failed_withdrawal_requests
-    }
-
-    pub fn deposits_to_consolidate(&self) -> &BTreeMap<LedgerMintIndex, (Account, Lamport)> {
-        &self.deposits_to_consolidate
-    }
-
-    pub fn has_deposit_awaiting_consolidation(&self, account: &Account) -> bool {
-        self.deposits_to_consolidate
-            .values()
-            .any(|(depositor, _)| depositor == account)
     }
 
     pub fn submitted_transactions(&self) -> &InsertionOrderedMap<Signature, SolanaTransaction> {
@@ -277,41 +239,6 @@ impl State {
         self.balance
     }
 
-    pub fn consolidation_transactions(
-        &self,
-    ) -> &InsertionOrderedMap<Signature, ConsolidationTransaction> {
-        &self.consolidation_transactions
-    }
-
-    pub fn deposit_status(&self, deposit_id: &DepositId) -> Option<DepositStatus> {
-        if self.quarantined_deposits.contains_key(deposit_id) {
-            return Some(DepositStatus::Quarantined((*deposit_id).into()));
-        }
-        if let Some(Deposit {
-            deposit_amount,
-            amount_to_mint,
-        }) = self.accepted_deposits.get(deposit_id)
-        {
-            return Some(DepositStatus::Processing {
-                deposit_amount: *deposit_amount,
-                amount_to_mint: *amount_to_mint,
-                deposit_id: (*deposit_id).into(),
-            });
-        }
-        if let Some(MintedDeposit {
-            block_index,
-            deposit: Deposit { amount_to_mint, .. },
-        }) = self.minted_deposits.get(deposit_id)
-        {
-            return Some(DepositStatus::Minted {
-                block_index: *block_index.get(),
-                minted_amount: *amount_to_mint,
-                deposit_id: (*deposit_id).into(),
-            });
-        }
-        None
-    }
-
     pub fn sol_rpc_client<R: Runtime>(&self, runtime: R) -> SolRpcClient<R> {
         SolRpcClient::builder(runtime, self.sol_rpc_canister_id)
             .with_rpc_sources(RpcSources::Default(SolanaCluster::from(
@@ -326,10 +253,6 @@ impl State {
 
     pub fn ledger_client<R: Runtime>(&self, runtime: R) -> LedgerClient<R> {
         LedgerClient::new(runtime, self.ledger_canister_id)
-    }
-
-    pub fn pending_process_deposit_request_guards_mut(&mut self) -> &mut BTreeSet<Account> {
-        &mut self.pending_process_deposit_request_guards
     }
 
     pub fn pending_deposit_sol_request_guards_mut(&mut self) -> &mut BTreeSet<Account> {
@@ -358,18 +281,6 @@ impl State {
                 "ERROR: provided canister IDs are not distinct!".to_string(),
             ));
         }
-        if self.automated_deposit_fee < self.manual_deposit_fee {
-            return Err(InvalidStateError::InvalidDepositFees {
-                automated_deposit_fee: self.automated_deposit_fee,
-                manual_deposit_fee: self.manual_deposit_fee,
-            });
-        }
-        if self.minimum_deposit_amount < self.automated_deposit_fee {
-            return Err(InvalidStateError::InvalidDepositFees {
-                automated_deposit_fee: self.automated_deposit_fee,
-                manual_deposit_fee: self.manual_deposit_fee,
-            });
-        }
         let maximum_sweep_fee = MAX_SIGNATURES * FEE_PER_SIGNATURE;
         if self.minimum_deposit_amount < maximum_sweep_fee + RENT_EXEMPTION_THRESHOLD {
             return Err(InvalidStateError::InvalidMinimumDepositAmount {
@@ -394,13 +305,11 @@ impl State {
                 rent_exemption_threshold: RENT_EXEMPTION_THRESHOLD,
             });
         }
-        if self.process_deposit_required_cycles
-            < GET_TRANSACTION_CYCLES + self.deposit_consolidation_fee
-        {
-            return Err(InvalidStateError::ProcessDepositRequiredCyclesTooLow {
-                required_cycles: self.process_deposit_required_cycles,
-                get_transaction_cycles: GET_TRANSACTION_CYCLES,
-                consolidation_fee: self.deposit_consolidation_fee,
+        if self.deposit_sol_required_cycles < GET_BALANCE_CYCLES + self.deposit_sol_fee {
+            return Err(InvalidStateError::DepositSolRequiredCyclesTooLow {
+                required_cycles: self.deposit_sol_required_cycles,
+                get_balance_cycles: GET_BALANCE_CYCLES,
+                deposit_sol_fee: self.deposit_sol_fee,
             });
         }
         Ok(())
@@ -410,23 +319,15 @@ impl State {
         &mut self,
         UpgradeArgs {
             sol_rpc_canister_id,
-            manual_deposit_fee,
-            automated_deposit_fee,
             minimum_withdrawal_amount,
             minimum_deposit_amount,
             withdrawal_fee,
-            process_deposit_required_cycles,
-            deposit_consolidation_fee,
+            deposit_sol_required_cycles,
+            deposit_sol_fee,
         }: UpgradeArgs,
     ) -> Result<(), InvalidStateError> {
         if let Some(sol_rpc_canister_id) = sol_rpc_canister_id {
             self.sol_rpc_canister_id = sol_rpc_canister_id;
-        }
-        if let Some(manual_deposit_fee) = manual_deposit_fee {
-            self.manual_deposit_fee = manual_deposit_fee;
-        }
-        if let Some(automated_deposit_fee) = automated_deposit_fee {
-            self.automated_deposit_fee = automated_deposit_fee;
         }
         if let Some(withdrawal_fee) = withdrawal_fee {
             self.withdrawal_fee = withdrawal_fee;
@@ -437,40 +338,13 @@ impl State {
         if let Some(minimum_deposit_amount) = minimum_deposit_amount {
             self.minimum_deposit_amount = minimum_deposit_amount;
         }
-        if let Some(process_deposit_required_cycles) = process_deposit_required_cycles {
-            self.process_deposit_required_cycles = process_deposit_required_cycles as u128;
+        if let Some(deposit_sol_required_cycles) = deposit_sol_required_cycles {
+            self.deposit_sol_required_cycles = deposit_sol_required_cycles as u128;
         }
-        if let Some(deposit_consolidation_fee) = deposit_consolidation_fee {
-            self.deposit_consolidation_fee = deposit_consolidation_fee as u128;
+        if let Some(deposit_sol_fee) = deposit_sol_fee {
+            self.deposit_sol_fee = deposit_sol_fee as u128;
         }
         self.validate()
-    }
-
-    fn process_accepted_deposit(
-        &mut self,
-        deposit_id: &DepositId,
-        deposit_amount: &Lamport,
-        amount_to_mint: &Lamport,
-    ) {
-        assert!(
-            !self.quarantined_deposits.contains_key(deposit_id),
-            "Attempted to accept already quarantined deposit: {deposit_id:?}"
-        );
-        assert!(
-            !self.minted_deposits.contains_key(deposit_id),
-            "Attempted to accept an already minted deposit: {deposit_id:?}"
-        );
-        assert_eq!(
-            self.accepted_deposits.insert(
-                *deposit_id,
-                Deposit {
-                    deposit_amount: *deposit_amount,
-                    amount_to_mint: *amount_to_mint,
-                }
-            ),
-            None,
-            "Attempted to accept an already accepted deposit: {deposit_id:?}"
-        );
     }
 
     fn process_queued_deposit(
@@ -530,25 +404,6 @@ impl State {
 
     fn process_quarantined_sweep(&mut self, signature: &Signature) {
         self.deposits.quarantine_sweep(signature);
-    }
-
-    fn process_quarantined_deposit(&mut self, deposit_id: &DepositId) {
-        assert!(
-            !self.minted_deposits.contains_key(deposit_id),
-            "Attempted to quarantine an already minted deposit: {deposit_id:?}"
-        );
-        let accepted_deposit = self
-            .accepted_deposits
-            .remove(deposit_id)
-            .unwrap_or_else(|| {
-                panic!("Attempted to quarantine an unknown deposit: {deposit_id:?}")
-            });
-        assert_eq!(
-            self.quarantined_deposits
-                .insert(*deposit_id, accepted_deposit),
-            None,
-            "Attempted to quarantine already quarantined deposit: {deposit_id:?}"
-        );
     }
 
     pub fn withdrawal_status(&self, block_index: u64) -> WithdrawalStatus {
@@ -614,38 +469,6 @@ impl State {
         );
     }
 
-    fn process_mint(&mut self, deposit_id: &DepositId, mint_block_index: &LedgerMintIndex) {
-        assert!(
-            !self.quarantined_deposits.contains_key(deposit_id),
-            "Attempted to mint ckSOL for a quarantined deposit: {deposit_id:?}",
-        );
-        let deposit = self
-            .accepted_deposits
-            .remove(deposit_id)
-            .unwrap_or_else(|| {
-                panic!("Attempted to mint ckSOL for an unknown deposit: {deposit_id:?}")
-            });
-        assert_eq!(
-            self.deposits_to_consolidate.insert(
-                *mint_block_index,
-                (deposit_id.account, deposit.deposit_amount)
-            ),
-            None,
-            "Attempted to consolidate funds for an already consolidated mint index: {mint_block_index:?}",
-        );
-        assert_eq!(
-            self.minted_deposits.insert(
-                *deposit_id,
-                MintedDeposit {
-                    block_index: *mint_block_index,
-                    deposit,
-                }
-            ),
-            None,
-            "Attempted to mint ckSOL twice for the same deposit: {deposit_id:?}",
-        );
-    }
-
     fn process_transaction_submitted(
         &mut self,
         signature: &Signature,
@@ -663,23 +486,6 @@ impl State {
             "Attempted to submit already failed transaction {signature:?}"
         );
         let amount = match purpose {
-            TransactionPurpose::ConsolidateDeposits { mint_indices } => {
-                let mut total: Lamport = 0;
-                let mut deposits = Vec::with_capacity(mint_indices.len());
-                for mint_index in mint_indices {
-                    let (_account, deposit_amount) = self
-                        .deposits_to_consolidate
-                        .remove(mint_index)
-                        .unwrap_or_else(|| {
-                            panic!("Attempted to consolidate unknown mint index: {mint_index:?}")
-                        });
-                    total += deposit_amount;
-                    deposits.push((*mint_index, deposit_amount));
-                }
-                self.consolidation_transactions
-                    .insert(*signature, ConsolidationTransaction { deposits });
-                total
-            }
             TransactionPurpose::WithdrawSol { burn_indices } => {
                 let mut total: Lamport = 0;
                 for burn_index in burn_indices {
@@ -771,9 +577,6 @@ impl State {
             None,
             "Attempted to resubmit transaction with signature {new_signature:?} that already exists"
         );
-        if let Some(info) = self.consolidation_transactions.remove(old_signature) {
-            self.consolidation_transactions.insert(*new_signature, info);
-        }
         for sent in self.sent_withdrawal_requests.values_mut() {
             if &sent.signature == old_signature {
                 sent.signature = *new_signature;
@@ -793,13 +596,6 @@ impl State {
                 panic!("Attempted to mark unknown transaction {signature:?} as succeeded")
             });
         match &transaction.purpose {
-            TransactionPurpose::ConsolidateDeposits { .. } => {
-                let tx_fee = transaction.message.transaction_fee();
-                self.balance += transaction
-                    .amount
-                    .checked_sub(tx_fee)
-                    .expect("BUG: consolidation amount is less than transaction fee");
-            }
             TransactionPurpose::WithdrawSol { .. } => {}
             TransactionPurpose::SweepDeposits { .. } => self.deposits.finalize_swept(signature),
         }
@@ -852,10 +648,6 @@ impl State {
 #[derive(Debug, PartialEq, Eq)]
 pub enum InvalidStateError {
     InvalidCanisterId(String),
-    InvalidDepositFees {
-        automated_deposit_fee: u64,
-        manual_deposit_fee: u64,
-    },
     InvalidMinimumDepositAmount {
         minimum_deposit_amount: u64,
         maximum_sweep_fee: u64,
@@ -871,10 +663,10 @@ pub enum InvalidStateError {
         withdrawal_fee: u64,
         rent_exemption_threshold: u64,
     },
-    ProcessDepositRequiredCyclesTooLow {
+    DepositSolRequiredCyclesTooLow {
         required_cycles: u128,
-        get_transaction_cycles: u128,
-        consolidation_fee: u128,
+        get_balance_cycles: u128,
+        deposit_sol_fee: u128,
     },
 }
 
@@ -885,15 +677,13 @@ impl TryFrom<InitArgs> for State {
         InitArgs {
             sol_rpc_canister_id,
             ledger_canister_id,
-            manual_deposit_fee,
-            automated_deposit_fee,
             master_key_name,
             minimum_withdrawal_amount,
             minimum_deposit_amount,
             withdrawal_fee,
-            process_deposit_required_cycles,
+            deposit_sol_required_cycles,
             solana_network,
-            deposit_consolidation_fee,
+            deposit_sol_fee,
         }: InitArgs,
     ) -> Result<Self, Self::Error> {
         let state = Self {
@@ -902,30 +692,22 @@ impl TryFrom<InitArgs> for State {
             ledger_canister_id,
             sol_rpc_canister_id,
             solana_network,
-            manual_deposit_fee,
-            automated_deposit_fee,
             withdrawal_fee,
             minimum_withdrawal_amount,
             minimum_deposit_amount,
-            process_deposit_required_cycles: process_deposit_required_cycles as u128,
-            deposit_consolidation_fee: deposit_consolidation_fee as u128,
-            pending_process_deposit_request_guards: BTreeSet::new(),
+            deposit_sol_required_cycles: deposit_sol_required_cycles as u128,
+            deposit_sol_fee: deposit_sol_fee as u128,
             pending_deposit_sol_request_guards: BTreeSet::new(),
             pending_withdrawal_request_guards: BTreeSet::new(),
             deposits: Deposits::default(),
-            accepted_deposits: InsertionOrderedMap::new(),
-            quarantined_deposits: InsertionOrderedMap::new(),
-            minted_deposits: InsertionOrderedMap::new(),
             pending_withdrawal_requests: BTreeMap::new(),
             sent_withdrawal_requests: BTreeMap::new(),
             successful_withdrawal_requests: BTreeMap::new(),
             failed_withdrawal_requests: BTreeMap::new(),
-            deposits_to_consolidate: BTreeMap::new(),
             submitted_transactions: InsertionOrderedMap::new(),
             transactions_to_resubmit: InsertionOrderedMap::new(),
             succeeded_transactions: BTreeSet::new(),
             failed_transactions: InsertionOrderedMap::new(),
-            consolidation_transactions: InsertionOrderedMap::new(),
             active_tasks: BTreeSet::new(),
             balance: 0,
         };
@@ -995,39 +777,13 @@ pub struct SchnorrPublicKey {
     pub chain_code: [u8; 32],
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Deposit {
-    pub deposit_amount: Lamport,
-    pub amount_to_mint: Lamport,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct MintedDeposit {
-    pub block_index: LedgerMintIndex,
-    pub deposit: Deposit,
-}
-
 #[derive(Copy, Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum TaskType {
-    DepositConsolidation,
     SweepDeposits,
     Mint,
     FinalizeTransactions,
     ResubmitTransactions,
     WithdrawalProcessing,
-}
-
-/// Details about a consolidation transaction, capturing the individual
-/// deposits (by mint index and amount) being consolidated.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ConsolidationTransaction {
-    pub deposits: Vec<(LedgerMintIndex, Lamport)>,
-}
-
-impl ConsolidationTransaction {
-    pub fn total_amount(&self) -> Lamport {
-        self.deposits.iter().map(|(_, amount)| amount).sum()
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
