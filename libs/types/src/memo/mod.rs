@@ -25,9 +25,8 @@ mod tests;
 /// possible: it takes nine bytes above [`u32::MAX`] and at most five below, which
 /// keeps the memo within 80 bytes for every deposit id reachable in practice.
 ///
-/// The ckSOL ledger must be deployed with a `max_memo_length` of at least this
-/// value to accept every memo. A smaller limit rejects only the mints whose memo
-/// exceeds it, but one below the size of the smallest memo, such as the ICRC-1
+/// A ledger whose `max_memo_length` is below this value rejects the mints whose memo
+/// exceeds its limit, and one below the size of the smallest memo, such as the ICRC-1
 /// default of 32 bytes, rejects all of them.
 ///
 /// # Example
