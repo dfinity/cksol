@@ -413,6 +413,43 @@ mod nonce_accounts {
     use crate::state::audit::replay_events;
 
     #[test]
+    fn should_only_add_a_nonce_account_once_no_incomplete_withdrawal_targets_it() {
+        init_state();
+        init_balance();
+        let destination = address(0);
+        let add_destination = || {
+            mutate_state(|s| {
+                s.upgrade(UpgradeArgs {
+                    nonce_accounts_to_add: Some(vec![destination.to_string()]),
+                    ..Default::default()
+                })
+            })
+        };
+
+        accept_withdrawal(account(1), 0, MINIMUM_WITHDRAWAL_AMOUNT);
+        assert_eq!(
+            add_destination(),
+            Err(InvalidStateError::NonceAccountIsWithdrawalDestination(
+                destination
+            ))
+        );
+
+        submit_withdrawal(signature(1), vec![0]);
+        assert_eq!(
+            add_destination(),
+            Err(InvalidStateError::NonceAccountIsWithdrawalDestination(
+                destination
+            ))
+        );
+
+        succeed_transaction(signature(1));
+        add_destination().unwrap();
+        assert!(read_state(|s| s
+            .nonce_pool_addresses()
+            .contains(&destination)));
+    }
+
+    #[test]
     fn should_fail_init_with_malformed_nonce_account() {
         let err = State::try_from(InitArgs {
             nonce_accounts: vec!["not-a-base58-address".to_string()],

@@ -358,10 +358,40 @@ impl State {
             self.deposit_sol_fee = deposit_sol_fee as u128;
         }
         if let Some(nonce_accounts) = nonce_accounts_to_add {
-            self.nonce_pool
-                .add_accounts(parse_nonce_accounts(nonce_accounts)?)?;
+            let nonce_accounts = parse_nonce_accounts(nonce_accounts)?;
+            self.ensure_no_incomplete_withdrawal_to(&nonce_accounts)?;
+            self.nonce_pool.add_accounts(nonce_accounts)?;
         }
         self.validate()
+    }
+
+    /// An incomplete withdrawal survives an upgrade, so an address may only
+    /// join the nonce pool once no queued or in-flight transfer targets it;
+    /// otherwise the withdrawal would credit a minter-controlled account.
+    fn ensure_no_incomplete_withdrawal_to(
+        &self,
+        nonce_accounts: &[Address],
+    ) -> Result<(), InvalidStateError> {
+        let incomplete_destinations: BTreeSet<Address> = self
+            .pending_withdrawal_requests
+            .values()
+            .map(|pending| &pending.request)
+            .chain(
+                self.sent_withdrawal_requests
+                    .values()
+                    .map(|sent| &sent.request),
+            )
+            .map(|request| Address::from(request.solana_address))
+            .collect();
+        match nonce_accounts
+            .iter()
+            .find(|address| incomplete_destinations.contains(address))
+        {
+            Some(address) => Err(InvalidStateError::NonceAccountIsWithdrawalDestination(
+                *address,
+            )),
+            None => Ok(()),
+        }
     }
 
     fn process_queued_deposit(
@@ -687,6 +717,7 @@ pub enum InvalidStateError {
     },
     InvalidNonceAccount(String),
     DuplicateNonceAccount(Address),
+    NonceAccountIsWithdrawalDestination(Address),
 }
 
 impl From<NoncePoolError> for InvalidStateError {
