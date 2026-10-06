@@ -2,7 +2,7 @@ benches:
   post_upgrade_10k_events:
     total:
       calls: 1
-      instructions: 194836563
+      instructions: 203657685
       heap_increase: 0
       stable_memory_increase: 0
     scopes: {}
