@@ -276,9 +276,12 @@ mod batch_withdrawal_tests {
             })
             .collect();
 
-        let result =
-            create_signed_batch_withdrawal_transaction(&minter_signing_once(), &targets, blockhash)
-                .await;
+        let result = create_signed_batch_withdrawal_transaction(
+            &TestCanisterRuntime::new(),
+            &targets,
+            blockhash,
+        )
+        .await;
 
         assert_matches!(
             result,

@@ -116,17 +116,21 @@ async fn sign_transaction(
     signer_derivation_paths: impl IntoIterator<Item = DerivationPath>,
     signer: &impl SchnorrSigner,
 ) -> Result<(), CreateTransferError> {
-    let message_bytes = transaction.message_data();
-    let message_len = message_bytes.len();
-    transaction.signatures = sign_bytes(signer_derivation_paths, signer, message_bytes).await?;
+    ensure_within_transaction_size(&transaction.message)?;
+    transaction.signatures =
+        sign_bytes(signer_derivation_paths, signer, transaction.message_data()).await?;
+    Ok(())
+}
 
-    let tx_size = 1 + message_len + transaction.signatures.len() * BYTES_PER_SIGNATURE;
+fn ensure_within_transaction_size(message: &Message) -> Result<(), CreateTransferError> {
+    let tx_size = 1
+        + message.serialize().len()
+        + message.header.num_required_signatures as usize * BYTES_PER_SIGNATURE;
     if tx_size > MAX_TX_SIZE {
         return Err(CreateTransferError::TransactionTooLarge {
             max: MAX_TX_SIZE,
             got: tx_size,
         });
     }
-
     Ok(())
 }
