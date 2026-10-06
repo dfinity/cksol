@@ -247,6 +247,9 @@ type WithdrawalError = variant {
     };
     // The minter failed to parse the destination address.
     MalformedAddress : Address;
+    // The destination address is not a valid withdrawal destination.
+    // The payload contains a human-readable message explaining why the destination was rejected.
+    InvalidDestination : text;
     // The ckSOL balance of the withdrawal account is too low.
     InsufficientFunds : record { balance : Lamport };
     // The minter is not approved to transfer the requested amount.

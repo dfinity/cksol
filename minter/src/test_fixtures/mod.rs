@@ -44,6 +44,8 @@ pub const MINTER_ACCOUNT: Account = Account {
 };
 /// The minter's main Solana address under the test master key: the raw master public key.
 pub const MINTER_ADDRESS: Address = address!("Fkt68XQXBDDBGBNNjFh8GM27ffpZGmncUdDG19njnRvY");
+/// The durable nonce account in the pool configured by [`init_state`].
+pub const NONCE_ACCOUNT: Address = address!("US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx");
 pub const MINIMUM_DEPOSIT_AMOUNT: Lamport = 20_000_000; // 0.02 SOL
 pub const DEPOSIT_SOL_REQUIRED_CYCLES: u128 = 1_000_000_000_000;
 
@@ -71,7 +73,14 @@ pub fn valid_init_args() -> InitArgs {
 }
 
 pub fn init_state() {
-    init_state_with_args(valid_init_args());
+    init_state_with_args(init_args_with_nonce_account());
+}
+
+pub fn init_args_with_nonce_account() -> InitArgs {
+    InitArgs {
+        nonce_accounts: vec![NONCE_ACCOUNT.to_string()],
+        ..valid_init_args()
+    }
 }
 
 pub fn init_state_with_args(init_args: InitArgs) {

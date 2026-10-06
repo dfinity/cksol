@@ -6,10 +6,10 @@ use crate::{
     sol_transfer::MAX_WITHDRAWALS_PER_TX,
     state::{TaskType, event::TransactionPurpose, read_state},
     test_fixtures::{
-        EventsAssert, MINIMUM_WITHDRAWAL_AMOUNT, MINTER_ACCOUNT, WITHDRAWAL_FEE, account,
-        confirmed_block_at_height, events, init_balance, init_balance_to, init_schnorr_master_key,
-        init_state, minter_signature, minter_signature_nth, runtime::TestCanisterRuntime,
-        signature,
+        EventsAssert, MINIMUM_WITHDRAWAL_AMOUNT, MINTER_ACCOUNT, MINTER_ADDRESS, NONCE_ACCOUNT,
+        WITHDRAWAL_FEE, account, confirmed_block_at_height, events, init_balance, init_balance_to,
+        init_schnorr_master_key, init_state, init_state_with_args, minter_signature,
+        minter_signature_nth, runtime::TestCanisterRuntime, signature, valid_init_args,
     },
     withdraw::{process_pending_withdrawals, withdraw, withdrawal_status},
 };
@@ -19,7 +19,7 @@ use canlog::Log;
 use cksol_types::TxFinalizedStatus;
 use cksol_types::WithdrawalStatus;
 use cksol_types::{WithdrawalError, WithdrawalOk};
-use cksol_types_internal::log::Priority;
+use cksol_types_internal::{InitArgs, log::Priority};
 use ic_canister_runtime::IcError;
 use ic_cdk::call::CallRejected;
 use ic_cdk_management_canister::SignCallError;
@@ -36,6 +36,7 @@ fn test_caller() -> Account {
 #[tokio::test]
 async fn should_return_error_if_calling_ledger_fails() {
     init_state();
+    init_schnorr_master_key();
 
     let runtime = TestCanisterRuntime::new().add_stub_error(IcError::CallPerformFailed);
 
@@ -56,6 +57,7 @@ async fn should_return_error_if_calling_ledger_fails() {
 #[tokio::test]
 async fn should_return_error_if_ledger_unavailable() {
     init_state();
+    init_schnorr_master_key();
 
     let runtime = TestCanisterRuntime::new().add_stub_response(Err::<Nat, TransferFromError>(
         TransferFromError::TemporarilyUnavailable,
@@ -80,6 +82,7 @@ async fn should_return_error_if_ledger_unavailable() {
 #[tokio::test]
 async fn should_return_error_if_insufficient_allowance() {
     init_state();
+    init_schnorr_master_key();
 
     let runtime = TestCanisterRuntime::new().add_stub_response(Err::<Nat, TransferFromError>(
         TransferFromError::InsufficientAllowance {
@@ -104,6 +107,7 @@ async fn should_return_error_if_insufficient_allowance() {
 #[tokio::test]
 async fn should_return_error_if_insufficient_funds() {
     init_state();
+    init_schnorr_master_key();
 
     let runtime = TestCanisterRuntime::new().add_stub_response(Err::<Nat, TransferFromError>(
         TransferFromError::InsufficientFunds {
@@ -128,6 +132,7 @@ async fn should_return_error_if_insufficient_funds() {
 #[tokio::test]
 async fn should_return_temporarily_unavailable_on_generic_error() {
     init_state();
+    init_schnorr_master_key();
 
     let runtime = TestCanisterRuntime::new().add_stub_response(Err::<Nat, TransferFromError>(
         TransferFromError::GenericError {
@@ -155,6 +160,7 @@ async fn should_return_temporarily_unavailable_on_generic_error() {
 #[tokio::test]
 async fn should_return_ok_if_burn_succeeds() {
     init_state();
+    init_schnorr_master_key();
 
     let runtime = TestCanisterRuntime::new()
         .add_stub_response(Ok::<Nat, TransferFromError>(Nat::from(123u64)))
@@ -194,6 +200,82 @@ async fn should_return_error_if_address_malformed() {
 }
 
 #[tokio::test]
+async fn should_reject_withdrawal_to_invalid_destinations() {
+    const SYSTEM_PROGRAM_ID: &str = "11111111111111111111111111111111";
+    const CLOCK_SYSVAR_ID: &str = "SysvarC1ock11111111111111111111111111111111";
+    init_state();
+    init_schnorr_master_key();
+
+    let runtime = TestCanisterRuntime::new();
+
+    let cases = [
+        ("the system program", SYSTEM_PROGRAM_ID.to_string()),
+        ("a sysvar", CLOCK_SYSVAR_ID.to_string()),
+        ("the minter's main address", MINTER_ADDRESS.to_string()),
+        ("a nonce account of the pool", NONCE_ACCOUNT.to_string()),
+    ];
+
+    for (name, destination) in cases {
+        let result = withdraw(
+            &runtime,
+            test_caller(),
+            MINIMUM_WITHDRAWAL_AMOUNT,
+            destination,
+        )
+        .await;
+
+        assert_matches!(
+            result,
+            Err(WithdrawalError::InvalidDestination(_)),
+            "{name}"
+        );
+        EventsAssert::assert_no_events_recorded();
+    }
+}
+
+#[tokio::test]
+async fn should_be_temporarily_unavailable_if_nonce_pool_empty() {
+    init_state_with_args(InitArgs {
+        nonce_accounts: vec![],
+        ..valid_init_args()
+    });
+    init_schnorr_master_key();
+
+    let runtime = TestCanisterRuntime::new();
+
+    let result = withdraw(
+        &runtime,
+        test_caller(),
+        MINIMUM_WITHDRAWAL_AMOUNT,
+        VALID_ADDRESS.to_string(),
+    )
+    .await;
+
+    assert_matches!(
+        result,
+        Err(WithdrawalError::TemporarilyUnavailable(e)) => assert!(e.contains("nonce"))
+    );
+    EventsAssert::assert_no_events_recorded();
+}
+
+#[tokio::test]
+async fn should_be_temporarily_unavailable_if_minter_public_key_not_cached() {
+    init_state();
+
+    let runtime = TestCanisterRuntime::new();
+
+    let result = withdraw(
+        &runtime,
+        test_caller(),
+        MINIMUM_WITHDRAWAL_AMOUNT,
+        VALID_ADDRESS.to_string(),
+    )
+    .await;
+
+    assert_matches!(result, Err(WithdrawalError::TemporarilyUnavailable(_)));
+}
+
+#[tokio::test]
 async fn should_return_error_if_amount_too_low() {
     init_state();
 
@@ -219,6 +301,7 @@ async fn should_return_error_if_amount_too_low() {
 #[tokio::test]
 async fn should_return_error_if_already_processing() {
     init_state();
+    init_schnorr_master_key();
 
     let from = test_caller();
     let _guard = withdrawal_guard(from).unwrap();

@@ -42,13 +42,24 @@ pub enum PocketIcMode {
     NonLiveMode,
 }
 
-#[derive(Default)]
 pub struct SetupBuilder {
     make_live: Option<PocketIcMode>,
     sol_rpc_install_args: Option<sol_rpc_types::InstallArgs>,
     initial_ledger_balances: Option<Vec<(Account, Nat)>>,
     proxy_canister: bool,
     nonce_accounts: Vec<String>,
+}
+
+impl Default for SetupBuilder {
+    fn default() -> Self {
+        Self {
+            make_live: None,
+            sol_rpc_install_args: None,
+            initial_ledger_balances: None,
+            proxy_canister: false,
+            nonce_accounts: vec![Setup::DEFAULT_NONCE_ACCOUNT.to_string()],
+        }
+    }
 }
 
 impl SetupBuilder {
@@ -116,6 +127,7 @@ impl Setup {
     pub const DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT: Lamport = 2_000_000; // 0.002 SOL
     pub const DEFAULT_CALLER: Principal =
         Principal::from_slice(&[0xff, 0xff, 0xff, 0xff, 0xff, 0xe0, 0x0, 0x3, 0x1, 0x1]);
+    pub const DEFAULT_NONCE_ACCOUNT: &'static str = "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx";
 
     pub async fn new(
         make_live: PocketIcMode,
