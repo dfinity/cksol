@@ -1,5 +1,5 @@
 use crate::state::{QuarantineCause, State};
-use crate::storage::{self, FailedCreditReason};
+use crate::storage::{self, FailedCreditReason, FailedMintReason};
 use ic_metrics_encoder::MetricsEncoder;
 
 const WASM_PAGE_SIZE_IN_BYTES: usize = 65536;
@@ -126,6 +126,11 @@ pub fn encode_metrics(w: &mut MetricsEncoder<Vec<u8>>, s: &State) -> std::io::Re
         age_seconds(s.deposits().oldest_in_flight_queued_at()).metric_value(),
         "Age of the oldest in-flight deposit in seconds, from queued until minted. Returns 0 if there are no in-flight deposits.",
     )?;
+    w.encode_gauge(
+        "oldest_pending_mint_age_seconds",
+        age_seconds(s.deposits().oldest_pending_mint_created_at()).metric_value(),
+        "Age of the oldest pending ckSOL mint in seconds, from the created_at_time the ledger deduplicates it by, counting up to the deduplication window. Returns 0 if there are no pending mints.",
+    )?;
     let mut failed_credit_attempts = w.counter_vec(
         "failed_credit_attempts",
         "Number of failed attempts to credit the deposits of a finalized sweep, by reason.",
@@ -134,6 +139,16 @@ pub fn encode_metrics(w: &mut MetricsEncoder<Vec<u8>>, s: &State) -> std::io::Re
         failed_credit_attempts = failed_credit_attempts.value(
             &[("reason", reason.label())],
             storage::failed_credit_attempt_count(reason).metric_value(),
+        )?;
+    }
+    let mut failed_mint_attempts = w.counter_vec(
+        "failed_mint_attempts",
+        "Number of failed attempts to mint a pending deposit on the ckSOL ledger, by reason.",
+    )?;
+    for reason in FailedMintReason::ALL {
+        failed_mint_attempts = failed_mint_attempts.value(
+            &[("reason", reason.label())],
+            storage::failed_mint_attempt_count(reason).metric_value(),
         )?;
     }
     w.encode_gauge(

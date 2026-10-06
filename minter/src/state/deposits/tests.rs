@@ -711,6 +711,33 @@ mod oldest_in_flight {
     }
 }
 
+mod oldest_pending_mint {
+    use super::{CREDIT_TIMESTAMP, Deposits, LedgerMintIndex, credited_sweep, mint};
+
+    #[test]
+    fn should_report_no_created_at_time_without_pending_mints() {
+        assert_eq!(Deposits::default().oldest_pending_mint_created_at(), None);
+    }
+
+    #[test]
+    fn should_report_the_created_at_time_until_the_deposit_is_minted() {
+        let (mut deposits, _) = credited_sweep(&[mint(0, 100), mint(1, 200)]);
+        assert_eq!(
+            deposits.oldest_pending_mint_created_at(),
+            Some(CREDIT_TIMESTAMP)
+        );
+
+        deposits.mint(0, LedgerMintIndex::from(42));
+        assert_eq!(
+            deposits.oldest_pending_mint_created_at(),
+            Some(CREDIT_TIMESTAMP)
+        );
+
+        deposits.mint(1, LedgerMintIndex::from(43));
+        assert_eq!(deposits.oldest_pending_mint_created_at(), None);
+    }
+}
+
 /// Queues `N` distinct deposits under the ids `0..N` and returns them in that order.
 fn queue_deposits<const N: usize>(deposits: &mut Deposits) -> [QueuedDeposit; N] {
     std::array::from_fn(|index| {

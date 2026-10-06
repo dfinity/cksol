@@ -37,6 +37,7 @@ thread_local! {
 pub(crate) struct Metrics {
     pub post_upgrade_instructions_consumed: u64,
     pub failed_credit_attempts: BTreeMap<FailedCreditReason, u64>,
+    pub failed_mint_attempts: BTreeMap<FailedMintReason, u64>,
 }
 
 impl Metrics {
@@ -44,6 +45,7 @@ impl Metrics {
         Self {
             post_upgrade_instructions_consumed: 0,
             failed_credit_attempts: BTreeMap::new(),
+            failed_mint_attempts: BTreeMap::new(),
         }
     }
 }
@@ -81,6 +83,41 @@ pub(crate) fn record_failed_credit_attempt(reason: FailedCreditReason) {
 
 pub(crate) fn failed_credit_attempt_count(reason: FailedCreditReason) -> u64 {
     with_unstable_metrics(|m| m.failed_credit_attempts.get(&reason).copied().unwrap_or(0))
+}
+
+/// Why an attempt to mint a pending deposit on the ckSOL ledger failed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum FailedMintReason {
+    Expired,
+    Rejected,
+    LedgerError,
+    CallError,
+}
+
+impl FailedMintReason {
+    pub const ALL: [Self; 4] = [
+        Self::Expired,
+        Self::Rejected,
+        Self::LedgerError,
+        Self::CallError,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Expired => "expired",
+            Self::Rejected => "rejected",
+            Self::LedgerError => "ledger_error",
+            Self::CallError => "call_error",
+        }
+    }
+}
+
+pub(crate) fn record_failed_mint_attempt(reason: FailedMintReason) {
+    with_unstable_metrics_mut(|m| *m.failed_mint_attempts.entry(reason).or_insert(0) += 1);
+}
+
+pub(crate) fn failed_mint_attempt_count(reason: FailedMintReason) -> u64 {
+    with_unstable_metrics(|m| m.failed_mint_attempts.get(&reason).copied().unwrap_or(0))
 }
 
 /// Appends the event to the event log.

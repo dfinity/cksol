@@ -110,6 +110,15 @@ impl Deposits {
         self.queued_at_by_id.values().min().copied()
     }
 
+    /// Returns the smallest `created_at_time` of the pending mints, the timestamp the
+    /// deduplication window of the oldest pending mint starts at.
+    pub fn oldest_pending_mint_created_at(&self) -> Option<u64> {
+        self.pending_mints
+            .values()
+            .map(|pending| pending.created_at_time)
+            .min()
+    }
+
     pub fn status(&self, deposit_id: DepositSolId) -> DepositSolStatus {
         if let Some(deposit) = self.queued.get(&deposit_id) {
             return DepositSolStatus::Queued {
