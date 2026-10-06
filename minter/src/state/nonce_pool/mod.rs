@@ -22,19 +22,21 @@ impl DurableNoncePool {
         Ok(pool)
     }
 
+    /// Adds the given accounts to the pool, or leaves the pool unchanged when
+    /// any of them duplicates another one or an account already in the pool.
     pub fn add_accounts(
         &mut self,
         addresses: impl IntoIterator<Item = Address>,
     ) -> Result<(), NoncePoolError> {
+        let mut additions = BTreeMap::new();
         for address in addresses {
-            if self
-                .accounts
-                .insert(address, NonceAccountState::Free)
-                .is_some()
+            if self.accounts.contains_key(&address)
+                || additions.insert(address, NonceAccountState::Free).is_some()
             {
                 return Err(NoncePoolError::DuplicateAccount(address));
             }
         }
+        self.accounts.append(&mut additions);
         Ok(())
     }
 
