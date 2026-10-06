@@ -19,9 +19,11 @@ use crate::{
     numeric::LedgerBurnIndex,
     rpc::submit_transaction_skipping_preflight,
     runtime::CanisterRuntime,
-    sol_transfer::{build_batch_withdrawal_message, sign_batch_withdrawal_message},
+    sol_transfer::{
+        CreateTransferError, build_batch_withdrawal_message, sign_batch_withdrawal_message,
+    },
     state::{
-        State, TaskType,
+        CreatedWithdrawalTransaction, State, TaskType,
         audit::process_event,
         event::{EventType, Signer, TransactionPurpose, WithdrawalRequest},
         mutate_state, read_state,
@@ -279,41 +281,51 @@ fn bound_withdrawals(state: &State, minter_address: &Address) -> Vec<BoundWithdr
         .created_withdrawal_txs()
         .iter()
         .filter_map(|(nonce_account, created)| {
-            let requests: Vec<WithdrawalRequest> = created
-                .burn_indices
-                .iter()
-                .map(|burn_index| {
-                    state
-                        .created_withdrawal_requests()
-                        .get(burn_index)
-                        .unwrap_or_else(|| {
-                            panic!("BUG: withdrawal request {burn_index:?} of a created transaction is not in the created bucket")
-                        })
-                        .request
-                        .clone()
-                })
-                .collect();
-            match build_batch_withdrawal_message(
-                minter_address,
-                nonce_account,
-                created.nonce_value,
-                &withdrawal_transfers(&requests),
-            ) {
-                Ok(message) => Some(BoundWithdrawal {
-                    nonce_account: *nonce_account,
-                    burn_indices: created.burn_indices.clone(),
-                    message,
-                }),
-                Err(e) => {
+            bound_withdrawal(state, minter_address, nonce_account, created)
+                .inspect_err(|e| {
                     log!(
                         Priority::Error,
                         "Failed to rebuild withdrawal transaction bound to nonce account {nonce_account}: {e}"
-                    );
-                    None
-                }
-            }
+                    )
+                })
+                .ok()
         })
         .collect()
+}
+
+fn bound_withdrawal(
+    state: &State,
+    minter_address: &Address,
+    nonce_account: &Address,
+    created: &CreatedWithdrawalTransaction,
+) -> Result<BoundWithdrawal, CreateTransferError> {
+    let requests: Vec<WithdrawalRequest> = created
+        .burn_indices
+        .iter()
+        .map(|burn_index| created_withdrawal_request(state, burn_index))
+        .collect();
+    let message = build_batch_withdrawal_message(
+        minter_address,
+        nonce_account,
+        created.nonce_value,
+        &withdrawal_transfers(&requests),
+    )?;
+    Ok(BoundWithdrawal {
+        nonce_account: *nonce_account,
+        burn_indices: created.burn_indices.clone(),
+        message,
+    })
+}
+
+fn created_withdrawal_request(state: &State, burn_index: &LedgerBurnIndex) -> WithdrawalRequest {
+    state
+        .created_withdrawal_requests()
+        .get(burn_index)
+        .unwrap_or_else(|| {
+            panic!("BUG: withdrawal request {burn_index:?} of a created transaction is not in the created bucket")
+        })
+        .request
+        .clone()
 }
 
 fn withdrawal_transfers(requests: &[WithdrawalRequest]) -> Vec<(Address, Lamport)> {
