@@ -42,6 +42,9 @@ type Lamport = nat64;
 // Index of a burn transaction on the ckSOL ledger.
 type LedgerBurnIndex = nat64;
 
+// Index of a mint transaction on the ckSOL ledger.
+type LedgerMintIndex = nat64;
+
 // Insufficient cycles attached by the caller to complete the call.
 type InsufficientCyclesError = record {
     // The amount of cycles the call requires.
@@ -90,7 +93,7 @@ type DepositSolStatus = variant {
     // The minter minted ckSOL for the deposit on the ledger.
     Minted : record {
         // The mint transaction index on the ckSOL ledger.
-        block_index: nat64;
+        block_index: LedgerMintIndex;
         // The minted amount: the swept amount minus the deposit's share of the
         // transaction fee of the sweep.
         minted_amount: Lamport;
@@ -450,7 +453,7 @@ type EventType = variant {
         // The identifier of the minted deposit.
         deposit_id: DepositSolId;
         // The mint transaction index on the ckSOL ledger.
-        mint_block_index: nat64;
+        mint_block_index: LedgerMintIndex;
     };
     // The pending mint of a swept deposit cannot be retried: either it became
     // older than the 24-hour deduplication window of the ckSOL ledger, or the
