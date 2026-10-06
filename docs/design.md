@@ -1,6 +1,27 @@
 # Chain-Key SOL (ckSOL) Design
 
-This document is a port of the original ckSOL scoping and design document. Diagrams were redrawn as Mermaid diagrams from the original figures.
+- [1. High-Level Goal](#1-high-level-goal)
+- [2. Overview](#2-overview)
+- [3. Technical Details](#3-technical-details)
+  - [3.1. Converting SOL to ckSOL](#31-converting-sol-to-cksol)
+    - [3.1.1. Validating a Solana Deposit Transaction](#311-validating-a-solana-deposit-transaction)
+    - [3.1.2. Automated Flow (Outdated)](#312-automated-flow-outdated)
+    - [3.1.3. Manual Flow](#313-manual-flow)
+    - [3.1.4. Consolidation](#314-consolidation)
+  - [3.2. Converting ckSOL to SOL](#32-converting-cksol-to-sol)
+    - [3.2.1. Durable Nonce Accounts](#321-durable-nonce-accounts)
+    - [3.2.2. Nonce Account Setup](#322-nonce-account-setup)
+    - [3.2.3. Submitting Withdrawal Requests](#323-submitting-withdrawal-requests)
+    - [3.2.4. Finalization and Resubmissions](#324-finalization-and-resubmissions)
+  - [3.3. Fees & Minimum Swap Amounts](#33-fees--minimum-swap-amounts)
+    - [3.3.1. ckSOL Ledger Fees](#331-cksol-ledger-fees)
+    - [3.3.2. ckSOL Minter Fees](#332-cksol-minter-fees)
+    - [3.3.3. Minimum Swap Amounts](#333-minimum-swap-amounts)
+    - [3.3.4. Parameter Constraints](#334-parameter-constraints)
+  - [3.4. OFAC Checks](#34-ofac-checks)
+  - [3.5. Events](#35-events)
+  - [3.6. API](#36-api)
+- [4. Testing](#4-testing)
 
 ## 1. High-Level Goal
 
@@ -45,13 +66,14 @@ graph LR
 
 The ckSOL minter interacts with the Solana blockchain via the [SOL RPC canister](https://github.com/dfinity/sol-rpc-canister). The ckSOL minter uses the following subset of endpoints:
 
+- [getAccountInfo](https://solana.com/docs/rpc/http/getaccountinfo): Returns the account information for the given address. This function is used to read the state of a durable nonce account before building a withdrawal transaction and to determine whether an in-flight withdrawal transaction has landed (see [Section 3.2.1](#321-durable-nonce-accounts)).
 - [getBalance](https://solana.com/docs/rpc/http/getbalance): Returns the balance of the given address. This function is used by `deposit_sol` to read the balance of a deposit address at the `finalized` commitment level and determine the sweepable amount.
 - [getBlock](https://solana.com/docs/rpc/http/getblock): Returns the block for the given slot. This function is used to get a recent block hash, which is contained in the response. Note that `transactionDetails` is set to `null` in the request. As a result, signatures and transactions are not returned.
 - [getSignaturesForAddress](https://solana.com/docs/rpc/http/getsignaturesforaddress): Returns the signatures for a given address. This function is used to learn about new transactions (in Solana, signatures are used to identify transactions, as the first signature in a transaction is considered the transaction ID).
-- [getSignatureStatuses](https://solana.com/docs/rpc/http/getsignaturestatuses): Returns the status of each transaction specified through its identifier, i.e., the first signature in the transaction. This function is used to determine whether or not a transaction has been finalized or needs to be resubmitted.
+- [getSignatureStatuses](https://solana.com/docs/rpc/http/getsignaturestatuses): Returns the status of each transaction specified through its identifier, i.e., the first signature in the transaction. This function is used to learn whether a transaction has been finalized; a missing status alone never triggers a resubmission, and how it is handled depends on the kind of transaction, as described in [Section 3.2.4](#324-finalization-and-resubmissions).
 - [getSlot](https://solana.com/docs/rpc/http/getslot): Returns the current slot. Since the slot number changes rapidly, the SOL RPC canister merely obtains a rounded and therefore slightly outdated slot number. The slot number is required to obtain a recent block hash using `getBlock`, whose block height is persisted with the transaction and later compared against the current block height to check if an unconfirmed transaction has expired.
 - [getTransaction](https://solana.com/docs/rpc/http/gettransaction): Returns the whole transaction for the given signature.
-- [sendTransaction](https://solana.com/docs/rpc/http/sendtransaction): Sends out the provided transaction. It requires the execution of the functions `getSlot` and `getBlock` to obtain a recent block hash, which must be part of the transaction.
+- [sendTransaction](https://solana.com/docs/rpc/http/sendtransaction): Sends out the provided transaction. It requires the execution of the functions `getSlot` and `getBlock` to obtain a recent block hash, which must be part of the transaction, except for withdrawal transactions, which carry a durable nonce instead (see [Section 3.2.1](#321-durable-nonce-accounts)).
 
 ### 3.1. Converting SOL to ckSOL
 
@@ -301,7 +323,7 @@ Proposed values for the parameters are provided in this list:
 
 A user first obtains their deposit address with `get_deposit_address` and transfers SOL to it, as in the automated flow. The user then asks the ckSOL minter to *sweep* that address. The user does not identify individual Solana transactions: the ckSOL minter reads the balance of the deposit address, moves it to its main account, and mints ckSOL once that sweep is finalized. As a consequence, several transfers that are each below the minimum deposit amount are credited together once their sum exceeds it, and deposits from centralized exchanges, which typically do not show the transaction signature to the user, need nothing but the deposit address.
 
-The manual flow is depicted in the following figure. The sweep reuses the transaction submission flow and the finalization flow described in [Section 3.1.4](#314-consolidation) and [Section 3.2.2](#322-finalization-and-resubmissions).
+The manual flow is depicted in the following figure. The sweep reuses the transaction submission flow and the finalization flow described in [Section 3.1.4](#314-consolidation) and [Section 3.2.4](#324-finalization-and-resubmissions).
 
 ```mermaid
 sequenceDiagram
@@ -357,7 +379,7 @@ If the balance is below the **minimum deposit amount** defined in [Section 3.3.3
 
 **Sweep.** A timer, running at the same frequency as withdrawal processing, takes up to 10 queued deposits and submits one Solana transaction for them following the transaction submission flow of [Section 3.1.4](#314-consolidation). Each deposit address signs a transfer of its sweepable amount to the main account of the ckSOL minter. The deposit address with the largest sweepable amount is the fee payer; it is listed first in the transaction and its transfer is reduced by the transaction fee of `5000 * k` lamports for `k` signatures. Since the minimum deposit amount is larger than the fee of a full batch (see [Section 3.3.4](#334-parameter-constraints)), the fee payer always has enough funds, and every deposit address is left with the rent exemption threshold plus whatever arrived after the balance check. The deposits are recorded as *swept* together with the transaction signature. No ckSOL is minted yet.
 
-**Finalization.** The sweep transaction is monitored like any other transaction, as described in [Section 3.2.2](#322-finalization-and-resubmissions). Once the transaction is finalized successfully, the deposits it contains are recorded as *finalized*: the SOL has moved to the main account, and the remaining steps only account for it. From this point on, `deposit_status` reports `Finalized` with the sweep signature until the mint lands.
+**Finalization.** The sweep transaction is monitored like any other transaction, as described in [Section 3.2.4](#324-finalization-and-resubmissions). Once the transaction is finalized successfully, the deposits it contains are recorded as *finalized*: the SOL has moved to the main account, and the remaining steps only account for it. From this point on, `deposit_status` reports `Finalized` with the sweep signature until the mint lands.
 
 The ckSOL minter then fetches the transaction with `getTransaction` and *settles* it against the plan the sweep was submitted with. Nothing is inferred from the outcome: the executed message must be exactly the planned one, every deposit address must have decreased by exactly its transfer, plus the fee reported in the metadata for the fee payer, and must end with at least the rent exemption threshold, since a transfer that arrived after the balance check legitimately leaves more, and the main account must have received exactly the planned amount, the sum of the sweepable amounts minus the assumed fee of `5000 * k` lamports. The reported fee may be lower than assumed, in which case the difference stays on the fee payer's address, but it may not be higher. If the `getTransaction` call fails or its result cannot be read, the deposits stay finalized and the fetch is retried on the next run of the finalization timer. If the result is readable but contradicts the plan, the ckSOL minter's model of the transaction is wrong, so nothing is minted: the deposits are *quarantined*, reusing the existing mechanism that prevents double minting, are reported on the dashboard together with the sweep signature, and the number of quarantined deposits is exposed as a metric. They are not processed further without a minter upgrade.
 
@@ -370,7 +392,7 @@ A user can follow the progress with `deposit_status`, which takes a deposit id a
 Two failure cases exist before the transaction is finalized, and neither is retried by the ckSOL minter:
 
 1. The transaction is finalized with an error. The funds are still on the deposit addresses, minus the fee paid by the fee payer. This should never happen with the invariants above, so it is reported as an error in the logs and in the metrics.
-2. The transaction expires, i.e., its blockhash is no longer valid and it has no on-chain status. Contrary to withdrawals, the sweep is *not* resubmitted. Expiry is determined against the last valid block height persisted with the transaction, as described in [Section 3.2.2](#322-finalization-and-resubmissions), never by counting slots; otherwise a transaction declared expired could still land, and the funds would reach the main account without being credited.
+2. The transaction expires, i.e., its blockhash is no longer valid and it has no on-chain status. Contrary to withdrawals, the sweep is *not* resubmitted. Expiry is determined against the last valid block height persisted with the transaction, as described in [Section 3.2.4](#324-finalization-and-resubmissions), never by counting slots; otherwise a transaction declared expired could still land, and the funds would reach the main account without being credited.
 
 In both cases the queued deposits are marked as *dropped*, and the number of dropped deposits is exposed as a metric. Since nothing was minted, no ckSOL is owed, and the user simply calls `deposit_sol` again to queue a new sweep of the balance that is still on the deposit address. In other words, the retry is triggered and paid for by the caller. In the first case Solana charges the fee even though the transaction failed, so the fee payer of that batch loses up to `5000 * k` lamports and its deposit address can fall just below the minimum deposit amount, in which case the next `deposit_sol` call reports the balance as too small until the user tops it up. This loss is accepted rather than reimbursed: the case should never occur, which is why it is alerted on, and a reimbursement flow would add a second path that moves funds without a deposit behind it.
 
@@ -432,15 +454,40 @@ Note that the default compute unit (CU) limits are [200,000 CUs per instruction 
 
 ### 3.2. Converting ckSOL to SOL
 
-#### 3.2.1. Submitting Withdrawal Requests
+#### 3.2.1. Durable Nonce Accounts
+
+A withdrawal pays out SOL irrevocably, so before a withdrawal transaction may be replaced, the ckSOL minter must be certain that the original transaction can never land anymore; otherwise both transactions may land and the withdrawal is paid out twice. Status queries cannot provide that certainty, because they are negative queries against storage with unspecified retention: `getSignatureStatuses` searches the recent status cache of roughly 300 rooted slots, and with `searchTransactionHistory: true` it additionally searches the node's local blockstore, whose size is an operator choice (`--limit-ledger-size`, by default on the order of days of history), followed by an archival database only if the operator runs one. `getTransaction` always searches these same tiers. A `null` response therefore only means "not found in whatever this node retains", and three out of four providers without archival storage agreeing on `null` would turn pruning into a confident but wrong answer. For withdrawals, the ckSOL minter therefore never decides anything based on a missing status; it relies on [durable nonces](https://solana.com/developers/guides/advanced/introduction-to-durable-nonces) instead.
+
+A **durable nonce account** is an account owned by the system program that stores a nonce value and a nonce authority. A transaction whose first instruction is `AdvanceNonceAccount`, signed by the nonce authority, may carry the stored nonce value in place of a recent block hash. Such a transaction never expires: it is valid for exactly as long as the nonce account still stores that value. When the transaction lands, the nonce is advanced to a new, unpredictable value, and the advance persists even if the transaction itself fails during execution.
+
+The ckSOL minter uses a **pool of durable nonce accounts** exclusively for withdrawal transactions, governed by two invariants:
+
+1. **One in-flight transaction per nonce account**: a nonce account is bound to at most one submitted transaction at a time, and it is reused only once that transaction has been observed to have landed, at which point the account already stores a fresh nonce value.
+2. **One message per nonce value**: the ckSOL minter never signs two different messages for the same nonce account and nonce value.
+
+The ckSOL minter's main address is the nonce authority of every account in the pool. Under these invariants, the state of a nonce account, read with `getAccountInfo` at the `finalized` commitment level, is an oracle that no provider's retention policy can distort: if the account still stores the nonce value used by an in-flight withdrawal transaction, the transaction has not landed, and since it can still land, the only safe action is to re-broadcast the identical transaction. If the nonce value has advanced, the transaction has landed, since nobody else can advance the nonce and no other message was signed for that value.
+
+For the oracle to be sound, a stale read must never be mistaken for an advance: nonce values are opaque hashes, so a value differing from the in-flight transaction's nonce could by itself be the account's past as well as its future, and a provider lagging behind an already observed state serves exactly such a past value. Since only the ckSOL minter can advance the nonce, the account's complete value history is the set of nonce values the ckSOL minter has bound to transactions, which the event log already records. Every read is therefore classified against that set: the bound value means the transaction has not landed; any other previously seen value is a stale response and yields no decision; a never-seen value can only be the account's new frontier, which proves the advance.
+
+The pool size bounds the withdrawal throughput, since every withdrawal transaction occupies one nonce account while it is in flight. When no free nonce account is available, the affected withdrawal batches simply remain queued until a nonce account frees up; the processing timer retries after a short delay only while both a free nonce account and an affordable batch remain, and otherwise waits for its regular interval, so an exhausted pool stops retrying entirely and a stale nonce read, whose reservation is released, is retried at the delayed cadence rather than in a zero-delay loop. As a nonce account costs nothing beyond its rent exemption minimum, the pool can be sized generously; **5 accounts** are proposed initially, allowing 50 concurrent in-flight withdrawals at 10 transfers per transaction.
+
+Deposit sweeps continue to use recent block hashes. The double-pay hazard is specific to withdrawals: a sweep only moves funds between addresses controlled by the ckSOL minter, nothing is credited before the finalized transaction has been positively observed, and an expired sweep is dropped rather than resubmitted, as described in [Section 3.1.3](#313-manual-flow).
+
+#### 3.2.2. Nonce Account Setup
+
+The nonce accounts are set up **offline** by the operators. The ckSOL minter's main address can be computed before the minter is installed, since it only depends on the canister ID and the subnet's threshold key. Each nonce account is created with the rent exemption minimum of 1,447,680 lamports for its 80 bytes of state and initialized **directly** with the ckSOL minter's main address as the nonce authority: the account is never initialized under an operator's authority and handed over later, and it is never advanced before joining the pool, so the first `AdvanceNonceAccount` instruction ever executed on it comes from the ckSOL minter. This makes the ckSOL minter's value history of the account complete from its first read, which the soundness of the classification in [Section 3.2.1](#321-durable-nonce-accounts) relies on. The ckSOL minter itself never creates, funds, or closes nonce accounts.
+
+The addresses of the pool are passed in the **init arguments**, and further addresses can be added through the **upgrade arguments**; the pool only ever grows, and removing an address is not supported. A removed account would keep the ckSOL minter's main address as its nonce authority while no longer being rejected by the withdrawal destination filter of [Section 3.2.3](#323-submitting-withdrawal-requests), turning it into a destination trap, and an account that ever left and re-joined the pool would break the precondition of [Section 3.2.1](#321-durable-nonce-accounts) that the ckSOL minter's value history of each account is complete. Nobody needs removal, so retiring a mis-configured account is accepted to require a code upgrade. Init and upgrade validation checks that the addresses are well-formed and pairwise distinct. That each address is an initialized nonce account with the ckSOL minter's main address as its authority is verified as part of the verification process of the NNS proposal carrying the init or upgrade arguments. Since the ckSOL minter reads each nonce account with `getAccountInfo` before using it anyway, it additionally asserts that the returned authority is the expected one; a failing assertion indicates a serious operator error.
+
+#### 3.2.3. Submitting Withdrawal Requests
 
 Converting ckSOL back to SOL requires two user actions: The user must approve the ckSOL minter to withdraw from their ckSOL account by calling `icrc2_approve` and then call `withdraw`. Naturally, the user may approve the ckSOL minter to withdraw a large amount from their account so that multiple `withdraw` calls can be performed without the need to create new approvals.
 
-The `withdraw` endpoint has the following parameters: An optional subaccount, the destination address on Solana, and the amount to be withdrawn. When receiving such a request, the ckSOL minter issues an `icrc2_transfer_from` call, sending the requested amount from the account corresponding to the caller's principal ID plus the provided subaccount (if any) to its own account. Since its account is the minting account, this transfer is a burn operation, burning the given amount.
+The `withdraw` endpoint has the following parameters: An optional subaccount, the destination address on Solana, and the amount to be withdrawn. While the nonce account pool is empty — a valid configuration during the deployment workflow of [Section 3.2.2](#322-nonce-account-setup), before the accounts have been added — the ckSOL minter rejects every withdrawal request with `TemporarilyUnavailable` before anything is burned, so no ckSOL is ever burned into a queue that nothing can serve; an exhausted but non-empty pool, in contrast, only delays queued withdrawals. Otherwise, the ckSOL minter issues an `icrc2_transfer_from` call, sending the requested amount from the account corresponding to the caller's principal ID plus the provided subaccount (if any) to its own account. Since its account is the minting account, this transfer is a burn operation, burning the given amount.
 
 If this burn operation is successful, the retrieval request is added to an internal queue and the block index of the burn operation is returned to the user. Otherwise, an error is returned.
 
-When the timer strikes, up to 10 retrieval requests are batched into a single transaction and sent to the SOL RPC canister. The flow is shown in the following figure, using the transaction submission flow defined above.
+When the timer strikes, up to 10 retrieval requests are batched into a single transaction and sent to the SOL RPC canister. The flow is shown in the following figure, using the withdrawal transaction submission flow defined below.
 
 ```mermaid
 sequenceDiagram
@@ -459,7 +506,7 @@ sequenceDiagram
     Note over Minter: Queue retrieval request
     Minter-->>-User: burn block index
 
-    Note over Solana,Minter: ⏱️ Transaction submission flow
+    Note over Solana,Minter: ⏱️ Withdrawal transaction submission flow
 ```
 
 Since Solana has a high block rate, the timer should execute more frequently compared to ckBTC. The proposed interval is **10 seconds**. A shorter interval between calls implies that there is a lower chance of retrieval requests being batched together; however, it is preferable to have smaller batches, as transactions are cheap and it provides a better user experience.
@@ -468,9 +515,45 @@ There is a **minimum withdrawal amount**, which is defined in [Section 3.3.3](#3
 
 The funds for each withdrawal are taken from the main account. Since ckSOL is only minted once the corresponding SOL has reached the main account (see [Section 3.1.3](#313-manual-flow)), the main account always covers the minted supply, and a withdrawal never waits for or triggers a consolidation. The only delay a user can experience is between a `deposit_sol` call and the mint of their own deposit.
 
-#### 3.2.2. Finalization and Resubmissions
+Contrary to sweeps, a withdrawal transaction does not follow the transaction submission flow of [Section 3.1.4](#314-consolidation), since it must not reference a recent block hash. Instead, the ckSOL minter picks a free durable nonce account from the pool of [Section 3.2.1](#321-durable-nonce-accounts) and reads its current nonce value with `getAccountInfo` at the `finalized` commitment level; a response showing a nonce value already bound to an earlier transaction of that account is stale, and the batch waits for the next round. The transaction consists of an `AdvanceNonceAccount` instruction first, followed by one transfer per withdrawal request, and carries the nonce value in place of the recent block hash. The main address is the fee payer, the source of all transfers, and the nonce authority, so the transaction has a single signature. A nonce account is reserved for a batch synchronously, before the first await point, so that concurrently processed batches can never pick the same account. Once the message is built, a `CreatedTransaction` event records the unsigned transaction together with the burn indices of the withdrawals it serves and the nonce account and nonce value it uses, *before* the threshold signature is requested: should the signing fail or be interrupted, the reservation survives, and the ckSOL minter signs the recorded message again instead of building a new one, so that no two different messages are ever signed for the same nonce value. The signed transaction is likewise persisted before it is sent, so that the identical transaction can later be re-broadcast.
 
-The statuses of (consolidation or withdrawal) transactions are checked on a timer by calling the `getSignatureStatuses` endpoint on the SOL RPC canister. The status of any accepted transaction is either `processed`, `confirmed`, or `finalized`.
+```mermaid
+sequenceDiagram
+    participant Solana as Solana Network
+    participant RPC as SOL RPC canister
+    participant Minter as ckSOL Minter
+    participant Signer as Threshold Signing
+
+    Note over Minter: ⏱️ Timer fires
+    activate Minter
+    Note over Minter: Reserve a free nonce account from the pool
+    Minter->>+RPC: getAccountInfo(nonce_account)
+    RPC->>+Solana: getAccountInfo(nonce_account)
+    Solana-->>-RPC: nonce account state
+    RPC-->>-Minter: nonce account state
+    Note over Minter: Build transaction: AdvanceNonceAccount first,<br/>then one transfer per withdrawal,<br/>nonce value in place of the recent block hash
+    Note over Minter: Record CreatedTransaction (unsigned transaction,<br/>nonce account, nonce value)
+    Minter->>+Signer: sign_with_schnorr(Ed25519, main derivation path, message)
+    Signer-->>-Minter: signature
+    Note over Minter: Serialize and persist signed transaction
+    Minter->>+RPC: sendTransaction(transaction)
+    RPC->>+Solana: sendTransaction(transaction)
+    Solana-->>-RPC: signature
+    RPC-->>-Minter: signature
+    deactivate Minter
+```
+
+The `AdvanceNonceAccount` instruction adds the nonce account and the recent-blockhashes sysvar to the account keys plus one short instruction, roughly 80 bytes in total, so a batch of 10 transfers still fits comfortably within the maximum transaction size of 1232 bytes.
+
+Withdrawal transactions are sent with `skipPreflight: true`. By default, an RPC provider simulates a transaction before broadcasting it and rejects it when the simulation fails, which happens for example when a withdrawal destination cannot receive lamports. Such a transaction would never be broadcast, its nonce would never advance, and its nonce account would stay occupied until an operator intervenes, so a handful of withdrawals to such destinations could exhaust the pool and halt all withdrawals. Skipping preflight lets a doomed transaction land and fail on-chain instead, which advances the nonce, frees the nonce account, and settles the transaction in the `Failed` state at the cost of the transaction fee. Preflight would also be an unreliable gate: each RPC provider evaluates it independently, so one lenient or faster provider may broadcast a transaction that the others rejected, making the outcome nondeterministic.
+
+Since transactions are atomic, a single destination that cannot receive lamports fails the whole batch, including the withdrawals of unrelated users, and the burned ckSOL is not reimbursed. This risk is accepted, but a cheap filter removes the statically known part of it: the `withdraw` endpoint rejects, before burning, any destination contained in the runtime's reserved account keys set (sysvars, builtin programs, and precompiles, whose write locks are always demoted so a transfer can never credit them), which the ckSOL minter embeds from the same SDK crate the runtime uses. The set grows over time through feature gates, so the embedded copy is best-effort and only as fresh as its crate version. The `withdraw` endpoint likewise rejects the ckSOL minter's own addresses, i.e., the main address and the nonce accounts of the pool, since a withdrawal to the main address would land as a self-transfer while the tracked balance was debited by the full amount, leaving the tracked balance permanently below the actual one. Destinations that fail dynamically, such as executable program accounts, cannot be filtered statically and checking them per withdrawal is not worth an RPC call; this residual risk is accepted, and it shrinks further once `remove_accounts_executable_flag_checks` (SIMD-0162) activates, after which transfers to program accounts simply succeed.
+
+Skipping preflight also means that a transaction the main account cannot pay for would land and fail, consuming its nonce and terminally failing the batch. The tracked balance prevents such a transaction from ever being built, and a tracked balance exceeding the actual balance would already be a critical bug, since it means the ckSOL supply is no longer fully backed. In addition, the batch selection keeps the rent exemption threshold back from the available balance, so a withdrawal transaction can never leave the main address with a balance below the rent exemption threshold, which Solana would equally reject at execution.
+
+#### 3.2.4. Finalization and Resubmissions
+
+The statuses of (sweep or withdrawal) transactions are checked on a timer by calling the `getSignatureStatuses` endpoint on the SOL RPC canister. The status of any accepted transaction is either `processed`, `confirmed`, or `finalized`.
 
 ```mermaid
 sequenceDiagram
@@ -488,33 +571,45 @@ sequenceDiagram
     deactivate Minter
 ```
 
-It is possible that a transaction is not accepted, i.e., it is not found in any of the statuses listed above. Since ckSOL tokens are not reimbursed, the transaction must be resubmitted until it is confirmed; however, care has to be taken to ensure that there is no double spending. Solana transactions refer to a recent block hash. The block hash may not be more than 150 blocks in the past, which corresponds to roughly 90 seconds.
+It is possible that a transaction is not accepted, i.e., it is not found in any of the statuses listed above. Since ckSOL tokens are not reimbursed, the transaction must eventually be confirmed; however, care has to be taken to ensure that there is no double spending. How a missing status is handled depends on the kind of transaction.
 
-A transaction is expired once the current block height exceeds its last valid block height, i.e., the block height persisted with the transaction plus 150. The current block height is read from the `getBlock` response that the finalization timer already fetches, so no additional call is required. Expiry is never determined by counting slots, since slots can be skipped and a transaction declared expired too early could still land. If there are expired transactions that are not found, i.e., they did not even reach the status `processed`, they need to be resubmitted. The different states and their transitions internal to the ckSOL minter are shown in the following figure.
+**Blockhash transactions (sweeps)** refer to a recent block hash, which may not be more than 150 blocks in the past, corresponding to roughly 90 seconds. Such a transaction is expired once the current block height exceeds its last valid block height, i.e., the block height persisted with the transaction plus 150. The current block height is read from the `getBlock` response that the finalization timer already fetches, so no additional call is required. Expiry is never determined by counting slots, since slots can be skipped and a transaction declared expired too early could still land. An expired sweep is dropped and never resubmitted, as described in [Section 3.1.3](#313-manual-flow).
+
+**Durable-nonce transactions (withdrawals)** never expire, so the notion of expiry does not apply to them. When the status of a withdrawal transaction is missing, the ckSOL minter reads the nonce account with `getAccountInfo` at the `finalized` commitment level and classifies the returned value as described in [Section 3.2.1](#321-durable-nonce-accounts):
+
+- **Nonce value unchanged**: the transaction has not landed and can still land. The persisted signed transaction is re-broadcast unchanged by the resubmission timer. No new threshold signature is required, and the transaction keeps its identifier. Re-signing the message would be safe, since at most one of two transactions sharing the same nonce value can land, but it would be pointless: threshold Ed25519 signing is not deterministic, so a fresh signature would merely create a second identifier to track for the same transaction. Re-signing only becomes useful to bump the transaction fee, which is not supported.
+- **Nonce value seen before**: the response is stale, coming from a provider lagging behind an already observed state. No decision is taken, and the transaction keeps being re-broadcast.
+- **Nonce value never seen**: the transaction has landed, but with an unknown outcome, since the nonce advance persists even when a transaction fails during execution: the advanced nonce proves inclusion, not payment. The ckSOL minter resolves the outcome with `getTransaction`. Should no provider return the transaction anymore because of its retention policy, the withdrawal remains in an unresolved state; no double pay is possible either way, since a transaction whose nonce has advanced is never submitted again.
+
+Entering the `Landed` state releases the transaction's nonce account: the nonce advance is finalized, so the account already stores a fresh value and can serve new withdrawals while the outcome is still being resolved, and unresolved outcomes therefore never reduce the pool capacity. While the outcome of a landed withdrawal transaction is unresolved, `withdrawal_status` keeps reporting `TxSent`, and changes to `TxFinalized` only once the outcome is known. The `getTransaction` call is retried on every round of the finalization timer until it succeeds, without a backoff or retry budget: the cost of retrying indefinitely is accepted, since an outcome stays unresolved only while every provider has pruned the transaction, which should be rare. The number of unresolved transactions, together with the age of the oldest one, is exposed as a metric. A withdrawal transaction that resolves to an on-chain error follows the regular failure handling described below: the transaction is stored whole and the burned ckSOL is not reimbursed, as there is no reimbursement flow.
+
+The different states and their transitions internal to the ckSOL minter are shown in the following figure.
 
 ```mermaid
 stateDiagram-v2
     Withdrawal --> Submitted
-    Consolidation --> Submitted
-    Submission --> Submitted
+    Sweep --> Submitted
     Submitted --> Succeeded: confirmation_status = finalized and err = null
     Submitted --> Failed: confirmation_status = finalized and err != null
-    Submitted --> PendingResubmission: withdrawal expired
+    Submitted --> Submitted: withdrawal not found and nonce unchanged (re-broadcast)
+    Submitted --> Landed: withdrawal not found and nonce advanced
+    Landed --> Succeeded: getTransaction with err = null
+    Landed --> Failed: getTransaction with err != null
     Submitted --> Dropped: sweep expired
-    PendingResubmission --> Submission
 
-    Submission: ⏱️ Transaction submission flow
     Succeeded: Succeeded (store transaction_id)
     Failed: Failed (store whole transaction)
-    PendingResubmission: Pending resubmission
+    Landed: Landed (outcome unresolved)
     Dropped: Dropped (deposits marked dropped, no resubmission)
 ```
 
-The withdrawal and consolidation flows result in the submission of a transaction, which is then in the `Submitted` state. The status of submitted transactions is checked on a timer as outlined above. If a transaction reaches the confirmation status `finalized`, there are two cases: If the transaction was finalized successfully, i.e., without errors, the transaction transitions to the state `Succeeded` and its ID is stored permanently. If there was an error, the transaction transitions to the state `Failed` and is stored in its entirety so that it can be analyzed what happened. Ideally, no transaction ever ends up in this state. However, it is possible for transactions to fail, for example by attempting to withdraw SOL to a program account, which is not allowed. As there is no reimbursement flow, the user's funds would be stuck in this case. Storing the whole failed transaction ensures that the funds are not lost and appropriate actions may be taken when such transactions are encountered.
+The withdrawal and sweep flows result in the submission of a transaction, which is then in the `Submitted` state. The status of submitted transactions is checked on a timer as outlined above. If a transaction reaches the confirmation status `finalized`, there are two cases: If the transaction was finalized successfully, i.e., without errors, the transaction transitions to the state `Succeeded` and its ID is stored permanently. If there was an error, the transaction transitions to the state `Failed` and is stored in its entirety so that it can be analyzed what happened. Ideally, no transaction ever ends up in this state. However, it is possible for transactions to fail, for example by attempting to withdraw SOL to a program account, which is not allowed. As there is no reimbursement flow, the user's funds would be stuck in this case. Storing the whole failed transaction ensures that the funds are not lost and appropriate actions may be taken when such transactions are encountered.
 
 The states above describe the lifecycle of the transaction itself, not the crediting of the deposits it carries. When a sweep transaction of the manual flow reaches `Succeeded`, the ckSOL minter additionally records its deposits as finalized, fetches the transaction to read the fee that was charged, runs the sanity check on the pre- and post-balances, and enqueues the pending mints, as described in [Section 3.1.3](#313-manual-flow).
 
-If the transaction expires, i.e., it is unknown after 150 blocks, it enters the `Pending resubmission` state. A different timer fetches transactions from this state, following the transaction submission flow to submit it again, at which point the transaction is back in the `Submitted` state. Sweep transactions of the manual flow are the exception: an expired sweep is never resubmitted but dropped, as described in [Section 3.1.3](#313-manual-flow), since nothing has been minted for it yet and the user can simply queue a new sweep.
+An expired sweep is never resubmitted but dropped, as described in [Section 3.1.3](#313-manual-flow), since nothing has been minted for it yet and the user can simply queue a new sweep. A withdrawal transaction with a missing status and an unchanged nonce stays in the `Submitted` state; a dedicated resubmission timer re-broadcasts the persisted signed transaction as-is.
+
+Since withdrawal transactions never expire, a transaction that persistently fails to land occupies its nonce account indefinitely. Re-broadcasting cures the causes that previously led to expiry, such as temporary RPC outages or transactions dropped on the way to a leader, and since preflight is skipped, a transaction whose transfer cannot succeed lands and fails on-chain rather than being silently filtered out by the RPC providers, so under normal conditions every withdrawal transaction eventually lands, successfully or not. The age of the oldest in-flight withdrawal transaction is exposed as a metric to detect the abnormal case. Deliberately abandoning a stuck transaction would require the ckSOL minter to advance the nonce itself with a separate transaction, which races the stuck transaction; this is left out of scope as a manual, operator-driven procedure.
 
 A prioritization fee is not required under normal load, therefore it is omitted. If the need arises to bump fees, this topic will be revisited.
 
@@ -557,6 +652,7 @@ The maximum response sizes for each endpoint are listed here:
 
 The following maximum response sizes were used to determine the cycles costs of the individual endpoints:
 
+- `getAccountInfo`: 500 bytes
 - `getSignaturesForAddress`: 20,000 bytes
 - `getTransaction`: 50,000 bytes
 - `getBalance`: 150 bytes
@@ -567,6 +663,7 @@ The following maximum response sizes were used to determine the cycles costs of 
 
 Using the [cost estimation endpoints](https://dashboard.internetcomputer.org/canister/tghme-zyaaa-aaaar-qarca-cai) of the SOL RPC canister, the following estimates are computed for the cycles cost of each required endpoint, using the individual maximum response sizes on mainnet for commitment level `finalized` and requiring 3 out of 4 responses to agree:
 
+- `getAccountInfo`: 2.1B cycles
 - `getSignaturesForAddress`: 4.3B cycles
 - `getTransaction`: 7.5B cycles
 - `sendTransaction`: 2.2B cycles
@@ -581,7 +678,7 @@ The **manual deposit fee** is not a parameter but the depositor's share of the s
 
 When a deposit address holding x SOL is swept for the first time, the user receives x SOL minus the rent exemption threshold minus the fee share in their account. Later sweeps of the same address only deduct the fee share, since the threshold is already in place.
 
-The **withdrawal fee** can be lower, as it only requires the execution of the message submission flow, i.e., making one `getSlot`, `getBlock`, and `sendTransaction` call, followed by a `getSignatureStatuses` call, for a total cost of 8.6B cycles, which corresponds to 0.0086 XDR = 0.012384 USD = 0.00012384 SOL. Adding the threshold signature cost of 0.000377 SOL, the total cost is 0.00050084 SOL. Rounding up, the withdrawal fee could be set to **0.001 SOL**.
+The **withdrawal fee** can be lower, as it only requires the execution of the withdrawal transaction submission flow, i.e., making one `getAccountInfo` and `sendTransaction` call, followed by a `getSignatureStatuses` call, for a total cost of 6.4B cycles, which corresponds to 0.0064 XDR = 0.009216 USD = 0.00009216 SOL. Adding the threshold signature cost of 0.000377 SOL, the total cost is 0.00046916 SOL. Rounding up, the withdrawal fee could be set to **0.001 SOL**.
 
 When the user withdraws x SOL, the user receives x SOL minus the withdrawal fee in the destination account.
 
