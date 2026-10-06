@@ -264,7 +264,8 @@ pub struct MinterInfo {
     pub deposit_sol_required_cycles: u128,
     /// The minter's tracked SOL balance in lamports.
     pub balance: Lamport,
-    /// The minter's main Solana address, available once its Schnorr public key has been fetched.
+    /// The minter's main Solana address, available once its Schnorr public key
+    /// has been fetched for the first time, shortly after installation.
     pub minter_address: Option<String>,
     /// The base58 addresses of the durable nonce accounts reserved for withdrawal transactions.
     pub nonce_accounts: Vec<String>,

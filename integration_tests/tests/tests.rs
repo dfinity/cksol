@@ -173,6 +173,7 @@ mod lifecycle {
         const NEW_DEPOSIT_SOL_REQUIRED_CYCLES: u128 = 500_000_000_000;
 
         let setup = SetupBuilder::new().build().await;
+        wait_for_initial_minter_address(&setup).await;
 
         let initial_minter_info = setup.minter().get_minter_info().await;
         assert_eq!(
@@ -195,7 +196,6 @@ mod lifecycle {
             .upgrade(UpgradeArgs::default())
             .await
             .expect("upgrade failed");
-        wait_for_cached_minter_address(&setup).await;
 
         let minter_info = setup.minter().get_minter_info().await;
         assert_eq!(minter_info, initial_minter_info);
@@ -214,7 +214,6 @@ mod lifecycle {
             })
             .await
             .expect("upgrade failed");
-        wait_for_cached_minter_address(&setup).await;
 
         let minter_info = setup.minter().get_minter_info().await;
         assert_eq!(
@@ -278,9 +277,10 @@ mod lifecycle {
         setup.drop().await;
     }
 
-    /// Polls until the minter has fetched its Schnorr master key again, which
-    /// an upgrade discards together with the rest of the transient state.
-    async fn wait_for_cached_minter_address(setup: &Setup) {
+    /// Polls until the minter has fetched its Schnorr master key for the first
+    /// time. The fetch is recorded in a `MinterPublicKeyFetched` event, so the
+    /// key survives upgrades and the address stays available without waiting.
+    async fn wait_for_initial_minter_address(setup: &Setup) {
         for _ in 0..10 {
             if setup
                 .minter()
