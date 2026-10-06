@@ -201,6 +201,11 @@ pub fn deposit_address(account: Account) -> solana_address::Address {
     account_address(&schnorr_master_key(), &account)
 }
 
+/// The id of the `i`-th deposit a test queues, since ids are assigned in sequence.
+pub fn deposit_id(i: usize) -> DepositSolId {
+    i as DepositSolId
+}
+
 /// Returns an [`Account`] with a deterministic principal derived from `i`.
 pub fn account(i: usize) -> Account {
     let mut bytes = [0u8; 29];

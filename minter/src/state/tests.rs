@@ -8,6 +8,7 @@ use crate::{
         AUTOMATED_DEPOSIT_FEE, DEPOSIT_CONSOLIDATION_FEE, DEPOSIT_SOL_REQUIRED_CYCLES,
         MINIMUM_DEPOSIT_AMOUNT, MINIMUM_WITHDRAWAL_AMOUNT, WITHDRAWAL_FEE, account,
         arb::arb_event,
+        deposit_id,
         events::{
             accept_withdrawal, accept_withdrawal_at, credit_sweep, expire_transaction,
             fail_transaction, queue_deposit, resubmit_transaction, submit_sweep, submit_withdrawal,
@@ -850,9 +851,9 @@ fn should_track_balance_through_deposits_withdrawals_and_failures() {
     assert_eq!(read_state(|s| s.balance()), 0);
 
     // Queueing and sweeping deposits does not change the balance
-    queue_deposit(0, account(1), DEPOSIT_1);
-    queue_deposit(1, account(2), DEPOSIT_2);
-    submit_sweep(signature(0xAA), vec![0, 1]);
+    queue_deposit(deposit_id(0), account(1), DEPOSIT_1);
+    queue_deposit(deposit_id(1), account(2), DEPOSIT_2);
+    submit_sweep(signature(0xAA), vec![deposit_id(0), deposit_id(1)]);
     assert_eq!(read_state(|s| s.balance()), 0);
 
     // A finalized sweep does not change the balance until it is credited
@@ -885,8 +886,8 @@ fn should_track_balance_through_deposits_withdrawals_and_failures() {
     assert_eq!(read_state(|s| s.balance()), expected);
 
     // A failed sweep does not credit the balance
-    queue_deposit(2, account(5), DEPOSIT_3);
-    submit_sweep(signature(0xCC), vec![2]);
+    queue_deposit(deposit_id(2), account(5), DEPOSIT_3);
+    submit_sweep(signature(0xCC), vec![deposit_id(2)]);
     fail_transaction(signature(0xCC));
     assert_eq!(read_state(|s| s.balance()), expected);
 }
