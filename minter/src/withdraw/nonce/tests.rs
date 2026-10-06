@@ -1,10 +1,12 @@
 use crate::{
+    rpc::GetNonceAccountError,
     test_fixtures::{
         MINTER_ADDRESS, durable_nonce, init_state, nonce_account_address, nonce_account_info,
         runtime::TestCanisterRuntime,
     },
-    withdraw::nonce::read_verified_nonce,
+    withdraw::nonce::{ReadNonceError, read_verified_nonce},
 };
+use assert_matches::assert_matches;
 use solana_address::Address;
 
 type GetAccountInfoResult = sol_rpc_types::MultiRpcResult<Option<sol_rpc_types::AccountInfo>>;
@@ -23,8 +25,7 @@ async fn should_return_the_nonce_value_of_an_account_with_the_minter_as_authorit
 }
 
 #[tokio::test]
-#[should_panic(expected = "BUG: nonce account")]
-async fn should_panic_if_the_account_is_not_owned_by_the_system_program() {
+async fn should_fail_if_the_account_is_not_owned_by_the_system_program() {
     init_state();
 
     let foreign_owner_account = sol_rpc_types::AccountInfo {
@@ -36,12 +37,18 @@ async fn should_panic_if_the_account_is_not_owned_by_the_system_program() {
         Ok(Some(foreign_owner_account)),
     ));
 
-    let _ = read_verified_nonce(&runtime, nonce_account_address(), MINTER_ADDRESS).await;
+    let result = read_verified_nonce(&runtime, nonce_account_address(), MINTER_ADDRESS).await;
+
+    assert_matches!(
+        result,
+        Err(ReadNonceError::GetNonceAccount(
+            GetNonceAccountError::NotOwnedBySystemProgram { .. }
+        ))
+    );
 }
 
 #[tokio::test]
-#[should_panic(expected = "BUG: nonce account")]
-async fn should_panic_if_the_authority_is_not_the_minter_address() {
+async fn should_fail_if_the_authority_is_not_the_minter_address() {
     init_state();
     let other_authority = Address::from([0x99; 32]);
 
@@ -49,5 +56,13 @@ async fn should_panic_if_the_authority_is_not_the_minter_address() {
         Ok(Some(nonce_account_info(other_authority, 1))),
     ));
 
-    let _ = read_verified_nonce(&runtime, nonce_account_address(), MINTER_ADDRESS).await;
+    let result = read_verified_nonce(&runtime, nonce_account_address(), MINTER_ADDRESS).await;
+
+    assert_eq!(
+        result,
+        Err(ReadNonceError::ForeignAuthority {
+            authority: other_authority,
+            minter_address: MINTER_ADDRESS,
+        })
+    );
 }
