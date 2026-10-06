@@ -424,7 +424,7 @@ mod nonce_accounts {
     }
 
     #[test]
-    fn should_round_trip_nonce_accounts_through_upgrades() {
+    fn should_add_nonce_accounts_through_upgrades() {
         let mut state = State::try_from(valid_init_args()).unwrap();
 
         state
@@ -433,18 +433,11 @@ mod nonce_accounts {
                 ..Default::default()
             })
             .unwrap();
+
         assert_eq!(
             pool_addresses(&state),
             vec![nonce_account(1), nonce_account(2)]
         );
-
-        state
-            .upgrade(UpgradeArgs {
-                nonce_accounts_to_remove: Some(vec![nonce_account(1), nonce_account(2)]),
-                ..Default::default()
-            })
-            .unwrap();
-        assert_eq!(state, State::try_from(valid_init_args()).unwrap());
     }
 
     #[test]
@@ -455,7 +448,6 @@ mod nonce_accounts {
         };
         let upgrade_args = UpgradeArgs {
             nonce_accounts_to_add: Some(vec![nonce_account(2)]),
-            nonce_accounts_to_remove: Some(vec![nonce_account(1)]),
             ..Default::default()
         };
         let mut expected = State::try_from(init_args.clone()).unwrap();
@@ -473,7 +465,10 @@ mod nonce_accounts {
         ]);
 
         assert_eq!(replayed, expected);
-        assert_eq!(pool_addresses(&replayed), vec![nonce_account(2)]);
+        assert_eq!(
+            pool_addresses(&replayed),
+            vec![nonce_account(1), nonce_account(2)]
+        );
     }
 
     fn nonce_account(i: usize) -> String {

@@ -985,7 +985,6 @@ pub mod arb {
             prop::option::of(any::<u64>()),
             prop::option::of(any::<u64>()),
             prop::option::of(arb_nonce_accounts()),
-            prop::option::of(arb_nonce_accounts()),
         )
             .prop_map(
                 |(
@@ -996,7 +995,6 @@ pub mod arb {
                     deposit_sol_required_cycles,
                     deposit_sol_fee,
                     nonce_accounts_to_add,
-                    nonce_accounts_to_remove,
                 )| UpgradeArgs {
                     sol_rpc_canister_id,
                     minimum_withdrawal_amount,
@@ -1005,7 +1003,6 @@ pub mod arb {
                     deposit_sol_required_cycles,
                     deposit_sol_fee,
                     nonce_accounts_to_add,
-                    nonce_accounts_to_remove,
                 },
             )
     }

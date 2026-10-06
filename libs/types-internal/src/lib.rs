@@ -87,9 +87,6 @@ pub struct UpgradeArgs {
     /// The base58 addresses of durable nonce accounts to add to the withdrawal pool.
     #[cfg_attr(feature = "event", n(6))]
     pub nonce_accounts_to_add: Option<Vec<String>>,
-    /// The base58 addresses of durable nonce accounts to remove from the withdrawal pool.
-    #[cfg_attr(feature = "event", n(7))]
-    pub nonce_accounts_to_remove: Option<Vec<String>>,
 }
 
 /// The Solana network to connect to via the SOL RPC canister.

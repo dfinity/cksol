@@ -337,7 +337,6 @@ impl State {
             deposit_sol_required_cycles,
             deposit_sol_fee,
             nonce_accounts_to_add,
-            nonce_accounts_to_remove,
         }: UpgradeArgs,
     ) -> Result<(), InvalidStateError> {
         if let Some(sol_rpc_canister_id) = sol_rpc_canister_id {
@@ -361,10 +360,6 @@ impl State {
         if let Some(nonce_accounts) = nonce_accounts_to_add {
             self.nonce_pool
                 .add_accounts(parse_nonce_accounts(nonce_accounts)?)?;
-        }
-        if let Some(nonce_accounts) = nonce_accounts_to_remove {
-            self.nonce_pool
-                .remove_accounts(parse_nonce_accounts(nonce_accounts)?)?;
         }
         self.validate()
     }
@@ -692,14 +687,12 @@ pub enum InvalidStateError {
     },
     InvalidNonceAccount(String),
     DuplicateNonceAccount(Address),
-    UnknownNonceAccount(Address),
 }
 
 impl From<NoncePoolError> for InvalidStateError {
     fn from(error: NoncePoolError) -> Self {
         match error {
             NoncePoolError::DuplicateAccount(address) => Self::DuplicateNonceAccount(address),
-            NoncePoolError::UnknownAccount(address) => Self::UnknownNonceAccount(address),
         }
     }
 }

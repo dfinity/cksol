@@ -7,9 +7,9 @@ mod tests;
 /// The pool of durable nonce accounts reserved for withdrawal transactions.
 ///
 /// The accounts are created offline by the operators with the minter's main
-/// address as the nonce authority and enter or leave the pool through the init
-/// and upgrade arguments. The pool may be empty, in which case no withdrawal
-/// transaction can be submitted.
+/// address as the nonce authority and enter the pool through the init and
+/// upgrade arguments; an account never leaves the pool. The pool may be empty,
+/// in which case no withdrawal transaction can be submitted.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct DurableNoncePool {
     accounts: BTreeMap<Address, NonceAccountState>,
@@ -38,25 +38,6 @@ impl DurableNoncePool {
         Ok(())
     }
 
-    /// Removes the given accounts from the pool.
-    ///
-    /// Only an account in the [`NonceAccountState::Free`] state may be removed,
-    /// so an account bound to an in-flight transaction stays in the pool.
-    pub fn remove_accounts(
-        &mut self,
-        addresses: impl IntoIterator<Item = Address>,
-    ) -> Result<(), NoncePoolError> {
-        for address in addresses {
-            match self.accounts.get(&address) {
-                None => return Err(NoncePoolError::UnknownAccount(address)),
-                Some(NonceAccountState::Free) => {
-                    self.accounts.remove(&address);
-                }
-            }
-        }
-        Ok(())
-    }
-
     pub fn addresses(&self) -> impl Iterator<Item = &Address> {
         self.accounts.keys()
     }
@@ -72,5 +53,4 @@ enum NonceAccountState {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum NoncePoolError {
     DuplicateAccount(Address),
-    UnknownAccount(Address),
 }
