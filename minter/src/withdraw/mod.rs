@@ -99,16 +99,16 @@ fn validate_destination(destination: &Address) -> Result<(), WithdrawalError> {
             "{destination} is an account key reserved by the Solana runtime"
         )));
     }
+    if read_state(|s| s.nonce_pool().contains(destination)) {
+        return Err(WithdrawalError::InvalidDestination(format!(
+            "{destination} is a durable nonce account of the ckSOL minter"
+        )));
+    }
     let master_key =
         minter_public_key().map_err(|e| WithdrawalError::TemporarilyUnavailable(e.to_string()))?;
     if destination == &minter_address(&master_key) {
         return Err(WithdrawalError::InvalidDestination(format!(
             "{destination} is the ckSOL minter's main address"
-        )));
-    }
-    if read_state(|s| s.nonce_pool().contains(destination)) {
-        return Err(WithdrawalError::InvalidDestination(format!(
-            "{destination} is a durable nonce account of the ckSOL minter"
         )));
     }
     Ok(())
