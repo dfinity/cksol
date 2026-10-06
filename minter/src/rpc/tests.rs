@@ -394,12 +394,18 @@ mod get_nonce_account_tests {
     async fn should_fail_if_account_is_not_an_initialized_nonce_account() {
         init_state();
 
-        let undecodable_account = sol_rpc_types::AccountInfo {
-            data: AccountData::Binary("not base64!".to_string(), AccountEncoding::Base64),
+        let account_with_data = |data: &str| sol_rpc_types::AccountInfo {
+            data: AccountData::Binary(data.to_string(), AccountEncoding::Base64),
             ..nonce_account_info(MINTER_ADDRESS, 1)
         };
+        let invalid_base64_account = account_with_data("not base64!");
+        let invalid_nonce_state_account = account_with_data("AAAA");
 
-        for account in [uninitialized_nonce_account_info(), undecodable_account] {
+        for account in [
+            uninitialized_nonce_account_info(),
+            invalid_base64_account,
+            invalid_nonce_state_account,
+        ] {
             let runtime = TestCanisterRuntime::new()
                 .add_stub_response(GetAccountInfoResult::Consistent(Ok(Some(account))));
 
