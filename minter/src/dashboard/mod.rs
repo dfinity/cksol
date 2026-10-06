@@ -1,6 +1,6 @@
 use crate::{
     address::minter_address,
-    state::{ConsolidationTransaction, State},
+    state::{ConsolidationTransaction, QuarantineCause, State},
 };
 use askama::Template;
 use candid::Principal;
@@ -40,6 +40,7 @@ pub(crate) const DEFAULT_PAGE_SIZE: usize = 100;
 pub struct DashboardPaginationParameters {
     pub quarantined_swept_deposits_start: usize,
     pub minted_deposits_start: usize,
+    pub minted_sweeps_start: usize,
     pub withdrawals_start: usize,
     pub consolidations_start: usize,
 }
@@ -57,6 +58,7 @@ impl DashboardPaginationParameters {
         Ok(Self {
             quarantined_swept_deposits_start: parse(req, "quarantined_swept_deposits_start")?,
             minted_deposits_start: parse(req, "minted_deposits_start")?,
+            minted_sweeps_start: parse(req, "minted_sweeps_start")?,
             withdrawals_start: parse(req, "withdrawals_start")?,
             consolidations_start: parse(req, "consolidations_start")?,
         })
@@ -70,6 +72,7 @@ impl DashboardPaginationParameters {
                 self.quarantined_swept_deposits_start,
             ),
             ("minted_deposits_start", self.minted_deposits_start),
+            ("minted_sweeps_start", self.minted_sweeps_start),
             ("withdrawals_start", self.withdrawals_start),
             ("consolidations_start", self.consolidations_start),
         ]
@@ -97,7 +100,36 @@ impl<T: Clone> DashboardPaginatedTable<T> {
         page_offset_query_param: &str,
         other_query_params: String,
     ) -> Self {
-        let total_items = items.len();
+        Self::from_rows(
+            items.iter(),
+            Clone::clone,
+            current_page_offset,
+            page_size,
+            num_cols,
+            table_reference,
+            page_offset_query_param,
+            other_query_params,
+        )
+    }
+
+    /// Paginates without materializing the whole table: only the rows of the current page
+    /// go through `to_row`, so rendering one page stays constant in the number of rows.
+    #[allow(clippy::too_many_arguments)]
+    pub fn from_rows<I, F>(
+        rows: I,
+        to_row: F,
+        current_page_offset: usize,
+        page_size: usize,
+        num_cols: usize,
+        table_reference: &str,
+        page_offset_query_param: &str,
+        other_query_params: String,
+    ) -> Self
+    where
+        I: ExactSizeIterator,
+        F: Fn(I::Item) -> T,
+    {
+        let total_items = rows.len();
 
         // Align offset to page boundary and clamp to the last valid page.
         let offset = if page_size == 0 || total_items == 0 {
@@ -109,7 +141,7 @@ impl<T: Clone> DashboardPaginatedTable<T> {
         };
 
         Self {
-            current_page: items.iter().skip(offset).take(page_size).cloned().collect(),
+            current_page: rows.skip(offset).take(page_size).map(to_row).collect(),
             pagination: DashboardTablePagination::new(
                 total_items,
                 offset,
@@ -210,7 +242,19 @@ pub struct DashboardQuarantinedDeposit {
     pub deposit_id: String,
     pub account: String,
     pub signature: String,
+    pub cause: &'static str,
     pub planned_amount: String,
+    /// The mint the deposit is still owed, or `-` when the sweep was never credited.
+    pub amount_to_mint: String,
+}
+
+/// A swept deposit whose ckSOL mint landed on the ledger.
+#[derive(Clone)]
+pub struct DashboardMintedSweep {
+    pub deposit_id: String,
+    pub account: String,
+    pub minted_amount: String,
+    pub mint_block_index: String,
 }
 
 #[derive(Clone)]
@@ -239,6 +283,7 @@ pub struct DashboardTemplate {
     pub minimum_withdrawal_amount: String,
     pub balance: String,
     pub quarantined_swept_deposits_table: DashboardPaginatedTable<DashboardQuarantinedDeposit>,
+    pub minted_sweeps_table: DashboardPaginatedTable<DashboardMintedSweep>,
     pub deposits_table: DashboardPaginatedTable<DashboardDeposit>,
     pub consolidations_table: DashboardPaginatedTable<DashboardConsolidation>,
     pub withdrawals_table: DashboardPaginatedTable<DashboardWithdrawal>,
@@ -312,19 +357,45 @@ impl DashboardTemplate {
             .rev()
             .map(|(deposit_id, quarantined)| DashboardQuarantinedDeposit {
                 deposit_id: deposit_id.to_string(),
-                account: quarantined.deposit.account.to_string(),
-                signature: quarantined.signature.to_string(),
-                planned_amount: lamports_to_sol(quarantined.deposit.sweepable_amount()),
+                account: quarantined.account().to_string(),
+                signature: quarantined.sweep_signature().to_string(),
+                cause: match quarantined.cause {
+                    QuarantineCause::SweepUnreadable => "Sweep unreadable",
+                    QuarantineCause::MintUnresolved { .. } => "Mint unresolved",
+                },
+                planned_amount: lamports_to_sol(quarantined.planned_amount()),
+                amount_to_mint: match quarantined.cause {
+                    QuarantineCause::SweepUnreadable => "-".to_string(),
+                    QuarantineCause::MintUnresolved { amount_to_mint, .. } => {
+                        lamports_to_sol(amount_to_mint)
+                    }
+                },
             })
             .collect();
         let quarantined_swept_deposits_table = DashboardPaginatedTable::from_items(
             &quarantined_swept_deposits,
             pagination.quarantined_swept_deposits_start,
             DEFAULT_PAGE_SIZE,
-            4,
+            6,
             "quarantined-swept-deposits",
             "quarantined_swept_deposits_start",
             pagination.other_params("quarantined_swept_deposits_start"),
+        );
+
+        let minted_sweeps_table = DashboardPaginatedTable::from_rows(
+            state.deposits().minted().iter().rev(),
+            |(deposit_id, minted)| DashboardMintedSweep {
+                deposit_id: deposit_id.to_string(),
+                account: minted.deposit.deposit.account.to_string(),
+                minted_amount: lamports_to_sol(minted.minted_amount),
+                mint_block_index: minted.mint_block_index.to_string(),
+            },
+            pagination.minted_sweeps_start,
+            DEFAULT_PAGE_SIZE,
+            4,
+            "minted-sweeps",
+            "minted_sweeps_start",
+            pagination.other_params("minted_sweeps_start"),
         );
 
         let deposits_table = DashboardPaginatedTable::from_items(
@@ -471,6 +542,7 @@ impl DashboardTemplate {
             minimum_withdrawal_amount: lamports_to_sol(state.minimum_withdrawal_amount()),
             balance: lamports_to_sol(state.balance()),
             quarantined_swept_deposits_table,
+            minted_sweeps_table,
             deposits_table,
             consolidations_table,
             withdrawals_table,

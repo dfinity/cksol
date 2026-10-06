@@ -345,5 +345,17 @@ async fn should_sweep_a_full_batch_of_deposits_in_one_transaction() {
         );
     }
 
+    for ((&deposit_id, &account), &deposit_amount) in
+        deposit_ids.iter().zip(&accounts).zip(&deposit_amounts)
+    {
+        let expected_minted_amount = deposit_amount - RENT_EXEMPTION_THRESHOLD - FEE_PER_SIGNATURE;
+        let minted_amount = setup.wait_for_deposit_minted(deposit_id).await;
+        assert_eq!(minted_amount, expected_minted_amount);
+        assert_eq!(
+            setup.ledger().balance_of(account).await,
+            expected_minted_amount
+        );
+    }
+
     setup.drop().await;
 }

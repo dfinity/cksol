@@ -9,6 +9,7 @@ use cksol_int_tests::{
         default_process_deposit_args, deposit_transaction_signature,
         get_deposit_transaction_response,
     },
+    validator::FEE_PER_SIGNATURE,
 };
 use cksol_types::{
     DepositId, DepositSolArgs, DepositSolError, DepositSolStatus, DepositStatus,
@@ -1191,7 +1192,8 @@ mod deposit_sol_tests {
     }
 
     #[tokio::test]
-    async fn should_sweep_queued_deposit_after_timer() {
+    async fn should_sweep_finalize_and_mint_queued_deposit_after_timers() {
+        const SWEEPABLE_AMOUNT: Lamport = BALANCE_ABOVE_MINIMUM - RENT_EXEMPTION_THRESHOLD;
         let setup = SetupBuilder::new().with_proxy_canister().build().await;
         let deposit_id = setup
             .minter()
@@ -1227,6 +1229,31 @@ mod deposit_sol_tests {
                 } if *signature == sweep_signature && deposit_ids == &[deposit_id]
             )));
         });
+
+        setup.advance_time(FINALIZE_TRANSACTIONS_DELAY).await;
+        setup
+            .execute_http_mocks(
+                MockBuilder::with_start_id(16)
+                    .finalize_transaction(SUBMISSION_BLOCK_HEIGHT)
+                    .get_sweep_transaction(&sweep_signature, SWEEPABLE_AMOUNT)
+                    .build(),
+            )
+            .await;
+
+        setup.wait_for_deposit_minted(deposit_id).await;
+
+        let minted_amount = SWEEPABLE_AMOUNT - FEE_PER_SIGNATURE;
+        assert_eq!(
+            setup.minter().deposit_status(deposit_id).await,
+            DepositSolStatus::Minted {
+                block_index: 0,
+                minted_amount,
+            }
+        );
+        assert_eq!(
+            setup.ledger().balance_of(DEFAULT_CALLER_ACCOUNT).await,
+            minted_amount
+        );
 
         setup.drop().await;
     }
@@ -1364,7 +1391,9 @@ mod deposit_sol_tests {
         let setup = setup
             .check_metrics()
             .await
-            .assert_contains_metric_matching(r"quarantined_swept_deposits 1 \d+")
+            .assert_contains_metric_matching(
+                r#"quarantined_swept_deposits\{cause="sweep_unreadable"\} 1 \d+"#,
+            )
             .into();
 
         let result = setup.minter().deposit_sol(DEFAULT_CALLER_ACCOUNT).await;

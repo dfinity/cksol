@@ -833,6 +833,8 @@ dependencies = [
  "assert2",
  "assert_matches",
  "async-trait",
+ "base64 0.22.1",
+ "bincode",
  "candid",
  "canlog",
  "cksol-types",
@@ -856,10 +858,14 @@ dependencies = [
  "sol_rpc_types",
  "solana-address 2.3.0",
  "solana-client",
+ "solana-hash 4.2.0",
  "solana-keypair",
+ "solana-message",
  "solana-native-token",
  "solana-signature",
+ "solana-system-interface 3.1.0",
  "solana-system-transaction",
+ "solana-transaction",
  "tokio",
 ]
 
@@ -898,6 +904,7 @@ version = "0.1.0"
 dependencies = [
  "askama",
  "assert_matches",
+ "async-trait",
  "base64 0.22.1",
  "bincode",
  "canbench-rs",

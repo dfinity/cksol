@@ -17,10 +17,12 @@ use icrc_ledger_types::icrc1::account::Account;
 mod tests;
 
 mod finalize;
+mod mint;
 mod timer;
 
-pub use crate::constants::SWEEP_DEPOSITS_DELAY;
+pub use crate::constants::{PROCESS_PENDING_MINTS_DELAY, SWEEP_DEPOSITS_DELAY};
 pub use finalize::credit_finalized_sweeps;
+pub use mint::process_pending_mints;
 pub use timer::sweep_queued_deposits;
 
 pub async fn deposit_sol<R: CanisterRuntime>(
@@ -53,7 +55,9 @@ pub async fn deposit_sol<R: CanisterRuntime>(
             DepositSolStatus::Quarantined { .. } => {
                 Err(DepositSolError::Quarantined { deposit_id })
             }
-            DepositSolStatus::Dropped { .. } | DepositSolStatus::NotFound => panic!(
+            DepositSolStatus::Dropped { .. }
+            | DepositSolStatus::Minted { .. }
+            | DepositSolStatus::NotFound => panic!(
                 "BUG: in-flight deposit {deposit_id} of account {account:?} has status {status:?}"
             ),
         };

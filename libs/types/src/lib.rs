@@ -123,8 +123,6 @@ impl From<Account> for DepositSolArgs {
 pub type DepositSolId = u64;
 
 /// The status of a deposit queued by the `deposit_sol` ckSOL minter endpoint.
-///
-/// The `Minted` variant will follow as the sweep flow is implemented.
 #[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize, Serialize)]
 pub enum DepositSolStatus {
     /// No deposit with this identifier was queued.
@@ -146,6 +144,14 @@ pub enum DepositSolStatus {
         /// The signature of the sweep transaction.
         signature: Signature,
     },
+    /// The minter minted ckSOL for the deposit on the ledger.
+    Minted {
+        /// The mint transaction index on the ckSOL ledger.
+        block_index: LedgerMintIndex,
+        /// The minted amount: the swept amount minus the deposit's share of the
+        /// transaction fee of the sweep.
+        minted_amount: Lamport,
+    },
     /// The sweep transaction failed, or expired without ever being seen on chain, so no
     /// ckSOL is owed. Calling `deposit_sol` again queues a new sweep of whatever balance
     /// the deposit address still holds.
@@ -153,12 +159,15 @@ pub enum DepositSolStatus {
         /// The signature of the sweep transaction.
         signature: Signature,
     },
-    /// The sweep transaction was finalized, but its outcome did not match the plan the
-    /// minter submitted it with, so the amount to credit cannot be determined safely and
-    /// no ckSOL was minted. This is not expected to happen and the minter does not
-    /// process the deposit any further: releasing or crediting it requires a minter
-    /// upgrade. Meanwhile the account stays in flight, so `deposit_sol` keeps rejecting
-    /// it and a new deposit has to use a different subaccount.
+    /// The minter stopped processing the deposit: either the finalized sweep's outcome
+    /// did not match the plan the minter submitted it with, so the amount to credit
+    /// cannot be determined safely and no ckSOL was minted, or the ckSOL mint of the
+    /// credited deposit could not be completed, in which case the mint may nevertheless
+    /// have landed on the ledger. This is not expected to happen and resolving it
+    /// requires a minter upgrade: before minting by hand, search the ledger for a mint
+    /// whose memo carries the sweep signature and the deposit id, otherwise a double
+    /// mint results. Meanwhile the account stays in flight, so `deposit_sol` keeps
+    /// rejecting it and a new deposit has to use a different subaccount.
     Quarantined {
         /// The signature of the sweep transaction.
         signature: Signature,

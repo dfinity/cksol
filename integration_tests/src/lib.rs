@@ -91,6 +91,9 @@ impl SetupBuilder {
 
 pub struct Setup {
     env: Option<PocketIc>,
+    /// Whether the instance produces blocks on its own, which decides how
+    /// [`Setup::advance_time_and_settle`] lets a timer round run.
+    auto_progress: bool,
     minter_canister_id: CanisterId,
     ledger_canister_id: CanisterId,
     sol_rpc_canister_id: CanisterId,
@@ -204,7 +207,8 @@ impl Setup {
             None
         };
 
-        let env = if let PocketIcMode::LiveMode = make_live {
+        let auto_progress = matches!(make_live, PocketIcMode::LiveMode);
+        let env = if auto_progress {
             let mut env = env;
             let _ = env.make_live(None).await;
             env
@@ -218,6 +222,7 @@ impl Setup {
 
         Self {
             env: Some(env),
+            auto_progress,
             minter_canister_id,
             ledger_canister_id,
             sol_rpc_canister_id,
@@ -317,13 +322,38 @@ impl Setup {
         self.env.as_ref().unwrap().advance_time(duration).await
     }
 
-    /// Advances time and then lets the timers that became due complete their
-    /// HTTP outcalls. An outcall still in flight when time is advanced again
-    /// times out, and a timer needs several sequential outcalls per round.
+    /// Advances time and then lets the timers that became due complete their round.
+    ///
+    /// An instance that produces blocks on its own only needs wall-clock time for the
+    /// HTTP outcalls of the round to come back, and an outcall still in flight when
+    /// time is advanced again times out. An instance that does not produce blocks runs
+    /// nothing until it is ticked, and a round takes several sequential messages.
     pub async fn advance_time_and_settle(&self, duration: Duration) {
         const OUTCALL_SETTLE_DELAY: Duration = Duration::from_secs(2);
+        const TICKS_PER_ROUND: usize = 10;
+
         self.advance_time(duration).await;
-        tokio::time::sleep(OUTCALL_SETTLE_DELAY).await;
+        if self.auto_progress {
+            tokio::time::sleep(OUTCALL_SETTLE_DELAY).await;
+        } else {
+            for _ in 0..TICKS_PER_ROUND {
+                self.tick().await;
+            }
+        }
+    }
+
+    /// Advances time until the deposit is minted and returns the minted amount.
+    pub async fn wait_for_deposit_minted(&self, deposit_id: DepositSolId) -> Lamport {
+        const MAX_ITERATIONS: usize = 30;
+        for _ in 0..MAX_ITERATIONS {
+            if let DepositSolStatus::Minted { minted_amount, .. } =
+                self.minter().deposit_status(deposit_id).await
+            {
+                return minted_amount;
+            }
+            self.advance_time_and_settle(Duration::from_mins(1)).await;
+        }
+        panic!("Deposit {deposit_id} was not minted within timeout");
     }
 
     pub async fn execute_http_mocks(&self, mut mocks: impl ExecuteHttpOutcallMocks) {

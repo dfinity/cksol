@@ -8,6 +8,7 @@ use crate::test_fixtures::{
         quarantine_sweep, queue_deposit, submit_consolidation, submit_sweep, submit_withdrawal,
         succeed_transaction,
     },
+    flow::deposit::DepositFlow,
     init_balance, init_schnorr_master_key, init_state, init_state_with_args, ledger_canister_id,
     signature, sol_rpc_canister_id, valid_init_args,
 };
@@ -201,7 +202,9 @@ fn should_display_quarantined_swept_deposits_with_the_sweep_signature() {
                 "0",
                 &account(1).to_string(),
                 &sweep_signature.to_string(),
+                "Sweep unreadable",
                 &lamports_to_sol(sweepable_amount),
+                "-",
             ],
             "quarantined swept deposits",
         )
@@ -209,6 +212,90 @@ fn should_display_quarantined_swept_deposits_with_the_sweep_signature() {
             |href| href.contains("solscan.io/tx/"),
             |href| href.contains(&sweep_signature.to_string()),
         );
+}
+
+#[test]
+fn should_display_a_quarantined_pending_mint_with_the_amount_it_is_owed() {
+    init_state();
+    init_schnorr_master_key();
+    let sweepable_amount = 400_000_000;
+    let pending = DepositFlow::queue(account(1), sweepable_amount)
+        .sweep(signature(0xAA))
+        .succeed()
+        .credit()
+        .single_pending_mint();
+    let amount_to_mint = pending.amount_to_mint;
+    let quarantined = pending.quarantine();
+
+    DashboardAssert::assert_that(dashboard()).has_table_row_value(
+        "#quarantined-swept-deposits + table > tbody > tr:nth-child(1)",
+        &[
+            &quarantined.deposit_id.to_string(),
+            &quarantined.account.to_string(),
+            &quarantined.sweep_signature.to_string(),
+            "Mint unresolved",
+            &lamports_to_sol(sweepable_amount),
+            &lamports_to_sol(amount_to_mint),
+        ],
+        "quarantined swept deposits",
+    );
+}
+
+#[test]
+fn should_display_minted_swept_deposits_with_amount_and_block_index() {
+    init_state();
+    init_schnorr_master_key();
+    let minted = DepositFlow::queue(account(1), 400_000_000)
+        .sweep(signature(0xAA))
+        .succeed()
+        .credit()
+        .single_pending_mint()
+        .mint(42);
+
+    DashboardAssert::assert_that(dashboard()).has_table_row_value(
+        "#minted-sweeps + table > tbody > tr:nth-child(1)",
+        &[
+            &minted.deposit_id.to_string(),
+            &minted.account.to_string(),
+            &lamports_to_sol(minted.minted_amount),
+            &minted.mint_block_index.to_string(),
+        ],
+        "minted swept deposits",
+    );
+}
+
+#[test]
+fn should_paginate_minted_swept_deposits_across_multiple_pages() {
+    use crate::dashboard::DEFAULT_PAGE_SIZE;
+
+    init_state();
+    init_schnorr_master_key();
+
+    let total_minted_sweeps = DEFAULT_PAGE_SIZE + 1;
+    for i in 0..total_minted_sweeps {
+        DepositFlow::queue(account(i + 1), 400_000_000)
+            .sweep(signature(i))
+            .succeed()
+            .credit()
+            .single_pending_mint()
+            .mint(i as u64);
+    }
+
+    let page1 = dashboard();
+    assert_eq!(
+        page1.minted_sweeps_table.current_page.len(),
+        DEFAULT_PAGE_SIZE
+    );
+    assert!(page1.minted_sweeps_table.has_more_than_one_page());
+    assert_eq!(page1.minted_sweeps_table.pagination.pages.len(), 2);
+    assert_eq!(page1.minted_sweeps_table.pagination.current_page_index, 1);
+
+    let page2 = dashboard_with_pagination(DashboardPaginationParameters {
+        minted_sweeps_start: DEFAULT_PAGE_SIZE,
+        ..Default::default()
+    });
+    assert_eq!(page2.minted_sweeps_table.current_page.len(), 1);
+    assert_eq!(page2.minted_sweeps_table.pagination.current_page_index, 2);
 }
 
 #[test]

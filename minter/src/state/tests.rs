@@ -141,11 +141,12 @@ mod queued_deposits {
 mod swept_deposits {
     use super::*;
     use crate::{
-        state::reset_state,
-        storage::reset_events,
+        state::{audit::replay_events, reset_state},
+        storage::{reset_events, with_event_iter},
         test_fixtures::{
             DEFAULT_BLOCK_HEIGHT,
             events::{credit_sweep, quarantine_sweep, queue_deposits, submit_sweep},
+            flow::deposit::{CreditedSweepFlow, DepositFlow, SweepFlow},
             sweep_message,
         },
     };
@@ -307,6 +308,68 @@ mod swept_deposits {
                 &TestCanisterRuntime::new().add_times([0, 0]),
             )
         });
+    }
+
+    #[test]
+    fn should_mint_pending_deposit_without_changing_the_balance() {
+        init_state();
+        let credited = credit_sweep_of_two_deposits(0);
+        let [to_mint, _] = credited.pending_mints();
+
+        to_mint.mint(42);
+
+        read_state(|s| assert_eq!(s.balance(), credited.amount_received));
+    }
+
+    #[test]
+    fn should_quarantine_pending_mint_without_changing_the_balance() {
+        init_state();
+        let credited = credit_sweep_of_two_deposits(0);
+        let [to_quarantine, _] = credited.pending_mints();
+
+        to_quarantine.quarantine();
+
+        read_state(|s| assert_eq!(s.balance(), credited.amount_received));
+    }
+
+    #[test]
+    fn should_replay_the_recorded_events_including_created_at_time() {
+        const CREDITED_AT: u64 = 1_234_000_000;
+        init_state();
+        let credited = credit_sweep_of_two_deposits(CREDITED_AT);
+        let [to_mint, sibling] = credited.pending_mints();
+        to_mint.mint(42);
+        let recorded_events: Vec<Event> = with_event_iter(|events| events.collect());
+
+        let replayed = replay_events(
+            [
+                Event {
+                    timestamp: 0,
+                    payload: EventType::Init(valid_init_args()),
+                },
+                Event {
+                    timestamp: 0,
+                    payload: crate::test_fixtures::minter_public_key_fetched_event(),
+                },
+            ]
+            .into_iter()
+            .chain(recorded_events),
+        );
+
+        assert_eq!(
+            replayed.deposits().pending_mints()[&sibling.deposit_id].created_at_time,
+            CREDITED_AT
+        );
+        read_state(|live_state| assert_eq!(&replayed, live_state));
+    }
+
+    fn credit_sweep_of_two_deposits(credited_at: u64) -> CreditedSweepFlow {
+        init_schnorr_master_key();
+        let deposits = [1, 2].map(|i| DepositFlow::queue(account(i), 1_000_000 * i as u64));
+        SweepFlow::of(deposits)
+            .submit(signature(SWEEP_SIGNATURE_INDEX))
+            .succeed()
+            .credit_at(credited_at)
     }
 
     #[test]
