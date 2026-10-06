@@ -96,7 +96,6 @@ pub struct State {
     ledger_canister_id: Principal,
     sol_rpc_canister_id: Principal,
     solana_network: SolanaNetwork,
-    automated_deposit_fee: Lamport,
     withdrawal_fee: Lamport,
     minimum_withdrawal_amount: Lamport,
     minimum_deposit_amount: Lamport,
@@ -149,10 +148,6 @@ impl State {
 
     pub fn master_key_name(&self) -> Ed25519KeyName {
         self.master_key_name
-    }
-
-    pub fn automated_deposit_fee(&self) -> u64 {
-        self.automated_deposit_fee
     }
 
     pub fn deposit_consolidation_fee(&self) -> u128 {
@@ -286,12 +281,6 @@ impl State {
                 "ERROR: provided canister IDs are not distinct!".to_string(),
             ));
         }
-        if self.minimum_deposit_amount < self.automated_deposit_fee {
-            return Err(InvalidStateError::InvalidDepositFees {
-                automated_deposit_fee: self.automated_deposit_fee,
-                minimum_deposit_amount: self.minimum_deposit_amount,
-            });
-        }
         let maximum_sweep_fee = MAX_SIGNATURES * FEE_PER_SIGNATURE;
         if self.minimum_deposit_amount < maximum_sweep_fee + RENT_EXEMPTION_THRESHOLD {
             return Err(InvalidStateError::InvalidMinimumDepositAmount {
@@ -330,7 +319,6 @@ impl State {
         &mut self,
         UpgradeArgs {
             sol_rpc_canister_id,
-            automated_deposit_fee,
             minimum_withdrawal_amount,
             minimum_deposit_amount,
             withdrawal_fee,
@@ -340,9 +328,6 @@ impl State {
     ) -> Result<(), InvalidStateError> {
         if let Some(sol_rpc_canister_id) = sol_rpc_canister_id {
             self.sol_rpc_canister_id = sol_rpc_canister_id;
-        }
-        if let Some(automated_deposit_fee) = automated_deposit_fee {
-            self.automated_deposit_fee = automated_deposit_fee;
         }
         if let Some(withdrawal_fee) = withdrawal_fee {
             self.withdrawal_fee = withdrawal_fee;
@@ -663,10 +648,6 @@ impl State {
 #[derive(Debug, PartialEq, Eq)]
 pub enum InvalidStateError {
     InvalidCanisterId(String),
-    InvalidDepositFees {
-        automated_deposit_fee: u64,
-        minimum_deposit_amount: u64,
-    },
     InvalidMinimumDepositAmount {
         minimum_deposit_amount: u64,
         maximum_sweep_fee: u64,
@@ -696,7 +677,6 @@ impl TryFrom<InitArgs> for State {
         InitArgs {
             sol_rpc_canister_id,
             ledger_canister_id,
-            automated_deposit_fee,
             master_key_name,
             minimum_withdrawal_amount,
             minimum_deposit_amount,
@@ -712,7 +692,6 @@ impl TryFrom<InitArgs> for State {
             ledger_canister_id,
             sol_rpc_canister_id,
             solana_network,
-            automated_deposit_fee,
             withdrawal_fee,
             minimum_withdrawal_amount,
             minimum_deposit_amount,

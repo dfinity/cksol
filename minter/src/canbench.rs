@@ -33,7 +33,6 @@ fn init_args() -> InitArgs {
     InitArgs {
         sol_rpc_canister_id: Principal::from_slice(&[1_u8; 20]),
         ledger_canister_id: Principal::from_slice(&[2_u8; 20]),
-        automated_deposit_fee: 10_000_000,
         master_key_name: Ed25519KeyName::default(),
         minimum_withdrawal_amount: 10_000_000,
         minimum_deposit_amount: 10_000_000,

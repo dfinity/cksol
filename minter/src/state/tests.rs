@@ -5,8 +5,8 @@ use crate::{
     sol_transfer::MAX_SIGNATURES,
     state::{audit::process_event, read_state},
     test_fixtures::{
-        AUTOMATED_DEPOSIT_FEE, DEPOSIT_CONSOLIDATION_FEE, DEPOSIT_SOL_REQUIRED_CYCLES,
-        MINIMUM_DEPOSIT_AMOUNT, MINIMUM_WITHDRAWAL_AMOUNT, WITHDRAWAL_FEE, account,
+        DEPOSIT_CONSOLIDATION_FEE, DEPOSIT_SOL_REQUIRED_CYCLES, MINIMUM_DEPOSIT_AMOUNT,
+        MINIMUM_WITHDRAWAL_AMOUNT, WITHDRAWAL_FEE, account,
         arb::arb_event,
         deposit_id,
         events::{
@@ -413,42 +413,15 @@ mod state_validation {
 
     #[test]
     fn should_fail_with_invalid_args() {
-        // automated_deposit_fee exceeds minimum_deposit_amount
-        assert_fails_both(
-            InitArgs {
-                automated_deposit_fee: MINIMUM_DEPOSIT_AMOUNT + 1,
-                ..valid_init_args()
-            },
-            UpgradeArgs {
-                automated_deposit_fee: Some(MINIMUM_DEPOSIT_AMOUNT + 1),
-                ..Default::default()
-            },
-            |e| matches!(e, InvalidStateError::InvalidDepositFees { .. }),
-        );
-        // minimum_deposit_amount below automated_deposit_fee
-        assert_fails_both(
-            InitArgs {
-                minimum_deposit_amount: AUTOMATED_DEPOSIT_FEE - 1,
-                ..valid_init_args()
-            },
-            UpgradeArgs {
-                minimum_deposit_amount: Some(AUTOMATED_DEPOSIT_FEE - 1),
-                ..Default::default()
-            },
-            |e| matches!(e, InvalidStateError::InvalidDepositFees { .. }),
-        );
         // minimum_deposit_amount below the fee of a full sweep + rent exemption threshold
-        // (automated_deposit_fee set to 1 to isolate this condition)
         let maximum_sweep_fee = MAX_SIGNATURES * FEE_PER_SIGNATURE;
         let minimum_required = maximum_sweep_fee + RENT_EXEMPTION_THRESHOLD;
         assert_fails_both(
             InitArgs {
-                automated_deposit_fee: 1,
                 minimum_deposit_amount: minimum_required - 1,
                 ..valid_init_args()
             },
             UpgradeArgs {
-                automated_deposit_fee: Some(1),
                 minimum_deposit_amount: Some(minimum_required - 1),
                 ..Default::default()
             },
@@ -464,12 +437,10 @@ mod state_validation {
         let minimum_funding_main_address = 2 * RENT_EXEMPTION_THRESHOLD + FEE_PER_SIGNATURE;
         assert_fails_both(
             InitArgs {
-                automated_deposit_fee: 1,
                 minimum_deposit_amount: minimum_funding_main_address - 1,
                 ..valid_init_args()
             },
             UpgradeArgs {
-                automated_deposit_fee: Some(1),
                 minimum_deposit_amount: Some(minimum_funding_main_address - 1),
                 ..Default::default()
             },
@@ -545,27 +516,14 @@ mod state_validation {
 
     #[test]
     fn should_succeed_at_boundary_conditions() {
-        // minimum_deposit_amount can equal automated_deposit_fee
-        assert_succeeds_both(
-            InitArgs {
-                minimum_deposit_amount: AUTOMATED_DEPOSIT_FEE,
-                ..valid_init_args()
-            },
-            UpgradeArgs {
-                minimum_deposit_amount: Some(AUTOMATED_DEPOSIT_FEE),
-                ..Default::default()
-            },
-        );
         // minimum_deposit_amount can equal twice the rent exemption threshold + one signature fee
         let minimum_required = 2 * RENT_EXEMPTION_THRESHOLD + FEE_PER_SIGNATURE;
         assert_succeeds_both(
             InitArgs {
-                automated_deposit_fee: 1,
                 minimum_deposit_amount: minimum_required,
                 ..valid_init_args()
             },
             UpgradeArgs {
-                automated_deposit_fee: Some(1),
                 minimum_deposit_amount: Some(minimum_required),
                 ..Default::default()
             },
@@ -640,7 +598,6 @@ mod state_from_init_args {
                 ledger_canister_id: ledger_canister_id(),
                 sol_rpc_canister_id: sol_rpc_canister_id(),
                 solana_network: SolanaNetwork::Mainnet,
-                automated_deposit_fee: AUTOMATED_DEPOSIT_FEE,
                 deposit_consolidation_fee: DEPOSIT_CONSOLIDATION_FEE,
                 withdrawal_fee: WITHDRAWAL_FEE,
                 minimum_withdrawal_amount: MINIMUM_WITHDRAWAL_AMOUNT,
@@ -707,7 +664,6 @@ mod state_upgrade {
     #[test]
     fn should_update_fields() {
         let new_canister_id = Principal::from_slice(&[3_u8; 20]);
-        let new_automated_fee = AUTOMATED_DEPOSIT_FEE / 2;
         let new_minimum_deposit_amount = MINIMUM_DEPOSIT_AMOUNT * 2;
         let new_minimum_withdrawal_amount = MINIMUM_WITHDRAWAL_AMOUNT * 2;
         let new_withdrawal_fee = WITHDRAWAL_FEE / 2;
@@ -725,11 +681,9 @@ mod state_upgrade {
         let mut state = initial_state();
         state
             .upgrade(UpgradeArgs {
-                automated_deposit_fee: Some(new_automated_fee),
                 ..Default::default()
             })
             .unwrap();
-        assert_eq!(state.automated_deposit_fee(), new_automated_fee);
 
         let mut state = initial_state();
         state
@@ -787,10 +741,10 @@ mod state_upgrade {
 
     // This test ensures the canister state is rolled back after a failed upgrade
     #[test]
-    #[should_panic = "InvalidDepositFees"]
+    #[should_panic = "InvalidMinimumDepositAmount"]
     fn should_panic_when_upgrade_fails() {
         let mut state = initial_state();
-        let new_minimum_deposit_amount = AUTOMATED_DEPOSIT_FEE - 1;
+        let new_minimum_deposit_amount = 1;
 
         process_event(
             &mut state,

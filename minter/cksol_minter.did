@@ -169,7 +169,6 @@ type InitArgs = record {
     sol_rpc_canister_id : principal;
     ledger_canister_id : principal;
     master_key_name : Ed25519KeyName;
-    automated_deposit_fee : Lamport;
     deposit_consolidation_fee : nat64;
     minimum_withdrawal_amount : Lamport;
     minimum_deposit_amount : Lamport;
@@ -180,7 +179,6 @@ type InitArgs = record {
 
 // Information about the ckSOL minter canister.
 type MinterInfo = record {
-    automated_deposit_fee : Lamport;
     deposit_consolidation_fee : nat;
     minimum_withdrawal_amount : Lamport;
     minimum_deposit_amount : Lamport;
@@ -204,7 +202,6 @@ type MinterArg = variant {
 // removed, or renamed across releases.
 type UpgradeArgs = record {
     sol_rpc_canister_id : opt principal;
-    automated_deposit_fee : opt Lamport;
     deposit_consolidation_fee : opt nat64;
     minimum_withdrawal_amount : opt Lamport;
     minimum_deposit_amount : opt Lamport;
