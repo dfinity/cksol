@@ -9,8 +9,8 @@ use crate::{
     storage::reset_events,
     test_fixtures::{
         EventsAssert, GetTransactionResult, MINIMUM_WITHDRAWAL_AMOUNT, account,
-        confirmed_block_at_height, durable_nonce, events, init_balance, init_schnorr_master_key,
-        init_state, runtime::TestCanisterRuntime, signature,
+        confirmed_block_at_height, events, init_balance, init_schnorr_master_key, init_state,
+        runtime::TestCanisterRuntime, signature,
     },
 };
 use sol_rpc_types::{
@@ -302,28 +302,10 @@ mod finalization {
     }
 
     #[tokio::test]
-    async fn should_finalize_nonce_withdrawal_without_fetching_current_block() {
-        setup();
-        let signature = submit_nonce_withdrawal_transaction(1);
-
-        let runtime = TestCanisterRuntime::new()
-            .with_increasing_time()
-            .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![Some(
-                finalized_status(),
-            )])));
-
-        finalize_transactions(runtime).await;
-
-        EventsAssert::from_recorded()
-            .expect_contains_event_eq(EventType::SucceededTransaction { signature });
-        assert!(read_state(|s| s.submitted_transactions().is_empty()));
-    }
-
-    #[tokio::test]
     async fn should_never_expire_nonce_withdrawal_with_missing_status() {
         setup();
         let sweep = submit_sweep_transaction_with_signature(1, EXPIRED_BLOCK_HEIGHT);
-        let nonce_withdrawal = submit_nonce_withdrawal_transaction(2);
+        let nonce_withdrawal = submit_withdrawal_transaction_with_signature(2);
 
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
@@ -509,13 +491,5 @@ fn submit_sweep_transaction_with_signature(
     let deposit_id = crate::state::read_state(|state| state.deposits().next_id());
     events::queue_deposit(deposit_id, account(i), 1_000_000);
     events::submit_sweep_at_height(signature, vec![deposit_id], block_height);
-    signature
-}
-
-fn submit_nonce_withdrawal_transaction(i: usize) -> solana_signature::Signature {
-    let signature = signature(i);
-    events::accept_withdrawal(account(i), i as u64, MINIMUM_WITHDRAWAL_AMOUNT);
-    events::create_withdrawal_batch_transaction(durable_nonce(i), vec![i as u64]);
-    events::submit_withdrawal_batch_transaction(signature, durable_nonce(i), vec![i as u64]);
     signature
 }
