@@ -899,7 +899,7 @@ pub mod events {
 
     /// Records a `CreatedTransaction` for the given withdrawals, binding
     /// [`NONCE_ACCOUNT`] to the nonce value of `nonce_seed`.
-    pub fn create_withdrawal(nonce_seed: usize, burn_indices: Vec<u64>) {
+    pub fn create_withdrawal_batch_transaction(nonce_seed: usize, burn_indices: Vec<u64>) {
         mutate_state(|state| {
             process_event(
                 state,
