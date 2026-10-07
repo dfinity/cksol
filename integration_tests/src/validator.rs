@@ -135,8 +135,13 @@ impl SolanaTestValidator {
     /// minter's deterministic main address before the minter is installed, so
     /// that withdrawal transactions can be submitted against it.
     pub async fn setup(&self) -> Setup {
+        self.setup_with_nonce_accounts(1).await
+    }
+
+    /// Like [`Self::setup`], with a pool of `count` durable nonce accounts.
+    pub async fn setup_with_nonce_accounts(&self, count: usize) -> Setup {
         let nonce_accounts = self
-            .create_nonce_accounts(1, &MINTER_ADDRESS)
+            .create_nonce_accounts(count, &MINTER_ADDRESS)
             .await
             .iter()
             .map(Address::to_string)
