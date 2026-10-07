@@ -49,11 +49,12 @@ impl DurableNoncePool {
     /// already bound to an earlier transaction of this account.
     pub(super) fn bind(&mut self, address: &Address, nonce_value: Hash) {
         let account = self.account_mut(address);
-        assert_ne!(
-            account.state,
-            NonceAccountState::Bound,
-            "BUG: nonce account {address} is already bound to an in-flight transaction"
-        );
+        match account.state {
+            NonceAccountState::Free => {}
+            NonceAccountState::Bound => {
+                panic!("BUG: nonce account {address} is already bound to an in-flight transaction")
+            }
+        }
         assert!(
             account.seen_nonce_values.insert(nonce_value),
             "BUG: nonce value {nonce_value} of account {address} was already seen"
