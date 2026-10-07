@@ -1,6 +1,6 @@
 use crate::{
     address::{MINTER_DERIVATION_PATH, account_address, derivation_path},
-    constants::RENT_EXEMPTION_THRESHOLD,
+    constants::{FEE_PER_SIGNATURE, RENT_EXEMPTION_THRESHOLD},
     rpc::{BlockHeight, FetchedTransaction},
     state::{
         DepositBalance, QueuedDeposit, SchnorrPublicKey, State, Sweep,
@@ -9,6 +9,7 @@ use crate::{
     },
     storage::with_event_iter,
 };
+use base64::{Engine, engine::general_purpose::STANDARD};
 use candid::Principal;
 use cksol_types::DepositSolId;
 use cksol_types_internal::{Ed25519KeyName, InitArgs, SolanaNetwork};
@@ -17,6 +18,10 @@ use ic_ed25519::{PocketIcMasterPublicKeyId, PublicKey};
 use icrc_ledger_types::icrc1::account::Account;
 use sol_rpc_types::{Lamport, MultiRpcResult};
 use solana_address::{Address, address};
+use solana_nonce::{
+    state::{Data as NonceData, DurableNonce, State as NonceState},
+    versions::Versions as NonceVersions,
+};
 use solana_transaction_status_client_types::{
     EncodedConfirmedTransactionWithStatusMeta, EncodedTransaction,
     EncodedTransactionWithStatusMeta, TransactionBinaryEncoding, UiLoadedAddresses,
@@ -173,6 +178,69 @@ pub fn confirmed_block_at_height(block_height: BlockHeight) -> sol_rpc_types::Co
         num_reward_partitions: None,
         transactions: None,
     }
+}
+
+/// A test durable nonce account address, distinct from any deposit address.
+pub fn nonce_account_address() -> Address {
+    Address::from([0x4E; 32])
+}
+
+/// Returns the nonce value stored by [`nonce_account_info`] for the same `nonce_seed`.
+pub fn durable_nonce(nonce_seed: usize) -> solana_hash::Hash {
+    *DurableNonce::from_blockhash(&seed_hash(nonce_seed)).as_hash()
+}
+
+/// Returns a `getAccountInfo` response for an initialized durable nonce account with
+/// the given authority, storing the nonce value [`durable_nonce`] of the same `nonce_seed`.
+pub fn nonce_account_info(authority: Address, nonce_seed: usize) -> sol_rpc_types::AccountInfo {
+    nonce_account_info_in_state(NonceState::Initialized(NonceData::new(
+        authority,
+        DurableNonce::from_blockhash(&seed_hash(nonce_seed)),
+        FEE_PER_SIGNATURE,
+    )))
+}
+
+/// Returns a `getAccountInfo` response for a nonce account that has not been initialized.
+pub fn uninitialized_nonce_account_info() -> sol_rpc_types::AccountInfo {
+    nonce_account_info_in_state(NonceState::Uninitialized)
+}
+
+/// Returns a `getAccountInfo` response for an initialized nonce account in the legacy format.
+pub fn legacy_nonce_account_info(authority: Address) -> sol_rpc_types::AccountInfo {
+    nonce_account_info_in_versions(NonceVersions::Legacy(Box::new(NonceState::Initialized(
+        NonceData::new(
+            authority,
+            DurableNonce::from_blockhash(&seed_hash(1)),
+            FEE_PER_SIGNATURE,
+        ),
+    ))))
+}
+
+fn nonce_account_info_in_state(state: NonceState) -> sol_rpc_types::AccountInfo {
+    nonce_account_info_in_versions(NonceVersions::new(state))
+}
+
+fn nonce_account_info_in_versions(versions: NonceVersions) -> sol_rpc_types::AccountInfo {
+    const SYSTEM_PROGRAM_ID: &str = "11111111111111111111111111111111";
+    let data =
+        bincode::serialize(&versions).expect("BUG: serializing a nonce account should succeed");
+    sol_rpc_types::AccountInfo {
+        lamports: 1_447_680,
+        space: data.len() as u64,
+        data: sol_rpc_types::AccountData::Binary(
+            STANDARD.encode(data),
+            sol_rpc_types::AccountEncoding::Base64,
+        ),
+        owner: SYSTEM_PROGRAM_ID.to_string(),
+        executable: false,
+        rent_epoch: u64::MAX,
+    }
+}
+
+fn seed_hash(seed: usize) -> solana_hash::Hash {
+    let mut bytes = [0u8; 32];
+    bytes[..8].copy_from_slice(&(seed as u64).to_le_bytes());
+    solana_hash::Hash::from(bytes)
 }
 
 /// Returns an [`Account`] with a deterministic principal derived from `i`.

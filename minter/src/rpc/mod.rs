@@ -1,7 +1,7 @@
 use crate::{
     constants::{
-        GET_BALANCE_CYCLES, GET_RECENT_BLOCK_MAX_TRIES, GET_SIGNATURE_STATUSES_CYCLES,
-        GET_TRANSACTION_CYCLES, MAX_HTTP_OUTCALL_RESPONSE_BYTES,
+        GET_ACCOUNT_INFO_CYCLES, GET_BALANCE_CYCLES, GET_RECENT_BLOCK_MAX_TRIES,
+        GET_SIGNATURE_STATUSES_CYCLES, GET_TRANSACTION_CYCLES, MAX_HTTP_OUTCALL_RESPONSE_BYTES,
     },
     runtime::CanisterRuntime,
     state::read_state,
@@ -11,10 +11,14 @@ use derive_more::From;
 use ic_canister_runtime::IcError;
 use minicbor::{Decode, Encode};
 use sol_rpc_types::{
-    CommitmentLevel, GetTransactionEncoding, Lamport, MultiRpcResult, RpcError, Slot,
+    CommitmentLevel, GetAccountInfoEncoding, GetTransactionEncoding, Lamport, MultiRpcResult,
+    RpcError, Slot,
 };
+use solana_account_decoder_client_types::UiAccount;
 use solana_address::Address;
 use solana_hash::Hash;
+use solana_nonce::{state::State as NonceState, versions::Versions as NonceVersions};
+use solana_sdk_ids::system_program;
 use solana_signature::Signature;
 use solana_transaction::{Transaction, versioned::VersionedTransaction};
 use solana_transaction_status_client_types::{
@@ -175,6 +179,85 @@ pub enum SubmitTransactionError {
     RpcError(RpcError),
     #[error("Inconsistent RPC results for sendTransaction")]
     InconsistentRpcResults,
+}
+
+pub async fn get_nonce_account<R: CanisterRuntime>(
+    runtime: &R,
+    address: Address,
+) -> Result<NonceAccount, GetNonceAccountError> {
+    let result = read_state(|state| state.sol_rpc_client(runtime.inter_canister_call_runtime()))
+        .get_account_info(address)
+        .with_encoding(GetAccountInfoEncoding::Base64)
+        .with_commitment(CommitmentLevel::Finalized)
+        .with_cycles(GET_ACCOUNT_INFO_CYCLES)
+        .try_send()
+        .await;
+    match result? {
+        MultiRpcResult::Consistent(Ok(Some(account))) => NonceAccount::try_from(account),
+        MultiRpcResult::Consistent(Ok(None)) => Err(GetNonceAccountError::AccountNotFound),
+        MultiRpcResult::Consistent(Err(e)) => Err(GetNonceAccountError::RpcError(e)),
+        MultiRpcResult::Inconsistent(_) => Err(GetNonceAccountError::InconsistentRpcResults),
+    }
+}
+
+/// The on-chain state of an initialized durable nonce account.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NonceAccount {
+    pub authority: Address,
+    pub nonce: Hash,
+}
+
+impl TryFrom<UiAccount> for NonceAccount {
+    type Error = GetNonceAccountError;
+
+    fn try_from(account: UiAccount) -> Result<Self, Self::Error> {
+        if account.owner != system_program::ID.to_string() || account.executable {
+            return Err(GetNonceAccountError::UnexpectedAccountMetadata {
+                owner: account.owner,
+                executable: account.executable,
+            });
+        }
+        let data = account.data.decode().ok_or_else(|| {
+            GetNonceAccountError::NotAnInitializedNonceAccount(
+                "undecodable account data".to_string(),
+            )
+        })?;
+        let versions: NonceVersions = bincode::deserialize(&data)
+            .map_err(|e| GetNonceAccountError::NotAnInitializedNonceAccount(e.to_string()))?;
+        let state = match versions {
+            NonceVersions::Legacy(_) => return Err(GetNonceAccountError::LegacyNonceAccount),
+            NonceVersions::Current(state) => state,
+        };
+        match *state {
+            NonceState::Uninitialized => Err(GetNonceAccountError::NotAnInitializedNonceAccount(
+                "the nonce account is uninitialized".to_string(),
+            )),
+            NonceState::Initialized(data) => Ok(Self {
+                authority: data.authority,
+                nonce: data.blockhash(),
+            }),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Error)]
+pub enum GetNonceAccountError {
+    #[error("Error while calling SOL RPC canister: {0}")]
+    IcError(#[from] IcError),
+    #[error("RPC error while fetching nonce account: {0}")]
+    RpcError(RpcError),
+    #[error("Inconsistent RPC results for getAccountInfo")]
+    InconsistentRpcResults,
+    #[error("Nonce account not found")]
+    AccountNotFound,
+    #[error(
+        "Expected a non-executable account owned by the system program, got owner {owner} (executable: {executable})"
+    )]
+    UnexpectedAccountMetadata { owner: String, executable: bool },
+    #[error("Not an initialized nonce account: {0}")]
+    NotAnInitializedNonceAccount(String),
+    #[error("Legacy nonce account, which cannot back a durable transaction")]
+    LegacyNonceAccount,
 }
 
 pub async fn get_recent_block<R: CanisterRuntime>(

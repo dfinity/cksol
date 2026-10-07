@@ -1,16 +1,19 @@
 use crate::{
     constants::GET_RECENT_BLOCK_MAX_TRIES,
     rpc::{
-        Block, BlockHeight, GetBalanceError, GetRecentBlockError, GetTransactionError,
-        SubmitTransactionError, get_balance, get_recent_block, get_transaction, submit_transaction,
+        Block, BlockHeight, GetBalanceError, GetNonceAccountError, GetRecentBlockError,
+        GetTransactionError, NonceAccount, SubmitTransactionError, get_balance, get_nonce_account,
+        get_recent_block, get_transaction, submit_transaction,
     },
     test_fixtures::{
-        confirmed_block, confirmed_block_at_height,
+        MINTER_ADDRESS, confirmed_block, confirmed_block_at_height,
         deposit::{
             DEPOSIT_ADDRESS, legacy_deposit_transaction, legacy_deposit_transaction_signature,
         },
-        fetched, init_state,
+        durable_nonce, fetched, init_state, legacy_nonce_account_info, nonce_account_address,
+        nonce_account_info,
         runtime::TestCanisterRuntime,
+        uninitialized_nonce_account_info,
     },
 };
 use assert_matches::assert_matches;
@@ -322,6 +325,142 @@ mod submit_transaction_tests {
 
     fn signature() -> sol_rpc_types::Signature {
         solana_signature::Signature::from([0x42; 64]).into()
+    }
+}
+
+mod get_nonce_account_tests {
+    use super::*;
+    use sol_rpc_types::{AccountData, AccountEncoding};
+
+    type GetAccountInfoResult = sol_rpc_types::MultiRpcResult<Option<sol_rpc_types::AccountInfo>>;
+
+    #[tokio::test]
+    async fn should_return_the_authority_and_nonce_value() {
+        init_state();
+
+        let runtime = TestCanisterRuntime::new().add_stub_response(
+            GetAccountInfoResult::Consistent(Ok(Some(nonce_account_info(MINTER_ADDRESS, 1)))),
+        );
+
+        let result = get_nonce_account(&runtime, nonce_account_address()).await;
+
+        assert_eq!(
+            result,
+            Ok(NonceAccount {
+                authority: MINTER_ADDRESS,
+                nonce: durable_nonce(1),
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn should_fail_if_account_not_found() {
+        init_state();
+
+        let runtime = TestCanisterRuntime::new()
+            .add_stub_response(GetAccountInfoResult::Consistent(Ok(None)));
+
+        let result = get_nonce_account(&runtime, nonce_account_address()).await;
+
+        assert_eq!(result, Err(GetNonceAccountError::AccountNotFound));
+    }
+
+    #[tokio::test]
+    async fn should_fail_if_call_fails_or_results_are_wrong() {
+        init_state();
+        let rpc_error = RpcError::ValidationError("Error 1".to_string());
+        let inconsistent = vec![(
+            RpcSource::Supported(SupportedRpcProviderId::AnkrMainnet),
+            Err(rpc_error.clone()),
+        )];
+
+        for (runtime, expected) in [
+            (
+                TestCanisterRuntime::new().add_stub_error(IcError::CallPerformFailed),
+                GetNonceAccountError::IcError(IcError::CallPerformFailed),
+            ),
+            (
+                TestCanisterRuntime::new()
+                    .add_stub_response(GetAccountInfoResult::Consistent(Err(rpc_error.clone()))),
+                GetNonceAccountError::RpcError(rpc_error.clone()),
+            ),
+            (
+                TestCanisterRuntime::new()
+                    .add_stub_response(GetAccountInfoResult::Inconsistent(inconsistent.clone())),
+                GetNonceAccountError::InconsistentRpcResults,
+            ),
+        ] {
+            let result = get_nonce_account(&runtime, nonce_account_address()).await;
+
+            assert_eq!(result, Err(expected));
+        }
+    }
+
+    #[tokio::test]
+    async fn should_fail_if_account_is_not_a_non_executable_system_program_account() {
+        init_state();
+
+        let foreign_owner_account = sol_rpc_types::AccountInfo {
+            owner: MINTER_ADDRESS.to_string(),
+            ..nonce_account_info(MINTER_ADDRESS, 1)
+        };
+        let executable_account = sol_rpc_types::AccountInfo {
+            executable: true,
+            ..nonce_account_info(MINTER_ADDRESS, 1)
+        };
+
+        for account in [foreign_owner_account, executable_account] {
+            let runtime = TestCanisterRuntime::new()
+                .add_stub_response(GetAccountInfoResult::Consistent(Ok(Some(account))));
+
+            let result = get_nonce_account(&runtime, nonce_account_address()).await;
+
+            assert_matches!(
+                result,
+                Err(GetNonceAccountError::UnexpectedAccountMetadata { .. })
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn should_fail_if_account_is_a_legacy_nonce_account() {
+        init_state();
+
+        let runtime = TestCanisterRuntime::new().add_stub_response(
+            GetAccountInfoResult::Consistent(Ok(Some(legacy_nonce_account_info(MINTER_ADDRESS)))),
+        );
+
+        let result = get_nonce_account(&runtime, nonce_account_address()).await;
+
+        assert_eq!(result, Err(GetNonceAccountError::LegacyNonceAccount));
+    }
+
+    #[tokio::test]
+    async fn should_fail_if_account_is_not_an_initialized_nonce_account() {
+        init_state();
+
+        let account_with_data = |data: &str| sol_rpc_types::AccountInfo {
+            data: AccountData::Binary(data.to_string(), AccountEncoding::Base64),
+            ..nonce_account_info(MINTER_ADDRESS, 1)
+        };
+        let invalid_base64_account = account_with_data("not base64!");
+        let invalid_nonce_state_account = account_with_data("AAAA");
+
+        for account in [
+            uninitialized_nonce_account_info(),
+            invalid_base64_account,
+            invalid_nonce_state_account,
+        ] {
+            let runtime = TestCanisterRuntime::new()
+                .add_stub_response(GetAccountInfoResult::Consistent(Ok(Some(account))));
+
+            let result = get_nonce_account(&runtime, nonce_account_address()).await;
+
+            assert_matches!(
+                result,
+                Err(GetNonceAccountError::NotAnInitializedNonceAccount(_))
+            );
+        }
     }
 }
 
