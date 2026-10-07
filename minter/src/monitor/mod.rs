@@ -5,7 +5,7 @@ use crate::{
     guard::TimerGuard,
     rpc::{
         Block, BlockHeight, SubmitTransactionError, get_recent_block, get_signature_statuses,
-        submit_transaction,
+        submit_transaction, submit_transaction_skipping_preflight,
     },
     runtime::CanisterRuntime,
     signer::sign_bytes,
@@ -15,6 +15,7 @@ use crate::{
         event::{EventType, Signer, VersionedMessage},
         mutate_state, read_state,
     },
+    storage::with_unstable_metrics_mut,
 };
 use canlog::log;
 use cksol_types_internal::log::Priority;
@@ -32,6 +33,13 @@ mod tests;
 
 pub const FINALIZE_TRANSACTIONS_DELAY: Duration = Duration::from_mins(2);
 pub const RESUBMIT_TRANSACTIONS_DELAY: Duration = Duration::from_mins(3);
+/// Minimum time since its submission before a withdrawal transaction without a
+/// status is re-broadcast. The minter sends transactions without `maxRetries`,
+/// so an Agave RPC node keeps re-sending a durable-nonce transaction every 2 s
+/// until it lands, its nonce advances, or 150 blocks (about 60 to 90 s) pass.
+/// Re-broadcasting earlier would only duplicate the work of the RPC node.
+/// See https://github.com/anza-xyz/agave/blob/master/rpc/src/rpc.rs
+pub const MIN_REBROADCAST_AGE: Duration = Duration::from_secs(90);
 /// A leader accepts a transaction while its blockhash is still among the last
 /// `MAX_PROCESSING_AGE` entries of the recent-blockhash queue, which holds one
 /// entry per non-skipped slot. The public documentation describes this window
@@ -46,7 +54,7 @@ const MAX_BLOCKHASH_AGE_IN_BLOCKS: BlockHeight = BlockHeight::new(150);
 const MAX_SIGNATURES_PER_STATUS_CHECK: usize = 256;
 
 /// Check the status of all submitted transactions, finalize succeeded/failed
-/// ones, and mark expired transactions for resubmission.
+/// ones, drop expired sweeps, and re-broadcast withdrawals that have no status.
 pub async fn finalize_transactions<R: CanisterRuntime>(runtime: R) {
     let _guard = match TimerGuard::new(TaskType::FinalizeTransactions) {
         Ok(guard) => guard,
@@ -139,6 +147,8 @@ async fn check_submitted_transactions<R: CanisterRuntime>(runtime: &R) -> bool {
         );
     }
 
+    rebroadcast_withdrawal_transactions(runtime, &statuses.not_found).await;
+
     num_transactions > MAX_CONCURRENT_RPC_CALLS * MAX_SIGNATURES_PER_STATUS_CHECK
 }
 
@@ -178,6 +188,62 @@ fn expire_transactions<R: CanisterRuntime>(
                 runtime,
             )
         });
+    }
+}
+
+async fn rebroadcast_withdrawal_transactions<R: CanisterRuntime>(
+    runtime: &R,
+    not_found: &BTreeSet<Signature>,
+) {
+    let now = runtime.time();
+    let batches: Vec<Vec<Transaction>> = read_state(|state| {
+        not_found
+            .iter()
+            .filter_map(
+                |signature| match state.submitted_transactions().get(signature)? {
+                    MinterTransaction::Withdrawal {
+                        message: VersionedMessage::Legacy(message),
+                        submitted_at,
+                        ..
+                    } if is_old_enough_to_rebroadcast(*submitted_at, now) => Some(Transaction {
+                        signatures: vec![*signature],
+                        message: message.clone(),
+                    }),
+                    MinterTransaction::Withdrawal { .. }
+                    | MinterTransaction::SweepDeposit { .. } => None,
+                },
+            )
+            .chunks(MAX_CONCURRENT_RPC_CALLS)
+            .into_iter()
+            .map(Iterator::collect)
+            .collect()
+    });
+    for batch in batches {
+        futures::future::join_all(
+            batch
+                .into_iter()
+                .map(|transaction| rebroadcast_transaction(runtime, transaction)),
+        )
+        .await;
+    }
+}
+
+fn is_old_enough_to_rebroadcast(submitted_at: u64, now: u64) -> bool {
+    Duration::from_nanos(now.saturating_sub(submitted_at)) >= MIN_REBROADCAST_AGE
+}
+
+async fn rebroadcast_transaction<R: CanisterRuntime>(runtime: &R, transaction: Transaction) {
+    let signature = transaction.signatures[0];
+    with_unstable_metrics_mut(|m| m.withdrawal_transaction_rebroadcasts += 1);
+    match submit_transaction_skipping_preflight(runtime, transaction).await {
+        Ok(_) => log!(
+            Priority::Info,
+            "Re-broadcast withdrawal transaction {signature}"
+        ),
+        Err(e) => log!(
+            Priority::Info,
+            "Failed to re-broadcast withdrawal transaction {signature} (will retry next round): {e}"
+        ),
     }
 }
 

@@ -399,6 +399,7 @@ mod swept_deposits {
                 deposit_ids: vec![0],
                 block_height: DEFAULT_BLOCK_HEIGHT,
             },
+            0,
         );
     }
 }
@@ -1455,6 +1456,7 @@ mod withdrawal_transactions {
                 &TransactionPurpose::Withdrawal {
                     burn_indices: vec![0_u64.into()],
                 },
+                0,
             )
         });
     }
@@ -1480,6 +1482,7 @@ mod withdrawal_transactions {
                 &TransactionPurpose::Withdrawal {
                     burn_indices: vec![0_u64.into()],
                 },
+                0,
             )
         });
     }

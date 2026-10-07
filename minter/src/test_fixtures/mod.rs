@@ -181,6 +181,16 @@ pub fn confirmed_block_at_height(block_height: BlockHeight) -> sol_rpc_types::Co
     }
 }
 
+/// A successful transaction status at the `finalized` commitment level.
+pub fn finalized_status() -> sol_rpc_types::TransactionStatus {
+    sol_rpc_types::TransactionStatus {
+        slot: 0,
+        status: Ok(()),
+        err: None,
+        confirmation_status: Some(sol_rpc_types::TransactionConfirmationStatus::Finalized),
+    }
+}
+
 /// A test durable nonce account address, distinct from any deposit address.
 pub fn nonce_account_address() -> Address {
     Address::from([0x4E; 32])

@@ -550,6 +550,7 @@ impl State {
         transaction: &VersionedMessage,
         signers: &[Signer],
         purpose: &TransactionPurpose,
+        timestamp: u64,
     ) {
         assert!(
             !self.succeeded_transactions.contains(signature),
@@ -563,7 +564,7 @@ impl State {
         let signers = signers.to_vec();
         let submitted_transaction = match purpose {
             TransactionPurpose::Withdrawal { burn_indices } => {
-                self.send_nonce_withdrawal(signature, message, signers, burn_indices)
+                self.send_nonce_withdrawal(signature, message, signers, burn_indices, timestamp)
             }
             TransactionPurpose::SweepDeposit {
                 deposit_ids,
@@ -639,6 +640,7 @@ impl State {
         message: VersionedMessage,
         signers: Vec<Signer>,
         burn_indices: &[LedgerBurnIndex],
+        submitted_at: u64,
     ) -> MinterTransaction {
         let nonce_account = message.advanced_nonce_account().unwrap_or_else(|| {
             panic!("BUG: withdrawal transaction {signature} does not start with an AdvanceNonceAccount instruction")
@@ -692,6 +694,7 @@ impl State {
             signers,
             nonce_account,
             nonce_value: created.nonce_value,
+            submitted_at,
         }
     }
 
@@ -1022,6 +1025,8 @@ pub enum MinterTransaction {
         nonce_account: Address,
         /// The durable nonce value the transaction uses instead of a recent blockhash.
         nonce_value: Hash,
+        /// The time, in nanoseconds since the epoch, at which the transaction was recorded as submitted.
+        submitted_at: u64,
     },
 }
 

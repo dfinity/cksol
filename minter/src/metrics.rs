@@ -118,6 +118,11 @@ pub fn encode_metrics(w: &mut MetricsEncoder<Vec<u8>>, s: &State) -> std::io::Re
         storage::with_unstable_metrics(|m| m.post_upgrade_instructions_consumed).metric_value(),
         "Number of instructions consumed during the last post-upgrade.",
     )?;
+    w.encode_counter(
+        "withdrawal_transaction_rebroadcasts",
+        storage::with_unstable_metrics(|m| m.withdrawal_transaction_rebroadcasts).metric_value(),
+        "Number of re-broadcast attempts of withdrawal transactions since the last upgrade.",
+    )?;
     Ok(())
 }
 
