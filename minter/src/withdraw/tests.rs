@@ -340,13 +340,12 @@ mod process_pending_withdrawals_tests {
                 create_withdrawal_batch_transaction, create_withdrawal_batch_transaction_on,
                 submit_withdrawal_batch_transaction,
             },
-            finalized_status, nonce_account_info,
+            nonce_account_info, succeeded_withdrawal_response,
         },
     };
 
     type GetAccountInfoResult = MultiRpcResult<Option<sol_rpc_types::AccountInfo>>;
     type SendTransactionResult = MultiRpcResult<sol_rpc_types::Signature>;
-    type SignatureStatusesResult = MultiRpcResult<Vec<Option<sol_rpc_types::TransactionStatus>>>;
 
     #[tokio::test]
     async fn should_do_nothing_if_no_pending_withdrawals() {
@@ -571,7 +570,9 @@ mod process_pending_withdrawals_tests {
 
         let rebroadcast = TestCanisterRuntime::new()
             .with_increasing_time_from(submission.time() + MIN_REBROADCAST_AGE.as_nanos() as u64)
-            .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![None])))
+            .add_stub_response(GetAccountInfoResult::Consistent(Ok(Some(
+                nonce_account_info(MINTER_ADDRESS, 1),
+            ))))
             .add_stub_response(SendTransactionResult::Consistent(Ok(
                 minter_signature().into()
             )));
@@ -584,9 +585,10 @@ mod process_pending_withdrawals_tests {
 
         let finalization = TestCanisterRuntime::new()
             .with_increasing_time()
-            .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![Some(
-                finalized_status(),
-            )])));
+            .add_stub_response(GetAccountInfoResult::Consistent(Ok(Some(
+                nonce_account_info(MINTER_ADDRESS, 2),
+            ))))
+            .add_stub_response(succeeded_withdrawal_response(&minter_signature()));
         finalize_transactions(finalization).await;
         assert_eq!(
             withdrawal_status(1),

@@ -786,12 +786,14 @@ mod withdrawal_tests {
         );
 
         // Only the in-flight withdrawal is monitored, so the finalization timer
-        // checks the signature statuses without fetching a current block.
+        // reads its nonce account and fetches the landed transaction without
+        // fetching a current block.
         setup.advance_time(FINALIZE_TRANSACTIONS_DELAY).await;
+        let withdrawal = setup.minter().signed_transaction(&transaction_id).await;
         setup
             .execute_http_mocks(
                 MockBuilder::with_start_id(40)
-                    .finalize_withdrawal_transaction(&transaction_id)
+                    .finalize_withdrawal_transaction(&withdrawal)
                     .build(),
             )
             .await;

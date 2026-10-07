@@ -346,6 +346,76 @@ pub fn minter_signature_nth(occurrence: usize) -> solana_signature::Signature {
     signer::derivation_path_signature(&MINTER_DERIVATION_PATH, occurrence)
 }
 
+/// The `getTransaction` response for the submitted withdrawal transaction with the given
+/// signature, finalized without error.
+pub fn succeeded_withdrawal_response(
+    signature: &solana_signature::Signature,
+) -> GetTransactionResult {
+    withdrawal_response(signature, serde_json::Value::Null)
+}
+
+/// The `getTransaction` response for the submitted withdrawal transaction with the given
+/// signature, finalized with an on-chain error of its first transfer.
+pub fn failed_withdrawal_response(signature: &solana_signature::Signature) -> GetTransactionResult {
+    withdrawal_response(
+        signature,
+        serde_json::json!({"InstructionError": [1, {"Custom": 1}]}),
+    )
+}
+
+fn withdrawal_response(
+    signature: &solana_signature::Signature,
+    error: serde_json::Value,
+) -> GetTransactionResult {
+    let message =
+        crate::state::read_state(
+            |state| match state.submitted_transactions().get(signature) {
+                Some(crate::state::MinterTransaction::Withdrawal {
+                    message: VersionedMessage::Legacy(message),
+                    ..
+                }) => message.clone(),
+                other => panic!("BUG: expected a submitted withdrawal transaction, got {other:?}"),
+            },
+        );
+    let transaction = solana_transaction::Transaction {
+        signatures: vec![*signature],
+        message,
+    };
+    let encoded = STANDARD.encode(
+        bincode::serialize(&transaction).expect("BUG: serializing the transaction should succeed"),
+    );
+    let status = if error.is_null() {
+        serde_json::json!({"Ok": null})
+    } else {
+        serde_json::json!({"Err": error.clone()})
+    };
+    let outcome: EncodedConfirmedTransactionWithStatusMeta =
+        serde_json::from_value(serde_json::json!({
+            "slot": 350_000_000_u64,
+            "blockTime": 1_700_000_000_i64,
+            "meta": {
+                "err": error,
+                "status": status,
+                "fee": FEE_PER_SIGNATURE,
+                "preBalances": [],
+                "postBalances": [],
+                "innerInstructions": [],
+                "logMessages": [],
+                "preTokenBalances": [],
+                "postTokenBalances": [],
+                "rewards": [],
+                "loadedAddresses": {"readonly": [], "writable": []},
+                "computeUnitsConsumed": 450
+            },
+            "transaction": [encoded, "base64"],
+            "version": "legacy"
+        }))
+        .expect("BUG: the getTransaction result should deserialize");
+    MultiRpcResult::Consistent(Ok(Some(outcome.try_into().expect(
+        "BUG: the getTransaction result should convert to the SOL RPC canister type",
+    ))))
+}
+
 /// The [`FetchedTransaction`] that [`rpc::get_transaction`] returns for the given
 /// `getTransaction` output.
 pub fn fetched(outcome: EncodedConfirmedTransactionWithStatusMeta) -> FetchedTransaction {

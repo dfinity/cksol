@@ -123,6 +123,12 @@ pub fn encode_metrics(w: &mut MetricsEncoder<Vec<u8>>, s: &State) -> std::io::Re
         storage::with_unstable_metrics(|m| m.withdrawal_transaction_rebroadcasts).metric_value(),
         "Number of re-broadcast attempts of withdrawal transactions since the last upgrade.",
     )?;
+    w.encode_gauge(
+        "withdrawal_transactions_with_unresolved_outcome",
+        storage::with_unstable_metrics(|m| m.withdrawal_transactions_with_unresolved_outcome)
+            .metric_value(),
+        "Number of in-flight withdrawal transactions whose nonce advanced but whose outcome could not be fetched in the last finalization round.",
+    )?;
     Ok(())
 }
 

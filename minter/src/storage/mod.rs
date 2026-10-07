@@ -37,6 +37,7 @@ thread_local! {
 pub(crate) struct Metrics {
     pub post_upgrade_instructions_consumed: u64,
     pub withdrawal_transaction_rebroadcasts: u64,
+    pub withdrawal_transactions_with_unresolved_outcome: u64,
 }
 
 impl Metrics {
@@ -44,6 +45,7 @@ impl Metrics {
         Self {
             post_upgrade_instructions_consumed: 0,
             withdrawal_transaction_rebroadcasts: 0,
+            withdrawal_transactions_with_unresolved_outcome: 0,
         }
     }
 }
