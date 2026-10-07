@@ -635,7 +635,9 @@ impl State {
                         "Attempted to create transaction for unknown withdrawal request: {burn_index:?}"
                     )
                 });
-            total += pending.request.amount_to_transfer;
+            total = total
+                .checked_add(pending.request.amount_to_transfer)
+                .expect("BUG: total amount of a withdrawal transaction overflows");
             assert_eq!(
                 self.created_withdrawal_requests
                     .insert(*burn_index, pending),
