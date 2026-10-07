@@ -196,6 +196,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "array-init"
+version = "2.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3d62b7694a562cdf5a74227903507c56ab2cc8bdd1f781ed5cb4cf9c9f810bfc"
+
+[[package]]
 name = "arrayref"
 version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -468,26 +474,26 @@ dependencies = [
 ]
 
 [[package]]
-name = "binread"
-version = "2.2.0"
+name = "binrw"
+version = "0.15.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "16598dfc8e6578e9b597d9910ba2e73618385dc9f4b1d43dd92c349d6be6418f"
+checksum = "6ad120d555272286c1017d25165ab8bd74806f13fc85b258484ec7e4ce75458f"
 dependencies = [
- "binread_derive",
- "lazy_static",
- "rustversion",
+ "array-init",
+ "binrw_derive",
+ "bytemuck",
 ]
 
 [[package]]
-name = "binread_derive"
-version = "2.1.0"
+name = "binrw_derive"
+version = "0.15.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1d9672209df1714ee804b1f4d4f68c8eb2a90b1f7a07acf472f88ce198ef1fed"
+checksum = "6df92e0e9baae4dc82c7bad7715ca40c0a5c71539057bf2ea04a5c29c980410b"
 dependencies = [
  "either",
  "proc-macro2",
  "quote",
- "syn 1.0.109",
+ "syn 2.0.117",
 ]
 
 [[package]]
@@ -667,21 +673,21 @@ dependencies = [
 
 [[package]]
 name = "canbench-rs"
-version = "0.4.1"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3d959bc8d6e4738bcfed6682d46ef105db17e5fe81d4c30e8b49b03b9badd2c8"
+checksum = "11eef0544778ff515f65fbe5427807009a9cf44eb898404380f6f13c9af20025"
 dependencies = [
  "canbench-rs-macros",
  "candid",
- "ic-cdk 0.19.0",
+ "ic-cdk",
  "serde",
 ]
 
 [[package]]
 name = "canbench-rs-macros"
-version = "0.4.1"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3198f118892181c4f4d30cfb423511a11b9d7e8d7efb94aa58777db78da27bd8"
+checksum = "94a1c524c43e000e22c24816ead2fcf79d57aca4bae6747835dc088d57682f11"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -690,12 +696,12 @@ dependencies = [
 
 [[package]]
 name = "candid"
-version = "0.10.26"
+version = "0.10.37"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "846adba6d1b4a00eeb8d4a0e4b88dfab570c25ad150cd52e51dfdc4f9d0a66cd"
+checksum = "a4dda5edb2bfa2d7703219ba0fd6ec712343fcd03867b76b87405feaa9aae7a0"
 dependencies = [
  "anyhow",
- "binread",
+ "binrw",
  "byteorder",
  "candid_derive",
  "hex",
@@ -713,9 +719,9 @@ dependencies = [
 
 [[package]]
 name = "candid_derive"
-version = "0.10.26"
+version = "0.10.37"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4c367110b158be2edc335a4ad70f3467fa588d5c5675e149ef38638a8e281fc4"
+checksum = "45e094bb111b7a9b70174aaa66f80f1a6751a2e66d2a99eef797c8ab6d0933d3"
 dependencies = [
  "lazy_static",
  "proc-macro2",
@@ -755,7 +761,7 @@ dependencies = [
  "derive_more 2.1.1",
  "futures-util",
  "http 1.4.0",
- "ic-cdk 0.20.0",
+ "ic-cdk",
  "ic-cdk-management-canister",
  "ic-error-types",
  "itertools 0.14.0",
@@ -958,7 +964,7 @@ dependencies = [
  "futures",
  "hex",
  "ic-canister-runtime",
- "ic-cdk 0.20.0",
+ "ic-cdk",
  "ic-cdk-management-canister",
  "ic-cdk-timers",
  "ic-dummy-getrandom-for-wasm",
@@ -2360,7 +2366,7 @@ checksum = "c35d580504ea1434b09d756085ffb7aac053094349e274781f91e21fe5e8efae"
 dependencies = [
  "async-trait",
  "candid",
- "ic-cdk 0.20.0",
+ "ic-cdk",
  "ic-cdk-management-canister",
  "ic-error-types",
  "serde",
@@ -2369,32 +2375,13 @@ dependencies = [
 
 [[package]]
 name = "ic-cdk"
-version = "0.19.0"
+version = "0.20.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "818d6d5416a8f0212e1b132703b0da51e36c55f2b96677e96f2bbe7702e1bd85"
+checksum = "fc6ad46670baa42b9d802e46cb0741e5da2d747b5b74b9ac8019aec9388b05b2"
 dependencies = [
  "candid",
  "ic-cdk-executor",
- "ic-cdk-macros 0.19.0",
- "ic-error-types",
- "ic-management-canister-types 0.5.0",
- "ic0",
- "pin-project-lite",
- "serde",
- "serde_bytes",
- "slotmap",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "ic-cdk"
-version = "0.20.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "057912339f889013f42b36cc0623585949ed278457efb32aef041bdc48acb111"
-dependencies = [
- "candid",
- "ic-cdk-executor",
- "ic-cdk-macros 0.20.0",
+ "ic-cdk-macros",
  "ic-error-types",
  "ic0",
  "pin-project-lite",
@@ -2415,22 +2402,9 @@ dependencies = [
 
 [[package]]
 name = "ic-cdk-macros"
-version = "0.19.0"
+version = "0.20.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "66dad91a214945cb3605bc9ef6901b87e2ac41e3624284c2cabba49d43aa4f43"
-dependencies = [
- "candid",
- "darling 0.20.11",
- "proc-macro2",
- "quote",
- "syn 2.0.117",
-]
-
-[[package]]
-name = "ic-cdk-macros"
-version = "0.20.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b140627c01710ac185fbc984ab1fda1781ffef4abbd952e07383350899b0952b"
+checksum = "9583454462627a6a816ffa91422c8ab7e6a21f75f63eb255d03f710248d45453"
 dependencies = [
  "candid",
  "darling 0.23.0",
@@ -2446,7 +2420,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "92c1319a274caebf0ab70ab826b8905c29e8563498289356b9a59464f2a85c56"
 dependencies = [
  "candid",
- "ic-cdk 0.20.0",
+ "ic-cdk",
  "ic-management-canister-types 0.7.1",
  "serde",
  "serde_bytes",
@@ -2576,7 +2550,7 @@ dependencies = [
  "candid",
  "canhttp",
  "ic-canister-runtime",
- "ic-cdk 0.20.0",
+ "ic-cdk",
  "ic-error-types",
  "pocket-ic",
  "serde",
@@ -2615,9 +2589,9 @@ dependencies = [
 
 [[package]]
 name = "ic0"
-version = "1.0.1"
+version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1499d08fd5be8f790d477e1865d63bab6a8d748300e141270c4296e6d5fdd6bc"
+checksum = "f05349d5c51ab6cc962c8963f877f826997ee6b737c6be3aafc9779eb8a4dd05"
 
 [[package]]
 name = "ic_principal"
@@ -4864,7 +4838,7 @@ dependencies = [
  "candid",
  "canlog",
  "derive_more 2.1.1",
- "ic-cdk 0.20.0",
+ "ic-cdk",
  "ic-management-canister-types 0.5.0",
  "regex",
  "serde",
