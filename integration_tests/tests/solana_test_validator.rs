@@ -1,3 +1,4 @@
+use assert_matches::assert_matches;
 use candid::Principal;
 use cksol_int_tests::{
     Setup,
@@ -5,8 +6,11 @@ use cksol_int_tests::{
     ledger_init_args::LEDGER_TRANSFER_FEE,
     validator::{FEE_PER_SIGNATURE, SolanaTestValidator, wait_for_withdrawal_finalized},
 };
-use cksol_types::{DepositSolId, DepositSolStatus, Signature, WithdrawalArgs};
-use cksol_types_internal::UpgradeArgs;
+use cksol_types::{
+    DepositSolId, DepositSolStatus, Signature, TxFinalizedStatus, WithdrawalArgs, WithdrawalError,
+    WithdrawalStatus,
+};
+use cksol_types_internal::{UpgradeArgs, event::EventType};
 use icrc_ledger_types::icrc1::account::Account;
 use sol_rpc_types::Lamport;
 use solana_address::Address;
@@ -223,6 +227,176 @@ async fn should_add_an_operator_created_nonce_account_through_an_upgrade() {
     assert_eq!(
         setup.minter().get_minter_info().await.nonce_accounts,
         nonce_accounts
+    );
+
+    setup.drop().await;
+}
+
+/// The largest number of withdrawals the minter serves in a single durable-nonce transaction.
+const MAX_WITHDRAWALS_PER_NONCE_TX: usize = 10;
+
+#[tokio::test(flavor = "multi_thread")]
+async fn should_batch_withdrawals_over_two_nonce_accounts_and_reuse_a_freed_one() {
+    const NUM_BATCHED_WITHDRAWALS: usize = MAX_WITHDRAWALS_PER_NONCE_TX + 1;
+    const WITHDRAWAL_AMOUNT: Lamport = LAMPORTS_PER_SOL / 100;
+    const AMOUNT_RECEIVED_PER_WITHDRAWAL: Lamport =
+        WITHDRAWAL_AMOUNT - Setup::DEFAULT_WITHDRAWAL_FEE;
+
+    let validator = SolanaTestValidator::start().await;
+    let setup = validator.setup_with_nonce_accounts(2).await;
+    let pool: Vec<Address> = setup
+        .minter()
+        .get_minter_info()
+        .await
+        .nonce_accounts
+        .iter()
+        .map(|nonce_account| {
+            nonce_account
+                .parse()
+                .expect("the minter reports well-formed nonce accounts")
+        })
+        .collect();
+    assert_eq!(pool.len(), 2);
+
+    let account = Account {
+        owner: DEPOSITOR,
+        subaccount: None,
+    };
+    validator
+        .fund_deposit_address(&setup, account, LAMPORTS_PER_SOL / 5)
+        .await;
+    let deposit_id = setup
+        .minter()
+        .deposit_sol(account)
+        .await
+        .expect("deposit_sol should queue a sweep");
+    setup.advance_time(Duration::from_mins(1)).await;
+    setup.wait_for_deposit_minted(deposit_id).await;
+    setup
+        .ledger()
+        .approve(
+            account.subaccount,
+            (NUM_BATCHED_WITHDRAWALS as Lamport + 1) * WITHDRAWAL_AMOUNT,
+            setup.minter_account(),
+        )
+        .await;
+
+    let withdraw_to = async |destination: &Address| {
+        setup
+            .minter()
+            .withdraw(WithdrawalArgs {
+                from_subaccount: account.subaccount,
+                amount: WITHDRAWAL_AMOUNT,
+                address: destination.to_string(),
+            })
+            .await
+    };
+    let created_withdrawal_transactions = async || {
+        setup
+            .minter()
+            .get_all_events()
+            .await
+            .into_iter()
+            .filter_map(|event| match event.payload {
+                EventType::CreatedWithdrawalTransaction {
+                    burn_indices,
+                    nonce_account,
+                    ..
+                } => Some((burn_indices, Address::from(nonce_account))),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+
+    let balance_before_rejection = setup.ledger().balance_of(account).await;
+    assert_matches!(
+        withdraw_to(&pool[0]).await,
+        Err(WithdrawalError::InvalidDestination(_))
+    );
+    assert_eq!(
+        setup.ledger().balance_of(account).await,
+        balance_before_rejection
+    );
+
+    let nonce_values_before = [
+        validator.get_nonce_value(&pool[0]).await,
+        validator.get_nonce_value(&pool[1]).await,
+    ];
+    let destinations: Vec<Address> = (0..NUM_BATCHED_WITHDRAWALS)
+        .map(|_| Keypair::new().pubkey())
+        .collect();
+    let mut burn_indices = Vec::with_capacity(NUM_BATCHED_WITHDRAWALS);
+    for destination in &destinations {
+        let withdrawal = withdraw_to(destination)
+            .await
+            .expect("withdraw should succeed");
+        burn_indices.push(withdrawal.block_index);
+    }
+
+    setup.advance_time(Duration::from_mins(1)).await;
+    for &burn_index in &burn_indices {
+        wait_for_withdrawal_finalized(&setup, burn_index).await;
+        assert_matches!(
+            setup.minter().withdrawal_status(burn_index).await,
+            WithdrawalStatus::TxFinalized(TxFinalizedStatus::Success { .. })
+        );
+    }
+    assert_eq!(
+        validator.get_balances(&destinations).await,
+        vec![AMOUNT_RECEIVED_PER_WITHDRAWAL; NUM_BATCHED_WITHDRAWALS]
+    );
+
+    let batches = created_withdrawal_transactions().await;
+    let [
+        (first_burn_indices, first_nonce_account),
+        (second_burn_indices, second_nonce_account),
+    ] = batches.as_slice()
+    else {
+        panic!("Expected two withdrawal transactions, got {batches:?}");
+    };
+    assert_ne!(first_nonce_account, second_nonce_account);
+    let mut batched_burn_indices = [
+        first_burn_indices.as_slice(),
+        second_burn_indices.as_slice(),
+    ]
+    .concat();
+    batched_burn_indices.sort_unstable();
+    assert_eq!(batched_burn_indices, burn_indices);
+    let nonce_values_after_batches = [
+        validator.get_nonce_value(&pool[0]).await,
+        validator.get_nonce_value(&pool[1]).await,
+    ];
+    assert_ne!(nonce_values_after_batches[0], nonce_values_before[0]);
+    assert_ne!(nonce_values_after_batches[1], nonce_values_before[1]);
+
+    let reuse_destination = Keypair::new().pubkey();
+    let reuse_burn_index = withdraw_to(&reuse_destination)
+        .await
+        .expect("withdraw should succeed")
+        .block_index;
+    setup.advance_time(Duration::from_mins(1)).await;
+    wait_for_withdrawal_finalized(&setup, reuse_burn_index).await;
+    assert_matches!(
+        setup.minter().withdrawal_status(reuse_burn_index).await,
+        WithdrawalStatus::TxFinalized(TxFinalizedStatus::Success { .. })
+    );
+    assert_eq!(
+        validator.get_balance(&reuse_destination).await,
+        AMOUNT_RECEIVED_PER_WITHDRAWAL
+    );
+
+    let batches = created_withdrawal_transactions().await;
+    let [_, _, (reused_burn_indices, reused_nonce_account)] = batches.as_slice() else {
+        panic!("Expected three withdrawal transactions, got {batches:?}");
+    };
+    assert_eq!(reused_burn_indices, &[reuse_burn_index]);
+    let reused = pool
+        .iter()
+        .position(|nonce_account| nonce_account == reused_nonce_account)
+        .expect("the reused nonce account belongs to the pool");
+    assert_ne!(
+        validator.get_nonce_value(reused_nonce_account).await,
+        nonce_values_after_batches[reused]
     );
 
     setup.drop().await;
