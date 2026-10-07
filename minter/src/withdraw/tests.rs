@@ -632,11 +632,13 @@ mod process_pending_withdrawals_tests {
         process_pending_withdrawals(failing_runtime).await;
 
         let num_events_after_failure = EventsAssert::from_recorded().len();
-        EventsAssert::from_recorded().expect_contains_event_eq(EventType::CreatedWithdrawalTransaction {
-            burn_indices: vec![1_u64.into()],
-            nonce_account: NONCE_ACCOUNT,
-            nonce_value: durable_nonce(1),
-        });
+        EventsAssert::from_recorded().expect_contains_event_eq(
+            EventType::CreatedWithdrawalTransaction {
+                burn_indices: vec![1_u64.into()],
+                nonce_account: NONCE_ACCOUNT,
+                nonce_value: durable_nonce(1),
+            },
+        );
         assert_eq!(withdrawal_status(1), WithdrawalStatus::Pending);
 
         let recovering_runtime = TestCanisterRuntime::new()
@@ -817,6 +819,47 @@ mod process_pending_withdrawals_tests {
 
     #[tokio::test]
     async fn should_retry_later_when_an_affordable_batch_is_left_behind() {
+        let second_nonce_account = address(2);
+        init_state_with_args(InitArgs {
+            nonce_accounts: vec![NONCE_ACCOUNT.to_string(), second_nonce_account.to_string()],
+            ..valid_init_args()
+        });
+        init_balance();
+        init_schnorr_master_key();
+
+        let num_requests = MAX_WITHDRAWALS_PER_NONCE_TX + 1;
+        for i in 0..num_requests {
+            events::accept_withdrawal(account(i), i as u64, MINIMUM_WITHDRAWAL_AMOUNT);
+        }
+
+        let runtime = TestCanisterRuntime::new()
+            .with_increasing_time()
+            .add_stub_response(GetAccountInfoResult::Consistent(Ok(Some(
+                nonce_account_info(MINTER_ADDRESS, 1),
+            ))))
+            .add_stub_response(GetAccountInfoResult::Consistent(Err(
+                RpcError::ValidationError("account unavailable".to_string()),
+            )))
+            .add_stub_response(SendTransactionResult::Consistent(Ok(
+                minter_signature().into()
+            )))
+            .add_signer(sign_as_minter());
+
+        process_pending_withdrawals(runtime.clone()).await;
+
+        read_state(|s| assert_eq!(s.submitted_transactions().len(), 1));
+        assert_eq!(
+            withdrawal_status(MAX_WITHDRAWALS_PER_NONCE_TX as u64),
+            WithdrawalStatus::Pending
+        );
+        assert_eq!(
+            runtime.set_timer_delays(),
+            vec![WITHDRAWAL_PROCESSING_RETRY_DELAY]
+        );
+    }
+
+    #[tokio::test]
+    async fn should_not_retry_early_when_the_round_made_no_progress() {
         init_state();
         init_balance();
         init_schnorr_master_key();
@@ -831,10 +874,8 @@ mod process_pending_withdrawals_tests {
 
         process_pending_withdrawals(runtime.clone()).await;
 
-        assert_eq!(
-            runtime.set_timer_delays(),
-            vec![WITHDRAWAL_PROCESSING_RETRY_DELAY]
-        );
+        assert_eq!(withdrawal_status(1), WithdrawalStatus::Pending);
+        assert_eq!(runtime.set_timer_delays(), Vec::<Duration>::new());
     }
 
     #[tokio::test]

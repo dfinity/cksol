@@ -154,13 +154,16 @@ pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: R) {
         return;
     };
 
-    create_transactions_batch(&runtime, minter_address).await;
+    let num_created = create_transactions_batch(&runtime, minter_address).await;
     let signed_transactions = sign_transactions_batch(&runtime, minter_address).await;
+    let made_progress = num_created > 0 || !signed_transactions.is_empty();
     send_transactions_batch(&runtime, signed_transactions).await;
 
-    if read_state(|s| {
-        s.can_create_withdrawal_transaction() || s.has_unsigned_withdrawal_transaction()
-    }) {
+    if made_progress
+        && read_state(|s| {
+            s.can_create_withdrawal_transaction() || s.has_unsigned_withdrawal_transaction()
+        })
+    {
         runtime.set_timer(
             WITHDRAWAL_PROCESSING_RETRY_DELAY,
             process_pending_withdrawals,
@@ -179,7 +182,10 @@ struct BoundWithdrawal {
     message: Message,
 }
 
-async fn create_transactions_batch<R: CanisterRuntime>(runtime: &R, minter_address: Address) {
+async fn create_transactions_batch<R: CanisterRuntime>(
+    runtime: &R,
+    minter_address: Address,
+) -> usize {
     let reserved_batches: Vec<ReservedBatch> = read_state(|state| {
         let max_batches = MAX_CONCURRENT_RPC_CALLS
             .min(MAX_CONCURRENT_SIGNATURES.saturating_sub(state.created_withdrawal_txs().len()));
@@ -201,14 +207,17 @@ async fn create_transactions_batch<R: CanisterRuntime>(runtime: &R, minter_addre
             .into_iter()
             .map(async |batch| create_transaction(runtime, minter_address, batch).await),
     )
-    .await;
+    .await
+    .into_iter()
+    .filter(|created| *created)
+    .count()
 }
 
 async fn create_transaction<R: CanisterRuntime>(
     runtime: &R,
     minter_address: Address,
     batch: ReservedBatch,
-) {
+) -> bool {
     let ReservedBatch {
         nonce_account,
         requests,
@@ -220,7 +229,7 @@ async fn create_transaction<R: CanisterRuntime>(
                 Priority::Error,
                 "Failed to read nonce account {nonce_account}, skipping withdrawal batch this round: {e}"
             );
-            return;
+            return false;
         }
     };
     if read_state(|state| state.nonce_pool().has_seen(&nonce_account, &nonce_value)) {
@@ -228,7 +237,7 @@ async fn create_transaction<R: CanisterRuntime>(
             Priority::Info,
             "Read a stale nonce value for account {nonce_account}, skipping withdrawal batch this round"
         );
-        return;
+        return false;
     }
 
     let burn_indices: Vec<_> = requests.iter().map(|r| r.burn_block_index).collect();
@@ -242,7 +251,7 @@ async fn create_transaction<R: CanisterRuntime>(
             Priority::Error,
             "Failed to build batch withdrawal transaction for burn indices {burn_indices:?}: {e}"
         );
-        return;
+        return false;
     }
 
     mutate_state(|state| {
@@ -256,6 +265,7 @@ async fn create_transaction<R: CanisterRuntime>(
             runtime,
         )
     });
+    true
 }
 
 async fn sign_transactions_batch<R: CanisterRuntime>(
