@@ -37,29 +37,6 @@ proptest! {
     }
 }
 
-#[test]
-fn should_decode_a_submitted_transaction_encoded_with_a_mandatory_block_height() {
-    const ENCODED: &str = "8200820385584001010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101820081582500000000000000000000000000000000000000000000000000000000000000000000000000818200808200818107182a";
-
-    let decoded = Event::from_bytes(Cow::Owned(hex::decode(ENCODED).unwrap()));
-
-    assert_eq!(
-        decoded,
-        Event {
-            timestamp: 0,
-            payload: EventType::SubmittedTransaction {
-                signature: solana_signature::Signature::from([1; 64]),
-                message: VersionedMessage::Legacy(solana_message::Message::default()),
-                signers: vec![Signer::Minter],
-                purpose: TransactionPurpose::WithdrawSol {
-                    burn_indices: vec![7_u64.into()],
-                },
-                block_height: Some(BlockHeight::new(42)),
-            },
-        }
-    );
-}
-
 mod cache_minter_public_key {
     use super::*;
     use ic_ed25519::{PocketIcMasterPublicKeyId, PublicKey};
@@ -418,10 +395,10 @@ mod swept_deposits {
             &signature(SWEEP_SIGNATURE_INDEX),
             &sweep_message([(0, queued_deposit(0))]),
             &[Signer::Account(queued_deposit(0).account)],
-            &TransactionPurpose::SweepDeposits {
+            &TransactionPurpose::SweepDeposit {
                 deposit_ids: vec![0],
+                block_height: DEFAULT_BLOCK_HEIGHT,
             },
-            Some(DEFAULT_BLOCK_HEIGHT),
         );
     }
 }
@@ -935,7 +912,6 @@ fn should_track_balance_through_deposits_withdrawals_and_failures() {
                     message: message_with_signers(num_signers).into(),
                     signers,
                     purpose,
-                    block_height: Some(BlockHeight::new(0)),
                 },
                 &TestCanisterRuntime::new().add_times([0, 0]),
             )
@@ -970,8 +946,9 @@ fn should_track_balance_through_deposits_withdrawals_and_failures() {
     submit_transaction(
         signature(0xBB),
         1,
-        TransactionPurpose::WithdrawSol {
+        TransactionPurpose::Withdrawal {
             burn_indices: vec![0.into(), 1.into()],
+            block_height: BlockHeight::new(0),
         },
     );
     let expected = expected - TRANSFER_1 - TRANSFER_2 - FEE_PER_SIGNATURE;
@@ -1422,10 +1399,9 @@ mod withdrawal_transactions {
             )
             .into(),
             signers: vec![Signer::Minter],
-            purpose: TransactionPurpose::WithdrawSol {
+            purpose: TransactionPurpose::NonceWithdrawal {
                 burn_indices: vec![0_u64.into()],
             },
-            block_height: None,
         });
 
         let replayed = replay_events(log_of(events));
@@ -1475,10 +1451,9 @@ mod withdrawal_transactions {
                 &signature(7),
                 &message_without_nonce_advance.into(),
                 &[Signer::Minter],
-                &TransactionPurpose::WithdrawSol {
+                &TransactionPurpose::NonceWithdrawal {
                     burn_indices: vec![0_u64.into()],
                 },
-                None,
             )
         });
     }
@@ -1501,10 +1476,9 @@ mod withdrawal_transactions {
                 &signature(7),
                 &message_with_another_amount.into(),
                 &[Signer::Minter],
-                &TransactionPurpose::WithdrawSol {
+                &TransactionPurpose::NonceWithdrawal {
                     burn_indices: vec![0_u64.into()],
                 },
-                None,
             )
         });
     }
@@ -1538,10 +1512,10 @@ mod withdrawal_transactions {
                 signature: signature(9),
                 message: sweep_message([(deposit_id(0), funding_deposit)]),
                 signers: vec![Signer::Account(funding_deposit.account)],
-                purpose: TransactionPurpose::SweepDeposits {
+                purpose: TransactionPurpose::SweepDeposit {
                     deposit_ids: vec![deposit_id(0)],
+                    block_height: BlockHeight::new(0),
                 },
-                block_height: Some(BlockHeight::new(0)),
             },
             EventType::SucceededTransaction {
                 signature: signature(9),

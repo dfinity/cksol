@@ -805,8 +805,10 @@ pub mod events {
                         .sweep_message(solana_hash::Hash::default())
                         .into(),
                     signers,
-                    purpose: TransactionPurpose::SweepDeposits { deposit_ids },
-                    block_height: Some(DEFAULT_BLOCK_HEIGHT),
+                    purpose: TransactionPurpose::SweepDeposit {
+                        deposit_ids,
+                        block_height: DEFAULT_BLOCK_HEIGHT,
+                    },
                 },
                 &runtime(),
             )
@@ -937,8 +939,7 @@ pub mod events {
                     signature,
                     message: message.into(),
                     signers: vec![Signer::Minter],
-                    purpose: TransactionPurpose::WithdrawSol { burn_indices },
-                    block_height: None,
+                    purpose: TransactionPurpose::NonceWithdrawal { burn_indices },
                 },
                 &runtime(),
             )
@@ -976,13 +977,13 @@ pub mod events {
                     signature,
                     message: message().into(),
                     signers: vec![Signer::Minter],
-                    purpose: TransactionPurpose::WithdrawSol {
+                    purpose: TransactionPurpose::Withdrawal {
                         burn_indices: burn_indices
                             .into_iter()
                             .map(LedgerBurnIndex::from)
                             .collect(),
+                        block_height,
                     },
-                    block_height: Some(block_height),
                 },
                 &runtime(),
             )
@@ -1288,21 +1289,14 @@ pub mod arb {
                 arb_signature(),
                 arb_message(),
                 prop::collection::vec(arb_signer(), 1..10),
-                prop_oneof![
-                    prop::collection::vec(arb_ledger_burn_index(), 1..10)
-                        .prop_map(|burn_indices| TransactionPurpose::WithdrawSol { burn_indices }),
-                    prop::collection::vec(any::<u64>(), 1..10)
-                        .prop_map(|deposit_ids| TransactionPurpose::SweepDeposits { deposit_ids }),
-                ],
-                proptest::option::of(arb_block_height()),
+                arb_transaction_purpose(),
             )
-                .prop_map(|(signature, message, signers, purpose, block_height)| {
+                .prop_map(|(signature, message, signers, purpose)| {
                     EventType::SubmittedTransaction {
                         signature,
                         message: message.into(),
                         signers,
                         purpose,
-                        block_height,
                     }
                 }),
             (arb_signature(), arb_signature(), arb_block_height(),).prop_map(
@@ -1377,6 +1371,33 @@ pub mod arb {
             deposit_id,
             amount_to_mint,
         })
+    }
+
+    fn arb_transaction_purpose() -> impl Strategy<Value = TransactionPurpose> {
+        prop_oneof![
+            (
+                prop::collection::vec(any::<u64>(), 1..10),
+                arb_block_height()
+            )
+                .prop_map(|(deposit_ids, block_height)| {
+                    TransactionPurpose::SweepDeposit {
+                        deposit_ids,
+                        block_height,
+                    }
+                }),
+            (
+                prop::collection::vec(arb_ledger_burn_index(), 1..10),
+                arb_block_height()
+            )
+                .prop_map(|(burn_indices, block_height)| {
+                    TransactionPurpose::Withdrawal {
+                        burn_indices,
+                        block_height,
+                    }
+                }),
+            prop::collection::vec(arb_ledger_burn_index(), 1..10)
+                .prop_map(|burn_indices| TransactionPurpose::NonceWithdrawal { burn_indices }),
+        ]
     }
 
     pub fn arb_event() -> impl Strategy<Value = Event> {

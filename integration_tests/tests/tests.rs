@@ -748,11 +748,10 @@ mod withdrawal_tests {
             check!(events.iter().any(|e| matches!(
                 e,
                 EventType::SubmittedTransaction {
-                    purpose: TransactionPurpose::WithdrawSol { burn_indices },
-                    block_height,
+                    purpose: TransactionPurpose::Withdrawal { burn_indices, block_height },
                     ..
                 } if burn_indices == &[block_index]
-                  && block_height == &Some(SUBMISSION_BLOCK_HEIGHT)
+                  && *block_height == SUBMISSION_BLOCK_HEIGHT
             )));
         });
 
@@ -1000,7 +999,7 @@ mod deposit_sol_tests {
                 e,
                 EventType::SubmittedTransaction {
                     signature,
-                    purpose: TransactionPurpose::SweepDeposits { deposit_ids },
+                    purpose: TransactionPurpose::SweepDeposit { deposit_ids, .. },
                     ..
                 } if *signature == sweep_signature && deposit_ids == &[deposit_id]
             )));

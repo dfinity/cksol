@@ -99,15 +99,10 @@ pub enum EventType {
         /// The signers in signature order (fee payer first).
         #[n(2)]
         signers: Vec<Signer>,
-        /// The purpose of this transaction.
+        /// The purpose of this transaction, with what the minter needs to
+        /// track it until it is finalized.
         #[n(3)]
         purpose: TransactionPurpose,
-        /// The block height of the block whose blockhash the transaction uses.
-        /// The blockhash is valid for 150 blocks after that height.
-        /// `None` for a durable-nonce transaction, which carries a nonce value
-        /// instead of a blockhash and never expires.
-        #[n(4)]
-        block_height: Option<BlockHeight>,
     },
     /// A previously submitted transaction was resubmitted with a new signature.
     /// The transaction message and signers remain the same.
@@ -296,21 +291,45 @@ impl Signer {
     }
 }
 
+/// The purpose of a submitted transaction, mirroring [`MinterTransaction`]:
+/// each variant carries what the minter needs to track the transaction.
+///
+/// [`MinterTransaction`]: crate::state::MinterTransaction
 #[derive(Clone, Eq, PartialEq, Debug, Decode, Encode)]
 pub enum TransactionPurpose {
-    /// Withdraw SOL to users' Solana addresses.
-    #[n(0)]
-    WithdrawSol {
-        /// The ledger burn indices of the withdrawal requests included in this transaction.
-        #[cbor(n(0), with = "cbor::id_vec")]
-        burn_indices: Vec<LedgerBurnIndex>,
-    },
-    /// Sweep the deposit addresses of deposits queued by `deposit_sol` into the minter's main account.
-    #[n(1)]
-    SweepDeposits {
+    /// Sweep the deposit addresses of deposits queued by `deposit_sol` into
+    /// the minter's main account. The transaction uses a recent blockhash and
+    /// is dropped once the blockhash expires.
+    #[n(2)]
+    SweepDeposit {
         /// The ids of the swept deposits.
         #[n(0)]
         deposit_ids: Vec<DepositSolId>,
+        /// The block height of the block whose blockhash the transaction uses.
+        /// The blockhash is valid for 150 blocks after that height.
+        #[n(1)]
+        block_height: BlockHeight,
+    },
+    /// Withdraw SOL to users' Solana addresses. The transaction uses a recent
+    /// blockhash and is resubmitted once the blockhash expires.
+    #[n(3)]
+    Withdrawal {
+        /// The ledger burn indices of the withdrawal requests included in this transaction.
+        #[cbor(n(0), with = "cbor::id_vec")]
+        burn_indices: Vec<LedgerBurnIndex>,
+        /// The block height of the block whose blockhash the transaction uses.
+        /// The blockhash is valid for 150 blocks after that height.
+        #[n(1)]
+        block_height: BlockHeight,
+    },
+    /// Withdraw SOL to users' Solana addresses. The transaction carries the
+    /// nonce value of a durable nonce account instead of a recent blockhash,
+    /// so it never expires.
+    #[n(4)]
+    NonceWithdrawal {
+        /// The ledger burn indices of the withdrawal requests included in this transaction.
+        #[cbor(n(0), with = "cbor::id_vec")]
+        burn_indices: Vec<LedgerBurnIndex>,
     },
 }
 

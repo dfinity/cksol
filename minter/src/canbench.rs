@@ -120,10 +120,10 @@ fn queue_and_sweep(deposit_id: u64, account_index: usize, amount: u64, sig: Sign
         signature: sig,
         message: VersionedMessage::Legacy(sweep.sweep_message(solana_message::Hash::default())),
         signers: vec![Signer::Account(account)],
-        purpose: TransactionPurpose::SweepDeposits {
+        purpose: TransactionPurpose::SweepDeposit {
             deposit_ids: vec![deposit_id],
+            block_height: BlockHeight::new(0),
         },
-        block_height: Some(BlockHeight::new(0)),
     });
 }
 
@@ -160,8 +160,7 @@ fn accept_and_submit_withdrawal(account_index: usize, burn_index: u64, sig: Sign
             AMOUNT_TO_TRANSFER,
         )),
         signers: vec![Signer::Minter],
-        purpose: TransactionPurpose::WithdrawSol { burn_indices },
-        block_height: None,
+        purpose: TransactionPurpose::NonceWithdrawal { burn_indices },
     });
 }
 

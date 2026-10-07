@@ -120,8 +120,7 @@ async fn should_sweep_batch_with_largest_deposit_as_fee_payer() {
                 signature,
                 message,
                 signers,
-                purpose: TransactionPurpose::SweepDeposits { deposit_ids },
-                block_height,
+                purpose: TransactionPurpose::SweepDeposit { deposit_ids, block_height },
             } => {
                 assert_eq!(signature, fee_payer_signature);
                 assert_eq!(signers[0], Signer::Account(account(2)));
@@ -130,7 +129,7 @@ async fn should_sweep_batch_with_largest_deposit_as_fee_payer() {
                     signers.contains(&Signer::Account(account(1)))
                         && signers.contains(&Signer::Account(account(3)))
                 );
-                assert_eq!(block_height, Some(DEFAULT_BLOCK_HEIGHT));
+                assert_eq!(block_height, DEFAULT_BLOCK_HEIGHT);
                 assert_eq!(deposit_ids, vec![0, 1, 2]);
                 assert_eq!(
                     transfers_to_minter_address(&message),
@@ -172,7 +171,7 @@ async fn should_record_event_even_if_transaction_submission_fails() {
         .expect_event(|e| {
             assert_matches!(e, EventType::SubmittedTransaction {
                 signature,
-                purpose: TransactionPurpose::SweepDeposits { deposit_ids },
+                purpose: TransactionPurpose::SweepDeposit { deposit_ids, .. },
                 ..
             } if signature == fee_payer_signature && deposit_ids == vec![0])
         })
@@ -218,14 +217,14 @@ async fn should_split_deposits_into_batches_of_max_size() {
         .expect_event(|e| {
             assert_matches!(e, EventType::SubmittedTransaction {
                 signature,
-                purpose: TransactionPurpose::SweepDeposits { deposit_ids },
+                purpose: TransactionPurpose::SweepDeposit { deposit_ids, .. },
                 ..
             } if signature == fee_payer_signature_1 && deposit_ids == batch_1_ids)
         })
         .expect_event(|e| {
             assert_matches!(e, EventType::SubmittedTransaction {
                 signature,
-                purpose: TransactionPurpose::SweepDeposits { deposit_ids },
+                purpose: TransactionPurpose::SweepDeposit { deposit_ids, .. },
                 ..
             } if signature == fee_payer_signature_2 && deposit_ids == batch_2_ids)
         })

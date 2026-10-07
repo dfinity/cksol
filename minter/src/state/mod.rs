@@ -548,7 +548,6 @@ impl State {
         transaction: &VersionedMessage,
         signers: &[Signer],
         purpose: &TransactionPurpose,
-        block_height: Option<BlockHeight>,
     ) {
         assert!(
             !self.succeeded_transactions.contains(signature),
@@ -560,8 +559,11 @@ impl State {
         );
         let message = transaction.clone();
         let signers = signers.to_vec();
-        let submitted_transaction = match (purpose, block_height) {
-            (TransactionPurpose::WithdrawSol { burn_indices }, Some(block_height)) => {
+        let submitted_transaction = match purpose {
+            TransactionPurpose::Withdrawal {
+                burn_indices,
+                block_height,
+            } => {
                 let mut total: Lamport = 0;
                 for burn_index in burn_indices {
                     let pending = self
@@ -592,13 +594,16 @@ impl State {
                 MinterTransaction::Withdrawal {
                     message,
                     signers,
-                    block_height,
+                    block_height: *block_height,
                 }
             }
-            (TransactionPurpose::WithdrawSol { burn_indices }, None) => {
+            TransactionPurpose::NonceWithdrawal { burn_indices } => {
                 self.send_nonce_withdrawal(signature, message, signers, burn_indices)
             }
-            (TransactionPurpose::SweepDeposits { deposit_ids }, Some(block_height)) => {
+            TransactionPurpose::SweepDeposit {
+                deposit_ids,
+                block_height,
+            } => {
                 let sweep_destination = minter_address(self.minter_public_key.as_ref().expect(
                     "BUG: a sweep was submitted before the minter public key was recorded",
                 ));
@@ -607,11 +612,8 @@ impl State {
                 MinterTransaction::SweepDeposit {
                     message,
                     signers,
-                    block_height,
+                    block_height: *block_height,
                 }
-            }
-            (TransactionPurpose::SweepDeposits { .. }, None) => {
-                panic!("BUG: sweep transaction {signature} does not use a recent blockhash")
             }
         };
         assert_eq!(

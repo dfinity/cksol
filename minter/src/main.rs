@@ -132,16 +132,26 @@ fn get_events(
                 message,
                 signers,
                 purpose,
-                block_height,
             } => {
                 let purpose = match purpose {
-                    TransactionPurpose::WithdrawSol { burn_indices } => {
-                        event::TransactionPurpose::WithdrawSol {
+                    TransactionPurpose::SweepDeposit {
+                        deposit_ids,
+                        block_height,
+                    } => event::TransactionPurpose::SweepDeposit {
+                        deposit_ids,
+                        block_height: block_height.get(),
+                    },
+                    TransactionPurpose::Withdrawal {
+                        burn_indices,
+                        block_height,
+                    } => event::TransactionPurpose::Withdrawal {
+                        burn_indices: burn_indices.iter().map(|idx| *idx.get()).collect(),
+                        block_height: block_height.get(),
+                    },
+                    TransactionPurpose::NonceWithdrawal { burn_indices } => {
+                        event::TransactionPurpose::NonceWithdrawal {
                             burn_indices: burn_indices.iter().map(|idx| *idx.get()).collect(),
                         }
-                    }
-                    TransactionPurpose::SweepDeposits { deposit_ids } => {
-                        event::TransactionPurpose::SweepDeposits { deposit_ids }
                     }
                 };
                 event::EventType::SubmittedTransaction {
@@ -162,7 +172,6 @@ fn get_events(
                         })
                         .collect(),
                     purpose,
-                    block_height: block_height.map(|height| height.get()),
                 }
             }
             EventType::ResubmittedTransaction {
