@@ -555,12 +555,14 @@ impl State {
             !self.failed_transactions.contains_key(signature),
             "Attempted to submit already failed transaction {signature:?}"
         );
-        let message = transaction.clone();
-        let signers = signers.to_vec();
         let submitted_transaction = match purpose {
-            TransactionPurpose::Withdrawal { burn_indices } => {
-                self.send_nonce_withdrawal(signature, message, signers, burn_indices, timestamp)
-            }
+            TransactionPurpose::Withdrawal { burn_indices } => self.send_nonce_withdrawal(
+                signature,
+                transaction.clone(),
+                signers,
+                burn_indices,
+                timestamp,
+            ),
             TransactionPurpose::SweepDeposit {
                 deposit_ids,
                 block_height,
@@ -571,8 +573,6 @@ impl State {
                 self.deposits
                     .sweep(deposit_ids, sweep_destination, transaction, signature);
                 MinterTransaction::SweepDeposit {
-                    message,
-                    signers,
                     block_height: *block_height,
                 }
             }
@@ -633,7 +633,7 @@ impl State {
         &mut self,
         signature: &Signature,
         message: VersionedMessage,
-        signers: Vec<Signer>,
+        signers: &[Signer],
         burn_indices: &[LedgerBurnIndex],
         submitted_at: u64,
     ) -> MinterTransaction {
@@ -686,7 +686,6 @@ impl State {
         }
         MinterTransaction::Withdrawal {
             message,
-            signers,
             nonce_account,
             nonce_value: created.nonce_value,
             submitted_at,
@@ -974,8 +973,6 @@ pub enum TaskType {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum MinterTransaction {
     SweepDeposit {
-        message: VersionedMessage,
-        signers: Vec<Signer>,
         /// The block height of the block whose blockhash the transaction uses.
         block_height: BlockHeight,
     },
@@ -983,7 +980,6 @@ pub enum MinterTransaction {
     /// in flight until it is finalized.
     Withdrawal {
         message: VersionedMessage,
-        signers: Vec<Signer>,
         /// The durable nonce account whose nonce value the transaction uses.
         nonce_account: Address,
         /// The durable nonce value the transaction uses instead of a recent blockhash.
