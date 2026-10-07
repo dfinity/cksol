@@ -992,19 +992,3 @@ pub enum MinterTransaction {
         submitted_at: u64,
     },
 }
-
-impl MinterTransaction {
-    pub fn message(&self) -> &VersionedMessage {
-        match self {
-            MinterTransaction::SweepDeposit { message, .. }
-            | MinterTransaction::Withdrawal { message, .. } => message,
-        }
-    }
-
-    pub fn signers(&self) -> &[Signer] {
-        match self {
-            MinterTransaction::SweepDeposit { signers, .. }
-            | MinterTransaction::Withdrawal { signers, .. } => signers,
-        }
-    }
-}

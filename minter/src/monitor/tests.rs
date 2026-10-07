@@ -6,7 +6,7 @@ use crate::{
     constants::MAX_CONCURRENT_RPC_CALLS,
     rpc::BlockHeight,
     state::{
-        TaskType,
+        MinterTransaction, TaskType,
         event::{EventType, VersionedMessage},
         mutate_state, read_state, reset_state,
     },
@@ -260,12 +260,18 @@ mod finalization {
     }
 
     fn encoded_submitted_transaction(signature: &solana_signature::Signature) -> String {
-        let VersionedMessage::Legacy(message) = read_state(|s| {
-            s.submitted_transactions()
+        let message = read_state(|s| {
+            match s
+                .submitted_transactions()
                 .get(signature)
                 .expect("the transaction is submitted")
-                .message()
-                .clone()
+            {
+                MinterTransaction::Withdrawal {
+                    message: VersionedMessage::Legacy(message),
+                    ..
+                } => message.clone(),
+                other => panic!("expected a withdrawal transaction, got {other:?}"),
+            }
         });
         let transaction = Transaction {
             signatures: vec![*signature],
