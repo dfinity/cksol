@@ -1,5 +1,5 @@
 use crate::{
-    address::{DerivationPath, MinterPublicKeyNotYetAvailable, minter_address, minter_public_key},
+    address::{DerivationPath, MINTER_DERIVATION_PATH},
     constants::FEE_PER_SIGNATURE,
     runtime::CanisterRuntime,
     signer::{SchnorrSigner, sign_bytes},
@@ -12,7 +12,7 @@ use sol_rpc_types::Lamport;
 use solana_address::Address;
 use solana_hash::Hash;
 use solana_system_interface::instruction;
-use solana_transaction::{Instruction, Message, Transaction};
+use solana_transaction::{Message, Transaction};
 use std::collections::BTreeMap;
 use thiserror::Error;
 
@@ -23,9 +23,9 @@ pub const MAX_SIGNATURES: u64 = 10;
 pub const MAX_TX_SIZE: usize = 1_232;
 const BYTES_PER_SIGNATURE: usize = 64;
 
-/// Upper bound on the number of withdrawal transfers that fit in a single
-/// Solana transaction when the fee-payer is the only signer.
-pub const MAX_WITHDRAWALS_PER_TX: usize = 20;
+/// Maximum number of withdrawal transfers batched into a single
+/// durable-nonce transaction.
+pub const MAX_WITHDRAWALS_PER_NONCE_TX: usize = 10;
 
 /// Fee charged for a batch withdrawal transaction, which is signed by the fee payer only.
 pub const BATCH_WITHDRAWAL_TX_FEE: Lamport = FEE_PER_SIGNATURE;
@@ -36,8 +36,6 @@ pub enum CreateTransferError {
     TransactionTooLarge { max: usize, got: usize },
     #[error("signing failed: {0}")]
     SigningFailed(SignCallError),
-    #[error(transparent)]
-    MinterPublicKeyNotYetAvailable(MinterPublicKeyNotYetAvailable),
 }
 
 /// Signs the transaction of a planned sweep with the deposit addresses it transfers from.
@@ -102,38 +100,19 @@ pub fn build_batch_withdrawal_message(
     Ok(message)
 }
 
-/// Creates a signed Solana transaction that transfers lamports from a single
-/// minter-controlled address (the fee payer) to multiple target addresses.
-///
-/// Returns the signed transaction and its signers:
-/// only [`Signer::Minter`], the fee payer.
-///
-/// # Panics
-///
-/// Panics if the IC returns a signature that is not exactly 64 bytes.
-pub async fn create_signed_batch_withdrawal_transaction<R: CanisterRuntime>(
+/// Signs the given withdrawal message with the minter's master key.
+pub async fn sign_batch_withdrawal_message<R: CanisterRuntime>(
     runtime: &R,
-    targets: &[(Address, Lamport)],
-    recent_blockhash: Hash,
-) -> Result<(Transaction, Vec<Signer>), CreateTransferError> {
-    let master_public_key = minter_public_key()?;
-    let fee_payer_address = minter_address(&master_public_key);
-
-    let instructions: Vec<Instruction> = targets
-        .iter()
-        .map(|(target, amount)| instruction::transfer(&fee_payer_address, target, *amount))
-        .collect();
-
-    let message =
-        Message::new_with_blockhash(&instructions, Some(&fee_payer_address), &recent_blockhash);
+    message: Message,
+) -> Result<Transaction, CreateTransferError> {
     let mut transaction = Transaction::new_unsigned(message);
-
-    let signers = vec![Signer::Minter];
-    let derivation_paths: Vec<DerivationPath> =
-        signers.iter().map(Signer::derivation_path).collect();
-    sign_transaction(&mut transaction, derivation_paths, &runtime.signer()).await?;
-
-    Ok((transaction, signers))
+    sign_transaction(
+        &mut transaction,
+        [MINTER_DERIVATION_PATH],
+        &runtime.signer(),
+    )
+    .await?;
+    Ok(transaction)
 }
 
 // Sign transaction, return error if it exceeds the maximum transaction size.

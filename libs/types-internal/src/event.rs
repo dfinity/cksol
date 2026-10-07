@@ -183,18 +183,10 @@ pub enum TransactionPurpose {
         /// The block height of the block whose blockhash the transaction uses.
         block_height: u64,
     },
-    /// Send withdrawals to users' Solana addresses. The transaction uses a
-    /// recent blockhash and is resubmitted once the blockhash expires.
-    Withdrawal {
-        /// The burn transaction indices on the ckSOL ledger.
-        burn_indices: Vec<u64>,
-        /// The block height of the block whose blockhash the transaction uses.
-        block_height: u64,
-    },
     /// Send withdrawals to users' Solana addresses. The transaction carries
     /// the nonce value of a durable nonce account instead of a recent
     /// blockhash, so it never expires.
-    NonceWithdrawal {
+    Withdrawal {
         /// The burn transaction indices on the ckSOL ledger.
         burn_indices: Vec<u64>,
     },

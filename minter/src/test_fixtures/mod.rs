@@ -724,15 +724,6 @@ pub mod events {
     use solana_address::Address;
     use solana_signature::Signature;
 
-    fn message() -> solana_message::Message {
-        let payer = solana_address::Address::from([0x42; 32]);
-        solana_message::Message::new_with_blockhash(
-            &[],
-            Some(&payer),
-            &solana_message::Hash::default(),
-        )
-    }
-
     /// The runtime is only used by [`process_event`] to supply timestamps
     /// for the state transition and for the event log entry.
     fn runtime() -> TestCanisterRuntime {
@@ -778,10 +769,27 @@ pub mod events {
         submit_sweep_to(signature, deposit_ids, MINTER_ADDRESS)
     }
 
+    pub fn submit_sweep_at_height(
+        signature: Signature,
+        deposit_ids: Vec<DepositSolId>,
+        block_height: BlockHeight,
+    ) {
+        submit_sweep_to_at_height(signature, deposit_ids, MINTER_ADDRESS, block_height)
+    }
+
     pub fn submit_sweep_to(
         signature: Signature,
         deposit_ids: Vec<DepositSolId>,
         minter_address: Address,
+    ) {
+        submit_sweep_to_at_height(signature, deposit_ids, minter_address, DEFAULT_BLOCK_HEIGHT)
+    }
+
+    fn submit_sweep_to_at_height(
+        signature: Signature,
+        deposit_ids: Vec<DepositSolId>,
+        minter_address: Address,
+        block_height: BlockHeight,
     ) {
         let deposits: Vec<_> = read_state(|state| {
             deposit_ids
@@ -807,7 +815,7 @@ pub mod events {
                     signers,
                     purpose: TransactionPurpose::SweepDeposit {
                         deposit_ids,
-                        block_height: DEFAULT_BLOCK_HEIGHT,
+                        block_height,
                     },
                 },
                 &runtime(),
@@ -901,6 +909,16 @@ pub mod events {
         nonce_value: solana_hash::Hash,
         burn_indices: Vec<u64>,
     ) {
+        create_withdrawal_batch_transaction_on(NONCE_ACCOUNT, nonce_value, burn_indices);
+    }
+
+    /// Records a `CreatedWithdrawalTransaction` for the given withdrawals, binding
+    /// `nonce_account` to `nonce_value`.
+    pub fn create_withdrawal_batch_transaction_on(
+        nonce_account: Address,
+        nonce_value: solana_hash::Hash,
+        burn_indices: Vec<u64>,
+    ) {
         mutate_state(|state| {
             process_event(
                 state,
@@ -909,7 +927,7 @@ pub mod events {
                         .into_iter()
                         .map(LedgerBurnIndex::from)
                         .collect(),
-                    nonce_account: NONCE_ACCOUNT,
+                    nonce_account,
                     nonce_value,
                 },
                 &runtime(),
@@ -941,7 +959,48 @@ pub mod events {
                     signature,
                     message: message.into(),
                     signers: vec![Signer::Minter],
-                    purpose: TransactionPurpose::NonceWithdrawal { burn_indices },
+                    purpose: TransactionPurpose::Withdrawal { burn_indices },
+                },
+                &runtime(),
+            )
+        });
+    }
+
+    /// Marks the given withdrawals as sent under `signature` by creating and
+    /// submitting a withdrawal transaction bound to a dedicated nonce account
+    /// derived from the signature, which is first added to the pool through an
+    /// upgrade event, so that repeated calls never contend for one account.
+    pub fn submit_withdrawal(signature: Signature, burn_indices: Vec<u64>) {
+        let nonce_account = add_nonce_account_of(&signature);
+        let nonce_value = nonce_value_of(&signature);
+        let burn_indices: Vec<LedgerBurnIndex> = burn_indices
+            .into_iter()
+            .map(LedgerBurnIndex::from)
+            .collect();
+        mutate_state(|state| {
+            process_event(
+                state,
+                EventType::CreatedWithdrawalTransaction {
+                    burn_indices: burn_indices.clone(),
+                    nonce_account,
+                    nonce_value,
+                },
+                &runtime(),
+            )
+        });
+        let message = withdrawal_batch_message(
+            nonce_account,
+            nonce_value,
+            &created_withdrawal_transfers(&burn_indices),
+        );
+        mutate_state(|state| {
+            process_event(
+                state,
+                EventType::SubmittedTransaction {
+                    signature,
+                    message: message.into(),
+                    signers: vec![Signer::Minter],
+                    purpose: TransactionPurpose::Withdrawal { burn_indices },
                 },
                 &runtime(),
             )
@@ -963,33 +1022,28 @@ pub mod events {
         })
     }
 
-    pub fn submit_withdrawal(signature: Signature, burn_indices: Vec<u64>) {
-        submit_withdrawal_at_height(signature, DEFAULT_BLOCK_HEIGHT, burn_indices);
-    }
-
-    pub fn submit_withdrawal_at_height(
-        signature: Signature,
-        block_height: BlockHeight,
-        burn_indices: Vec<u64>,
-    ) {
+    fn add_nonce_account_of(signature: &Signature) -> Address {
+        use sha2::Digest;
+        let digest = sha2::Sha256::digest(signature.as_ref());
+        let nonce_account = Address::from(<[u8; 32]>::from(digest));
         mutate_state(|state| {
             process_event(
                 state,
-                EventType::SubmittedTransaction {
-                    signature,
-                    message: message().into(),
-                    signers: vec![Signer::Minter],
-                    purpose: TransactionPurpose::Withdrawal {
-                        burn_indices: burn_indices
-                            .into_iter()
-                            .map(LedgerBurnIndex::from)
-                            .collect(),
-                        block_height,
-                    },
-                },
+                EventType::Upgrade(cksol_types_internal::UpgradeArgs {
+                    nonce_accounts_to_add: Some(vec![nonce_account.to_string()]),
+                    ..cksol_types_internal::UpgradeArgs::default()
+                }),
                 &runtime(),
             )
         });
+        nonce_account
+    }
+
+    fn nonce_value_of(signature: &Signature) -> solana_hash::Hash {
+        let bytes: [u8; 32] = signature.as_ref()[32..]
+            .try_into()
+            .expect("BUG: a signature holds exactly 64 bytes");
+        solana_hash::Hash::from(bytes)
     }
 
     pub fn succeed_transaction(signature: Signature) {
@@ -1387,18 +1441,8 @@ pub mod arb {
                         block_height,
                     }
                 }),
-            (
-                prop::collection::vec(arb_ledger_burn_index(), 1..10),
-                arb_block_height()
-            )
-                .prop_map(|(burn_indices, block_height)| {
-                    TransactionPurpose::Withdrawal {
-                        burn_indices,
-                        block_height,
-                    }
-                }),
             prop::collection::vec(arb_ledger_burn_index(), 1..10)
-                .prop_map(|burn_indices| TransactionPurpose::NonceWithdrawal { burn_indices }),
+                .prop_map(|burn_indices| TransactionPurpose::Withdrawal { burn_indices }),
         ]
     }
 

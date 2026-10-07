@@ -141,15 +141,8 @@ fn get_events(
                         deposit_ids,
                         block_height: block_height.get(),
                     },
-                    TransactionPurpose::Withdrawal {
-                        burn_indices,
-                        block_height,
-                    } => event::TransactionPurpose::Withdrawal {
-                        burn_indices: burn_indices.iter().map(|idx| *idx.get()).collect(),
-                        block_height: block_height.get(),
-                    },
-                    TransactionPurpose::NonceWithdrawal { burn_indices } => {
-                        event::TransactionPurpose::NonceWithdrawal {
+                    TransactionPurpose::Withdrawal { burn_indices } => {
+                        event::TransactionPurpose::Withdrawal {
                             burn_indices: burn_indices.iter().map(|idx| *idx.get()).collect(),
                         }
                     }

@@ -1,4 +1,7 @@
-use crate::{Setup, SetupBuilder, fixtures::RENT_EXEMPTION_THRESHOLD};
+use crate::{
+    Setup, SetupBuilder,
+    fixtures::{MINTER_ADDRESS, RENT_EXEMPTION_THRESHOLD},
+};
 use cksol_types::WithdrawalStatus;
 use icrc_ledger_types::icrc1::account::Account;
 use sol_rpc_types::{InstallArgs, Lamport, OverrideProvider, RegexSubstitution, RoundingError};
@@ -127,12 +130,27 @@ impl SolanaTestValidator {
         rpc.get_fee_for_message(&transfer.message).await.ok()
     }
 
-    /// Creates a test setup whose SOL RPC canister talks to this validator.
+    /// Creates a test setup whose SOL RPC canister talks to this validator,
+    /// with a real durable nonce account created on the validator for the
+    /// minter's deterministic main address before the minter is installed, so
+    /// that withdrawal transactions can be submitted against it.
     pub async fn setup(&self) -> Setup {
-        self.setup_builder().build().await
+        let nonce_accounts = self
+            .create_nonce_accounts(1, &MINTER_ADDRESS)
+            .await
+            .iter()
+            .map(Address::to_string)
+            .collect();
+        self.setup_builder()
+            .with_nonce_accounts(nonce_accounts)
+            .build()
+            .await
     }
 
-    /// A [`SetupBuilder`] preconfigured so the SOL RPC canister talks to this validator.
+    /// A [`SetupBuilder`] preconfigured so the SOL RPC canister talks to this
+    /// validator. The default nonce account pool is a placeholder that does not
+    /// exist on the validator, so a test whose minter submits withdrawals must
+    /// pass accounts from [`Self::create_nonce_accounts`] or use [`Self::setup`].
     pub fn setup_builder(&self) -> SetupBuilder {
         SetupBuilder::new()
             .with_proxy_canister()
@@ -261,6 +279,30 @@ impl SolanaTestValidator {
             addresses.push(nonce_account.pubkey());
         }
         addresses
+    }
+
+    /// The nonce value currently stored by the given durable nonce account,
+    /// read at `finalized` commitment.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the account does not exist or is not an initialized nonce account.
+    pub async fn get_nonce_value(&self, address: &Address) -> solana_hash::Hash {
+        let account = self
+            .rpc_client()
+            .get_account_with_commitment(address, CommitmentConfig::finalized())
+            .await
+            .expect("Failed to read the nonce account")
+            .value
+            .unwrap_or_else(|| panic!("Nonce account {address} does not exist"));
+        let versions: solana_nonce::versions::Versions = bincode::deserialize(&account.data)
+            .unwrap_or_else(|e| panic!("Account {address} is not a nonce account: {e}"));
+        match versions.state() {
+            solana_nonce::state::State::Initialized(data) => data.blockhash(),
+            solana_nonce::state::State::Uninitialized => {
+                panic!("Nonce account {address} is not initialized")
+            }
+        }
     }
 
     pub async fn airdrop_and_confirm(&self, address: Address, airdrop_amount: Lamport) {

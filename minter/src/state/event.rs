@@ -310,23 +310,11 @@ pub enum TransactionPurpose {
         #[n(1)]
         block_height: BlockHeight,
     },
-    /// Withdraw SOL to users' Solana addresses. The transaction uses a recent
-    /// blockhash and is resubmitted once the blockhash expires.
-    #[n(3)]
-    Withdrawal {
-        /// The ledger burn indices of the withdrawal requests included in this transaction.
-        #[cbor(n(0), with = "cbor::id_vec")]
-        burn_indices: Vec<LedgerBurnIndex>,
-        /// The block height of the block whose blockhash the transaction uses.
-        /// The blockhash is valid for 150 blocks after that height.
-        #[n(1)]
-        block_height: BlockHeight,
-    },
     /// Withdraw SOL to users' Solana addresses. The transaction carries the
     /// nonce value of a durable nonce account instead of a recent blockhash,
     /// so it never expires.
     #[n(4)]
-    NonceWithdrawal {
+    Withdrawal {
         /// The ledger burn indices of the withdrawal requests included in this transaction.
         #[cbor(n(0), with = "cbor::id_vec")]
         burn_indices: Vec<LedgerBurnIndex>,

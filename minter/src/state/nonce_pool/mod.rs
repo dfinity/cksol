@@ -76,6 +76,14 @@ impl DurableNoncePool {
         }
     }
 
+    /// Whether `nonce_value` was already bound to a transaction of this account,
+    /// in which case a read returning it is stale.
+    pub fn has_seen(&self, address: &Address, nonce_value: &Hash) -> bool {
+        self.accounts
+            .get(address)
+            .is_some_and(|account| account.seen_nonce_values.contains(nonce_value))
+    }
+
     pub fn addresses(&self) -> impl Iterator<Item = &Address> {
         self.accounts.keys()
     }
@@ -86,6 +94,17 @@ impl DurableNoncePool {
 
     pub fn is_empty(&self) -> bool {
         self.accounts.is_empty()
+    }
+
+    pub fn free_accounts(&self) -> impl Iterator<Item = &Address> {
+        self.accounts
+            .iter()
+            .filter(|(_, account)| account.is_free())
+            .map(|(address, _)| address)
+    }
+
+    pub fn num_free_accounts(&self) -> usize {
+        self.free_accounts().count()
     }
 
     fn account_mut(&mut self, address: &Address) -> &mut NonceAccount {
@@ -103,6 +122,12 @@ impl DurableNoncePool {
 struct NonceAccount {
     state: NonceAccountState,
     seen_nonce_values: BTreeSet<Hash>,
+}
+
+impl NonceAccount {
+    fn is_free(&self) -> bool {
+        self.state == NonceAccountState::Free
+    }
 }
 
 /// The lifecycle state of a durable nonce account in the pool.

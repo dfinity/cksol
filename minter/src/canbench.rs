@@ -160,7 +160,7 @@ fn accept_and_submit_withdrawal(account_index: usize, burn_index: u64, sig: Sign
             AMOUNT_TO_TRANSFER,
         )),
         signers: vec![Signer::Minter],
-        purpose: TransactionPurpose::NonceWithdrawal { burn_indices },
+        purpose: TransactionPurpose::Withdrawal { burn_indices },
     });
 }
 
