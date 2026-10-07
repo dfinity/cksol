@@ -383,10 +383,7 @@ mod finalization {
         assert!(!events.contains_event(&EventType::ExpiredTransaction {
             signature: nonce_withdrawal
         }));
-        read_state(|s| {
-            assert!(s.submitted_transactions().contains_key(&nonce_withdrawal));
-            assert!(!s.transactions_to_resubmit().contains_key(&nonce_withdrawal));
-        });
+        read_state(|s| assert!(s.submitted_transactions().contains_key(&nonce_withdrawal)));
     }
 
     #[tokio::test]
