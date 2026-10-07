@@ -566,23 +566,18 @@ impl State {
                     message,
                     signers,
                     block_height,
-                    amount: total,
-                    burn_indices: burn_indices.clone(),
                 }
             }
             TransactionPurpose::SweepDeposits { deposit_ids } => {
                 let sweep_destination = minter_address(self.minter_public_key.as_ref().expect(
                     "BUG: a sweep was submitted before the minter public key was recorded",
                 ));
-                let amount =
-                    self.deposits
-                        .sweep(deposit_ids, sweep_destination, transaction, signature);
+                self.deposits
+                    .sweep(deposit_ids, sweep_destination, transaction, signature);
                 MinterTransaction::SweepDeposit {
                     message,
                     signers,
                     block_height,
-                    amount,
-                    deposit_ids: deposit_ids.clone(),
                 }
             }
         };
@@ -614,14 +609,10 @@ impl State {
                 message,
                 signers,
                 block_height: _,
-                amount,
-                burn_indices,
             } => MinterTransaction::Withdrawal {
                 message,
                 signers,
                 block_height: new_block_height,
-                amount,
-                burn_indices,
             },
         };
         assert!(
@@ -882,18 +873,12 @@ pub enum MinterTransaction {
         signers: Vec<Signer>,
         /// The block height of the block whose blockhash the transaction uses.
         block_height: BlockHeight,
-        /// Total transfer amount in lamports (excluding fees).
-        amount: Lamport,
-        deposit_ids: Vec<DepositSolId>,
     },
     Withdrawal {
         message: VersionedMessage,
         signers: Vec<Signer>,
         /// The block height of the block whose blockhash the transaction uses.
         block_height: BlockHeight,
-        /// Total transfer amount in lamports (excluding fees).
-        amount: Lamport,
-        burn_indices: Vec<LedgerBurnIndex>,
     },
 }
 

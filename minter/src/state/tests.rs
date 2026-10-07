@@ -169,16 +169,7 @@ mod swept_deposits {
             assert_eq!(s.deposits().queued().keys().collect::<Vec<_>>(), vec![&1]);
             assert_matches!(
                 s.submitted_transactions().get(&sweep_signature).unwrap(),
-                MinterTransaction::SweepDeposit {
-                    signers,
-                    amount,
-                    deposit_ids,
-                    ..
-                } => {
-                    assert_eq!(
-                        *amount,
-                        first.sweepable_amount() + third.sweepable_amount() - 2 * FEE_PER_SIGNATURE
-                    );
+                MinterTransaction::SweepDeposit { signers, .. } => {
                     assert_eq!(
                         *signers,
                         vec![
@@ -186,7 +177,6 @@ mod swept_deposits {
                             Signer::Account(first.account)
                         ]
                     );
-                    assert_eq!(*deposit_ids, vec![2, 0]);
                 }
             );
             assert_eq!(s.balance(), 0);

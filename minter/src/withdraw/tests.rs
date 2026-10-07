@@ -487,11 +487,12 @@ mod process_pending_withdrawals_tests {
         read_state(|s| {
             let submitted = s.submitted_transactions().get(&tx_signature).unwrap();
             assert_eq!(submitted.block_height(), block_height);
-            assert_matches!(
-                submitted,
-                MinterTransaction::Withdrawal { burn_indices, .. } => {
-                    assert_eq!(*burn_indices, vec![1_u64.into()]);
-                }
+            assert_matches!(submitted, MinterTransaction::Withdrawal { .. });
+            assert_eq!(
+                s.sent_withdrawal_requests()
+                    .get(&1_u64.into())
+                    .map(|sent| sent.signature),
+                Some(tx_signature)
             );
         });
     }
