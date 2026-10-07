@@ -7,8 +7,7 @@ use crate::{
     test_fixtures::{
         confirmed_block, confirmed_block_at_height,
         deposit::{
-            DEPOSIT_ADDRESS, deposit_transaction_to_wrong_address_signature,
-            legacy_deposit_transaction, legacy_deposit_transaction_signature,
+            DEPOSIT_ADDRESS, legacy_deposit_transaction, legacy_deposit_transaction_signature,
         },
         fetched, init_state,
         runtime::TestCanisterRuntime,
@@ -152,13 +151,14 @@ mod get_transaction_tests {
             Some(legacy_deposit_transaction().try_into().unwrap()),
         )));
 
-        let result =
-            get_transaction(&runtime, deposit_transaction_to_wrong_address_signature()).await;
+        let queried = solana_signature::Signature::from([7; 64]);
+
+        let result = get_transaction(&runtime, queried).await;
 
         assert_eq!(
             result,
             Err(GetTransactionError::SignatureMismatch {
-                queried: deposit_transaction_to_wrong_address_signature(),
+                queried,
                 returned: Some(Box::new(legacy_deposit_transaction_signature())),
             })
         );
@@ -221,26 +221,6 @@ mod get_transaction_tests {
             Err(GetTransactionError::InvalidSignature {
                 queried: legacy_deposit_transaction_signature()
             })
-        );
-    }
-
-    #[test]
-    fn should_reject_an_untrustworthy_response_as_an_invalid_deposit() {
-        use cksol_types::ProcessDepositError;
-
-        let untrustworthy = || GetTransactionError::SignatureMismatch {
-            queried: legacy_deposit_transaction_signature(),
-            returned: None,
-        };
-        let transient = || GetTransactionError::InconsistentRpcResults;
-
-        assert_eq!(
-            ProcessDepositError::from(untrustworthy()),
-            ProcessDepositError::InvalidDepositTransaction(untrustworthy().to_string())
-        );
-        assert_eq!(
-            ProcessDepositError::from(transient()),
-            ProcessDepositError::TemporarilyUnavailable(transient().to_string())
         );
     }
 

@@ -23,42 +23,6 @@ pub enum EventType {
     Init(InitArgs),
     /// The minter upgraded with the specified arguments.
     Upgrade(UpgradeArgs),
-    /// A user manually submitted a valid ckSOL deposit transaction via
-    /// `process_deposit`. ckSOL tokens have not yet been minted for this deposit.
-    AcceptedManualDeposit {
-        /// The signature of the Solana deposit transaction.
-        signature: Signature,
-        /// The account to which the minter should mint ckSOL.
-        account: Account,
-        /// The amount that was deposited.
-        deposit_amount: Lamport,
-        /// The amount of ckSOL tokens to mint for this deposit.
-        /// This amount is generally lower than `deposit_amount` due
-        /// to the deposit fee.
-        amount_to_mint: Lamport,
-    },
-    /// The minter discovered a Solana transaction that is a valid ckSOL
-    /// deposit, but it is unknown whether ckSOL tokens were minted for
-    /// it or not, most likely because there was an unexpected panic in
-    /// the callback.
-    ///
-    /// The deposit is quarantined to avoid any double minting and
-    /// will not be further processed without manual intervention.
-    QuarantinedDeposit {
-        /// The signature of the Solana deposit transaction.
-        signature: Signature,
-        /// The account to which the minter should mint ckSOL.
-        account: Account,
-    },
-    /// The minter minted ckSOL in response to a deposit.
-    Minted {
-        /// The signature of the Solana deposit transaction.
-        signature: Signature,
-        /// The account to which the minter minted ckSOL.
-        account: Account,
-        /// The transaction index on the ckSOL ledger.
-        mint_block_index: u64,
-    },
     /// The minter burned ckSOL for a withdrawal request.
     AcceptedWithdrawalRequest {
         /// The ledger account from which ckSOL was burned.
@@ -106,7 +70,7 @@ pub enum EventType {
     },
     /// A previously submitted Solana transaction has an expired blockhash
     /// and a null on-chain status, meaning it will never be executed.
-    /// A withdrawal or consolidation transaction is marked for resubmission;
+    /// A withdrawal transaction is marked for resubmission;
     /// the deposits of a sweep transaction are dropped instead.
     ExpiredTransaction {
         /// The signature of the expired Solana transaction.
@@ -150,6 +114,31 @@ pub enum EventType {
         /// The chain code used to derive subkeys (32 bytes).
         chain_code: Vec<u8>,
     },
+    /// The minter minted ckSOL on the ledger for a swept deposit whose sweep
+    /// was credited.
+    MintedSweptDeposit {
+        /// The identifier of the minted deposit.
+        deposit_id: u64,
+        /// The mint transaction index on the ckSOL ledger.
+        mint_block_index: u64,
+    },
+    /// The pending mint of a swept deposit cannot be retried: either it became
+    /// older than the 24-hour deduplication window of the ckSOL ledger, or the
+    /// ledger definitively rejected it. Retrying the transfer with the same
+    /// arguments fails forever, and fresh arguments could double mint.
+    ///
+    /// The deposit is quarantined to avoid any double minting and will not be
+    /// further processed without manual intervention.
+    ///
+    /// If the minter was down past the deduplication window, the underlying
+    /// transfer may nevertheless have landed on the ledger. Manual resolution
+    /// must therefore first search the ledger for a mint whose memo carries the
+    /// sweep signature before crediting by hand, otherwise a double mint
+    /// results.
+    QuarantinedPendingMint {
+        /// The identifier of the deposit whose pending mint was quarantined.
+        deposit_id: u64,
+    },
 }
 
 /// The mint enqueued for one deposit of a `CreditedSweep` event.
@@ -175,11 +164,6 @@ pub enum Signer {
 /// The purpose of a submitted Solana transaction.
 #[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]
 pub enum TransactionPurpose {
-    /// Consolidate deposited funds into the minter's main account.
-    ConsolidateDeposits {
-        /// The mint indices of the deposits being consolidated.
-        mint_indices: Vec<u64>,
-    },
     /// Send withdrawals to users' Solana addresses.
     WithdrawSol {
         /// The burn transaction indices on the ckSOL ledger.

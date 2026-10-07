@@ -18,49 +18,6 @@ pub type LedgerMintIndex = u64;
 /// Index of a burn transaction on the ckSOL ledger.
 pub type LedgerBurnIndex = u64;
 
-/// A single transaction can deposit to multiple accounts, so the signature alone is not sufficient.
-/// The combination of a Solana transaction signature and the account it targets together
-/// uniquely identify a deposit. If a transaction contains multiple transfers to the same account,
-/// they are aggregated into a single deposit.
-#[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize, Serialize)]
-pub struct DepositId {
-    /// The Solana transaction signature.
-    pub signature: Signature,
-    /// The account to which the deposit is attributed.
-    pub account: Account,
-}
-
-/// The outcome of processing a Solana deposit transaction.
-#[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize, Serialize)]
-pub enum DepositStatus {
-    /// The transaction is a valid deposit, but the corresponding ckSOL tokens
-    /// have not yet been minted.
-    Processing {
-        /// The deposit amount.
-        deposit_amount: Lamport,
-        /// The amount to mint (deposit amount minus fees).
-        amount_to_mint: Lamport,
-        /// The deposit identifier.
-        deposit_id: DepositId,
-    },
-    /// The transaction is a valid deposit, but it is unknown whether the
-    /// corresponding ckSOL tokens have been minted, most likely because there
-    /// was an unexpected panic while trying to mint.
-    ///
-    /// The deposit is quarantined to avoid any double minting and will not
-    /// be further processed without manual intervention.
-    Quarantined(DepositId),
-    /// The minter accepted the deposit and minted ckSOL tokens on the ledger.
-    Minted {
-        /// The mint transaction index on the ledger.
-        block_index: LedgerMintIndex,
-        /// The minted amount (deposit amount minus fees).
-        minted_amount: Lamport,
-        /// The deposit identifier.
-        deposit_id: DepositId,
-    },
-}
-
 /// Arguments for a request to the `get_deposit_address` ckSOL minter endpoint.
 #[derive(Clone, Eq, PartialEq, Debug, Default, CandidType, Deserialize, Serialize)]
 pub struct GetDepositAddressArgs {
@@ -80,20 +37,6 @@ impl From<Account> for GetDepositAddressArgs {
             subaccount: account.subaccount,
         }
     }
-}
-
-/// Arguments for a request to the `process_deposit` ckSOL minter endpoint.
-#[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize, Serialize)]
-pub struct ProcessDepositArgs {
-    /// The principal to credit with the deposit.
-    ///
-    /// If not set, defaults to the caller's principal.
-    /// The resolved owner must be a non-anonymous principal.
-    pub owner: Option<Principal>,
-    /// The subaccount to credit with the deposit.
-    pub subaccount: Option<Subaccount>,
-    /// Signature of the deposit transaction.
-    pub signature: Signature,
 }
 
 /// Arguments for a request to the `deposit_sol` ckSOL minter endpoint.
@@ -123,8 +66,6 @@ impl From<Account> for DepositSolArgs {
 pub type DepositSolId = u64;
 
 /// The status of a deposit queued by the `deposit_sol` ckSOL minter endpoint.
-///
-/// The `Minted` variant will follow as the sweep flow is implemented.
 #[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize, Serialize)]
 pub enum DepositSolStatus {
     /// No deposit with this identifier was queued.
@@ -146,6 +87,14 @@ pub enum DepositSolStatus {
         /// The signature of the sweep transaction.
         signature: Signature,
     },
+    /// The minter minted ckSOL for the deposit on the ledger.
+    Minted {
+        /// The mint transaction index on the ckSOL ledger.
+        block_index: LedgerMintIndex,
+        /// The minted amount: the swept amount minus the deposit's share of the
+        /// transaction fee of the sweep.
+        minted_amount: Lamport,
+    },
     /// The sweep transaction failed, or expired without ever being seen on chain, so no
     /// ckSOL is owed. Calling `deposit_sol` again queues a new sweep of whatever balance
     /// the deposit address still holds.
@@ -153,12 +102,15 @@ pub enum DepositSolStatus {
         /// The signature of the sweep transaction.
         signature: Signature,
     },
-    /// The sweep transaction was finalized, but its outcome did not match the plan the
-    /// minter submitted it with, so the amount to credit cannot be determined safely and
-    /// no ckSOL was minted. This is not expected to happen and the minter does not
-    /// process the deposit any further: releasing or crediting it requires a minter
-    /// upgrade. Meanwhile the account stays in flight, so `deposit_sol` keeps rejecting
-    /// it and a new deposit has to use a different subaccount.
+    /// The minter stopped processing the deposit: either the finalized sweep's outcome
+    /// did not match the plan the minter submitted it with, so the amount to credit
+    /// cannot be determined safely and no ckSOL was minted, or the ckSOL mint of the
+    /// credited deposit could not be completed, in which case the mint may nevertheless
+    /// have landed on the ledger. This is not expected to happen and resolving it
+    /// requires a minter upgrade: before minting by hand, search the ledger for a mint
+    /// whose memo carries the sweep signature and the deposit id, otherwise a double
+    /// mint results. Meanwhile the account stays in flight, so `deposit_sol` keeps
+    /// rejecting it and a new deposit has to use a different subaccount.
     Quarantined {
         /// The signature of the sweep transaction.
         signature: Signature,
@@ -198,40 +150,6 @@ pub enum DepositSolError {
     Quarantined {
         /// The identifier of the quarantined deposit.
         deposit_id: DepositSolId,
-    },
-}
-
-/// An error from the `process_deposit` ckSOL minter endpoint.
-#[derive(Debug, Clone, PartialEq, CandidType, Deserialize, Error)]
-pub enum ProcessDepositError {
-    /// Insufficient cycles attached by the caller to complete the [`process_deposit`] call.
-    #[error(transparent)]
-    InsufficientCycles(#[from] InsufficientCyclesError),
-    /// The minter experiences temporary issues, try the call again later.
-    #[error("Transient error, try the call again later: {0}")]
-    TemporarilyUnavailable(String),
-    /// There is already a concurrent `process_deposit` invocation from the same caller.
-    #[error("There is already a concurrent `process_deposit` invocation from the same caller")]
-    AlreadyProcessing,
-    /// No matching transaction was found for the given signature.
-    ///
-    /// This can also happen if the transaction is not yet finalized, in which case trying
-    /// this call again later may result in a successful mint.
-    #[error("No transaction found for the given signature")]
-    TransactionNotFound,
-    /// The Solana transaction with the given signature is not a valid
-    /// deposit to the owner's deposit address.
-    #[error("The transaction is not a valid deposit: {0}")]
-    InvalidDepositTransaction(String),
-    /// The deposit amount does not cover the deposit fee.
-    #[error(
-        "Insufficient deposit amount: expected at least {minimum_deposit_amount} lamports, but got {deposit_amount} lamports"
-    )]
-    ValueTooSmall {
-        /// The minimum deposit amount for the deposit to be accepted.
-        minimum_deposit_amount: Lamport,
-        /// The amount that was deposited.
-        deposit_amount: Lamport,
     },
 }
 
@@ -284,6 +202,9 @@ pub enum WithdrawalError {
     },
     /// The Solana address is not valid.
     MalformedAddress(String),
+    /// The destination address is not a valid withdrawal destination.
+    /// The payload contains a human-readable message explaining why the destination was rejected.
+    InvalidDestination(String),
     /// The withdrawal account does not hold the requested ckSOL amount.
     InsufficientFunds {
         /// The current balance of the withdrawal account.
@@ -334,20 +255,21 @@ pub enum WithdrawalStatus {
 /// Information about the ckSOL minter canister.
 #[derive(Clone, Debug, Eq, PartialEq, CandidType, Deserialize, Serialize)]
 pub struct MinterInfo {
-    /// Fee deducted from each deposit in the manual flow (SOL -> ckSOL).
-    pub manual_deposit_fee: Lamport,
-    /// Fee deducted from each deposit in the automated flow (SOL -> ckSOL).
-    pub automated_deposit_fee: Lamport,
-    /// Extra cycles charged per `process_deposit` call to offset deposit consolidation costs.
-    pub deposit_consolidation_fee: u128,
+    /// Extra cycles charged per `deposit_sol` call to offset the cost of the sweep.
+    pub deposit_sol_fee: u128,
     /// Minimum withdrawal amount in lamports.
     pub minimum_withdrawal_amount: Lamport,
     /// Minimum deposit amount in lamports.
     pub minimum_deposit_amount: Lamport,
     /// Fee deducted from each withdrawal (ckSOL -> SOL).
     pub withdrawal_fee: Lamport,
-    /// Minimum cycles the caller must attach when calling `process_deposit`.
-    pub process_deposit_required_cycles: u128,
+    /// Minimum cycles the caller must attach when calling `deposit_sol`.
+    pub deposit_sol_required_cycles: u128,
     /// The minter's tracked SOL balance in lamports.
     pub balance: Lamport,
+    /// The minter's main Solana address, available once its Schnorr public key
+    /// has been fetched for the first time, shortly after installation.
+    pub minter_address: Option<String>,
+    /// The base58 addresses of the durable nonce accounts reserved for withdrawal transactions.
+    pub nonce_accounts: Vec<String>,
 }

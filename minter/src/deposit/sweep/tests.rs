@@ -4,15 +4,9 @@ use crate::{
     state::{event::EventType, read_state},
     storage::with_event_iter,
     test_fixtures::{
-        BLOCK_INDEX, DEPOSIT_CONSOLIDATION_FEE, EventsAssert, MINIMUM_DEPOSIT_AMOUNT,
-        MINTER_ACCOUNT, PROCESS_DEPOSIT_REQUIRED_CYCLES, account,
-        deposit::{
-            DEPOSIT_AMOUNT, DEPOSITOR_ACCOUNT, accepted_deposit_event,
-            deposit_id as manual_deposit_id, minted_event,
-        },
-        events, init_schnorr_master_key, init_state, queued_deposit_of,
-        runtime::TestCanisterRuntime,
-        signature,
+        DEPOSIT_SOL_FEE, DEPOSIT_SOL_REQUIRED_CYCLES, EventsAssert, MINIMUM_DEPOSIT_AMOUNT,
+        MINTER_ACCOUNT, account, deposit::DEPOSITOR_ACCOUNT, events, init_schnorr_master_key,
+        init_state, queued_deposit_of, runtime::TestCanisterRuntime, signature,
     },
 };
 use assert_matches::assert_matches;
@@ -40,7 +34,7 @@ fn should_report_unknown_deposit_as_not_found() {
 async fn should_fail_if_insufficient_cycles_attached() {
     init_state();
     let runtime =
-        TestCanisterRuntime::new().add_msg_cycles_available(PROCESS_DEPOSIT_REQUIRED_CYCLES - 1);
+        TestCanisterRuntime::new().add_msg_cycles_available(DEPOSIT_SOL_REQUIRED_CYCLES - 1);
 
     let result = deposit_sol(&runtime, DEPOSITOR_ACCOUNT).await;
 
@@ -48,8 +42,8 @@ async fn should_fail_if_insufficient_cycles_attached() {
         result,
         Err(DepositSolError::InsufficientCycles(
             InsufficientCyclesError {
-                expected: PROCESS_DEPOSIT_REQUIRED_CYCLES,
-                received: PROCESS_DEPOSIT_REQUIRED_CYCLES - 1,
+                expected: DEPOSIT_SOL_REQUIRED_CYCLES,
+                received: DEPOSIT_SOL_REQUIRED_CYCLES - 1,
             }
         ))
     );
@@ -60,8 +54,7 @@ async fn should_fail_if_insufficient_cycles_attached() {
 #[tokio::test]
 async fn should_fail_while_the_minter_public_key_is_unavailable() {
     init_state();
-    let runtime =
-        TestCanisterRuntime::new().add_msg_cycles_available(PROCESS_DEPOSIT_REQUIRED_CYCLES);
+    let runtime = TestCanisterRuntime::new().add_msg_cycles_available(DEPOSIT_SOL_REQUIRED_CYCLES);
 
     let result = deposit_sol(&runtime, DEPOSITOR_ACCOUNT).await;
 
@@ -140,7 +133,7 @@ async fn should_queue_deposits_from_minimum_with_sequential_ids() {
         );
         assert_eq!(
             runtime.msg_cycles_accepted(),
-            [GET_BALANCE_CYCLES - GET_BALANCE_REFUND + DEPOSIT_CONSOLIDATION_FEE]
+            [GET_BALANCE_CYCLES - GET_BALANCE_REFUND + DEPOSIT_SOL_FEE]
         );
     }
     assert_eq!(deposit_status(2), DepositSolStatus::NotFound);
@@ -159,27 +152,6 @@ async fn should_queue_deposits_from_minimum_with_sequential_ids() {
 }
 
 #[tokio::test]
-async fn should_fail_while_process_deposit_deposit_awaits_consolidation() {
-    init_state();
-    events::accept_deposit(manual_deposit_id(), DEPOSIT_AMOUNT);
-    events::mint_deposit(manual_deposit_id(), BLOCK_INDEX);
-    let runtime =
-        TestCanisterRuntime::new().add_msg_cycles_available(PROCESS_DEPOSIT_REQUIRED_CYCLES);
-
-    let result = deposit_sol(&runtime, EXPLICIT_DEFAULT_SUBACCOUNT).await;
-
-    assert_matches!(
-        result,
-        Err(DepositSolError::TemporarilyUnavailable(e)) => assert!(e.contains("awaiting consolidation"))
-    );
-    assert!(runtime.msg_cycles_accepted().is_empty());
-    EventsAssert::from_recorded()
-        .expect_event_eq(accepted_deposit_event())
-        .expect_event_eq(minted_event(BLOCK_INDEX))
-        .assert_no_more_events();
-}
-
-#[tokio::test]
 async fn should_reject_an_account_whose_latest_deposit_is_quarantined() {
     init_state();
     init_schnorr_master_key();
@@ -188,8 +160,7 @@ async fn should_reject_an_account_whose_latest_deposit_is_quarantined() {
     events::submit_sweep(sweep_signature, vec![0]);
     events::succeed_transaction(sweep_signature);
     events::quarantine_sweep(sweep_signature);
-    let runtime =
-        TestCanisterRuntime::new().add_msg_cycles_available(PROCESS_DEPOSIT_REQUIRED_CYCLES);
+    let runtime = TestCanisterRuntime::new().add_msg_cycles_available(DEPOSIT_SOL_REQUIRED_CYCLES);
 
     let result = deposit_sol(&runtime, DEPOSITOR_ACCOUNT).await;
 
@@ -247,8 +218,7 @@ async fn assert_second_call_returns_same_deposit(first: Account, second: Account
         .assert_no_more_events();
     let num_events_after_first_call = with_event_iter(|events| events.count());
 
-    let runtime =
-        TestCanisterRuntime::new().add_msg_cycles_available(PROCESS_DEPOSIT_REQUIRED_CYCLES);
+    let runtime = TestCanisterRuntime::new().add_msg_cycles_available(DEPOSIT_SOL_REQUIRED_CYCLES);
     let result = deposit_sol(&runtime, second).await;
 
     assert_eq!(result, Ok(deposit_id));
@@ -279,7 +249,7 @@ fn runtime() -> TestCanisterRuntime {
     TestCanisterRuntime::new()
         .with_increasing_time()
         .expecting_charges()
-        .add_msg_cycles_available(PROCESS_DEPOSIT_REQUIRED_CYCLES)
+        .add_msg_cycles_available(DEPOSIT_SOL_REQUIRED_CYCLES)
         .add_msg_cycles_refunded(GET_BALANCE_REFUND)
 }
 

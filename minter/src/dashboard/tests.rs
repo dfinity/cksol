@@ -1,13 +1,12 @@
 use crate::dashboard::{DashboardPaginationParameters, DashboardTemplate, lamports_to_sol};
 use crate::state::read_state;
 use crate::test_fixtures::{
-    AUTOMATED_DEPOSIT_FEE, MANUAL_DEPOSIT_FEE, MINIMUM_DEPOSIT_AMOUNT, MINIMUM_WITHDRAWAL_AMOUNT,
-    WITHDRAWAL_FEE, account, deposit_id,
+    MINIMUM_DEPOSIT_AMOUNT, MINIMUM_WITHDRAWAL_AMOUNT, WITHDRAWAL_FEE, account,
     events::{
-        accept_deposit, accept_withdrawal, fail_transaction, mint_deposit, quarantine_deposit,
-        quarantine_sweep, queue_deposit, submit_consolidation, submit_sweep, submit_withdrawal,
-        succeed_transaction,
+        accept_withdrawal, fail_transaction, quarantine_sweep, queue_deposit, submit_sweep,
+        submit_withdrawal, succeed_transaction,
     },
+    flow::deposit::DepositFlow,
     init_balance, init_schnorr_master_key, init_state, init_state_with_args, ledger_canister_id,
     signature, sol_rpc_canister_id, valid_init_args,
 };
@@ -44,16 +43,6 @@ fn should_display_metadata() {
             "wrong sol rpc canister ID",
         )
         .has_string_value(
-            "#manual-deposit-fee > td",
-            &lamports_to_sol(MANUAL_DEPOSIT_FEE),
-            "wrong manual deposit fee",
-        )
-        .has_string_value(
-            "#automated-deposit-fee > td",
-            &lamports_to_sol(AUTOMATED_DEPOSIT_FEE),
-            "wrong automated deposit fee",
-        )
-        .has_string_value(
             "#withdrawal-fee > td",
             &lamports_to_sol(WITHDRAWAL_FEE),
             "wrong withdrawal fee",
@@ -75,7 +64,7 @@ fn should_display_empty_state() {
     init_state();
 
     DashboardAssert::assert_that(dashboard())
-        .has_no_elements_matching("#deposits + table")
+        .has_no_elements_matching("#minted-sweeps + table")
         .has_no_elements_matching("#withdrawals + table");
 }
 
@@ -121,69 +110,6 @@ fn should_display_minter_address_with_devnet_solscan_link() {
 }
 
 #[test]
-fn should_display_minted_deposits() {
-    init_state();
-
-    let deposit = deposit_id(1);
-    let deposit_amount = 500_000_000;
-    accept_deposit(deposit, deposit_amount);
-    mint_deposit(deposit, 42);
-
-    DashboardAssert::assert_that(dashboard())
-        .has_table_row_value(
-            "#deposits + table > tbody > tr:nth-child(1)",
-            &[
-                &deposit.signature.to_string(),
-                &deposit.account.to_string(),
-                &lamports_to_sol(deposit_amount),
-                &lamports_to_sol(deposit_amount - MANUAL_DEPOSIT_FEE),
-                "42",
-                "Minted",
-            ],
-            "deposits",
-        )
-        .has_links_satisfying(
-            |href| href.contains("solscan.io/tx/"),
-            |href| href.contains(&deposit.signature.to_string()),
-        );
-}
-
-#[test]
-fn should_display_all_deposit_statuses() {
-    init_state();
-
-    // Accepted
-    accept_deposit(deposit_id(1), 100_000_000);
-
-    // Minted (pending consolidation)
-    accept_deposit(deposit_id(2), 200_000_000);
-    mint_deposit(deposit_id(2), 10);
-
-    // Quarantined
-    accept_deposit(deposit_id(3), 50_000_000);
-    quarantine_deposit(deposit_id(3));
-
-    // Consolidated (minted + consolidation submitted)
-    accept_deposit(deposit_id(4), 300_000_000);
-    mint_deposit(deposit_id(4), 20);
-    submit_consolidation(signature(0xAA), account(0), vec![20]);
-
-    let rendered_dashboard = dashboard();
-    assert_eq!(rendered_dashboard.deposits_table.current_page.len(), 4);
-
-    let statuses: Vec<&str> = rendered_dashboard
-        .deposits_table
-        .current_page
-        .iter()
-        .map(|deposit| deposit.status)
-        .collect();
-    assert!(statuses.contains(&"Accepted"));
-    assert!(statuses.contains(&"Quarantined"));
-    assert!(statuses.contains(&"Minted"));
-    assert!(statuses.contains(&"Consolidated"));
-}
-
-#[test]
 fn should_display_quarantined_swept_deposits_with_the_sweep_signature() {
     init_state();
     init_schnorr_master_key();
@@ -201,7 +127,9 @@ fn should_display_quarantined_swept_deposits_with_the_sweep_signature() {
                 "0",
                 &account(1).to_string(),
                 &sweep_signature.to_string(),
+                "Sweep unreadable",
                 &lamports_to_sol(sweepable_amount),
+                "-",
             ],
             "quarantined swept deposits",
         )
@@ -209,6 +137,90 @@ fn should_display_quarantined_swept_deposits_with_the_sweep_signature() {
             |href| href.contains("solscan.io/tx/"),
             |href| href.contains(&sweep_signature.to_string()),
         );
+}
+
+#[test]
+fn should_display_a_quarantined_pending_mint_with_the_amount_it_is_owed() {
+    init_state();
+    init_schnorr_master_key();
+    let sweepable_amount = 400_000_000;
+    let pending = DepositFlow::queue(account(1), sweepable_amount)
+        .sweep(signature(0xAA))
+        .succeed()
+        .credit()
+        .single_pending_mint();
+    let amount_to_mint = pending.amount_to_mint;
+    let quarantined = pending.quarantine();
+
+    DashboardAssert::assert_that(dashboard()).has_table_row_value(
+        "#quarantined-swept-deposits + table > tbody > tr:nth-child(1)",
+        &[
+            &quarantined.deposit_id.to_string(),
+            &quarantined.account.to_string(),
+            &quarantined.sweep_signature.to_string(),
+            "Mint unresolved",
+            &lamports_to_sol(sweepable_amount),
+            &lamports_to_sol(amount_to_mint),
+        ],
+        "quarantined swept deposits",
+    );
+}
+
+#[test]
+fn should_display_minted_swept_deposits_with_amount_and_block_index() {
+    init_state();
+    init_schnorr_master_key();
+    let minted = DepositFlow::queue(account(1), 400_000_000)
+        .sweep(signature(0xAA))
+        .succeed()
+        .credit()
+        .single_pending_mint()
+        .mint(42);
+
+    DashboardAssert::assert_that(dashboard()).has_table_row_value(
+        "#minted-sweeps + table > tbody > tr:nth-child(1)",
+        &[
+            &minted.deposit_id.to_string(),
+            &minted.account.to_string(),
+            &lamports_to_sol(minted.minted_amount),
+            &minted.mint_block_index.to_string(),
+        ],
+        "minted swept deposits",
+    );
+}
+
+#[test]
+fn should_paginate_minted_swept_deposits_across_multiple_pages() {
+    use crate::dashboard::DEFAULT_PAGE_SIZE;
+
+    init_state();
+    init_schnorr_master_key();
+
+    let total_minted_sweeps = DEFAULT_PAGE_SIZE + 1;
+    for i in 0..total_minted_sweeps {
+        DepositFlow::queue(account(i + 1), 400_000_000)
+            .sweep(signature(i))
+            .succeed()
+            .credit()
+            .single_pending_mint()
+            .mint(i as u64);
+    }
+
+    let page1 = dashboard();
+    assert_eq!(
+        page1.minted_sweeps_table.current_page.len(),
+        DEFAULT_PAGE_SIZE
+    );
+    assert!(page1.minted_sweeps_table.has_more_than_one_page());
+    assert_eq!(page1.minted_sweeps_table.pagination.pages.len(), 2);
+    assert_eq!(page1.minted_sweeps_table.pagination.current_page_index, 1);
+
+    let page2 = dashboard_with_pagination(DashboardPaginationParameters {
+        minted_sweeps_start: DEFAULT_PAGE_SIZE,
+        ..Default::default()
+    });
+    assert_eq!(page2.minted_sweeps_table.current_page.len(), 1);
+    assert_eq!(page2.minted_sweeps_table.pagination.current_page_index, 2);
 }
 
 #[test]
@@ -220,48 +232,6 @@ fn should_not_display_pagination_for_small_tables() {
         !rendered.contains("Pages:"),
         "should not show pagination when tables are empty"
     );
-}
-
-#[test]
-fn should_paginate_minted_deposits_across_multiple_pages() {
-    use crate::dashboard::DEFAULT_PAGE_SIZE;
-
-    init_state();
-    init_schnorr_master_key();
-
-    let total_deposits = DEFAULT_PAGE_SIZE * 2 + 1;
-    let remainder = total_deposits - DEFAULT_PAGE_SIZE * 2;
-
-    for i in 0..total_deposits {
-        accept_deposit(deposit_id(i), 500_000_000);
-        mint_deposit(deposit_id(i), i as u64);
-    }
-
-    let page1 = dashboard();
-    assert_eq!(page1.deposits_table.current_page.len(), DEFAULT_PAGE_SIZE);
-    assert!(page1.deposits_table.has_more_than_one_page());
-    assert_eq!(page1.deposits_table.pagination.pages.len(), 3);
-    assert_eq!(page1.deposits_table.pagination.current_page_index, 1);
-
-    let rendered = page1.render().unwrap();
-    assert!(
-        rendered.contains("Pages:"),
-        "should show pagination controls"
-    );
-
-    let page2 = dashboard_with_pagination(DashboardPaginationParameters {
-        minted_deposits_start: DEFAULT_PAGE_SIZE,
-        ..Default::default()
-    });
-    assert_eq!(page2.deposits_table.current_page.len(), DEFAULT_PAGE_SIZE);
-    assert_eq!(page2.deposits_table.pagination.current_page_index, 2);
-
-    let page3 = dashboard_with_pagination(DashboardPaginationParameters {
-        minted_deposits_start: DEFAULT_PAGE_SIZE * 2,
-        ..Default::default()
-    });
-    assert_eq!(page3.deposits_table.current_page.len(), remainder);
-    assert_eq!(page3.deposits_table.pagination.current_page_index, 3);
 }
 
 #[test]
@@ -352,52 +322,6 @@ fn should_display_all_withdrawal_statuses() {
     assert!(statuses.contains(&"Sent"));
     assert!(statuses.contains(&"Succeeded"));
     assert!(statuses.contains(&"Failed"));
-}
-
-// --- Consolidation table tests ---
-
-#[test]
-fn should_display_consolidation_transactions() {
-    init_state();
-
-    // Create deposits and mint them
-    let deposit_amount = 500_000_000;
-    accept_deposit(deposit_id(1), deposit_amount);
-    mint_deposit(deposit_id(1), 10);
-    accept_deposit(deposit_id(2), deposit_amount);
-    mint_deposit(deposit_id(2), 20);
-
-    // Submit consolidation transaction for both deposits
-    submit_consolidation(signature(0xBB), account(0), vec![10, 20]);
-
-    let rendered_dashboard = dashboard();
-    assert_eq!(
-        rendered_dashboard.consolidations_table.current_page.len(),
-        1
-    );
-    assert_eq!(
-        rendered_dashboard.consolidations_table.current_page[0]
-            .deposits
-            .len(),
-        2
-    );
-    assert_eq!(
-        rendered_dashboard.consolidations_table.current_page[0].status,
-        "Submitted"
-    );
-
-    // Mark as succeeded
-    succeed_transaction(signature(0xBB));
-
-    let rendered_dashboard = dashboard();
-    assert_eq!(
-        rendered_dashboard.consolidations_table.current_page.len(),
-        1
-    );
-    assert_eq!(
-        rendered_dashboard.consolidations_table.current_page[0].status,
-        "Succeeded"
-    );
 }
 
 // --- Assertion helpers ---

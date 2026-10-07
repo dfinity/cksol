@@ -27,20 +27,6 @@ fn apply_state_transition(state: &mut State, payload: &EventType, timestamp: u64
         EventType::AcceptedWithdrawalRequest(request) => {
             state.process_accepted_withdrawal(request, timestamp);
         }
-        EventType::AcceptedManualDeposit {
-            deposit_id,
-            deposit_amount,
-            amount_to_mint,
-        } => {
-            state.process_accepted_deposit(deposit_id, deposit_amount, amount_to_mint);
-        }
-        EventType::QuarantinedDeposit(deposit_id) => state.process_quarantined_deposit(deposit_id),
-        EventType::Minted {
-            deposit_id,
-            mint_block_index,
-        } => {
-            state.process_mint(deposit_id, mint_block_index);
-        }
         EventType::SubmittedTransaction {
             signature,
             message,
@@ -85,7 +71,7 @@ fn apply_state_transition(state: &mut State, payload: &EventType, timestamp: u64
             amount_received,
             mints,
         } => {
-            state.process_credited_sweep(signature, *amount_received, mints);
+            state.process_credited_sweep(signature, *amount_received, mints, timestamp);
         }
         EventType::QuarantinedSweep { signature } => {
             state.process_quarantined_sweep(signature);
@@ -98,6 +84,15 @@ fn apply_state_transition(state: &mut State, payload: &EventType, timestamp: u64
                 public_key: *public_key,
                 chain_code: *chain_code,
             });
+        }
+        EventType::MintedSweptDeposit {
+            deposit_id,
+            mint_block_index,
+        } => {
+            state.process_minted_swept_deposit(*deposit_id, mint_block_index);
+        }
+        EventType::QuarantinedPendingMint { deposit_id } => {
+            state.process_quarantined_pending_mint(*deposit_id);
         }
     }
 }

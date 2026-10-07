@@ -6,8 +6,8 @@ use cksol_int_tests::{
     validator::{FEE_PER_SIGNATURE, SolanaTestValidator, wait_for_withdrawal_finalized},
 };
 use cksol_types::{DepositSolId, DepositSolStatus, Signature, WithdrawalArgs};
+use cksol_types_internal::UpgradeArgs;
 use icrc_ledger_types::icrc1::account::Account;
-use itertools::Itertools;
 use sol_rpc_types::Lamport;
 use solana_address::Address;
 use solana_keypair::{Keypair, Signer};
@@ -16,12 +16,8 @@ use std::time::Duration;
 
 const DEPOSITOR: Principal = Setup::DEFAULT_CALLER;
 
-// TODO DEFI-2643: Add tests with more exotic transactions, e.g.:
-//  - a transaction with multiple transfer instructions to same target address: single mint with the summed up amount
-//  - a transaction with multiple instructions, not all to the same target address: only relevant amounts are considered.
-
 #[tokio::test(flavor = "multi_thread")]
-async fn should_deposit_consolidate_and_withdraw() {
+async fn should_deposit_and_withdraw() {
     let validator = SolanaTestValidator::start().await;
     let setup = validator.setup().await;
 
@@ -33,6 +29,7 @@ async fn should_deposit_consolidate_and_withdraw() {
 
         let minter_cycles_before = setup.minter().cycle_balance().await;
         let minter_sol_before = validator.get_balance(&MINTER_ADDRESS).await;
+        let minter_info_balance_before = setup.minter().get_minter_info().await.balance;
         let destination_sol_before = validator.get_balance(&withdrawal_address).await;
 
         let accounts: Vec<_> = (1_u8..=num_deposits)
@@ -43,44 +40,71 @@ async fn should_deposit_consolidate_and_withdraw() {
             })
             .collect();
 
-        // Deposit funds
-        let (deposit_addresses, deposit_amounts, minted_amounts): (Vec<_>, Vec<_>, Vec<_>) =
+        let (deposit_addresses, deposit_amounts): (Vec<_>, Vec<_>) =
             futures::future::join_all(accounts.iter().enumerate().map(async |(j, account)| {
                 let deposit_amount = ((j as u64 + 1) * LAMPORTS_PER_SOL) / 10;
-                let (deposit_address, minted_amount) = validator
-                    .deposit_to_account(&setup, *account, deposit_amount)
+                let deposit_address = validator
+                    .fund_deposit_address(&setup, *account, deposit_amount)
                     .await;
-                (deposit_address, deposit_amount, minted_amount)
+                (deposit_address, deposit_amount)
             }))
             .await
             .into_iter()
-            .multiunzip();
+            .unzip::<_, _, Vec<Address>, Vec<Lamport>>();
 
-        let total_minted_amount = minted_amounts.iter().sum::<Lamport>();
-        let total_deposited_amount = deposit_amounts.iter().sum::<Lamport>();
-
-        let deposit_accounts_balances_before = validator.get_balances(&deposit_addresses).await;
-
-        // Each deposit address is a signer in its consolidation transaction, so
-        // the total Solana transaction fee is `FEE_PER_SIGNATURE` per deposit.
-        let expected_minter_sol_after_consolidation =
-            minter_sol_before + total_deposited_amount - num_deposits as u64 * FEE_PER_SIGNATURE;
-
-        // Trigger consolidation and wait for the minter to hold the consolidated deposits
-        setup.advance_time(Duration::from_mins(10)).await;
-        validator
-            .wait_for_finalized_balance(&MINTER_ADDRESS, expected_minter_sol_after_consolidation)
+        let deposit_ids: Vec<DepositSolId> =
+            futures::future::join_all(accounts.iter().map(async |&account| {
+                setup
+                    .minter()
+                    .deposit_sol(account)
+                    .await
+                    .expect("deposit_sol should queue a sweep")
+            }))
             .await;
 
-        // Verify deposit addresses were drained
-        for (deposit_address, &balance_before, &deposit_amount) in itertools::multizip((
-            &deposit_addresses,
-            &deposit_accounts_balances_before,
-            &deposit_amounts,
-        )) {
+        // Every deposit address signs the sweep of its sweepable amount, so the
+        // total Solana transaction fee is `FEE_PER_SIGNATURE` per deposit.
+        let total_sweepable_amount: Lamport = deposit_amounts
+            .iter()
+            .map(|deposit_amount| deposit_amount - RENT_EXEMPTION_THRESHOLD)
+            .sum();
+        let total_sweep_fee = num_deposits as u64 * FEE_PER_SIGNATURE;
+        let expected_minter_sol_after_sweep =
+            minter_sol_before + total_sweepable_amount - total_sweep_fee;
+
+        // Trigger the sweep and wait for the minter to hold the swept deposits
+        setup.advance_time(Duration::from_mins(1)).await;
+        validator
+            .wait_for_finalized_balance(&MINTER_ADDRESS, expected_minter_sol_after_sweep)
+            .await;
+
+        // Verify the deposit addresses were drained down to the rent exemption threshold
+        for deposit_address in &deposit_addresses {
             let balance_after = validator.get_balance(deposit_address).await;
-            assert_eq!(balance_after, balance_before - deposit_amount);
+            assert_eq!(balance_after, RENT_EXEMPTION_THRESHOLD);
         }
+
+        // Wait for the mints and verify the minted amounts and ledger balances
+        let mut minted_amounts = Vec::new();
+        for ((&deposit_id, account), &deposit_amount) in
+            deposit_ids.iter().zip(&accounts).zip(&deposit_amounts)
+        {
+            let expected_minted_amount =
+                deposit_amount - RENT_EXEMPTION_THRESHOLD - FEE_PER_SIGNATURE;
+            let minted_amount = setup.wait_for_deposit_minted(deposit_id).await;
+            assert_eq!(minted_amount, expected_minted_amount);
+            assert_eq!(
+                setup.ledger().balance_of(*account).await,
+                expected_minted_amount
+            );
+            minted_amounts.push(minted_amount);
+        }
+        let total_minted_amount = minted_amounts.iter().sum::<Lamport>();
+
+        assert_eq!(
+            setup.minter().get_minter_info().await.balance,
+            minter_info_balance_before + total_sweepable_amount - total_sweep_fee
+        );
 
         let minter_cycles_after = setup.minter().cycle_balance().await;
         assert!(
@@ -153,84 +177,41 @@ async fn should_deposit_consolidate_and_withdraw() {
 
     setup.drop().await;
 }
+
 #[tokio::test(flavor = "multi_thread")]
-async fn should_withdraw_exactly_the_consolidated_balance() {
+async fn should_add_an_operator_created_nonce_account_through_an_upgrade() {
     let validator = SolanaTestValidator::start().await;
-    let setup = validator.setup().await;
-    let withdrawal_address = Keypair::new().pubkey();
-    let consolidated_depositor = Account {
-        owner: DEPOSITOR,
-        subaccount: Some([0xC0; 32]),
-    };
-    let unconsolidated_depositor = Account {
-        owner: DEPOSITOR,
-        subaccount: Some([0xC1; 32]),
-    };
+    let setup = validator
+        .setup_builder()
+        .with_nonce_accounts(Vec::new())
+        .build()
+        .await;
 
-    let minter_sol_before = validator.get_balance(&MINTER_ADDRESS).await;
-    let consolidated_deposit_amount = LAMPORTS_PER_SOL / 10;
-    validator
-        .deposit_to_account(&setup, consolidated_depositor, consolidated_deposit_amount)
-        .await;
-    let consolidated_balance = consolidated_deposit_amount - FEE_PER_SIGNATURE;
-    setup.advance_time(Duration::from_mins(10)).await;
-    validator
-        .wait_for_finalized_balance(&MINTER_ADDRESS, minter_sol_before + consolidated_balance)
-        .await;
-    wait_for_minter_balance(&setup, consolidated_balance).await;
-
-    let (_, unconsolidated_minted_amount) = validator
-        .deposit_to_account(
-            &setup,
-            unconsolidated_depositor,
-            3 * consolidated_deposit_amount,
-        )
-        .await;
     assert_eq!(
-        setup.minter().get_minter_info().await.balance,
-        consolidated_balance
+        setup.minter().get_minter_info().await.nonce_accounts,
+        Vec::<String>::new()
     );
+    let authority = setup.wait_for_minter_address().await;
 
-    let withdrawal_amount = consolidated_balance + Setup::DEFAULT_WITHDRAWAL_FEE;
-    assert!(withdrawal_amount + LEDGER_TRANSFER_FEE <= unconsolidated_minted_amount);
+    let nonce_accounts: Vec<String> = validator
+        .create_nonce_accounts(1, &authority)
+        .await
+        .iter()
+        .map(Address::to_string)
+        .collect();
+
     setup
-        .ledger()
-        .approve(
-            unconsolidated_depositor.subaccount,
-            withdrawal_amount,
-            setup.minter_account(),
-        )
-        .await;
-    let burn_index = setup
         .minter()
-        .withdraw(WithdrawalArgs {
-            from_subaccount: unconsolidated_depositor.subaccount,
-            amount: withdrawal_amount,
-            address: withdrawal_address.to_string(),
+        .upgrade(UpgradeArgs {
+            nonce_accounts_to_add: Some(nonce_accounts.clone()),
+            ..UpgradeArgs::default()
         })
         .await
-        .expect("withdraw should succeed")
-        .block_index;
+        .expect("upgrade should succeed");
 
-    setup.advance_time(Duration::from_mins(1)).await;
-    wait_for_withdrawal_finalized(&setup, burn_index).await;
-
-    // The minter consolidates the second deposit and pays the withdrawal out of it,
-    // leaving it with that deposit less the fee of the withdrawal transaction.
-    let unconsolidated_balance = 3 * consolidated_deposit_amount - FEE_PER_SIGNATURE;
-    validator
-        .wait_for_finalized_balance(
-            &MINTER_ADDRESS,
-            minter_sol_before + unconsolidated_balance - FEE_PER_SIGNATURE,
-        )
-        .await;
     assert_eq!(
-        validator.get_balance(&withdrawal_address).await,
-        consolidated_balance
-    );
-    assert_eq!(
-        setup.minter().get_minter_info().await.balance,
-        unconsolidated_balance - FEE_PER_SIGNATURE
+        setup.minter().get_minter_info().await.nonce_accounts,
+        nonce_accounts
     );
 
     setup.drop().await;
@@ -267,13 +248,9 @@ async fn should_sweep_a_full_batch_of_deposits_in_one_transaction() {
     let deposit_addresses: Vec<Address> =
         futures::future::join_all(accounts.iter().zip(&deposit_amounts).map(
             async |(&account, &deposit_amount)| {
-                let deposit_address: Address =
-                    setup.minter().get_deposit_address(account).await.into();
-                validator.transfer_to(deposit_address, deposit_amount).await;
                 validator
-                    .wait_for_finalized_balance(&deposit_address, deposit_amount)
-                    .await;
-                deposit_address
+                    .fund_deposit_address(&setup, account, deposit_amount)
+                    .await
             },
         ))
         .await;
@@ -344,6 +321,66 @@ async fn should_sweep_a_full_batch_of_deposits_in_one_transaction() {
             }
         );
     }
+
+    for ((&deposit_id, &account), &deposit_amount) in
+        deposit_ids.iter().zip(&accounts).zip(&deposit_amounts)
+    {
+        let expected_minted_amount = deposit_amount - RENT_EXEMPTION_THRESHOLD - FEE_PER_SIGNATURE;
+        let minted_amount = setup.wait_for_deposit_minted(deposit_id).await;
+        assert_eq!(minted_amount, expected_minted_amount);
+        assert_eq!(
+            setup.ledger().balance_of(account).await,
+            expected_minted_amount
+        );
+    }
+
+    setup.drop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn should_sweep_sub_rent_remainder_together_with_the_deposit() {
+    const SUB_RENT_REMAINDER: Lamport = 500_000;
+
+    let validator = SolanaTestValidator::start().await;
+    let setup = validator.setup().await;
+    let account = Account {
+        owner: DEPOSITOR,
+        subaccount: Some([0xAB; 32]),
+    };
+    let deposit_address: Address = setup.minter().get_deposit_address(account).await.into();
+
+    validator
+        .transfer_to(deposit_address, Setup::DEFAULT_MINIMUM_DEPOSIT_AMOUNT)
+        .await;
+    validator
+        .transfer_to(deposit_address, SUB_RENT_REMAINDER)
+        .await;
+    let deposit_address_balance = Setup::DEFAULT_MINIMUM_DEPOSIT_AMOUNT + SUB_RENT_REMAINDER;
+    validator
+        .wait_for_finalized_balance(&deposit_address, deposit_address_balance)
+        .await;
+
+    let deposit_id = setup
+        .minter()
+        .deposit_sol(account)
+        .await
+        .expect("deposit_sol should queue a sweep");
+
+    let sweepable_amount = deposit_address_balance - RENT_EXEMPTION_THRESHOLD;
+    assert_eq!(
+        setup.minter().deposit_status(deposit_id).await,
+        DepositSolStatus::Queued { sweepable_amount }
+    );
+
+    setup.advance_time(Duration::from_mins(1)).await;
+    let minted_amount = setup.wait_for_deposit_minted(deposit_id).await;
+
+    assert_eq!(minted_amount, sweepable_amount - FEE_PER_SIGNATURE);
+    assert_eq!(setup.ledger().balance_of(account).await, minted_amount);
+    assert_eq!(
+        validator.get_balance(&deposit_address).await,
+        RENT_EXEMPTION_THRESHOLD
+    );
 
     setup.drop().await;
 }

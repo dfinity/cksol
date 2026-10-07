@@ -1,8 +1,5 @@
 use crate::{
-    address::{
-        DerivationPath, MinterPublicKeyNotYetAvailable, derivation_path, derive_public_key,
-        minter_address, minter_public_key,
-    },
+    address::{DerivationPath, MinterPublicKeyNotYetAvailable, minter_address, minter_public_key},
     constants::FEE_PER_SIGNATURE,
     runtime::CanisterRuntime,
     signer::{SchnorrSigner, sign_bytes},
@@ -41,88 +38,6 @@ pub enum CreateTransferError {
     SigningFailed(SignCallError),
     #[error(transparent)]
     MinterPublicKeyNotYetAvailable(MinterPublicKeyNotYetAvailable),
-}
-
-/// Creates a signed Solana transaction that transfers lamports from
-/// each minter-controlled source address to the minter's consolidated address.
-///
-/// The first source account is used as the fee payer. Its transfer amount
-/// is reduced by the transaction fee.
-///
-/// Returns the signed transaction and its signers in signature order.
-///
-/// # Panics
-///
-/// * Panics if `sources` is empty.
-/// * Panics if source accounts are not unique.
-/// * Panics if the IC returns a signature that is not exactly 64 bytes.
-pub async fn create_signed_consolidation_transaction<R: CanisterRuntime>(
-    runtime: &R,
-    sources: Vec<(Account, Lamport)>,
-    recent_blockhash: Hash,
-) -> Result<(Transaction, Vec<Signer>), CreateTransferError> {
-    assert!(!sources.is_empty(), "BUG: sources must not be empty");
-
-    let master_public_key = minter_public_key()?;
-    let target_address = minter_address(&master_public_key);
-    let addresses: Vec<Address> = sources
-        .iter()
-        .map(|(account, _)| {
-            let public_key = derive_public_key(&master_public_key, derivation_path(account));
-            Address::from(public_key.serialize_raw())
-        })
-        .collect();
-
-    let fee_payer_address = &addresses[0];
-    let transaction_fee = FEE_PER_SIGNATURE * sources.len() as u64;
-
-    let instructions: Vec<Instruction> = addresses
-        .iter()
-        .zip(&sources)
-        .enumerate()
-        .map(|(index, (source, (_, amount)))| {
-            let transfer_amount = if index == 0 {
-                amount
-                    .checked_sub(transaction_fee)
-                    .expect("BUG: fee payer has insufficient funds to cover the transaction fee")
-            } else {
-                *amount
-            };
-            instruction::transfer(source, &target_address, transfer_amount)
-        })
-        .collect();
-
-    let message =
-        Message::new_with_blockhash(&instructions, Some(fee_payer_address), &recent_blockhash);
-    let mut transaction = Transaction::new_unsigned(message);
-
-    assert_eq!(
-        transaction.message.signer_keys().len(),
-        sources.len(),
-        "BUG: source accounts must be unique"
-    );
-
-    // Re-order signers to match the order of the message account keys
-    let mut signer_map: BTreeMap<Address, Signer> = addresses
-        .into_iter()
-        .zip(sources.iter().map(|(account, _)| Signer::Account(*account)))
-        .collect();
-    let signers: Vec<Signer> = transaction
-        .message
-        .signer_keys()
-        .iter()
-        .map(|key| {
-            signer_map
-                .remove(key)
-                .expect("BUG: signer key not found in source addresses")
-        })
-        .collect();
-
-    let derivation_paths: Vec<DerivationPath> =
-        signers.iter().map(Signer::derivation_path).collect();
-    sign_transaction(&mut transaction, derivation_paths, &runtime.signer()).await?;
-
-    Ok((transaction, signers))
 }
 
 /// Signs the transaction of a planned sweep with the deposit addresses it transfers from.

@@ -1,5 +1,6 @@
 use crate::{
     constants::RENT_EXEMPTION_THRESHOLD,
+    numeric::LedgerMintIndex,
     state::event::{CreditedDeposit, VersionedMessage},
 };
 use cksol_types::{DepositSolId, DepositSolStatus};
@@ -23,9 +24,9 @@ mod tests;
 /// A deposit is in exactly one stage at a time and only moves forward:
 ///
 /// ```text
-/// queued --sendTransaction--> swept --getSignatureStatuses--> finalized --getTransaction--> pending_mints
-///                                |                              |
-///                                +--failed or expired--> dropped  +--metadata mismatch--> quarantined
+/// queued --sendTransaction--> swept --getSignatureStatuses--> finalized --getTransaction--> pending_mints --icrc1_transfer--> minted
+///                                |                              |                                |
+///                                +--failed or expired--> dropped  +--metadata mismatch--> quarantined <--beyond the deduplication window--+
 /// ```
 ///
 /// * `queued`: the deposit address holds a sweepable amount and waits for a sweep transaction.
@@ -42,8 +43,12 @@ mod tests;
 /// * `pending_mints`: the metadata returned by `getTransaction` was read and the transaction
 ///   fee of the sweep was shared between its deposits. Each deposit now carries the amount to
 ///   mint and only the mint on the ledger remains, so the deposits are tracked individually again.
-/// * `quarantined`: the metadata contradicts the minter's model of the sweep, so nothing is
-///   minted and the accounts stay rejected by `deposit_sol` until a minter upgrade.
+/// * `minted`: the ckSOL mint landed on the ledger and the account is released.
+/// * `quarantined`: the metadata contradicts the minter's model of the sweep, so nothing was
+///   credited and nothing is minted, or a pending mint could no longer be retried within the
+///   deduplication window of the ledger, in which case the sweep was credited and the mint is
+///   still owed unless it already landed. The cause records which of the two it is, and the
+///   accounts stay rejected by `deposit_sol` until a minter upgrade.
 ///
 /// Every account has at most one deposit in flight, so that `deposit_sol` can report the
 /// deposit it is already tracking instead of queueing the same balance twice.
@@ -54,8 +59,9 @@ pub struct Deposits {
     swept: Sweeps,
     finalized: Sweeps,
     pending_mints: BTreeMap<DepositSolId, PendingMint>,
+    minted: BTreeMap<DepositSolId, MintedSweep>,
     dropped: BTreeMap<DepositSolId, SweptDeposit>,
-    quarantined: BTreeMap<DepositSolId, SweptDeposit>,
+    quarantined: BTreeMap<DepositSolId, QuarantinedDeposit>,
     in_flight_ids: BTreeMap<Account, DepositSolId>,
 }
 
@@ -80,11 +86,15 @@ impl Deposits {
         &self.pending_mints
     }
 
+    pub fn minted(&self) -> &BTreeMap<DepositSolId, MintedSweep> {
+        &self.minted
+    }
+
     pub fn dropped(&self) -> &BTreeMap<DepositSolId, SweptDeposit> {
         &self.dropped
     }
 
-    pub fn quarantined(&self) -> &BTreeMap<DepositSolId, SweptDeposit> {
+    pub fn quarantined(&self) -> &BTreeMap<DepositSolId, QuarantinedDeposit> {
         &self.quarantined
     }
 
@@ -110,7 +120,13 @@ impl Deposits {
         }
         if let Some(pending) = self.pending_mints.get(&deposit_id) {
             return DepositSolStatus::Finalized {
-                signature: pending.deposit.signature.into(),
+                signature: pending.sweep_signature().into(),
+            };
+        }
+        if let Some(minted) = self.minted.get(&deposit_id) {
+            return DepositSolStatus::Minted {
+                block_index: *minted.mint_block_index.get(),
+                minted_amount: minted.minted_amount,
             };
         }
         if let Some(dropped) = self.dropped.get(&deposit_id) {
@@ -120,7 +136,7 @@ impl Deposits {
         }
         if let Some(quarantined) = self.quarantined.get(&deposit_id) {
             return DepositSolStatus::Quarantined {
-                signature: quarantined.signature.into(),
+                signature: quarantined.deposit.signature.into(),
             };
         }
         DepositSolStatus::NotFound
@@ -201,9 +217,12 @@ impl Deposits {
             .extend(sweep.deposits().iter().map(|(deposit_id, deposit)| {
                 (
                     *deposit_id,
-                    SweptDeposit {
-                        deposit: *deposit,
-                        signature: *signature,
+                    QuarantinedDeposit {
+                        deposit: SweptDeposit {
+                            deposit: *deposit,
+                            signature: *signature,
+                        },
+                        cause: QuarantineCause::SweepUnreadable,
                     },
                 )
             }));
@@ -227,7 +246,12 @@ impl Deposits {
 
     /// Moves every deposit of the given finalized sweep to the pending mints, each with
     /// the amount its mint carries.
-    pub(super) fn credit_sweep(&mut self, signature: &Signature, mints: &[CreditedDeposit]) {
+    pub(super) fn credit_sweep(
+        &mut self,
+        signature: &Signature,
+        mints: &[CreditedDeposit],
+        timestamp: u64,
+    ) {
         let sweep = self.finalized.remove(signature).unwrap_or_else(|| {
             panic!("Attempted to credit sweep {signature} that is not finalized")
         });
@@ -258,6 +282,7 @@ impl Deposits {
                     signature: *signature,
                 },
                 amount_to_mint: mint.amount_to_mint,
+                created_at_time: timestamp,
             };
             assert!(
                 self.pending_mints
@@ -267,6 +292,37 @@ impl Deposits {
                 mint.deposit_id
             );
         }
+    }
+
+    pub(super) fn mint(&mut self, deposit_id: DepositSolId, mint_block_index: LedgerMintIndex) {
+        let pending = self.pending_mints.remove(&deposit_id).unwrap_or_else(|| {
+            panic!("Attempted to mint deposit {deposit_id} that has no pending mint")
+        });
+        self.release_in_flight(deposit_id, &pending.account());
+        self.minted.insert(
+            deposit_id,
+            MintedSweep {
+                deposit: pending.deposit,
+                minted_amount: pending.amount_to_mint,
+                mint_block_index,
+            },
+        );
+    }
+
+    pub(super) fn quarantine_pending_mint(&mut self, deposit_id: DepositSolId) {
+        let pending = self.pending_mints.remove(&deposit_id).unwrap_or_else(|| {
+            panic!("Attempted to quarantine deposit {deposit_id} that has no pending mint")
+        });
+        self.quarantined.insert(
+            deposit_id,
+            QuarantinedDeposit {
+                deposit: pending.deposit,
+                cause: QuarantineCause::MintUnresolved {
+                    amount_to_mint: pending.amount_to_mint,
+                    created_at_time: pending.created_at_time,
+                },
+            },
+        );
     }
 }
 
@@ -325,4 +381,69 @@ pub struct PendingMint {
     pub deposit: SweptDeposit,
     /// The sweepable amount minus the deposit's share of the transaction fee of the sweep.
     pub amount_to_mint: Lamport,
+    /// The timestamp of the `CreditedSweep` event that enqueued this pending mint.
+    ///
+    /// Every retry of the mint sends this same `created_at_time` to the ckSOL
+    /// ledger, so the ledger deduplicates retries after an unknown outcome.
+    pub created_at_time: u64,
+}
+
+impl PendingMint {
+    pub fn account(&self) -> Account {
+        self.deposit.deposit.account
+    }
+
+    pub fn sweep_signature(&self) -> Signature {
+        self.deposit.signature
+    }
+}
+
+/// A swept deposit the minter stopped processing, together with what resolving it takes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct QuarantinedDeposit {
+    pub deposit: SweptDeposit,
+    pub cause: QuarantineCause,
+}
+
+impl QuarantinedDeposit {
+    pub fn account(&self) -> Account {
+        self.deposit.deposit.account
+    }
+
+    pub fn sweep_signature(&self) -> Signature {
+        self.deposit.signature
+    }
+
+    /// The amount the sweep planned to move, before the deposit's share of its fee.
+    pub fn planned_amount(&self) -> Lamport {
+        self.deposit.deposit.sweepable_amount()
+    }
+}
+
+/// Why a swept deposit was quarantined, and therefore what a manual resolution has
+/// to establish before crediting it by hand.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum QuarantineCause {
+    /// The finalized sweep contradicted the plan it was submitted with, so the amount
+    /// received could not be determined: nothing was credited and nothing was minted.
+    SweepUnreadable,
+    /// The sweep was credited and this mint is owed, but it fell out of the
+    /// deduplication window of the ledger before it was confirmed, so it may already
+    /// have landed. The ledger has to be searched for a mint carrying this deposit in
+    /// its memo before minting again.
+    MintUnresolved {
+        /// The amount the pending mint was going to mint.
+        amount_to_mint: Lamport,
+        /// The `created_at_time` the pending mint was sent with.
+        created_at_time: u64,
+    },
+}
+
+/// A swept deposit whose ckSOL mint landed on the ledger.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MintedSweep {
+    pub deposit: SweptDeposit,
+    /// The sweepable amount minus the deposit's share of the transaction fee of the sweep.
+    pub minted_amount: Lamport,
+    pub mint_block_index: LedgerMintIndex,
 }

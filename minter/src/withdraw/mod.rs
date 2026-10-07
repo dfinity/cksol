@@ -9,8 +9,7 @@ use canlog::log;
 use cksol_types_internal::log::Priority;
 
 use crate::{
-    address::minter_public_key,
-    consolidate::consolidate_deposits,
+    address::{minter_address, minter_public_key},
     constants::MAX_CONCURRENT_RPC_CALLS,
     guard::{TimerGuard, withdrawal_guard},
     ledger::{BurnError, burn},
@@ -27,6 +26,7 @@ use crate::{
 
 pub const WITHDRAWAL_PROCESSING_DELAY: Duration = Duration::from_mins(1);
 
+mod reserved_account_keys;
 #[cfg(test)]
 mod tests;
 
@@ -44,10 +44,12 @@ pub async fn withdraw<R: CanisterRuntime>(
         });
     }
 
-    let _guard = withdrawal_guard(from)?;
-
     let solana_address = Address::from_str(&address)
         .map_err(|e| WithdrawalError::MalformedAddress(e.to_string()))?;
+    validate_destination(&solana_address)?;
+    validate_nonce_pool_not_empty()?;
+
+    let _guard = withdrawal_guard(from)?;
 
     let minter_account: Account = runtime.canister_self().into();
     let block_index = burn(
@@ -91,6 +93,36 @@ pub async fn withdraw<R: CanisterRuntime>(
     Ok(WithdrawalOk { block_index })
 }
 
+fn validate_destination(destination: &Address) -> Result<(), WithdrawalError> {
+    if reserved_account_keys::is_reserved_account_key(destination) {
+        return Err(WithdrawalError::InvalidDestination(format!(
+            "{destination} is an account key reserved by the Solana runtime"
+        )));
+    }
+    if read_state(|s| s.nonce_pool().contains(destination)) {
+        return Err(WithdrawalError::InvalidDestination(format!(
+            "{destination} is a durable nonce account of the ckSOL minter"
+        )));
+    }
+    let master_key =
+        minter_public_key().map_err(|e| WithdrawalError::TemporarilyUnavailable(e.to_string()))?;
+    if destination == &minter_address(&master_key) {
+        return Err(WithdrawalError::InvalidDestination(format!(
+            "{destination} is the ckSOL minter's main address"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_nonce_pool_not_empty() -> Result<(), WithdrawalError> {
+    if read_state(|s| s.nonce_pool().is_empty()) {
+        return Err(WithdrawalError::TemporarilyUnavailable(
+            "The durable nonce account pool is empty, no withdrawal can be processed".to_string(),
+        ));
+    }
+    Ok(())
+}
+
 pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: R) {
     let _guard = match TimerGuard::new(TaskType::WithdrawalProcessing) {
         Ok(guard) => guard,
@@ -103,27 +135,14 @@ pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: R) {
         }
     };
 
-    let (batches, more_to_process, num_pending_withdrawals) = read_state(|state| {
+    let (batches, more_to_process) = read_state(|state| {
         let mut affordable_batches = state.withdrawal_batches().peekable();
         let batches: Vec<Vec<_>> = affordable_batches
             .by_ref()
             .take(MAX_CONCURRENT_RPC_CALLS)
             .collect();
-        (
-            batches,
-            affordable_batches.peek().is_some(),
-            state.pending_withdrawal_requests().len(),
-        )
+        (batches, affordable_batches.peek().is_some())
     });
-
-    let num_affordable_withdrawals: usize = batches.iter().map(Vec::len).sum();
-    if !more_to_process && num_affordable_withdrawals < num_pending_withdrawals {
-        log!(
-            Priority::Info,
-            "Insufficient minter balance for some withdrawal requests, scheduling consolidation"
-        );
-        runtime.set_timer(Duration::ZERO, consolidate_deposits);
-    }
 
     let reschedule = scopeguard::guard(runtime.clone(), |runtime| {
         runtime.set_timer(Duration::ZERO, process_pending_withdrawals);

@@ -6,7 +6,7 @@ use crate::{
     runtime::CanisterRuntime,
     state::read_state,
 };
-use cksol_types::{DepositSolError, ProcessDepositError};
+use cksol_types::DepositSolError;
 use derive_more::From;
 use ic_canister_runtime::IcError;
 use minicbor::{Decode, Encode};
@@ -118,15 +118,6 @@ impl GetTransactionError {
             | GetTransactionError::RpcError(_)
             | GetTransactionError::InconsistentRpcResults => false,
         }
-    }
-}
-
-impl From<GetTransactionError> for ProcessDepositError {
-    fn from(error: GetTransactionError) -> Self {
-        if error.is_response_untrustworthy() {
-            return ProcessDepositError::InvalidDepositTransaction(error.to_string());
-        }
-        ProcessDepositError::TemporarilyUnavailable(error.to_string())
     }
 }
 
@@ -269,6 +260,7 @@ pub async fn get_signature_statuses<R: CanisterRuntime>(
     let result = client
         .get_signature_statuses(signatures)
         .map_err(GetSignatureStatusesError::RpcError)?
+        .with_search_transaction_history(true)
         .with_response_size_estimate(MAX_HTTP_OUTCALL_RESPONSE_BYTES)
         .with_cycles(GET_SIGNATURE_STATUSES_CYCLES)
         .try_send()

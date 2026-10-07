@@ -17,10 +17,12 @@ use icrc_ledger_types::icrc1::account::Account;
 mod tests;
 
 mod finalize;
+mod mint;
 mod timer;
 
-pub use crate::constants::SWEEP_DEPOSITS_DELAY;
+pub use crate::constants::{PROCESS_PENDING_MINTS_DELAY, SWEEP_DEPOSITS_DELAY};
 pub use finalize::credit_finalized_sweeps;
+pub use mint::process_pending_mints;
 pub use timer::sweep_queued_deposits;
 
 pub async fn deposit_sol<R: CanisterRuntime>(
@@ -30,14 +32,13 @@ pub async fn deposit_sol<R: CanisterRuntime>(
     assert_valid_deposit_owner(&account, runtime.canister_self());
     let _guard = deposit_sol_guard(account)?;
 
-    let (required_cycles, deposit_consolidation_fee, minimum_deposit_amount) =
-        read_state(|state| {
-            (
-                state.process_deposit_required_cycles(),
-                state.deposit_consolidation_fee(),
-                state.minimum_deposit_amount(),
-            )
-        });
+    let (required_cycles, deposit_sol_fee, minimum_deposit_amount) = read_state(|state| {
+        (
+            state.deposit_sol_required_cycles(),
+            state.deposit_sol_fee(),
+            state.minimum_deposit_amount(),
+        )
+    });
     check_caller_available_cycles(runtime, required_cycles)?;
 
     if let Some((deposit_id, status)) = read_state(|state| {
@@ -53,22 +54,12 @@ pub async fn deposit_sol<R: CanisterRuntime>(
             DepositSolStatus::Quarantined { .. } => {
                 Err(DepositSolError::Quarantined { deposit_id })
             }
-            DepositSolStatus::Dropped { .. } | DepositSolStatus::NotFound => panic!(
+            DepositSolStatus::Dropped { .. }
+            | DepositSolStatus::Minted { .. }
+            | DepositSolStatus::NotFound => panic!(
                 "BUG: in-flight deposit {deposit_id} of account {account:?} has status {status:?}"
             ),
         };
-    }
-
-    // TODO hq-3k1.6: This check only exists while `process_deposit` still mints before the
-    // deposit is consolidated, and will be removed together with that endpoint by the last PR
-    // of the stack. Without it, a `deposit_sol` call between a `process_deposit` mint and its
-    // consolidation would sweep lamports that were already credited and mint them twice.
-    if read_state(|state| state.has_deposit_awaiting_consolidation(&account)) {
-        return Err(DepositSolError::TemporarilyUnavailable(
-            "a deposit accepted by process_deposit for this account is awaiting consolidation, \
-             try again once it has been consolidated"
-                .to_string(),
-        ));
     }
 
     let master_key =
@@ -82,7 +73,7 @@ pub async fn deposit_sol<R: CanisterRuntime>(
         runtime,
         RpcCallCharge {
             attached_cycles: GET_BALANCE_CYCLES,
-            fee_on_success: deposit_consolidation_fee,
+            fee_on_success: deposit_sol_fee,
         },
         &result,
     );
