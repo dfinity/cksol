@@ -366,6 +366,37 @@ mod get_nonce_account_tests {
     }
 
     #[tokio::test]
+    async fn should_fail_if_call_fails_or_results_are_wrong() {
+        init_state();
+        let rpc_error = RpcError::ValidationError("Error 1".to_string());
+        let inconsistent = vec![(
+            RpcSource::Supported(SupportedRpcProviderId::AnkrMainnet),
+            Err(rpc_error.clone()),
+        )];
+
+        for (runtime, expected) in [
+            (
+                TestCanisterRuntime::new().add_stub_error(IcError::CallPerformFailed),
+                GetNonceAccountError::IcError(IcError::CallPerformFailed),
+            ),
+            (
+                TestCanisterRuntime::new()
+                    .add_stub_response(GetAccountInfoResult::Consistent(Err(rpc_error.clone()))),
+                GetNonceAccountError::RpcError(rpc_error.clone()),
+            ),
+            (
+                TestCanisterRuntime::new()
+                    .add_stub_response(GetAccountInfoResult::Inconsistent(inconsistent.clone())),
+                GetNonceAccountError::InconsistentRpcResults,
+            ),
+        ] {
+            let result = get_nonce_account(&runtime, nonce_account_address()).await;
+
+            assert_eq!(result, Err(expected));
+        }
+    }
+
+    #[tokio::test]
     async fn should_fail_if_account_is_not_a_non_executable_system_program_account() {
         init_state();
 
