@@ -1039,13 +1039,4 @@ impl MinterTransaction {
             | MinterTransaction::Withdrawal { signers, .. } => signers,
         }
     }
-
-    /// The block height of the block whose blockhash the transaction uses,
-    /// or `None` for a durable-nonce transaction, which never expires.
-    pub fn block_height(&self) -> Option<BlockHeight> {
-        match self {
-            MinterTransaction::SweepDeposit { block_height, .. } => Some(*block_height),
-            MinterTransaction::Withdrawal { .. } => None,
-        }
-    }
 }

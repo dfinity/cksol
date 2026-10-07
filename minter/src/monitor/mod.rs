@@ -10,7 +10,7 @@ use crate::{
     runtime::CanisterRuntime,
     signer::sign_bytes,
     state::{
-        TaskType,
+        MinterTransaction, TaskType,
         audit::process_event,
         event::{EventType, Signer, VersionedMessage},
         mutate_state, read_state,
@@ -76,7 +76,12 @@ async fn check_submitted_transactions<R: CanisterRuntime>(runtime: &R) -> bool {
             submitted.iter().map(|(sig, _)| *sig).collect(),
             submitted
                 .iter()
-                .filter_map(|(sig, tx)| tx.block_height().map(|height| (*sig, height)))
+                .filter_map(|(sig, tx)| match tx {
+                    MinterTransaction::SweepDeposit { block_height, .. } => {
+                        Some((*sig, *block_height))
+                    }
+                    MinterTransaction::Withdrawal { .. } => None,
+                })
                 .collect(),
         )
     });
