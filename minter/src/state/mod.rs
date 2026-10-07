@@ -111,10 +111,10 @@ pub struct State {
     sent_withdrawal_requests: BTreeMap<LedgerBurnIndex, SentWithdrawalRequest>,
     successful_withdrawal_requests: BTreeMap<LedgerBurnIndex, SentWithdrawalRequest>,
     failed_withdrawal_requests: BTreeMap<LedgerBurnIndex, SentWithdrawalRequest>,
-    submitted_transactions: InsertionOrderedMap<Signature, SolanaTransaction>,
-    transactions_to_resubmit: InsertionOrderedMap<Signature, SolanaTransaction>,
+    submitted_transactions: InsertionOrderedMap<Signature, MinterTransaction>,
+    transactions_to_resubmit: InsertionOrderedMap<Signature, MinterTransaction>,
     succeeded_transactions: BTreeSet<Signature>,
-    failed_transactions: InsertionOrderedMap<Signature, SolanaTransaction>,
+    failed_transactions: InsertionOrderedMap<Signature, MinterTransaction>,
     nonce_pool: DurableNoncePool,
     active_tasks: BTreeSet<TaskType>,
     balance: Lamport,
@@ -196,11 +196,11 @@ impl State {
         &self.failed_withdrawal_requests
     }
 
-    pub fn submitted_transactions(&self) -> &InsertionOrderedMap<Signature, SolanaTransaction> {
+    pub fn submitted_transactions(&self) -> &InsertionOrderedMap<Signature, MinterTransaction> {
         &self.submitted_transactions
     }
 
-    pub fn transactions_to_resubmit(&self) -> &InsertionOrderedMap<Signature, SolanaTransaction> {
+    pub fn transactions_to_resubmit(&self) -> &InsertionOrderedMap<Signature, MinterTransaction> {
         &self.transactions_to_resubmit
     }
 
@@ -219,23 +219,22 @@ impl State {
             .unwrap_or_else(|| {
                 panic!("BUG: cannot mark non-submitted transaction {signature} for resubmission")
             });
-        if let TransactionPurpose::SweepDeposits { .. } = &transaction.purpose {
-            self.deposits.drop_swept(signature);
-            return;
+        match transaction {
+            MinterTransaction::SweepDeposit { .. } => self.deposits.drop_swept(signature),
+            MinterTransaction::Withdrawal { .. } => assert!(
+                self.transactions_to_resubmit
+                    .insert(*signature, transaction)
+                    .is_none(),
+                "BUG: transaction {signature} is already queued for resubmission"
+            ),
         }
-        assert!(
-            self.transactions_to_resubmit
-                .insert(*signature, transaction)
-                .is_none(),
-            "BUG: transaction {signature} is already queued for resubmission"
-        );
     }
 
     pub fn succeeded_transactions(&self) -> &BTreeSet<Signature> {
         &self.succeeded_transactions
     }
 
-    pub fn failed_transactions(&self) -> &InsertionOrderedMap<Signature, SolanaTransaction> {
+    pub fn failed_transactions(&self) -> &InsertionOrderedMap<Signature, MinterTransaction> {
         &self.failed_transactions
     }
 
@@ -532,7 +531,9 @@ impl State {
             !self.failed_transactions.contains_key(signature),
             "Attempted to submit already failed transaction {signature:?}"
         );
-        let amount = match purpose {
+        let message = transaction.clone();
+        let signers = signers.to_vec();
+        let submitted_transaction = match purpose {
             TransactionPurpose::WithdrawSol { burn_indices } => {
                 let mut total: Lamport = 0;
                 for burn_index in burn_indices {
@@ -561,27 +562,28 @@ impl State {
                     .balance
                     .checked_sub(total + tx_fee)
                     .expect("BUG: insufficient minter balance for withdrawal");
-                total
+                MinterTransaction::Withdrawal {
+                    message,
+                    signers,
+                    block_height,
+                }
             }
             TransactionPurpose::SweepDeposits { deposit_ids } => {
                 let sweep_destination = minter_address(self.minter_public_key.as_ref().expect(
                     "BUG: a sweep was submitted before the minter public key was recorded",
                 ));
                 self.deposits
-                    .sweep(deposit_ids, sweep_destination, transaction, signature)
+                    .sweep(deposit_ids, sweep_destination, transaction, signature);
+                MinterTransaction::SweepDeposit {
+                    message,
+                    signers,
+                    block_height,
+                }
             }
         };
         assert_eq!(
-            self.submitted_transactions.insert(
-                *signature,
-                SolanaTransaction {
-                    message: transaction.clone(),
-                    signers: signers.to_vec(),
-                    block_height,
-                    purpose: purpose.clone(),
-                    amount,
-                }
-            ),
+            self.submitted_transactions
+                .insert(*signature, submitted_transaction),
             None,
             "Attempted to submit transaction with signature {signature:?} twice"
         );
@@ -599,13 +601,20 @@ impl State {
             .unwrap_or_else(|| {
                 panic!("Attempted to resubmit unknown transaction with signature {old_signature:?}")
             });
-        assert!(
-            !matches!(
-                old_transaction.purpose,
-                TransactionPurpose::SweepDeposits { .. }
+        let new_transaction = match old_transaction {
+            MinterTransaction::SweepDeposit { .. } => panic!(
+                "BUG: sweep transaction {old_signature} must be dropped instead of resubmitted"
             ),
-            "BUG: sweep transaction {old_signature} must be dropped instead of resubmitted"
-        );
+            MinterTransaction::Withdrawal {
+                message,
+                signers,
+                block_height: _,
+            } => MinterTransaction::Withdrawal {
+                message,
+                signers,
+                block_height: new_block_height,
+            },
+        };
         assert!(
             !self.succeeded_transactions.contains(new_signature),
             "Attempted to resubmit with signature {new_signature:?} that already succeeded"
@@ -614,10 +623,6 @@ impl State {
             !self.failed_transactions.contains_key(new_signature),
             "Attempted to resubmit with signature {new_signature:?} that already failed"
         );
-        let new_transaction = SolanaTransaction {
-            block_height: new_block_height,
-            ..old_transaction
-        };
         assert_eq!(
             self.submitted_transactions
                 .insert(*new_signature, new_transaction),
@@ -642,9 +647,9 @@ impl State {
             .unwrap_or_else(|| {
                 panic!("Attempted to mark unknown transaction {signature:?} as succeeded")
             });
-        match &transaction.purpose {
-            TransactionPurpose::WithdrawSol { .. } => {}
-            TransactionPurpose::SweepDeposits { .. } => self.deposits.finalize_swept(signature),
+        match transaction {
+            MinterTransaction::SweepDeposit { .. } => self.deposits.finalize_swept(signature),
+            MinterTransaction::Withdrawal { .. } => {}
         }
         assert!(
             !self.transactions_to_resubmit.contains_key(signature),
@@ -676,8 +681,9 @@ impl State {
             !self.transactions_to_resubmit.contains_key(signature),
             "BUG: transaction {signature} is queued for resubmission but is being marked as failed"
         );
-        if let TransactionPurpose::SweepDeposits { .. } = &transaction.purpose {
-            self.deposits.drop_swept(signature);
+        match transaction {
+            MinterTransaction::SweepDeposit { .. } => self.deposits.drop_swept(signature),
+            MinterTransaction::Withdrawal { .. } => {}
         }
         assert_eq!(
             self.failed_transactions.insert(*signature, transaction),
@@ -861,12 +867,40 @@ pub enum TaskType {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SolanaTransaction {
-    pub message: VersionedMessage,
-    pub signers: Vec<Signer>,
-    /// The block height of the block whose blockhash the transaction uses.
-    pub block_height: BlockHeight,
-    pub purpose: TransactionPurpose,
-    /// Total transfer amount in lamports (excluding fees).
-    pub amount: Lamport,
+pub enum MinterTransaction {
+    SweepDeposit {
+        message: VersionedMessage,
+        signers: Vec<Signer>,
+        /// The block height of the block whose blockhash the transaction uses.
+        block_height: BlockHeight,
+    },
+    Withdrawal {
+        message: VersionedMessage,
+        signers: Vec<Signer>,
+        /// The block height of the block whose blockhash the transaction uses.
+        block_height: BlockHeight,
+    },
+}
+
+impl MinterTransaction {
+    pub fn message(&self) -> &VersionedMessage {
+        match self {
+            MinterTransaction::SweepDeposit { message, .. }
+            | MinterTransaction::Withdrawal { message, .. } => message,
+        }
+    }
+
+    pub fn signers(&self) -> &[Signer] {
+        match self {
+            MinterTransaction::SweepDeposit { signers, .. }
+            | MinterTransaction::Withdrawal { signers, .. } => signers,
+        }
+    }
+
+    pub fn block_height(&self) -> BlockHeight {
+        match self {
+            MinterTransaction::SweepDeposit { block_height, .. }
+            | MinterTransaction::Withdrawal { block_height, .. } => *block_height,
+        }
+    }
 }

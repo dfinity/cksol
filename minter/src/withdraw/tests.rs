@@ -4,7 +4,7 @@ use crate::{
     guard::{TimerGuard, withdrawal_guard},
     rpc::BlockHeight,
     sol_transfer::MAX_WITHDRAWALS_PER_TX,
-    state::{TaskType, event::TransactionPurpose, read_state},
+    state::{MinterTransaction, TaskType, read_state},
     test_fixtures::{
         EventsAssert, MINIMUM_WITHDRAWAL_AMOUNT, MINTER_ACCOUNT, MINTER_ADDRESS, NONCE_ACCOUNT,
         WITHDRAWAL_FEE, account, confirmed_block_at_height, events, init_balance, init_balance_to,
@@ -486,12 +486,13 @@ mod process_pending_withdrawals_tests {
         assert_matches!(withdrawal_status(1), WithdrawalStatus::TxSent { .. });
         read_state(|s| {
             let submitted = s.submitted_transactions().get(&tx_signature).unwrap();
-            assert_eq!(submitted.block_height, block_height);
+            assert_eq!(submitted.block_height(), block_height);
+            assert_matches!(submitted, MinterTransaction::Withdrawal { .. });
             assert_eq!(
-                submitted.purpose,
-                TransactionPurpose::WithdrawSol {
-                    burn_indices: vec![1_u64.into()]
-                }
+                s.sent_withdrawal_requests()
+                    .get(&1_u64.into())
+                    .map(|sent| sent.signature),
+                Some(tx_signature)
             );
         });
     }

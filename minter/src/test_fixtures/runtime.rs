@@ -35,7 +35,7 @@ pub struct TestCanisterRuntime {
     msg_cycles_accepted: Arc<Mutex<Vec<u128>>>,
     msg_cycles_available: Stubs<u128>,
     msg_cycles_refunded: Stubs<u128>,
-    set_timer_call_count: Arc<Mutex<usize>>,
+    set_timer_delays: Arc<Mutex<Vec<Duration>>>,
     schnorr_public_key_results: Stubs<Result<SchnorrPublicKeyResult, CallError>>,
     schnorr_public_key_call_count: Arc<Mutex<usize>>,
 }
@@ -145,7 +145,11 @@ impl TestCanisterRuntime {
     }
 
     pub(crate) fn set_timer_call_count(&self) -> usize {
-        *self.set_timer_call_count.lock().unwrap()
+        self.set_timer_delays().len()
+    }
+
+    pub(crate) fn set_timer_delays(&self) -> Vec<Duration> {
+        self.set_timer_delays.lock().unwrap().clone()
     }
 
     pub(crate) fn schnorr_public_key_call_count(&self) -> usize {
@@ -194,13 +198,13 @@ impl CanisterRuntime for TestCanisterRuntime {
         self.msg_cycles_refunded.next()
     }
 
-    fn set_timer<F, Fut>(&self, _delay: Duration, _f: F) -> ic_cdk_timers::TimerId
+    fn set_timer<F, Fut>(&self, delay: Duration, _f: F) -> ic_cdk_timers::TimerId
     where
         Self: Sized,
         F: FnOnce(Self) -> Fut + 'static,
         Fut: Future<Output = ()> + 'static,
     {
-        *self.set_timer_call_count.lock().unwrap() += 1;
+        self.set_timer_delays.lock().unwrap().push(delay);
         Default::default()
     }
 
