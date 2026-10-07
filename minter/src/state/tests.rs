@@ -1274,8 +1274,8 @@ mod withdrawal_transactions {
         test_fixtures::{
             MINTER_ADDRESS, NONCE_ACCOUNT, durable_nonce,
             events::{create_withdrawal_batch_transaction, submit_withdrawal_batch_transaction},
-            minter_public_key_fetched_event, nonce_withdrawal_message, queued_deposit_of,
-            sweep_message,
+            minter_public_key_fetched_event, queued_deposit_of, sweep_message,
+            withdrawal_batch_message,
         },
     };
     use cksol_types::{TxFinalizedStatus, WithdrawalStatus};
@@ -1415,7 +1415,7 @@ mod withdrawal_transactions {
         let mut events = funded_log_until_created_transaction();
         events.push(EventType::SubmittedTransaction {
             signature: signature(7),
-            message: nonce_withdrawal_message(NONCE_ACCOUNT, durable_nonce(1)).into(),
+            message: withdrawal_batch_message(NONCE_ACCOUNT, durable_nonce(1)).into(),
             signers: vec![Signer::Minter],
             purpose: TransactionPurpose::WithdrawSol {
                 burn_indices: vec![0_u64.into()],

@@ -188,7 +188,7 @@ pub fn nonce_account_address() -> Address {
 /// Returns a durable-nonce withdrawal message of [`MINTER_ADDRESS`] that
 /// advances `nonce_account` and carries `nonce_value` in place of a recent
 /// blockhash, without any transfer.
-pub fn nonce_withdrawal_message(
+pub fn withdrawal_batch_message(
     nonce_account: Address,
     nonce_value: solana_hash::Hash,
 ) -> solana_message::Message {
@@ -709,7 +709,7 @@ pub mod devnet_sweep {
 pub mod events {
     use super::{
         DEFAULT_BLOCK_HEIGHT, MINTER_ADDRESS, NONCE_ACCOUNT, WITHDRAWAL_FEE, durable_nonce,
-        nonce_withdrawal_message, queued_deposit, queued_deposit_of, runtime::TestCanisterRuntime,
+        queued_deposit, queued_deposit_of, runtime::TestCanisterRuntime, withdrawal_batch_message,
     };
     use crate::deposit::sweep::deposit_status;
     use crate::{
@@ -929,7 +929,7 @@ pub mod events {
                 state,
                 EventType::SubmittedTransaction {
                     signature,
-                    message: nonce_withdrawal_message(NONCE_ACCOUNT, durable_nonce(nonce_seed))
+                    message: withdrawal_batch_message(NONCE_ACCOUNT, durable_nonce(nonce_seed))
                         .into(),
                     signers: vec![Signer::Minter],
                     purpose: TransactionPurpose::WithdrawSol {
