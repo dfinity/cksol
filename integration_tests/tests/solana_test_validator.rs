@@ -232,7 +232,8 @@ async fn should_add_an_operator_created_nonce_account_through_an_upgrade() {
     setup.drop().await;
 }
 
-/// The largest number of withdrawals the minter serves in a single durable-nonce transaction.
+/// The largest number of withdrawals the minter serves in a single durable-nonce transaction,
+/// mirroring `MAX_WITHDRAWALS_PER_NONCE_TX` in `minter/src/sol_transfer/mod.rs`.
 const MAX_WITHDRAWALS_PER_NONCE_TX: usize = 10;
 
 #[tokio::test(flavor = "multi_thread")]
@@ -326,12 +327,14 @@ async fn should_batch_withdrawals_over_two_nonce_accounts_and_reuse_a_freed_one(
         .map(|_| Keypair::new().pubkey())
         .collect();
     let mut burn_indices = Vec::with_capacity(NUM_BATCHED_WITHDRAWALS);
+    setup.stop_progress().await;
     for destination in &destinations {
         let withdrawal = withdraw_to(destination)
             .await
             .expect("withdraw should succeed");
         burn_indices.push(withdrawal.block_index);
     }
+    setup.resume_progress().await;
 
     setup.advance_time(Duration::from_mins(1)).await;
     for &burn_index in &burn_indices {
@@ -358,10 +361,15 @@ async fn should_batch_withdrawals_over_two_nonce_accounts_and_reuse_a_freed_one(
     let mut batched_burn_indices = [
         first_burn_indices.as_slice(),
         second_burn_indices.as_slice(),
-    ]
-    .concat();
+    ];
     batched_burn_indices.sort_unstable();
-    assert_eq!(batched_burn_indices, burn_indices);
+    assert_eq!(
+        batched_burn_indices,
+        [
+            &burn_indices[..MAX_WITHDRAWALS_PER_NONCE_TX],
+            &burn_indices[MAX_WITHDRAWALS_PER_NONCE_TX..]
+        ]
+    );
     let nonce_values_after_batches = [
         validator.get_nonce_value(&pool[0]).await,
         validator.get_nonce_value(&pool[1]).await,

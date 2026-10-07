@@ -344,6 +344,17 @@ impl Setup {
         self.env.as_ref().unwrap().advance_time(duration).await
     }
 
+    /// Stops the automatic progress of a live instance, so that its time and timers
+    /// stand still until [`Self::resume_progress`] is called.
+    pub async fn stop_progress(&self) {
+        self.env.as_ref().unwrap().stop_progress().await
+    }
+
+    /// Resumes the automatic progress of a live instance stopped by [`Self::stop_progress`].
+    pub async fn resume_progress(&self) {
+        self.env.as_ref().unwrap().auto_progress().await;
+    }
+
     /// Advances time and then lets the timers that became due complete their round.
     ///
     /// An instance that produces blocks on its own only needs wall-clock time for the
