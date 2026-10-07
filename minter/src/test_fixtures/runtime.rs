@@ -16,7 +16,9 @@ use ic_cdk::call::{CallPerformFailed, Error as CallError};
 use ic_cdk_management_canister::{SchnorrPublicKeyArgs, SchnorrPublicKeyResult};
 use icrc_ledger_types::icrc1::account::Account;
 use serde::de::DeserializeOwned;
-use sol_rpc_types::{MultiRpcResult, RpcResult, Signature, Slot};
+use sol_rpc_types::{
+    MultiRpcResult, RpcConfig, RpcResult, RpcSources, SendTransactionParams, Signature, Slot,
+};
 use std::{
     future::Future,
     sync::{Arc, Mutex},
@@ -76,6 +78,22 @@ impl TestCanisterRuntime {
             .lock()
             .unwrap()
             .clone()
+    }
+
+    /// The parameters of the `sendTransaction` calls made through this runtime, in call order.
+    pub fn sent_transactions(&self) -> Vec<SendTransactionParams> {
+        self.sent_update_calls()
+            .iter()
+            .filter(|call| call.method == "sendTransaction")
+            .map(|call| {
+                let (_sources, _config, params): (
+                    RpcSources,
+                    Option<RpcConfig>,
+                    SendTransactionParams,
+                ) = call.args();
+                params
+            })
+            .collect()
     }
 
     pub fn add_recent_block(mut self, result: RpcResult<Slot>) -> Self {
@@ -236,11 +254,11 @@ pub struct SentUpdateCall {
 impl SentUpdateCall {
     /// Decodes the single Candid argument of the recorded call.
     pub fn single_arg<Arg: CandidType + DeserializeOwned>(&self) -> Arg {
-        let (arg,) = decode_args(&self.args).expect("Failed to decode the call argument");
+        let (arg,) = self.args();
         arg
     }
 
-    /// Decodes all the Candid arguments of the recorded call.
+    /// Decodes the Candid arguments of the recorded call.
     pub fn args<Args: for<'a> ArgumentDecoder<'a>>(&self) -> Args {
         decode_args(&self.args).expect("Failed to decode the call arguments")
     }

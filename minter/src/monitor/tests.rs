@@ -5,22 +5,28 @@ use super::{
 use crate::{
     constants::MAX_CONCURRENT_RPC_CALLS,
     rpc::BlockHeight,
-    state::{TaskType, event::EventType, mutate_state, read_state, reset_state},
+    state::{
+        TaskType,
+        event::{EventType, VersionedMessage},
+        mutate_state, read_state, reset_state,
+    },
     storage::reset_events,
     test_fixtures::{
         EventsAssert, GetTransactionResult, MINIMUM_WITHDRAWAL_AMOUNT, account,
-        confirmed_block_at_height, events, init_balance, init_schnorr_master_key, init_state,
-        runtime::TestCanisterRuntime, signature,
+        confirmed_block_at_height, events, finalized_status, init_balance, init_schnorr_master_key,
+        init_state, runtime::TestCanisterRuntime, signature,
     },
 };
 use sol_rpc_types::{
-    ConfirmedBlock, MultiRpcResult, RpcError, Slot, TransactionConfirmationStatus,
-    TransactionError, TransactionStatus,
+    ConfirmedBlock, MultiRpcResult, RpcError, SendTransactionParams, Slot,
+    TransactionConfirmationStatus, TransactionError, TransactionStatus,
 };
+use solana_transaction::Transaction;
 
 type SlotResult = MultiRpcResult<Slot>;
 type BlockResult = MultiRpcResult<ConfirmedBlock>;
 type SignatureStatusesResult = MultiRpcResult<Vec<Option<TransactionStatus>>>;
+type SendTransactionResult = MultiRpcResult<sol_rpc_types::Signature>;
 
 const CURRENT_SLOT: Slot = 408_807_102;
 const SUBMISSION_SLOT: Slot = CURRENT_SLOT - 10;
@@ -204,19 +210,45 @@ mod finalization {
     }
 
     #[tokio::test]
-    async fn should_keep_a_missing_withdrawal_in_flight() {
+    async fn should_rebroadcast_a_missing_withdrawal_unchanged() {
         setup();
         let signature = submit_withdrawal_transaction();
         let events_before = EventsAssert::from_recorded();
 
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
-            .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![None])));
+            .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![None])))
+            .add_stub_response(SendTransactionResult::Consistent(Ok(signature.into())));
 
-        finalize_transactions(runtime).await;
+        finalize_transactions(runtime.clone()).await;
 
+        let sent = runtime.sent_transactions();
+        assert_eq!(sent.len(), 1);
+        assert_eq!(
+            sent[0].get_transaction(),
+            encoded_submitted_transaction(&signature)
+        );
+        assert_eq!(sent[0].skip_preflight, Some(true));
         assert_eq!(EventsAssert::from_recorded(), events_before);
         read_state(|s| assert!(s.submitted_transactions().contains_key(&signature)));
+    }
+
+    fn encoded_submitted_transaction(signature: &solana_signature::Signature) -> String {
+        let VersionedMessage::Legacy(message) = read_state(|s| {
+            s.submitted_transactions()
+                .get(signature)
+                .expect("the transaction is submitted")
+                .message()
+                .clone()
+        });
+        let transaction = Transaction {
+            signatures: vec![*signature],
+            message,
+        };
+        SendTransactionParams::try_from(transaction)
+            .expect("the transaction is serializable")
+            .get_transaction()
+            .to_string()
     }
 
     fn submit_withdrawal_transaction() -> solana_signature::Signature {
@@ -311,7 +343,10 @@ mod finalization {
             .with_increasing_time()
             .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
             .add_stub_response(BlockResult::Consistent(Ok(current_block())))
-            .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![None, None])));
+            .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![None, None])))
+            .add_stub_response(SendTransactionResult::Consistent(Ok(
+                nonce_withdrawal.into()
+            )));
 
         finalize_transactions(runtime).await;
 
@@ -395,15 +430,6 @@ mod finalization {
             status: Ok(()),
             err: None,
             confirmation_status: Some(TransactionConfirmationStatus::Processed),
-        }
-    }
-
-    fn finalized_status() -> TransactionStatus {
-        TransactionStatus {
-            slot: 0,
-            status: Ok(()),
-            err: None,
-            confirmation_status: Some(TransactionConfirmationStatus::Finalized),
         }
     }
 }

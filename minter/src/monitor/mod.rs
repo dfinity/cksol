@@ -5,7 +5,7 @@ use crate::{
     guard::TimerGuard,
     rpc::{
         Block, BlockHeight, SubmitTransactionError, get_recent_block, get_signature_statuses,
-        submit_transaction,
+        submit_transaction, submit_transaction_skipping_preflight,
     },
     runtime::CanisterRuntime,
     signer::sign_bytes,
@@ -46,7 +46,7 @@ const MAX_BLOCKHASH_AGE_IN_BLOCKS: BlockHeight = BlockHeight::new(150);
 const MAX_SIGNATURES_PER_STATUS_CHECK: usize = 256;
 
 /// Check the status of all submitted transactions, finalize succeeded/failed
-/// ones, and mark expired transactions for resubmission.
+/// ones, drop expired sweeps, and re-broadcast withdrawals that have no status.
 pub async fn finalize_transactions<R: CanisterRuntime>(runtime: R) {
     let _guard = match TimerGuard::new(TaskType::FinalizeTransactions) {
         Ok(guard) => guard,
@@ -139,6 +139,8 @@ async fn check_submitted_transactions<R: CanisterRuntime>(runtime: &R) -> bool {
         );
     }
 
+    rebroadcast_withdrawal_transactions(runtime, &statuses.not_found).await;
+
     num_transactions > MAX_CONCURRENT_RPC_CALLS * MAX_SIGNATURES_PER_STATUS_CHECK
 }
 
@@ -178,6 +180,54 @@ fn expire_transactions<R: CanisterRuntime>(
                 runtime,
             )
         });
+    }
+}
+
+async fn rebroadcast_withdrawal_transactions<R: CanisterRuntime>(
+    runtime: &R,
+    not_found: &BTreeSet<Signature>,
+) {
+    let batches: Vec<Vec<Transaction>> = read_state(|state| {
+        not_found
+            .iter()
+            .filter_map(
+                |signature| match state.submitted_transactions().get(signature)? {
+                    MinterTransaction::Withdrawal {
+                        message: VersionedMessage::Legacy(message),
+                        ..
+                    } => Some(Transaction {
+                        signatures: vec![*signature],
+                        message: message.clone(),
+                    }),
+                    MinterTransaction::SweepDeposit { .. } => None,
+                },
+            )
+            .chunks(MAX_CONCURRENT_RPC_CALLS)
+            .into_iter()
+            .map(Iterator::collect)
+            .collect()
+    });
+    for batch in batches {
+        futures::future::join_all(
+            batch
+                .into_iter()
+                .map(|transaction| rebroadcast_transaction(runtime, transaction)),
+        )
+        .await;
+    }
+}
+
+async fn rebroadcast_transaction<R: CanisterRuntime>(runtime: &R, transaction: Transaction) {
+    let signature = transaction.signatures[0];
+    match submit_transaction_skipping_preflight(runtime, transaction).await {
+        Ok(_) => log!(
+            Priority::Info,
+            "Re-broadcast withdrawal transaction {signature}"
+        ),
+        Err(e) => log!(
+            Priority::Info,
+            "Failed to re-broadcast withdrawal transaction {signature} (will retry next round): {e}"
+        ),
     }
 }
 
