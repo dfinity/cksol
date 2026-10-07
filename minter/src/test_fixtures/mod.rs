@@ -909,6 +909,16 @@ pub mod events {
         nonce_value: solana_hash::Hash,
         burn_indices: Vec<u64>,
     ) {
+        create_withdrawal_batch_transaction_on(NONCE_ACCOUNT, nonce_value, burn_indices);
+    }
+
+    /// Records a `CreatedWithdrawalTransaction` for the given withdrawals, binding
+    /// `nonce_account` to `nonce_value`.
+    pub fn create_withdrawal_batch_transaction_on(
+        nonce_account: Address,
+        nonce_value: solana_hash::Hash,
+        burn_indices: Vec<u64>,
+    ) {
         mutate_state(|state| {
             process_event(
                 state,
@@ -917,7 +927,7 @@ pub mod events {
                         .into_iter()
                         .map(LedgerBurnIndex::from)
                         .collect(),
-                    nonce_account: NONCE_ACCOUNT,
+                    nonce_account,
                     nonce_value,
                 },
                 &runtime(),

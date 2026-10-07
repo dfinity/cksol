@@ -3,6 +3,10 @@ use std::{num::NonZeroUsize, time::Duration};
 /// Maximum number of concurrent calls to the SOL RPC canister.
 pub const MAX_CONCURRENT_RPC_CALLS: usize = 10;
 
+/// Maximum number of concurrent threshold signing requests to the management canister
+/// in a single round of a timer.
+pub const MAX_CONCURRENT_SIGNATURES: usize = 10;
+
 /// Maximum number of attempts to fetch a recent block, each attempt consisting of
 /// at most one `getSlot` and one `getBlock` call.
 pub const GET_RECENT_BLOCK_MAX_TRIES: NonZeroUsize =

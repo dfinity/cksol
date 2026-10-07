@@ -13,7 +13,7 @@ use cksol_types_internal::log::Priority;
 
 use crate::{
     address::{minter_address, minter_public_key},
-    constants::MAX_CONCURRENT_RPC_CALLS,
+    constants::{MAX_CONCURRENT_RPC_CALLS, MAX_CONCURRENT_SIGNATURES},
     guard::{TimerGuard, withdrawal_guard},
     ledger::{BurnError, burn},
     numeric::LedgerBurnIndex,
@@ -33,6 +33,8 @@ use crate::{
 
 pub const WITHDRAWAL_PROCESSING_DELAY: Duration = Duration::from_mins(1);
 pub const WITHDRAWAL_PROCESSING_RETRY_DELAY: Duration = Duration::from_secs(10);
+
+const _: () = assert!(MAX_CONCURRENT_SIGNATURES <= MAX_CONCURRENT_RPC_CALLS);
 
 pub mod nonce;
 mod reserved_account_keys;
@@ -180,7 +182,8 @@ async fn create_transactions_batch<R: CanisterRuntime>(runtime: &R, minter_addre
         let max_batches = state
             .nonce_pool()
             .num_free_accounts()
-            .min(MAX_CONCURRENT_RPC_CALLS);
+            .min(MAX_CONCURRENT_RPC_CALLS)
+            .min(MAX_CONCURRENT_SIGNATURES.saturating_sub(state.created_withdrawal_txs().len()));
         let batches: Vec<_> = state.withdrawal_batches().take(max_batches).collect();
         state
             .reserve_nonce_accounts(batches.len())
@@ -277,9 +280,11 @@ async fn sign_transactions_batch<R: CanisterRuntime>(
 }
 
 fn bound_withdrawals(state: &State, minter_address: &Address) -> Vec<BoundWithdrawal> {
-    state
-        .created_withdrawal_txs()
-        .iter()
+    let mut created_withdrawal_txs: Vec<_> = state.created_withdrawal_txs().iter().collect();
+    created_withdrawal_txs.sort_by_key(|(_, created)| created.burn_indices.iter().min().copied());
+    created_withdrawal_txs
+        .into_iter()
+        .take(MAX_CONCURRENT_SIGNATURES)
         .filter_map(|(nonce_account, created)| {
             bound_withdrawal(state, minter_address, nonce_account, created)
                 .inspect_err(|e| {

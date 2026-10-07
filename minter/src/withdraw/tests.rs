@@ -1,6 +1,9 @@
 use crate::test_fixtures::signer::sign_as_minter;
 use crate::{
-    constants::{FEE_PER_SIGNATURE, MAX_CONCURRENT_RPC_CALLS, RENT_EXEMPTION_THRESHOLD},
+    constants::{
+        FEE_PER_SIGNATURE, MAX_CONCURRENT_RPC_CALLS, MAX_CONCURRENT_SIGNATURES,
+        RENT_EXEMPTION_THRESHOLD,
+    },
     guard::{TimerGuard, withdrawal_guard},
     sol_transfer::MAX_WITHDRAWALS_PER_NONCE_TX,
     state::{
@@ -331,7 +334,10 @@ mod process_pending_withdrawals_tests {
         state::event::EventType,
         test_fixtures::{
             address, durable_nonce,
-            events::{create_withdrawal_batch_transaction, submit_withdrawal_batch_transaction},
+            events::{
+                create_withdrawal_batch_transaction, create_withdrawal_batch_transaction_on,
+                submit_withdrawal_batch_transaction,
+            },
             nonce_account_info,
         },
     };
@@ -701,6 +707,76 @@ mod process_pending_withdrawals_tests {
             assert_eq!(
                 nonce_accounts,
                 [NONCE_ACCOUNT, second_nonce_account].into_iter().collect()
+            );
+        });
+    }
+
+    #[tokio::test]
+    async fn should_sign_at_most_the_concurrent_signatures_oldest_first_without_creating_more() {
+        let num_bound = MAX_CONCURRENT_SIGNATURES + 1;
+        let free_nonce_account = address(num_bound + 1);
+        let bound_nonce_account = |burn_index: usize| address(num_bound - burn_index);
+        init_state_with_args(InitArgs {
+            nonce_accounts: (0..num_bound)
+                .map(bound_nonce_account)
+                .chain([free_nonce_account])
+                .map(|nonce_account| nonce_account.to_string())
+                .collect(),
+            ..valid_init_args()
+        });
+        init_balance();
+        init_schnorr_master_key();
+
+        for burn_index in 0..num_bound {
+            events::accept_withdrawal(
+                account(burn_index),
+                burn_index as u64,
+                MINIMUM_WITHDRAWAL_AMOUNT,
+            );
+            create_withdrawal_batch_transaction_on(
+                bound_nonce_account(burn_index),
+                durable_nonce(burn_index),
+                vec![burn_index as u64],
+            );
+        }
+        let pending_burn_index = num_bound as u64;
+        events::accept_withdrawal(
+            account(num_bound),
+            pending_burn_index,
+            MINIMUM_WITHDRAWAL_AMOUNT,
+        );
+
+        let runtime = (0..MAX_CONCURRENT_SIGNATURES)
+            .fold(TestCanisterRuntime::new(), |runtime, i| {
+                runtime
+                    .add_stub_response(SendTransactionResult::Consistent(Ok(signature(i).into())))
+            })
+            .add_stub_response(GetAccountInfoResult::Consistent(Ok(Some(
+                nonce_account_info(MINTER_ADDRESS, num_bound),
+            ))))
+            .with_increasing_time()
+            .add_signer(sign_as_minter().times(MAX_CONCURRENT_SIGNATURES));
+
+        process_pending_withdrawals(runtime).await;
+
+        for burn_index in 0..MAX_CONCURRENT_SIGNATURES {
+            assert_matches!(
+                withdrawal_status(burn_index as u64),
+                WithdrawalStatus::TxSent { .. }
+            );
+        }
+        assert_eq!(
+            withdrawal_status(MAX_CONCURRENT_SIGNATURES as u64),
+            WithdrawalStatus::Pending
+        );
+        read_state(|s| {
+            assert_eq!(
+                s.created_withdrawal_txs().keys().collect::<Vec<_>>(),
+                vec![&bound_nonce_account(MAX_CONCURRENT_SIGNATURES)]
+            );
+            assert!(
+                s.pending_withdrawal_requests()
+                    .contains_key(&pending_burn_index.into())
             );
         });
     }
