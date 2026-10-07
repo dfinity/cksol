@@ -1,6 +1,6 @@
 use crate::{
     state::nonce_pool::{DurableNoncePool, NoncePoolError},
-    test_fixtures::address,
+    test_fixtures::{address, durable_nonce},
 };
 use solana_address::Address;
 
@@ -30,6 +30,42 @@ fn should_leave_the_pool_unchanged_when_an_add_fails() {
         .expect_err("adding a duplicate address should fail");
 
     assert_eq!(pool, pool_of([address(1)]));
+}
+
+#[test]
+#[should_panic(expected = "already bound")]
+fn should_panic_when_binding_a_bound_account() {
+    let mut pool = pool_of([address(1)]);
+    pool.bind(&address(1), durable_nonce(1));
+
+    pool.bind(&address(1), durable_nonce(2));
+}
+
+#[test]
+#[should_panic(expected = "already seen")]
+fn should_panic_when_binding_a_seen_nonce_value() {
+    let mut pool = pool_of([address(1)]);
+    pool.bind(&address(1), durable_nonce(1));
+    pool.free(&address(1));
+
+    pool.bind(&address(1), durable_nonce(1));
+}
+
+#[test]
+fn should_bind_a_freed_account_to_a_new_nonce_value() {
+    let mut pool = pool_of([address(1)]);
+    pool.bind(&address(1), durable_nonce(1));
+    pool.free(&address(1));
+
+    pool.bind(&address(1), durable_nonce(2));
+}
+
+#[test]
+#[should_panic(expected = "not bound")]
+fn should_panic_when_freeing_an_unbound_account() {
+    let mut pool = pool_of([address(1)]);
+
+    pool.free(&address(1));
 }
 
 fn pool_of(addresses: impl IntoIterator<Item = Address>) -> DurableNoncePool {

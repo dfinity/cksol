@@ -6,7 +6,7 @@ use askama::Template;
 use candid::Principal;
 use cksol_types_internal::SolanaNetwork;
 use ic_http_types::HttpRequest;
-use std::str::FromStr;
+use std::{collections::BTreeMap, str::FromStr};
 
 const LAMPORTS_PER_SOL: u64 = 1_000_000_000;
 
@@ -331,7 +331,12 @@ impl DashboardTemplate {
         }
 
         // Pending and sent (active) newest-first, then finalized (succeeded/failed) newest-first.
-        for (burn_index, pending) in state.pending_withdrawal_requests().iter().rev() {
+        let pending_and_created_requests: BTreeMap<_, _> = state
+            .pending_withdrawal_requests()
+            .iter()
+            .chain(state.created_withdrawal_requests())
+            .collect();
+        for (burn_index, pending) in pending_and_created_requests.into_iter().rev() {
             push_withdrawal(
                 &mut withdrawals,
                 burn_index,

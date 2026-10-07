@@ -4,7 +4,10 @@ use crate::{
     ledger::client::LedgerClient,
     numeric::{LedgerBurnIndex, LedgerMintIndex},
     rpc::BlockHeight,
-    sol_transfer::{BATCH_WITHDRAWAL_TX_FEE, MAX_SIGNATURES, MAX_WITHDRAWALS_PER_TX},
+    sol_transfer::{
+        BATCH_WITHDRAWAL_TX_FEE, MAX_SIGNATURES, MAX_WITHDRAWALS_PER_TX,
+        build_batch_withdrawal_message,
+    },
     state::event::{
         CreditedDeposit, Signer, TransactionPurpose, VersionedMessage, WithdrawalRequest,
     },
@@ -20,6 +23,8 @@ use icrc_ledger_types::icrc1::account::Account;
 use sol_rpc_client::SolRpcClient;
 use sol_rpc_types::{ConsensusStrategy, Lamport, RpcSources, SolanaCluster};
 use solana_address::Address;
+use solana_hash::Hash;
+use solana_message::Message;
 use solana_signature::Signature;
 use std::{
     cell::RefCell,
@@ -108,10 +113,12 @@ pub struct State {
     pending_withdrawal_request_guards: BTreeSet<Account>,
     deposits: Deposits,
     pending_withdrawal_requests: BTreeMap<LedgerBurnIndex, PendingWithdrawalRequest>,
+    created_withdrawal_requests: BTreeMap<LedgerBurnIndex, PendingWithdrawalRequest>,
     sent_withdrawal_requests: BTreeMap<LedgerBurnIndex, SentWithdrawalRequest>,
     successful_withdrawal_requests: BTreeMap<LedgerBurnIndex, SentWithdrawalRequest>,
     failed_withdrawal_requests: BTreeMap<LedgerBurnIndex, SentWithdrawalRequest>,
     submitted_transactions: InsertionOrderedMap<Signature, MinterTransaction>,
+    created_withdrawal_txs: BTreeMap<Address, CreatedWithdrawalTransaction>,
     transactions_to_resubmit: InsertionOrderedMap<Signature, MinterTransaction>,
     succeeded_transactions: BTreeSet<Signature>,
     failed_transactions: InsertionOrderedMap<Signature, MinterTransaction>,
@@ -200,6 +207,10 @@ impl State {
         &self.submitted_transactions
     }
 
+    pub fn created_withdrawal_txs(&self) -> &BTreeMap<Address, CreatedWithdrawalTransaction> {
+        &self.created_withdrawal_txs
+    }
+
     pub fn transactions_to_resubmit(&self) -> &InsertionOrderedMap<Signature, MinterTransaction> {
         &self.transactions_to_resubmit
     }
@@ -227,6 +238,9 @@ impl State {
                     .is_none(),
                 "BUG: transaction {signature} is already queued for resubmission"
             ),
+            MinterTransaction::NonceWithdrawal { .. } => {
+                panic!("BUG: durable-nonce withdrawal transaction {signature} cannot expire")
+            }
         }
     }
 
@@ -374,6 +388,7 @@ impl State {
         let incomplete_destinations: BTreeSet<Address> = self
             .pending_withdrawal_requests
             .values()
+            .chain(self.created_withdrawal_requests.values())
             .map(|pending| &pending.request)
             .chain(
                 self.sent_withdrawal_requests
@@ -454,7 +469,9 @@ impl State {
 
     pub fn withdrawal_status(&self, block_index: u64) -> WithdrawalStatus {
         let burn_index = LedgerBurnIndex::from(block_index);
-        if self.pending_withdrawal_requests.contains_key(&burn_index) {
+        if self.pending_withdrawal_requests.contains_key(&burn_index)
+            || self.created_withdrawal_requests.contains_key(&burn_index)
+        {
             return WithdrawalStatus::Pending;
         }
         if let Some(sent) = self.sent_withdrawal_requests.get(&burn_index) {
@@ -482,6 +499,12 @@ impl State {
         &self.pending_withdrawal_requests
     }
 
+    pub fn created_withdrawal_requests(
+        &self,
+    ) -> &BTreeMap<LedgerBurnIndex, PendingWithdrawalRequest> {
+        &self.created_withdrawal_requests
+    }
+
     pub fn withdrawal_batches(&self) -> WithdrawalBatches<'_> {
         WithdrawalBatches {
             pending_requests: self.pending_withdrawal_requests.values().peekable(),
@@ -496,8 +519,12 @@ impl State {
             .pending_withdrawal_requests
             .values()
             .map(|r| r.created_at);
+        let created = self
+            .created_withdrawal_requests
+            .values()
+            .map(|r| r.created_at);
         let sent = self.sent_withdrawal_requests.values().map(|r| r.created_at);
-        pending.chain(sent).min()
+        pending.chain(created).chain(sent).min()
     }
 
     fn process_accepted_withdrawal(&mut self, request: &WithdrawalRequest, created_at: u64) {
@@ -521,7 +548,6 @@ impl State {
         transaction: &VersionedMessage,
         signers: &[Signer],
         purpose: &TransactionPurpose,
-        block_height: BlockHeight,
     ) {
         assert!(
             !self.succeeded_transactions.contains(signature),
@@ -534,7 +560,10 @@ impl State {
         let message = transaction.clone();
         let signers = signers.to_vec();
         let submitted_transaction = match purpose {
-            TransactionPurpose::WithdrawSol { burn_indices } => {
+            TransactionPurpose::Withdrawal {
+                burn_indices,
+                block_height,
+            } => {
                 let mut total: Lamport = 0;
                 for burn_index in burn_indices {
                     let pending = self
@@ -565,10 +594,16 @@ impl State {
                 MinterTransaction::Withdrawal {
                     message,
                     signers,
-                    block_height,
+                    block_height: *block_height,
                 }
             }
-            TransactionPurpose::SweepDeposits { deposit_ids } => {
+            TransactionPurpose::NonceWithdrawal { burn_indices } => {
+                self.send_nonce_withdrawal(signature, message, signers, burn_indices)
+            }
+            TransactionPurpose::SweepDeposit {
+                deposit_ids,
+                block_height,
+            } => {
                 let sweep_destination = minter_address(self.minter_public_key.as_ref().expect(
                     "BUG: a sweep was submitted before the minter public key was recorded",
                 ));
@@ -577,7 +612,7 @@ impl State {
                 MinterTransaction::SweepDeposit {
                     message,
                     signers,
-                    block_height,
+                    block_height: *block_height,
                 }
             }
         };
@@ -587,6 +622,151 @@ impl State {
             None,
             "Attempted to submit transaction with signature {signature:?} twice"
         );
+    }
+
+    fn process_transaction_created(
+        &mut self,
+        burn_indices: &[LedgerBurnIndex],
+        nonce_account: &Address,
+        nonce_value: Hash,
+    ) {
+        self.nonce_pool.bind(nonce_account, nonce_value);
+        let mut total: Lamport = 0;
+        for burn_index in burn_indices {
+            let pending = self
+                .pending_withdrawal_requests
+                .remove(burn_index)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "Attempted to create transaction for unknown withdrawal request: {burn_index:?}"
+                    )
+                });
+            total = total
+                .checked_add(pending.request.amount_to_transfer)
+                .expect("BUG: total amount of a withdrawal transaction overflows");
+            assert_eq!(
+                self.created_withdrawal_requests
+                    .insert(*burn_index, pending),
+                None,
+                "Attempted to create transaction for already created withdrawal request: {burn_index:?}"
+            );
+        }
+        self.balance = self
+            .balance
+            .checked_sub(total + BATCH_WITHDRAWAL_TX_FEE)
+            .expect("BUG: insufficient minter balance for withdrawal");
+        assert_eq!(
+            self.created_withdrawal_txs.insert(
+                *nonce_account,
+                CreatedWithdrawalTransaction {
+                    nonce_value,
+                    burn_indices: burn_indices.to_vec(),
+                }
+            ),
+            None,
+            "BUG: nonce account {nonce_account} already has a created transaction"
+        );
+    }
+
+    fn send_nonce_withdrawal(
+        &mut self,
+        signature: &Signature,
+        message: VersionedMessage,
+        signers: Vec<Signer>,
+        burn_indices: &[LedgerBurnIndex],
+    ) -> MinterTransaction {
+        let nonce_account = message.advanced_nonce_account().unwrap_or_else(|| {
+            panic!("BUG: withdrawal transaction {signature} does not start with an AdvanceNonceAccount instruction")
+        });
+        let created = self
+            .created_withdrawal_txs
+            .remove(&nonce_account)
+            .unwrap_or_else(|| {
+                panic!(
+                    "BUG: no withdrawal transaction was created for nonce account {nonce_account}"
+                )
+            });
+        assert_eq!(
+            burn_indices, created.burn_indices,
+            "BUG: withdrawal transaction {signature} does not serve the withdrawal requests bound to nonce account {nonce_account}"
+        );
+        assert_eq!(
+            message,
+            VersionedMessage::Legacy(self.bound_withdrawal_message(&nonce_account, &created)),
+            "BUG: withdrawal transaction {signature} does not carry the message bound to nonce account {nonce_account}"
+        );
+        assert_eq!(
+            signers,
+            [Signer::Minter],
+            "BUG: withdrawal transaction {signature} must be signed by the minter only"
+        );
+        for burn_index in &created.burn_indices {
+            let pending = self
+                .created_withdrawal_requests
+                .remove(burn_index)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "BUG: withdrawal request {burn_index:?} of a created transaction is not in the created bucket"
+                    )
+                });
+            assert_eq!(
+                self.sent_withdrawal_requests.insert(
+                    *burn_index,
+                    SentWithdrawalRequest {
+                        request: pending.request,
+                        signature: *signature,
+                        created_at: pending.created_at,
+                    },
+                ),
+                None,
+                "Attempted to send transaction for already sent withdrawal request: {burn_index:?}"
+            );
+        }
+        MinterTransaction::NonceWithdrawal {
+            message,
+            signers,
+            nonce_account,
+            nonce_value: created.nonce_value,
+        }
+    }
+
+    fn bound_withdrawal_message(
+        &self,
+        nonce_account: &Address,
+        created: &CreatedWithdrawalTransaction,
+    ) -> Message {
+        let minter_address =
+            minter_address(self.minter_public_key.as_ref().expect(
+                "BUG: a withdrawal was submitted before the minter public key was recorded",
+            ));
+        let transfers: Vec<(Address, Lamport)> = created
+            .burn_indices
+            .iter()
+            .map(|burn_index| {
+                let request = &self
+                    .created_withdrawal_requests
+                    .get(burn_index)
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "BUG: withdrawal request {burn_index:?} of a created transaction is not in the created bucket"
+                        )
+                    })
+                    .request;
+                (
+                    Address::from(request.solana_address),
+                    request.amount_to_transfer,
+                )
+            })
+            .collect();
+        build_batch_withdrawal_message(
+            &minter_address,
+            nonce_account,
+            created.nonce_value,
+            &transfers,
+        )
+        .unwrap_or_else(|e| {
+            panic!("BUG: cannot rebuild the withdrawal message bound to nonce account {nonce_account}: {e}")
+        })
     }
 
     fn process_transaction_resubmitted(
@@ -614,6 +794,9 @@ impl State {
                 signers,
                 block_height: new_block_height,
             },
+            MinterTransaction::NonceWithdrawal { .. } => panic!(
+                "BUG: durable-nonce withdrawal transaction {old_signature} must never be resubmitted"
+            ),
         };
         assert!(
             !self.succeeded_transactions.contains(new_signature),
@@ -650,6 +833,9 @@ impl State {
         match transaction {
             MinterTransaction::SweepDeposit { .. } => self.deposits.finalize_swept(signature),
             MinterTransaction::Withdrawal { .. } => {}
+            MinterTransaction::NonceWithdrawal { nonce_account, .. } => {
+                self.nonce_pool.free(&nonce_account)
+            }
         }
         assert!(
             !self.transactions_to_resubmit.contains_key(signature),
@@ -677,18 +863,21 @@ impl State {
             .unwrap_or_else(|| {
                 panic!("Attempted to mark unknown transaction {signature:?} as failed")
             });
-        assert!(
-            !self.transactions_to_resubmit.contains_key(signature),
-            "BUG: transaction {signature} is queued for resubmission but is being marked as failed"
-        );
-        match transaction {
+        match &transaction {
             MinterTransaction::SweepDeposit { .. } => self.deposits.drop_swept(signature),
             MinterTransaction::Withdrawal { .. } => {}
+            MinterTransaction::NonceWithdrawal { nonce_account, .. } => {
+                self.nonce_pool.free(nonce_account)
+            }
         }
         assert_eq!(
             self.failed_transactions.insert(*signature, transaction),
             None,
             "Attempted to fail transaction {signature:?} twice"
+        );
+        assert!(
+            !self.transactions_to_resubmit.contains_key(signature),
+            "BUG: transaction {signature} is queued for resubmission but is being marked as failed"
         );
         self.sent_withdrawal_requests
             .extract_if(.., |_, sent| &sent.signature == signature)
@@ -780,10 +969,12 @@ impl TryFrom<InitArgs> for State {
             pending_withdrawal_request_guards: BTreeSet::new(),
             deposits: Deposits::default(),
             pending_withdrawal_requests: BTreeMap::new(),
+            created_withdrawal_requests: BTreeMap::new(),
             sent_withdrawal_requests: BTreeMap::new(),
             successful_withdrawal_requests: BTreeMap::new(),
             failed_withdrawal_requests: BTreeMap::new(),
             submitted_transactions: InsertionOrderedMap::new(),
+            created_withdrawal_txs: BTreeMap::new(),
             transactions_to_resubmit: InsertionOrderedMap::new(),
             succeeded_transactions: BTreeSet::new(),
             failed_transactions: InsertionOrderedMap::new(),
@@ -843,6 +1034,17 @@ impl Iterator for WithdrawalBatches<'_> {
     }
 }
 
+/// The binding of a durable nonce account and its nonce value to the
+/// withdrawal requests of a transaction whose threshold signature was not yet
+/// recorded. The binding determines the transaction message, so that a signing
+/// failure leads to re-signing the identical message instead of building a new
+/// one for the same nonce value.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CreatedWithdrawalTransaction {
+    pub nonce_value: Hash,
+    pub burn_indices: Vec<LedgerBurnIndex>,
+}
+
 /// A withdrawal request that has been submitted in a Solana transaction.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SentWithdrawalRequest {
@@ -880,27 +1082,42 @@ pub enum MinterTransaction {
         /// The block height of the block whose blockhash the transaction uses.
         block_height: BlockHeight,
     },
+    /// A durable-nonce withdrawal transaction, which never expires: it stays
+    /// in flight until it is finalized.
+    NonceWithdrawal {
+        message: VersionedMessage,
+        signers: Vec<Signer>,
+        /// The durable nonce account whose nonce value the transaction uses.
+        nonce_account: Address,
+        /// The durable nonce value the transaction uses instead of a recent blockhash.
+        nonce_value: Hash,
+    },
 }
 
 impl MinterTransaction {
     pub fn message(&self) -> &VersionedMessage {
         match self {
             MinterTransaction::SweepDeposit { message, .. }
-            | MinterTransaction::Withdrawal { message, .. } => message,
+            | MinterTransaction::Withdrawal { message, .. }
+            | MinterTransaction::NonceWithdrawal { message, .. } => message,
         }
     }
 
     pub fn signers(&self) -> &[Signer] {
         match self {
             MinterTransaction::SweepDeposit { signers, .. }
-            | MinterTransaction::Withdrawal { signers, .. } => signers,
+            | MinterTransaction::Withdrawal { signers, .. }
+            | MinterTransaction::NonceWithdrawal { signers, .. } => signers,
         }
     }
 
-    pub fn block_height(&self) -> BlockHeight {
+    /// The block height of the block whose blockhash the transaction uses,
+    /// or `None` for a durable-nonce transaction, which never expires.
+    pub fn block_height(&self) -> Option<BlockHeight> {
         match self {
             MinterTransaction::SweepDeposit { block_height, .. }
-            | MinterTransaction::Withdrawal { block_height, .. } => *block_height,
+            | MinterTransaction::Withdrawal { block_height, .. } => Some(*block_height),
+            MinterTransaction::NonceWithdrawal { .. } => None,
         }
     }
 }

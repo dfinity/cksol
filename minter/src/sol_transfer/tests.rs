@@ -292,3 +292,120 @@ mod batch_withdrawal_tests {
         );
     }
 }
+
+mod batch_withdrawal_message_tests {
+    use super::*;
+    use solana_message::{MessageHeader, compiled_instruction::CompiledInstruction};
+    use solana_sdk_ids::{system_program, sysvar::recent_blockhashes};
+
+    const NONCE_ACCOUNT: Address = Address::new_from_array([0x4E; 32]);
+    const FIRST_TARGET: Address = Address::new_from_array([0x01; 32]);
+    const SECOND_TARGET: Address = Address::new_from_array([0x02; 32]);
+    const MINTER_ADDRESS_INDEX: u8 = 0;
+    const NONCE_ACCOUNT_INDEX: u8 = 3;
+    const SYSTEM_PROGRAM_INDEX: u8 = 4;
+    const RECENT_BLOCKHASHES_INDEX: u8 = 5;
+
+    #[test]
+    fn should_build_the_message_bound_to_the_nonce() {
+        let nonce_value = Hash::new_from_array([0xAA; 32]);
+
+        let message = build_batch_withdrawal_message(
+            &MINTER_ADDRESS,
+            &NONCE_ACCOUNT,
+            nonce_value,
+            &[(SECOND_TARGET, 20_000_000), (FIRST_TARGET, 10_000_000)],
+        )
+        .expect("message should fit in a transaction");
+
+        assert_eq!(
+            message,
+            Message {
+                header: MessageHeader {
+                    num_required_signatures: 1,
+                    num_readonly_signed_accounts: 0,
+                    num_readonly_unsigned_accounts: 2,
+                },
+                account_keys: vec![
+                    MINTER_ADDRESS,
+                    FIRST_TARGET,
+                    SECOND_TARGET,
+                    NONCE_ACCOUNT,
+                    system_program::ID,
+                    recent_blockhashes::ID,
+                ],
+                recent_blockhash: nonce_value,
+                instructions: vec![
+                    advance_nonce_instruction(),
+                    transfer_instruction(2, 20_000_000),
+                    transfer_instruction(1, 10_000_000),
+                ],
+            }
+        );
+    }
+
+    #[test]
+    fn should_fit_max_withdrawals_with_distinct_targets() {
+        let message = build_batch_withdrawal_message(
+            &MINTER_ADDRESS,
+            &NONCE_ACCOUNT,
+            Hash::new_from_array([0xAA; 32]),
+            &distinct_transfers(MAX_WITHDRAWALS_PER_TX),
+        )
+        .expect("message should fit in a transaction at max capacity");
+
+        assert_eq!(message.instructions.len(), MAX_WITHDRAWALS_PER_TX + 1);
+    }
+
+    #[test]
+    fn should_reject_more_than_max_withdrawals_with_distinct_targets() {
+        let result = build_batch_withdrawal_message(
+            &MINTER_ADDRESS,
+            &NONCE_ACCOUNT,
+            Hash::new_from_array([0xAA; 32]),
+            &distinct_transfers(MAX_WITHDRAWALS_PER_TX + 1),
+        );
+
+        assert_matches!(
+            result,
+            Err(CreateTransferError::TransactionTooLarge {
+                max: MAX_TX_SIZE,
+                ..
+            })
+        );
+    }
+
+    fn distinct_transfers(count: usize) -> Vec<(Address, Lamport)> {
+        (0..count)
+            .map(|i| {
+                let mut target = [0xF0; 32];
+                target[0] = i as u8;
+                (Address::new_from_array(target), 1_000_000)
+            })
+            .collect()
+    }
+
+    fn advance_nonce_instruction() -> CompiledInstruction {
+        const ADVANCE_NONCE_ACCOUNT_DISCRIMINANT: u32 = 4;
+        CompiledInstruction {
+            program_id_index: SYSTEM_PROGRAM_INDEX,
+            accounts: vec![
+                NONCE_ACCOUNT_INDEX,
+                RECENT_BLOCKHASHES_INDEX,
+                MINTER_ADDRESS_INDEX,
+            ],
+            data: ADVANCE_NONCE_ACCOUNT_DISCRIMINANT.to_le_bytes().to_vec(),
+        }
+    }
+
+    fn transfer_instruction(to_index: u8, amount: Lamport) -> CompiledInstruction {
+        const TRANSFER_DISCRIMINANT: u32 = 2;
+        let mut data = TRANSFER_DISCRIMINANT.to_le_bytes().to_vec();
+        data.extend_from_slice(&amount.to_le_bytes());
+        CompiledInstruction {
+            program_id_index: SYSTEM_PROGRAM_INDEX,
+            accounts: vec![MINTER_ADDRESS_INDEX, to_index],
+            data,
+        }
+    }
+}

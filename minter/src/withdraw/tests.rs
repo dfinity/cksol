@@ -486,7 +486,7 @@ mod process_pending_withdrawals_tests {
         assert_matches!(withdrawal_status(1), WithdrawalStatus::TxSent { .. });
         read_state(|s| {
             let submitted = s.submitted_transactions().get(&tx_signature).unwrap();
-            assert_eq!(submitted.block_height(), block_height);
+            assert_eq!(submitted.block_height(), Some(block_height));
             assert_matches!(submitted, MinterTransaction::Withdrawal { .. });
             assert_eq!(
                 s.sent_withdrawal_requests()

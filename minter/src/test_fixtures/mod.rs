@@ -2,6 +2,7 @@ use crate::{
     address::{MINTER_DERIVATION_PATH, account_address, derivation_path},
     constants::{FEE_PER_SIGNATURE, RENT_EXEMPTION_THRESHOLD},
     rpc::{BlockHeight, FetchedTransaction},
+    sol_transfer::build_batch_withdrawal_message,
     state::{
         DepositBalance, QueuedDeposit, SchnorrPublicKey, State, Sweep,
         event::{Event, EventType, VersionedMessage},
@@ -183,6 +184,18 @@ pub fn confirmed_block_at_height(block_height: BlockHeight) -> sol_rpc_types::Co
 /// A test durable nonce account address, distinct from any deposit address.
 pub fn nonce_account_address() -> Address {
     Address::from([0x4E; 32])
+}
+
+/// Returns the batch withdrawal message of [`MINTER_ADDRESS`] that advances
+/// `nonce_account`, carries `nonce_value` in place of a recent blockhash and
+/// performs the given transfers.
+pub fn withdrawal_batch_message(
+    nonce_account: Address,
+    nonce_value: solana_hash::Hash,
+    transfers: &[(Address, Lamport)],
+) -> solana_message::Message {
+    build_batch_withdrawal_message(&MINTER_ADDRESS, &nonce_account, nonce_value, transfers)
+        .expect("BUG: the withdrawal batch message exceeds the transaction size")
 }
 
 /// Returns the nonce value stored by [`nonce_account_info`] for the same `nonce_seed`.
@@ -691,8 +704,8 @@ pub mod devnet_sweep {
 /// All helpers operate on the global thread-local state via [`mutate_state`].
 pub mod events {
     use super::{
-        DEFAULT_BLOCK_HEIGHT, MINTER_ADDRESS, WITHDRAWAL_FEE, queued_deposit, queued_deposit_of,
-        runtime::TestCanisterRuntime,
+        DEFAULT_BLOCK_HEIGHT, MINTER_ADDRESS, NONCE_ACCOUNT, WITHDRAWAL_FEE, queued_deposit,
+        queued_deposit_of, runtime::TestCanisterRuntime, withdrawal_batch_message,
     };
     use crate::deposit::sweep::deposit_status;
     use crate::{
@@ -792,8 +805,10 @@ pub mod events {
                         .sweep_message(solana_hash::Hash::default())
                         .into(),
                     signers,
-                    purpose: TransactionPurpose::SweepDeposits { deposit_ids },
-                    block_height: DEFAULT_BLOCK_HEIGHT,
+                    purpose: TransactionPurpose::SweepDeposit {
+                        deposit_ids,
+                        block_height: DEFAULT_BLOCK_HEIGHT,
+                    },
                 },
                 &runtime(),
             )
@@ -880,6 +895,74 @@ pub mod events {
         });
     }
 
+    /// Records a `CreatedWithdrawalTransaction` for the given withdrawals, binding
+    /// [`NONCE_ACCOUNT`] to `nonce_value`.
+    pub fn create_withdrawal_batch_transaction(
+        nonce_value: solana_hash::Hash,
+        burn_indices: Vec<u64>,
+    ) {
+        mutate_state(|state| {
+            process_event(
+                state,
+                EventType::CreatedWithdrawalTransaction {
+                    burn_indices: burn_indices
+                        .into_iter()
+                        .map(LedgerBurnIndex::from)
+                        .collect(),
+                    nonce_account: NONCE_ACCOUNT,
+                    nonce_value,
+                },
+                &runtime(),
+            )
+        });
+    }
+
+    /// Records a `SubmittedTransaction` for the durable-nonce withdrawal
+    /// transaction advancing [`NONCE_ACCOUNT`] with `nonce_value` and
+    /// transferring the created withdrawal requests of `burn_indices`.
+    pub fn submit_withdrawal_batch_transaction(
+        signature: Signature,
+        nonce_value: solana_hash::Hash,
+        burn_indices: Vec<u64>,
+    ) {
+        let burn_indices: Vec<LedgerBurnIndex> = burn_indices
+            .into_iter()
+            .map(LedgerBurnIndex::from)
+            .collect();
+        let message = withdrawal_batch_message(
+            NONCE_ACCOUNT,
+            nonce_value,
+            &created_withdrawal_transfers(&burn_indices),
+        );
+        mutate_state(|state| {
+            process_event(
+                state,
+                EventType::SubmittedTransaction {
+                    signature,
+                    message: message.into(),
+                    signers: vec![Signer::Minter],
+                    purpose: TransactionPurpose::NonceWithdrawal { burn_indices },
+                },
+                &runtime(),
+            )
+        });
+    }
+
+    fn created_withdrawal_transfers(burn_indices: &[LedgerBurnIndex]) -> Vec<(Address, Lamport)> {
+        read_state(|state| {
+            burn_indices
+                .iter()
+                .map(|burn_index| {
+                    let request = &state.created_withdrawal_requests()[burn_index].request;
+                    (
+                        Address::from(request.solana_address),
+                        request.amount_to_transfer,
+                    )
+                })
+                .collect()
+        })
+    }
+
     pub fn submit_withdrawal(signature: Signature, burn_indices: Vec<u64>) {
         submit_withdrawal_at_height(signature, DEFAULT_BLOCK_HEIGHT, burn_indices);
     }
@@ -896,13 +979,13 @@ pub mod events {
                     signature,
                     message: message().into(),
                     signers: vec![Signer::Minter],
-                    purpose: TransactionPurpose::WithdrawSol {
+                    purpose: TransactionPurpose::Withdrawal {
                         burn_indices: burn_indices
                             .into_iter()
                             .map(LedgerBurnIndex::from)
                             .collect(),
+                        block_height,
                     },
-                    block_height,
                 },
                 &runtime(),
             )
@@ -1208,21 +1291,14 @@ pub mod arb {
                 arb_signature(),
                 arb_message(),
                 prop::collection::vec(arb_signer(), 1..10),
-                prop_oneof![
-                    prop::collection::vec(arb_ledger_burn_index(), 1..10)
-                        .prop_map(|burn_indices| TransactionPurpose::WithdrawSol { burn_indices }),
-                    prop::collection::vec(any::<u64>(), 1..10)
-                        .prop_map(|deposit_ids| TransactionPurpose::SweepDeposits { deposit_ids }),
-                ],
-                arb_block_height(),
+                arb_transaction_purpose(),
             )
-                .prop_map(|(signature, message, signers, purpose, block_height)| {
+                .prop_map(|(signature, message, signers, purpose)| {
                     EventType::SubmittedTransaction {
                         signature,
                         message: message.into(),
                         signers,
                         purpose,
-                        block_height,
                     }
                 }),
             (arb_signature(), arb_signature(), arb_block_height(),).prop_map(
@@ -1277,6 +1353,18 @@ pub mod arb {
                 }
             }),
             any::<u64>().prop_map(|deposit_id| EventType::QuarantinedPendingMint { deposit_id }),
+            (
+                prop::collection::vec(arb_ledger_burn_index(), 1..10),
+                arb_address(),
+                arb_hash(),
+            )
+                .prop_map(|(burn_indices, nonce_account, nonce_value)| {
+                    EventType::CreatedWithdrawalTransaction {
+                        burn_indices,
+                        nonce_account,
+                        nonce_value,
+                    }
+                }),
         ]
     }
 
@@ -1285,6 +1373,33 @@ pub mod arb {
             deposit_id,
             amount_to_mint,
         })
+    }
+
+    fn arb_transaction_purpose() -> impl Strategy<Value = TransactionPurpose> {
+        prop_oneof![
+            (
+                prop::collection::vec(any::<u64>(), 1..10),
+                arb_block_height()
+            )
+                .prop_map(|(deposit_ids, block_height)| {
+                    TransactionPurpose::SweepDeposit {
+                        deposit_ids,
+                        block_height,
+                    }
+                }),
+            (
+                prop::collection::vec(arb_ledger_burn_index(), 1..10),
+                arb_block_height()
+            )
+                .prop_map(|(burn_indices, block_height)| {
+                    TransactionPurpose::Withdrawal {
+                        burn_indices,
+                        block_height,
+                    }
+                }),
+            prop::collection::vec(arb_ledger_burn_index(), 1..10)
+                .prop_map(|burn_indices| TransactionPurpose::NonceWithdrawal { burn_indices }),
+        ]
     }
 
     pub fn arb_event() -> impl Strategy<Value = Event> {
