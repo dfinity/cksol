@@ -51,6 +51,23 @@ fn should_panic_when_binding_a_seen_nonce_value() {
     pool.bind(&address(1), durable_nonce(1));
 }
 
+#[test]
+fn should_bind_a_freed_account_to_a_new_nonce_value() {
+    let mut pool = pool_of([address(1)]);
+    pool.bind(&address(1), durable_nonce(1));
+    pool.free(&address(1));
+
+    pool.bind(&address(1), durable_nonce(2));
+}
+
+#[test]
+#[should_panic(expected = "not bound")]
+fn should_panic_when_freeing_an_unbound_account() {
+    let mut pool = pool_of([address(1)]);
+
+    pool.free(&address(1));
+}
+
 fn pool_of(addresses: impl IntoIterator<Item = Address>) -> DurableNoncePool {
     DurableNoncePool::new(addresses).expect("the addresses are pairwise distinct")
 }
