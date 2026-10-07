@@ -1065,11 +1065,6 @@ mod deposit_sol_tests {
                 e,
                 EventType::ExpiredTransaction { signature } if *signature == sweep_signature
             )));
-            check!(
-                !events
-                    .iter()
-                    .any(|e| matches!(e, EventType::ResubmittedTransaction { .. }))
-            );
         });
         let setup = setup
             .check_metrics()

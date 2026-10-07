@@ -48,15 +48,6 @@ pub enum EventType {
         /// track it until it is finalized.
         purpose: TransactionPurpose,
     },
-    /// A previously submitted transaction was resubmitted with a new signature.
-    ResubmittedTransaction {
-        /// The signature of the old transaction being replaced.
-        old_signature: Signature,
-        /// The signature of the new transaction.
-        new_signature: Signature,
-        /// The block height of the new blockhash used in the resubmitted transaction.
-        new_block_height: u64,
-    },
     /// A previously submitted Solana transaction has been finalized successfully.
     SucceededTransaction {
         /// The signature of the succeeded Solana transaction.
@@ -69,8 +60,7 @@ pub enum EventType {
     },
     /// A previously submitted Solana transaction has an expired blockhash
     /// and a null on-chain status, meaning it will never be executed.
-    /// A withdrawal transaction is marked for resubmission;
-    /// the deposits of a sweep transaction are dropped instead.
+    /// The deposits of the expired sweep transaction are dropped.
     ExpiredTransaction {
         /// The signature of the expired Solana transaction.
         signature: Signature,

@@ -48,12 +48,6 @@ const MOCK_SLOT: u64 = 100_000_000;
 const SUBMITTED_BLOCKHASH: &str = "4sGjMW1sUnHzSxGspuhpqLDx6wiyjNtZAMdL4VZHirAn";
 const SUBMITTED_SIGNATURE: &str =
     "5VERv8NMvzbJMEkV8xnrLkEaWRtSz9CosKDYjCJjBRnbJLgp8uirBgmQpjKhoR4tjF3ZpRzrFmBV6UjKdiSZkQUW";
-/// Blockhash of the later block a timer builds the replacement of an expired transaction
-/// on, and the signature the mocked `sendTransaction` answers with for it. Both differ from
-/// those of the first submission, so a test can tell the two transactions apart.
-const REPLACEMENT_BLOCKHASH: &str = "9ZNTfG4NyQgxy2SWjSiQoUyBPEvXT2xo7fKc5hPYYJ7b";
-const REPLACEMENT_SIGNATURE: &str =
-    "drWLXM6bHretgz7KuwvGZvPBeQ8KEbS3AKB2WJPy4TbBDaqdqAiNcj3cTAS7UnyJKM7eEZoUf4DvhY1TKkus9Bp";
 /// Blockhash the mocks report for a block a timer only reads the height of.
 const IGNORED_BLOCKHASH: &str = "CzBVNFJkh7WkQDfJUiDjLc7kPrJd8kR2yiCvwBUhSe7Y";
 
@@ -186,16 +180,6 @@ impl MockBuilder {
     pub fn mark_transaction_expired(self, signature: &Signature, block_height: u64) -> Self {
         self.get_current_block(block_height, IGNORED_BLOCKHASH)
             .check_signature_statuses(signature, get_signature_statuses_not_found_response())
-    }
-
-    /// Mocks for `resubmit_transactions` sending the replacement transaction, built on the
-    /// block at `block_height`: `getSlot` → `getBlock` → `sendTransaction`.
-    pub fn resubmit_transaction(self, block_height: u64) -> Self {
-        self.get_current_block(block_height, REPLACEMENT_BLOCKHASH)
-            .expect(
-                send_transaction_request(),
-                send_transaction_response(REPLACEMENT_SIGNATURE),
-            )
     }
 
     /// Mocks for `finalize_transactions` reporting the pending transaction with the given

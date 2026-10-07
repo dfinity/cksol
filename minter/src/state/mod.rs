@@ -119,7 +119,6 @@ pub struct State {
     failed_withdrawal_requests: BTreeMap<LedgerBurnIndex, SentWithdrawalRequest>,
     submitted_transactions: InsertionOrderedMap<Signature, MinterTransaction>,
     created_withdrawal_txs: BTreeMap<Address, CreatedWithdrawalTransaction>,
-    transactions_to_resubmit: InsertionOrderedMap<Signature, MinterTransaction>,
     succeeded_transactions: BTreeSet<Signature>,
     failed_transactions: InsertionOrderedMap<Signature, MinterTransaction>,
     nonce_pool: DurableNoncePool,
@@ -211,24 +210,20 @@ impl State {
         &self.created_withdrawal_txs
     }
 
-    pub fn transactions_to_resubmit(&self) -> &InsertionOrderedMap<Signature, MinterTransaction> {
-        &self.transactions_to_resubmit
-    }
-
     pub fn process_transaction_expired(&mut self, signature: &Signature) {
         assert!(
             !self.succeeded_transactions.contains(signature),
-            "BUG: cannot mark already succeeded transaction {signature} for resubmission"
+            "BUG: cannot mark already succeeded transaction {signature} as expired"
         );
         assert!(
             !self.failed_transactions.contains_key(signature),
-            "BUG: cannot mark already failed transaction {signature} for resubmission"
+            "BUG: cannot mark already failed transaction {signature} as expired"
         );
         let transaction = self
             .submitted_transactions
             .remove(signature)
             .unwrap_or_else(|| {
-                panic!("BUG: cannot mark non-submitted transaction {signature} for resubmission")
+                panic!("BUG: cannot mark non-submitted transaction {signature} as expired")
             });
         match transaction {
             MinterTransaction::SweepDeposit { .. } => self.deposits.drop_swept(signature),
@@ -560,12 +555,14 @@ impl State {
             !self.failed_transactions.contains_key(signature),
             "Attempted to submit already failed transaction {signature:?}"
         );
-        let message = transaction.clone();
-        let signers = signers.to_vec();
         let submitted_transaction = match purpose {
-            TransactionPurpose::Withdrawal { burn_indices } => {
-                self.send_nonce_withdrawal(signature, message, signers, burn_indices, timestamp)
-            }
+            TransactionPurpose::Withdrawal { burn_indices } => self.send_nonce_withdrawal(
+                signature,
+                transaction.clone(),
+                signers,
+                burn_indices,
+                timestamp,
+            ),
             TransactionPurpose::SweepDeposit {
                 deposit_ids,
                 block_height,
@@ -576,8 +573,6 @@ impl State {
                 self.deposits
                     .sweep(deposit_ids, sweep_destination, transaction, signature);
                 MinterTransaction::SweepDeposit {
-                    message,
-                    signers,
                     block_height: *block_height,
                 }
             }
@@ -638,7 +633,7 @@ impl State {
         &mut self,
         signature: &Signature,
         message: VersionedMessage,
-        signers: Vec<Signer>,
+        signers: &[Signer],
         burn_indices: &[LedgerBurnIndex],
         submitted_at: u64,
     ) -> MinterTransaction {
@@ -691,7 +686,6 @@ impl State {
         }
         MinterTransaction::Withdrawal {
             message,
-            signers,
             nonce_account,
             nonce_value: created.nonce_value,
             submitted_at,
@@ -737,28 +731,6 @@ impl State {
         })
     }
 
-    fn process_transaction_resubmitted(
-        &mut self,
-        old_signature: &Signature,
-        _new_signature: &Signature,
-        _new_block_height: BlockHeight,
-    ) {
-        let old_transaction = self
-            .transactions_to_resubmit
-            .remove(old_signature)
-            .unwrap_or_else(|| {
-                panic!("Attempted to resubmit unknown transaction with signature {old_signature:?}")
-            });
-        match old_transaction {
-            MinterTransaction::SweepDeposit { .. } => panic!(
-                "BUG: sweep transaction {old_signature} must be dropped instead of resubmitted"
-            ),
-            MinterTransaction::Withdrawal { .. } => panic!(
-                "BUG: durable-nonce withdrawal transaction {old_signature} must never be resubmitted"
-            ),
-        }
-    }
-
     fn process_transaction_succeeded(&mut self, signature: &Signature) {
         assert!(
             !self.failed_transactions.contains_key(signature),
@@ -776,10 +748,6 @@ impl State {
                 self.nonce_pool.free(&nonce_account)
             }
         }
-        assert!(
-            !self.transactions_to_resubmit.contains_key(signature),
-            "BUG: transaction {signature} is queued for resubmission but is being marked as succeeded"
-        );
         assert!(
             self.succeeded_transactions.insert(*signature),
             "Attempted to mark transaction {signature:?} as succeeded twice"
@@ -812,10 +780,6 @@ impl State {
             self.failed_transactions.insert(*signature, transaction),
             None,
             "Attempted to fail transaction {signature:?} twice"
-        );
-        assert!(
-            !self.transactions_to_resubmit.contains_key(signature),
-            "BUG: transaction {signature} is queued for resubmission but is being marked as failed"
         );
         self.sent_withdrawal_requests
             .extract_if(.., |_, sent| &sent.signature == signature)
@@ -913,7 +877,6 @@ impl TryFrom<InitArgs> for State {
             failed_withdrawal_requests: BTreeMap::new(),
             submitted_transactions: InsertionOrderedMap::new(),
             created_withdrawal_txs: BTreeMap::new(),
-            transactions_to_resubmit: InsertionOrderedMap::new(),
             succeeded_transactions: BTreeSet::new(),
             failed_transactions: InsertionOrderedMap::new(),
             nonce_pool,
@@ -1004,15 +967,12 @@ pub enum TaskType {
     SweepDeposits,
     Mint,
     FinalizeTransactions,
-    ResubmitTransactions,
     WithdrawalProcessing,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum MinterTransaction {
     SweepDeposit {
-        message: VersionedMessage,
-        signers: Vec<Signer>,
         /// The block height of the block whose blockhash the transaction uses.
         block_height: BlockHeight,
     },
@@ -1020,7 +980,6 @@ pub enum MinterTransaction {
     /// in flight until it is finalized.
     Withdrawal {
         message: VersionedMessage,
-        signers: Vec<Signer>,
         /// The durable nonce account whose nonce value the transaction uses.
         nonce_account: Address,
         /// The durable nonce value the transaction uses instead of a recent blockhash.
@@ -1028,20 +987,4 @@ pub enum MinterTransaction {
         /// The time, in nanoseconds since the epoch, at which the transaction was recorded as submitted.
         submitted_at: u64,
     },
-}
-
-impl MinterTransaction {
-    pub fn message(&self) -> &VersionedMessage {
-        match self {
-            MinterTransaction::SweepDeposit { message, .. }
-            | MinterTransaction::Withdrawal { message, .. } => message,
-        }
-    }
-
-    pub fn signers(&self) -> &[Signer] {
-        match self {
-            MinterTransaction::SweepDeposit { signers, .. }
-            | MinterTransaction::Withdrawal { signers, .. } => signers,
-        }
-    }
 }

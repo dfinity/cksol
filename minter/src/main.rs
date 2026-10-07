@@ -6,10 +6,7 @@ use cksol_minter::{
         PROCESS_PENDING_MINTS_DELAY, SWEEP_DEPOSITS_DELAY, process_pending_mints,
         sweep_queued_deposits,
     },
-    monitor::{
-        FINALIZE_TRANSACTIONS_DELAY, RESUBMIT_TRANSACTIONS_DELAY, finalize_transactions,
-        resubmit_transactions,
-    },
+    monitor::{FINALIZE_TRANSACTIONS_DELAY, finalize_transactions},
     runtime::IcCanisterRuntime,
     state::read_state,
     withdraw::{WITHDRAWAL_PROCESSING_DELAY, process_pending_withdrawals},
@@ -167,15 +164,6 @@ fn get_events(
                     purpose,
                 }
             }
-            EventType::ResubmittedTransaction {
-                old_signature,
-                new_signature,
-                new_block_height,
-            } => event::EventType::ResubmittedTransaction {
-                old_signature: old_signature.into(),
-                new_signature: new_signature.into(),
-                new_block_height: new_block_height.get(),
-            },
             EventType::SucceededTransaction { signature } => {
                 event::EventType::SucceededTransaction {
                     signature: signature.into(),
@@ -409,9 +397,6 @@ fn setup_timers() {
     });
     ic_cdk_timers::set_timer_interval(FINALIZE_TRANSACTIONS_DELAY, async || {
         finalize_transactions(IcCanisterRuntime::new()).await;
-    });
-    ic_cdk_timers::set_timer_interval(RESUBMIT_TRANSACTIONS_DELAY, async || {
-        resubmit_transactions(IcCanisterRuntime::new()).await;
     });
 }
 

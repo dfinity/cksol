@@ -11,9 +11,8 @@ use crate::{
         deposit_id,
         events::{
             accept_withdrawal, accept_withdrawal_at, create_withdrawal_batch_transaction,
-            credit_sweep, expire_transaction, fail_transaction, queue_deposit,
-            resubmit_transaction, submit_sweep, submit_withdrawal,
-            submit_withdrawal_batch_transaction, succeed_transaction,
+            credit_sweep, expire_transaction, fail_transaction, queue_deposit, submit_sweep,
+            submit_withdrawal, submit_withdrawal_batch_transaction, succeed_transaction,
         },
         init_balance, init_schnorr_master_key, init_state, ledger_canister_id, planned_sweep,
         queued_deposit,
@@ -170,15 +169,7 @@ mod swept_deposits {
             assert_eq!(s.deposits().queued().keys().collect::<Vec<_>>(), vec![&1]);
             assert_matches!(
                 s.submitted_transactions().get(&sweep_signature).unwrap(),
-                MinterTransaction::SweepDeposit { signers, .. } => {
-                    assert_eq!(
-                        *signers,
-                        vec![
-                            Signer::Account(third.account),
-                            Signer::Account(first.account)
-                        ]
-                    );
-                }
+                MinterTransaction::SweepDeposit { .. }
             );
             assert_eq!(s.balance(), 0);
         });
@@ -225,29 +216,11 @@ mod swept_deposits {
 
             read_state(|s| {
                 assert!(s.submitted_transactions().is_empty(), "{outcome}");
-                assert!(s.transactions_to_resubmit().is_empty(), "{outcome}");
                 assert!(s.deposits().swept().is_empty(), "{outcome}");
                 assert_eq!(s.deposits().dropped().len(), 2, "{outcome}");
                 assert_eq!(s.balance(), 0, "{outcome}");
             });
         }
-    }
-
-    #[test]
-    #[should_panic(expected = "must be dropped instead of resubmitted")]
-    fn should_panic_when_resubmitting_a_sweep() {
-        init_state();
-        init_schnorr_master_key();
-        queue_deposits::<3>();
-        let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
-        submit_sweep(sweep_signature, vec![2, 0]);
-        mutate_state(|s| {
-            let transaction = s.submitted_transactions.remove(&sweep_signature).unwrap();
-            s.transactions_to_resubmit
-                .insert(sweep_signature, transaction);
-        });
-
-        resubmit_transaction(sweep_signature, signature(SWEEP_SIGNATURE_INDEX + 1));
     }
 
     #[test]
@@ -730,7 +703,6 @@ mod state_from_init_args {
                 failed_withdrawal_requests: BTreeMap::new(),
                 submitted_transactions: InsertionOrderedMap::new(),
                 created_withdrawal_txs: BTreeMap::new(),
-                transactions_to_resubmit: InsertionOrderedMap::new(),
                 succeeded_transactions: BTreeSet::new(),
                 failed_transactions: InsertionOrderedMap::new(),
                 nonce_pool: DurableNoncePool::default(),
