@@ -72,7 +72,8 @@ pub fn encode_metrics(w: &mut MetricsEncoder<Vec<u8>>, s: &State) -> std::io::Re
     )?;
     w.encode_gauge(
         "pending_withdrawal_requests",
-        s.pending_withdrawal_requests().len().metric_value(),
+        (s.pending_withdrawal_requests().len() + s.created_withdrawal_requests().len())
+            .metric_value(),
         "Number of pending withdrawal requests.",
     )?;
     w.encode_gauge(
