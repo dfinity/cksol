@@ -68,12 +68,12 @@ impl DurableNoncePool {
     /// Panics if the account is not bound.
     pub(super) fn free(&mut self, address: &Address) {
         let account = self.account_mut(address);
-        assert_eq!(
-            account.state,
-            NonceAccountState::Bound,
-            "BUG: cannot free nonce account {address} that is not bound"
-        );
-        account.state = NonceAccountState::Free;
+        match account.state {
+            NonceAccountState::Bound => account.state = NonceAccountState::Free,
+            NonceAccountState::Free => {
+                panic!("BUG: cannot free nonce account {address} that is not bound")
+            }
+        }
     }
 
     pub fn addresses(&self) -> impl Iterator<Item = &Address> {
