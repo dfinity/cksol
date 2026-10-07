@@ -9,9 +9,9 @@ use crate::{
     state::{TaskType, event::EventType, mutate_state, read_state, reset_state},
     storage::reset_events,
     test_fixtures::{
-        EventsAssert, MINIMUM_WITHDRAWAL_AMOUNT, account, confirmed_block_at_height, events,
-        init_balance, init_schnorr_master_key, init_state, minter_signature, minter_signature_nth,
-        runtime::TestCanisterRuntime, signature,
+        EventsAssert, MINIMUM_WITHDRAWAL_AMOUNT, account, confirmed_block_at_height, durable_nonce,
+        events, init_balance, init_schnorr_master_key, init_state, minter_signature,
+        minter_signature_nth, runtime::TestCanisterRuntime, signature,
     },
 };
 use sol_rpc_types::{
@@ -257,6 +257,52 @@ mod finalization {
             assert_eq!(s.submitted_transactions().len(), 1);
             assert!(s.submitted_transactions().contains_key(&signature(sig_b)));
             assert!(s.transactions_to_resubmit().is_empty());
+        });
+    }
+
+    #[tokio::test]
+    async fn should_finalize_nonce_withdrawal_without_fetching_current_block() {
+        setup();
+        let signature = submit_nonce_withdrawal_transaction(1);
+
+        let runtime = TestCanisterRuntime::new()
+            .with_increasing_time()
+            .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![Some(
+                finalized_status(),
+            )])));
+
+        finalize_transactions(runtime).await;
+
+        EventsAssert::from_recorded()
+            .expect_contains_event_eq(EventType::SucceededTransaction { signature });
+        assert!(read_state(|s| s.submitted_transactions().is_empty()));
+    }
+
+    #[tokio::test]
+    async fn should_never_expire_nonce_withdrawal_with_missing_status() {
+        setup();
+        let blockhash_withdrawal =
+            submit_withdrawal_transaction_with_signature(1, EXPIRED_BLOCK_HEIGHT);
+        let nonce_withdrawal = submit_nonce_withdrawal_transaction(2);
+
+        let runtime = TestCanisterRuntime::new()
+            .with_increasing_time()
+            .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
+            .add_stub_response(BlockResult::Consistent(Ok(current_block())))
+            .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![None, None])));
+
+        finalize_transactions(runtime).await;
+
+        let events =
+            EventsAssert::from_recorded().expect_contains_event_eq(EventType::ExpiredTransaction {
+                signature: blockhash_withdrawal,
+            });
+        assert!(!events.contains_event(&EventType::ExpiredTransaction {
+            signature: nonce_withdrawal
+        }));
+        read_state(|s| {
+            assert!(s.submitted_transactions().contains_key(&nonce_withdrawal));
+            assert!(!s.transactions_to_resubmit().contains_key(&nonce_withdrawal));
         });
     }
 
@@ -594,5 +640,13 @@ fn submit_withdrawal_transaction_with_signature(
     let signature = signature(i);
     events::accept_withdrawal(account(i), i as u64, MINIMUM_WITHDRAWAL_AMOUNT);
     events::submit_withdrawal_at_height(signature, block_height, vec![i as u64]);
+    signature
+}
+
+fn submit_nonce_withdrawal_transaction(i: usize) -> solana_signature::Signature {
+    let signature = signature(i);
+    events::accept_withdrawal(account(i), i as u64, MINIMUM_WITHDRAWAL_AMOUNT);
+    events::create_withdrawal_batch_transaction(durable_nonce(i), vec![i as u64]);
+    events::submit_withdrawal_batch_transaction(signature, durable_nonce(i), vec![i as u64]);
     signature
 }
