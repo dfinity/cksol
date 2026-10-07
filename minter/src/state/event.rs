@@ -39,13 +39,6 @@ impl VersionedMessage {
         FEE_PER_SIGNATURE * message.header.num_required_signatures as u64
     }
 
-    /// The recent blockhash of the message, which is the nonce value for a
-    /// durable-nonce transaction.
-    pub fn recent_blockhash(&self) -> Hash {
-        let VersionedMessage::Legacy(message) = self;
-        message.recent_blockhash
-    }
-
     /// The nonce account advanced by the first instruction of the message,
     /// or `None` if the first instruction is not a system-program
     /// `AdvanceNonceAccount` instruction.

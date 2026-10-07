@@ -4,7 +4,10 @@ use crate::{
     ledger::client::LedgerClient,
     numeric::{LedgerBurnIndex, LedgerMintIndex},
     rpc::BlockHeight,
-    sol_transfer::{BATCH_WITHDRAWAL_TX_FEE, MAX_SIGNATURES, MAX_WITHDRAWALS_PER_TX},
+    sol_transfer::{
+        BATCH_WITHDRAWAL_TX_FEE, MAX_SIGNATURES, MAX_WITHDRAWALS_PER_TX,
+        build_batch_withdrawal_message,
+    },
     state::event::{
         CreditedDeposit, Signer, TransactionPurpose, VersionedMessage, WithdrawalRequest,
     },
@@ -21,6 +24,7 @@ use sol_rpc_client::SolRpcClient;
 use sol_rpc_types::{ConsensusStrategy, Lamport, RpcSources, SolanaCluster};
 use solana_address::Address;
 use solana_hash::Hash;
+use solana_message::Message;
 use solana_signature::Signature;
 use std::{
     cell::RefCell,
@@ -681,13 +685,18 @@ impl State {
                 )
             });
         assert_eq!(
-            message.recent_blockhash(),
-            created.nonce_value,
-            "BUG: withdrawal transaction {signature} does not carry the nonce value bound to nonce account {nonce_account}"
-        );
-        assert_eq!(
             burn_indices, created.burn_indices,
             "BUG: withdrawal transaction {signature} does not serve the withdrawal requests bound to nonce account {nonce_account}"
+        );
+        assert_eq!(
+            message,
+            VersionedMessage::Legacy(self.bound_withdrawal_message(&nonce_account, &created)),
+            "BUG: withdrawal transaction {signature} does not carry the message bound to nonce account {nonce_account}"
+        );
+        assert_eq!(
+            signers,
+            [Signer::Minter],
+            "BUG: withdrawal transaction {signature} must be signed by the minter only"
         );
         for burn_index in &created.burn_indices {
             let pending = self
@@ -717,6 +726,45 @@ impl State {
             nonce_account,
             nonce_value: created.nonce_value,
         }
+    }
+
+    fn bound_withdrawal_message(
+        &self,
+        nonce_account: &Address,
+        created: &CreatedWithdrawalTransaction,
+    ) -> Message {
+        let minter_address =
+            minter_address(self.minter_public_key.as_ref().expect(
+                "BUG: a withdrawal was submitted before the minter public key was recorded",
+            ));
+        let transfers: Vec<(Address, Lamport)> = created
+            .burn_indices
+            .iter()
+            .map(|burn_index| {
+                let request = &self
+                    .created_withdrawal_requests
+                    .get(burn_index)
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "BUG: withdrawal request {burn_index:?} of a created transaction is not in the created bucket"
+                        )
+                    })
+                    .request;
+                (
+                    Address::from(request.solana_address),
+                    request.amount_to_transfer,
+                )
+            })
+            .collect();
+        build_batch_withdrawal_message(
+            &minter_address,
+            nonce_account,
+            created.nonce_value,
+            &transfers,
+        )
+        .unwrap_or_else(|e| {
+            panic!("BUG: cannot rebuild the withdrawal message bound to nonce account {nonce_account}: {e}")
+        })
     }
 
     fn process_transaction_resubmitted(

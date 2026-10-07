@@ -5,6 +5,7 @@ use crate::{
     numeric::{LedgerBurnIndex, LedgerMintIndex},
     rpc::BlockHeight,
     runtime::IcCanisterRuntime,
+    sol_transfer::build_batch_withdrawal_message,
     state::{
         DepositBalance, QueuedDeposit, SchnorrPublicKey, Sweep,
         audit::{process_event, replay_events},
@@ -22,7 +23,6 @@ use cksol_types_internal::{Ed25519KeyName, InitArgs, SolanaNetwork};
 use ic_ed25519::{PocketIcMasterPublicKeyId, PublicKey};
 use icrc_ledger_types::icrc1::account::Account;
 use solana_signature::Signature;
-use solana_system_interface::instruction;
 
 const INDEX_OFFSET_QUARANTINE: usize = 10_000;
 const INDEX_OFFSET_WITHDRAWAL: usize = 20_000;
@@ -87,15 +87,13 @@ fn nonce_withdrawal_message(
     destination: solana_address::Address,
     amount: u64,
 ) -> solana_message::Message {
-    let minter_address = minter_address(&master_key());
-    solana_message::Message::new_with_blockhash(
-        &[
-            instruction::advance_nonce_account(&nonce_account(), &minter_address),
-            instruction::transfer(&minter_address, &destination, amount),
-        ],
-        Some(&minter_address),
-        &nonce_value,
+    build_batch_withdrawal_message(
+        &minter_address(&master_key()),
+        &nonce_account(),
+        nonce_value,
+        &[(destination, amount)],
     )
+    .expect("BUG: a single-transfer withdrawal message fits in a transaction")
 }
 
 fn record(event: EventType) {

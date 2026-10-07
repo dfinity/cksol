@@ -1415,7 +1415,12 @@ mod withdrawal_transactions {
         let mut events = funded_log_until_created_transaction();
         events.push(EventType::SubmittedTransaction {
             signature: signature(7),
-            message: withdrawal_batch_message(NONCE_ACCOUNT, durable_nonce(1)).into(),
+            message: withdrawal_batch_message(
+                NONCE_ACCOUNT,
+                durable_nonce(1),
+                &[(Address::from([0u8; 32]), AMOUNT_TO_TRANSFER)],
+            )
+            .into(),
             signers: vec![Signer::Minter],
             purpose: TransactionPurpose::WithdrawSol {
                 burn_indices: vec![0_u64.into()],
@@ -1479,14 +1484,29 @@ mod withdrawal_transactions {
     }
 
     #[test]
-    #[should_panic(expected = "does not carry the nonce value bound to nonce account")]
-    fn should_panic_when_a_nonce_withdrawal_carries_another_nonce_value() {
+    #[should_panic(expected = "does not carry the message bound to nonce account")]
+    fn should_panic_when_a_nonce_withdrawal_differs_from_the_bound_message() {
         init_state();
         init_balance();
         accept_withdrawal(account(1), 0, MINIMUM_WITHDRAWAL_AMOUNT);
         create_withdrawal_batch_transaction(1, vec![0]);
+        let message_with_another_amount = withdrawal_batch_message(
+            NONCE_ACCOUNT,
+            durable_nonce(1),
+            &[(Address::from([0u8; 32]), AMOUNT_TO_TRANSFER + 1)],
+        );
 
-        submit_withdrawal_batch_transaction(signature(7), 2, vec![0]);
+        mutate_state(|s| {
+            s.process_transaction_submitted(
+                &signature(7),
+                &message_with_another_amount.into(),
+                &[Signer::Minter],
+                &TransactionPurpose::WithdrawSol {
+                    burn_indices: vec![0_u64.into()],
+                },
+                None,
+            )
+        });
     }
 
     #[test]

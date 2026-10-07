@@ -2,6 +2,7 @@ use crate::{
     address::{MINTER_DERIVATION_PATH, account_address, derivation_path},
     constants::{FEE_PER_SIGNATURE, RENT_EXEMPTION_THRESHOLD},
     rpc::{BlockHeight, FetchedTransaction},
+    sol_transfer::build_batch_withdrawal_message,
     state::{
         DepositBalance, QueuedDeposit, SchnorrPublicKey, State, Sweep,
         event::{Event, EventType, VersionedMessage},
@@ -185,21 +186,16 @@ pub fn nonce_account_address() -> Address {
     Address::from([0x4E; 32])
 }
 
-/// Returns a durable-nonce withdrawal message of [`MINTER_ADDRESS`] that
-/// advances `nonce_account` and carries `nonce_value` in place of a recent
-/// blockhash, without any transfer.
+/// Returns the batch withdrawal message of [`MINTER_ADDRESS`] that advances
+/// `nonce_account`, carries `nonce_value` in place of a recent blockhash and
+/// performs the given transfers.
 pub fn withdrawal_batch_message(
     nonce_account: Address,
     nonce_value: solana_hash::Hash,
+    transfers: &[(Address, Lamport)],
 ) -> solana_message::Message {
-    solana_message::Message::new_with_blockhash(
-        &[solana_system_interface::instruction::advance_nonce_account(
-            &nonce_account,
-            &MINTER_ADDRESS,
-        )],
-        Some(&MINTER_ADDRESS),
-        &nonce_value,
-    )
+    build_batch_withdrawal_message(&MINTER_ADDRESS, &nonce_account, nonce_value, transfers)
+        .expect("BUG: the withdrawal batch message exceeds the transaction size")
 }
 
 /// Returns the nonce value stored by [`nonce_account_info`] for the same `nonce_seed`.
@@ -918,31 +914,50 @@ pub mod events {
 
     /// Records a `SubmittedTransaction` for the durable-nonce withdrawal
     /// transaction advancing [`NONCE_ACCOUNT`] with the nonce value of
-    /// `nonce_seed`.
+    /// `nonce_seed` and transferring the created withdrawal requests of
+    /// `burn_indices`.
     pub fn submit_withdrawal_batch_transaction(
         signature: Signature,
         nonce_seed: usize,
         burn_indices: Vec<u64>,
     ) {
+        let burn_indices: Vec<LedgerBurnIndex> = burn_indices
+            .into_iter()
+            .map(LedgerBurnIndex::from)
+            .collect();
+        let message = withdrawal_batch_message(
+            NONCE_ACCOUNT,
+            durable_nonce(nonce_seed),
+            &created_withdrawal_transfers(&burn_indices),
+        );
         mutate_state(|state| {
             process_event(
                 state,
                 EventType::SubmittedTransaction {
                     signature,
-                    message: withdrawal_batch_message(NONCE_ACCOUNT, durable_nonce(nonce_seed))
-                        .into(),
+                    message: message.into(),
                     signers: vec![Signer::Minter],
-                    purpose: TransactionPurpose::WithdrawSol {
-                        burn_indices: burn_indices
-                            .into_iter()
-                            .map(LedgerBurnIndex::from)
-                            .collect(),
-                    },
+                    purpose: TransactionPurpose::WithdrawSol { burn_indices },
                     block_height: None,
                 },
                 &runtime(),
             )
         });
+    }
+
+    fn created_withdrawal_transfers(burn_indices: &[LedgerBurnIndex]) -> Vec<(Address, Lamport)> {
+        read_state(|state| {
+            burn_indices
+                .iter()
+                .map(|burn_index| {
+                    let request = &state.created_withdrawal_requests()[burn_index].request;
+                    (
+                        Address::from(request.solana_address),
+                        request.amount_to_transfer,
+                    )
+                })
+                .collect()
+        })
     }
 
     pub fn submit_withdrawal(signature: Signature, burn_indices: Vec<u64>) {

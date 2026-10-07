@@ -76,6 +76,32 @@ pub async fn sign_sweep_transaction<R: CanisterRuntime>(
     Ok((transaction, signers))
 }
 
+/// Builds the unsigned message of a batch withdrawal transaction: an
+/// `AdvanceNonceAccount` instruction first, followed by one transfer from the
+/// minter's main address per withdrawal request, carrying the nonce value in
+/// place of a recent blockhash. The main address is the fee payer, the source
+/// of all transfers, and the nonce authority, so the transaction has a single
+/// signature.
+pub fn build_batch_withdrawal_message(
+    minter_address: &Address,
+    nonce_account: &Address,
+    nonce_value: Hash,
+    transfers: &[(Address, Lamport)],
+) -> Result<Message, CreateTransferError> {
+    let mut instructions = vec![instruction::advance_nonce_account(
+        nonce_account,
+        minter_address,
+    )];
+    instructions.extend(
+        transfers
+            .iter()
+            .map(|(target, amount)| instruction::transfer(minter_address, target, *amount)),
+    );
+    let message = Message::new_with_blockhash(&instructions, Some(minter_address), &nonce_value);
+    ensure_within_transaction_size(&message)?;
+    Ok(message)
+}
+
 /// Creates a signed Solana transaction that transfers lamports from a single
 /// minter-controlled address (the fee payer) to multiple target addresses.
 ///
