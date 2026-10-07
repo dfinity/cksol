@@ -1,38 +1,33 @@
 use crate::{
-    address::DerivationPath,
     constants::MAX_CONCURRENT_RPC_CALLS,
     deposit::sweep::credit_finalized_sweeps,
     guard::TimerGuard,
     rpc::{
-        Block, BlockHeight, SubmitTransactionError, get_recent_block, get_signature_statuses,
-        submit_transaction, submit_transaction_skipping_preflight,
+        BlockHeight, get_recent_block, get_signature_statuses,
+        submit_transaction_skipping_preflight,
     },
     runtime::CanisterRuntime,
-    signer::sign_bytes,
     state::{
         MinterTransaction, TaskType,
         audit::process_event,
-        event::{EventType, Signer, VersionedMessage},
+        event::{EventType, VersionedMessage},
         mutate_state, read_state,
     },
     storage::with_unstable_metrics_mut,
 };
 use canlog::log;
 use cksol_types_internal::log::Priority;
-use ic_cdk_management_canister::SignCallError;
 use itertools::Itertools;
 use solana_signature::Signature;
 use solana_transaction::Transaction;
 use solana_transaction_status_client_types::TransactionConfirmationStatus;
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
-use thiserror::Error;
 
 #[cfg(test)]
 mod tests;
 
 pub const FINALIZE_TRANSACTIONS_DELAY: Duration = Duration::from_mins(2);
-pub const RESUBMIT_TRANSACTIONS_DELAY: Duration = Duration::from_mins(3);
 /// Minimum time since its submission before a withdrawal transaction without a
 /// status is re-broadcast. The minter sends transactions without `maxRetries`,
 /// so an Agave RPC node keeps re-sending a durable-nonce transaction every 2 s
@@ -254,47 +249,6 @@ fn is_blockhash_expired(
     current_block_height.saturating_sub(transaction_block_height) > MAX_BLOCKHASH_AGE_IN_BLOCKS
 }
 
-/// Resubmit transactions that have been marked for resubmission by
-/// [`finalize_transactions`].
-pub async fn resubmit_transactions<R: CanisterRuntime>(runtime: R) {
-    let _guard = match TimerGuard::new(TaskType::ResubmitTransactions) {
-        Ok(guard) => guard,
-        Err(_) => return,
-    };
-
-    let to_resubmit: Vec<_> = read_state(|state| {
-        state
-            .transactions_to_resubmit()
-            .iter()
-            .map(|(sig, tx)| {
-                (
-                    *sig,
-                    tx.message().clone(),
-                    tx.signers()
-                        .iter()
-                        .map(Signer::derivation_path)
-                        .collect::<Vec<DerivationPath>>(),
-                )
-            })
-            .collect()
-    });
-    if to_resubmit.is_empty() {
-        return;
-    }
-
-    let more_to_process = to_resubmit.len() > MAX_CONCURRENT_RPC_CALLS;
-    let reschedule = scopeguard::guard(runtime.clone(), |runtime| {
-        runtime.set_timer(Duration::ZERO, resubmit_transactions);
-    });
-
-    resubmit_expired_transactions(&runtime, to_resubmit).await;
-
-    if !more_to_process {
-        // All work fits in this round
-        scopeguard::ScopeGuard::into_inner(reschedule);
-    }
-}
-
 /// Result of checking transaction statuses.
 // Transactions that are in-flight (Processed/Confirmed) or whose status
 // check failed are implicitly excluded from the below sets.
@@ -303,7 +257,7 @@ struct TransactionStatuses {
     succeeded: BTreeSet<Signature>,
     /// Transactions that finalized with an on-chain error.
     errored: BTreeMap<Signature, String>,
-    /// Transactions with no on-chain status (safe to resubmit if expired).
+    /// Transactions with no on-chain status.
     not_found: BTreeSet<Signature>,
 }
 
@@ -357,80 +311,4 @@ async fn check_transaction_statuses<R: CanisterRuntime>(
     }
 
     result
-}
-
-async fn resubmit_expired_transactions<R: CanisterRuntime>(
-    runtime: &R,
-    to_resubmit: Vec<(Signature, VersionedMessage, Vec<DerivationPath>)>,
-) {
-    let block = match get_recent_block(runtime).await {
-        Ok(block) => block,
-        Err(e) => {
-            log!(Priority::Info, "Failed to get recent blockhash: {e}");
-            return;
-        }
-    };
-
-    futures::future::join_all(to_resubmit.into_iter().take(MAX_CONCURRENT_RPC_CALLS).map(
-        async |(old_signature, message, derivation_paths)| {
-            match try_resubmit_transaction(runtime, old_signature, message, derivation_paths, block)
-                .await
-            {
-                Ok(new_sig) => log!(
-                    Priority::Info,
-                    "Resubmitted transaction {old_signature} as {new_sig}"
-                ),
-                Err(e) => log!(
-                    Priority::Info,
-                    "Failed to resubmit transaction {old_signature}: {e}"
-                ),
-            }
-        },
-    ))
-    .await;
-}
-
-async fn try_resubmit_transaction<R: CanisterRuntime>(
-    runtime: &R,
-    old_signature: Signature,
-    versioned_message: VersionedMessage,
-    derivation_paths: Vec<DerivationPath>,
-    block: Block,
-) -> Result<Signature, ResubmitError> {
-    let VersionedMessage::Legacy(mut message) = versioned_message;
-    message.recent_blockhash = block.blockhash;
-
-    let mut transaction = Transaction::new_unsigned(message);
-    transaction.signatures = sign_bytes(
-        derivation_paths,
-        &runtime.signer(),
-        transaction.message_data(),
-    )
-    .await?;
-
-    let new_signature = transaction.signatures[0];
-
-    mutate_state(|state| {
-        process_event(
-            state,
-            EventType::ResubmittedTransaction {
-                old_signature,
-                new_signature,
-                new_block_height: block.block_height,
-            },
-            runtime,
-        )
-    });
-
-    submit_transaction(runtime, transaction).await?;
-
-    Ok(new_signature)
-}
-
-#[derive(Debug, Error)]
-enum ResubmitError {
-    #[error("failed to submit new transaction: {0}")]
-    Submit(#[from] SubmitTransactionError),
-    #[error("failed to sign transaction: {0}")]
-    Signing(#[from] SignCallError),
 }

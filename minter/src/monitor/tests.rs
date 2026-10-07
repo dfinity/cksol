@@ -1,6 +1,6 @@
 use super::{
     MAX_BLOCKHASH_AGE_IN_BLOCKS, MAX_SIGNATURES_PER_STATUS_CHECK, MIN_REBROADCAST_AGE,
-    finalize_transactions, resubmit_transactions,
+    finalize_transactions,
 };
 use crate::{
     constants::MAX_CONCURRENT_RPC_CALLS,
@@ -34,8 +34,6 @@ const CURRENT_BLOCK_HEIGHT: BlockHeight = BlockHeight::new(CURRENT_SLOT - 1_000)
 const OLDEST_VALID_BLOCK_HEIGHT: BlockHeight =
     BlockHeight::new(CURRENT_BLOCK_HEIGHT.get() - MAX_BLOCKHASH_AGE_IN_BLOCKS.get());
 const EXPIRED_BLOCK_HEIGHT: BlockHeight = BlockHeight::new(OLDEST_VALID_BLOCK_HEIGHT.get() - 1);
-const RESUBMISSION_SLOT: Slot = CURRENT_SLOT + 5;
-const RESUBMISSION_BLOCK_HEIGHT: BlockHeight = BlockHeight::new(RESUBMISSION_SLOT - 1_000);
 
 mod finalization {
     use super::*;
@@ -386,6 +384,33 @@ mod finalization {
         });
     }
 
+    #[tokio::test]
+    async fn should_not_expire_transaction_if_status_check_fails() {
+        setup();
+
+        submit_sweep_transaction(EXPIRED_BLOCK_HEIGHT);
+
+        let events_before = EventsAssert::from_recorded();
+
+        let finalize_runtime = TestCanisterRuntime::new()
+            .with_increasing_time()
+            .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
+            .add_stub_response(BlockResult::Consistent(Ok(current_block())))
+            .add_stub_response(SignatureStatusesResult::Consistent(Err(
+                RpcError::ValidationError("Error".to_string()),
+            )));
+
+        finalize_transactions(finalize_runtime).await;
+
+        let events_after = EventsAssert::from_recorded();
+        assert_eq!(events_before, events_after);
+
+        read_state(|s| {
+            assert_eq!(s.submitted_transactions().len(), 1);
+            assert!(s.transactions_to_resubmit().is_empty());
+        });
+    }
+
     struct ExpiryCase {
         name: &'static str,
         transaction_block_height: BlockHeight,
@@ -456,67 +481,6 @@ mod finalization {
             err: None,
             confirmation_status: Some(TransactionConfirmationStatus::Processed),
         }
-    }
-}
-
-mod resubmission {
-    use super::*;
-
-    #[tokio::test]
-    async fn should_return_early_if_no_transactions_to_resubmit() {
-        setup();
-        let events_before = EventsAssert::from_recorded();
-
-        resubmit_transactions(TestCanisterRuntime::new().with_increasing_time()).await;
-
-        assert_eq!(EventsAssert::from_recorded(), events_before);
-    }
-
-    #[tokio::test]
-    async fn should_return_early_if_task_already_active() {
-        setup();
-        let sig = submit_sweep_transaction(EXPIRED_BLOCK_HEIGHT);
-        events::expire_transaction(sig);
-
-        mutate_state(|s| {
-            s.active_tasks_mut().insert(TaskType::ResubmitTransactions);
-        });
-
-        let events_before = EventsAssert::from_recorded();
-
-        resubmit_transactions(TestCanisterRuntime::new()).await;
-
-        let events_after = EventsAssert::from_recorded();
-        assert_eq!(events_before, events_after);
-    }
-
-    #[tokio::test]
-    async fn should_not_resubmit_expired_transaction_if_status_check_fails() {
-        setup();
-
-        submit_sweep_transaction(EXPIRED_BLOCK_HEIGHT);
-
-        let events_before = EventsAssert::from_recorded();
-
-        let finalize_runtime = TestCanisterRuntime::new()
-            .with_increasing_time()
-            .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
-            .add_stub_response(BlockResult::Consistent(Ok(confirmed_block_at_height(
-                RESUBMISSION_BLOCK_HEIGHT,
-            ))))
-            .add_stub_response(SignatureStatusesResult::Consistent(Err(
-                RpcError::ValidationError("Error".to_string()),
-            )));
-
-        finalize_transactions(finalize_runtime).await;
-
-        let events_after = EventsAssert::from_recorded();
-        assert_eq!(events_before, events_after);
-
-        read_state(|s| {
-            assert_eq!(s.submitted_transactions().len(), 1);
-            assert!(s.transactions_to_resubmit().is_empty());
-        });
     }
 }
 

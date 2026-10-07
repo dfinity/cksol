@@ -1004,7 +1004,6 @@ pub enum TaskType {
     SweepDeposits,
     Mint,
     FinalizeTransactions,
-    ResubmitTransactions,
     WithdrawalProcessing,
 }
 
