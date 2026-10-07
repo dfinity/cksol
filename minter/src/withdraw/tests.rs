@@ -838,6 +838,32 @@ mod process_pending_withdrawals_tests {
     }
 
     #[tokio::test]
+    async fn should_retry_later_when_a_bound_withdrawal_is_left_unsigned() {
+        init_state();
+        init_balance();
+        init_schnorr_master_key();
+
+        events::accept_withdrawal(account(1), 1, MINIMUM_WITHDRAWAL_AMOUNT);
+
+        let runtime = TestCanisterRuntime::new()
+            .with_increasing_time()
+            .add_stub_response(GetAccountInfoResult::Consistent(Ok(Some(
+                nonce_account_info(MINTER_ADDRESS, 1),
+            ))))
+            .add_signer(sign_as_minter().expect([Err(SignCallError::CallFailed(
+                CallRejected::with_rejection(4, "signing service unavailable".to_string()).into(),
+            ))]));
+
+        process_pending_withdrawals(runtime.clone()).await;
+
+        read_state(|s| assert_eq!(s.created_withdrawal_txs().len(), 1));
+        assert_eq!(
+            runtime.set_timer_delays(),
+            vec![WITHDRAWAL_PROCESSING_RETRY_DELAY]
+        );
+    }
+
+    #[tokio::test]
     async fn should_not_reschedule_without_a_free_nonce_account_even_with_affordable_batches_left()
     {
         init_state();

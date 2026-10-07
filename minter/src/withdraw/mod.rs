@@ -158,7 +158,9 @@ pub async fn process_pending_withdrawals<R: CanisterRuntime>(runtime: R) {
     let signed_transactions = sign_transactions_batch(&runtime, minter_address).await;
     send_transactions_batch(&runtime, signed_transactions).await;
 
-    if read_state(|s| s.can_create_withdrawal_transaction()) {
+    if read_state(|s| {
+        s.can_create_withdrawal_transaction() || s.has_unsigned_withdrawal_transaction()
+    }) {
         runtime.set_timer(
             WITHDRAWAL_PROCESSING_RETRY_DELAY,
             process_pending_withdrawals,

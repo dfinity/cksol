@@ -523,6 +523,10 @@ impl State {
         self.nonce_pool.num_free_accounts() > 0 && self.withdrawal_batches().next().is_some()
     }
 
+    pub fn has_unsigned_withdrawal_transaction(&self) -> bool {
+        !self.created_withdrawal_txs.is_empty()
+    }
+
     /// Returns the creation timestamp (in nanoseconds) of the oldest incomplete withdrawal request.
     /// An incomplete withdrawal is one that has not yet been finalized (succeeded or failed).
     pub fn oldest_incomplete_withdrawal_created_at(&self) -> Option<u64> {
