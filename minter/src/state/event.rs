@@ -226,7 +226,7 @@ pub enum EventType {
     /// signing failure leads to re-signing the identical message and never to
     /// a second message being signed for the same nonce value.
     #[n(14)]
-    CreatedTransaction {
+    CreatedWithdrawalTransaction {
         /// The ledger burn indices of the withdrawal requests served by this transaction.
         #[cbor(n(0), with = "cbor::id_vec")]
         burn_indices: Vec<LedgerBurnIndex>,

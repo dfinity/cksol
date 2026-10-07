@@ -240,11 +240,11 @@ fn get_events(
             EventType::QuarantinedPendingMint { deposit_id } => {
                 event::EventType::QuarantinedPendingMint { deposit_id }
             }
-            EventType::CreatedTransaction {
+            EventType::CreatedWithdrawalTransaction {
                 burn_indices,
                 nonce_account,
                 nonce_value,
-            } => event::EventType::CreatedTransaction {
+            } => event::EventType::CreatedWithdrawalTransaction {
                 burn_indices: burn_indices.iter().map(|idx| *idx.get()).collect(),
                 nonce_account: nonce_account.into(),
                 nonce_value: nonce_value.into(),

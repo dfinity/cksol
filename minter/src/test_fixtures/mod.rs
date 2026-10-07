@@ -895,7 +895,7 @@ pub mod events {
         });
     }
 
-    /// Records a `CreatedTransaction` for the given withdrawals, binding
+    /// Records a `CreatedWithdrawalTransaction` for the given withdrawals, binding
     /// [`NONCE_ACCOUNT`] to `nonce_value`.
     pub fn create_withdrawal_batch_transaction(
         nonce_value: solana_hash::Hash,
@@ -904,7 +904,7 @@ pub mod events {
         mutate_state(|state| {
             process_event(
                 state,
-                EventType::CreatedTransaction {
+                EventType::CreatedWithdrawalTransaction {
                     burn_indices: burn_indices
                         .into_iter()
                         .map(LedgerBurnIndex::from)
@@ -1359,7 +1359,7 @@ pub mod arb {
                 arb_hash(),
             )
                 .prop_map(|(burn_indices, nonce_account, nonce_value)| {
-                    EventType::CreatedTransaction {
+                    EventType::CreatedWithdrawalTransaction {
                         burn_indices,
                         nonce_account,
                         nonce_value,

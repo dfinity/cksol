@@ -1539,7 +1539,7 @@ mod withdrawal_transactions {
                 burned_amount: MINIMUM_WITHDRAWAL_AMOUNT,
                 amount_to_transfer: AMOUNT_TO_TRANSFER,
             }),
-            EventType::CreatedTransaction {
+            EventType::CreatedWithdrawalTransaction {
                 burn_indices: vec![0_u64.into()],
                 nonce_account: NONCE_ACCOUNT,
                 nonce_value: durable_nonce(1),

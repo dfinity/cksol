@@ -141,7 +141,7 @@ pub enum EventType {
     /// The minter bound a durable nonce account and its nonce value to the
     /// withdrawal requests of the given burn indices, before requesting the
     /// threshold signature. The binding determines the transaction message.
-    CreatedTransaction {
+    CreatedWithdrawalTransaction {
         /// The ledger burn indices of the withdrawal requests served by this transaction.
         burn_indices: Vec<u64>,
         /// The durable nonce account bound to this transaction.

@@ -87,7 +87,7 @@ fn apply_state_transition(state: &mut State, payload: &EventType, timestamp: u64
         EventType::QuarantinedPendingMint { deposit_id } => {
             state.process_quarantined_pending_mint(*deposit_id);
         }
-        EventType::CreatedTransaction {
+        EventType::CreatedWithdrawalTransaction {
             burn_indices,
             nonce_account,
             nonce_value,

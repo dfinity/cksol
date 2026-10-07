@@ -147,7 +147,7 @@ fn accept_and_submit_withdrawal(account_index: usize, burn_index: u64, sig: Sign
         burned_amount: WITHDRAWAL_AMOUNT,
         amount_to_transfer: AMOUNT_TO_TRANSFER,
     }));
-    record(EventType::CreatedTransaction {
+    record(EventType::CreatedWithdrawalTransaction {
         burn_indices: burn_indices.clone(),
         nonce_account: nonce_account(),
         nonce_value: nonce_value(account_index),
