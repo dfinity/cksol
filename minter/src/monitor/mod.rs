@@ -15,6 +15,7 @@ use crate::{
         event::{EventType, Signer, VersionedMessage},
         mutate_state, read_state,
     },
+    storage::with_unstable_metrics_mut,
 };
 use canlog::log;
 use cksol_types_internal::log::Priority;
@@ -233,6 +234,7 @@ fn is_old_enough_to_rebroadcast(submitted_at: u64, now: u64) -> bool {
 
 async fn rebroadcast_transaction<R: CanisterRuntime>(runtime: &R, transaction: Transaction) {
     let signature = transaction.signatures[0];
+    with_unstable_metrics_mut(|m| m.withdrawal_transaction_rebroadcasts += 1);
     match submit_transaction_skipping_preflight(runtime, transaction).await {
         Ok(_) => log!(
             Priority::Info,

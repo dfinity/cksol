@@ -36,12 +36,14 @@ thread_local! {
 #[derive(Default)]
 pub(crate) struct Metrics {
     pub post_upgrade_instructions_consumed: u64,
+    pub withdrawal_transaction_rebroadcasts: u64,
 }
 
 impl Metrics {
     const fn new() -> Self {
         Self {
             post_upgrade_instructions_consumed: 0,
+            withdrawal_transaction_rebroadcasts: 0,
         }
     }
 }
