@@ -64,19 +64,33 @@ mod finalization {
     }
 
     #[tokio::test]
-    async fn should_return_early_if_fetching_current_block_fails() {
+    async fn should_finalize_but_not_expire_transactions_if_fetching_current_block_fails() {
         setup();
-        submit_withdrawal_transaction(EXPIRED_BLOCK_HEIGHT);
-
-        let events_before = EventsAssert::from_recorded();
+        let finalized = submit_withdrawal_transaction_with_signature(1, EXPIRED_BLOCK_HEIGHT);
+        let not_found = submit_withdrawal_transaction_with_signature(2, EXPIRED_BLOCK_HEIGHT);
 
         let runtime = TestCanisterRuntime::new()
-            .add_recent_block(Err(RpcError::ValidationError("Error".to_string())));
+            .with_increasing_time()
+            .add_recent_block(Err(RpcError::ValidationError("Error".to_string())))
+            .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![
+                Some(finalized_status()),
+                None,
+            ])));
 
         finalize_transactions(runtime).await;
 
-        let events_after = EventsAssert::from_recorded();
-        assert_eq!(events_before, events_after);
+        let events = EventsAssert::from_recorded().expect_contains_event_eq(
+            EventType::SucceededTransaction {
+                signature: finalized,
+            },
+        );
+        assert!(!events.contains_event(&EventType::ExpiredTransaction {
+            signature: not_found
+        }));
+        read_state(|s| {
+            assert!(s.submitted_transactions().contains_key(&not_found));
+            assert!(s.transactions_to_resubmit().is_empty());
+        });
     }
 
     #[tokio::test]
