@@ -217,7 +217,7 @@ async fn create_transaction<R: CanisterRuntime>(
         Ok(nonce_value) => nonce_value,
         Err(e) => {
             log!(
-                Priority::Info,
+                Priority::Error,
                 "Failed to read nonce account {nonce_account}, skipping withdrawal batch this round: {e}"
             );
             return;
