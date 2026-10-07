@@ -9,7 +9,7 @@ use crate::{
 use async_trait::async_trait;
 use candid::{
     CandidType, Principal,
-    utils::{ArgumentEncoder, decode_args, encode_args},
+    utils::{ArgumentDecoder, ArgumentEncoder, decode_args, encode_args},
 };
 use ic_canister_runtime::{IcError, Runtime, StubRuntime};
 use ic_cdk::call::{CallPerformFailed, Error as CallError};
@@ -238,6 +238,11 @@ impl SentUpdateCall {
     pub fn single_arg<Arg: CandidType + DeserializeOwned>(&self) -> Arg {
         let (arg,) = decode_args(&self.args).expect("Failed to decode the call argument");
         arg
+    }
+
+    /// Decodes all the Candid arguments of the recorded call.
+    pub fn args<Args: for<'a> ArgumentDecoder<'a>>(&self) -> Args {
+        decode_args(&self.args).expect("Failed to decode the call arguments")
     }
 }
 

@@ -4,6 +4,7 @@ use crate::{
         Block, BlockHeight, GetBalanceError, GetNonceAccountError, GetRecentBlockError,
         GetTransactionError, NonceAccount, SubmitTransactionError, get_balance, get_nonce_account,
         get_recent_block, get_transaction, submit_transaction,
+        submit_transaction_skipping_preflight,
     },
     test_fixtures::{
         MINTER_ADDRESS, confirmed_block, confirmed_block_at_height,
@@ -18,7 +19,10 @@ use crate::{
 };
 use assert_matches::assert_matches;
 use ic_canister_runtime::IcError;
-use sol_rpc_types::{HttpOutcallError, RpcError, RpcSource, SupportedRpcProviderId};
+use sol_rpc_types::{
+    HttpOutcallError, RpcConfig, RpcError, RpcSource, RpcSources, SendTransactionParams,
+    SupportedRpcProviderId,
+};
 use solana_transaction::{Message, Transaction};
 use solana_transaction_status_client_types::{EncodedTransaction, TransactionBinaryEncoding};
 
@@ -313,6 +317,38 @@ mod submit_transaction_tests {
         let result = submit_transaction(&runtime, transaction()).await;
 
         assert_eq!(result, Err(SubmitTransactionError::InconsistentRpcResults));
+    }
+
+    #[tokio::test]
+    async fn should_keep_the_preflight_simulation() {
+        init_state();
+        let runtime = TestCanisterRuntime::new()
+            .add_stub_response(SendTransactionResult::Consistent(Ok(signature())));
+
+        let result = submit_transaction(&runtime, transaction()).await;
+
+        assert_eq!(result, Ok(signature().into()));
+        assert_eq!(sent_params(&runtime).skip_preflight, None);
+    }
+
+    #[tokio::test]
+    async fn should_skip_the_preflight_simulation_when_requested() {
+        init_state();
+        let runtime = TestCanisterRuntime::new()
+            .add_stub_response(SendTransactionResult::Consistent(Ok(signature())));
+
+        let result = submit_transaction_skipping_preflight(&runtime, transaction()).await;
+
+        assert_eq!(result, Ok(signature().into()));
+        assert_eq!(sent_params(&runtime).skip_preflight, Some(true));
+    }
+
+    fn sent_params(runtime: &TestCanisterRuntime) -> SendTransactionParams {
+        let [call] = runtime.sent_update_calls().try_into().unwrap();
+        assert_eq!(call.method, "sendTransaction");
+        let (_sources, _config, params): (RpcSources, Option<RpcConfig>, SendTransactionParams) =
+            call.args();
+        params
     }
 
     fn transaction() -> Transaction {
