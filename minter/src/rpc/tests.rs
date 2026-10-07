@@ -9,7 +9,7 @@ use crate::{
         deposit::{
             DEPOSIT_ADDRESS, legacy_deposit_transaction, legacy_deposit_transaction_signature,
         },
-        init_state,
+        fetched, init_state,
         runtime::TestCanisterRuntime,
     },
 };
@@ -17,6 +17,7 @@ use assert_matches::assert_matches;
 use ic_canister_runtime::IcError;
 use sol_rpc_types::{HttpOutcallError, RpcError, RpcSource, SupportedRpcProviderId};
 use solana_transaction::{Message, Transaction};
+use solana_transaction_status_client_types::{EncodedTransaction, TransactionBinaryEncoding};
 
 mod get_balance_tests {
     use super::*;
@@ -143,6 +144,87 @@ mod get_transaction_tests {
     }
 
     #[tokio::test]
+    async fn should_fail_if_returned_transaction_has_another_signature() {
+        init_state();
+
+        let runtime = TestCanisterRuntime::new().add_stub_response(MultiRpcResult::Consistent(Ok(
+            Some(legacy_deposit_transaction().try_into().unwrap()),
+        )));
+
+        let queried = solana_signature::Signature::from([7; 64]);
+
+        let result = get_transaction(&runtime, queried).await;
+
+        assert_eq!(
+            result,
+            Err(GetTransactionError::SignatureMismatch {
+                queried,
+                returned: Some(Box::new(legacy_deposit_transaction_signature())),
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn should_fail_if_returned_transaction_cannot_be_decoded() {
+        init_state();
+
+        let mut transaction = legacy_deposit_transaction();
+        transaction.transaction.transaction = EncodedTransaction::Binary(
+            "not a transaction".to_string(),
+            TransactionBinaryEncoding::Base64,
+        );
+
+        let runtime = TestCanisterRuntime::new().add_stub_response(MultiRpcResult::Consistent(Ok(
+            Some(transaction.try_into().unwrap()),
+        )));
+
+        let result = get_transaction(&runtime, legacy_deposit_transaction_signature()).await;
+
+        assert_eq!(
+            result,
+            Err(GetTransactionError::UndecodableTransaction {
+                queried: legacy_deposit_transaction_signature()
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn should_fail_if_the_signature_does_not_sign_the_returned_message() {
+        init_state();
+
+        let mut transaction = legacy_deposit_transaction();
+        let mut decoded = transaction
+            .transaction
+            .transaction
+            .decode()
+            .expect("BUG: the fixture transaction should decode");
+        let solana_message::VersionedMessage::Legacy(message) = &mut decoded.message else {
+            panic!("BUG: the fixture is a legacy transaction");
+        };
+        message.recent_blockhash = solana_hash::Hash::new_from_array([0x5A; 32]);
+        transaction.transaction.transaction = EncodedTransaction::Binary(
+            base64::Engine::encode(
+                &base64::engine::general_purpose::STANDARD,
+                bincode::serialize(&decoded).expect("BUG: the transaction should serialize"),
+            ),
+            TransactionBinaryEncoding::Base64,
+        );
+
+        let runtime = TestCanisterRuntime::new().add_stub_response(MultiRpcResult::Consistent(Ok(
+            Some(transaction.try_into().unwrap()),
+        )));
+
+        let result = get_transaction(&runtime, legacy_deposit_transaction_signature()).await;
+
+        assert_eq!(
+            result,
+            Err(GetTransactionError::InvalidSignature {
+                queried: legacy_deposit_transaction_signature()
+            })
+        );
+    }
+
+    #[tokio::test]
     async fn should_return_transaction() {
         init_state();
 
@@ -152,7 +234,7 @@ mod get_transaction_tests {
 
         let result = get_transaction(&runtime, legacy_deposit_transaction_signature()).await;
 
-        assert_eq!(result, Ok(Some(legacy_deposit_transaction())))
+        assert_eq!(result, Ok(Some(fetched(legacy_deposit_transaction()))))
     }
 }
 

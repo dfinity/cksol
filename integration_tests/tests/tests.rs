@@ -66,11 +66,12 @@ async fn deposit_and_credit_funds(setup: &Setup) {
 
     // Finalize and credit
     setup.advance_time(FINALIZE_TRANSACTIONS_DELAY).await;
+    let sweep = setup.minter().signed_transaction(&sweep_signature).await;
     setup
         .execute_http_mocks(
             MockBuilder::with_start_id(16)
                 .finalize_transaction(&sweep_signature, SUBMISSION_BLOCK_HEIGHT)
-                .get_sweep_transaction(&sweep_signature, SWEEPABLE_AMOUNT)
+                .get_sweep_transaction(&sweep, SWEEPABLE_AMOUNT)
                 .build(),
         )
         .await;
@@ -1006,11 +1007,12 @@ mod deposit_sol_tests {
         });
 
         setup.advance_time(FINALIZE_TRANSACTIONS_DELAY).await;
+        let sweep = setup.minter().signed_transaction(&sweep_signature).await;
         setup
             .execute_http_mocks(
                 MockBuilder::with_start_id(16)
                     .finalize_transaction(&sweep_signature, SUBMISSION_BLOCK_HEIGHT)
-                    .get_sweep_transaction(&sweep_signature, SWEEPABLE_AMOUNT)
+                    .get_sweep_transaction(&sweep, SWEEPABLE_AMOUNT)
                     .build(),
             )
             .await;
@@ -1134,11 +1136,12 @@ mod deposit_sol_tests {
 
         setup.advance_time(FINALIZE_TRANSACTIONS_DELAY).await;
         let amount_not_in_the_plan = BALANCE_ABOVE_MINIMUM - RENT_EXEMPTION_THRESHOLD + 1;
+        let sweep = setup.minter().signed_transaction(&sweep_signature).await;
         setup
             .execute_http_mocks(
                 MockBuilder::with_start_id(16)
                     .finalize_transaction(&sweep_signature, SUBMISSION_BLOCK_HEIGHT)
-                    .get_sweep_transaction(&sweep_signature, amount_not_in_the_plan)
+                    .get_sweep_transaction(&sweep, amount_not_in_the_plan)
                     .build(),
             )
             .await;

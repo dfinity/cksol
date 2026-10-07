@@ -52,7 +52,7 @@ solana-message = { workspace = true }
 solana-sdk-ids = { workspace = true }
 solana-signature = { workspace = true }
 solana-system-interface = { workspace = true, features = ["bincode"] }
-solana-transaction = { workspace = true, features = ["bincode"] }
+solana-transaction = { workspace = true, features = ["bincode", "verify"] }
 solana-transaction-status-client-types = { workspace = true }
 thiserror = { workspace = true }
 

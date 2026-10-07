@@ -16,17 +16,28 @@ use sol_rpc_types::{
 use solana_address::Address;
 use solana_hash::Hash;
 use solana_signature::Signature;
-use solana_transaction::Transaction;
-use solana_transaction_status_client_types::EncodedConfirmedTransactionWithStatusMeta;
+use solana_transaction::{Transaction, versioned::VersionedTransaction};
+use solana_transaction_status_client_types::{
+    EncodedConfirmedTransactionWithStatusMeta, UiTransactionStatusMeta,
+};
 use thiserror::Error;
 
 #[cfg(test)]
 mod tests;
 
+/// A `getTransaction` response attributed to the queried signature: the transaction
+/// decoded by [`get_transaction`], whose first signature is the queried one and signs
+/// the message.
+#[derive(Debug, PartialEq)]
+pub struct FetchedTransaction {
+    pub transaction: VersionedTransaction,
+    pub meta: Option<UiTransactionStatusMeta>,
+}
+
 pub async fn get_transaction<R: CanisterRuntime>(
     runtime: &R,
     signature: Signature,
-) -> Result<Option<EncodedConfirmedTransactionWithStatusMeta>, GetTransactionError> {
+) -> Result<Option<FetchedTransaction>, GetTransactionError> {
     let result = read_state(|state| state.sol_rpc_client(runtime.inter_canister_call_runtime()))
         .get_transaction(signature)
         .with_encoding(GetTransactionEncoding::Base64)
@@ -37,10 +48,41 @@ pub async fn get_transaction<R: CanisterRuntime>(
         .try_send()
         .await;
     match result? {
-        MultiRpcResult::Consistent(Ok(maybe_transaction)) => Ok(maybe_transaction),
+        MultiRpcResult::Consistent(Ok(Some(outcome))) => {
+            let transaction = ensure_signed_with(&outcome, signature)?;
+            Ok(Some(FetchedTransaction {
+                transaction,
+                meta: outcome.transaction.meta,
+            }))
+        }
+        MultiRpcResult::Consistent(Ok(None)) => Ok(None),
         MultiRpcResult::Consistent(Err(e)) => Err(GetTransactionError::RpcError(e)),
         MultiRpcResult::Inconsistent(_) => Err(GetTransactionError::InconsistentRpcResults),
     }
+}
+
+fn ensure_signed_with(
+    outcome: &EncodedConfirmedTransactionWithStatusMeta,
+    queried: Signature,
+) -> Result<VersionedTransaction, GetTransactionError> {
+    let decoded = outcome
+        .transaction
+        .transaction
+        .decode()
+        .ok_or(GetTransactionError::UndecodableTransaction { queried })?;
+    match decoded.signatures.first() {
+        Some(first) if *first == queried => {}
+        returned => {
+            return Err(GetTransactionError::SignatureMismatch {
+                queried,
+                returned: returned.copied().map(Box::new),
+            });
+        }
+    }
+    if decoded.verify_with_results().first() != Some(&true) {
+        return Err(GetTransactionError::InvalidSignature { queried });
+    }
+    Ok(decoded)
 }
 
 #[derive(Debug, PartialEq, Error, From)]
@@ -51,6 +93,32 @@ pub enum GetTransactionError {
     RpcError(RpcError),
     #[error("Inconsistent RPC results for transaction")]
     InconsistentRpcResults,
+    #[error("Transaction returned for {queried} cannot be decoded")]
+    #[from(ignore)]
+    UndecodableTransaction { queried: Signature },
+    #[error("Transaction returned for {queried} has first signature {returned:?}")]
+    SignatureMismatch {
+        queried: Signature,
+        returned: Option<Box<Signature>>,
+    },
+    #[error("Transaction returned for {queried} is not signed by its fee payer")]
+    #[from(ignore)]
+    InvalidSignature { queried: Signature },
+}
+
+impl GetTransactionError {
+    /// A consistent response that cannot be attributed to the queried signature points
+    /// to a misbehaving provider or SOL RPC canister, not to a transient error.
+    pub fn is_response_untrustworthy(&self) -> bool {
+        match self {
+            GetTransactionError::UndecodableTransaction { .. }
+            | GetTransactionError::SignatureMismatch { .. }
+            | GetTransactionError::InvalidSignature { .. } => true,
+            GetTransactionError::IcError(_)
+            | GetTransactionError::RpcError(_)
+            | GetTransactionError::InconsistentRpcResults => false,
+        }
+    }
 }
 
 pub async fn get_balance<R: CanisterRuntime>(

@@ -5,9 +5,9 @@ use crate::{
     state::{event::EventType, read_state, reset_state},
     storage::reset_events,
     test_fixtures::{
-        EventsAssert, GetTransactionResult, MINTER_ADDRESS, account, devnet_sweep,
-        events::{queue, queue_deposit, submit_sweep, succeed_transaction},
-        init_schnorr_master_key, init_state,
+        EventsAssert, GetTransactionResult, account, devnet_sweep,
+        events::{queue, submit_sweep_to, succeed_transaction},
+        init_state,
         runtime::TestCanisterRuntime,
         signature,
     },
@@ -17,7 +17,7 @@ use sol_rpc_types::Lamport;
 use solana_signature::Signature;
 use solana_transaction_status_client_types::EncodedConfirmedTransactionWithStatusMeta;
 
-const DEVNET_SWEEP_SIGNATURE_INDEX: usize = 0;
+const FRESH_SWEEP_SIGNATURE_INDEX: usize = 0x80;
 
 #[tokio::test]
 async fn should_do_nothing_without_finalized_deposits() {
@@ -53,13 +53,17 @@ async fn should_ask_for_another_round_only_after_crediting_with_sweeps_left_over
             .add_stub_response(devnet_sweep_response);
         for index in 0..MAX_CONCURRENT_RPC_CALLS {
             let deposit_id = (devnet_sweep::DEPOSITS.len() + index) as DepositSolId;
-            queue_deposit(
+            let account = account(deposit_id as usize + 1);
+            queue(
                 deposit_id,
-                account(deposit_id as usize + 1),
-                SWEEPABLE_AMOUNT,
+                devnet_sweep::fresh_deposit(account, SWEEPABLE_AMOUNT),
             );
-            let sweep_signature = signature(DEVNET_SWEEP_SIGNATURE_INDEX + 1 + index);
-            submit_sweep(sweep_signature, vec![deposit_id]);
+            let sweep_signature = signature(FRESH_SWEEP_SIGNATURE_INDEX + index);
+            submit_sweep_to(
+                sweep_signature,
+                vec![deposit_id],
+                devnet_sweep::minter_main_address(),
+            );
             succeed_transaction(sweep_signature);
             if index + 1 < MAX_CONCURRENT_RPC_CALLS {
                 runtime = runtime.add_stub_response(GetTransactionResult::Consistent(Ok(None)));
@@ -158,7 +162,7 @@ async fn should_quarantine_deposits_if_the_outcome_does_not_match_the_plan() {
     setup();
     let sweep_signature = finalize_devnet_sweep();
     let mut outcome = devnet_sweep::derived_outcome();
-    devnet_sweep::set_balances(&mut outcome, MINTER_ADDRESS, 1, 0);
+    devnet_sweep::set_balances(&mut outcome, devnet_sweep::minter_main_address(), 1, 0);
 
     credit_finalized_sweeps(&runtime_returning(outcome)).await;
 
@@ -185,7 +189,7 @@ fn setup() {
     reset_state();
     reset_events();
     init_state();
-    init_schnorr_master_key();
+    devnet_sweep::init_master_key();
 }
 
 /// Queues the deposits of the devnet sweep, submits it and finalizes it.
@@ -194,10 +198,11 @@ fn finalize_devnet_sweep() -> Signature {
     for (deposit_id, deposit) in &deposits {
         queue(*deposit_id, *deposit);
     }
-    let sweep_signature = signature(DEVNET_SWEEP_SIGNATURE_INDEX);
-    submit_sweep(
+    let sweep_signature = devnet_sweep::transaction_signature();
+    submit_sweep_to(
         sweep_signature,
         deposits.iter().map(|(deposit_id, _)| *deposit_id).collect(),
+        devnet_sweep::minter_main_address(),
     );
     succeed_transaction(sweep_signature);
     sweep_signature

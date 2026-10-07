@@ -14,6 +14,7 @@ use pocket_ic::nonblocking::PocketIc;
 use serde_json::json;
 use sol_rpc_types::Lamport;
 use solana_address::{Address, address};
+use solana_transaction::Transaction;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -174,13 +175,13 @@ impl MockBuilder {
             .check_signature_statuses(signature, get_signature_statuses_finalized_response())
     }
 
-    /// Mock for `getTransaction` for a sweep of [`DEFAULT_CALLER_DEPOSIT_ADDRESS`] under the
-    /// given signature, reporting metadata that credits the minter's main account with the
-    /// sweepable amount minus the transaction fee of one signature.
-    pub fn get_sweep_transaction(self, signature: &Signature, sweepable_amount: Lamport) -> Self {
+    /// Mock for `getTransaction` returning the given signed sweep of
+    /// [`DEFAULT_CALLER_DEPOSIT_ADDRESS`], reporting metadata that credits the minter's main
+    /// account with the sweepable amount minus the transaction fee of one signature.
+    pub fn get_sweep_transaction(self, sweep: &Transaction, sweepable_amount: Lamport) -> Self {
         self.expect(
-            get_transaction_request(signature),
-            sweep_transaction_response(sweepable_amount),
+            get_transaction_request(&sweep.signatures[0]),
+            sweep_transaction_response(sweep, sweepable_amount),
         )
     }
 
@@ -200,35 +201,21 @@ impl MockBuilder {
 // These are private helpers used by `MockBuilder` methods above.
 
 /// [`getTransaction`] request for the given signature.
-fn get_transaction_request(signature: &Signature) -> JsonRpcRequestMatcher {
+fn get_transaction_request(signature: &solana_signature::Signature) -> JsonRpcRequestMatcher {
     JsonRpcRequestMatcher::with_method("getTransaction").with_params(json!([
         signature.to_string(),
         {"encoding": "base64", "commitment": "finalized", "maxSupportedTransactionVersion": 0}
     ]))
 }
 
-/// JSON-RPC `getTransaction` response for a sweep transaction moving the sweepable
-/// amount of [`DEFAULT_CALLER_DEPOSIT_ADDRESS`], minus the fee it pays as the only
-/// signer, to [`MINTER_ADDRESS`].
-fn sweep_transaction_response(sweepable_amount: Lamport) -> JsonRpcResponse {
+/// JSON-RPC `getTransaction` response for the given sweep, with balances showing the
+/// sweepable amount of [`DEFAULT_CALLER_DEPOSIT_ADDRESS`], minus the fee it pays as the
+/// only signer, moved to [`MINTER_ADDRESS`].
+fn sweep_transaction_response(sweep: &Transaction, sweepable_amount: Lamport) -> JsonRpcResponse {
     const MAIN_BALANCE_BEFORE_SWEEP: Lamport = 5_000_000_000;
-    let deposit_address: Address = DEFAULT_CALLER_DEPOSIT_ADDRESS.parse().unwrap();
     let transfer_amount = sweepable_amount - FEE_PER_SIGNATURE;
-    let message = solana_message::Message::new_with_blockhash(
-        &[solana_system_interface::instruction::transfer(
-            &deposit_address,
-            &MINTER_ADDRESS,
-            transfer_amount,
-        )],
-        Some(&deposit_address),
-        &solana_hash::Hash::default(),
-    );
-    let transaction = solana_transaction::versioned::VersionedTransaction::from(
-        solana_transaction::Transaction::new_unsigned(message),
-    );
-    let encoded_transaction = STANDARD.encode(
-        bincode::serialize(&transaction).expect("serializing the transaction should succeed"),
-    );
+    let encoded_transaction = STANDARD
+        .encode(bincode::serialize(sweep).expect("serializing the transaction should succeed"));
     JsonRpcResponse::from(json!({
         "jsonrpc": "2.0",
         "result": {

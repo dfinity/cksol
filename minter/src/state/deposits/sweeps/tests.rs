@@ -300,6 +300,7 @@ mod settle {
         SweepSettlementError, TransactionError, UiTransactionError, UnreadableOutcome, account,
         devnet_sweep, planned_sweep, queued_deposit_of,
     };
+    use crate::test_fixtures::fetched;
 
     type Deviation = fn(&mut EncodedConfirmedTransactionWithStatusMeta);
 
@@ -334,8 +335,9 @@ mod settle {
             let mut outcome = devnet_sweep::outcome();
             deviate(&mut outcome);
 
+            let fetched = fetched(outcome);
             let settled = devnet_sweep::sweep()
-                .settle(&outcome)
+                .settle(&fetched.transaction, fetched.meta.as_ref())
                 .unwrap_or_else(|e| panic!("{name}: {e}"));
 
             assert_eq!(
@@ -349,12 +351,7 @@ mod settle {
 
     #[test]
     fn should_reject_an_outcome_that_cannot_be_read() {
-        let cases: [(&str, Deviation, UnreadableOutcome); 3] = [
-            (
-                "the transaction cannot be decoded",
-                devnet_sweep::corrupt_transaction,
-                UnreadableOutcome::TransactionDecodingFailed,
-            ),
+        let cases: [(&str, Deviation, UnreadableOutcome); 2] = [
             (
                 "the meta field is missing",
                 |outcome| outcome.transaction.meta = None,
@@ -373,8 +370,9 @@ mod settle {
             let mut outcome = devnet_sweep::outcome();
             deviate(&mut outcome);
 
+            let fetched = fetched(outcome);
             assert_eq!(
-                devnet_sweep::sweep().settle(&outcome),
+                devnet_sweep::sweep().settle(&fetched.transaction, fetched.meta.as_ref()),
                 Err(SweepSettlementError::Unreadable(expected)),
                 "{name}"
             );
@@ -505,8 +503,9 @@ mod settle {
             let mut outcome = devnet_sweep::outcome();
             deviate(&mut outcome);
 
+            let fetched = fetched(outcome);
             assert_eq!(
-                devnet_sweep::sweep().settle(&outcome),
+                devnet_sweep::sweep().settle(&fetched.transaction, fetched.meta.as_ref()),
                 Err(SweepSettlementError::Mismatch(expected)),
                 "{name}"
             );

@@ -1,7 +1,7 @@
 use crate::{
     address::{MINTER_DERIVATION_PATH, account_address, derivation_path},
     constants::RENT_EXEMPTION_THRESHOLD,
-    rpc::BlockHeight,
+    rpc::{BlockHeight, FetchedTransaction},
     state::{
         DepositBalance, QueuedDeposit, SchnorrPublicKey, State, Sweep,
         event::{Event, EventType, VersionedMessage},
@@ -255,6 +255,19 @@ pub fn minter_signature_nth(occurrence: usize) -> solana_signature::Signature {
     signer::derivation_path_signature(&MINTER_DERIVATION_PATH, occurrence)
 }
 
+/// The [`FetchedTransaction`] that [`rpc::get_transaction`] returns for the given
+/// `getTransaction` output.
+pub fn fetched(outcome: EncodedConfirmedTransactionWithStatusMeta) -> FetchedTransaction {
+    FetchedTransaction {
+        transaction: outcome
+            .transaction
+            .transaction
+            .decode()
+            .expect("BUG: the fixture transaction should decode"),
+        meta: outcome.transaction.meta,
+    }
+}
+
 /// A sweep of four deposits that the minter submitted on devnet as transaction
 /// `59vLxkN5YGgBrHGTQMCrntNi7CrAxfkQxYek2v3hUgKfujgGtfkSDZZmFyVw6S59uTH2FEwWcvntPiEkdN5Ep5W2`,
 /// with the `getTransaction` response the minter settles it against, and ways to deviate
@@ -264,6 +277,7 @@ pub mod devnet_sweep {
     use crate::state::{DepositBalance, QueuedDeposit, Sweep, event::CreditedDeposit};
     use base64::{Engine, engine::general_purpose::STANDARD};
     use cksol_types::DepositSolId;
+    use icrc_ledger_types::icrc1::account::Account;
     use serde_json::json;
     use sol_rpc_types::Lamport;
     use solana_address::{Address, address};
@@ -276,8 +290,44 @@ pub mod devnet_sweep {
 
     pub const MINTER_ADDRESS: Address = address!("5yazYQT1Kwm3jEjMp58J5329gzbxA232fnPajemCeKbL");
 
-    /// The devnet deposits with their addresses replaced by ones the test master key
-    /// derives, so the sweep can flow through the event-sourced state.
+    /// Caches the master public key whose children sign [`derived_outcome`], so a sweep
+    /// of [`derived_deposits`] can flow through the event-sourced state.
+    pub fn init_master_key() {
+        crate::state::mutate_state(|s| s.cache_minter_public_key(master_key()));
+    }
+
+    pub fn master_key() -> crate::state::SchnorrPublicKey {
+        crate::state::SchnorrPublicKey {
+            public_key: master_private_key().public_key(),
+            chain_code: MASTER_CHAIN_CODE,
+        }
+    }
+
+    pub fn minter_main_address() -> Address {
+        crate::address::minter_address(&master_key())
+    }
+
+    const MASTER_CHAIN_CODE: [u8; 32] = [7; 32];
+
+    fn master_private_key() -> ic_ed25519::PrivateKey {
+        ic_ed25519::PrivateKey::generate_from_seed(b"devnet sweep master key")
+    }
+
+    fn sign_as(account: &Account, message: &[u8]) -> solana_signature::Signature {
+        let path = ic_ed25519::DerivationPath::new(
+            crate::address::derivation_path(account)
+                .into_iter()
+                .map(ic_ed25519::DerivationIndex)
+                .collect(),
+        );
+        let (child, _chain_code) =
+            master_private_key().derive_subkey_with_chain_code(&path, &MASTER_CHAIN_CODE);
+        solana_signature::Signature::from(child.sign_message(message))
+    }
+
+    /// The deposits of the devnet sweep with their addresses derived from
+    /// [`master_key`], so that their sweep satisfies the queued-address check
+    /// and its rebuilt message can be signed by [`sign_as`].
     pub fn derived_deposits() -> Vec<(DepositSolId, QueuedDeposit)> {
         DEPOSITS
             .into_iter()
@@ -288,7 +338,7 @@ pub mod devnet_sweep {
                     index as DepositSolId,
                     QueuedDeposit {
                         account,
-                        address: super::deposit_address(account),
+                        address: crate::address::account_address(&master_key(), &account),
                         balance: DepositBalance::new(balance)
                             .expect("BUG: the balance covers the rent exemption threshold"),
                     },
@@ -297,28 +347,68 @@ pub mod devnet_sweep {
             .collect()
     }
 
-    pub fn derived_sweep() -> Sweep {
-        Sweep::plan(derived_deposits(), super::MINTER_ADDRESS)
+    /// A deposit queued while [`master_key`] is recorded, so its address must be
+    /// derived from that key.
+    pub fn fresh_deposit(account: Account, sweepable_amount: Lamport) -> QueuedDeposit {
+        QueuedDeposit {
+            account,
+            address: crate::address::account_address(&master_key(), &account),
+            balance: DepositBalance::new(
+                sweepable_amount + crate::constants::RENT_EXEMPTION_THRESHOLD,
+            )
+            .expect("BUG: the balance covers the rent exemption threshold"),
+        }
     }
 
-    /// The devnet outcome rewritten over [`derived_deposits`]: the message is rebuilt
-    /// from the plan with the recorded blockhash and the balances are remapped to the
-    /// new account order, while the signatures, fee and amounts stay the devnet ones.
-    pub fn derived_outcome() -> EncodedConfirmedTransactionWithStatusMeta {
-        let mut outcome = outcome();
-        let transaction = outcome
+    pub fn derived_sweep() -> Sweep {
+        Sweep::plan(derived_deposits(), minter_main_address())
+    }
+
+    /// The first signature of the transaction of [`derived_outcome`], under which the
+    /// sweep is submitted and queried.
+    pub fn transaction_signature() -> solana_signature::Signature {
+        derived_transaction().signatures[0]
+    }
+
+    fn derived_transaction() -> VersionedTransaction {
+        let real = outcome()
             .transaction
             .transaction
             .decode()
             .expect("BUG: the devnet transaction should decode");
-        let message = derived_sweep().sweep_message(*transaction.message.recent_blockhash());
-        let patched = VersionedTransaction {
-            signatures: transaction.signatures,
+        let message = derived_sweep().sweep_message(*real.message.recent_blockhash());
+        let address_to_account: std::collections::BTreeMap<Address, Account> = derived_deposits()
+            .into_iter()
+            .map(|(_, deposit)| (deposit.address, deposit.account))
+            .collect();
+        let message_bytes = message.serialize();
+        let signatures = message.account_keys[..message.header.num_required_signatures as usize]
+            .iter()
+            .map(|signer| {
+                sign_as(
+                    address_to_account
+                        .get(signer)
+                        .expect("BUG: every signer of the sweep is a deposit address"),
+                    &message_bytes,
+                )
+            })
+            .collect();
+        VersionedTransaction {
+            signatures,
             message: solana_message::VersionedMessage::Legacy(message),
-        };
+        }
+    }
+
+    /// The devnet outcome rewritten over [`derived_deposits`]: the message is rebuilt
+    /// from the plan with the recorded blockhash and signed by the deposit keys, and
+    /// the balances are remapped to the new account order, while the fee and amounts
+    /// stay the devnet ones.
+    pub fn derived_outcome() -> EncodedConfirmedTransactionWithStatusMeta {
+        let mut outcome = outcome();
         outcome.transaction.transaction = EncodedTransaction::Binary(
             STANDARD.encode(
-                bincode::serialize(&patched).expect("BUG: the transaction should serialize"),
+                bincode::serialize(&derived_transaction())
+                    .expect("BUG: the transaction should serialize"),
             ),
             TransactionBinaryEncoding::Base64,
         );
@@ -330,7 +420,7 @@ pub mod devnet_sweep {
                 crate::constants::RENT_EXEMPTION_THRESHOLD,
             );
         }
-        set_balances(&mut outcome, super::MINTER_ADDRESS, 0, AMOUNT_RECEIVED);
+        set_balances(&mut outcome, minter_main_address(), 0, AMOUNT_RECEIVED);
         set_balances(&mut outcome, solana_system_interface::program::ID, 1, 1);
         outcome
     }

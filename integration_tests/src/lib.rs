@@ -8,7 +8,7 @@ use cksol_types::{
 };
 use cksol_types_internal::{
     MinterArg,
-    event::{Event, GetEventsResult},
+    event::{Event, EventType, GetEventsResult, VersionedTransactionMessage},
     log::Priority,
 };
 use ic_canister_runtime::Runtime;
@@ -28,6 +28,7 @@ use pocket_ic::{PocketIcBuilder, RejectResponse, nonblocking::PocketIc};
 use serde::de::DeserializeOwned;
 use sol_rpc_client::SolRpcClient;
 use sol_rpc_types::{Lamport, RpcAccess};
+use solana_transaction::Transaction;
 use std::{default::Default, env::var, fs, ops::Deref, path::PathBuf, time::Duration, vec};
 
 pub mod events;
@@ -539,6 +540,26 @@ impl CkSolMinter<'_> {
 
     pub async fn assert_that_events(&self) -> MinterEventAssert {
         MinterEventAssert::new(self.get_all_events().await)
+    }
+
+    pub async fn signed_transaction(&self, signature: &cksol_types::Signature) -> Transaction {
+        let message = self
+            .get_all_events()
+            .await
+            .into_iter()
+            .find_map(|event| match event.payload {
+                EventType::SubmittedTransaction {
+                    signature: submitted,
+                    transaction: VersionedTransactionMessage::Legacy(message),
+                    ..
+                } if submitted == *signature => Some(message),
+                _ => None,
+            })
+            .expect("the transaction should have been submitted");
+        Transaction {
+            signatures: vec![signature.to_string().parse().expect("valid signature")],
+            message: bincode::deserialize(&message).expect("valid legacy message"),
+        }
     }
 
     pub async fn get_all_events(&self) -> Vec<Event> {
