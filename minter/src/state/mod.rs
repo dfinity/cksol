@@ -885,22 +885,22 @@ pub enum MinterTransaction {
 impl MinterTransaction {
     pub fn message(&self) -> &VersionedMessage {
         match self {
-            MinterTransaction::SweepDeposit { message, .. } => message,
-            MinterTransaction::Withdrawal { message, .. } => message,
+            MinterTransaction::SweepDeposit { message, .. }
+            | MinterTransaction::Withdrawal { message, .. } => message,
         }
     }
 
     pub fn signers(&self) -> &[Signer] {
         match self {
-            MinterTransaction::SweepDeposit { signers, .. } => signers,
-            MinterTransaction::Withdrawal { signers, .. } => signers,
+            MinterTransaction::SweepDeposit { signers, .. }
+            | MinterTransaction::Withdrawal { signers, .. } => signers,
         }
     }
 
     pub fn block_height(&self) -> BlockHeight {
         match self {
-            MinterTransaction::SweepDeposit { block_height, .. } => *block_height,
-            MinterTransaction::Withdrawal { block_height, .. } => *block_height,
+            MinterTransaction::SweepDeposit { block_height, .. }
+            | MinterTransaction::Withdrawal { block_height, .. } => *block_height,
         }
     }
 }
