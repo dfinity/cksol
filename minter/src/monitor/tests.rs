@@ -355,7 +355,6 @@ mod finalization {
         read_state(|s| {
             assert_eq!(s.submitted_transactions().len(), 1);
             assert!(s.submitted_transactions().contains_key(&signature(sig_b)));
-            assert!(s.transactions_to_resubmit().is_empty());
         });
     }
 
@@ -407,7 +406,6 @@ mod finalization {
 
         read_state(|s| {
             assert_eq!(s.submitted_transactions().len(), 1);
-            assert!(s.transactions_to_resubmit().is_empty());
         });
     }
 
@@ -454,7 +452,6 @@ mod finalization {
                 .contains_event(&EventType::ExpiredTransaction { signature });
             assert_eq!(expired, case.should_expire, "{}", case.name);
             read_state(|s| {
-                assert!(s.transactions_to_resubmit().is_empty(), "{}", case.name);
                 assert_eq!(
                     s.submitted_transactions().contains_key(&signature),
                     !case.should_expire,

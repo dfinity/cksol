@@ -1085,20 +1085,6 @@ pub mod events {
             )
         });
     }
-
-    pub fn resubmit_transaction(old_signature: Signature, new_signature: Signature) {
-        mutate_state(|state| {
-            process_event(
-                state,
-                EventType::ResubmittedTransaction {
-                    old_signature,
-                    new_signature,
-                    new_block_height: DEFAULT_BLOCK_HEIGHT,
-                },
-                &runtime(),
-            )
-        });
-    }
 }
 
 #[cfg(test)]
@@ -1365,15 +1351,6 @@ pub mod arb {
                         purpose,
                     }
                 }),
-            (arb_signature(), arb_signature(), arb_block_height(),).prop_map(
-                |(old_signature, new_signature, new_block_height)| {
-                    EventType::ResubmittedTransaction {
-                        old_signature,
-                        new_signature,
-                        new_block_height,
-                    }
-                }
-            ),
             arb_signature().prop_map(|signature| EventType::SucceededTransaction { signature }),
             arb_signature().prop_map(|signature| EventType::FailedTransaction { signature }),
             arb_signature().prop_map(|signature| EventType::ExpiredTransaction { signature }),

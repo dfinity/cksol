@@ -164,15 +164,6 @@ fn get_events(
                     purpose,
                 }
             }
-            EventType::ResubmittedTransaction {
-                old_signature,
-                new_signature,
-                new_block_height,
-            } => event::EventType::ResubmittedTransaction {
-                old_signature: old_signature.into(),
-                new_signature: new_signature.into(),
-                new_block_height: new_block_height.get(),
-            },
             EventType::SucceededTransaction { signature } => {
                 event::EventType::SucceededTransaction {
                     signature: signature.into(),

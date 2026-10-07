@@ -119,7 +119,6 @@ pub struct State {
     failed_withdrawal_requests: BTreeMap<LedgerBurnIndex, SentWithdrawalRequest>,
     submitted_transactions: InsertionOrderedMap<Signature, MinterTransaction>,
     created_withdrawal_txs: BTreeMap<Address, CreatedWithdrawalTransaction>,
-    transactions_to_resubmit: InsertionOrderedMap<Signature, MinterTransaction>,
     succeeded_transactions: BTreeSet<Signature>,
     failed_transactions: InsertionOrderedMap<Signature, MinterTransaction>,
     nonce_pool: DurableNoncePool,
@@ -211,24 +210,20 @@ impl State {
         &self.created_withdrawal_txs
     }
 
-    pub fn transactions_to_resubmit(&self) -> &InsertionOrderedMap<Signature, MinterTransaction> {
-        &self.transactions_to_resubmit
-    }
-
     pub fn process_transaction_expired(&mut self, signature: &Signature) {
         assert!(
             !self.succeeded_transactions.contains(signature),
-            "BUG: cannot mark already succeeded transaction {signature} for resubmission"
+            "BUG: cannot mark already succeeded transaction {signature} as expired"
         );
         assert!(
             !self.failed_transactions.contains_key(signature),
-            "BUG: cannot mark already failed transaction {signature} for resubmission"
+            "BUG: cannot mark already failed transaction {signature} as expired"
         );
         let transaction = self
             .submitted_transactions
             .remove(signature)
             .unwrap_or_else(|| {
-                panic!("BUG: cannot mark non-submitted transaction {signature} for resubmission")
+                panic!("BUG: cannot mark non-submitted transaction {signature} as expired")
             });
         match transaction {
             MinterTransaction::SweepDeposit { .. } => self.deposits.drop_swept(signature),
@@ -737,28 +732,6 @@ impl State {
         })
     }
 
-    fn process_transaction_resubmitted(
-        &mut self,
-        old_signature: &Signature,
-        _new_signature: &Signature,
-        _new_block_height: BlockHeight,
-    ) {
-        let old_transaction = self
-            .transactions_to_resubmit
-            .remove(old_signature)
-            .unwrap_or_else(|| {
-                panic!("Attempted to resubmit unknown transaction with signature {old_signature:?}")
-            });
-        match old_transaction {
-            MinterTransaction::SweepDeposit { .. } => panic!(
-                "BUG: sweep transaction {old_signature} must be dropped instead of resubmitted"
-            ),
-            MinterTransaction::Withdrawal { .. } => panic!(
-                "BUG: durable-nonce withdrawal transaction {old_signature} must never be resubmitted"
-            ),
-        }
-    }
-
     fn process_transaction_succeeded(&mut self, signature: &Signature) {
         assert!(
             !self.failed_transactions.contains_key(signature),
@@ -776,10 +749,6 @@ impl State {
                 self.nonce_pool.free(&nonce_account)
             }
         }
-        assert!(
-            !self.transactions_to_resubmit.contains_key(signature),
-            "BUG: transaction {signature} is queued for resubmission but is being marked as succeeded"
-        );
         assert!(
             self.succeeded_transactions.insert(*signature),
             "Attempted to mark transaction {signature:?} as succeeded twice"
@@ -812,10 +781,6 @@ impl State {
             self.failed_transactions.insert(*signature, transaction),
             None,
             "Attempted to fail transaction {signature:?} twice"
-        );
-        assert!(
-            !self.transactions_to_resubmit.contains_key(signature),
-            "BUG: transaction {signature} is queued for resubmission but is being marked as failed"
         );
         self.sent_withdrawal_requests
             .extract_if(.., |_, sent| &sent.signature == signature)
@@ -913,7 +878,6 @@ impl TryFrom<InitArgs> for State {
             failed_withdrawal_requests: BTreeMap::new(),
             submitted_transactions: InsertionOrderedMap::new(),
             created_withdrawal_txs: BTreeMap::new(),
-            transactions_to_resubmit: InsertionOrderedMap::new(),
             succeeded_transactions: BTreeSet::new(),
             failed_transactions: InsertionOrderedMap::new(),
             nonce_pool,

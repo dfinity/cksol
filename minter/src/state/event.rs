@@ -104,20 +104,6 @@ pub enum EventType {
         #[n(3)]
         purpose: TransactionPurpose,
     },
-    /// A previously submitted transaction was resubmitted with a new signature.
-    /// The transaction message and signers remain the same.
-    #[n(4)]
-    ResubmittedTransaction {
-        /// The signature of the old transaction being replaced
-        #[cbor(n(0), with = "cbor::signature")]
-        old_signature: Signature,
-        /// The signature of the new transaction
-        #[cbor(n(1), with = "cbor::signature")]
-        new_signature: Signature,
-        /// The block height of the new blockhash used in the resubmitted transaction.
-        #[n(2)]
-        new_block_height: BlockHeight,
-    },
     /// A previously submitted Solana transaction has been finalized successfully.
     #[n(5)]
     SucceededTransaction {
@@ -134,8 +120,7 @@ pub enum EventType {
     },
     /// A previously submitted Solana transaction has an expired blockhash
     /// and a null on-chain status, meaning it will never be executed.
-    /// A withdrawal transaction is marked for resubmission;
-    /// the deposits of a sweep transaction are dropped instead.
+    /// The deposits of the expired sweep transaction are dropped.
     #[n(7)]
     ExpiredTransaction {
         /// The signature of the expired Solana transaction.
