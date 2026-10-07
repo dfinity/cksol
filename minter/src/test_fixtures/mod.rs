@@ -919,7 +919,7 @@ pub mod events {
     /// Records a `SubmittedTransaction` for the durable-nonce withdrawal
     /// transaction advancing [`NONCE_ACCOUNT`] with the nonce value of
     /// `nonce_seed`.
-    pub fn submit_nonce_withdrawal(
+    pub fn submit_withdrawal_batch_transaction(
         signature: Signature,
         nonce_seed: usize,
         burn_indices: Vec<u64>,
