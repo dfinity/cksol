@@ -704,8 +704,8 @@ pub mod devnet_sweep {
 /// All helpers operate on the global thread-local state via [`mutate_state`].
 pub mod events {
     use super::{
-        DEFAULT_BLOCK_HEIGHT, MINTER_ADDRESS, NONCE_ACCOUNT, WITHDRAWAL_FEE, durable_nonce,
-        queued_deposit, queued_deposit_of, runtime::TestCanisterRuntime, withdrawal_batch_message,
+        DEFAULT_BLOCK_HEIGHT, MINTER_ADDRESS, NONCE_ACCOUNT, WITHDRAWAL_FEE, queued_deposit,
+        queued_deposit_of, runtime::TestCanisterRuntime, withdrawal_batch_message,
     };
     use crate::deposit::sweep::deposit_status;
     use crate::{
@@ -896,8 +896,11 @@ pub mod events {
     }
 
     /// Records a `CreatedTransaction` for the given withdrawals, binding
-    /// [`NONCE_ACCOUNT`] to the nonce value of `nonce_seed`.
-    pub fn create_withdrawal_batch_transaction(nonce_seed: usize, burn_indices: Vec<u64>) {
+    /// [`NONCE_ACCOUNT`] to `nonce_value`.
+    pub fn create_withdrawal_batch_transaction(
+        nonce_value: solana_hash::Hash,
+        burn_indices: Vec<u64>,
+    ) {
         mutate_state(|state| {
             process_event(
                 state,
@@ -907,7 +910,7 @@ pub mod events {
                         .map(LedgerBurnIndex::from)
                         .collect(),
                     nonce_account: NONCE_ACCOUNT,
-                    nonce_value: durable_nonce(nonce_seed),
+                    nonce_value,
                 },
                 &runtime(),
             )
@@ -915,12 +918,11 @@ pub mod events {
     }
 
     /// Records a `SubmittedTransaction` for the durable-nonce withdrawal
-    /// transaction advancing [`NONCE_ACCOUNT`] with the nonce value of
-    /// `nonce_seed` and transferring the created withdrawal requests of
-    /// `burn_indices`.
+    /// transaction advancing [`NONCE_ACCOUNT`] with `nonce_value` and
+    /// transferring the created withdrawal requests of `burn_indices`.
     pub fn submit_withdrawal_batch_transaction(
         signature: Signature,
-        nonce_seed: usize,
+        nonce_value: solana_hash::Hash,
         burn_indices: Vec<u64>,
     ) {
         let burn_indices: Vec<LedgerBurnIndex> = burn_indices
@@ -929,7 +931,7 @@ pub mod events {
             .collect();
         let message = withdrawal_batch_message(
             NONCE_ACCOUNT,
-            durable_nonce(nonce_seed),
+            nonce_value,
             &created_withdrawal_transfers(&burn_indices),
         );
         mutate_state(|state| {

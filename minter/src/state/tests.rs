@@ -405,7 +405,7 @@ mod swept_deposits {
 
 mod nonce_accounts {
     use super::*;
-    use crate::state::audit::replay_events;
+    use crate::{state::audit::replay_events, test_fixtures::durable_nonce};
 
     #[test]
     fn should_only_add_a_nonce_account_once_no_incomplete_withdrawal_targets_it() {
@@ -429,7 +429,7 @@ mod nonce_accounts {
             ))
         );
 
-        create_withdrawal_batch_transaction(1, vec![0]);
+        create_withdrawal_batch_transaction(durable_nonce(1), vec![0]);
         assert_eq!(
             add_destination(),
             Err(InvalidStateError::NonceAccountIsWithdrawalDestination(
@@ -437,7 +437,7 @@ mod nonce_accounts {
             ))
         );
 
-        submit_withdrawal_batch_transaction(signature(1), 1, vec![0]);
+        submit_withdrawal_batch_transaction(signature(1), durable_nonce(1), vec![0]);
         assert_eq!(
             add_destination(),
             Err(InvalidStateError::NonceAccountIsWithdrawalDestination(
@@ -1266,7 +1266,7 @@ mod withdrawal_transactions {
         let balance_before = read_state(|s| s.balance());
         accept_withdrawal(account(1), 0, MINIMUM_WITHDRAWAL_AMOUNT);
 
-        create_withdrawal_batch_transaction(1, vec![0]);
+        create_withdrawal_batch_transaction(durable_nonce(1), vec![0]);
 
         read_state(|s| {
             assert_eq!(
@@ -1285,10 +1285,10 @@ mod withdrawal_transactions {
         init_state();
         init_balance();
         accept_withdrawal(account(1), 0, MINIMUM_WITHDRAWAL_AMOUNT);
-        create_withdrawal_batch_transaction(1, vec![0]);
+        create_withdrawal_batch_transaction(durable_nonce(1), vec![0]);
         let balance_after_creation = read_state(|s| s.balance());
 
-        submit_withdrawal_batch_transaction(signature(7), 1, vec![0]);
+        submit_withdrawal_batch_transaction(signature(7), durable_nonce(1), vec![0]);
 
         read_state(|s| {
             assert_eq!(s.balance(), balance_after_creation);
@@ -1319,8 +1319,8 @@ mod withdrawal_transactions {
         init_state();
         init_balance();
         accept_withdrawal(account(1), 0, MINIMUM_WITHDRAWAL_AMOUNT);
-        create_withdrawal_batch_transaction(1, vec![0]);
-        submit_withdrawal_batch_transaction(signature(7), 1, vec![0]);
+        create_withdrawal_batch_transaction(durable_nonce(1), vec![0]);
+        submit_withdrawal_batch_transaction(signature(7), durable_nonce(1), vec![0]);
 
         succeed_transaction(signature(7));
 
@@ -1342,8 +1342,8 @@ mod withdrawal_transactions {
         init_state();
         init_balance();
         accept_withdrawal(account(1), 0, MINIMUM_WITHDRAWAL_AMOUNT);
-        create_withdrawal_batch_transaction(1, vec![0]);
-        submit_withdrawal_batch_transaction(signature(7), 1, vec![0]);
+        create_withdrawal_batch_transaction(durable_nonce(1), vec![0]);
+        submit_withdrawal_batch_transaction(signature(7), durable_nonce(1), vec![0]);
 
         fail_transaction(signature(7));
 
@@ -1435,7 +1435,7 @@ mod withdrawal_transactions {
         init_state();
         init_balance();
         accept_withdrawal(account(1), 0, MINIMUM_WITHDRAWAL_AMOUNT);
-        create_withdrawal_batch_transaction(1, vec![0]);
+        create_withdrawal_batch_transaction(durable_nonce(1), vec![0]);
         let message_without_nonce_advance = solana_message::Message::new_with_blockhash(
             &[solana_system_interface::instruction::transfer(
                 &MINTER_ADDRESS,
@@ -1464,7 +1464,7 @@ mod withdrawal_transactions {
         init_state();
         init_balance();
         accept_withdrawal(account(1), 0, MINIMUM_WITHDRAWAL_AMOUNT);
-        create_withdrawal_batch_transaction(1, vec![0]);
+        create_withdrawal_batch_transaction(durable_nonce(1), vec![0]);
         let message_with_another_amount = withdrawal_batch_message(
             NONCE_ACCOUNT,
             durable_nonce(1),
@@ -1490,9 +1490,9 @@ mod withdrawal_transactions {
         init_balance();
         accept_withdrawal(account(1), 0, MINIMUM_WITHDRAWAL_AMOUNT);
         accept_withdrawal(account(2), 1, MINIMUM_WITHDRAWAL_AMOUNT);
-        create_withdrawal_batch_transaction(1, vec![0, 1]);
+        create_withdrawal_batch_transaction(durable_nonce(1), vec![0, 1]);
 
-        submit_withdrawal_batch_transaction(signature(7), 1, vec![0]);
+        submit_withdrawal_batch_transaction(signature(7), durable_nonce(1), vec![0]);
     }
 
     const DEPOSIT_AMOUNT: u64 = 500_000_000;
