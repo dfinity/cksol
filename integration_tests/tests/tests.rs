@@ -69,7 +69,7 @@ async fn deposit_and_credit_funds(setup: &Setup) {
     setup
         .execute_http_mocks(
             MockBuilder::with_start_id(16)
-                .finalize_transaction(SUBMISSION_BLOCK_HEIGHT)
+                .finalize_transaction(&sweep_signature, SUBMISSION_BLOCK_HEIGHT)
                 .get_sweep_transaction(&sweep_signature, SWEEPABLE_AMOUNT)
                 .build(),
         )
@@ -768,7 +768,7 @@ mod withdrawal_tests {
         setup
             .execute_http_mocks(
                 MockBuilder::with_start_id(44)
-                    .mark_transaction_expired(EXPIRY_BLOCK_HEIGHT)
+                    .mark_transaction_expired(&original_transaction_id, EXPIRY_BLOCK_HEIGHT)
                     .build(),
             )
             .await;
@@ -803,7 +803,7 @@ mod withdrawal_tests {
         setup
             .execute_http_mocks(
                 MockBuilder::with_start_id(68)
-                    .finalize_transaction(EXPIRY_BLOCK_HEIGHT)
+                    .finalize_transaction(&resubmitted_transaction_id, EXPIRY_BLOCK_HEIGHT)
                     .build(),
             )
             .await;
@@ -1009,7 +1009,7 @@ mod deposit_sol_tests {
         setup
             .execute_http_mocks(
                 MockBuilder::with_start_id(16)
-                    .finalize_transaction(SUBMISSION_BLOCK_HEIGHT)
+                    .finalize_transaction(&sweep_signature, SUBMISSION_BLOCK_HEIGHT)
                     .get_sweep_transaction(&sweep_signature, SWEEPABLE_AMOUNT)
                     .build(),
             )
@@ -1063,7 +1063,7 @@ mod deposit_sol_tests {
         setup
             .execute_http_mocks(
                 MockBuilder::with_start_id(16)
-                    .mark_transaction_expired(EXPIRY_BLOCK_HEIGHT)
+                    .mark_transaction_expired(&sweep_signature, EXPIRY_BLOCK_HEIGHT)
                     .build(),
             )
             .await;
@@ -1137,7 +1137,7 @@ mod deposit_sol_tests {
         setup
             .execute_http_mocks(
                 MockBuilder::with_start_id(16)
-                    .finalize_transaction(SUBMISSION_BLOCK_HEIGHT)
+                    .finalize_transaction(&sweep_signature, SUBMISSION_BLOCK_HEIGHT)
                     .get_sweep_transaction(&sweep_signature, amount_not_in_the_plan)
                     .build(),
             )
