@@ -211,19 +211,6 @@ impl State {
         &self.created_withdrawal_txs
     }
 
-    /// Transiently reserves up to `max` free durable nonce accounts for
-    /// withdrawal batches being processed, so that concurrently processed
-    /// batches can never pick the same account.
-    pub fn reserve_nonce_accounts(&mut self, max: usize) -> Vec<Address> {
-        self.nonce_pool.reserve_accounts(max)
-    }
-
-    /// Releases the transient reservation of a nonce account whose batch was
-    /// not submitted.
-    pub fn unreserve_nonce_account(&mut self, address: &Address) {
-        self.nonce_pool.unreserve(address);
-    }
-
     pub fn transactions_to_resubmit(&self) -> &InsertionOrderedMap<Signature, MinterTransaction> {
         &self.transactions_to_resubmit
     }

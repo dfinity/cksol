@@ -41,37 +41,6 @@ impl DurableNoncePool {
         Ok(())
     }
 
-    /// Reserves up to `max` free accounts for withdrawal batches being processed,
-    /// so that concurrently processed batches can never pick the same account.
-    ///
-    /// A reservation is transient: it is either released with [`Self::unreserve`]
-    /// in the same timer round or superseded by [`Self::bind`].
-    pub(super) fn reserve_accounts(&mut self, max: usize) -> Vec<Address> {
-        self.accounts
-            .iter_mut()
-            .filter(|(_, account)| account.is_free())
-            .take(max)
-            .map(|(address, account)| {
-                account.state = NonceAccountState::Reserved;
-                *address
-            })
-            .collect()
-    }
-
-    /// Releases the reservation of an account whose batch was not submitted.
-    ///
-    /// # Panics
-    /// Panics if the account is not reserved.
-    pub(super) fn unreserve(&mut self, address: &Address) {
-        let account = self.account_mut(address);
-        assert_eq!(
-            account.state,
-            NonceAccountState::Reserved,
-            "BUG: cannot unreserve nonce account {address} that is not reserved"
-        );
-        account.state = NonceAccountState::Free;
-    }
-
     /// Binds the account to an in-flight withdrawal transaction carrying
     /// `nonce_value`, recording the value as seen.
     ///
@@ -81,7 +50,7 @@ impl DurableNoncePool {
     pub(super) fn bind(&mut self, address: &Address, nonce_value: Hash) {
         let account = self.account_mut(address);
         match account.state {
-            NonceAccountState::Free | NonceAccountState::Reserved => {}
+            NonceAccountState::Free => {}
             NonceAccountState::Bound => {
                 panic!("BUG: nonce account {address} is already bound to an in-flight transaction")
             }
@@ -101,7 +70,7 @@ impl DurableNoncePool {
         let account = self.account_mut(address);
         match account.state {
             NonceAccountState::Bound => account.state = NonceAccountState::Free,
-            NonceAccountState::Free | NonceAccountState::Reserved => {
+            NonceAccountState::Free => {
                 panic!("BUG: cannot free nonce account {address} that is not bound")
             }
         }
@@ -127,11 +96,15 @@ impl DurableNoncePool {
         self.accounts.is_empty()
     }
 
-    pub fn num_free_accounts(&self) -> usize {
+    pub fn free_accounts(&self) -> impl Iterator<Item = &Address> {
         self.accounts
-            .values()
-            .filter(|account| account.is_free())
-            .count()
+            .iter()
+            .filter(|(_, account)| account.is_free())
+            .map(|(address, _)| address)
+    }
+
+    pub fn num_free_accounts(&self) -> usize {
+        self.free_accounts().count()
     }
 
     fn account_mut(&mut self, address: &Address) -> &mut NonceAccount {
@@ -163,9 +136,6 @@ enum NonceAccountState {
     /// The account is not bound to any in-flight withdrawal transaction.
     #[default]
     Free,
-    /// The account is transiently picked for a withdrawal batch being processed.
-    /// Reservations never survive a replay of the event log.
-    Reserved,
     /// The account is bound to an in-flight withdrawal transaction.
     Bound,
 }

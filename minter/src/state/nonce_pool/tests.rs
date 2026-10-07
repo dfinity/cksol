@@ -33,40 +33,30 @@ fn should_leave_the_pool_unchanged_when_an_add_fails() {
 }
 
 #[test]
-fn should_reserve_at_most_the_free_accounts() {
+fn should_list_every_account_of_a_new_pool_as_free() {
+    let pool = pool_of([address(1), address(2)]);
+
+    assert_eq!(free_accounts(&pool), vec![address(1), address(2)]);
+}
+
+#[test]
+fn should_not_list_a_bound_account_as_free() {
     let mut pool = pool_of([address(1), address(2)]);
 
-    assert_eq!(pool.reserve_accounts(3), vec![address(1), address(2)]);
-    assert_eq!(pool.reserve_accounts(1), vec![]);
-}
-
-#[test]
-fn should_not_reserve_a_bound_account() {
-    let mut pool = pool_of([address(1), address(2)]);
     pool.bind(&address(1), durable_nonce(1));
 
-    assert_eq!(pool.reserve_accounts(2), vec![address(2)]);
+    assert_eq!(free_accounts(&pool), vec![address(2)]);
 }
 
 #[test]
-fn should_reserve_an_unreserved_account_again() {
-    let mut pool = pool_of([address(1)]);
-    assert_eq!(pool.reserve_accounts(1), vec![address(1)]);
-
-    pool.unreserve(&address(1));
-
-    assert_eq!(pool.reserve_accounts(1), vec![address(1)]);
-}
-
-#[test]
-fn should_free_a_bound_account_for_a_new_reservation() {
+fn should_list_a_freed_account_as_free_again() {
     let mut pool = pool_of([address(1)]);
     pool.bind(&address(1), durable_nonce(1));
-    assert_eq!(pool.reserve_accounts(1), vec![]);
+    assert_eq!(free_accounts(&pool), vec![]);
 
     pool.free(&address(1));
 
-    assert_eq!(pool.reserve_accounts(1), vec![address(1)]);
+    assert_eq!(free_accounts(&pool), vec![address(1)]);
 }
 
 #[test]
@@ -128,9 +118,13 @@ fn should_count_only_the_free_accounts() {
     assert_eq!(pool.num_free_accounts(), 3);
 
     pool.bind(&address(1), durable_nonce(1));
-    assert_eq!(pool.reserve_accounts(1), vec![address(2)]);
+    pool.bind(&address(2), durable_nonce(2));
 
     assert_eq!(pool.num_free_accounts(), 1);
+}
+
+fn free_accounts(pool: &DurableNoncePool) -> Vec<Address> {
+    pool.free_accounts().copied().collect()
 }
 
 fn pool_of(addresses: impl IntoIterator<Item = Address>) -> DurableNoncePool {

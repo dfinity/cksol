@@ -567,7 +567,7 @@ mod process_pending_withdrawals_tests {
 
         assert_eq!(EventsAssert::from_recorded(), events_before);
         assert_eq!(withdrawal_status(1), WithdrawalStatus::Pending);
-        assert_nonce_account_unreserved();
+        assert_nonce_account_free();
     }
 
     #[tokio::test]
@@ -594,7 +594,7 @@ mod process_pending_withdrawals_tests {
 
         assert_eq!(EventsAssert::from_recorded(), events_before);
         assert_eq!(withdrawal_status(2), WithdrawalStatus::Pending);
-        assert_nonce_account_unreserved();
+        assert_nonce_account_free();
     }
 
     #[tokio::test]
@@ -897,10 +897,12 @@ mod process_pending_withdrawals_tests {
         assert_eq!(runtime.set_timer_delays(), Vec::<Duration>::new());
     }
 
-    fn assert_nonce_account_unreserved() {
-        crate::state::mutate_state(|s| {
-            assert_eq!(s.reserve_nonce_accounts(1), vec![NONCE_ACCOUNT]);
-            s.unreserve_nonce_account(&NONCE_ACCOUNT);
+    fn assert_nonce_account_free() {
+        read_state(|s| {
+            assert_eq!(
+                s.nonce_pool().free_accounts().collect::<Vec<_>>(),
+                vec![&NONCE_ACCOUNT]
+            )
         });
     }
 }

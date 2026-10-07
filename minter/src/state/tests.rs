@@ -1366,7 +1366,7 @@ mod withdrawal_transactions {
 
     #[test]
     fn should_rebuild_the_bound_pool_and_created_bucket_from_a_log_ending_after_creation() {
-        let mut replayed = replay_events(log_of(funded_log_until_created_transaction()));
+        let replayed = replay_events(log_of(funded_log_until_created_transaction()));
 
         assert_eq!(
             replayed.balance(),
@@ -1385,7 +1385,7 @@ mod withdrawal_transactions {
             Some(durable_nonce(1))
         );
         assert_eq!(replayed.withdrawal_status(0), WithdrawalStatus::Pending);
-        assert_eq!(replayed.reserve_nonce_accounts(1), vec![]);
+        assert_eq!(replayed.nonce_pool().num_free_accounts(), 0);
     }
 
     #[test]
@@ -1562,7 +1562,11 @@ mod withdrawal_transactions {
     }
 
     fn assert_nonce_account_free() {
-        mutate_state(|s| assert_eq!(s.reserve_nonce_accounts(1), vec![NONCE_ACCOUNT]));
-        mutate_state(|s| s.unreserve_nonce_account(&NONCE_ACCOUNT));
+        read_state(|s| {
+            assert_eq!(
+                s.nonce_pool().free_accounts().collect::<Vec<_>>(),
+                vec![&NONCE_ACCOUNT]
+            )
+        });
     }
 }

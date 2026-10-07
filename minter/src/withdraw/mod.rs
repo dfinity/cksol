@@ -180,17 +180,15 @@ struct BoundWithdrawal {
 }
 
 async fn create_transactions_batch<R: CanisterRuntime>(runtime: &R, minter_address: Address) {
-    let reserved_batches: Vec<ReservedBatch> = mutate_state(|state| {
-        let max_batches = state
-            .nonce_pool()
-            .num_free_accounts()
-            .min(MAX_CONCURRENT_RPC_CALLS)
+    let reserved_batches: Vec<ReservedBatch> = read_state(|state| {
+        let max_batches = MAX_CONCURRENT_RPC_CALLS
             .min(MAX_CONCURRENT_SIGNATURES.saturating_sub(state.created_withdrawal_txs().len()));
-        let batches: Vec<_> = state.withdrawal_batches().take(max_batches).collect();
         state
-            .reserve_nonce_accounts(batches.len())
-            .into_iter()
-            .zip(batches)
+            .nonce_pool()
+            .free_accounts()
+            .copied()
+            .zip(state.withdrawal_batches())
+            .take(max_batches)
             .map(|(nonce_account, requests)| ReservedBatch {
                 nonce_account,
                 requests,
@@ -215,10 +213,6 @@ async fn create_transaction<R: CanisterRuntime>(
         nonce_account,
         requests,
     } = batch;
-    let unreserve = scopeguard::guard((), |()| {
-        mutate_state(|state| state.unreserve_nonce_account(&nonce_account));
-    });
-
     let nonce_value = match read_verified_nonce(runtime, nonce_account, minter_address).await {
         Ok(nonce_value) => nonce_value,
         Err(e) => {
@@ -251,7 +245,6 @@ async fn create_transaction<R: CanisterRuntime>(
         return;
     }
 
-    scopeguard::ScopeGuard::into_inner(unreserve);
     mutate_state(|state| {
         process_event(
             state,
