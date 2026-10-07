@@ -32,6 +32,13 @@ mod tests;
 
 pub const FINALIZE_TRANSACTIONS_DELAY: Duration = Duration::from_mins(2);
 pub const RESUBMIT_TRANSACTIONS_DELAY: Duration = Duration::from_mins(3);
+/// Minimum time since its submission before a withdrawal transaction without a
+/// status is re-broadcast. The minter sends transactions without `maxRetries`,
+/// so an Agave RPC node keeps re-sending a durable-nonce transaction every 2 s
+/// until it lands, its nonce advances, or 150 blocks (about 60 to 90 s) pass.
+/// Re-broadcasting earlier would only duplicate the work of the RPC node.
+/// See https://github.com/anza-xyz/agave/blob/master/rpc/src/rpc.rs
+pub const MIN_REBROADCAST_AGE: Duration = Duration::from_secs(90);
 /// A leader accepts a transaction while its blockhash is still among the last
 /// `MAX_PROCESSING_AGE` entries of the recent-blockhash queue, which holds one
 /// entry per non-skipped slot. The public documentation describes this window
@@ -187,6 +194,7 @@ async fn rebroadcast_withdrawal_transactions<R: CanisterRuntime>(
     runtime: &R,
     not_found: &BTreeSet<Signature>,
 ) {
+    let now = runtime.time();
     let batches: Vec<Vec<Transaction>> = read_state(|state| {
         not_found
             .iter()
@@ -194,12 +202,14 @@ async fn rebroadcast_withdrawal_transactions<R: CanisterRuntime>(
                 |signature| match state.submitted_transactions().get(signature)? {
                     MinterTransaction::Withdrawal {
                         message: VersionedMessage::Legacy(message),
+                        submitted_at,
                         ..
-                    } => Some(Transaction {
+                    } if is_old_enough_to_rebroadcast(*submitted_at, now) => Some(Transaction {
                         signatures: vec![*signature],
                         message: message.clone(),
                     }),
-                    MinterTransaction::SweepDeposit { .. } => None,
+                    MinterTransaction::Withdrawal { .. }
+                    | MinterTransaction::SweepDeposit { .. } => None,
                 },
             )
             .chunks(MAX_CONCURRENT_RPC_CALLS)
@@ -215,6 +225,10 @@ async fn rebroadcast_withdrawal_transactions<R: CanisterRuntime>(
         )
         .await;
     }
+}
+
+fn is_old_enough_to_rebroadcast(submitted_at: u64, now: u64) -> bool {
+    Duration::from_nanos(now.saturating_sub(submitted_at)) >= MIN_REBROADCAST_AGE
 }
 
 async fn rebroadcast_transaction<R: CanisterRuntime>(runtime: &R, transaction: Transaction) {

@@ -121,8 +121,12 @@ impl TestCanisterRuntime {
         self
     }
 
-    pub fn with_increasing_time(mut self) -> Self {
-        self.times = (0..).into();
+    pub fn with_increasing_time(self) -> Self {
+        self.with_increasing_time_from(0)
+    }
+
+    pub fn with_increasing_time_from(mut self, start: u64) -> Self {
+        self.times = (start..).into();
         self
     }
 

@@ -33,7 +33,7 @@ fn apply_state_transition(state: &mut State, payload: &EventType, timestamp: u64
             signers,
             purpose,
         } => {
-            state.process_transaction_submitted(signature, message, signers, purpose);
+            state.process_transaction_submitted(signature, message, signers, purpose, timestamp);
         }
         EventType::ResubmittedTransaction {
             old_signature,

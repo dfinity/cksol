@@ -330,7 +330,8 @@ async fn should_return_error_if_already_processing() {
 mod process_pending_withdrawals_tests {
     use super::*;
     use crate::{
-        monitor::finalize_transactions,
+        monitor::{MIN_REBROADCAST_AGE, finalize_transactions},
+        runtime::CanisterRuntime,
         sol_transfer::build_batch_withdrawal_message,
         state::event::EventType,
         test_fixtures::{
@@ -569,7 +570,7 @@ mod process_pending_withdrawals_tests {
         assert_matches!(withdrawal_status(1), WithdrawalStatus::TxSent { .. });
 
         let rebroadcast = TestCanisterRuntime::new()
-            .with_increasing_time()
+            .with_increasing_time_from(submission.time() + MIN_REBROADCAST_AGE.as_nanos() as u64)
             .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![None])))
             .add_stub_response(SendTransactionResult::Consistent(Ok(
                 minter_signature().into()

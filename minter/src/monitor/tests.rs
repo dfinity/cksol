@@ -1,6 +1,6 @@
 use super::{
-    MAX_BLOCKHASH_AGE_IN_BLOCKS, MAX_SIGNATURES_PER_STATUS_CHECK, finalize_transactions,
-    resubmit_transactions,
+    MAX_BLOCKHASH_AGE_IN_BLOCKS, MAX_SIGNATURES_PER_STATUS_CHECK, MIN_REBROADCAST_AGE,
+    finalize_transactions, resubmit_transactions,
 };
 use crate::{
     constants::MAX_CONCURRENT_RPC_CALLS,
@@ -216,7 +216,7 @@ mod finalization {
         let events_before = EventsAssert::from_recorded();
 
         let runtime = TestCanisterRuntime::new()
-            .with_increasing_time()
+            .with_increasing_time_from(min_rebroadcast_age_nanos())
             .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![None])))
             .add_stub_response(SendTransactionResult::Consistent(Ok(signature.into())));
 
@@ -231,6 +231,34 @@ mod finalization {
         assert_eq!(sent[0].skip_preflight, Some(true));
         assert_eq!(EventsAssert::from_recorded(), events_before);
         read_state(|s| assert!(s.submitted_transactions().contains_key(&signature)));
+    }
+
+    #[tokio::test]
+    async fn should_rebroadcast_a_missing_withdrawal_only_after_the_minimum_age() {
+        setup();
+        let signature = submit_withdrawal_transaction();
+
+        let too_early = TestCanisterRuntime::new()
+            .with_increasing_time()
+            .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![None])));
+
+        finalize_transactions(too_early.clone()).await;
+
+        assert!(too_early.sent_transactions().is_empty());
+
+        let old_enough = TestCanisterRuntime::new()
+            .with_increasing_time_from(min_rebroadcast_age_nanos())
+            .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![None])))
+            .add_stub_response(SendTransactionResult::Consistent(Ok(signature.into())));
+
+        finalize_transactions(old_enough.clone()).await;
+
+        assert_eq!(old_enough.sent_transactions().len(), 1);
+        read_state(|s| assert!(s.submitted_transactions().contains_key(&signature)));
+    }
+
+    fn min_rebroadcast_age_nanos() -> u64 {
+        MIN_REBROADCAST_AGE.as_nanos() as u64
     }
 
     fn encoded_submitted_transaction(signature: &solana_signature::Signature) -> String {
@@ -343,10 +371,7 @@ mod finalization {
             .with_increasing_time()
             .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
             .add_stub_response(BlockResult::Consistent(Ok(current_block())))
-            .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![None, None])))
-            .add_stub_response(SendTransactionResult::Consistent(Ok(
-                nonce_withdrawal.into()
-            )));
+            .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![None, None])));
 
         finalize_transactions(runtime).await;
 
