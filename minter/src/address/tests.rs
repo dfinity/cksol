@@ -93,8 +93,8 @@ mod minter_address_tests {
 
     #[test]
     fn should_derive_mainnet_minter_addresses_offline() {
-        const CKSOL_MINTER_PRODUCTION_CANISTER_ID: &'static str = "lh22c-kyaaa-aaaar-qb5nq-cai";
-        const CKSOL_MINTER_STAGING_CANISTER_ID: &'static str = "ljyxk-riaaa-aaaar-qb5mq-cai";
+        const CKSOL_MINTER_PRODUCTION_CANISTER_ID: &str = "lh22c-kyaaa-aaaar-qb5nq-cai";
+        const CKSOL_MINTER_STAGING_CANISTER_ID: &str = "ljyxk-riaaa-aaaar-qb5mq-cai";
 
         for (minter_id, expected_address) in [
             (
