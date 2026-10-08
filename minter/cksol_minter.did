@@ -519,7 +519,7 @@ service : (MinterArg) -> {
     //
     // If the owner is not set, it defaults to the caller's principal.
     // The resolved owner must be a non-anonymous principal.
-    get_deposit_address: (GetDepositAddressArgs) -> (Address) query;
+    get_deposit_address: (GetDepositAddressArgs) -> (Address);
 
     // Queues the deposit address of the given account for a sweep
     // to the minter's main account and returns the identifier of

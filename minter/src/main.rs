@@ -58,7 +58,7 @@ fn post_upgrade(args: Option<MinterArg>) {
     setup_timers();
 }
 
-#[ic_cdk::query]
+#[ic_cdk::update]
 fn get_deposit_address(args: GetDepositAddressArgs) -> Address {
     let account = assert_valid_deposit_account(args.owner, args.subaccount);
     cksol_minter::address::get_deposit_address(&account).into()
