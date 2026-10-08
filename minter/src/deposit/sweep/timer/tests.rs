@@ -161,7 +161,10 @@ async fn should_record_event_even_if_transaction_submission_fails() {
     let runtime = TestCanisterRuntime::new()
         .with_increasing_time()
         .add_recent_block(Ok(SLOT))
-        .add_stub_response(SendTransactionResult::Inconsistent(vec![]))
+        .expect_send_transaction(
+            fee_payer_signature,
+            SendTransactionResult::Inconsistent(vec![]),
+        )
         .add_signer(sign_for(&account(1)));
 
     sweep_queued_deposits(runtime).await;

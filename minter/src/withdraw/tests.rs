@@ -25,12 +25,15 @@ use assert_matches::assert_matches;
 use candid::{Nat, Principal};
 use cksol_types::TxFinalizedStatus;
 use cksol_types::WithdrawSolStatus;
-use cksol_types::{WithdrawSolError, WithdrawSolOk};
+use cksol_types::{BurnMemo, Memo, WithdrawSolError, WithdrawSolOk};
 use cksol_types_internal::InitArgs;
 use ic_canister_runtime::IcError;
 use ic_cdk::call::CallRejected;
 use ic_cdk_management_canister::SignCallError;
-use icrc_ledger_types::{icrc1::account::Account, icrc2::transfer_from::TransferFromError};
+use icrc_ledger_types::{
+    icrc1::account::Account,
+    icrc2::transfer_from::{TransferFromArgs, TransferFromError},
+};
 use sol_rpc_types::{MultiRpcResult, RpcError};
 use solana_signature::Signature;
 use std::time::Duration;
@@ -41,12 +44,32 @@ fn test_caller() -> Account {
     Principal::from_slice(&[1_u8; 20]).into()
 }
 
+/// The `icrc2_transfer_from` arguments burning `amount` ckSOL from `from` for a withdrawal
+/// to [`VALID_ADDRESS`].
+fn burn_args(from: Account, amount: u64) -> TransferFromArgs {
+    let to_address: solana_address::Address = VALID_ADDRESS
+        .parse()
+        .expect("BUG: VALID_ADDRESS should parse");
+    TransferFromArgs {
+        spender_subaccount: None,
+        from,
+        to: MINTER_ACCOUNT,
+        fee: None,
+        created_at_time: None,
+        memo: Some(Memo::from(BurnMemo::convert(to_address)).into()),
+        amount: Nat::from(amount),
+    }
+}
+
 #[tokio::test]
 async fn should_return_error_if_calling_ledger_fails() {
     init_state();
     init_schnorr_master_key();
 
-    let runtime = TestCanisterRuntime::new().add_stub_error(IcError::CallPerformFailed);
+    let runtime = TestCanisterRuntime::new().expect_icrc2_transfer_from(
+        burn_args(test_caller(), MINIMUM_WITHDRAWAL_AMOUNT),
+        IcError::CallPerformFailed,
+    );
 
     let result = withdraw(
         &runtime,
@@ -67,9 +90,10 @@ async fn should_return_error_if_ledger_unavailable() {
     init_state();
     init_schnorr_master_key();
 
-    let runtime = TestCanisterRuntime::new().add_stub_response(Err::<Nat, TransferFromError>(
-        TransferFromError::TemporarilyUnavailable,
-    ));
+    let runtime = TestCanisterRuntime::new().expect_icrc2_transfer_from(
+        burn_args(test_caller(), MINIMUM_WITHDRAWAL_AMOUNT),
+        Err(TransferFromError::TemporarilyUnavailable),
+    );
 
     let result = withdraw(
         &runtime,
@@ -92,11 +116,12 @@ async fn should_return_error_if_insufficient_allowance() {
     init_state();
     init_schnorr_master_key();
 
-    let runtime = TestCanisterRuntime::new().add_stub_response(Err::<Nat, TransferFromError>(
-        TransferFromError::InsufficientAllowance {
+    let runtime = TestCanisterRuntime::new().expect_icrc2_transfer_from(
+        burn_args(test_caller(), MINIMUM_WITHDRAWAL_AMOUNT),
+        Err(TransferFromError::InsufficientAllowance {
             allowance: Nat::from(123u64),
-        },
-    ));
+        }),
+    );
 
     let result = withdraw(
         &runtime,
@@ -117,11 +142,12 @@ async fn should_return_error_if_insufficient_funds() {
     init_state();
     init_schnorr_master_key();
 
-    let runtime = TestCanisterRuntime::new().add_stub_response(Err::<Nat, TransferFromError>(
-        TransferFromError::InsufficientFunds {
+    let runtime = TestCanisterRuntime::new().expect_icrc2_transfer_from(
+        burn_args(test_caller(), MINIMUM_WITHDRAWAL_AMOUNT),
+        Err(TransferFromError::InsufficientFunds {
             balance: Nat::from(123u64),
-        },
-    ));
+        }),
+    );
 
     let result = withdraw(
         &runtime,
@@ -142,12 +168,13 @@ async fn should_return_temporarily_unavailable_on_generic_error() {
     init_state();
     init_schnorr_master_key();
 
-    let runtime = TestCanisterRuntime::new().add_stub_response(Err::<Nat, TransferFromError>(
-        TransferFromError::GenericError {
+    let runtime = TestCanisterRuntime::new().expect_icrc2_transfer_from(
+        burn_args(test_caller(), MINIMUM_WITHDRAWAL_AMOUNT),
+        Err(TransferFromError::GenericError {
             error_code: Nat::from(123u64),
             message: "msg".to_string(),
-        },
-    ));
+        }),
+    );
 
     let result = withdraw(
         &runtime,
@@ -171,7 +198,10 @@ async fn should_return_ok_if_burn_succeeds() {
     init_schnorr_master_key();
 
     let runtime = TestCanisterRuntime::new()
-        .add_stub_response(Ok::<Nat, TransferFromError>(Nat::from(123u64)))
+        .expect_icrc2_transfer_from(
+            burn_args(test_caller(), MINIMUM_WITHDRAWAL_AMOUNT),
+            Ok(Nat::from(123u64)),
+        )
         .with_increasing_time();
 
     let result = withdraw(
@@ -340,7 +370,7 @@ mod process_pending_withdrawals_tests {
                 create_withdrawal_batch_transaction, create_withdrawal_batch_transaction_on,
                 submit_withdrawal_batch_transaction,
             },
-            finalized_status, nonce_account_info,
+            finalized_status, minter_signature_nth, nonce_account_info,
         },
     };
 
@@ -420,7 +450,10 @@ mod process_pending_withdrawals_tests {
         let burn_block_index = 3_u64;
         let result = withdraw(
             &TestCanisterRuntime::new()
-                .add_stub_response(Ok::<Nat, TransferFromError>(Nat::from(burn_block_index)))
+                .expect_icrc2_transfer_from(
+                    burn_args(test_caller(), minter_balance + WITHDRAWAL_FEE),
+                    Ok(Nat::from(burn_block_index)),
+                )
                 .with_increasing_time(),
             test_caller(),
             minter_balance + WITHDRAWAL_FEE,
@@ -463,12 +496,14 @@ mod process_pending_withdrawals_tests {
         let events_before = EventsAssert::from_recorded();
 
         let runtime = TestCanisterRuntime::new()
-            .add_stub_response(GetAccountInfoResult::Consistent(Ok(Some(
-                nonce_account_info(MINTER_ADDRESS, 1),
-            ))))
-            .add_stub_response(SendTransactionResult::Consistent(Ok(
-                minter_signature().into()
-            )))
+            .expect_get_account_info(
+                NONCE_ACCOUNT,
+                GetAccountInfoResult::Consistent(Ok(Some(nonce_account_info(MINTER_ADDRESS, 1)))),
+            )
+            .expect_send_transaction_skipping_preflight(
+                minter_signature(),
+                SendTransactionResult::Consistent(Ok(minter_signature().into())),
+            )
             .add_signer(sign_as_minter())
             .with_increasing_time();
 
@@ -495,12 +530,14 @@ mod process_pending_withdrawals_tests {
 
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
-            .add_stub_response(GetAccountInfoResult::Consistent(Ok(Some(
-                nonce_account_info(MINTER_ADDRESS, 1),
-            ))))
-            .add_stub_response(SendTransactionResult::Consistent(Ok(
-                minter_signature().into()
-            )))
+            .expect_get_account_info(
+                NONCE_ACCOUNT,
+                GetAccountInfoResult::Consistent(Ok(Some(nonce_account_info(MINTER_ADDRESS, 1)))),
+            )
+            .expect_send_transaction_skipping_preflight(
+                minter_signature(),
+                SendTransactionResult::Consistent(Ok(minter_signature().into())),
+            )
             .add_signer(sign_as_minter());
 
         process_pending_withdrawals(runtime).await;
@@ -557,36 +594,54 @@ mod process_pending_withdrawals_tests {
         init_schnorr_master_key();
         events::accept_withdrawal(account(1), 1, MINIMUM_WITHDRAWAL_AMOUNT);
 
+        let sent_transaction = signed_by_minter(
+            build_batch_withdrawal_message(
+                &MINTER_ADDRESS,
+                &NONCE_ACCOUNT,
+                durable_nonce(1),
+                &[(
+                    solana_address::Address::from([0u8; 32]),
+                    MINIMUM_WITHDRAWAL_AMOUNT - WITHDRAWAL_FEE,
+                )],
+            )
+            .unwrap(),
+        );
+
         let submission = TestCanisterRuntime::new()
             .with_increasing_time()
-            .add_stub_response(GetAccountInfoResult::Consistent(Ok(Some(
-                nonce_account_info(MINTER_ADDRESS, 1),
-            ))))
-            .add_stub_response(SendTransactionResult::Consistent(Err(
-                RpcError::ValidationError("send failed".to_string()),
-            )))
+            .expect_get_account_info(
+                NONCE_ACCOUNT,
+                GetAccountInfoResult::Consistent(Ok(Some(nonce_account_info(MINTER_ADDRESS, 1)))),
+            )
+            .expect_send_exact_transaction_skipping_preflight(
+                sent_transaction.clone(),
+                SendTransactionResult::Consistent(Err(RpcError::ValidationError(
+                    "send failed".to_string(),
+                ))),
+            )
             .add_signer(sign_as_minter());
         process_pending_withdrawals(submission.clone()).await;
         assert_matches!(withdrawal_status(1), WithdrawSolStatus::TxSent { .. });
 
         let rebroadcast = TestCanisterRuntime::new()
             .with_increasing_time_from(submission.time() + MIN_REBROADCAST_AGE.as_nanos() as u64)
-            .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![None])))
-            .add_stub_response(SendTransactionResult::Consistent(Ok(
-                minter_signature().into()
-            )));
-        finalize_transactions(rebroadcast.clone()).await;
-        assert_eq!(
-            rebroadcast.sent_transactions(),
-            submission.sent_transactions()
-        );
+            .expect_get_signature_statuses(
+                vec![minter_signature()],
+                SignatureStatusesResult::Consistent(Ok(vec![None])),
+            )
+            .expect_send_exact_transaction_skipping_preflight(
+                sent_transaction,
+                SendTransactionResult::Consistent(Ok(minter_signature().into())),
+            );
+        finalize_transactions(rebroadcast).await;
         assert_matches!(withdrawal_status(1), WithdrawSolStatus::TxSent { .. });
 
         let finalization = TestCanisterRuntime::new()
             .with_increasing_time()
-            .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![Some(
-                finalized_status(),
-            )])));
+            .expect_get_signature_statuses(
+                vec![minter_signature()],
+                SignatureStatusesResult::Consistent(Ok(vec![Some(finalized_status())])),
+            );
         finalize_transactions(finalization).await;
         assert_eq!(
             withdrawal_status(1),
@@ -609,9 +664,12 @@ mod process_pending_withdrawals_tests {
 
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
-            .add_stub_response(GetAccountInfoResult::Consistent(Err(
-                RpcError::ValidationError("account unavailable".to_string()),
-            )));
+            .expect_get_account_info(
+                NONCE_ACCOUNT,
+                GetAccountInfoResult::Consistent(Err(RpcError::ValidationError(
+                    "account unavailable".to_string(),
+                ))),
+            );
 
         process_pending_withdrawals(runtime).await;
 
@@ -636,9 +694,10 @@ mod process_pending_withdrawals_tests {
 
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
-            .add_stub_response(GetAccountInfoResult::Consistent(Ok(Some(
-                nonce_account_info(MINTER_ADDRESS, 1),
-            ))));
+            .expect_get_account_info(
+                NONCE_ACCOUNT,
+                GetAccountInfoResult::Consistent(Ok(Some(nonce_account_info(MINTER_ADDRESS, 1)))),
+            );
 
         process_pending_withdrawals(runtime).await;
 
@@ -667,9 +726,10 @@ mod process_pending_withdrawals_tests {
 
         let failing_runtime = TestCanisterRuntime::new()
             .with_increasing_time()
-            .add_stub_response(GetAccountInfoResult::Consistent(Ok(Some(
-                nonce_account_info(MINTER_ADDRESS, 1),
-            ))))
+            .expect_get_account_info(
+                NONCE_ACCOUNT,
+                GetAccountInfoResult::Consistent(Ok(Some(nonce_account_info(MINTER_ADDRESS, 1)))),
+            )
             .add_signer(
                 sign_as_minter()
                     .of_message(expected_message.serialize())
@@ -694,9 +754,10 @@ mod process_pending_withdrawals_tests {
         let recovering_runtime = TestCanisterRuntime::new()
             .with_increasing_time()
             .add_signer(sign_as_minter().of_message(expected_message.serialize()))
-            .add_stub_response(SendTransactionResult::Consistent(Ok(
-                minter_signature().into()
-            )));
+            .expect_send_transaction_skipping_preflight(
+                minter_signature(),
+                SendTransactionResult::Consistent(Ok(minter_signature().into())),
+            );
 
         process_pending_withdrawals(recovering_runtime).await;
 
@@ -730,14 +791,22 @@ mod process_pending_withdrawals_tests {
 
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
-            .add_stub_response(GetAccountInfoResult::Consistent(Ok(Some(
-                nonce_account_info(MINTER_ADDRESS, 1),
-            ))))
-            .add_stub_response(GetAccountInfoResult::Consistent(Ok(Some(
-                nonce_account_info(MINTER_ADDRESS, 2),
-            ))))
-            .add_stub_response(SendTransactionResult::Consistent(Ok(signature(1).into())))
-            .add_stub_response(SendTransactionResult::Consistent(Ok(signature(2).into())))
+            .expect_get_account_info(
+                NONCE_ACCOUNT,
+                GetAccountInfoResult::Consistent(Ok(Some(nonce_account_info(MINTER_ADDRESS, 1)))),
+            )
+            .expect_get_account_info(
+                second_nonce_account,
+                GetAccountInfoResult::Consistent(Ok(Some(nonce_account_info(MINTER_ADDRESS, 2)))),
+            )
+            .expect_send_transaction_skipping_preflight(
+                minter_signature_nth(0),
+                SendTransactionResult::Consistent(Ok(minter_signature_nth(0).into())),
+            )
+            .expect_send_transaction_skipping_preflight(
+                minter_signature_nth(1),
+                SendTransactionResult::Consistent(Ok(minter_signature_nth(1).into())),
+            )
             .add_signer(sign_as_minter().times(2));
 
         process_pending_withdrawals(runtime).await;
@@ -803,12 +872,11 @@ mod process_pending_withdrawals_tests {
 
         let runtime = (0..MAX_CONCURRENT_SIGNATURES)
             .fold(TestCanisterRuntime::new(), |runtime, i| {
-                runtime
-                    .add_stub_response(SendTransactionResult::Consistent(Ok(signature(i).into())))
+                runtime.expect_send_transaction_skipping_preflight(
+                    minter_signature_nth(i),
+                    SendTransactionResult::Consistent(Ok(minter_signature_nth(i).into())),
+                )
             })
-            .add_stub_response(GetAccountInfoResult::Consistent(Ok(Some(
-                nonce_account_info(MINTER_ADDRESS, num_bound),
-            ))))
             .with_increasing_time()
             .add_signer(sign_as_minter().times(MAX_CONCURRENT_SIGNATURES));
 
@@ -849,12 +917,14 @@ mod process_pending_withdrawals_tests {
 
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
-            .add_stub_response(GetAccountInfoResult::Consistent(Ok(Some(
-                nonce_account_info(MINTER_ADDRESS, 1),
-            ))))
-            .add_stub_response(SendTransactionResult::Consistent(Ok(
-                minter_signature().into()
-            )))
+            .expect_get_account_info(
+                NONCE_ACCOUNT,
+                GetAccountInfoResult::Consistent(Ok(Some(nonce_account_info(MINTER_ADDRESS, 1)))),
+            )
+            .expect_send_transaction_skipping_preflight(
+                minter_signature(),
+                SendTransactionResult::Consistent(Ok(minter_signature().into())),
+            )
             .add_signer(sign_as_minter());
 
         process_pending_withdrawals(runtime.clone()).await;
@@ -890,15 +960,20 @@ mod process_pending_withdrawals_tests {
 
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
-            .add_stub_response(GetAccountInfoResult::Consistent(Ok(Some(
-                nonce_account_info(MINTER_ADDRESS, 1),
-            ))))
-            .add_stub_response(GetAccountInfoResult::Consistent(Err(
-                RpcError::ValidationError("account unavailable".to_string()),
-            )))
-            .add_stub_response(SendTransactionResult::Consistent(Ok(
-                minter_signature().into()
-            )))
+            .expect_get_account_info(
+                second_nonce_account,
+                GetAccountInfoResult::Consistent(Ok(Some(nonce_account_info(MINTER_ADDRESS, 1)))),
+            )
+            .expect_get_account_info(
+                NONCE_ACCOUNT,
+                GetAccountInfoResult::Consistent(Err(RpcError::ValidationError(
+                    "account unavailable".to_string(),
+                ))),
+            )
+            .expect_send_transaction_skipping_preflight(
+                minter_signature(),
+                SendTransactionResult::Consistent(Ok(minter_signature().into())),
+            )
             .add_signer(sign_as_minter());
 
         process_pending_withdrawals(runtime.clone()).await;
@@ -924,9 +999,12 @@ mod process_pending_withdrawals_tests {
 
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
-            .add_stub_response(GetAccountInfoResult::Consistent(Err(
-                RpcError::ValidationError("account unavailable".to_string()),
-            )));
+            .expect_get_account_info(
+                NONCE_ACCOUNT,
+                GetAccountInfoResult::Consistent(Err(RpcError::ValidationError(
+                    "account unavailable".to_string(),
+                ))),
+            );
 
         process_pending_withdrawals(runtime.clone()).await;
 
@@ -944,9 +1022,10 @@ mod process_pending_withdrawals_tests {
 
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
-            .add_stub_response(GetAccountInfoResult::Consistent(Ok(Some(
-                nonce_account_info(MINTER_ADDRESS, 1),
-            ))))
+            .expect_get_account_info(
+                NONCE_ACCOUNT,
+                GetAccountInfoResult::Consistent(Ok(Some(nonce_account_info(MINTER_ADDRESS, 1)))),
+            )
             .add_signer(sign_as_minter().expect([Err(SignCallError::CallFailed(
                 CallRejected::with_rejection(4, "signing service unavailable".to_string()).into(),
             ))]));
@@ -980,18 +1059,27 @@ mod process_pending_withdrawals_tests {
 
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
-            .add_stub_response(GetAccountInfoResult::Consistent(Ok(Some(
-                nonce_account_info(MINTER_ADDRESS, 1),
-            ))))
-            .add_stub_response(SendTransactionResult::Consistent(Ok(
-                minter_signature().into()
-            )))
+            .expect_get_account_info(
+                NONCE_ACCOUNT,
+                GetAccountInfoResult::Consistent(Ok(Some(nonce_account_info(MINTER_ADDRESS, 1)))),
+            )
+            .expect_send_transaction_skipping_preflight(
+                minter_signature(),
+                SendTransactionResult::Consistent(Ok(minter_signature().into())),
+            )
             .add_signer(sign_as_minter());
 
         process_pending_withdrawals(runtime.clone()).await;
 
         read_state(|s| assert_eq!(s.submitted_transactions().len(), 1));
         assert_eq!(runtime.set_timer_delays(), Vec::<Duration>::new());
+    }
+
+    fn signed_by_minter(message: solana_message::Message) -> solana_transaction::Transaction {
+        solana_transaction::Transaction {
+            signatures: vec![minter_signature()],
+            message,
+        }
     }
 
     fn assert_nonce_account_free() {

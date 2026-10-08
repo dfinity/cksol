@@ -18,13 +18,11 @@ use crate::{
     },
 };
 use sol_rpc_types::{
-    ConfirmedBlock, MultiRpcResult, RpcError, SendTransactionParams, Slot,
-    TransactionConfirmationStatus, TransactionError, TransactionStatus,
+    ConfirmedBlock, MultiRpcResult, RpcError, Slot, TransactionConfirmationStatus,
+    TransactionError, TransactionStatus,
 };
 use solana_transaction::Transaction;
 
-type SlotResult = MultiRpcResult<Slot>;
-type BlockResult = MultiRpcResult<ConfirmedBlock>;
 type SignatureStatusesResult = MultiRpcResult<Vec<Option<TransactionStatus>>>;
 type SendTransactionResult = MultiRpcResult<sol_rpc_types::Signature>;
 
@@ -74,10 +72,10 @@ mod finalization {
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
             .add_recent_block(Err(RpcError::ValidationError("Error".to_string())))
-            .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![
-                Some(finalized_status()),
-                None,
-            ])));
+            .expect_get_signature_statuses(
+                vec![finalized, not_found],
+                SignatureStatusesResult::Consistent(Ok(vec![Some(finalized_status()), None])),
+            );
 
         finalize_transactions(runtime).await;
 
@@ -102,11 +100,16 @@ mod finalization {
         }
 
         // Round 1: finalizes MAX_CONCURRENT_RPC_CALLS batches, 1 transaction unchecked → reschedule
+        let batches = status_check_batches(num);
         let mut runtime = TestCanisterRuntime::new().with_increasing_time();
-        for _ in 0..MAX_CONCURRENT_RPC_CALLS {
-            runtime = runtime.add_stub_response(SignatureStatusesResult::Consistent(Ok(
-                vec![Some(finalized_status()); MAX_SIGNATURES_PER_STATUS_CHECK],
-            )));
+        for batch in batches.iter().take(MAX_CONCURRENT_RPC_CALLS) {
+            runtime = runtime.expect_get_signature_statuses(
+                batch.clone(),
+                SignatureStatusesResult::Consistent(Ok(vec![
+                    Some(finalized_status());
+                    batch.len()
+                ])),
+            );
         }
 
         finalize_transactions(runtime.clone()).await;
@@ -115,11 +118,13 @@ mod finalization {
         assert_eq!(runtime.set_timer_call_count(), 1);
 
         // Round 2: finalizes the remaining 1 transaction → no reschedule
+        let unchecked_batch = batches.last().expect("BUG: no unchecked batch").clone();
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
-            .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![Some(
-                finalized_status(),
-            )])));
+            .expect_get_signature_statuses(
+                unchecked_batch,
+                SignatureStatusesResult::Consistent(Ok(vec![Some(finalized_status())])),
+            );
 
         finalize_transactions(runtime.clone()).await;
 
@@ -135,12 +140,12 @@ mod finalization {
 
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
-            .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
-            .add_stub_response(BlockResult::Consistent(Ok(current_block())))
-            .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![Some(
-                finalized_status(),
-            )])))
-            .add_stub_response(GetTransactionResult::Consistent(Ok(None)));
+            .expect_recent_block(CURRENT_SLOT, current_block())
+            .expect_get_signature_statuses(
+                vec![signature],
+                SignatureStatusesResult::Consistent(Ok(vec![Some(finalized_status())])),
+            )
+            .expect_get_transaction(signature, GetTransactionResult::Consistent(Ok(None)));
 
         finalize_transactions(runtime).await;
 
@@ -168,13 +173,15 @@ mod finalization {
         reset_events();
         setup();
 
-        submit_sweep_transaction(block_height);
+        let signature = submit_sweep_transaction(block_height);
 
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
-            .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
-            .add_stub_response(BlockResult::Consistent(Ok(current_block())))
-            .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![status])));
+            .expect_recent_block(CURRENT_SLOT, current_block())
+            .expect_get_signature_statuses(
+                vec![signature],
+                SignatureStatusesResult::Consistent(Ok(vec![status])),
+            );
 
         let events_before = EventsAssert::from_recorded();
 
@@ -193,9 +200,10 @@ mod finalization {
 
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
-            .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![Some(
-                finalized_status(),
-            )])));
+            .expect_get_signature_statuses(
+                vec![signature],
+                SignatureStatusesResult::Consistent(Ok(vec![Some(finalized_status())])),
+            );
 
         finalize_transactions(runtime).await;
 
@@ -215,18 +223,17 @@ mod finalization {
 
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time_from(min_rebroadcast_age_nanos())
-            .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![None])))
-            .add_stub_response(SendTransactionResult::Consistent(Ok(signature.into())));
+            .expect_get_signature_statuses(
+                vec![signature],
+                SignatureStatusesResult::Consistent(Ok(vec![None])),
+            )
+            .expect_send_exact_transaction_skipping_preflight(
+                submitted_transaction(&signature),
+                SendTransactionResult::Consistent(Ok(signature.into())),
+            );
 
-        finalize_transactions(runtime.clone()).await;
+        finalize_transactions(runtime).await;
 
-        let sent = runtime.sent_transactions();
-        assert_eq!(sent.len(), 1);
-        assert_eq!(
-            sent[0].get_transaction(),
-            encoded_submitted_transaction(&signature)
-        );
-        assert_eq!(sent[0].skip_preflight, Some(true));
         assert_eq!(EventsAssert::from_recorded(), events_before);
         read_state(|s| assert!(s.submitted_transactions().contains_key(&signature)));
     }
@@ -238,20 +245,26 @@ mod finalization {
 
         let too_early = TestCanisterRuntime::new()
             .with_increasing_time()
-            .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![None])));
+            .expect_get_signature_statuses(
+                vec![signature],
+                SignatureStatusesResult::Consistent(Ok(vec![None])),
+            );
 
-        finalize_transactions(too_early.clone()).await;
-
-        assert!(too_early.sent_transactions().is_empty());
+        finalize_transactions(too_early).await;
 
         let old_enough = TestCanisterRuntime::new()
             .with_increasing_time_from(min_rebroadcast_age_nanos())
-            .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![None])))
-            .add_stub_response(SendTransactionResult::Consistent(Ok(signature.into())));
+            .expect_get_signature_statuses(
+                vec![signature],
+                SignatureStatusesResult::Consistent(Ok(vec![None])),
+            )
+            .expect_send_transaction_skipping_preflight(
+                signature,
+                SendTransactionResult::Consistent(Ok(signature.into())),
+            );
 
-        finalize_transactions(old_enough.clone()).await;
+        finalize_transactions(old_enough).await;
 
-        assert_eq!(old_enough.sent_transactions().len(), 1);
         read_state(|s| assert!(s.submitted_transactions().contains_key(&signature)));
     }
 
@@ -259,7 +272,7 @@ mod finalization {
         MIN_REBROADCAST_AGE.as_nanos() as u64
     }
 
-    fn encoded_submitted_transaction(signature: &solana_signature::Signature) -> String {
+    fn submitted_transaction(signature: &solana_signature::Signature) -> Transaction {
         let message = read_state(|s| {
             match s
                 .submitted_transactions()
@@ -273,14 +286,10 @@ mod finalization {
                 other => panic!("expected a withdrawal transaction, got {other:?}"),
             }
         });
-        let transaction = Transaction {
+        Transaction {
             signatures: vec![*signature],
             message,
-        };
-        SendTransactionParams::try_from(transaction)
-            .expect("the transaction is serializable")
-            .get_transaction()
-            .to_string()
+        }
     }
 
     fn submit_withdrawal_transaction() -> solana_signature::Signature {
@@ -302,16 +311,16 @@ mod finalization {
 
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
-            .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
-            .add_stub_response(BlockResult::Consistent(Ok(current_block())))
-            .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![Some(
-                TransactionStatus {
+            .expect_recent_block(CURRENT_SLOT, current_block())
+            .expect_get_signature_statuses(
+                vec![signature],
+                SignatureStatusesResult::Consistent(Ok(vec![Some(TransactionStatus {
                     slot: SUBMISSION_SLOT,
                     status: Err(TransactionError::InsufficientFundsForFee),
                     err: Some(TransactionError::InsufficientFundsForFee),
                     confirmation_status: Some(TransactionConfirmationStatus::Finalized),
-                },
-            )])));
+                })])),
+            );
 
         finalize_transactions(runtime).await;
 
@@ -338,15 +347,17 @@ mod finalization {
 
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
-            .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
-            .add_stub_response(BlockResult::Consistent(Ok(current_block())))
-            .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![
-                Some(finalized_status()),
-                None,
-                Some(finalized_status()),
-            ])))
-            .add_stub_response(GetTransactionResult::Consistent(Ok(None)))
-            .add_stub_response(GetTransactionResult::Consistent(Ok(None)));
+            .expect_recent_block(CURRENT_SLOT, current_block())
+            .expect_get_signature_statuses(
+                vec![signature(sig_a), signature(sig_b), signature(sig_c)],
+                SignatureStatusesResult::Consistent(Ok(vec![
+                    Some(finalized_status()),
+                    None,
+                    Some(finalized_status()),
+                ])),
+            )
+            .expect_get_transaction(signature(sig_a), GetTransactionResult::Consistent(Ok(None)))
+            .expect_get_transaction(signature(sig_c), GetTransactionResult::Consistent(Ok(None)));
 
         finalize_transactions(runtime).await;
 
@@ -372,9 +383,11 @@ mod finalization {
 
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
-            .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
-            .add_stub_response(BlockResult::Consistent(Ok(current_block())))
-            .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![None, None])));
+            .expect_recent_block(CURRENT_SLOT, current_block())
+            .expect_get_signature_statuses(
+                vec![sweep, nonce_withdrawal],
+                SignatureStatusesResult::Consistent(Ok(vec![None, None])),
+            );
 
         finalize_transactions(runtime).await;
 
@@ -390,17 +403,19 @@ mod finalization {
     async fn should_not_expire_transaction_if_status_check_fails() {
         setup();
 
-        submit_sweep_transaction(EXPIRED_BLOCK_HEIGHT);
+        let signature = submit_sweep_transaction(EXPIRED_BLOCK_HEIGHT);
 
         let events_before = EventsAssert::from_recorded();
 
         let finalize_runtime = TestCanisterRuntime::new()
             .with_increasing_time()
-            .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
-            .add_stub_response(BlockResult::Consistent(Ok(current_block())))
-            .add_stub_response(SignatureStatusesResult::Consistent(Err(
-                RpcError::ValidationError("Error".to_string()),
-            )));
+            .expect_recent_block(CURRENT_SLOT, current_block())
+            .expect_get_signature_statuses(
+                vec![signature],
+                SignatureStatusesResult::Consistent(Err(RpcError::ValidationError(
+                    "Error".to_string(),
+                ))),
+            );
 
         finalize_transactions(finalize_runtime).await;
 
@@ -445,9 +460,11 @@ mod finalization {
             let signature = submit_sweep_transaction(case.transaction_block_height);
             let runtime = TestCanisterRuntime::new()
                 .with_increasing_time()
-                .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
-                .add_stub_response(BlockResult::Consistent(Ok(current_block())))
-                .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![None])));
+                .expect_recent_block(CURRENT_SLOT, current_block())
+                .expect_get_signature_statuses(
+                    vec![signature],
+                    SignatureStatusesResult::Consistent(Ok(vec![None])),
+                );
 
             finalize_transactions(runtime).await;
 
@@ -492,6 +509,18 @@ fn setup() {
 
 fn current_block() -> ConfirmedBlock {
     confirmed_block_at_height(CURRENT_BLOCK_HEIGHT)
+}
+
+/// The signatures of `num_transactions` submitted transactions, batched as
+/// `finalize_transactions` checks their statuses: ordered as the state stores them, in
+/// chunks of [`MAX_SIGNATURES_PER_STATUS_CHECK`].
+fn status_check_batches(num_transactions: usize) -> Vec<Vec<solana_signature::Signature>> {
+    let mut signatures: Vec<_> = (0..num_transactions).map(signature).collect();
+    signatures.sort_unstable();
+    signatures
+        .chunks(MAX_SIGNATURES_PER_STATUS_CHECK)
+        .map(<[solana_signature::Signature]>::to_vec)
+        .collect()
 }
 
 fn submit_sweep_transaction(block_height: BlockHeight) -> solana_signature::Signature {

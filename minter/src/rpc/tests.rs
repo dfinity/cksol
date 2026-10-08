@@ -19,10 +19,7 @@ use crate::{
 };
 use assert_matches::assert_matches;
 use ic_canister_runtime::IcError;
-use sol_rpc_types::{
-    HttpOutcallError, RpcConfig, RpcError, RpcSource, RpcSources, SendTransactionParams,
-    SupportedRpcProviderId,
-};
+use sol_rpc_types::{HttpOutcallError, RpcError, RpcSource, SupportedRpcProviderId};
 use solana_transaction::{Message, Transaction};
 use solana_transaction_status_client_types::{EncodedTransaction, TransactionBinaryEncoding};
 
@@ -35,8 +32,8 @@ mod get_balance_tests {
     #[tokio::test]
     async fn should_return_balance() {
         init_state();
-        let runtime =
-            TestCanisterRuntime::new().add_stub_response(MultiRpcResult::Consistent(Ok(42)));
+        let runtime = TestCanisterRuntime::new()
+            .expect_get_balance(DEPOSIT_ADDRESS, MultiRpcResult::Consistent(Ok(42)));
 
         let result = get_balance(&runtime, DEPOSIT_ADDRESS).await;
 
@@ -54,17 +51,22 @@ mod get_balance_tests {
 
         for (runtime, expected) in [
             (
-                TestCanisterRuntime::new().add_stub_error(IcError::CallPerformFailed),
+                TestCanisterRuntime::new()
+                    .expect_get_balance(DEPOSIT_ADDRESS, IcError::CallPerformFailed),
                 GetBalanceError::IcError(IcError::CallPerformFailed),
             ),
             (
-                TestCanisterRuntime::new()
-                    .add_stub_response(MultiRpcResult::Consistent(Err(rpc_error.clone()))),
+                TestCanisterRuntime::new().expect_get_balance(
+                    DEPOSIT_ADDRESS,
+                    MultiRpcResult::Consistent(Err(rpc_error.clone())),
+                ),
                 GetBalanceError::RpcError(rpc_error.clone()),
             ),
             (
-                TestCanisterRuntime::new()
-                    .add_stub_response(MultiRpcResult::Inconsistent(inconsistent.clone())),
+                TestCanisterRuntime::new().expect_get_balance(
+                    DEPOSIT_ADDRESS,
+                    MultiRpcResult::Inconsistent(inconsistent.clone()),
+                ),
                 GetBalanceError::InconsistentRpcResults,
             ),
         ] {
@@ -87,7 +89,10 @@ mod get_transaction_tests {
     async fn should_fail_if_get_transaction_fails() {
         init_state();
 
-        let runtime = TestCanisterRuntime::new().add_stub_error(IcError::CallPerformFailed);
+        let runtime = TestCanisterRuntime::new().expect_get_transaction(
+            legacy_deposit_transaction_signature(),
+            IcError::CallPerformFailed,
+        );
 
         let result = get_transaction(&runtime, legacy_deposit_transaction_signature()).await;
 
@@ -107,8 +112,10 @@ mod get_transaction_tests {
             parsing_error: None,
         });
 
-        let runtime = TestCanisterRuntime::new()
-            .add_stub_response(MultiRpcResult::Consistent(Err(rpc_error.clone())));
+        let runtime = TestCanisterRuntime::new().expect_get_transaction(
+            legacy_deposit_transaction_signature(),
+            MultiRpcResult::Consistent(Err(rpc_error.clone())),
+        );
 
         let result = get_transaction(&runtime, legacy_deposit_transaction_signature()).await;
 
@@ -130,8 +137,10 @@ mod get_transaction_tests {
             ),
         ];
 
-        let runtime =
-            TestCanisterRuntime::new().add_stub_response(MultiRpcResult::Inconsistent(results));
+        let runtime = TestCanisterRuntime::new().expect_get_transaction(
+            legacy_deposit_transaction_signature(),
+            MultiRpcResult::Inconsistent(results),
+        );
 
         let result = get_transaction(&runtime, legacy_deposit_transaction_signature()).await;
 
@@ -142,8 +151,10 @@ mod get_transaction_tests {
     async fn should_return_empty_if_transaction_not_found() {
         init_state();
 
-        let runtime =
-            TestCanisterRuntime::new().add_stub_response(MultiRpcResult::Consistent(Ok(None)));
+        let runtime = TestCanisterRuntime::new().expect_get_transaction(
+            legacy_deposit_transaction_signature(),
+            MultiRpcResult::Consistent(Ok(None)),
+        );
 
         let result = get_transaction(&runtime, legacy_deposit_transaction_signature()).await;
 
@@ -154,11 +165,12 @@ mod get_transaction_tests {
     async fn should_fail_if_returned_transaction_has_another_signature() {
         init_state();
 
-        let runtime = TestCanisterRuntime::new().add_stub_response(MultiRpcResult::Consistent(Ok(
-            Some(legacy_deposit_transaction().try_into().unwrap()),
-        )));
-
         let queried = solana_signature::Signature::from([7; 64]);
+
+        let runtime = TestCanisterRuntime::new().expect_get_transaction(
+            queried,
+            MultiRpcResult::Consistent(Ok(Some(legacy_deposit_transaction().try_into().unwrap()))),
+        );
 
         let result = get_transaction(&runtime, queried).await;
 
@@ -181,9 +193,10 @@ mod get_transaction_tests {
             TransactionBinaryEncoding::Base64,
         );
 
-        let runtime = TestCanisterRuntime::new().add_stub_response(MultiRpcResult::Consistent(Ok(
-            Some(transaction.try_into().unwrap()),
-        )));
+        let runtime = TestCanisterRuntime::new().expect_get_transaction(
+            legacy_deposit_transaction_signature(),
+            MultiRpcResult::Consistent(Ok(Some(transaction.try_into().unwrap()))),
+        );
 
         let result = get_transaction(&runtime, legacy_deposit_transaction_signature()).await;
 
@@ -217,9 +230,10 @@ mod get_transaction_tests {
             TransactionBinaryEncoding::Base64,
         );
 
-        let runtime = TestCanisterRuntime::new().add_stub_response(MultiRpcResult::Consistent(Ok(
-            Some(transaction.try_into().unwrap()),
-        )));
+        let runtime = TestCanisterRuntime::new().expect_get_transaction(
+            legacy_deposit_transaction_signature(),
+            MultiRpcResult::Consistent(Ok(Some(transaction.try_into().unwrap()))),
+        );
 
         let result = get_transaction(&runtime, legacy_deposit_transaction_signature()).await;
 
@@ -235,9 +249,10 @@ mod get_transaction_tests {
     async fn should_return_transaction() {
         init_state();
 
-        let runtime = TestCanisterRuntime::new().add_stub_response(MultiRpcResult::Consistent(Ok(
-            Some(legacy_deposit_transaction().try_into().unwrap()),
-        )));
+        let runtime = TestCanisterRuntime::new().expect_get_transaction(
+            legacy_deposit_transaction_signature(),
+            MultiRpcResult::Consistent(Ok(Some(legacy_deposit_transaction().try_into().unwrap()))),
+        );
 
         let result = get_transaction(&runtime, legacy_deposit_transaction_signature()).await;
 
@@ -255,7 +270,8 @@ mod submit_transaction_tests {
         init_state();
 
         let expected_signature = signature();
-        let runtime = TestCanisterRuntime::new().add_stub_response(
+        let runtime = TestCanisterRuntime::new().expect_send_transaction(
+            transaction_signature(),
             SendTransactionResult::Consistent(Ok(expected_signature.clone())),
         );
 
@@ -268,7 +284,8 @@ mod submit_transaction_tests {
     async fn should_fail_on_ic_error() {
         init_state();
 
-        let runtime = TestCanisterRuntime::new().add_stub_error(IcError::CallPerformFailed);
+        let runtime = TestCanisterRuntime::new()
+            .expect_send_transaction(transaction_signature(), IcError::CallPerformFailed);
 
         let result = submit_transaction(&runtime, transaction()).await;
 
@@ -288,8 +305,10 @@ mod submit_transaction_tests {
             parsing_error: None,
         });
 
-        let runtime = TestCanisterRuntime::new()
-            .add_stub_response(SendTransactionResult::Consistent(Err(rpc_error.clone())));
+        let runtime = TestCanisterRuntime::new().expect_send_transaction(
+            transaction_signature(),
+            SendTransactionResult::Consistent(Err(rpc_error.clone())),
+        );
 
         let result = submit_transaction(&runtime, transaction()).await;
 
@@ -311,8 +330,10 @@ mod submit_transaction_tests {
             ),
         ];
 
-        let runtime = TestCanisterRuntime::new()
-            .add_stub_response(SendTransactionResult::Inconsistent(results));
+        let runtime = TestCanisterRuntime::new().expect_send_transaction(
+            transaction_signature(),
+            SendTransactionResult::Inconsistent(results),
+        );
 
         let result = submit_transaction(&runtime, transaction()).await;
 
@@ -322,45 +343,43 @@ mod submit_transaction_tests {
     #[tokio::test]
     async fn should_keep_the_preflight_simulation() {
         init_state();
-        let runtime = TestCanisterRuntime::new()
-            .add_stub_response(SendTransactionResult::Consistent(Ok(signature())));
+        let runtime = TestCanisterRuntime::new().expect_send_transaction(
+            transaction_signature(),
+            SendTransactionResult::Consistent(Ok(signature())),
+        );
 
         let result = submit_transaction(&runtime, transaction()).await;
 
         assert_eq!(result, Ok(signature().into()));
-        assert_eq!(sent_params(&runtime).skip_preflight, None);
     }
 
     #[tokio::test]
     async fn should_skip_the_preflight_simulation_when_requested() {
         init_state();
-        let runtime = TestCanisterRuntime::new()
-            .add_stub_response(SendTransactionResult::Consistent(Ok(signature())));
+        let runtime = TestCanisterRuntime::new().expect_send_transaction_skipping_preflight(
+            transaction_signature(),
+            SendTransactionResult::Consistent(Ok(signature())),
+        );
 
         let result = submit_transaction_skipping_preflight(&runtime, transaction()).await;
 
         assert_eq!(result, Ok(signature().into()));
-        assert_eq!(sent_params(&runtime).skip_preflight, Some(true));
-    }
-
-    fn sent_params(runtime: &TestCanisterRuntime) -> SendTransactionParams {
-        let [call] = runtime.sent_update_calls().try_into().unwrap();
-        assert_eq!(call.method, "sendTransaction");
-        let (_sources, _config, params): (RpcSources, Option<RpcConfig>, SendTransactionParams) =
-            call.args();
-        params
     }
 
     fn transaction() -> Transaction {
         let message = Message::new(&[], None);
         Transaction {
-            signatures: vec![signature().into()],
+            signatures: vec![transaction_signature()],
             message,
         }
     }
 
+    fn transaction_signature() -> solana_signature::Signature {
+        solana_signature::Signature::from([0x42; 64])
+    }
+
     fn signature() -> sol_rpc_types::Signature {
-        solana_signature::Signature::from([0x42; 64]).into()
+        transaction_signature().into()
     }
 }
 
@@ -374,7 +393,8 @@ mod get_nonce_account_tests {
     async fn should_return_the_authority_and_nonce_value() {
         init_state();
 
-        let runtime = TestCanisterRuntime::new().add_stub_response(
+        let runtime = TestCanisterRuntime::new().expect_get_account_info(
+            nonce_account_address(),
             GetAccountInfoResult::Consistent(Ok(Some(nonce_account_info(MINTER_ADDRESS, 1)))),
         );
 
@@ -393,8 +413,10 @@ mod get_nonce_account_tests {
     async fn should_fail_if_account_not_found() {
         init_state();
 
-        let runtime = TestCanisterRuntime::new()
-            .add_stub_response(GetAccountInfoResult::Consistent(Ok(None)));
+        let runtime = TestCanisterRuntime::new().expect_get_account_info(
+            nonce_account_address(),
+            GetAccountInfoResult::Consistent(Ok(None)),
+        );
 
         let result = get_nonce_account(&runtime, nonce_account_address()).await;
 
@@ -412,17 +434,22 @@ mod get_nonce_account_tests {
 
         for (runtime, expected) in [
             (
-                TestCanisterRuntime::new().add_stub_error(IcError::CallPerformFailed),
+                TestCanisterRuntime::new()
+                    .expect_get_account_info(nonce_account_address(), IcError::CallPerformFailed),
                 GetNonceAccountError::IcError(IcError::CallPerformFailed),
             ),
             (
-                TestCanisterRuntime::new()
-                    .add_stub_response(GetAccountInfoResult::Consistent(Err(rpc_error.clone()))),
+                TestCanisterRuntime::new().expect_get_account_info(
+                    nonce_account_address(),
+                    GetAccountInfoResult::Consistent(Err(rpc_error.clone())),
+                ),
                 GetNonceAccountError::RpcError(rpc_error.clone()),
             ),
             (
-                TestCanisterRuntime::new()
-                    .add_stub_response(GetAccountInfoResult::Inconsistent(inconsistent.clone())),
+                TestCanisterRuntime::new().expect_get_account_info(
+                    nonce_account_address(),
+                    GetAccountInfoResult::Inconsistent(inconsistent.clone()),
+                ),
                 GetNonceAccountError::InconsistentRpcResults,
             ),
         ] {
@@ -446,8 +473,10 @@ mod get_nonce_account_tests {
         };
 
         for account in [foreign_owner_account, executable_account] {
-            let runtime = TestCanisterRuntime::new()
-                .add_stub_response(GetAccountInfoResult::Consistent(Ok(Some(account))));
+            let runtime = TestCanisterRuntime::new().expect_get_account_info(
+                nonce_account_address(),
+                GetAccountInfoResult::Consistent(Ok(Some(account))),
+            );
 
             let result = get_nonce_account(&runtime, nonce_account_address()).await;
 
@@ -462,7 +491,8 @@ mod get_nonce_account_tests {
     async fn should_fail_if_account_is_a_legacy_nonce_account() {
         init_state();
 
-        let runtime = TestCanisterRuntime::new().add_stub_response(
+        let runtime = TestCanisterRuntime::new().expect_get_account_info(
+            nonce_account_address(),
             GetAccountInfoResult::Consistent(Ok(Some(legacy_nonce_account_info(MINTER_ADDRESS)))),
         );
 
@@ -487,8 +517,10 @@ mod get_nonce_account_tests {
             invalid_base64_account,
             invalid_nonce_state_account,
         ] {
-            let runtime = TestCanisterRuntime::new()
-                .add_stub_response(GetAccountInfoResult::Consistent(Ok(Some(account))));
+            let runtime = TestCanisterRuntime::new().expect_get_account_info(
+                nonce_account_address(),
+                GetAccountInfoResult::Consistent(Ok(Some(account))),
+            );
 
             let result = get_nonce_account(&runtime, nonce_account_address()).await;
 
@@ -503,9 +535,6 @@ mod get_nonce_account_tests {
 mod get_recent_block_tests {
     use super::*;
 
-    type GetSlotResult = sol_rpc_types::MultiRpcResult<sol_rpc_types::Slot>;
-    type GetBlockResult = sol_rpc_types::MultiRpcResult<Option<sol_rpc_types::ConfirmedBlock>>;
-
     const SLOT: sol_rpc_types::Slot = 978458723;
 
     #[tokio::test]
@@ -513,10 +542,7 @@ mod get_recent_block_tests {
         init_state();
         let block_height = BlockHeight::new(SLOT - 10);
         let runtime = TestCanisterRuntime::new()
-            .add_stub_response(GetSlotResult::Consistent(Ok(SLOT)))
-            .add_stub_response(GetBlockResult::Consistent(Ok(Some(
-                confirmed_block_at_height(block_height),
-            ))));
+            .expect_recent_block(SLOT, confirmed_block_at_height(block_height));
 
         let result = get_recent_block(&runtime).await;
 
@@ -533,14 +559,13 @@ mod get_recent_block_tests {
     #[tokio::test]
     async fn should_fail_when_block_has_no_block_height() {
         init_state();
-        let runtime = TestCanisterRuntime::new()
-            .add_stub_response(GetSlotResult::Consistent(Ok(SLOT)))
-            .add_stub_response(GetBlockResult::Consistent(Ok(Some(
-                sol_rpc_types::ConfirmedBlock {
-                    block_height: None,
-                    ..confirmed_block()
-                },
-            ))));
+        let runtime = TestCanisterRuntime::new().expect_recent_block(
+            SLOT,
+            sol_rpc_types::ConfirmedBlock {
+                block_height: None,
+                ..confirmed_block()
+            },
+        );
 
         let result = get_recent_block(&runtime).await;
 
