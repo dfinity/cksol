@@ -2,10 +2,7 @@ use crate::{
     address::minter_address,
     constants::MAX_CONCURRENT_RPC_CALLS,
     monitor::MIN_REBROADCAST_AGE,
-    rpc::{
-        TransactionOutcome, get_submitted_transaction_outcome,
-        submit_transaction_skipping_preflight,
-    },
+    rpc::{FetchedTransaction, get_transaction, submit_transaction_skipping_preflight},
     runtime::CanisterRuntime,
     state::{
         MinterTransaction, NonceRead,
@@ -200,19 +197,28 @@ async fn finalize_landed_withdrawal<R: CanisterRuntime>(
     withdrawal: &InFlightWithdrawal,
 ) -> Finalization {
     let signature = withdrawal.signature;
-    let event = match get_submitted_transaction_outcome(runtime, signature, &withdrawal.message)
-        .await
-    {
-        Ok(Some(TransactionOutcome::Succeeded)) => {
-            log!(Priority::Info, "Transaction {signature} finalized");
-            EventType::SucceededTransaction { signature }
-        }
-        Ok(Some(TransactionOutcome::Failed(error))) => {
+    let event = match get_transaction(runtime, signature).await {
+        Ok(Some(FetchedTransaction {
+            meta: Some(meta), ..
+        })) => match meta.err {
+            None => {
+                log!(Priority::Info, "Transaction {signature} finalized");
+                EventType::SucceededTransaction { signature }
+            }
+            Some(error) => {
+                log!(
+                    Priority::Error,
+                    "Transaction {signature} finalized with on-chain error: {error:?}"
+                );
+                EventType::FailedTransaction { signature }
+            }
+        },
+        Ok(Some(FetchedTransaction { meta: None, .. })) => {
             log!(
                 Priority::Error,
-                "Transaction {signature} finalized with on-chain error: {error:?}"
+                "Withdrawal transaction {signature} landed without status metadata, retrying next round"
             );
-            EventType::FailedTransaction { signature }
+            return Finalization::UnresolvedOutcome;
         }
         Ok(None) => {
             log!(

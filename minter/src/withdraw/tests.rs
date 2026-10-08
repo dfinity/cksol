@@ -335,7 +335,7 @@ mod process_pending_withdrawals_tests {
         sol_transfer::build_batch_withdrawal_message,
         state::event::EventType,
         test_fixtures::{
-            address, durable_nonce,
+            address, devnet_sweep, durable_nonce,
             events::{
                 create_withdrawal_batch_transaction, create_withdrawal_batch_transaction_on,
                 submit_withdrawal_batch_transaction,
@@ -552,30 +552,40 @@ mod process_pending_withdrawals_tests {
     #[tokio::test]
     async fn should_rebroadcast_a_withdrawal_whose_initial_send_failed_until_it_finalizes() {
         init_state();
-        init_balance();
-        init_schnorr_master_key();
+        devnet_sweep::init_balance();
         events::accept_withdrawal(account(1), 1, MINIMUM_WITHDRAWAL_AMOUNT);
+        let minter_address = devnet_sweep::minter_main_address();
+        let signature = devnet_sweep::minter_signature_of(
+            &build_batch_withdrawal_message(
+                &minter_address,
+                &NONCE_ACCOUNT,
+                durable_nonce(1),
+                &[(
+                    solana_address::Address::from([0u8; 32]),
+                    MINIMUM_WITHDRAWAL_AMOUNT - WITHDRAWAL_FEE,
+                )],
+            )
+            .unwrap(),
+        );
 
         let submission = TestCanisterRuntime::new()
             .with_increasing_time()
             .add_stub_response(GetAccountInfoResult::Consistent(Ok(Some(
-                nonce_account_info(MINTER_ADDRESS, 1),
+                nonce_account_info(minter_address, 1),
             ))))
             .add_stub_response(SendTransactionResult::Consistent(Err(
                 RpcError::ValidationError("send failed".to_string()),
             )))
-            .add_signer(sign_as_minter());
+            .add_signer(sign_as_minter().expect([Ok(signature)]));
         process_pending_withdrawals(submission.clone()).await;
         assert_matches!(withdrawal_status(1), WithdrawalStatus::TxSent { .. });
 
         let rebroadcast = TestCanisterRuntime::new()
             .with_increasing_time_from(submission.time() + MIN_REBROADCAST_AGE.as_nanos() as u64)
             .add_stub_response(GetAccountInfoResult::Consistent(Ok(Some(
-                nonce_account_info(MINTER_ADDRESS, 1),
+                nonce_account_info(minter_address, 1),
             ))))
-            .add_stub_response(SendTransactionResult::Consistent(Ok(
-                minter_signature().into()
-            )));
+            .add_stub_response(SendTransactionResult::Consistent(Ok(signature.into())));
         finalize_transactions(rebroadcast.clone()).await;
         assert_eq!(
             rebroadcast.sent_transactions(),
@@ -586,14 +596,14 @@ mod process_pending_withdrawals_tests {
         let finalization = TestCanisterRuntime::new()
             .with_increasing_time()
             .add_stub_response(GetAccountInfoResult::Consistent(Ok(Some(
-                nonce_account_info(MINTER_ADDRESS, 2),
+                nonce_account_info(minter_address, 2),
             ))))
-            .add_stub_response(succeeded_withdrawal_response(&minter_signature()));
+            .add_stub_response(succeeded_withdrawal_response(&signature));
         finalize_transactions(finalization).await;
         assert_eq!(
             withdrawal_status(1),
             WithdrawalStatus::TxFinalized(TxFinalizedStatus::Success {
-                transaction_id: minter_signature().into(),
+                transaction_id: signature.into(),
                 effective_transaction_fee: None,
             })
         );

@@ -103,11 +103,20 @@ pub fn init_balance() {
 /// Queueing the funding deposit needs the minter public key, so this records it.
 pub fn init_balance_to(amount: Lamport) {
     init_schnorr_master_key();
+    fund_minter(queued_deposit_of(funding_account(), amount), MINTER_ADDRESS);
+}
+
+fn funding_account() -> Account {
+    account(0xFD)
+}
+
+fn fund_minter(deposit: QueuedDeposit, minter_address: Address) {
+    let amount = deposit.balance.sweepable_amount();
     let funding_deposit_id = crate::state::read_state(|state| state.deposits().next_id());
     let sweep_signature = signature(0xFF00 + funding_deposit_id as usize);
 
-    events::queue_deposit(funding_deposit_id, account(0xFD), amount);
-    events::submit_sweep(sweep_signature, vec![funding_deposit_id]);
+    events::queue(funding_deposit_id, deposit);
+    events::submit_sweep_to(sweep_signature, vec![funding_deposit_id], minter_address);
     events::succeed_transaction(sweep_signature);
     events::credit_sweep(sweep_signature, amount);
     events::mint_swept_deposit(funding_deposit_id, 0xFE00 + funding_deposit_id);
@@ -457,6 +466,14 @@ pub mod devnet_sweep {
         crate::state::mutate_state(|s| s.cache_minter_public_key(master_key()));
     }
 
+    pub fn init_balance() {
+        init_master_key();
+        super::fund_minter(
+            fresh_deposit(super::funding_account(), u64::MAX / 2),
+            minter_main_address(),
+        );
+    }
+
     pub fn master_key() -> crate::state::SchnorrPublicKey {
         crate::state::SchnorrPublicKey {
             public_key: master_private_key().public_key(),
@@ -475,8 +492,19 @@ pub mod devnet_sweep {
     }
 
     fn sign_as(account: &Account, message: &[u8]) -> solana_signature::Signature {
+        sign_on(crate::address::derivation_path(account), message)
+    }
+
+    pub fn minter_signature_of(message: &Message) -> solana_signature::Signature {
+        sign_on(crate::address::MINTER_DERIVATION_PATH, &message.serialize())
+    }
+
+    fn sign_on(
+        derivation_path: crate::address::DerivationPath,
+        message: &[u8],
+    ) -> solana_signature::Signature {
         let path = ic_ed25519::DerivationPath::new(
-            crate::address::derivation_path(account)
+            derivation_path
                 .into_iter()
                 .map(ic_ed25519::DerivationIndex)
                 .collect(),
@@ -784,13 +812,14 @@ pub mod devnet_sweep {
 /// All helpers operate on the global thread-local state via [`mutate_state`].
 pub mod events {
     use super::{
-        DEFAULT_BLOCK_HEIGHT, MINTER_ADDRESS, NONCE_ACCOUNT, WITHDRAWAL_FEE, queued_deposit,
-        queued_deposit_of, runtime::TestCanisterRuntime, withdrawal_batch_message,
+        DEFAULT_BLOCK_HEIGHT, MINTER_ADDRESS, NONCE_ACCOUNT, WITHDRAWAL_FEE, devnet_sweep,
+        queued_deposit, queued_deposit_of, runtime::TestCanisterRuntime, withdrawal_batch_message,
     };
     use crate::deposit::sweep::deposit_status;
     use crate::{
         numeric::{LedgerBurnIndex, LedgerMintIndex},
         rpc::BlockHeight,
+        sol_transfer::build_batch_withdrawal_message,
         state::{
             QueuedDeposit, Sweep,
             audit::process_event,
@@ -1032,6 +1061,34 @@ pub mod events {
             nonce_value,
             &created_withdrawal_transfers(&burn_indices),
         );
+        record_submitted_withdrawal(signature, message, burn_indices);
+    }
+
+    pub fn submit_signed_withdrawal_batch_transaction(
+        nonce_value: solana_hash::Hash,
+        burn_indices: Vec<u64>,
+    ) -> Signature {
+        let burn_indices: Vec<LedgerBurnIndex> = burn_indices
+            .into_iter()
+            .map(LedgerBurnIndex::from)
+            .collect();
+        let message = build_batch_withdrawal_message(
+            &devnet_sweep::minter_main_address(),
+            &NONCE_ACCOUNT,
+            nonce_value,
+            &created_withdrawal_transfers(&burn_indices),
+        )
+        .expect("BUG: the withdrawal batch message exceeds the transaction size");
+        let signature = devnet_sweep::minter_signature_of(&message);
+        record_submitted_withdrawal(signature, message, burn_indices);
+        signature
+    }
+
+    fn record_submitted_withdrawal(
+        signature: Signature,
+        message: solana_message::Message,
+        burn_indices: Vec<LedgerBurnIndex>,
+    ) {
         mutate_state(|state| {
             process_event(
                 state,

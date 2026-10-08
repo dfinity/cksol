@@ -17,13 +17,12 @@ use sol_rpc_types::{
 use solana_account_decoder_client_types::UiAccount;
 use solana_address::Address;
 use solana_hash::Hash;
-use solana_message::Message;
 use solana_nonce::{state::State as NonceState, versions::Versions as NonceVersions};
 use solana_sdk_ids::system_program;
 use solana_signature::Signature;
 use solana_transaction::{Transaction, versioned::VersionedTransaction};
 use solana_transaction_status_client_types::{
-    EncodedConfirmedTransactionWithStatusMeta, UiTransactionError, UiTransactionStatusMeta,
+    EncodedConfirmedTransactionWithStatusMeta, UiTransactionStatusMeta,
 };
 use thiserror::Error;
 
@@ -50,46 +49,6 @@ pub async fn get_transaction<R: CanisterRuntime>(
     Ok(Some(FetchedTransaction {
         transaction,
         meta: outcome.transaction.meta,
-    }))
-}
-
-/// The outcome of a finalized transaction.
-#[derive(Debug, PartialEq)]
-pub enum TransactionOutcome {
-    Succeeded,
-    Failed(UiTransactionError),
-}
-
-/// Fetches the outcome of the finalized transaction the minter submitted with `signature`
-/// and `message`. The response is attributed by comparing the returned transaction with the
-/// submitted one, which makes verifying its signature redundant.
-pub async fn get_submitted_transaction_outcome<R: CanisterRuntime>(
-    runtime: &R,
-    signature: Signature,
-    message: &Message,
-) -> Result<Option<TransactionOutcome>, GetTransactionError> {
-    let Some(outcome) = get_finalized_transaction(runtime, signature).await? else {
-        return Ok(None);
-    };
-    let returned = outcome
-        .transaction
-        .transaction
-        .decode()
-        .and_then(VersionedTransaction::into_legacy_transaction);
-    let submitted = Transaction {
-        signatures: vec![signature],
-        message: message.clone(),
-    };
-    if returned.as_ref() != Some(&submitted) {
-        return Err(GetTransactionError::UnexpectedTransaction { queried: signature });
-    }
-    let meta = outcome
-        .transaction
-        .meta
-        .ok_or(GetTransactionError::MissingStatusMeta { queried: signature })?;
-    Ok(Some(match meta.err {
-        None => TransactionOutcome::Succeeded,
-        Some(error) => TransactionOutcome::Failed(error),
     }))
 }
 
@@ -156,12 +115,6 @@ pub enum GetTransactionError {
     #[error("Transaction returned for {queried} is not signed by its fee payer")]
     #[from(ignore)]
     InvalidSignature { queried: Signature },
-    #[error("Transaction returned for {queried} differs from the submitted one")]
-    #[from(ignore)]
-    UnexpectedTransaction { queried: Signature },
-    #[error("Transaction returned for {queried} has no status metadata")]
-    #[from(ignore)]
-    MissingStatusMeta { queried: Signature },
 }
 
 impl GetTransactionError {
@@ -171,9 +124,7 @@ impl GetTransactionError {
         match self {
             GetTransactionError::UndecodableTransaction { .. }
             | GetTransactionError::SignatureMismatch { .. }
-            | GetTransactionError::InvalidSignature { .. }
-            | GetTransactionError::UnexpectedTransaction { .. }
-            | GetTransactionError::MissingStatusMeta { .. } => true,
+            | GetTransactionError::InvalidSignature { .. } => true,
             GetTransactionError::IcError(_)
             | GetTransactionError::RpcError(_)
             | GetTransactionError::InconsistentRpcResults => false,

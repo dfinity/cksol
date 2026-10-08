@@ -3,6 +3,7 @@ use super::{
     MAX_SIGNATURES_PER_STATUS_CHECK, MIN_REBROADCAST_AGE, finalize_transactions,
 };
 use crate::{
+    address::minter_address,
     constants::MAX_CONCURRENT_RPC_CALLS,
     rpc::BlockHeight,
     state::{
@@ -12,11 +13,10 @@ use crate::{
     },
     storage::{reset_events, with_unstable_metrics},
     test_fixtures::{
-        EventsAssert, GetTransactionResult, MINIMUM_WITHDRAWAL_AMOUNT, MINTER_ADDRESS,
-        NONCE_ACCOUNT, account, confirmed_block_at_height, durable_nonce, events,
-        failed_withdrawal_response, finalized_status, init_balance, init_schnorr_master_key,
-        init_state, nonce_account_info, runtime::TestCanisterRuntime, signature,
-        succeeded_withdrawal_response,
+        EventsAssert, GetTransactionResult, MINIMUM_WITHDRAWAL_AMOUNT, NONCE_ACCOUNT, account,
+        confirmed_block_at_height, devnet_sweep, durable_nonce, events, failed_withdrawal_response,
+        finalized_status, init_balance, init_schnorr_master_key, init_state, nonce_account_info,
+        runtime::TestCanisterRuntime, signature, succeeded_withdrawal_response,
     },
 };
 use sol_rpc_types::{
@@ -386,8 +386,8 @@ mod withdrawal_finalization {
 
     #[tokio::test]
     async fn should_record_a_withdrawal_as_succeeded_once_its_nonce_advanced() {
-        setup();
-        let signature = submit_withdrawal_bound_to(1, BOUND_NONCE_SEED);
+        setup_with_signing_key();
+        let signature = submit_signed_withdrawal_bound_to(1, BOUND_NONCE_SEED);
 
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
@@ -411,8 +411,8 @@ mod withdrawal_finalization {
 
     #[tokio::test]
     async fn should_record_a_withdrawal_as_failed_once_its_nonce_advanced_with_an_error() {
-        setup();
-        let signature = submit_withdrawal_bound_to(1, BOUND_NONCE_SEED);
+        setup_with_signing_key();
+        let signature = submit_signed_withdrawal_bound_to(1, BOUND_NONCE_SEED);
 
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
@@ -432,8 +432,8 @@ mod withdrawal_finalization {
 
     #[tokio::test]
     async fn should_rebroadcast_a_withdrawal_with_an_unchanged_nonce_unchanged() {
-        setup();
-        let signature = submit_withdrawal_bound_to(1, BOUND_NONCE_SEED);
+        setup_with_signing_key();
+        let signature = submit_signed_withdrawal_bound_to(1, BOUND_NONCE_SEED);
         let events_before = EventsAssert::from_recorded();
 
         let runtime = TestCanisterRuntime::new()
@@ -456,8 +456,8 @@ mod withdrawal_finalization {
 
     #[tokio::test]
     async fn should_rebroadcast_a_withdrawal_with_an_unchanged_nonce_only_after_the_minimum_age() {
-        setup();
-        let signature = submit_withdrawal_bound_to(1, BOUND_NONCE_SEED);
+        setup_with_signing_key();
+        let signature = submit_signed_withdrawal_bound_to(1, BOUND_NONCE_SEED);
 
         let too_early = TestCanisterRuntime::new()
             .with_increasing_time()
@@ -480,10 +480,10 @@ mod withdrawal_finalization {
 
     #[tokio::test]
     async fn should_take_no_decision_on_a_stale_nonce_read() {
-        setup();
-        let landed = submit_withdrawal_bound_to(1, STALE_NONCE_SEED);
+        setup_with_signing_key();
+        let landed = submit_signed_withdrawal_bound_to(1, STALE_NONCE_SEED);
         events::succeed_transaction(landed);
-        let signature = submit_withdrawal_bound_to(2, BOUND_NONCE_SEED);
+        let signature = submit_signed_withdrawal_bound_to(2, BOUND_NONCE_SEED);
         let events_before = EventsAssert::from_recorded();
 
         let runtime = TestCanisterRuntime::new()
@@ -499,8 +499,8 @@ mod withdrawal_finalization {
 
     #[tokio::test]
     async fn should_keep_the_nonce_account_bound_until_the_outcome_is_known() {
-        setup();
-        let signature = submit_withdrawal_bound_to(1, BOUND_NONCE_SEED);
+        setup_with_signing_key();
+        let signature = submit_signed_withdrawal_bound_to(1, BOUND_NONCE_SEED);
         let events_before = EventsAssert::from_recorded();
 
         let runtime = TestCanisterRuntime::new()
@@ -579,8 +579,16 @@ fn submit_withdrawal_bound_to(i: usize, nonce_seed: usize) -> solana_signature::
     signature
 }
 
+fn submit_signed_withdrawal_bound_to(i: usize, nonce_seed: usize) -> solana_signature::Signature {
+    events::accept_withdrawal(account(i), i as u64, MINIMUM_WITHDRAWAL_AMOUNT);
+    events::create_withdrawal_batch_transaction(durable_nonce(nonce_seed), vec![i as u64]);
+    events::submit_signed_withdrawal_batch_transaction(durable_nonce(nonce_seed), vec![i as u64])
+}
+
 fn nonce_read(nonce_seed: usize) -> GetAccountInfoResult {
-    GetAccountInfoResult::Consistent(Ok(Some(nonce_account_info(MINTER_ADDRESS, nonce_seed))))
+    let minter_address = read_state(|s| s.minter_public_key().map(minter_address))
+        .expect("the minter public key is cached");
+    GetAccountInfoResult::Consistent(Ok(Some(nonce_account_info(minter_address, nonce_seed))))
 }
 
 fn called_methods(runtime: &TestCanisterRuntime) -> Vec<String> {
@@ -595,6 +603,11 @@ fn setup() {
     init_state();
     init_balance();
     init_schnorr_master_key();
+}
+
+fn setup_with_signing_key() {
+    init_state();
+    devnet_sweep::init_balance();
 }
 
 fn current_block() -> ConfirmedBlock {
