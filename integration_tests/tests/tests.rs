@@ -1313,6 +1313,9 @@ mod metrics_tests {
                 r#"failed_credit_attempts\{reason="rpc_error"\} 0 \d+"#,
             )
             .assert_contains_metric_matching(
+                r#"failed_credit_attempts\{reason="invalid_response"\} 0 \d+"#,
+            )
+            .assert_contains_metric_matching(
                 r#"failed_credit_attempts\{reason="unreadable"\} 0 \d+"#,
             )
             .assert_contains_metric_matching(r#"failed_credit_attempts\{reason="mismatch"\} 0 \d+"#)

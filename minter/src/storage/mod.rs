@@ -57,14 +57,16 @@ impl Metrics {
 pub enum FailedCreditReason {
     NotFound,
     RpcError,
+    InvalidResponse,
     Unreadable,
     Mismatch,
 }
 
 impl FailedCreditReason {
-    pub const ALL: [Self; 4] = [
+    pub const ALL: [Self; 5] = [
         Self::NotFound,
         Self::RpcError,
+        Self::InvalidResponse,
         Self::Unreadable,
         Self::Mismatch,
     ];
@@ -73,6 +75,7 @@ impl FailedCreditReason {
         match self {
             Self::NotFound => "not_found",
             Self::RpcError => "rpc_error",
+            Self::InvalidResponse => "invalid_response",
             Self::Unreadable => "unreadable",
             Self::Mismatch => "mismatch",
         }

@@ -60,14 +60,17 @@ pub async fn credit_finalized_sweeps<R: CanisterRuntime>(runtime: &R) -> bool {
                 record_failed_credit_attempt(FailedCreditReason::NotFound);
                 continue;
             }
-            Err(e) => {
-                let priority = if e.is_response_untrustworthy() {
-                    Priority::Error
-                } else {
-                    Priority::Info
-                };
+            Err(e) if e.is_response_untrustworthy() => {
                 log!(
-                    priority,
+                    Priority::Error,
+                    "Failed to fetch finalized sweep {signature}: {e}, retrying later"
+                );
+                record_failed_credit_attempt(FailedCreditReason::InvalidResponse);
+                continue;
+            }
+            Err(e) => {
+                log!(
+                    Priority::Info,
                     "Failed to fetch finalized sweep {signature}: {e}, retrying later"
                 );
                 record_failed_credit_attempt(FailedCreditReason::RpcError);

@@ -15,7 +15,9 @@ use crate::{
 use cksol_types::{DepositSolId, DepositSolStatus};
 use sol_rpc_types::Lamport;
 use solana_signature::Signature;
-use solana_transaction_status_client_types::EncodedConfirmedTransactionWithStatusMeta;
+use solana_transaction_status_client_types::{
+    EncodedConfirmedTransactionWithStatusMeta, EncodedTransaction, TransactionBinaryEncoding,
+};
 
 const FRESH_SWEEP_SIGNATURE_INDEX: usize = 0x80;
 
@@ -116,7 +118,7 @@ async fn should_credit_the_amount_received_by_the_main_account() {
 #[tokio::test]
 async fn should_keep_deposits_finalized_until_the_outcome_can_be_read() {
     type Response = fn() -> GetTransactionResult;
-    let cases: [(&str, Response, FailedCreditReason); 3] = [
+    let cases: [(&str, Response, FailedCreditReason); 4] = [
         (
             "the transaction is not returned",
             || GetTransactionResult::Consistent(Ok(None)),
@@ -126,6 +128,18 @@ async fn should_keep_deposits_finalized_until_the_outcome_can_be_read() {
             "fetching the transaction fails",
             || GetTransactionResult::Inconsistent(vec![]),
             FailedCreditReason::RpcError,
+        ),
+        (
+            "the providers agree on a transaction that cannot be decoded",
+            || {
+                let mut outcome = devnet_sweep::derived_outcome();
+                outcome.transaction.transaction = EncodedTransaction::Binary(
+                    "not a transaction".to_string(),
+                    TransactionBinaryEncoding::Base64,
+                );
+                transaction_response(outcome)
+            },
+            FailedCreditReason::InvalidResponse,
         ),
         (
             "the metadata cannot be read",
