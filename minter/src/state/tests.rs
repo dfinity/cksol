@@ -102,8 +102,9 @@ mod queued_deposits {
 
     #[test]
     fn should_replay_queued_deposits_like_direct_transitions() {
+        let queued_at = |deposit_id| 10 * (deposit_id + 1);
         let queued = |deposit_id| Event {
-            timestamp: 0,
+            timestamp: queued_at(deposit_id),
             payload: EventType::QueuedDeposit {
                 deposit_id,
                 account: queued_deposit(deposit_id).account,
@@ -128,12 +129,17 @@ mod queued_deposits {
                 &deposit.account,
                 &deposit.address,
                 deposit.balance,
+                queued_at(deposit_id),
             );
         }
 
         let replayed = replay_events([init, key_fetched, queued(0), queued(1)]);
 
         assert_eq!(replayed, expected);
+        assert_eq!(
+            replayed.deposits().oldest_in_flight_queued_at(),
+            Some(queued_at(0))
+        );
     }
 }
 
