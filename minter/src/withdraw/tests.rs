@@ -25,7 +25,7 @@ use assert_matches::assert_matches;
 use candid::{Nat, Principal};
 use cksol_types::TxFinalizedStatus;
 use cksol_types::WithdrawSolStatus;
-use cksol_types::{WithdrawalError, WithdrawalOk};
+use cksol_types::{WithdrawSolError, WithdrawSolOk};
 use cksol_types_internal::InitArgs;
 use ic_canister_runtime::IcError;
 use ic_cdk::call::CallRejected;
@@ -58,7 +58,7 @@ async fn should_return_error_if_calling_ledger_fails() {
 
     assert_matches!(
         result,
-        Err(WithdrawalError::TemporarilyUnavailable(e)) => assert!(e.contains("Failed to burn tokens"))
+        Err(WithdrawSolError::TemporarilyUnavailable(e)) => assert!(e.contains("Failed to burn tokens"))
     );
 }
 
@@ -81,7 +81,7 @@ async fn should_return_error_if_ledger_unavailable() {
 
     assert_eq!(
         result,
-        Err(WithdrawalError::TemporarilyUnavailable(
+        Err(WithdrawSolError::TemporarilyUnavailable(
             "Ledger is temporarily unavailable".to_string(),
         ))
     );
@@ -108,7 +108,7 @@ async fn should_return_error_if_insufficient_allowance() {
 
     assert_eq!(
         result,
-        Err(WithdrawalError::InsufficientAllowance { allowance: 123u64 })
+        Err(WithdrawSolError::InsufficientAllowance { allowance: 123u64 })
     );
 }
 
@@ -133,7 +133,7 @@ async fn should_return_error_if_insufficient_funds() {
 
     assert_eq!(
         result,
-        Err(WithdrawalError::InsufficientFunds { balance: 123u64 })
+        Err(WithdrawSolError::InsufficientFunds { balance: 123u64 })
     );
 }
 
@@ -159,7 +159,7 @@ async fn should_return_temporarily_unavailable_on_generic_error() {
 
     assert_eq!(
         result,
-        Err(WithdrawalError::TemporarilyUnavailable(
+        Err(WithdrawSolError::TemporarilyUnavailable(
             "Ledger returned a generic error: code 123, message: msg".to_string()
         ))
     );
@@ -184,7 +184,7 @@ async fn should_return_ok_if_burn_succeeds() {
 
     assert_eq!(
         result,
-        Ok(WithdrawalOk {
+        Ok(WithdrawSolOk {
             block_index: 123u64
         })
     );
@@ -204,7 +204,7 @@ async fn should_return_error_if_address_malformed() {
     )
     .await;
 
-    assert_matches!(result, Err(WithdrawalError::MalformedAddress(_)));
+    assert_matches!(result, Err(WithdrawSolError::MalformedAddress(_)));
 }
 
 #[tokio::test]
@@ -234,7 +234,7 @@ async fn should_reject_withdrawal_to_invalid_destinations() {
 
         assert_matches!(
             result,
-            Err(WithdrawalError::InvalidDestination(_)),
+            Err(WithdrawSolError::InvalidDestination(_)),
             "{name}"
         );
         EventsAssert::assert_no_events_recorded();
@@ -261,7 +261,7 @@ async fn should_be_temporarily_unavailable_if_nonce_pool_empty() {
 
     assert_matches!(
         result,
-        Err(WithdrawalError::TemporarilyUnavailable(e)) => assert!(e.contains("nonce"))
+        Err(WithdrawSolError::TemporarilyUnavailable(e)) => assert!(e.contains("nonce"))
     );
     EventsAssert::assert_no_events_recorded();
 }
@@ -280,7 +280,7 @@ async fn should_be_temporarily_unavailable_if_minter_public_key_not_cached() {
     )
     .await;
 
-    assert_matches!(result, Err(WithdrawalError::TemporarilyUnavailable(_)));
+    assert_matches!(result, Err(WithdrawSolError::TemporarilyUnavailable(_)));
 }
 
 #[tokio::test]
@@ -299,7 +299,7 @@ async fn should_return_error_if_amount_too_low() {
 
     assert_eq!(
         result,
-        Err(WithdrawalError::ValueTooSmall {
+        Err(WithdrawSolError::ValueTooSmall {
             minimum_withdrawal_amount: MINIMUM_WITHDRAWAL_AMOUNT,
             withdrawal_amount: MINIMUM_WITHDRAWAL_AMOUNT - 1,
         })
@@ -324,7 +324,7 @@ async fn should_return_error_if_already_processing() {
     )
     .await;
 
-    assert_eq!(result, Err(WithdrawalError::AlreadyProcessing));
+    assert_eq!(result, Err(WithdrawSolError::AlreadyProcessing));
 }
 
 mod process_pending_withdrawals_tests {
@@ -429,7 +429,7 @@ mod process_pending_withdrawals_tests {
         .await;
         assert_eq!(
             result,
-            Ok(WithdrawalOk {
+            Ok(WithdrawSolOk {
                 block_index: burn_block_index
             })
         );

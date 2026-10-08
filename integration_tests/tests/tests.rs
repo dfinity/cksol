@@ -11,7 +11,7 @@ use cksol_int_tests::{
 };
 use cksol_types::{
     DepositSolArgs, DepositSolError, DepositSolStatus, GetDepositAddressArgs, Lamport, MinterInfo,
-    TxFinalizedStatus, WithdrawSolArgs, WithdrawSolStatus, WithdrawalError,
+    TxFinalizedStatus, WithdrawSolArgs, WithdrawSolError, WithdrawSolStatus,
 };
 use cksol_types_internal::{
     UpgradeArgs,
@@ -302,7 +302,7 @@ mod withdrawal_tests {
 
     use candid::Nat;
     use cksol_int_tests::{fixtures::get_memo, ledger_init_args::LEDGER_TRANSFER_FEE};
-    use cksol_types::{BurnMemo, Memo, WithdrawalOk};
+    use cksol_types::{BurnMemo, Memo, WithdrawSolOk};
     use cksol_types_internal::UpgradeArgs;
     use icrc_ledger_types::icrc1::account::Account;
     use solana_address::Address;
@@ -321,7 +321,7 @@ mod withdrawal_tests {
 
         let result = setup.minter().withdraw_sol(args).await;
         let err = result.unwrap_err();
-        assert_matches!(err, WithdrawalError::MalformedAddress(_));
+        assert_matches!(err, WithdrawSolError::MalformedAddress(_));
 
         let args = WithdrawSolArgs {
             from_subaccount: None,
@@ -331,7 +331,10 @@ mod withdrawal_tests {
 
         let result = setup.minter().withdraw_sol(args).await;
         let err = result.unwrap_err();
-        assert_eq!(err, WithdrawalError::InsufficientAllowance { allowance: 0 });
+        assert_eq!(
+            err,
+            WithdrawSolError::InsufficientAllowance { allowance: 0 }
+        );
 
         setup.drop().await;
     }
@@ -371,7 +374,7 @@ mod withdrawal_tests {
             })
             .await;
 
-        assert_matches!(result, Err(WithdrawalError::InvalidDestination(_)));
+        assert_matches!(result, Err(WithdrawSolError::InvalidDestination(_)));
         assert_eq!(
             setup.ledger().balance_of(DEFAULT_CALLER_ACCOUNT).await,
             balance_before_withdrawal
@@ -392,7 +395,10 @@ mod withdrawal_tests {
 
         let result = setup.minter().withdraw_sol(args.clone()).await;
         let err = result.unwrap_err();
-        assert_eq!(err, WithdrawalError::InsufficientAllowance { allowance: 0 });
+        assert_eq!(
+            err,
+            WithdrawSolError::InsufficientAllowance { allowance: 0 }
+        );
 
         let new_minimum_withdrawal_amount = Setup::DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT + 1;
         setup
@@ -408,7 +414,7 @@ mod withdrawal_tests {
         let err = result.unwrap_err();
         assert_eq!(
             err,
-            WithdrawalError::ValueTooSmall {
+            WithdrawSolError::ValueTooSmall {
                 minimum_withdrawal_amount: new_minimum_withdrawal_amount,
                 withdrawal_amount: Setup::DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT,
             }
@@ -422,7 +428,10 @@ mod withdrawal_tests {
 
         let result = setup.minter().withdraw_sol(args).await;
         let err = result.unwrap_err();
-        assert_eq!(err, WithdrawalError::InsufficientAllowance { allowance: 0 });
+        assert_eq!(
+            err,
+            WithdrawSolError::InsufficientAllowance { allowance: 0 }
+        );
 
         setup.drop().await;
     }
@@ -469,7 +478,7 @@ mod withdrawal_tests {
 
         let balance = setup.ledger().balance_of(DEFAULT_CALLER_ACCOUNT).await;
         assert_eq!(balance, WITHDRAWAL_AMOUNT - LEDGER_TRANSFER_FEE);
-        assert_eq!(result, Err(WithdrawalError::InsufficientFunds { balance }));
+        assert_eq!(result, Err(WithdrawSolError::InsufficientFunds { balance }));
 
         // Test insufficient allowance
         let result = setup
@@ -483,7 +492,7 @@ mod withdrawal_tests {
 
         assert_eq!(
             result,
-            Err(WithdrawalError::InsufficientAllowance { allowance: 0 })
+            Err(WithdrawSolError::InsufficientAllowance { allowance: 0 })
         );
 
         let approve_amount = WITHDRAWAL_AMOUNT - 1;
@@ -511,7 +520,7 @@ mod withdrawal_tests {
 
         assert_eq!(
             result,
-            Err(WithdrawalError::InsufficientAllowance {
+            Err(WithdrawSolError::InsufficientAllowance {
                 allowance: approve_amount
             })
         );
@@ -680,14 +689,14 @@ mod withdrawal_tests {
         assert!(
             results
                 .iter()
-                .any(|r| matches!(r, Ok(WithdrawalOk { block_index: _ }))),
+                .any(|r| matches!(r, Ok(WithdrawSolOk { block_index: _ }))),
             "Expected one Minted result, got: {:?}",
             results
         );
         assert!(
             results
                 .iter()
-                .any(|r| matches!(r, Err(WithdrawalError::AlreadyProcessing))),
+                .any(|r| matches!(r, Err(WithdrawSolError::AlreadyProcessing))),
             "Expected one AlreadyProcessing result, got: {:?}",
             results
         );
@@ -724,7 +733,7 @@ mod withdrawal_tests {
             )
             .await;
 
-        let WithdrawalOk { block_index } = setup
+        let WithdrawSolOk { block_index } = setup
             .minter()
             .withdraw_sol(WithdrawSolArgs {
                 from_subaccount: None,

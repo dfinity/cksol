@@ -8,7 +8,7 @@ use cksol_int_tests::{
 };
 use cksol_types::{
     DepositSolId, DepositSolStatus, Signature, TxFinalizedStatus, WithdrawSolArgs,
-    WithdrawSolStatus, WithdrawalError,
+    WithdrawSolError, WithdrawSolStatus,
 };
 use cksol_types_internal::{UpgradeArgs, event::EventType};
 use icrc_ledger_types::icrc1::account::Account;
@@ -312,7 +312,7 @@ async fn should_batch_withdrawals_over_two_nonce_accounts_and_reuse_a_freed_one(
     let balance_before_rejection = setup.ledger().balance_of(account).await;
     assert_matches!(
         withdraw_to(&pool[0]).await,
-        Err(WithdrawalError::InvalidDestination(_))
+        Err(WithdrawSolError::InvalidDestination(_))
     );
     assert_eq!(
         setup.ledger().balance_of(account).await,

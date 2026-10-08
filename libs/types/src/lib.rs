@@ -176,7 +176,7 @@ pub struct WithdrawSolArgs {
 
 /// The successful result of a withdrawal request.
 #[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize)]
-pub struct WithdrawalOk {
+pub struct WithdrawSolOk {
     /// The index of the burn block on the ckSOL ledger.
     pub block_index: LedgerBurnIndex,
 }
@@ -190,7 +190,7 @@ pub struct WithdrawSolStatusArgs {
 
 /// The error result of a withdrawal request.
 #[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize)]
-pub enum WithdrawalError {
+pub enum WithdrawSolError {
     /// There is another request for this principal.
     AlreadyProcessing,
     /// The withdrawal amount is too low.
