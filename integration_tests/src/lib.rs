@@ -380,7 +380,7 @@ impl Setup {
         const MAX_ITERATIONS: usize = 30;
         for _ in 0..MAX_ITERATIONS {
             if let DepositSolStatus::Minted { minted_amount, .. } =
-                self.minter().deposit_status(deposit_id).await
+                self.minter().deposit_sol_status(deposit_id).await
             {
                 return minted_amount;
             }
@@ -510,8 +510,8 @@ impl CkSolMinter<'_> {
             .await
     }
 
-    pub async fn deposit_status(&self, deposit_id: DepositSolId) -> DepositSolStatus {
-        self.query_call("deposit_status", (deposit_id,)).await
+    pub async fn deposit_sol_status(&self, deposit_id: DepositSolId) -> DepositSolStatus {
+        self.query_call("deposit_sol_status", (deposit_id,)).await
     }
 
     pub async fn withdraw_sol(
@@ -530,9 +530,9 @@ impl CkSolMinter<'_> {
         self.try_update_call("withdraw_sol", (args,), 0).await
     }
 
-    pub async fn withdrawal_status(&self, block_index: u64) -> WithdrawalStatus {
+    pub async fn withdrawal_sol_status(&self, block_index: u64) -> WithdrawalStatus {
         self.update_call(
-            "withdrawal_status",
+            "withdrawal_sol_status",
             (WithdrawalStatusArgs { block_index },),
             0,
         )

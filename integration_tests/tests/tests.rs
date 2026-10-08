@@ -59,7 +59,7 @@ async fn deposit_and_credit_funds(setup: &Setup) {
         )
         .await;
     let sweep_signature = assert_matches!(
-        setup.minter().deposit_status(deposit_id).await,
+        setup.minter().deposit_sol_status(deposit_id).await,
         DepositSolStatus::Swept { signature } => signature
     );
 
@@ -580,7 +580,7 @@ mod withdrawal_tests {
     }
 
     #[tokio::test]
-    async fn should_return_withdrawal_status() {
+    async fn should_return_withdrawal_sol_status() {
         const WITHDRAWAL_AMOUNT: u64 = 100_000_000;
         const WITHDRAWAL_ADDRESS: &str = "E4MpwNnMWs2XtW5gVrxZvyS7fMq31QD5HvbxmwP45Tz3";
 
@@ -617,12 +617,12 @@ mod withdrawal_tests {
 
         let block_index = result.expect("burn should succeed").block_index;
 
-        let status = setup.minter().withdrawal_status(block_index).await;
+        let status = setup.minter().withdrawal_sol_status(block_index).await;
         assert_eq!(status, WithdrawalStatus::Pending);
         // 0 is the initial mint block, should be NotFound
-        let status = setup.minter().withdrawal_status(0).await;
+        let status = setup.minter().withdrawal_sol_status(0).await;
         assert_eq!(status, WithdrawalStatus::NotFound);
-        let status = setup.minter().withdrawal_status(u64::MAX).await;
+        let status = setup.minter().withdrawal_sol_status(u64::MAX).await;
         assert_eq!(status, WithdrawalStatus::NotFound);
 
         setup.drop().await;
@@ -765,7 +765,7 @@ mod withdrawal_tests {
         });
 
         // Withdrawal status should be TxSent with some signature
-        let status = setup.minter().withdrawal_status(block_index).await;
+        let status = setup.minter().withdrawal_sol_status(block_index).await;
         let transaction_id = match &status {
             WithdrawalStatus::TxSent { transaction_id } => transaction_id.clone(),
             other => panic!("Expected TxSent, got: {other:?}"),
@@ -779,7 +779,7 @@ mod withdrawal_tests {
             .await
             .expect("upgrade should succeed");
         assert_eq!(
-            setup.minter().withdrawal_status(block_index).await,
+            setup.minter().withdrawal_sol_status(block_index).await,
             WithdrawalStatus::TxSent {
                 transaction_id: transaction_id.clone()
             }
@@ -796,7 +796,7 @@ mod withdrawal_tests {
             )
             .await;
 
-        let status = setup.minter().withdrawal_status(block_index).await;
+        let status = setup.minter().withdrawal_sol_status(block_index).await;
         match &status {
             WithdrawalStatus::TxFinalized(TxFinalizedStatus::Success {
                 transaction_id: finalized_transaction_id,
@@ -836,7 +836,7 @@ mod deposit_sol_tests {
 
         assert_eq!(deposit_id, 0);
         assert_eq!(
-            minter.deposit_status(deposit_id).await,
+            minter.deposit_sol_status(deposit_id).await,
             DepositSolStatus::Queued {
                 sweepable_amount: BALANCE_ABOVE_MINIMUM - RENT_EXEMPTION_THRESHOLD
             }
@@ -976,7 +976,7 @@ mod deposit_sol_tests {
             .await;
 
         let sweep_signature = assert_matches!(
-            setup.minter().deposit_status(deposit_id).await,
+            setup.minter().deposit_sol_status(deposit_id).await,
             DepositSolStatus::Swept { signature } => signature
         );
         setup.minter().assert_that_events().await.satisfy(|events| {
@@ -1005,7 +1005,7 @@ mod deposit_sol_tests {
 
         let minted_amount = SWEEPABLE_AMOUNT - FEE_PER_SIGNATURE;
         assert_eq!(
-            setup.minter().deposit_status(deposit_id).await,
+            setup.minter().deposit_sol_status(deposit_id).await,
             DepositSolStatus::Minted {
                 block_index: 0,
                 minted_amount,
@@ -1041,7 +1041,7 @@ mod deposit_sol_tests {
             )
             .await;
         let sweep_signature = assert_matches!(
-            setup.minter().deposit_status(deposit_id).await,
+            setup.minter().deposit_sol_status(deposit_id).await,
             DepositSolStatus::Swept { signature } => signature
         );
 
@@ -1055,7 +1055,7 @@ mod deposit_sol_tests {
             .await;
 
         assert_eq!(
-            setup.minter().deposit_status(deposit_id).await,
+            setup.minter().deposit_sol_status(deposit_id).await,
             DepositSolStatus::Dropped {
                 signature: sweep_signature.clone()
             }
@@ -1109,7 +1109,7 @@ mod deposit_sol_tests {
             )
             .await;
         let sweep_signature = assert_matches!(
-            setup.minter().deposit_status(deposit_id).await,
+            setup.minter().deposit_sol_status(deposit_id).await,
             DepositSolStatus::Swept { signature } => signature
         );
 
@@ -1126,7 +1126,7 @@ mod deposit_sol_tests {
             .await;
 
         assert_eq!(
-            setup.minter().deposit_status(deposit_id).await,
+            setup.minter().deposit_sol_status(deposit_id).await,
             DepositSolStatus::Quarantined {
                 signature: sweep_signature.clone()
             }

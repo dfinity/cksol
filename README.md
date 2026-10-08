@@ -51,7 +51,7 @@ The minter controls one or more Solana addresses derived from a [threshold Schno
 
 4. **Sweep and mint.** On timers, the minter sweeps the deposit address to its main Solana account and, once the sweep transaction is finalized, mints the swept amount of ckSOL (minus the deposit's share of the sweep transaction fee) to your ICRC-1 ledger account.
 
-5. **Track the deposit.** Call `deposit_status` with the deposit id to follow the progress: `Queued` → `Swept` → `Finalized` → `Minted`.
+5. **Track the deposit.** Call `deposit_sol_status` with the deposit id to follow the progress: `Queued` → `Swept` → `Finalized` → `Minted`.
 
 ```mermaid
 sequenceDiagram
@@ -73,7 +73,7 @@ sequenceDiagram
     Minter->>Solana: sweep deposit_address to main account
     Minter->>Ledger: mint with icrc1_transfer(to=user, swept amount - fee share)
 
-    User->>Minter: deposit_status(deposit_id)
+    User->>Minter: deposit_sol_status(deposit_id)
     Minter-->>User: Minted { block_index, minted_amount }
 ```
 
@@ -87,7 +87,7 @@ sequenceDiagram
 
 3. **Transaction submission.** The minter constructs a Solana transaction, signs it using chain-key Ed25519, and submits it via the SOL RPC canister.
 
-4. **Monitor status.** Call `withdrawal_status` with the ledger burn index returned by `withdraw_sol` to track the status of your withdrawal request (`Pending` → `TxSent` → `TxFinalized`).
+4. **Monitor status.** Call `withdrawal_sol_status` with the ledger burn index returned by `withdraw_sol` to track the status of your withdrawal request (`Pending` → `TxSent` → `TxFinalized`).
 
 ```mermaid
 sequenceDiagram
@@ -107,7 +107,7 @@ sequenceDiagram
     Note over Minter,Solana: (processed asynchronously by the minter)
     Minter->>Solana: submit SOL transfer to destination_address
 
-    User->>Minter: withdrawal_status(burn_block_index)
+    User->>Minter: withdrawal_sol_status(burn_block_index)
     Minter-->>User: TxFinalized(Success)
 ```
 
@@ -197,7 +197,7 @@ A successful response returns the deposit id, which you can use to track the dep
 After calling `deposit_sol`, track the deposit using the deposit id returned in the response. The status moves through `Queued` → `Swept` → `Finalized` → `Minted` as the minter sweeps the deposit address and mints ckSOL:
 
 ```sh
-icp canister call -e prod cksol_minter deposit_status '(42 : nat64)' --query
+icp canister call -e prod cksol_minter deposit_sol_status '(42 : nat64)' --query
 ```
 
 ### Submit a withdrawal request
@@ -220,7 +220,7 @@ A successful response returns the burn block index, which you can use to track t
 After calling `withdraw_sol`, track the status using the `block_index` returned in the response:
 
 ```sh
-icp canister call -e prod cksol_minter withdrawal_status \
+icp canister call -e prod cksol_minter withdrawal_sol_status \
   '(record { block_index = 42 })'
 ```
 

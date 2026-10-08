@@ -71,7 +71,7 @@ async fn deposit_sol(args: DepositSolArgs) -> Result<DepositSolId, DepositSolErr
 }
 
 #[ic_cdk::query]
-fn deposit_status(deposit_id: DepositSolId) -> DepositSolStatus {
+fn deposit_sol_status(deposit_id: DepositSolId) -> DepositSolStatus {
     cksol_minter::deposit::sweep::deposit_status(deposit_id)
 }
 
@@ -89,7 +89,7 @@ async fn withdraw_sol(args: WithdrawalArgs) -> Result<WithdrawalOk, WithdrawalEr
 }
 
 #[ic_cdk::update]
-fn withdrawal_status(args: WithdrawalStatusArgs) -> WithdrawalStatus {
+fn withdrawal_sol_status(args: WithdrawalStatusArgs) -> WithdrawalStatus {
     cksol_minter::withdraw::withdrawal_status(args.block_index)
 }
 

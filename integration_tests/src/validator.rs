@@ -381,7 +381,7 @@ impl SolanaTestValidator {
 pub async fn wait_for_withdrawal_finalized(setup: &Setup, burn_index: u64) {
     for _ in 0..15 {
         if matches!(
-            setup.minter().withdrawal_status(burn_index).await,
+            setup.minter().withdrawal_sol_status(burn_index).await,
             WithdrawalStatus::TxFinalized(_)
         ) {
             return;
