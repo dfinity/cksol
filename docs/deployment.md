@@ -221,3 +221,60 @@ Initialization arguments:
 
 The index takes an optional argument, hence the leading `opt`.
 Leaving `retrieve_blocks_from_ledger_interval_seconds` unset uses the index's default polling interval.
+
+## Test
+
+### Deposit SOL
+
+The commands below use the staging minter and ledger.
+For production, replace the canister IDs with those of the production minter and ledger.
+
+```shell
+MINTER=ljyxk-riaaa-aaaar-qb5mq-cai
+LEDGER=la34w-haaaa-aaaar-qb5na-cai
+OWNER=$(icp identity principal --identity demo)
+```
+
+### Get the deposit address
+
+```shell
+icp canister call $MINTER get_deposit_address "(record { owner = opt principal \"$OWNER\"; subaccount = null })" --query -n ic
+```
+
+Send SOL to the returned address ([faucet](https://faucet.solana.com/)).
+The balance of the deposit address must be at least `minimum_deposit_amount`, which `get_minter_info` returns:
+
+```shell
+icp canister call $MINTER get_minter_info '()' --query -n ic
+```
+
+### Queue the deposit
+
+`deposit_sol` requires `deposit_sol_required_cycles` (1T cycles) to be attached to the call.
+Since an identity cannot attach cycles, route the call through a proxy canister that holds cycles:
+
+```shell
+icp canister call $MINTER deposit_sol "(record { owner = opt principal \"$OWNER\"; subaccount = null })" \
+  --proxy h35ft-riaaa-aaaar-qb37a-cai \
+  --cycles 1000000000000 \
+  --identity hsm \
+  --identity-password-file ~/.config/icp/hsm.pin \
+  -n ic
+```
+
+The minter sees the proxy canister as the caller, so `owner` must be set explicitly.
+Otherwise, the ckSOL would be minted to the proxy canister.
+The call returns the deposit ID, e.g. `(variant { Ok = 0 : nat64 })`.
+
+### Check the deposit status
+
+```shell
+icp canister call $MINTER deposit_status '(0 : nat64)' --query -n ic
+```
+
+The status goes through `Queued`, `Swept`, `Finalized` and `Minted`.
+Once minted, the ckSOL balance of the owner is:
+
+```shell
+icp canister call $LEDGER icrc1_balance_of "(record { owner = principal \"$OWNER\"; subaccount = null })" --query -n ic
+```
