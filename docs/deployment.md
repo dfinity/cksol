@@ -10,7 +10,64 @@ See `should_derive_mainnet_minter_addresses_offline` for an example.
 | Production  | [`lh22c-kyaaa-aaaar-qb5nq-cai`](https://dashboard.internetcomputer.org/canister/lh22c-kyaaa-aaaar-qb5nq-cai) | [`GXVewvv6HehcLFYCmwpqh5CrMjqN9zJ8rqzGq3HEt9Ax`](https://explorer.solana.com/address/GXVewvv6HehcLFYCmwpqh5CrMjqN9zJ8rqzGq3HEt9Ax)                |
 | Staging     | [`ljyxk-riaaa-aaaar-qb5mq-cai`](https://dashboard.internetcomputer.org/canister/ljyxk-riaaa-aaaar-qb5mq-cai) | [`Br8eRkeya8hy3sHCYqtWqGeNNZ349aPSUKGVYFWKKer1`](https://explorer.solana.com/address/Br8eRkeya8hy3sHCYqtWqGeNNZ349aPSUKGVYFWKKer1?cluster=devnet) |
 
-### Create nonce accounts
+## Create nonce accounts
+
+Withdrawals are sent as durable-nonce transactions, so the minter needs a pool of durable nonce accounts whose nonce authority is the minter's address.
+Without them, `withdraw` returns `TemporarilyUnavailable("The durable nonce account pool is empty, no withdrawal can be processed")`.
+
+The commands below use the [Solana CLI](https://solana.com/docs/intro/installation) and the staging minter on Devnet.
+For production, use the production minter's address and `--url mainnet-beta`.
+
+Fund a fee payer that pays for the rent of the nonce accounts:
+
+```shell
+solana-keygen new --no-bip39-passphrase -o ~/.config/solana/devnet-payer.json
+solana airdrop 1 --keypair ~/.config/solana/devnet-payer.json --url devnet
+```
+
+Create the nonce accounts with the minter as nonce authority:
+
+```shell
+MINTER_ADDRESS=Br8eRkeya8hy3sHCYqtWqGeNNZ349aPSUKGVYFWKKer1
+mkdir -p nonce-accounts
+for i in 1 2 3; do
+  solana-keygen new --no-bip39-passphrase --silent -o nonce-accounts/nonce-$i.json
+  solana create-nonce-account nonce-accounts/nonce-$i.json 0.002 \
+    --nonce-authority $MINTER_ADDRESS \
+    --keypair ~/.config/solana/devnet-payer.json \
+    --url devnet
+done
+```
+
+Each account is funded with 0.002 SOL, above the rent-exempt minimum for the 80 bytes of a nonce account (see `solana rent 80`).
+The `nonce-$i.json` keypairs are only needed to create the accounts: afterwards, only the nonce authority can advance the nonce or withdraw from the account.
+Each in-flight withdrawal transaction occupies one nonce account until it is finalized, and a transaction batches up to 10 withdrawals.
+
+Check that the nonce authority of each account is the minter's address:
+
+```shell
+for i in 1 2 3; do
+  ADDRESS=$(solana-keygen pubkey nonce-accounts/nonce-$i.json)
+  echo $ADDRESS
+  solana nonce-account $ADDRESS --url devnet
+done
+```
+
+The minter only parses the addresses when they are added and verifies each account when it creates a withdrawal transaction, so a wrong nonce authority only surfaces once a withdrawal is processed.
+
+Add the accounts to the minter, either in `nonce_accounts` of the [initialization arguments](#minter) or with an upgrade:
+
+```candid
+(
+  variant {
+    Upgrade = record {
+      nonce_accounts_to_add = opt vec { "<address-1>"; "<address-2>"; "<address-3>" };
+    }
+  },
+)
+```
+
+The other fields of `UpgradeArgs` are optional and can be omitted.
 
 ## Minter
 
