@@ -18,6 +18,7 @@ use crate::{
 };
 use canlog::log;
 use cksol_types_internal::log::Priority;
+use itertools::Itertools;
 use solana_address::Address;
 use solana_hash::Hash;
 use solana_message::Message;
@@ -25,25 +26,76 @@ use solana_signature::Signature;
 use solana_transaction::Transaction;
 use std::time::Duration;
 
-/// Decides every in-flight withdrawal transaction from a finalized read of its nonce
-/// account: a landed transaction is finalized with the outcome `getTransaction` reports,
-/// and a transaction that has not landed is re-broadcast once old enough.
-pub(super) async fn check_withdrawal_transactions<R: CanisterRuntime>(runtime: &R) {
+#[derive(Default)]
+pub(super) struct InFlightNonces {
+    unchanged: Vec<InFlightWithdrawal>,
+    advanced: Vec<InFlightWithdrawal>,
+}
+
+pub(super) async fn read_in_flight_nonces<R: CanisterRuntime>(runtime: &R) -> InFlightNonces {
+    let mut nonces = InFlightNonces::default();
     let Some(minter_address) = read_state(|state| state.minter_public_key().map(minter_address))
     else {
-        return;
+        return nonces;
     };
-    let withdrawals = in_flight_withdrawals();
+    let batches: Vec<Vec<_>> = in_flight_withdrawals()
+        .into_iter()
+        .chunks(MAX_CONCURRENT_RPC_CALLS)
+        .into_iter()
+        .map(Iterator::collect)
+        .collect();
+    for batch in batches {
+        let reads = futures::future::join_all(
+            batch
+                .into_iter()
+                .map(|withdrawal| read_nonce(runtime, withdrawal, minter_address)),
+        )
+        .await;
+        for (withdrawal, nonce_read) in reads {
+            match nonce_read {
+                Some(NonceRead::Unchanged) => nonces.unchanged.push(withdrawal),
+                Some(NonceRead::Advanced) => nonces.advanced.push(withdrawal),
+                Some(NonceRead::Stale) | None => {}
+            }
+        }
+    }
+    nonces
+}
+
+pub(super) async fn resubmit_transactions_batch<R: CanisterRuntime>(
+    runtime: &R,
+    nonces: &InFlightNonces,
+) {
+    let now = runtime.time();
+    let to_rebroadcast: Vec<_> = nonces
+        .unchanged
+        .iter()
+        .filter(|withdrawal| withdrawal.is_old_enough_to_rebroadcast(now))
+        .collect();
+    for batch in to_rebroadcast.chunks(MAX_CONCURRENT_RPC_CALLS) {
+        futures::future::join_all(
+            batch
+                .iter()
+                .map(|withdrawal| rebroadcast(runtime, withdrawal)),
+        )
+        .await;
+    }
+}
+
+pub(super) async fn finalize_transactions_batch<R: CanisterRuntime>(
+    runtime: &R,
+    nonces: &InFlightNonces,
+) {
     let mut num_unresolved_outcomes = 0;
-    for batch in withdrawals.chunks(MAX_CONCURRENT_RPC_CALLS) {
+    for batch in nonces.advanced.chunks(MAX_CONCURRENT_RPC_CALLS) {
         num_unresolved_outcomes += futures::future::join_all(
             batch
                 .iter()
-                .map(|withdrawal| check_withdrawal(runtime, withdrawal, minter_address)),
+                .map(|withdrawal| finalize_landed_withdrawal(runtime, withdrawal)),
         )
         .await
         .into_iter()
-        .filter(|check| *check == WithdrawalCheck::UnresolvedOutcome)
+        .filter(|finalization| *finalization == Finalization::UnresolvedOutcome)
         .count();
     }
     with_unstable_metrics_mut(|metrics| {
@@ -96,24 +148,17 @@ fn in_flight_withdrawals() -> Vec<InFlightWithdrawal> {
     })
 }
 
-#[derive(PartialEq)]
-enum WithdrawalCheck {
-    NoOutcome,
-    UnresolvedOutcome,
-    Finalized,
-}
-
-async fn check_withdrawal<R: CanisterRuntime>(
+async fn read_nonce<R: CanisterRuntime>(
     runtime: &R,
-    withdrawal: &InFlightWithdrawal,
+    withdrawal: InFlightWithdrawal,
     minter_address: Address,
-) -> WithdrawalCheck {
+) -> (InFlightWithdrawal, Option<NonceRead>) {
     let InFlightWithdrawal {
         signature,
         nonce_account,
         nonce_value,
         ..
-    } = withdrawal;
+    } = &withdrawal;
     let read_nonce_value = match read_verified_nonce(runtime, *nonce_account, minter_address).await
     {
         Ok(read_nonce_value) => read_nonce_value,
@@ -127,7 +172,7 @@ async fn check_withdrawal<R: CanisterRuntime>(
                 priority,
                 "Failed to read nonce account {nonce_account} of withdrawal transaction {signature}, retrying next round: {e}"
             );
-            return WithdrawalCheck::NoOutcome;
+            return (withdrawal, None);
         }
     };
     let nonce_read = read_state(|state| {
@@ -135,28 +180,25 @@ async fn check_withdrawal<R: CanisterRuntime>(
             .nonce_pool()
             .classify_read(nonce_account, nonce_value, &read_nonce_value)
     });
-    match nonce_read {
-        NonceRead::Unchanged => {
-            if withdrawal.is_old_enough_to_rebroadcast(runtime.time()) {
-                rebroadcast(runtime, withdrawal).await;
-            }
-            WithdrawalCheck::NoOutcome
-        }
-        NonceRead::Stale => {
-            log!(
-                Priority::Info,
-                "Stale read of nonce account {nonce_account} of withdrawal transaction {signature}, retrying next round"
-            );
-            WithdrawalCheck::NoOutcome
-        }
-        NonceRead::Advanced => finalize_landed_withdrawal(runtime, withdrawal).await,
+    if nonce_read == NonceRead::Stale {
+        log!(
+            Priority::Info,
+            "Stale read of nonce account {nonce_account} of withdrawal transaction {signature}, retrying next round"
+        );
     }
+    (withdrawal, Some(nonce_read))
+}
+
+#[derive(PartialEq)]
+enum Finalization {
+    Finalized,
+    UnresolvedOutcome,
 }
 
 async fn finalize_landed_withdrawal<R: CanisterRuntime>(
     runtime: &R,
     withdrawal: &InFlightWithdrawal,
-) -> WithdrawalCheck {
+) -> Finalization {
     let signature = withdrawal.signature;
     let event = match get_submitted_transaction_outcome(runtime, signature, &withdrawal.message)
         .await
@@ -177,7 +219,7 @@ async fn finalize_landed_withdrawal<R: CanisterRuntime>(
                 Priority::Info,
                 "Withdrawal transaction {signature} landed but was not found, retrying next round"
             );
-            return WithdrawalCheck::UnresolvedOutcome;
+            return Finalization::UnresolvedOutcome;
         }
         Err(e) => {
             let priority = if e.is_response_untrustworthy() {
@@ -189,11 +231,11 @@ async fn finalize_landed_withdrawal<R: CanisterRuntime>(
                 priority,
                 "Failed to fetch landed withdrawal transaction {signature}, retrying next round: {e}"
             );
-            return WithdrawalCheck::UnresolvedOutcome;
+            return Finalization::UnresolvedOutcome;
         }
     };
     mutate_state(|state| process_event(state, event, runtime));
-    WithdrawalCheck::Finalized
+    Finalization::Finalized
 }
 
 async fn rebroadcast<R: CanisterRuntime>(runtime: &R, withdrawal: &InFlightWithdrawal) {

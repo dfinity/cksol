@@ -2,7 +2,9 @@ use crate::{
     constants::MAX_CONCURRENT_RPC_CALLS,
     deposit::sweep::credit_finalized_sweeps,
     guard::TimerGuard,
-    monitor::withdrawals::check_withdrawal_transactions,
+    monitor::withdrawals::{
+        finalize_transactions_batch, read_in_flight_nonces, resubmit_transactions_batch,
+    },
     rpc::{BlockHeight, get_recent_block, get_signature_statuses},
     runtime::CanisterRuntime,
     state::{
@@ -58,7 +60,9 @@ pub async fn finalize_transactions<R: CanisterRuntime>(runtime: R) {
     });
 
     let more_transactions_to_check = check_sweep_transactions(&runtime).await;
-    check_withdrawal_transactions(&runtime).await;
+    let nonces = read_in_flight_nonces(&runtime).await;
+    resubmit_transactions_batch(&runtime, &nonces).await;
+    finalize_transactions_batch(&runtime, &nonces).await;
     let more_sweeps_to_credit = credit_finalized_sweeps(&runtime).await;
 
     if !more_transactions_to_check && !more_sweeps_to_credit {
