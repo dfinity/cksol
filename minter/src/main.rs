@@ -76,7 +76,7 @@ fn deposit_status(deposit_id: DepositSolId) -> DepositSolStatus {
 }
 
 #[ic_cdk::update]
-async fn withdraw(args: WithdrawalArgs) -> Result<WithdrawalOk, WithdrawalError> {
+async fn withdraw_sol(args: WithdrawalArgs) -> Result<WithdrawalOk, WithdrawalError> {
     let account = assert_non_anonymous_account(None, args.from_subaccount);
 
     cksol_minter::withdraw::withdraw(

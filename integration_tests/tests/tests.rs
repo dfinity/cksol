@@ -319,7 +319,7 @@ mod withdrawal_tests {
             address: "InvalidAddress".to_string(),
         };
 
-        let result = setup.minter().withdraw(args).await;
+        let result = setup.minter().withdraw_sol(args).await;
         let err = result.unwrap_err();
         assert_matches!(err, WithdrawalError::MalformedAddress(_));
 
@@ -329,7 +329,7 @@ mod withdrawal_tests {
             address: "E4MpwNnMWs2XtW5gVrxZvyS7fMq31QD5HvbxmwP45Tz3".to_string(),
         };
 
-        let result = setup.minter().withdraw(args).await;
+        let result = setup.minter().withdraw_sol(args).await;
         let err = result.unwrap_err();
         assert_eq!(err, WithdrawalError::InsufficientAllowance { allowance: 0 });
 
@@ -364,7 +364,7 @@ mod withdrawal_tests {
 
         let result = setup
             .minter()
-            .withdraw(WithdrawalArgs {
+            .withdraw_sol(WithdrawalArgs {
                 from_subaccount: None,
                 amount: Setup::DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT,
                 address: SYSTEM_PROGRAM_ID.to_string(),
@@ -390,7 +390,7 @@ mod withdrawal_tests {
             address: "E4MpwNnMWs2XtW5gVrxZvyS7fMq31QD5HvbxmwP45Tz3".to_string(),
         };
 
-        let result = setup.minter().withdraw(args.clone()).await;
+        let result = setup.minter().withdraw_sol(args.clone()).await;
         let err = result.unwrap_err();
         assert_eq!(err, WithdrawalError::InsufficientAllowance { allowance: 0 });
 
@@ -404,7 +404,7 @@ mod withdrawal_tests {
             .await
             .expect("upgrade failed");
 
-        let result = setup.minter().withdraw(args).await;
+        let result = setup.minter().withdraw_sol(args).await;
         let err = result.unwrap_err();
         assert_eq!(
             err,
@@ -420,7 +420,7 @@ mod withdrawal_tests {
             address: "E4MpwNnMWs2XtW5gVrxZvyS7fMq31QD5HvbxmwP45Tz3".to_string(),
         };
 
-        let result = setup.minter().withdraw(args).await;
+        let result = setup.minter().withdraw_sol(args).await;
         let err = result.unwrap_err();
         assert_eq!(err, WithdrawalError::InsufficientAllowance { allowance: 0 });
 
@@ -460,7 +460,7 @@ mod withdrawal_tests {
 
         let result = setup
             .minter()
-            .withdraw(WithdrawalArgs {
+            .withdraw_sol(WithdrawalArgs {
                 from_subaccount: None,
                 amount: WITHDRAWAL_AMOUNT,
                 address: "E4MpwNnMWs2XtW5gVrxZvyS7fMq31QD5HvbxmwP45Tz3".to_string(),
@@ -474,7 +474,7 @@ mod withdrawal_tests {
         // Test insufficient allowance
         let result = setup
             .minter()
-            .withdraw(WithdrawalArgs {
+            .withdraw_sol(WithdrawalArgs {
                 from_subaccount: subaccount,
                 amount: WITHDRAWAL_AMOUNT,
                 address: "E4MpwNnMWs2XtW5gVrxZvyS7fMq31QD5HvbxmwP45Tz3".to_string(),
@@ -502,7 +502,7 @@ mod withdrawal_tests {
 
         let result = setup
             .minter()
-            .withdraw(WithdrawalArgs {
+            .withdraw_sol(WithdrawalArgs {
                 from_subaccount: subaccount,
                 amount: WITHDRAWAL_AMOUNT,
                 address: "E4MpwNnMWs2XtW5gVrxZvyS7fMq31QD5HvbxmwP45Tz3".to_string(),
@@ -551,7 +551,7 @@ mod withdrawal_tests {
 
         let result = setup
             .minter()
-            .withdraw(WithdrawalArgs {
+            .withdraw_sol(WithdrawalArgs {
                 from_subaccount: None,
                 amount: WITHDRAWAL_AMOUNT,
                 address: WITHDRAWAL_ADDRESS.to_string(),
@@ -608,7 +608,7 @@ mod withdrawal_tests {
 
         let result = setup
             .minter()
-            .withdraw(WithdrawalArgs {
+            .withdraw_sol(WithdrawalArgs {
                 from_subaccount: None,
                 amount: WITHDRAWAL_AMOUNT,
                 address: WITHDRAWAL_ADDRESS.to_string(),
@@ -665,8 +665,8 @@ mod withdrawal_tests {
         let minter2 = setup.minter();
 
         let (result1, result2) = join!(
-            minter1.withdraw(args.clone()),
-            minter2.withdraw(args.clone()),
+            minter1.withdraw_sol(args.clone()),
+            minter2.withdraw_sol(args.clone()),
         );
 
         let (result1, result2) = match (&result1, &result2) {
@@ -726,7 +726,7 @@ mod withdrawal_tests {
 
         let WithdrawalOk { block_index } = setup
             .minter()
-            .withdraw(WithdrawalArgs {
+            .withdraw_sol(WithdrawalArgs {
                 from_subaccount: None,
                 amount: WITHDRAWAL_AMOUNT,
                 address: WITHDRAWAL_ADDRESS.to_string(),
@@ -1239,10 +1239,10 @@ mod anonymous_caller_tests {
             assert_matches!(result, Err(s) if s.contains("the owner must be non-anonymous"));
         }
 
-        // `withdraw` endpoint (no `owner` field, only anonymous caller applies)
+        // `withdraw_sol` endpoint (no `owner` field, only anonymous caller applies)
         let minter = setup.minter_with_caller(Principal::anonymous());
         let result = minter
-            .try_withdraw(WithdrawalArgs {
+            .try_withdraw_sol(WithdrawalArgs {
                 from_subaccount: None,
                 amount: Setup::DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT,
                 address: "E4MpwNnMWs2XtW5gVrxZvyS7fMq31QD5HvbxmwP45Tz3".to_string(),
@@ -1371,7 +1371,7 @@ mod metrics_tests {
 
         setup
             .minter()
-            .withdraw(WithdrawalArgs {
+            .withdraw_sol(WithdrawalArgs {
                 from_subaccount: None,
                 amount: WITHDRAWAL_AMOUNT,
                 address: WITHDRAWAL_ADDRESS.to_string(),

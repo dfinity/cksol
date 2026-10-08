@@ -81,13 +81,13 @@ sequenceDiagram
 
 1. **Approve the minter.** Grant the minter an [ICRC-2](https://github.com/dfinity/ICRC-1/blob/main/standards/ICRC-2/README.md) allowance on your ckSOL ledger account.
 
-2. **Submit a withdrawal request.** Call `withdraw` on the minter with the destination Solana address and the amount in [lamports](https://solana.com/docs/terminology#lamport). The minter:
+2. **Submit a withdrawal request.** Call `withdraw_sol` on the minter with the destination Solana address and the amount in [lamports](https://solana.com/docs/terminology#lamport). The minter:
    - Burns the requested ckSOL from your ledger account via [icrc2_transfer_from](https://github.com/dfinity/ICRC-1/blob/main/standards/ICRC-2/README.md#icrc2_transfer_from).
    - Queues the corresponding SOL transfer.
 
 3. **Transaction submission.** The minter constructs a Solana transaction, signs it using chain-key Ed25519, and submits it via the SOL RPC canister.
 
-4. **Monitor status.** Call `withdrawal_status` with the ledger burn index returned by `withdraw` to track the status of your withdrawal request (`Pending` → `TxSent` → `TxFinalized`).
+4. **Monitor status.** Call `withdrawal_status` with the ledger burn index returned by `withdraw_sol` to track the status of your withdrawal request (`Pending` → `TxSent` → `TxFinalized`).
 
 ```mermaid
 sequenceDiagram
@@ -99,7 +99,7 @@ sequenceDiagram
     User->>Ledger: icrc2_approve(spender=minter, amount)
     Ledger-->>User: ok
 
-    User->>Minter: withdraw(destination_address, amount)
+    User->>Minter: withdraw_sol(destination_address, amount)
     Minter->>Ledger: burn with icrc2_transfer_from(from=user, to=burn, amount)
     Ledger-->>Minter: burn_block_index
     Minter-->>User: burn_block_index
@@ -217,7 +217,7 @@ A successful response returns the burn block index, which you can use to track t
 
 ### Check a withdrawal status
 
-After calling `withdraw`, track the status using the `block_index` returned in the response:
+After calling `withdraw_sol`, track the status using the `block_index` returned in the response:
 
 ```sh
 icp canister call -e prod cksol_minter withdrawal_status \

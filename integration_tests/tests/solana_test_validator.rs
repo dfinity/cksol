@@ -134,7 +134,7 @@ async fn should_deposit_and_withdraw() {
 
                     setup
                         .minter()
-                        .withdraw(WithdrawalArgs {
+                        .withdraw_sol(WithdrawalArgs {
                             from_subaccount: account.subaccount,
                             amount: withdrawal_amount,
                             address: withdrawal_address.to_string(),
@@ -285,7 +285,7 @@ async fn should_batch_withdrawals_over_two_nonce_accounts_and_reuse_a_freed_one(
     let withdraw_to = async |destination: &Address| {
         setup
             .minter()
-            .withdraw(WithdrawalArgs {
+            .withdraw_sol(WithdrawalArgs {
                 from_subaccount: account.subaccount,
                 amount: WITHDRAWAL_AMOUNT,
                 address: destination.to_string(),

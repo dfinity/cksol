@@ -514,15 +514,20 @@ impl CkSolMinter<'_> {
         self.query_call("deposit_status", (deposit_id,)).await
     }
 
-    pub async fn withdraw(&self, args: WithdrawalArgs) -> Result<WithdrawalOk, WithdrawalError> {
-        self.try_withdraw(args).await.expect("withdraw failed")
+    pub async fn withdraw_sol(
+        &self,
+        args: WithdrawalArgs,
+    ) -> Result<WithdrawalOk, WithdrawalError> {
+        self.try_withdraw_sol(args)
+            .await
+            .expect("withdraw_sol failed")
     }
 
-    pub async fn try_withdraw(
+    pub async fn try_withdraw_sol(
         &self,
         args: WithdrawalArgs,
     ) -> Result<Result<WithdrawalOk, WithdrawalError>, String> {
-        self.try_update_call("withdraw", (args,), 0).await
+        self.try_update_call("withdraw_sol", (args,), 0).await
     }
 
     pub async fn withdrawal_status(&self, block_index: u64) -> WithdrawalStatus {

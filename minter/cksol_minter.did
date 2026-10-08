@@ -234,7 +234,7 @@ type WithdrawalOk = record {
 
 // Arguments for a request to the `withdrawal_status` endpoint.
 type WithdrawalStatusArgs = record {
-    // The burn block index returned by the `withdraw` endpoint.
+    // The burn block index returned by the `withdraw_sol` endpoint.
     block_index : LedgerBurnIndex;
 };
 
@@ -263,7 +263,7 @@ type WithdrawalError = variant {
     TemporarilyUnavailable : text;
 };
 
-// The result of a call to the `withdraw` endpoint.
+// The result of a call to the `withdraw_sol` endpoint.
 type WithdrawalResult = variant { Ok : WithdrawalOk; Err : WithdrawalError };
 
 // Status of a finalized transaction.
@@ -534,7 +534,7 @@ service : (MinterArg) -> {
     deposit_status: (DepositSolId) -> (DepositSolStatus) query;
 
     // Submits a request to convert ckSOL to Solana.
-    withdraw : (WithdrawalArgs) -> (WithdrawalResult);
+    withdraw_sol : (WithdrawalArgs) -> (WithdrawalResult);
 
     // Retrieve the status of a Solana withdrawal request.
     withdrawal_status : (WithdrawalStatusArgs) -> (WithdrawalStatus);

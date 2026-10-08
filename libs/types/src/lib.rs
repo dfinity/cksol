@@ -184,7 +184,7 @@ pub struct WithdrawalOk {
 /// Arguments for a request to the `withdrawal_status` ckSOL minter endpoint.
 #[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize)]
 pub struct WithdrawalStatusArgs {
-    /// The burn block index returned by the `withdraw` endpoint.
+    /// The burn block index returned by the `withdraw_sol` endpoint.
     pub block_index: LedgerBurnIndex,
 }
 
