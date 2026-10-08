@@ -35,53 +35,19 @@ type GetDepositAddressArgs = record {
 // Example: "5LrcE2f6uvydKRquEJ8xp19heGxSvqsVbcqUeFoiWbXe8JNip7ftPQNTAVPyTK7ijVdpkzmKKaAQR7MWMmujAhXD"
 type Signature = text;
 
+// A 32-byte Solana hash as a base-58 encoded string,
+// such as the nonce value stored by a durable nonce account.
+type Hash = text;
+
 // Smallest denomination of SOL, the native token on Solana,
 // i.e. 1_000_000_000 Lamports is 1 SOL
 type Lamport = nat64;
 
-// Index of a mint transaction on the ckSOL ledger.
-type LedgerMintIndex = nat64;
-
 // Index of a burn transaction on the ckSOL ledger.
 type LedgerBurnIndex = nat64;
 
-// Arguments for a request to the `process_deposit` endpoint.
-type ProcessDepositArgs = record {
-    // If provided, update the balance for this principal.
-    //
-    // If not set, defaults to the caller's principal.
-    // The resolved owner must be a non-anonymous principal.
-    owner: opt principal;
-    // The subaccount for which to update the balance.
-    subaccount: opt blob;
-    // Signature of the deposit transaction.
-    signature: Signature;
-};
-
-// An error from the `process_deposit` ckSOL minter endpoint.
-type ProcessDepositError = variant {
-    // Insufficient cycles attached by the caller to complete the `process_deposit` call.
-    InsufficientCycles : InsufficientCyclesError;
-    // The minter experiences temporary issues, try the call again later.
-    TemporarilyUnavailable : text;
-    // There is already a concurrent `process_deposit` invocation from the same caller.
-    AlreadyProcessing;
-    // No matching transaction was found for the given signature.
-    //
-    // This can also happen if the transaction is not yet finalized, in which
-    // case trying this call again later may result in a successful mint.
-    TransactionNotFound;
-    // The Solana transaction with the given signature is not a valid
-    // deposit to the owner's deposit address.
-    InvalidDepositTransaction : text;
-    // The deposit amount does not cover the deposit fee.
-    ValueTooSmall : record {
-        // The minimum deposit amount for the deposit to be accepted.
-        minimum_deposit_amount: Lamport;
-        // The amount that was deposited.
-        deposit_amount: Lamport;
-    };
-};
+// Index of a mint transaction on the ckSOL ledger.
+type LedgerMintIndex = nat64;
 
 // Insufficient cycles attached by the caller to complete the call.
 type InsufficientCyclesError = record {
@@ -90,39 +56,6 @@ type InsufficientCyclesError = record {
     // The amount of cycles received by the minter.
     received: nat;
 };
-
-// The outcome of processing a Solana deposit transaction.
-type DepositStatus = variant {
-    // The transaction is a valid deposit, but the corresponding ckSOL tokens
-    // have not yet been minted.
-    Processing : record {
-        // The deposit amount.
-        deposit_amount: Lamport;
-        // The amount to mint (deposit amount minus fees).
-        amount_to_mint: Lamport;
-        // The deposit identifier.
-        deposit_id: DepositId;
-    };
-    // The transaction is a valid deposit, but it is unknown whether the
-    // corresponding ckSOL tokens have been minted, most likely because there
-    // was an unexpected panic while trying to mint.
-    //
-    // The deposit is quarantined to avoid any double minting and will not
-    // be further processed without manual intervention.
-    Quarantined : DepositId;
-    // The minter accepted the deposit and minted ckSOL tokens on the ledger.
-    Minted : record {
-        // The mint transaction index on the ledger.
-        block_index: LedgerMintIndex;
-        // The minted amount (deposit amount minus fees).
-        minted_amount: Lamport;
-        // The deposit identifier.
-        deposit_id: DepositId;
-    };
-};
-
-// Represents the result of a call to the `process_deposit` endpoint.
-type ProcessDepositResult = variant { Ok : DepositStatus; Err : ProcessDepositError };
 
 // Arguments for a request to the `deposit_sol` endpoint.
 type DepositSolArgs = record {
@@ -164,7 +97,7 @@ type DepositSolStatus = variant {
     // The minter minted ckSOL for the deposit on the ledger.
     Minted : record {
         // The mint transaction index on the ckSOL ledger.
-        block_index: nat64;
+        block_index: LedgerMintIndex;
         // The minted amount: the swept amount minus the deposit's share of the
         // transaction fee of the sweep.
         minted_amount: Lamport;
@@ -240,26 +173,25 @@ type InitArgs = record {
     sol_rpc_canister_id : principal;
     ledger_canister_id : principal;
     master_key_name : Ed25519KeyName;
-    manual_deposit_fee : Lamport;
-    automated_deposit_fee : Lamport;
-    deposit_consolidation_fee : nat64;
+    deposit_sol_fee : nat64;
     minimum_withdrawal_amount : Lamport;
     minimum_deposit_amount : Lamport;
     withdrawal_fee : Lamport;
-    process_deposit_required_cycles : nat64;
+    deposit_sol_required_cycles : nat64;
     solana_network : SolanaNetwork;
+    nonce_accounts : vec text;
 };
 
 // Information about the ckSOL minter canister.
 type MinterInfo = record {
-    manual_deposit_fee : Lamport;
-    automated_deposit_fee : Lamport;
-    deposit_consolidation_fee : nat;
+    deposit_sol_fee : nat;
     minimum_withdrawal_amount : Lamport;
     minimum_deposit_amount : Lamport;
     withdrawal_fee : Lamport;
-    process_deposit_required_cycles : nat;
+    deposit_sol_required_cycles : nat;
     balance : Lamport;
+    minter_address : opt text;
+    nonce_accounts : vec text;
 };
 
 // The ckSOL minter service arguments.
@@ -277,13 +209,12 @@ type MinterArg = variant {
 // removed, or renamed across releases.
 type UpgradeArgs = record {
     sol_rpc_canister_id : opt principal;
-    manual_deposit_fee : opt Lamport;
-    automated_deposit_fee : opt Lamport;
-    deposit_consolidation_fee : opt nat64;
+    deposit_sol_fee : opt nat64;
     minimum_withdrawal_amount : opt Lamport;
     minimum_deposit_amount : opt Lamport;
     withdrawal_fee : opt Lamport;
-    process_deposit_required_cycles : opt nat64;
+    deposit_sol_required_cycles : opt nat64;
+    nonce_accounts_to_add : opt vec text;
 };
 
 type WithdrawalArgs = record {
@@ -320,6 +251,9 @@ type WithdrawalError = variant {
     };
     // The minter failed to parse the destination address.
     MalformedAddress : Address;
+    // The destination address is not a valid withdrawal destination.
+    // The payload contains a human-readable message explaining why the destination was rejected.
+    InvalidDestination : text;
     // The ckSOL balance of the withdrawal account is too low.
     InsufficientFunds : record { balance : Lamport };
     // The minter is not approved to transfer the requested amount.
@@ -415,21 +349,21 @@ type Signer = variant {
 // *WARNING*: This type is used exclusively by the debug `get_events` endpoint.
 // Backwards-compatibility is not guaranteed.
 type TransactionPurpose = variant {
-    // Consolidate deposited funds into the minter's main account.
-    ConsolidateDeposits : record {
-        // The ledger mint indices of the deposits being consolidated.
-        mint_indices: vec LedgerMintIndex;
-    };
-    // Withdraw SOL to users' Solana addresses.
-    WithdrawSol : record {
-        // The ledger burn indices of the withdrawal requests included in this transaction.
-        burn_indices: vec LedgerBurnIndex;
-    };
     // Sweep the deposit addresses of deposits queued by `deposit_sol` into the
-    // minter's main account.
-    SweepDeposits : record {
+    // minter's main account. The transaction uses a recent blockhash and is
+    // dropped once the blockhash expires.
+    SweepDeposit : record {
         // The ids of the swept deposits.
         deposit_ids: vec DepositSolId;
+        // The block height of the block whose blockhash the transaction uses.
+        block_height: nat64;
+    };
+    // Withdraw SOL to users' Solana addresses. The transaction carries the
+    // nonce value of a durable nonce account instead of a recent blockhash,
+    // so it never expires.
+    Withdrawal : record {
+        // The ledger burn indices of the withdrawal requests included in this transaction.
+        burn_indices: vec LedgerBurnIndex;
     };
 };
 
@@ -447,42 +381,6 @@ type EventType = variant {
     // burned the requested amount of ckSOL.
     // The Solana transaction was not generated yet.
     AcceptedWithdrawalRequest : AcceptedWithdrawalRequest;
-    // A user manually submitted a valid ckSOL deposit transaction via
-    // `process_deposit`. ckSOL tokens have not yet been minted for this deposit.
-    AcceptedManualDeposit : record {
-        // The signature of the Solana deposit transaction.
-        signature: Signature;
-        // The account to which the minter should mint ckSOL.
-        account: Account;
-        // The amount that was deposited.
-        deposit_amount: Lamport;
-        // The amount of ckSOL tokens to mint for this deposit.
-        // This amount is generally lower than `deposit_amount` due
-        // to the deposit fee.
-        amount_to_mint: Lamport;
-    };
-    // The minter discovered a Solana transaction that is a valid ckSOL
-    // deposit, but it is unknown whether ckSOL tokens were minted for
-    // it or not, most likely because there was an unexpected panic in
-    // the callback.
-    //
-    // The deposit is quarantined to avoid any double minting and
-    // will not be further processed without manual intervention.
-    QuarantinedDeposit : record {
-        // The signature of the Solana deposit transaction.
-        signature: Signature;
-        // The account to which the minter should mint ckSOL.
-        account: Account;
-    };
-    // The minter minted ckSOL in response to a deposit.
-    Minted : record {
-        // The signature of the Solana deposit transaction.
-        signature: Signature;
-        // The account to which the minter minted ckSOL.
-        account: Account;
-        // The transaction index on the ckSOL ledger.
-        mint_block_index: LedgerMintIndex;
-    };
     // Submitted a Solana transaction.
     SubmittedTransaction : record {
         // The signature of the Solana transaction.
@@ -491,19 +389,9 @@ type EventType = variant {
         transaction: VersionedTransactionMessage;
         // The signers in signature order (fee payer first).
         signers: vec Signer;
-        // The purpose of this transaction.
+        // The purpose of this transaction, with what the minter needs to
+        // track it until it is finalized.
         purpose: TransactionPurpose;
-        // The block height of the block whose blockhash the transaction uses.
-        block_height: nat64;
-    };
-    // A previously submitted transaction was resubmitted with a new signature.
-    ResubmittedTransaction : record {
-        // The signature of the old transaction being replaced.
-        old_signature: Signature;
-        // The signature of the new transaction.
-        new_signature: Signature;
-        // The block height of the new blockhash used in the resubmitted transaction.
-        new_block_height: nat64;
     };
     // A previously submitted Solana transaction has been finalized successfully.
     SucceededTransaction : record {
@@ -517,8 +405,7 @@ type EventType = variant {
     };
     // A previously submitted Solana transaction has an expired blockhash
     // and a null on-chain status, meaning it will never be executed.
-    // A withdrawal or consolidation transaction is marked for resubmission;
-    // the deposits of a sweep transaction are dropped instead.
+    // The deposits of the expired sweep transaction are dropped.
     ExpiredTransaction : record {
         // The signature of the expired Solana transaction.
         signature: Signature;
@@ -568,7 +455,7 @@ type EventType = variant {
         // The identifier of the minted deposit.
         deposit_id: DepositSolId;
         // The mint transaction index on the ckSOL ledger.
-        mint_block_index: nat64;
+        mint_block_index: LedgerMintIndex;
     };
     // The pending mint of a swept deposit cannot be retried: either it became
     // older than the 24-hour deduplication window of the ckSOL ledger, or the
@@ -587,18 +474,17 @@ type EventType = variant {
         // The identifier of the deposit whose pending mint was quarantined.
         deposit_id: DepositSolId;
     };
-};
-
-// A single transaction can deposit to multiple accounts, so the signature alone
-// is not sufficient. The combination of the Solana transaction signature and the
-// account it targets together uniquely identify a deposit. If a transaction
-// contains multiple transfers to the same account, they are aggregated into a
-// single deposit.
-type DepositId = record {
-    // The signature of the Solana deposit transaction.
-    signature: Signature;
-    // The account to which the minter should mint ckSOL.
-    account: Account;
+    // The minter bound a durable nonce account and its nonce value to the
+    // withdrawal requests of the given burn indices, before requesting the
+    // threshold signature. The binding determines the transaction message.
+    CreatedWithdrawalTransaction : record {
+        // The ledger burn indices of the withdrawal requests served by this transaction.
+        burn_indices: vec LedgerBurnIndex;
+        // The durable nonce account bound to this transaction.
+        nonce_account: Address;
+        // The nonce value the transaction carries in place of a recent blockhash.
+        nonce_value: Hash;
+    };
 };
 
 // A minter event.
@@ -634,15 +520,6 @@ service : (MinterArg) -> {
     // If the owner is not set, it defaults to the caller's principal.
     // The resolved owner must be a non-anonymous principal.
     get_deposit_address: (GetDepositAddressArgs) -> (Address) query;
-
-    // Update the ckSOL balance of the given owner with the funds
-    // deposited in a specific Solana transaction.
-    //
-    // Safe to call multiple times with the same signature: if the deposit was
-    // already accepted, the call returns the current status (`Processing`,
-    // `Quarantined`, or `Minted`) without charging additional cycles. If minting
-    // previously failed (status `Processing`), calling again will retry the mint.
-    process_deposit: (ProcessDepositArgs) -> (ProcessDepositResult);
 
     // Queues the deposit address of the given account for a sweep
     // to the minter's main account and returns the identifier of

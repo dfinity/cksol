@@ -12,8 +12,8 @@ use solana_address::Address;
 use solana_hash::Hash;
 use solana_signature::Signature;
 use solana_system_interface::instruction;
-use solana_transaction::{Instruction, Message};
-use solana_transaction_status_client_types::EncodedConfirmedTransactionWithStatusMeta;
+use solana_transaction::{Instruction, Message, versioned::VersionedTransaction};
+use solana_transaction_status_client_types::UiTransactionStatusMeta;
 use std::{cmp::Reverse, collections::BTreeMap};
 use thiserror::Error;
 
@@ -231,18 +231,10 @@ impl Sweep {
     /// on the fee payer's address.
     pub fn settle(
         self,
-        outcome: &EncodedConfirmedTransactionWithStatusMeta,
+        transaction: &VersionedTransaction,
+        meta: Option<&UiTransactionStatusMeta>,
     ) -> Result<SettledSweep, SweepSettlementError> {
-        let transaction = outcome
-            .transaction
-            .transaction
-            .decode()
-            .ok_or(UnreadableOutcome::TransactionDecodingFailed)?;
-        let meta = outcome
-            .transaction
-            .meta
-            .as_ref()
-            .ok_or(UnreadableOutcome::NoMetaField)?;
+        let meta = meta.ok_or(UnreadableOutcome::NoMetaField)?;
         if let Some(error) = &meta.err {
             return Err(SweepMismatch::TransactionFailed {
                 error: error.to_string(),
@@ -375,8 +367,6 @@ pub enum SweepSettlementError {
 
 #[derive(Debug, PartialEq, Eq, Error)]
 pub enum UnreadableOutcome {
-    #[error("the sweep transaction could not be decoded")]
-    TransactionDecodingFailed,
     #[error("the 'getTransaction' response has no 'meta' field")]
     NoMetaField,
     #[error("the balances in the metadata do not cover all account keys")]

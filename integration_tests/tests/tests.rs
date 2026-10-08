@@ -4,34 +4,27 @@ use candid::{Nat, Principal};
 use cksol_int_tests::{
     CkSolMinter, Setup, SetupBuilder,
     fixtures::{
-        DEFAULT_CALLER_ACCOUNT, DEFAULT_CALLER_DEPOSIT_ADDRESS, DEPOSIT_AMOUNT,
-        EXPECTED_MINT_AMOUNT, MockBuilder, RENT_EXEMPTION_THRESHOLD, SharedMockHttpOutcalls,
-        default_process_deposit_args, deposit_transaction_signature,
-        get_deposit_transaction_response,
+        DEFAULT_CALLER_ACCOUNT, DEFAULT_CALLER_DEPOSIT_ADDRESS, DEPOSIT_AMOUNT, MINTER_ADDRESS,
+        MockBuilder, RENT_EXEMPTION_THRESHOLD, SharedMockHttpOutcalls,
     },
     validator::FEE_PER_SIGNATURE,
 };
 use cksol_types::{
-    DepositId, DepositSolArgs, DepositSolError, DepositSolStatus, DepositStatus,
-    GetDepositAddressArgs, InsufficientCyclesError, Lamport, MinterInfo, ProcessDepositArgs,
-    ProcessDepositError, TxFinalizedStatus, WithdrawalArgs, WithdrawalError, WithdrawalStatus,
+    DepositSolArgs, DepositSolError, DepositSolStatus, GetDepositAddressArgs, Lamport, MinterInfo,
+    TxFinalizedStatus, WithdrawalArgs, WithdrawalError, WithdrawalStatus,
 };
 use cksol_types_internal::{
     UpgradeArgs,
     event::{EventType, TransactionPurpose},
     log::Priority,
 };
-use ic_pocket_canister_runtime::JsonRpcResponse;
 use icrc_ledger_types::icrc1::account::{Account, Subaccount};
-use serde_json::json;
-use sol_rpc_types::{CommitmentLevel, ConsensusStrategy, GetTransactionEncoding, RpcConfig};
+use sol_rpc_types::{CommitmentLevel, ConsensusStrategy, RpcConfig};
 use std::time::Duration;
 use tokio::join;
 
 const WITHDRAWAL_PROCESSING_DELAY: Duration = Duration::from_mins(1);
 const FINALIZE_TRANSACTIONS_DELAY: Duration = Duration::from_mins(2);
-const RESUBMIT_TRANSACTIONS_DELAY: Duration = Duration::from_mins(3);
-const DEPOSIT_CONSOLIDATION_DELAY: Duration = Duration::from_mins(10);
 const SWEEP_DEPOSITS_DELAY: Duration = Duration::from_mins(1);
 /// Number of blocks a blockhash stays valid for, as the minter counts them.
 const MAX_BLOCKHASH_AGE_IN_BLOCKS: u64 = 150;
@@ -41,20 +34,23 @@ const SUBMISSION_BLOCK_HEIGHT: u64 = 100_000_000;
 /// [`SUBMISSION_BLOCK_HEIGHT`] is no longer accepted.
 const EXPIRY_BLOCK_HEIGHT: u64 = SUBMISSION_BLOCK_HEIGHT + MAX_BLOCKHASH_AGE_IN_BLOCKS + 1;
 
-/// Deposits funds into the minter via `process_deposit`, consolidates them,
-/// and finalizes the consolidation so the minter's internal balance is credited.
+/// Deposits funds into the minter via `deposit_sol`, sweeps them, and finalizes
+/// and credits the sweep so the minter's internal balance is credited.
 ///
 /// Requires the setup to have been built with `.with_proxy_canister()`.
-async fn deposit_and_consolidate_funds(setup: &Setup) {
-    let result = setup
-        .minter()
-        .with_http_mocks(MockBuilder::new().get_deposit_transaction().build())
-        .process_deposit(default_process_deposit_args())
-        .await;
-    assert_matches!(result, Ok(DepositStatus::Minted { .. }));
+async fn deposit_and_credit_funds(setup: &Setup) {
+    const FUNDING_BALANCE: Lamport = DEPOSIT_AMOUNT + RENT_EXEMPTION_THRESHOLD;
+    const SWEEPABLE_AMOUNT: Lamport = DEPOSIT_AMOUNT;
 
-    // Consolidate
-    setup.advance_time(DEPOSIT_CONSOLIDATION_DELAY).await;
+    let deposit_id = setup
+        .minter()
+        .with_http_mocks(MockBuilder::new().get_balance(FUNDING_BALANCE).build())
+        .deposit_sol(DEFAULT_CALLER_ACCOUNT)
+        .await
+        .expect("deposit_sol should queue a sweep");
+
+    // Sweep
+    setup.advance_time(SWEEP_DEPOSITS_DELAY).await;
     setup
         .execute_http_mocks(
             MockBuilder::with_start_id(4)
@@ -62,13 +58,19 @@ async fn deposit_and_consolidate_funds(setup: &Setup) {
                 .build(),
         )
         .await;
+    let sweep_signature = assert_matches!(
+        setup.minter().deposit_status(deposit_id).await,
+        DepositSolStatus::Swept { signature } => signature
+    );
 
-    // Finalize
+    // Finalize and credit
     setup.advance_time(FINALIZE_TRANSACTIONS_DELAY).await;
+    let sweep = setup.minter().signed_transaction(&sweep_signature).await;
     setup
         .execute_http_mocks(
             MockBuilder::with_start_id(16)
-                .finalize_transaction(SUBMISSION_BLOCK_HEIGHT)
+                .finalize_transaction(&sweep_signature, SUBMISSION_BLOCK_HEIGHT)
+                .get_sweep_transaction(&sweep, SWEEPABLE_AMOUNT)
                 .build(),
         )
         .await;
@@ -136,10 +138,10 @@ mod lifecycle {
 
         let minter_info_before = minter.get_minter_info().await;
 
-        // Setting minimum_deposit_amount below automated_deposit_fee should fail
+        // A minimum deposit amount below the fee of a full sweep should fail
         let result = minter
             .upgrade(UpgradeArgs {
-                minimum_deposit_amount: Some(Setup::DEFAULT_AUTOMATED_DEPOSIT_FEE - 1),
+                minimum_deposit_amount: Some(1),
                 ..UpgradeArgs::default()
             })
             .await;
@@ -165,27 +167,26 @@ mod lifecycle {
 
     #[tokio::test]
     async fn should_get_minter_info_and_upgrade() {
-        const NEW_MANUAL_DEPOSIT_FEE: Lamport = 10;
-        const NEW_AUTOMATED_DEPOSIT_FEE: Lamport = 20;
         const NEW_MINIMUM_DEPOSIT_AMOUNT: Lamport = 2_000_000;
         const NEW_WITHDRAWAL_FEE: Lamport = 100_000;
         const NEW_MINIMUM_WITHDRAWAL_AMOUNT: Lamport = 1_000_000;
-        const NEW_PROCESS_DEPOSIT_REQUIRED_CYCLES: u128 = 500_000_000_000;
+        const NEW_DEPOSIT_SOL_REQUIRED_CYCLES: u128 = 500_000_000_000;
 
         let setup = SetupBuilder::new().build().await;
+        wait_for_initial_minter_address(&setup).await;
 
         let initial_minter_info = setup.minter().get_minter_info().await;
         assert_eq!(
             initial_minter_info,
             MinterInfo {
-                manual_deposit_fee: Setup::DEFAULT_MANUAL_DEPOSIT_FEE,
-                automated_deposit_fee: Setup::DEFAULT_AUTOMATED_DEPOSIT_FEE,
-                deposit_consolidation_fee: Setup::DEFAULT_DEPOSIT_CONSOLIDATION_FEE,
+                deposit_sol_fee: Setup::DEFAULT_DEPOSIT_SOL_FEE,
                 minimum_withdrawal_amount: Setup::DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT,
                 minimum_deposit_amount: Setup::DEFAULT_MINIMUM_DEPOSIT_AMOUNT,
                 withdrawal_fee: Setup::DEFAULT_WITHDRAWAL_FEE,
-                process_deposit_required_cycles: Setup::DEFAULT_PROCESS_DEPOSIT_REQUIRED_CYCLES,
+                deposit_sol_required_cycles: Setup::DEFAULT_DEPOSIT_SOL_REQUIRED_CYCLES,
                 balance: 0,
+                minter_address: Some(MINTER_ADDRESS.to_string()),
+                nonce_accounts: vec![Setup::DEFAULT_NONCE_ACCOUNT.to_string()],
             }
         );
 
@@ -204,13 +205,12 @@ mod lifecycle {
             .minter()
             .upgrade(UpgradeArgs {
                 sol_rpc_canister_id: None,
-                manual_deposit_fee: Some(NEW_MANUAL_DEPOSIT_FEE),
-                automated_deposit_fee: Some(NEW_AUTOMATED_DEPOSIT_FEE),
                 minimum_withdrawal_amount: Some(NEW_MINIMUM_WITHDRAWAL_AMOUNT),
                 minimum_deposit_amount: Some(NEW_MINIMUM_DEPOSIT_AMOUNT),
                 withdrawal_fee: Some(NEW_WITHDRAWAL_FEE),
-                process_deposit_required_cycles: Some(NEW_PROCESS_DEPOSIT_REQUIRED_CYCLES as u64),
-                deposit_consolidation_fee: None,
+                deposit_sol_required_cycles: Some(NEW_DEPOSIT_SOL_REQUIRED_CYCLES as u64),
+                deposit_sol_fee: None,
+                nonce_accounts_to_add: None,
             })
             .await
             .expect("upgrade failed");
@@ -219,14 +219,14 @@ mod lifecycle {
         assert_eq!(
             minter_info,
             MinterInfo {
-                manual_deposit_fee: NEW_MANUAL_DEPOSIT_FEE,
-                automated_deposit_fee: NEW_AUTOMATED_DEPOSIT_FEE,
-                deposit_consolidation_fee: Setup::DEFAULT_DEPOSIT_CONSOLIDATION_FEE,
+                deposit_sol_fee: Setup::DEFAULT_DEPOSIT_SOL_FEE,
                 minimum_withdrawal_amount: NEW_MINIMUM_WITHDRAWAL_AMOUNT,
                 minimum_deposit_amount: NEW_MINIMUM_DEPOSIT_AMOUNT,
                 withdrawal_fee: NEW_WITHDRAWAL_FEE,
-                process_deposit_required_cycles: NEW_PROCESS_DEPOSIT_REQUIRED_CYCLES,
+                deposit_sol_required_cycles: NEW_DEPOSIT_SOL_REQUIRED_CYCLES,
                 balance: 0,
+                minter_address: Some(MINTER_ADDRESS.to_string()),
+                nonce_accounts: vec![Setup::DEFAULT_NONCE_ACCOUNT.to_string()],
             }
         );
 
@@ -276,6 +276,25 @@ mod lifecycle {
 
         setup.drop().await;
     }
+
+    /// Polls until the minter has fetched its Schnorr master key for the first
+    /// time. The fetch is recorded in a `MinterPublicKeyFetched` event, so the
+    /// key survives upgrades and the address stays available without waiting.
+    async fn wait_for_initial_minter_address(setup: &Setup) {
+        for _ in 0..10 {
+            if setup
+                .minter()
+                .get_minter_info()
+                .await
+                .minter_address
+                .is_some()
+            {
+                return;
+            }
+            setup.tick().await;
+        }
+        panic!("Minter address was not cached within timeout");
+    }
 }
 
 mod withdrawal_tests {
@@ -313,6 +332,50 @@ mod withdrawal_tests {
         let result = setup.minter().withdraw(args).await;
         let err = result.unwrap_err();
         assert_eq!(err, WithdrawalError::InsufficientAllowance { allowance: 0 });
+
+        setup.drop().await;
+    }
+
+    #[tokio::test]
+    async fn should_reject_withdrawal_to_reserved_account_key() {
+        const SYSTEM_PROGRAM_ID: &str = "11111111111111111111111111111111";
+        const WITHDRAWAL_AMOUNT: u64 = 100_000_000;
+
+        let setup = SetupBuilder::new()
+            .with_initial_ledger_balances(vec![(
+                DEFAULT_CALLER_ACCOUNT,
+                Nat::from(WITHDRAWAL_AMOUNT),
+            )])
+            .build()
+            .await;
+
+        setup
+            .ledger()
+            .approve(
+                None,
+                u64::MAX,
+                Account {
+                    owner: setup.minter_canister_id(),
+                    subaccount: None,
+                },
+            )
+            .await;
+        let balance_before_withdrawal = setup.ledger().balance_of(DEFAULT_CALLER_ACCOUNT).await;
+
+        let result = setup
+            .minter()
+            .withdraw(WithdrawalArgs {
+                from_subaccount: None,
+                amount: Setup::DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT,
+                address: SYSTEM_PROGRAM_ID.to_string(),
+            })
+            .await;
+
+        assert_matches!(result, Err(WithdrawalError::InvalidDestination(_)));
+        assert_eq!(
+            setup.ledger().balance_of(DEFAULT_CALLER_ACCOUNT).await,
+            balance_before_withdrawal
+        );
 
         setup.drop().await;
     }
@@ -646,8 +709,8 @@ mod withdrawal_tests {
             .build()
             .await;
 
-        // Deposit and consolidate so the minter has enough balance for withdrawals
-        deposit_and_consolidate_funds(&setup).await;
+        // Deposit and credit a sweep so the minter has enough balance for withdrawals
+        deposit_and_credit_funds(&setup).await;
 
         setup
             .ledger()
@@ -671,341 +734,80 @@ mod withdrawal_tests {
             .await
             .expect("withdraw should succeed");
 
+        // The withdrawal timer reads the durable nonce account and submits the
+        // transaction with the nonce value in place of a recent blockhash.
         setup.advance_time(WITHDRAWAL_PROCESSING_DELAY).await;
         setup
             .execute_http_mocks(
-                MockBuilder::with_start_id(28)
-                    .submit_transaction(SUBMISSION_BLOCK_HEIGHT)
+                MockBuilder::with_start_id(32)
+                    .submit_withdrawal_transaction()
                     .build(),
             )
             .await;
 
+        let nonce_account = Setup::DEFAULT_NONCE_ACCOUNT.to_string();
         setup.minter().assert_that_events().await.satisfy(|events| {
             check!(events.iter().any(|e| matches!(
                 e,
+                EventType::CreatedWithdrawalTransaction {
+                    burn_indices,
+                    nonce_account: account,
+                    ..
+                } if burn_indices == &[block_index] && account.to_string() == nonce_account
+            )));
+            check!(events.iter().any(|e| matches!(
+                e,
                 EventType::SubmittedTransaction {
-                    purpose: TransactionPurpose::WithdrawSol { burn_indices },
-                    block_height,
+                    purpose: TransactionPurpose::Withdrawal { burn_indices },
                     ..
                 } if burn_indices == &[block_index]
-                  && block_height == &SUBMISSION_BLOCK_HEIGHT
             )));
         });
 
         // Withdrawal status should be TxSent with some signature
         let status = setup.minter().withdrawal_status(block_index).await;
-        let original_transaction_id = match &status {
+        let transaction_id = match &status {
             WithdrawalStatus::TxSent { transaction_id } => transaction_id.clone(),
             other => panic!("Expected TxSent, got: {other:?}"),
         };
 
-        // Advance time to trigger finalize_transactions, which fetches the current block,
-        // checks statuses (not found), and marks the expired transaction for resubmission.
+        // An upgrade replays the created and submitted withdrawal events; the
+        // in-flight transaction must survive the replay unchanged.
+        setup
+            .minter()
+            .upgrade(UpgradeArgs::default())
+            .await
+            .expect("upgrade should succeed");
+        assert_eq!(
+            setup.minter().withdrawal_status(block_index).await,
+            WithdrawalStatus::TxSent {
+                transaction_id: transaction_id.clone()
+            }
+        );
+
+        // Only the in-flight withdrawal is monitored, so the finalization timer
+        // checks the signature statuses without fetching a current block.
         setup.advance_time(FINALIZE_TRANSACTIONS_DELAY).await;
         setup
             .execute_http_mocks(
                 MockBuilder::with_start_id(40)
-                    .mark_transaction_expired(EXPIRY_BLOCK_HEIGHT)
+                    .finalize_withdrawal_transaction(&transaction_id)
                     .build(),
             )
             .await;
 
-        // Advance time to trigger resubmit_transactions. finalize_transactions also
-        // fires but has no pending transactions, so it makes no HTTP outcalls.
-        setup.advance_time(RESUBMIT_TRANSACTIONS_DELAY).await;
-        setup
-            .execute_http_mocks(
-                MockBuilder::with_start_id(52)
-                    .resubmit_transaction(EXPIRY_BLOCK_HEIGHT)
-                    .build(),
-            )
-            .await;
-
-        // Withdrawal status should now have a different signature
-        let status = setup.minter().withdrawal_status(block_index).await;
-        let resubmitted_transaction_id = match &status {
-            WithdrawalStatus::TxSent { transaction_id } => {
-                assert_ne!(
-                    *transaction_id, original_transaction_id,
-                    "Expected transaction ID to change after resubmission"
-                );
-                transaction_id.clone()
-            }
-            other => panic!("Expected TxSent after resubmission, got: {other:?}"),
-        };
-
-        // Advance time to trigger finalize_transactions again. This time the
-        // transaction is reported as finalized.
-        setup.advance_time(FINALIZE_TRANSACTIONS_DELAY).await;
-        setup
-            .execute_http_mocks(
-                MockBuilder::with_start_id(64)
-                    .finalize_transaction(EXPIRY_BLOCK_HEIGHT)
-                    .build(),
-            )
-            .await;
-
-        // Withdrawal status should now be TxFinalized with Success
         let status = setup.minter().withdrawal_status(block_index).await;
         match &status {
             WithdrawalStatus::TxFinalized(TxFinalizedStatus::Success {
-                transaction_id, ..
+                transaction_id: finalized_transaction_id,
+                ..
             }) => {
-                assert_eq!(
-                    *transaction_id, resubmitted_transaction_id,
-                    "Expected finalized transaction ID to match resubmitted transaction ID"
-                );
+                assert_eq!(*finalized_transaction_id, transaction_id);
             }
             other => panic!("Expected TxFinalized(Success), got: {other:?}"),
         }
 
         setup.drop().await;
-    }
-}
-
-mod process_deposit_tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn should_fail_with_insufficient_cycles() {
-        let setup = SetupBuilder::new().with_proxy_canister().build().await;
-
-        let result = setup
-            .minter()
-            .process_deposit_with_cycles(
-                default_process_deposit_args(),
-                Setup::DEFAULT_PROCESS_DEPOSIT_REQUIRED_CYCLES - 1,
-            )
-            .await;
-
-        assert_eq!(
-            result,
-            Err(ProcessDepositError::InsufficientCycles(
-                InsufficientCyclesError {
-                    expected: Setup::DEFAULT_PROCESS_DEPOSIT_REQUIRED_CYCLES,
-                    received: Setup::DEFAULT_PROCESS_DEPOSIT_REQUIRED_CYCLES - 1,
-                }
-            ))
-        );
-
-        setup.drop().await;
-    }
-
-    #[tokio::test]
-    async fn should_fail_if_transaction_not_found() {
-        fn transaction_not_found_response() -> JsonRpcResponse {
-            JsonRpcResponse::from(json!({"jsonrpc": "2.0", "result": null, "id": 0}))
-        }
-
-        let setup = SetupBuilder::new().with_proxy_canister().build().await;
-
-        let result = setup
-            .minter()
-            .with_http_mocks(
-                MockBuilder::new()
-                    .get_transaction(transaction_not_found_response())
-                    .build(),
-            )
-            .process_deposit(default_process_deposit_args())
-            .await;
-
-        assert_eq!(result, Err(ProcessDepositError::TransactionNotFound));
-
-        setup.drop().await;
-    }
-
-    #[tokio::test]
-    async fn should_fail_for_concurrent_access() {
-        let setup = SetupBuilder::new().with_proxy_canister().build().await;
-
-        // Both minters use the same mocks, whichever gets the guard first will consume them
-        let mocks =
-            SharedMockHttpOutcalls::new(MockBuilder::new().get_deposit_transaction().build());
-
-        let minter1 = setup.minter().with_http_mocks(mocks.clone());
-        let minter2 = setup.minter().with_http_mocks(mocks.clone());
-
-        let (result1, result2) = join!(
-            minter1.process_deposit(default_process_deposit_args()),
-            minter2.process_deposit(default_process_deposit_args())
-        );
-
-        let (result1, result2) = match (&result1, &result2) {
-            (Ok(_), Err(_)) => (result1, result2),
-            (Err(_), Ok(_)) => (result2, result1),
-            _ => panic!("Expected one success and one error, but got: {result1:?} and {result2:?}"),
-        };
-
-        // One should succeed, one should fail with `AlreadyProcessing` (order is non-deterministic)
-        let results = [&result1, &result2];
-        assert!(
-            results
-                .iter()
-                .any(|r| matches!(r, Ok(DepositStatus::Minted { .. }))),
-            "Expected one Minted result, got: {:?}",
-            results
-        );
-        assert!(
-            results
-                .iter()
-                .any(|r| matches!(r, Err(ProcessDepositError::AlreadyProcessing))),
-            "Expected one AlreadyProcessing result, got: {:?}",
-            results
-        );
-
-        setup.drop().await;
-    }
-
-    #[tokio::test]
-    async fn should_return_processing_if_minting_fails_and_mint_on_retry() {
-        let setup = SetupBuilder::new().with_proxy_canister().build().await;
-
-        setup.ledger().stop().await;
-
-        let deposit_signature = deposit_transaction_signature();
-
-        // First call to `process_deposit` fails due to minting error
-        let first_result = setup
-            .minter()
-            .with_http_mocks(MockBuilder::new().get_deposit_transaction().build())
-            .process_deposit(default_process_deposit_args())
-            .await;
-        assert_eq!(
-            first_result,
-            Ok(DepositStatus::Processing {
-                deposit_amount: DEPOSIT_AMOUNT,
-                amount_to_mint: EXPECTED_MINT_AMOUNT,
-                deposit_id: DepositId {
-                    signature: deposit_signature.clone(),
-                    account: DEFAULT_CALLER_ACCOUNT,
-                },
-            })
-        );
-
-        // Second call to `process_deposit` while the ledger is stopped should still return
-        // the same status
-        let second_result = setup
-            .minter()
-            .process_deposit(default_process_deposit_args())
-            .await;
-        assert_eq!(second_result, first_result);
-
-        setup.ledger().start().await;
-
-        // Third call to update balance after re-starting the ledger should result in a
-        // successful mint (without making any additional JSON-RPC calls)
-        let balance_before = setup.ledger().balance_of(DEFAULT_CALLER_ACCOUNT).await;
-        assert_eq!(balance_before, 0);
-
-        let result = setup
-            .minter()
-            .process_deposit(default_process_deposit_args())
-            .await;
-        assert_matches!(&result, Ok(DepositStatus::Minted {
-            minted_amount,
-            deposit_id,
-            block_index: _,
-        }) if minted_amount == &EXPECTED_MINT_AMOUNT
-            && deposit_id.signature == deposit_signature
-            && deposit_id.account == DEFAULT_CALLER_ACCOUNT);
-
-        let balance_after = setup.ledger().balance_of(DEFAULT_CALLER_ACCOUNT).await;
-        assert_eq!(balance_after, EXPECTED_MINT_AMOUNT);
-
-        setup.drop().await;
-    }
-
-    #[tokio::test]
-    async fn should_process_deposit_only_once_with_same_deposit() {
-        let setup = SetupBuilder::new().with_proxy_canister().build().await;
-
-        let balance_before = setup.ledger().balance_of(DEFAULT_CALLER_ACCOUNT).await;
-        assert_eq!(balance_before, 0);
-
-        let deposit_signature = deposit_transaction_signature();
-
-        // First call to `process_deposit` should result in mint
-        let first_result = setup
-            .minter()
-            .with_http_mocks(MockBuilder::new().get_deposit_transaction().build())
-            .process_deposit(default_process_deposit_args())
-            .await;
-        assert_matches!(&first_result, Ok(DepositStatus::Minted {
-            minted_amount,
-            deposit_id,
-            block_index: _,
-        }) if minted_amount == &EXPECTED_MINT_AMOUNT
-            && deposit_id.signature == deposit_signature
-            && deposit_id.account == DEFAULT_CALLER_ACCOUNT);
-
-        let balance_after = setup.ledger().balance_of(DEFAULT_CALLER_ACCOUNT).await;
-        assert_eq!(balance_after, EXPECTED_MINT_AMOUNT);
-
-        // Second call to `process_deposit` should not result in any JSON-RPC calls or mint
-        let second_result = setup
-            .minter()
-            .process_deposit(default_process_deposit_args())
-            .await;
-        assert_eq!(second_result, first_result);
-
-        let balance_after = setup.ledger().balance_of(DEFAULT_CALLER_ACCOUNT).await;
-        assert_eq!(balance_after, EXPECTED_MINT_AMOUNT);
-
-        setup.drop().await;
-    }
-
-    #[tokio::test]
-    async fn should_refund_extra_cycles() {
-        let setup = SetupBuilder::new().with_proxy_canister().build().await;
-
-        let get_transaction_cycles_cost = get_transaction_cycles_cost(&setup).await;
-        assert!(get_transaction_cycles_cost > 0);
-
-        let caller_cycles_before = setup.proxy().cycle_balance().await;
-        let minter_cycles_before = setup.minter().cycle_balance().await;
-
-        let result = setup
-            .minter()
-            .with_http_mocks(MockBuilder::new().get_deposit_transaction().build())
-            .process_deposit(default_process_deposit_args())
-            .await;
-        assert_matches!(result, Ok(DepositStatus::Minted { .. }));
-
-        let caller_cycles_after = setup.proxy().cycle_balance().await;
-        let minter_cycles_after = setup.minter().cycle_balance().await;
-
-        // The caller should be charged the actual cost of the RPC call plus the consolidation fee
-        let expected_charge =
-            get_transaction_cycles_cost + Setup::DEFAULT_DEPOSIT_CONSOLIDATION_FEE;
-        assert_eq!(caller_cycles_before - caller_cycles_after, expected_charge);
-        // The minter receives the consolidation fee
-        assert_eq!(
-            minter_cycles_after - minter_cycles_before,
-            Setup::DEFAULT_DEPOSIT_CONSOLIDATION_FEE,
-        );
-
-        setup.drop().await;
-    }
-
-    async fn get_transaction_cycles_cost(setup: &Setup) -> u128 {
-        setup
-            .sol_rpc()
-            .get_transaction(solana_signature::Signature::from(
-                deposit_transaction_signature(),
-            ))
-            .with_rpc_config(RpcConfig {
-                response_size_estimate: Some(2_000_000),
-                response_consensus: Some(ConsensusStrategy::Threshold {
-                    min: 3,
-                    total: Some(4),
-                }),
-            })
-            .with_encoding(GetTransactionEncoding::Base64)
-            .with_commitment(CommitmentLevel::Finalized)
-            .request_cost()
-            .send()
-            .await
-            .expect("Failed to get cycles cost for `getTransaction` request")
     }
 }
 
@@ -1070,7 +872,7 @@ mod deposit_sol_tests {
     }
 
     #[tokio::test]
-    async fn should_charge_balance_read_and_consolidation_fee() {
+    async fn should_charge_balance_read_and_deposit_sol_fee() {
         let setup = SetupBuilder::new().with_proxy_canister().build().await;
         let get_balance_cycles_cost = get_balance_cycles_cost(&setup).await;
         assert!(get_balance_cycles_cost > 0);
@@ -1092,11 +894,11 @@ mod deposit_sol_tests {
         let minter_cycles_after = setup.minter().cycle_balance().await;
         assert_eq!(
             caller_cycles_before - caller_cycles_after,
-            get_balance_cycles_cost + Setup::DEFAULT_DEPOSIT_CONSOLIDATION_FEE
+            get_balance_cycles_cost + Setup::DEFAULT_DEPOSIT_SOL_FEE
         );
         assert_eq!(
             minter_cycles_after - minter_cycles_before,
-            Setup::DEFAULT_DEPOSIT_CONSOLIDATION_FEE
+            Setup::DEFAULT_DEPOSIT_SOL_FEE
         );
 
         setup.drop().await;
@@ -1150,48 +952,6 @@ mod deposit_sol_tests {
     }
 
     #[tokio::test]
-    async fn should_fail_while_process_deposit_deposit_awaits_consolidation() {
-        let setup = SetupBuilder::new().with_proxy_canister().build().await;
-        let minted = setup
-            .minter()
-            .with_http_mocks(MockBuilder::new().get_deposit_transaction().build())
-            .process_deposit(default_process_deposit_args())
-            .await;
-        assert_matches!(minted, Ok(DepositStatus::Minted { .. }));
-        let caller_cycles_before = setup.proxy().cycle_balance().await;
-
-        let result = setup.minter().deposit_sol(DEFAULT_CALLER_ACCOUNT).await;
-
-        assert_matches!(
-            result,
-            Err(DepositSolError::TemporarilyUnavailable(e)) if e.contains("awaiting consolidation")
-        );
-        assert_eq!(setup.proxy().cycle_balance().await, caller_cycles_before);
-
-        setup.advance_time(DEPOSIT_CONSOLIDATION_DELAY).await;
-        setup
-            .execute_http_mocks(
-                MockBuilder::with_start_id(4)
-                    .submit_transaction(SUBMISSION_BLOCK_HEIGHT)
-                    .build(),
-            )
-            .await;
-        let deposit_id = setup
-            .minter()
-            .with_http_mocks(
-                MockBuilder::with_start_id(16)
-                    .get_balance(BALANCE_ABOVE_MINIMUM)
-                    .build(),
-            )
-            .deposit_sol(DEFAULT_CALLER_ACCOUNT)
-            .await;
-
-        assert_eq!(deposit_id, Ok(0));
-
-        setup.drop().await;
-    }
-
-    #[tokio::test]
     async fn should_sweep_finalize_and_mint_queued_deposit_after_timers() {
         const SWEEPABLE_AMOUNT: Lamport = BALANCE_ABOVE_MINIMUM - RENT_EXEMPTION_THRESHOLD;
         let setup = SetupBuilder::new().with_proxy_canister().build().await;
@@ -1224,18 +984,19 @@ mod deposit_sol_tests {
                 e,
                 EventType::SubmittedTransaction {
                     signature,
-                    purpose: TransactionPurpose::SweepDeposits { deposit_ids },
+                    purpose: TransactionPurpose::SweepDeposit { deposit_ids, .. },
                     ..
                 } if *signature == sweep_signature && deposit_ids == &[deposit_id]
             )));
         });
 
         setup.advance_time(FINALIZE_TRANSACTIONS_DELAY).await;
+        let sweep = setup.minter().signed_transaction(&sweep_signature).await;
         setup
             .execute_http_mocks(
                 MockBuilder::with_start_id(16)
-                    .finalize_transaction(SUBMISSION_BLOCK_HEIGHT)
-                    .get_sweep_transaction(&sweep_signature, SWEEPABLE_AMOUNT)
+                    .finalize_transaction(&sweep_signature, SUBMISSION_BLOCK_HEIGHT)
+                    .get_sweep_transaction(&sweep, SWEEPABLE_AMOUNT)
                     .build(),
             )
             .await;
@@ -1288,7 +1049,7 @@ mod deposit_sol_tests {
         setup
             .execute_http_mocks(
                 MockBuilder::with_start_id(16)
-                    .mark_transaction_expired(EXPIRY_BLOCK_HEIGHT)
+                    .mark_transaction_expired(&sweep_signature, EXPIRY_BLOCK_HEIGHT)
                     .build(),
             )
             .await;
@@ -1304,11 +1065,6 @@ mod deposit_sol_tests {
                 e,
                 EventType::ExpiredTransaction { signature } if *signature == sweep_signature
             )));
-            check!(
-                !events
-                    .iter()
-                    .any(|e| matches!(e, EventType::ResubmittedTransaction { .. }))
-            );
         });
         let setup = setup
             .check_metrics()
@@ -1358,15 +1114,13 @@ mod deposit_sol_tests {
         );
 
         setup.advance_time(FINALIZE_TRANSACTIONS_DELAY).await;
-        let outcome_of_another_transaction = get_deposit_transaction_response();
+        let amount_not_in_the_plan = BALANCE_ABOVE_MINIMUM - RENT_EXEMPTION_THRESHOLD + 1;
+        let sweep = setup.minter().signed_transaction(&sweep_signature).await;
         setup
             .execute_http_mocks(
                 MockBuilder::with_start_id(16)
-                    .finalize_transaction(SUBMISSION_BLOCK_HEIGHT)
-                    .get_transaction_with_signature(
-                        &sweep_signature,
-                        outcome_of_another_transaction,
-                    )
+                    .finalize_transaction(&sweep_signature, SUBMISSION_BLOCK_HEIGHT)
+                    .get_sweep_transaction(&sweep, amount_not_in_the_plan)
                     .build(),
             )
             .await;
@@ -1476,16 +1230,6 @@ mod anonymous_caller_tests {
                 .await;
             assert_matches!(result, Err(s) if s.contains("the owner must be non-anonymous"));
 
-            // `process_deposit` endpoint
-            let result = minter
-                .try_process_deposit(ProcessDepositArgs {
-                    owner,
-                    subaccount: None,
-                    signature: deposit_transaction_signature(),
-                })
-                .await;
-            assert_matches!(result, Err(s) if s.contains("the owner must be non-anonymous"));
-
             let result = minter
                 .try_deposit_sol(DepositSolArgs {
                     owner,
@@ -1539,55 +1283,6 @@ mod minter_owner_tests {
             })
             .await;
         assert_matches!(result, Err(s) if s.contains(&expected_message));
-
-        let result = setup
-            .minter()
-            .try_process_deposit(ProcessDepositArgs {
-                owner,
-                subaccount: None,
-                signature: deposit_transaction_signature(),
-            })
-            .await;
-        assert_matches!(result, Err(s) if s.contains(&expected_message));
-
-        setup.drop().await;
-    }
-}
-
-mod consolidation_tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn should_consolidate_deposits_after_timer() {
-        let setup = SetupBuilder::new().with_proxy_canister().build().await;
-
-        let result = setup
-            .minter()
-            .with_http_mocks(MockBuilder::new().get_deposit_transaction().build())
-            .process_deposit(default_process_deposit_args())
-            .await;
-        let mint_block_index =
-            assert_matches!(result, Ok(DepositStatus::Minted { block_index, .. }) => block_index);
-
-        // Advance time past the consolidation delay to trigger the timer
-        setup.advance_time(DEPOSIT_CONSOLIDATION_DELAY).await;
-        setup
-            .execute_http_mocks(
-                MockBuilder::with_start_id(4)
-                    .submit_transaction(SUBMISSION_BLOCK_HEIGHT)
-                    .build(),
-            )
-            .await;
-
-        // Verify consolidation events were recorded
-        let events_after = setup.minter().get_all_events().await;
-        check!(events_after.iter().any(|e| matches!(
-            &e.payload,
-            EventType::SubmittedTransaction {
-                purpose: TransactionPurpose::ConsolidateDeposits { mint_indices },
-                ..
-            } if mint_indices == &[mint_block_index]
-        )));
 
         setup.drop().await;
     }

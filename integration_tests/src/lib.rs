@@ -2,13 +2,13 @@ use crate::{events::MinterEventAssert, ledger_init_args::ledger_init_args};
 use candid::{CandidType, Decode, Encode, Nat, Principal, utils::ArgumentEncoder};
 use canlog::{Log, LogEntry};
 use cksol_types::{
-    Address, DepositSolArgs, DepositSolError, DepositSolId, DepositSolStatus, DepositStatus,
-    GetDepositAddressArgs, MinterInfo, ProcessDepositArgs, ProcessDepositError, WithdrawalArgs,
-    WithdrawalError, WithdrawalOk, WithdrawalStatus, WithdrawalStatusArgs,
+    Address, DepositSolArgs, DepositSolError, DepositSolId, DepositSolStatus,
+    GetDepositAddressArgs, MinterInfo, WithdrawalArgs, WithdrawalError, WithdrawalOk,
+    WithdrawalStatus, WithdrawalStatusArgs,
 };
 use cksol_types_internal::{
     MinterArg,
-    event::{Event, GetEventsResult},
+    event::{Event, EventType, GetEventsResult, VersionedTransactionMessage},
     log::Priority,
 };
 use ic_canister_runtime::Runtime;
@@ -28,6 +28,8 @@ use pocket_ic::{PocketIcBuilder, RejectResponse, nonblocking::PocketIc};
 use serde::de::DeserializeOwned;
 use sol_rpc_client::SolRpcClient;
 use sol_rpc_types::{Lamport, RpcAccess};
+use solana_address::address;
+use solana_transaction::Transaction;
 use std::{default::Default, env::var, fs, ops::Deref, path::PathBuf, time::Duration, vec};
 
 pub mod events;
@@ -42,17 +44,34 @@ pub enum PocketIcMode {
     NonLiveMode,
 }
 
-#[derive(Default)]
 pub struct SetupBuilder {
     make_live: Option<PocketIcMode>,
     sol_rpc_install_args: Option<sol_rpc_types::InstallArgs>,
     initial_ledger_balances: Option<Vec<(Account, Nat)>>,
     proxy_canister: bool,
+    nonce_accounts: Vec<String>,
+}
+
+impl Default for SetupBuilder {
+    fn default() -> Self {
+        Self {
+            make_live: None,
+            sol_rpc_install_args: None,
+            initial_ledger_balances: None,
+            proxy_canister: false,
+            nonce_accounts: vec![Setup::DEFAULT_NONCE_ACCOUNT.to_string()],
+        }
+    }
 }
 
 impl SetupBuilder {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn with_nonce_accounts(mut self, nonce_accounts: Vec<String>) -> Self {
+        self.nonce_accounts = nonce_accounts;
+        self
     }
 
     pub fn with_initial_ledger_balances(
@@ -84,6 +103,7 @@ impl SetupBuilder {
             self.sol_rpc_install_args.unwrap_or_default(),
             self.initial_ledger_balances,
             self.proxy_canister,
+            self.nonce_accounts,
         )
         .await
     }
@@ -101,22 +121,23 @@ pub struct Setup {
 }
 
 impl Setup {
-    pub const DEFAULT_MANUAL_DEPOSIT_FEE: Lamport = 10_000; // 0.00001 SOL
-    pub const DEFAULT_AUTOMATED_DEPOSIT_FEE: Lamport = 10_000_000; // 0.01 SOL
-    pub const DEFAULT_DEPOSIT_CONSOLIDATION_FEE: u128 = 10_000_000_000; // 0.01T cycles
+    pub const DEFAULT_DEPOSIT_SOL_FEE: u128 = 10_000_000_000; // 0.01T cycles
     pub const DEFAULT_WITHDRAWAL_FEE: Lamport = 1_000_000; // 0.001 SOL
     pub const DEFAULT_CONTROLLER: Principal = Principal::from_slice(&[0x9d, 0xf7, 0x01]);
     pub const DEFAULT_MINIMUM_DEPOSIT_AMOUNT: Lamport = 20_000_000; // 0.02 SOL
-    pub const DEFAULT_PROCESS_DEPOSIT_REQUIRED_CYCLES: u128 = 1_000_000_000_000;
+    pub const DEFAULT_DEPOSIT_SOL_REQUIRED_CYCLES: u128 = 1_000_000_000_000;
     pub const DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT: Lamport = 2_000_000; // 0.002 SOL
     pub const DEFAULT_CALLER: Principal =
         Principal::from_slice(&[0xff, 0xff, 0xff, 0xff, 0xff, 0xe0, 0x0, 0x3, 0x1, 0x1]);
+    pub const DEFAULT_NONCE_ACCOUNT: solana_address::Address =
+        address!("US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx");
 
     pub async fn new(
         make_live: PocketIcMode,
         sol_rpc_install_args: sol_rpc_types::InstallArgs,
         initial_ledger_balances: Option<Vec<(Account, Nat)>>,
         with_proxy_canister: bool,
+        nonce_accounts: Vec<String>,
     ) -> Self {
         let env = PocketIcBuilder::new()
             .with_nns_subnet() //make_live requires NNS subnet.
@@ -160,6 +181,7 @@ impl Setup {
             Encode!(&cksol_minter_init_args(
                 sol_rpc_canister_id,
                 ledger_canister_id,
+                nonce_accounts,
             ))
             .unwrap(),
             Some(Self::DEFAULT_CONTROLLER),
@@ -322,6 +344,17 @@ impl Setup {
         self.env.as_ref().unwrap().advance_time(duration).await
     }
 
+    /// Stops the automatic progress of a live instance, so that its time and timers
+    /// stand still until [`Self::resume_progress`] is called.
+    pub async fn stop_progress(&self) {
+        self.env.as_ref().unwrap().stop_progress().await
+    }
+
+    /// Resumes the automatic progress of a live instance stopped by [`Self::stop_progress`].
+    pub async fn resume_progress(&self) {
+        self.env.as_ref().unwrap().auto_progress().await;
+    }
+
     /// Advances time and then lets the timers that became due complete their round.
     ///
     /// An instance that produces blocks on its own only needs wall-clock time for the
@@ -366,6 +399,24 @@ impl Setup {
 
             mocks.execute_http_outcall_mocks(env).await;
         }
+    }
+
+    /// Polls `get_minter_info` until the minter reports its main Solana address,
+    /// advancing time between polls so the timer fetching the Schnorr master key fires.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the address is not reported within the timeout.
+    pub async fn wait_for_minter_address(&self) -> solana_address::Address {
+        for _ in 0..30 {
+            if let Some(address) = self.minter().get_minter_info().await.minter_address {
+                return address
+                    .parse()
+                    .expect("the minter reported a malformed main address");
+            }
+            self.advance_time_and_settle(Duration::from_secs(1)).await;
+        }
+        panic!("Minter address was not available within timeout");
     }
 
     pub async fn check_metrics(self) -> ic_metrics_assert::MetricsAssert<Self> {
@@ -423,42 +474,6 @@ impl CkSolMinter<'_> {
             .await
     }
 
-    pub async fn process_deposit(
-        &self,
-        args: ProcessDepositArgs,
-    ) -> Result<DepositStatus, ProcessDepositError> {
-        self.try_process_deposit(args)
-            .await
-            .expect("process_deposit failed")
-    }
-
-    pub async fn process_deposit_with_cycles(
-        &self,
-        args: ProcessDepositArgs,
-        cycles: u128,
-    ) -> Result<DepositStatus, ProcessDepositError> {
-        self.try_process_deposit_with_cycles(args, cycles)
-            .await
-            .expect("process_deposit failed")
-    }
-
-    pub async fn try_process_deposit(
-        &self,
-        args: ProcessDepositArgs,
-    ) -> Result<Result<DepositStatus, ProcessDepositError>, String> {
-        self.try_process_deposit_with_cycles(args, Setup::DEFAULT_PROCESS_DEPOSIT_REQUIRED_CYCLES)
-            .await
-    }
-
-    pub async fn try_process_deposit_with_cycles(
-        &self,
-        args: ProcessDepositArgs,
-        cycles: u128,
-    ) -> Result<Result<DepositStatus, ProcessDepositError>, String> {
-        self.try_update_call("process_deposit", (args,), cycles)
-            .await
-    }
-
     pub async fn deposit_sol(
         &self,
         args: impl Into<DepositSolArgs>,
@@ -482,7 +497,7 @@ impl CkSolMinter<'_> {
         &self,
         args: impl Into<DepositSolArgs>,
     ) -> Result<Result<DepositSolId, DepositSolError>, String> {
-        self.try_deposit_sol_with_cycles(args, Setup::DEFAULT_PROCESS_DEPOSIT_REQUIRED_CYCLES)
+        self.try_deposit_sol_with_cycles(args, Setup::DEFAULT_DEPOSIT_SOL_REQUIRED_CYCLES)
             .await
     }
 
@@ -538,6 +553,26 @@ impl CkSolMinter<'_> {
 
     pub async fn assert_that_events(&self) -> MinterEventAssert {
         MinterEventAssert::new(self.get_all_events().await)
+    }
+
+    pub async fn signed_transaction(&self, signature: &cksol_types::Signature) -> Transaction {
+        let message = self
+            .get_all_events()
+            .await
+            .into_iter()
+            .find_map(|event| match event.payload {
+                EventType::SubmittedTransaction {
+                    signature: submitted,
+                    transaction: VersionedTransactionMessage::Legacy(message),
+                    ..
+                } if submitted == *signature => Some(message),
+                _ => None,
+            })
+            .expect("the transaction should have been submitted");
+        Transaction {
+            signatures: vec![signature.to_string().parse().expect("valid signature")],
+            message: bincode::deserialize(&message).expect("valid legacy message"),
+        }
     }
 
     pub async fn get_all_events(&self) -> Vec<Event> {
@@ -748,20 +783,20 @@ fn cksol_minter_wasm() -> Vec<u8> {
 fn cksol_minter_init_args(
     sol_rpc_canister_id: Principal,
     ledger_canister_id: Principal,
+    nonce_accounts: Vec<String>,
 ) -> MinterArg {
     use cksol_types_internal::{Ed25519KeyName, InitArgs, MinterArg, SolanaNetwork};
     MinterArg::Init(InitArgs {
         sol_rpc_canister_id,
         ledger_canister_id,
-        manual_deposit_fee: Setup::DEFAULT_MANUAL_DEPOSIT_FEE,
-        automated_deposit_fee: Setup::DEFAULT_AUTOMATED_DEPOSIT_FEE,
         master_key_name: Ed25519KeyName::MainnetProdKey1,
         minimum_withdrawal_amount: Setup::DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT,
         minimum_deposit_amount: Setup::DEFAULT_MINIMUM_DEPOSIT_AMOUNT,
         withdrawal_fee: Setup::DEFAULT_WITHDRAWAL_FEE,
-        process_deposit_required_cycles: Setup::DEFAULT_PROCESS_DEPOSIT_REQUIRED_CYCLES as u64,
+        deposit_sol_required_cycles: Setup::DEFAULT_DEPOSIT_SOL_REQUIRED_CYCLES as u64,
         solana_network: SolanaNetwork::Mainnet,
-        deposit_consolidation_fee: Setup::DEFAULT_DEPOSIT_CONSOLIDATION_FEE as u64,
+        deposit_sol_fee: Setup::DEFAULT_DEPOSIT_SOL_FEE as u64,
+        nonce_accounts,
     })
 }
 

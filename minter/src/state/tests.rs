@@ -1,19 +1,18 @@
 use super::{event::*, *};
 use crate::{
-    constants::{FEE_PER_SIGNATURE, GET_TRANSACTION_CYCLES, RENT_EXEMPTION_THRESHOLD},
+    constants::{FEE_PER_SIGNATURE, GET_BALANCE_CYCLES, RENT_EXEMPTION_THRESHOLD},
     rpc::BlockHeight,
     sol_transfer::MAX_SIGNATURES,
     state::{audit::process_event, read_state},
     test_fixtures::{
-        AUTOMATED_DEPOSIT_FEE, DEPOSIT_CONSOLIDATION_FEE, MANUAL_DEPOSIT_FEE,
-        MINIMUM_DEPOSIT_AMOUNT, MINIMUM_WITHDRAWAL_AMOUNT, PROCESS_DEPOSIT_REQUIRED_CYCLES,
-        WITHDRAWAL_FEE, account,
+        DEPOSIT_SOL_FEE, DEPOSIT_SOL_REQUIRED_CYCLES, MINIMUM_DEPOSIT_AMOUNT,
+        MINIMUM_WITHDRAWAL_AMOUNT, WITHDRAWAL_FEE, account, address,
         arb::arb_event,
         deposit_id,
         events::{
-            accept_deposit, accept_withdrawal, accept_withdrawal_at, expire_transaction,
-            fail_transaction, mint_deposit, resubmit_transaction, submit_withdrawal,
-            succeed_transaction,
+            accept_withdrawal, accept_withdrawal_at, create_withdrawal_batch_transaction,
+            credit_sweep, expire_transaction, fail_transaction, queue_deposit, submit_sweep,
+            submit_withdrawal, submit_withdrawal_batch_transaction, succeed_transaction,
         },
         init_balance, init_schnorr_master_key, init_state, ledger_canister_id, planned_sweep,
         queued_deposit,
@@ -174,23 +173,9 @@ mod swept_deposits {
                 Some(&planned_sweep([(0, first), (2, third)]))
             );
             assert_eq!(s.deposits().queued().keys().collect::<Vec<_>>(), vec![&1]);
-            let transaction = s.submitted_transactions().get(&sweep_signature).unwrap();
-            assert_eq!(
-                transaction.amount,
-                first.sweepable_amount() + third.sweepable_amount() - 2 * FEE_PER_SIGNATURE
-            );
-            assert_eq!(
-                transaction.signers,
-                vec![
-                    Signer::Account(third.account),
-                    Signer::Account(first.account)
-                ]
-            );
-            assert_eq!(
-                transaction.purpose,
-                TransactionPurpose::SweepDeposits {
-                    deposit_ids: vec![2, 0],
-                }
+            assert_matches!(
+                s.submitted_transactions().get(&sweep_signature).unwrap(),
+                MinterTransaction::SweepDeposit { .. }
             );
             assert_eq!(s.balance(), 0);
         });
@@ -237,29 +222,11 @@ mod swept_deposits {
 
             read_state(|s| {
                 assert!(s.submitted_transactions().is_empty(), "{outcome}");
-                assert!(s.transactions_to_resubmit().is_empty(), "{outcome}");
                 assert!(s.deposits().swept().is_empty(), "{outcome}");
                 assert_eq!(s.deposits().dropped().len(), 2, "{outcome}");
                 assert_eq!(s.balance(), 0, "{outcome}");
             });
         }
-    }
-
-    #[test]
-    #[should_panic(expected = "must be dropped instead of resubmitted")]
-    fn should_panic_when_resubmitting_a_sweep() {
-        init_state();
-        init_schnorr_master_key();
-        queue_deposits::<3>();
-        let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
-        submit_sweep(sweep_signature, vec![2, 0]);
-        mutate_state(|s| {
-            let transaction = s.submitted_transactions.remove(&sweep_signature).unwrap();
-            s.transactions_to_resubmit
-                .insert(sweep_signature, transaction);
-        });
-
-        resubmit_transaction(sweep_signature, signature(SWEEP_SIGNATURE_INDEX + 1));
     }
 
     #[test]
@@ -351,7 +318,7 @@ mod swept_deposits {
             [
                 Event {
                     timestamp: 0,
-                    payload: EventType::Init(valid_init_args()),
+                    payload: EventType::Init(crate::test_fixtures::init_args_with_nonce_account()),
                 },
                 Event {
                     timestamp: 0,
@@ -407,11 +374,133 @@ mod swept_deposits {
             &signature(SWEEP_SIGNATURE_INDEX),
             &sweep_message([(0, queued_deposit(0))]),
             &[Signer::Account(queued_deposit(0).account)],
-            &TransactionPurpose::SweepDeposits {
+            &TransactionPurpose::SweepDeposit {
                 deposit_ids: vec![0],
+                block_height: DEFAULT_BLOCK_HEIGHT,
             },
-            DEFAULT_BLOCK_HEIGHT,
+            0,
         );
+    }
+}
+
+mod nonce_accounts {
+    use super::*;
+    use crate::{state::audit::replay_events, test_fixtures::durable_nonce};
+
+    #[test]
+    fn should_only_add_a_nonce_account_once_no_incomplete_withdrawal_targets_it() {
+        init_state();
+        init_balance();
+        let destination = address(0);
+        let add_destination = || {
+            mutate_state(|s| {
+                s.upgrade(UpgradeArgs {
+                    nonce_accounts_to_add: Some(vec![destination.to_string()]),
+                    ..Default::default()
+                })
+            })
+        };
+
+        accept_withdrawal(account(1), 0, MINIMUM_WITHDRAWAL_AMOUNT);
+        assert_eq!(
+            add_destination(),
+            Err(InvalidStateError::NonceAccountIsWithdrawalDestination(
+                destination
+            ))
+        );
+
+        create_withdrawal_batch_transaction(durable_nonce(1), vec![0]);
+        assert_eq!(
+            add_destination(),
+            Err(InvalidStateError::NonceAccountIsWithdrawalDestination(
+                destination
+            ))
+        );
+
+        submit_withdrawal_batch_transaction(signature(1), durable_nonce(1), vec![0]);
+        assert_eq!(
+            add_destination(),
+            Err(InvalidStateError::NonceAccountIsWithdrawalDestination(
+                destination
+            ))
+        );
+
+        succeed_transaction(signature(1));
+        add_destination().unwrap();
+        assert!(read_state(|s| s
+            .nonce_pool_addresses()
+            .contains(&destination)));
+    }
+
+    #[test]
+    fn should_fail_init_with_malformed_nonce_account() {
+        let err = State::try_from(InitArgs {
+            nonce_accounts: vec!["not-a-base58-address".to_string()],
+            ..valid_init_args()
+        })
+        .unwrap_err();
+
+        assert_matches!(err, InvalidStateError::InvalidNonceAccount(_));
+    }
+
+    #[test]
+    fn should_add_nonce_accounts_through_upgrades() {
+        let mut state = State::try_from(valid_init_args()).unwrap();
+
+        state
+            .upgrade(UpgradeArgs {
+                nonce_accounts_to_add: Some(vec![nonce_account(1), nonce_account(2)]),
+                ..Default::default()
+            })
+            .unwrap();
+
+        assert_eq!(
+            pool_addresses(&state),
+            vec![nonce_account(1), nonce_account(2)]
+        );
+    }
+
+    #[test]
+    fn should_replay_nonce_accounts_like_direct_transitions() {
+        let init_args = InitArgs {
+            nonce_accounts: vec![nonce_account(1)],
+            ..valid_init_args()
+        };
+        let upgrade_args = UpgradeArgs {
+            nonce_accounts_to_add: Some(vec![nonce_account(2)]),
+            ..Default::default()
+        };
+        let mut expected = State::try_from(init_args.clone()).unwrap();
+        expected.upgrade(upgrade_args.clone()).unwrap();
+
+        let replayed = replay_events([
+            Event {
+                timestamp: 0,
+                payload: EventType::Init(init_args),
+            },
+            Event {
+                timestamp: 1,
+                payload: EventType::Upgrade(upgrade_args),
+            },
+        ]);
+
+        assert_eq!(replayed, expected);
+        assert_eq!(
+            pool_addresses(&replayed),
+            vec![nonce_account(1), nonce_account(2)]
+        );
+    }
+
+    fn nonce_account(i: usize) -> String {
+        address(i).to_string()
+    }
+
+    fn pool_addresses(state: &State) -> Vec<String> {
+        state
+            .nonce_pool_addresses()
+            .iter()
+            .map(Address::to_string)
+            .collect()
     }
 }
 
@@ -420,68 +509,15 @@ mod state_validation {
 
     #[test]
     fn should_fail_with_invalid_args() {
-        // manual_deposit_fee exceeds automated_deposit_fee
-        assert_fails_both(
-            InitArgs {
-                manual_deposit_fee: AUTOMATED_DEPOSIT_FEE + 1,
-                ..valid_init_args()
-            },
-            UpgradeArgs {
-                manual_deposit_fee: Some(AUTOMATED_DEPOSIT_FEE + 1),
-                ..Default::default()
-            },
-            |e| matches!(e, InvalidStateError::InvalidDepositFees { .. }),
-        );
-        // automated_deposit_fee below manual_deposit_fee
-        assert_fails_both(
-            InitArgs {
-                automated_deposit_fee: MANUAL_DEPOSIT_FEE - 1,
-                ..valid_init_args()
-            },
-            UpgradeArgs {
-                automated_deposit_fee: Some(MANUAL_DEPOSIT_FEE - 1),
-                ..Default::default()
-            },
-            |e| matches!(e, InvalidStateError::InvalidDepositFees { .. }),
-        );
-        // automated_deposit_fee exceeds minimum_deposit_amount
-        assert_fails_both(
-            InitArgs {
-                automated_deposit_fee: MINIMUM_DEPOSIT_AMOUNT + 1,
-                ..valid_init_args()
-            },
-            UpgradeArgs {
-                automated_deposit_fee: Some(MINIMUM_DEPOSIT_AMOUNT + 1),
-                ..Default::default()
-            },
-            |e| matches!(e, InvalidStateError::InvalidDepositFees { .. }),
-        );
-        // minimum_deposit_amount below automated_deposit_fee
-        assert_fails_both(
-            InitArgs {
-                minimum_deposit_amount: AUTOMATED_DEPOSIT_FEE - 1,
-                ..valid_init_args()
-            },
-            UpgradeArgs {
-                minimum_deposit_amount: Some(AUTOMATED_DEPOSIT_FEE - 1),
-                ..Default::default()
-            },
-            |e| matches!(e, InvalidStateError::InvalidDepositFees { .. }),
-        );
         // minimum_deposit_amount below the fee of a full sweep + rent exemption threshold
-        // (automated_deposit_fee and manual_deposit_fee set to 1 to isolate this condition)
         let maximum_sweep_fee = MAX_SIGNATURES * FEE_PER_SIGNATURE;
         let minimum_required = maximum_sweep_fee + RENT_EXEMPTION_THRESHOLD;
         assert_fails_both(
             InitArgs {
-                automated_deposit_fee: 1,
-                manual_deposit_fee: 1,
                 minimum_deposit_amount: minimum_required - 1,
                 ..valid_init_args()
             },
             UpgradeArgs {
-                automated_deposit_fee: Some(1),
-                manual_deposit_fee: Some(1),
                 minimum_deposit_amount: Some(minimum_required - 1),
                 ..Default::default()
             },
@@ -497,14 +533,10 @@ mod state_validation {
         let minimum_funding_main_address = 2 * RENT_EXEMPTION_THRESHOLD + FEE_PER_SIGNATURE;
         assert_fails_both(
             InitArgs {
-                automated_deposit_fee: 1,
-                manual_deposit_fee: 1,
                 minimum_deposit_amount: minimum_funding_main_address - 1,
                 ..valid_init_args()
             },
             UpgradeArgs {
-                automated_deposit_fee: Some(1),
-                manual_deposit_fee: Some(1),
                 minimum_deposit_amount: Some(minimum_funding_main_address - 1),
                 ..Default::default()
             },
@@ -540,39 +572,39 @@ mod state_validation {
             },
             |e| matches!(e, InvalidStateError::InvalidMinimumWithdrawalAmount { .. }),
         );
-        let minimum_required = GET_TRANSACTION_CYCLES + DEPOSIT_CONSOLIDATION_FEE;
+        let minimum_required = GET_BALANCE_CYCLES + DEPOSIT_SOL_FEE;
         assert_fails_both(
             InitArgs {
-                process_deposit_required_cycles: (minimum_required - 1) as u64,
+                deposit_sol_required_cycles: (minimum_required - 1) as u64,
                 ..valid_init_args()
             },
             UpgradeArgs {
-                process_deposit_required_cycles: Some((minimum_required - 1) as u64),
+                deposit_sol_required_cycles: Some((minimum_required - 1) as u64),
                 ..Default::default()
             },
             |e| {
-                e == &InvalidStateError::ProcessDepositRequiredCyclesTooLow {
+                e == &InvalidStateError::DepositSolRequiredCyclesTooLow {
                     required_cycles: minimum_required - 1,
-                    get_transaction_cycles: GET_TRANSACTION_CYCLES,
-                    consolidation_fee: DEPOSIT_CONSOLIDATION_FEE,
+                    get_balance_cycles: GET_BALANCE_CYCLES,
+                    deposit_sol_fee: DEPOSIT_SOL_FEE,
                 }
             },
         );
-        let maximum_fee = PROCESS_DEPOSIT_REQUIRED_CYCLES - GET_TRANSACTION_CYCLES;
+        let maximum_fee = DEPOSIT_SOL_REQUIRED_CYCLES - GET_BALANCE_CYCLES;
         assert_fails_both(
             InitArgs {
-                deposit_consolidation_fee: (maximum_fee + 1) as u64,
+                deposit_sol_fee: (maximum_fee + 1) as u64,
                 ..valid_init_args()
             },
             UpgradeArgs {
-                deposit_consolidation_fee: Some((maximum_fee + 1) as u64),
+                deposit_sol_fee: Some((maximum_fee + 1) as u64),
                 ..Default::default()
             },
             |e| {
-                e == &InvalidStateError::ProcessDepositRequiredCyclesTooLow {
-                    required_cycles: PROCESS_DEPOSIT_REQUIRED_CYCLES,
-                    get_transaction_cycles: GET_TRANSACTION_CYCLES,
-                    consolidation_fee: maximum_fee + 1,
+                e == &InvalidStateError::DepositSolRequiredCyclesTooLow {
+                    required_cycles: DEPOSIT_SOL_REQUIRED_CYCLES,
+                    get_balance_cycles: GET_BALANCE_CYCLES,
+                    deposit_sol_fee: maximum_fee + 1,
                 }
             },
         );
@@ -580,40 +612,14 @@ mod state_validation {
 
     #[test]
     fn should_succeed_at_boundary_conditions() {
-        // manual_deposit_fee can equal automated_deposit_fee
-        assert_succeeds_both(
-            InitArgs {
-                manual_deposit_fee: AUTOMATED_DEPOSIT_FEE,
-                ..valid_init_args()
-            },
-            UpgradeArgs {
-                manual_deposit_fee: Some(AUTOMATED_DEPOSIT_FEE),
-                ..Default::default()
-            },
-        );
-        // minimum_deposit_amount can equal automated_deposit_fee
-        assert_succeeds_both(
-            InitArgs {
-                minimum_deposit_amount: AUTOMATED_DEPOSIT_FEE,
-                ..valid_init_args()
-            },
-            UpgradeArgs {
-                minimum_deposit_amount: Some(AUTOMATED_DEPOSIT_FEE),
-                ..Default::default()
-            },
-        );
         // minimum_deposit_amount can equal twice the rent exemption threshold + one signature fee
         let minimum_required = 2 * RENT_EXEMPTION_THRESHOLD + FEE_PER_SIGNATURE;
         assert_succeeds_both(
             InitArgs {
-                automated_deposit_fee: 1,
-                manual_deposit_fee: 1,
                 minimum_deposit_amount: minimum_required,
                 ..valid_init_args()
             },
             UpgradeArgs {
-                automated_deposit_fee: Some(1),
-                manual_deposit_fee: Some(1),
                 minimum_deposit_amount: Some(minimum_required),
                 ..Default::default()
             },
@@ -630,25 +636,25 @@ mod state_validation {
                 ..Default::default()
             },
         );
-        let minimum_required = GET_TRANSACTION_CYCLES + DEPOSIT_CONSOLIDATION_FEE;
+        let minimum_required = GET_BALANCE_CYCLES + DEPOSIT_SOL_FEE;
         assert_succeeds_both(
             InitArgs {
-                process_deposit_required_cycles: minimum_required as u64,
+                deposit_sol_required_cycles: minimum_required as u64,
                 ..valid_init_args()
             },
             UpgradeArgs {
-                process_deposit_required_cycles: Some(minimum_required as u64),
+                deposit_sol_required_cycles: Some(minimum_required as u64),
                 ..Default::default()
             },
         );
-        let maximum_fee = PROCESS_DEPOSIT_REQUIRED_CYCLES - GET_TRANSACTION_CYCLES;
+        let maximum_fee = DEPOSIT_SOL_REQUIRED_CYCLES - GET_BALANCE_CYCLES;
         assert_succeeds_both(
             InitArgs {
-                deposit_consolidation_fee: maximum_fee as u64,
+                deposit_sol_fee: maximum_fee as u64,
                 ..valid_init_args()
             },
             UpgradeArgs {
-                deposit_consolidation_fee: Some(maximum_fee as u64),
+                deposit_sol_fee: Some(maximum_fee as u64),
                 ..Default::default()
             },
         );
@@ -688,30 +694,24 @@ mod state_from_init_args {
                 ledger_canister_id: ledger_canister_id(),
                 sol_rpc_canister_id: sol_rpc_canister_id(),
                 solana_network: SolanaNetwork::Mainnet,
-                manual_deposit_fee: MANUAL_DEPOSIT_FEE,
-                automated_deposit_fee: AUTOMATED_DEPOSIT_FEE,
-                deposit_consolidation_fee: DEPOSIT_CONSOLIDATION_FEE,
+                deposit_sol_fee: DEPOSIT_SOL_FEE,
                 withdrawal_fee: WITHDRAWAL_FEE,
                 minimum_withdrawal_amount: MINIMUM_WITHDRAWAL_AMOUNT,
                 minimum_deposit_amount: MINIMUM_DEPOSIT_AMOUNT,
-                process_deposit_required_cycles: PROCESS_DEPOSIT_REQUIRED_CYCLES,
-                pending_process_deposit_request_guards: BTreeSet::new(),
+                deposit_sol_required_cycles: DEPOSIT_SOL_REQUIRED_CYCLES,
                 pending_deposit_sol_request_guards: BTreeSet::new(),
                 pending_withdrawal_request_guards: BTreeSet::new(),
                 deposits: Deposits::default(),
-                accepted_deposits: InsertionOrderedMap::new(),
-                quarantined_deposits: InsertionOrderedMap::new(),
-                minted_deposits: InsertionOrderedMap::new(),
                 pending_withdrawal_requests: BTreeMap::new(),
+                created_withdrawal_requests: BTreeMap::new(),
                 sent_withdrawal_requests: BTreeMap::new(),
                 successful_withdrawal_requests: BTreeMap::new(),
                 failed_withdrawal_requests: BTreeMap::new(),
-                deposits_to_consolidate: BTreeMap::new(),
                 submitted_transactions: InsertionOrderedMap::new(),
-                transactions_to_resubmit: InsertionOrderedMap::new(),
+                created_withdrawal_txs: BTreeMap::new(),
                 succeeded_transactions: BTreeSet::new(),
                 failed_transactions: InsertionOrderedMap::new(),
-                consolidation_transactions: InsertionOrderedMap::new(),
+                nonce_pool: DurableNoncePool::default(),
                 active_tasks: BTreeSet::new(),
                 balance: 0,
             }
@@ -762,12 +762,10 @@ mod state_upgrade {
     #[test]
     fn should_update_fields() {
         let new_canister_id = Principal::from_slice(&[3_u8; 20]);
-        let new_manual_fee = MANUAL_DEPOSIT_FEE / 2;
-        let new_automated_fee = AUTOMATED_DEPOSIT_FEE / 2;
         let new_minimum_deposit_amount = MINIMUM_DEPOSIT_AMOUNT * 2;
         let new_minimum_withdrawal_amount = MINIMUM_WITHDRAWAL_AMOUNT * 2;
         let new_withdrawal_fee = WITHDRAWAL_FEE / 2;
-        let new_process_deposit_required_cycles = (PROCESS_DEPOSIT_REQUIRED_CYCLES * 2) as u64;
+        let new_deposit_sol_required_cycles = (DEPOSIT_SOL_REQUIRED_CYCLES * 2) as u64;
 
         let mut state = initial_state();
         state
@@ -781,20 +779,9 @@ mod state_upgrade {
         let mut state = initial_state();
         state
             .upgrade(UpgradeArgs {
-                manual_deposit_fee: Some(new_manual_fee),
                 ..Default::default()
             })
             .unwrap();
-        assert_eq!(state.manual_deposit_fee(), new_manual_fee);
-
-        let mut state = initial_state();
-        state
-            .upgrade(UpgradeArgs {
-                automated_deposit_fee: Some(new_automated_fee),
-                ..Default::default()
-            })
-            .unwrap();
-        assert_eq!(state.automated_deposit_fee(), new_automated_fee);
 
         let mut state = initial_state();
         state
@@ -829,13 +816,13 @@ mod state_upgrade {
         let mut state = initial_state();
         state
             .upgrade(UpgradeArgs {
-                process_deposit_required_cycles: Some(new_process_deposit_required_cycles),
+                deposit_sol_required_cycles: Some(new_deposit_sol_required_cycles),
                 ..Default::default()
             })
             .unwrap();
         assert_eq!(
-            state.process_deposit_required_cycles(),
-            new_process_deposit_required_cycles as u128
+            state.deposit_sol_required_cycles(),
+            new_deposit_sol_required_cycles as u128
         );
     }
 
@@ -852,10 +839,10 @@ mod state_upgrade {
 
     // This test ensures the canister state is rolled back after a failed upgrade
     #[test]
-    #[should_panic = "InvalidDepositFees"]
+    #[should_panic = "InvalidMinimumDepositAmount"]
     fn should_panic_when_upgrade_fails() {
         let mut state = initial_state();
-        let new_minimum_deposit_amount = AUTOMATED_DEPOSIT_FEE - 1;
+        let new_minimum_deposit_amount = 1;
 
         process_event(
             &mut state,
@@ -878,62 +865,23 @@ fn should_track_balance_through_deposits_withdrawals_and_failures() {
     const TRANSFER_1: u64 = WITHDRAWAL_1 - WITHDRAWAL_FEE;
     const TRANSFER_2: u64 = WITHDRAWAL_2 - WITHDRAWAL_FEE;
 
-    /// Creates a Solana message with the given number of required signatures.
-    fn message_with_signers(num_signers: u8) -> solana_message::Message {
-        solana_message::Message {
-            header: solana_message::MessageHeader {
-                num_required_signatures: num_signers,
-                num_readonly_signed_accounts: 0,
-                num_readonly_unsigned_accounts: 0,
-            },
-            account_keys: vec![],
-            recent_blockhash: Default::default(),
-            instructions: vec![],
-        }
-    }
-
-    fn submit_transaction(sig: Signature, num_signers: u8, purpose: TransactionPurpose) {
-        let signers: Vec<_> = (0..num_signers)
-            .map(|i| Signer::Account(account(100 + i as usize)))
-            .collect();
-        mutate_state(|state| {
-            process_event(
-                state,
-                EventType::SubmittedTransaction {
-                    signature: sig,
-                    message: message_with_signers(num_signers).into(),
-                    signers,
-                    purpose,
-                    block_height: BlockHeight::new(0),
-                },
-                &TestCanisterRuntime::new().add_times([0, 0]),
-            )
-        });
-    }
-
     init_state();
+    init_schnorr_master_key();
     assert_eq!(read_state(|s| s.balance()), 0);
 
-    // Accepting and minting deposits does not change the balance
-    accept_deposit(deposit_id(1), DEPOSIT_1);
-    accept_deposit(deposit_id(2), DEPOSIT_2);
-    mint_deposit(deposit_id(1), 0);
-    mint_deposit(deposit_id(2), 1);
+    // Queueing and sweeping deposits does not change the balance
+    queue_deposit(deposit_id(0), account(1), DEPOSIT_1);
+    queue_deposit(deposit_id(1), account(2), DEPOSIT_2);
+    submit_sweep(signature(0xAA), vec![deposit_id(0), deposit_id(1)]);
     assert_eq!(read_state(|s| s.balance()), 0);
 
-    // Submitting a consolidation (2 signers) does not change the balance
-    submit_transaction(
-        signature(0xAA),
-        2,
-        TransactionPurpose::ConsolidateDeposits {
-            mint_indices: vec![0.into(), 1.into()],
-        },
-    );
-    assert_eq!(read_state(|s| s.balance()), 0);
-
-    // Finalized consolidation: balance += total_deposits - tx_fee(2 signers)
+    // A finalized sweep does not change the balance until it is credited
     succeed_transaction(signature(0xAA));
+    assert_eq!(read_state(|s| s.balance()), 0);
+
+    // Crediting the sweep adds the amount received: balance += total_deposits - tx_fee(2 signers)
     let expected = DEPOSIT_1 + DEPOSIT_2 - 2 * FEE_PER_SIGNATURE;
+    credit_sweep(signature(0xAA), expected);
     assert_eq!(read_state(|s| s.balance()), expected);
 
     // Accepting withdrawals does not change the balance
@@ -941,14 +889,8 @@ fn should_track_balance_through_deposits_withdrawals_and_failures() {
     accept_withdrawal(account(4), 1, WITHDRAWAL_2);
     assert_eq!(read_state(|s| s.balance()), expected);
 
-    // Submitting a withdrawal (1 signer): balance -= total_transfers + tx_fee
-    submit_transaction(
-        signature(0xBB),
-        1,
-        TransactionPurpose::WithdrawSol {
-            burn_indices: vec![0.into(), 1.into()],
-        },
-    );
+    // Creating a withdrawal transaction (1 signature): balance -= total_transfers + tx_fee
+    submit_withdrawal(signature(0xBB), vec![0, 1]);
     let expected = expected - TRANSFER_1 - TRANSFER_2 - FEE_PER_SIGNATURE;
     assert_eq!(read_state(|s| s.balance()), expected);
 
@@ -956,16 +898,9 @@ fn should_track_balance_through_deposits_withdrawals_and_failures() {
     succeed_transaction(signature(0xBB));
     assert_eq!(read_state(|s| s.balance()), expected);
 
-    // Failed consolidation does not credit the balance
-    accept_deposit(deposit_id(3), DEPOSIT_3);
-    mint_deposit(deposit_id(3), 2);
-    submit_transaction(
-        signature(0xCC),
-        1,
-        TransactionPurpose::ConsolidateDeposits {
-            mint_indices: vec![2.into()],
-        },
-    );
+    // A failed sweep does not credit the balance
+    queue_deposit(deposit_id(2), account(5), DEPOSIT_3);
+    submit_sweep(signature(0xCC), vec![deposit_id(2)]);
     fail_transaction(signature(0xCC));
     assert_eq!(read_state(|s| s.balance()), expected);
 }
@@ -1073,50 +1008,22 @@ mod oldest_incomplete_withdrawal_created_at {
             None
         );
     }
-
-    #[test]
-    fn should_preserve_created_at_through_resubmission() {
-        init_state();
-        init_balance();
-        accept_withdrawal_at(account(1), 0, AMOUNT, 1_000_000_000);
-        accept_withdrawal_at(account(2), 1, AMOUNT, 2_000_000_000);
-
-        submit_withdrawal(signature(0xAA), vec![0, 1]);
-
-        assert_eq!(
-            read_state(|s| s.oldest_incomplete_withdrawal_created_at()),
-            Some(1_000_000_000)
-        );
-
-        // Expire then resubmit the transaction with a new signature
-        expire_transaction(signature(0xAA));
-        resubmit_transaction(signature(0xAA), signature(0xBB));
-
-        // created_at timestamps should be unchanged
-        assert_eq!(
-            read_state(|s| s.oldest_incomplete_withdrawal_created_at()),
-            Some(1_000_000_000)
-        );
-
-        // Finalize the resubmitted transaction
-        succeed_transaction(signature(0xBB));
-
-        assert_eq!(
-            read_state(|s| s.oldest_incomplete_withdrawal_created_at()),
-            None
-        );
-    }
 }
 
 mod withdrawal_batches {
     use super::*;
-    use crate::sol_transfer::{BATCH_WITHDRAWAL_TX_FEE, MAX_WITHDRAWALS_PER_TX};
+    use crate::{
+        sol_transfer::{BATCH_WITHDRAWAL_TX_FEE, MAX_WITHDRAWALS_PER_NONCE_TX},
+        test_fixtures::durable_nonce,
+    };
 
-    const MAX_AMOUNT_TO_TRANSFER: Lamport = u64::MAX - WITHDRAWAL_FEE - BATCH_WITHDRAWAL_TX_FEE;
-    const NUM_REQUESTS_FOR_TWO_BATCHES: usize = MAX_WITHDRAWALS_PER_TX + 1;
+    const MAX_AMOUNT_TO_TRANSFER: Lamport =
+        u64::MAX - WITHDRAWAL_FEE - BATCH_WITHDRAWAL_TX_FEE - RENT_EXEMPTION_THRESHOLD;
+    const NUM_REQUESTS_FOR_TWO_BATCHES: usize = MAX_WITHDRAWALS_PER_NONCE_TX + 1;
     const COST_OF_TWO_BATCHES: Lamport = NUM_REQUESTS_FOR_TWO_BATCHES as u64
         * MINIMUM_WITHDRAWAL_AMOUNT
-        + 2 * BATCH_WITHDRAWAL_TX_FEE;
+        + 2 * BATCH_WITHDRAWAL_TX_FEE
+        + RENT_EXEMPTION_THRESHOLD;
 
     #[test]
     fn should_be_empty_when_no_pending_withdrawals() {
@@ -1131,7 +1038,7 @@ mod withdrawal_batches {
             amount_to_transfer in MINIMUM_WITHDRAWAL_AMOUNT..=MAX_AMOUNT_TO_TRANSFER
         ) {
             let mut state = state();
-            state.balance = amount_to_transfer + BATCH_WITHDRAWAL_TX_FEE;
+            state.balance = amount_to_transfer + BATCH_WITHDRAWAL_TX_FEE + RENT_EXEMPTION_THRESHOLD;
             let requests = [withdrawal_request(0, amount_to_transfer)];
             accept_withdrawal_requests(&mut state, requests.clone());
 
@@ -1146,7 +1053,8 @@ mod withdrawal_batches {
             shortfall in 1..=MINIMUM_WITHDRAWAL_AMOUNT + BATCH_WITHDRAWAL_TX_FEE
         ) {
             let mut state = state();
-            state.balance = amount_to_transfer + BATCH_WITHDRAWAL_TX_FEE - shortfall;
+            state.balance = amount_to_transfer + BATCH_WITHDRAWAL_TX_FEE + RENT_EXEMPTION_THRESHOLD
+                - shortfall;
             let requests = [withdrawal_request(0, amount_to_transfer)];
             accept_withdrawal_requests(&mut state, requests);
 
@@ -1167,8 +1075,8 @@ mod withdrawal_batches {
             prop_assert_eq!(
                 batches,
                 vec![
-                    requests[..MAX_WITHDRAWALS_PER_TX].to_vec(),
-                    requests[MAX_WITHDRAWALS_PER_TX..].to_vec()
+                    requests[..MAX_WITHDRAWALS_PER_NONCE_TX].to_vec(),
+                    requests[MAX_WITHDRAWALS_PER_NONCE_TX..].to_vec()
                 ]
             );
         }
@@ -1184,8 +1092,23 @@ mod withdrawal_batches {
 
             let batches: Vec<_> = state.withdrawal_batches().collect();
 
-            prop_assert_eq!(batches, vec![requests[..MAX_WITHDRAWALS_PER_TX].to_vec()]);
+            prop_assert_eq!(batches, vec![requests[..MAX_WITHDRAWALS_PER_NONCE_TX].to_vec()]);
         }
+    }
+
+    #[test]
+    fn should_hold_back_the_rent_exemption_threshold() {
+        let mut state = state();
+        let requests = [withdrawal_request(0, MINIMUM_WITHDRAWAL_AMOUNT)];
+        accept_withdrawal_requests(&mut state, requests.clone());
+        state.balance =
+            MINIMUM_WITHDRAWAL_AMOUNT + BATCH_WITHDRAWAL_TX_FEE + RENT_EXEMPTION_THRESHOLD - 1;
+
+        assert_eq!(state.withdrawal_batches().next(), None);
+
+        state.balance += 1;
+
+        assert_eq!(state.withdrawal_batches().next(), Some(requests.to_vec()));
     }
 
     #[test]
@@ -1205,7 +1128,8 @@ mod withdrawal_batches {
     #[test]
     fn should_stop_at_first_unaffordable_request_without_skipping_it() {
         let mut state = state();
-        state.balance = 2 * MINIMUM_WITHDRAWAL_AMOUNT + BATCH_WITHDRAWAL_TX_FEE;
+        state.balance =
+            2 * MINIMUM_WITHDRAWAL_AMOUNT + BATCH_WITHDRAWAL_TX_FEE + RENT_EXEMPTION_THRESHOLD;
         let requests = [
             withdrawal_request(0, MINIMUM_WITHDRAWAL_AMOUNT),
             withdrawal_request(1, 2 * MINIMUM_WITHDRAWAL_AMOUNT),
@@ -1216,6 +1140,57 @@ mod withdrawal_batches {
         let batches: Vec<_> = state.withdrawal_batches().collect();
 
         assert_eq!(batches, vec![vec![requests[0].clone()]]);
+    }
+
+    #[test]
+    fn should_not_create_a_transaction_without_pending_withdrawals() {
+        let mut state = state();
+        state.balance = u64::MAX;
+        state.nonce_pool.add_accounts([address(1)]).unwrap();
+
+        assert!(!state.can_create_withdrawal_transaction());
+    }
+
+    #[test]
+    fn should_not_create_a_transaction_without_a_free_nonce_account() {
+        let mut state = state();
+        state.balance = u64::MAX;
+        accept_withdrawal_requests(
+            &mut state,
+            [withdrawal_request(0, MINIMUM_WITHDRAWAL_AMOUNT)],
+        );
+        state.nonce_pool.add_accounts([address(1)]).unwrap();
+        state.nonce_pool.bind(&address(1), durable_nonce(1));
+
+        assert!(!state.can_create_withdrawal_transaction());
+    }
+
+    #[test]
+    fn should_not_create_a_transaction_without_an_affordable_batch() {
+        let mut state = state();
+        state.balance =
+            MINIMUM_WITHDRAWAL_AMOUNT + BATCH_WITHDRAWAL_TX_FEE + RENT_EXEMPTION_THRESHOLD - 1;
+        accept_withdrawal_requests(
+            &mut state,
+            [withdrawal_request(0, MINIMUM_WITHDRAWAL_AMOUNT)],
+        );
+        state.nonce_pool.add_accounts([address(1)]).unwrap();
+
+        assert!(!state.can_create_withdrawal_transaction());
+    }
+
+    #[test]
+    fn should_create_a_transaction_with_an_affordable_batch_and_a_free_nonce_account() {
+        let mut state = state();
+        state.balance =
+            MINIMUM_WITHDRAWAL_AMOUNT + BATCH_WITHDRAWAL_TX_FEE + RENT_EXEMPTION_THRESHOLD;
+        accept_withdrawal_requests(
+            &mut state,
+            [withdrawal_request(0, MINIMUM_WITHDRAWAL_AMOUNT)],
+        );
+        state.nonce_pool.add_accounts([address(1)]).unwrap();
+
+        assert!(state.can_create_withdrawal_transaction());
     }
 
     fn state() -> State {
@@ -1245,5 +1220,334 @@ mod withdrawal_batches {
             amount_to_transfer,
             burned_amount: amount_to_transfer + WITHDRAWAL_FEE,
         }
+    }
+}
+
+mod withdrawal_transactions {
+    use super::*;
+    use crate::{
+        sol_transfer::BATCH_WITHDRAWAL_TX_FEE,
+        state::audit::replay_events,
+        test_fixtures::{
+            MINTER_ADDRESS, NONCE_ACCOUNT, durable_nonce,
+            events::{create_withdrawal_batch_transaction, submit_withdrawal_batch_transaction},
+            minter_public_key_fetched_event, queued_deposit_of, sweep_message,
+            withdrawal_batch_message,
+        },
+    };
+    use cksol_types::{TxFinalizedStatus, WithdrawalStatus};
+
+    const AMOUNT_TO_TRANSFER: u64 = MINIMUM_WITHDRAWAL_AMOUNT - WITHDRAWAL_FEE;
+
+    #[test]
+    fn should_debit_the_balance_and_bucket_the_requests_at_creation() {
+        init_state();
+        init_balance();
+        let balance_before = read_state(|s| s.balance());
+        accept_withdrawal(account(1), 0, MINIMUM_WITHDRAWAL_AMOUNT);
+
+        create_withdrawal_batch_transaction(durable_nonce(1), vec![0]);
+
+        read_state(|s| {
+            assert_eq!(
+                s.balance(),
+                balance_before - AMOUNT_TO_TRANSFER - BATCH_WITHDRAWAL_TX_FEE
+            );
+            assert!(s.pending_withdrawal_requests().is_empty());
+            assert!(s.created_withdrawal_requests().contains_key(&0_u64.into()));
+            assert!(s.created_withdrawal_txs().contains_key(&NONCE_ACCOUNT));
+            assert_eq!(s.withdrawal_status(0), WithdrawalStatus::Pending);
+        });
+    }
+
+    #[test]
+    fn should_move_the_created_transaction_in_flight_once_submitted() {
+        init_state();
+        init_balance();
+        accept_withdrawal(account(1), 0, MINIMUM_WITHDRAWAL_AMOUNT);
+        create_withdrawal_batch_transaction(durable_nonce(1), vec![0]);
+        let balance_after_creation = read_state(|s| s.balance());
+
+        submit_withdrawal_batch_transaction(signature(7), durable_nonce(1), vec![0]);
+
+        read_state(|s| {
+            assert_eq!(s.balance(), balance_after_creation);
+            assert!(s.created_withdrawal_txs().is_empty());
+            assert!(s.created_withdrawal_requests().is_empty());
+            let transaction = s.submitted_transactions().get(&signature(7)).unwrap();
+            let MinterTransaction::Withdrawal {
+                nonce_account,
+                nonce_value,
+                ..
+            } = transaction
+            else {
+                panic!("expected a withdrawal transaction, got {transaction:?}");
+            };
+            assert_eq!(*nonce_account, NONCE_ACCOUNT);
+            assert_eq!(*nonce_value, durable_nonce(1));
+            assert_eq!(
+                s.withdrawal_status(0),
+                WithdrawalStatus::TxSent {
+                    transaction_id: signature(7).into()
+                }
+            );
+        });
+    }
+
+    #[test]
+    fn should_free_the_nonce_account_and_settle_the_request_on_success() {
+        init_state();
+        init_balance();
+        accept_withdrawal(account(1), 0, MINIMUM_WITHDRAWAL_AMOUNT);
+        create_withdrawal_batch_transaction(durable_nonce(1), vec![0]);
+        submit_withdrawal_batch_transaction(signature(7), durable_nonce(1), vec![0]);
+
+        succeed_transaction(signature(7));
+
+        read_state(|s| {
+            assert!(s.submitted_transactions().is_empty());
+            assert_eq!(
+                s.withdrawal_status(0),
+                WithdrawalStatus::TxFinalized(TxFinalizedStatus::Success {
+                    transaction_id: signature(7).into(),
+                    effective_transaction_fee: None,
+                })
+            );
+        });
+        assert_nonce_account_free();
+    }
+
+    #[test]
+    fn should_free_the_nonce_account_and_settle_the_request_on_failure() {
+        init_state();
+        init_balance();
+        accept_withdrawal(account(1), 0, MINIMUM_WITHDRAWAL_AMOUNT);
+        create_withdrawal_batch_transaction(durable_nonce(1), vec![0]);
+        submit_withdrawal_batch_transaction(signature(7), durable_nonce(1), vec![0]);
+
+        fail_transaction(signature(7));
+
+        read_state(|s| {
+            assert!(s.submitted_transactions().is_empty());
+            assert_matches!(
+                s.failed_transactions().get(&signature(7)),
+                Some(MinterTransaction::Withdrawal { .. })
+            );
+            assert_eq!(
+                s.withdrawal_status(0),
+                WithdrawalStatus::TxFinalized(TxFinalizedStatus::Failure {
+                    transaction_id: signature(7).into(),
+                })
+            );
+        });
+        assert_nonce_account_free();
+    }
+
+    #[test]
+    fn should_rebuild_the_bound_pool_and_created_bucket_from_a_log_ending_after_creation() {
+        let replayed = replay_events(log_of(funded_log_until_created_transaction()));
+
+        assert_eq!(
+            replayed.balance(),
+            DEPOSIT_AMOUNT - FEE_PER_SIGNATURE - AMOUNT_TO_TRANSFER - BATCH_WITHDRAWAL_TX_FEE
+        );
+        assert!(
+            replayed
+                .created_withdrawal_requests()
+                .contains_key(&0_u64.into())
+        );
+        assert_eq!(
+            replayed
+                .created_withdrawal_txs()
+                .get(&NONCE_ACCOUNT)
+                .map(|tx| tx.nonce_value),
+            Some(durable_nonce(1))
+        );
+        assert_eq!(replayed.withdrawal_status(0), WithdrawalStatus::Pending);
+        assert_eq!(replayed.nonce_pool().num_free_accounts(), 0);
+    }
+
+    #[test]
+    fn should_rebuild_the_in_flight_map_from_a_log_ending_after_submission() {
+        let mut events = funded_log_until_created_transaction();
+        events.push(EventType::SubmittedTransaction {
+            signature: signature(7),
+            message: withdrawal_batch_message(
+                NONCE_ACCOUNT,
+                durable_nonce(1),
+                &[(Address::from([0u8; 32]), AMOUNT_TO_TRANSFER)],
+            )
+            .into(),
+            signers: vec![Signer::Minter],
+            purpose: TransactionPurpose::Withdrawal {
+                burn_indices: vec![0_u64.into()],
+            },
+        });
+
+        let replayed = replay_events(log_of(events));
+
+        assert!(replayed.created_withdrawal_txs().is_empty());
+        let transaction = replayed
+            .submitted_transactions()
+            .get(&signature(7))
+            .unwrap();
+        let MinterTransaction::Withdrawal {
+            nonce_account,
+            nonce_value,
+            ..
+        } = transaction
+        else {
+            panic!("expected a withdrawal transaction, got {transaction:?}");
+        };
+        assert_eq!(*nonce_account, NONCE_ACCOUNT);
+        assert_eq!(*nonce_value, durable_nonce(1));
+        assert_eq!(
+            replayed.withdrawal_status(0),
+            WithdrawalStatus::TxSent {
+                transaction_id: signature(7).into()
+            }
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "does not start with an AdvanceNonceAccount instruction")]
+    fn should_panic_when_a_nonce_withdrawal_does_not_advance_a_nonce_account() {
+        init_state();
+        init_balance();
+        accept_withdrawal(account(1), 0, MINIMUM_WITHDRAWAL_AMOUNT);
+        create_withdrawal_batch_transaction(durable_nonce(1), vec![0]);
+        let message_without_nonce_advance = solana_message::Message::new_with_blockhash(
+            &[solana_system_interface::instruction::transfer(
+                &MINTER_ADDRESS,
+                &NONCE_ACCOUNT,
+                AMOUNT_TO_TRANSFER,
+            )],
+            Some(&MINTER_ADDRESS),
+            &durable_nonce(1),
+        );
+
+        mutate_state(|s| {
+            s.process_transaction_submitted(
+                &signature(7),
+                &message_without_nonce_advance.into(),
+                &[Signer::Minter],
+                &TransactionPurpose::Withdrawal {
+                    burn_indices: vec![0_u64.into()],
+                },
+                0,
+            )
+        });
+    }
+
+    #[test]
+    #[should_panic(expected = "does not carry the message bound to nonce account")]
+    fn should_panic_when_a_nonce_withdrawal_differs_from_the_bound_message() {
+        init_state();
+        init_balance();
+        accept_withdrawal(account(1), 0, MINIMUM_WITHDRAWAL_AMOUNT);
+        create_withdrawal_batch_transaction(durable_nonce(1), vec![0]);
+        let message_with_another_amount = withdrawal_batch_message(
+            NONCE_ACCOUNT,
+            durable_nonce(1),
+            &[(Address::from([0u8; 32]), AMOUNT_TO_TRANSFER + 1)],
+        );
+
+        mutate_state(|s| {
+            s.process_transaction_submitted(
+                &signature(7),
+                &message_with_another_amount.into(),
+                &[Signer::Minter],
+                &TransactionPurpose::Withdrawal {
+                    burn_indices: vec![0_u64.into()],
+                },
+                0,
+            )
+        });
+    }
+
+    #[test]
+    #[should_panic(expected = "does not serve the withdrawal requests bound to nonce account")]
+    fn should_panic_when_a_nonce_withdrawal_serves_other_withdrawal_requests() {
+        init_state();
+        init_balance();
+        accept_withdrawal(account(1), 0, MINIMUM_WITHDRAWAL_AMOUNT);
+        accept_withdrawal(account(2), 1, MINIMUM_WITHDRAWAL_AMOUNT);
+        create_withdrawal_batch_transaction(durable_nonce(1), vec![0, 1]);
+
+        submit_withdrawal_batch_transaction(signature(7), durable_nonce(1), vec![0]);
+    }
+
+    const DEPOSIT_AMOUNT: u64 = 500_000_000;
+
+    fn funded_log_until_created_transaction() -> Vec<EventType> {
+        let credited_amount = DEPOSIT_AMOUNT - FEE_PER_SIGNATURE;
+        let funding_deposit = queued_deposit_of(account(9), credited_amount);
+        vec![
+            minter_public_key_fetched_event(),
+            EventType::QueuedDeposit {
+                deposit_id: deposit_id(0),
+                account: funding_deposit.account,
+                address: funding_deposit.address,
+                balance: funding_deposit.balance,
+            },
+            EventType::SubmittedTransaction {
+                signature: signature(9),
+                message: sweep_message([(deposit_id(0), funding_deposit)]),
+                signers: vec![Signer::Account(funding_deposit.account)],
+                purpose: TransactionPurpose::SweepDeposit {
+                    deposit_ids: vec![deposit_id(0)],
+                    block_height: BlockHeight::new(0),
+                },
+            },
+            EventType::SucceededTransaction {
+                signature: signature(9),
+            },
+            EventType::CreditedSweep {
+                signature: signature(9),
+                amount_received: credited_amount,
+                mints: vec![CreditedDeposit {
+                    deposit_id: deposit_id(0),
+                    amount_to_mint: credited_amount,
+                }],
+            },
+            EventType::MintedSweptDeposit {
+                deposit_id: deposit_id(0),
+                mint_block_index: 9_u64.into(),
+            },
+            EventType::AcceptedWithdrawalRequest(WithdrawalRequest {
+                account: account(1),
+                solana_address: [0u8; 32],
+                burn_block_index: 0_u64.into(),
+                burned_amount: MINIMUM_WITHDRAWAL_AMOUNT,
+                amount_to_transfer: AMOUNT_TO_TRANSFER,
+            }),
+            EventType::CreatedWithdrawalTransaction {
+                burn_indices: vec![0_u64.into()],
+                nonce_account: NONCE_ACCOUNT,
+                nonce_value: durable_nonce(1),
+            },
+        ]
+    }
+
+    fn log_of(events: Vec<EventType>) -> Vec<Event> {
+        std::iter::once(EventType::Init(InitArgs {
+            nonce_accounts: vec![NONCE_ACCOUNT.to_string()],
+            ..valid_init_args()
+        }))
+        .chain(events)
+        .map(|payload| Event {
+            timestamp: 0,
+            payload,
+        })
+        .collect()
+    }
+
+    fn assert_nonce_account_free() {
+        read_state(|s| {
+            assert_eq!(
+                s.nonce_pool().free_accounts().collect::<Vec<_>>(),
+                vec![&NONCE_ACCOUNT]
+            )
+        });
     }
 }

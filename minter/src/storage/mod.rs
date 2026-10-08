@@ -38,6 +38,7 @@ pub(crate) struct Metrics {
     pub post_upgrade_instructions_consumed: u64,
     pub failed_credit_attempts: BTreeMap<FailedCreditReason, u64>,
     pub failed_mint_attempts: BTreeMap<FailedMintReason, u64>,
+    pub withdrawal_transaction_rebroadcasts: u64,
 }
 
 impl Metrics {
@@ -46,6 +47,7 @@ impl Metrics {
             post_upgrade_instructions_consumed: 0,
             failed_credit_attempts: BTreeMap::new(),
             failed_mint_attempts: BTreeMap::new(),
+            withdrawal_transaction_rebroadcasts: 0,
         }
     }
 }

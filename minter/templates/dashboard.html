@@ -77,14 +77,6 @@
                         <th>tEd25519 key name</th>
                         <td><code>{{ master_key_name }}</code></td>
                     </tr>
-                    <tr id="manual-deposit-fee">
-                        <th>Manual deposit fee (SOL)</th>
-                        <td>{{ manual_deposit_fee }}</td>
-                    </tr>
-                    <tr id="automated-deposit-fee">
-                        <th>Automated deposit fee (SOL)</th>
-                        <td>{{ automated_deposit_fee }}</td>
-                    </tr>
                     <tr id="withdrawal-fee">
                         <th>Withdrawal fee (SOL)</th>
                         <td>{{ withdrawal_fee }}</td>
@@ -155,64 +147,6 @@
                 {% endfor %}
                 {% if minted_sweeps_table.has_more_than_one_page() %}{{ minted_sweeps_table.pagination|safe }}{% endif %}
                 </tbody>
-            </table>
-            {% endif %}
-
-            {% if !deposits_table.is_empty() %}
-            <h3 id="deposits">Deposits</h3>
-            <table>
-                <thead>
-                <tr>
-                    <th>Deposit Txn</th>
-                    <th>Account</th>
-                    <th>Deposit Amount (SOL)</th>
-                    <th>Minted Amount (SOL)</th>
-                    <th>Mint Block Index</th>
-                    <th>Status</th>
-                </tr>
-                </thead>
-                <tbody>
-                {% for deposit in deposits_table.current_page %}
-                <tr>
-                    <td>{% call solscan_tx_link(deposit.signature) %}</td>
-                    <td><code>{{ deposit.account }}</code></td>
-                    <td>{{ deposit.deposit_amount }}</td>
-                    <td>{{ deposit.minted_amount }}</td>
-                    <td>{{ deposit.mint_block_index }}</td>
-                    <td>{{ deposit.status }}</td>
-                </tr>
-                {% endfor %}
-                {% if deposits_table.has_more_than_one_page() %}{{ deposits_table.pagination|safe }}{% endif %}
-                </tbody>
-            </table>
-            {% endif %}
-
-            {% if !consolidations_table.is_empty() %}
-            <h3 id="consolidations">Consolidation Transactions</h3>
-            <table>
-                <thead>
-                <tr>
-                    <th>Transaction</th>
-                    <th>Status</th>
-                    <th>Mint Index</th>
-                    <th>Deposit Amount (SOL)</th>
-                </tr>
-                </thead>
-                <tbody>
-                {% for c in consolidations_table.current_page %}
-                {% for d in c.deposits %}
-                <tr>
-                    {% if loop.index0 == 0 %}
-                    <td rowspan="{{ c.deposits.len() }}">{% call solscan_tx_link(c.transaction) %}</td>
-                    <td rowspan="{{ c.deposits.len() }}">{{ c.status }}</td>
-                    {% endif %}
-                    <td>{{ d.mint_index }}</td>
-                    <td>{{ d.deposit_amount }}</td>
-                </tr>
-                {% endfor %}
-                {% endfor %}
-                </tbody>
-                {% if consolidations_table.has_more_than_one_page() %}{{ consolidations_table.pagination|safe }}{% endif %}
             </table>
             {% endif %}
 

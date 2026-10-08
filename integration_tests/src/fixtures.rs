@@ -1,7 +1,7 @@
 use crate::{Setup, validator::FEE_PER_SIGNATURE};
 use async_trait::async_trait;
 use base64::{Engine, engine::general_purpose::STANDARD};
-use cksol_types::{GetDepositAddressArgs, ProcessDepositArgs, Signature};
+use cksol_types::Signature;
 use ic_pocket_canister_runtime::{
     ExecuteHttpOutcallMocks, JsonRpcRequestMatcher, JsonRpcResponse, MockHttpOutcalls,
     MockHttpOutcallsBuilder,
@@ -14,7 +14,13 @@ use pocket_ic::nonblocking::PocketIc;
 use serde_json::json;
 use sol_rpc_types::Lamport;
 use solana_address::{Address, address};
-use std::{str::FromStr, sync::Arc};
+use solana_hash::Hash;
+use solana_nonce::{
+    state::{Data, DurableNonce, State},
+    versions::Versions,
+};
+use solana_transaction::Transaction;
+use std::sync::Arc;
 use tokio::sync::Mutex;
 
 pub const DEFAULT_CALLER_ACCOUNT: Account = Account {
@@ -42,43 +48,8 @@ const MOCK_SLOT: u64 = 100_000_000;
 const SUBMITTED_BLOCKHASH: &str = "4sGjMW1sUnHzSxGspuhpqLDx6wiyjNtZAMdL4VZHirAn";
 const SUBMITTED_SIGNATURE: &str =
     "5VERv8NMvzbJMEkV8xnrLkEaWRtSz9CosKDYjCJjBRnbJLgp8uirBgmQpjKhoR4tjF3ZpRzrFmBV6UjKdiSZkQUW";
-/// Blockhash of the later block a timer builds the replacement of an expired transaction
-/// on, and the signature the mocked `sendTransaction` answers with for it. Both differ from
-/// those of the first submission, so a test can tell the two transactions apart.
-const REPLACEMENT_BLOCKHASH: &str = "9ZNTfG4NyQgxy2SWjSiQoUyBPEvXT2xo7fKc5hPYYJ7b";
-const REPLACEMENT_SIGNATURE: &str =
-    "drWLXM6bHretgz7KuwvGZvPBeQ8KEbS3AKB2WJPy4TbBDaqdqAiNcj3cTAS7UnyJKM7eEZoUf4DvhY1TKkus9Bp";
 /// Blockhash the mocks report for a block a timer only reads the height of.
 const IGNORED_BLOCKHASH: &str = "CzBVNFJkh7WkQDfJUiDjLc7kPrJd8kR2yiCvwBUhSe7Y";
-
-pub const EXPECTED_MINT_AMOUNT: Lamport = DEPOSIT_AMOUNT - Setup::DEFAULT_MANUAL_DEPOSIT_FEE;
-
-/// Signature for a Solana transaction depositing [`DEPOSIT_AMOUNT`] lamports to
-/// the address [`DEFAULT_CALLER_DEPOSIT_ADDRESS`].
-/// Explorer link to transaction on Solana Devnet [here].
-///
-/// [here]: https://explorer.solana.com/tx/5N4jM4eZGdeKJdFVFM7pY5GU79juLiJE7gALPpYXD1fkZEWkwc2cMW48Frxo8HkbRxLiSy5WkqLSEwb48Mam4amT?cluster=devnet
-pub const DEPOSIT_TRANSACTION_SIGNATURE: &str =
-    "5N4jM4eZGdeKJdFVFM7pY5GU79juLiJE7gALPpYXD1fkZEWkwc2cMW48Frxo8HkbRxLiSy5WkqLSEwb48Mam4amT";
-
-pub fn deposit_transaction_signature() -> Signature {
-    Signature::from_str(DEPOSIT_TRANSACTION_SIGNATURE).unwrap()
-}
-
-pub fn default_get_deposit_address_args() -> GetDepositAddressArgs {
-    GetDepositAddressArgs {
-        owner: None,
-        subaccount: None,
-    }
-}
-
-pub fn default_process_deposit_args() -> ProcessDepositArgs {
-    ProcessDepositArgs {
-        owner: None,
-        subaccount: None,
-        signature: deposit_transaction_signature(),
-    }
-}
 
 pub fn get_memo(block: ICRC3Value) -> Vec<u8> {
     let block: Value = block.into();
@@ -163,26 +134,6 @@ impl MockBuilder {
         self.inner.build()
     }
 
-    /// Mock for `getTransaction` with the given response.
-    pub fn get_transaction(self, response: JsonRpcResponse) -> Self {
-        self.expect(get_deposit_transaction_request(), response)
-    }
-
-    /// Mock for `getTransaction` returning the default deposit transaction.
-    pub fn get_deposit_transaction(self) -> Self {
-        self.get_transaction(get_deposit_transaction_response())
-    }
-
-    /// Mock for `getTransaction` of the transaction with the given signature, answering
-    /// with the given response.
-    pub fn get_transaction_with_signature(
-        self,
-        signature: &Signature,
-        response: JsonRpcResponse,
-    ) -> Self {
-        self.expect(get_transaction_request(&signature.to_string()), response)
-    }
-
     /// Mock for `getBalance` returning the given balance for any address.
     pub fn get_balance(self, balance: Lamport) -> Self {
         self.expect(get_balance_request(), get_balance_response(balance))
@@ -198,43 +149,58 @@ impl MockBuilder {
             )
     }
 
-    /// Mocks for `finalize_transactions` finding the pending transaction expired at
-    /// `block_height`: `getSlot` → `getBlock` → `getSignatureStatuses` reporting it as not
-    /// found.
-    pub fn mark_transaction_expired(self, block_height: u64) -> Self {
-        self.get_current_block(block_height, IGNORED_BLOCKHASH)
-            .check_signature_statuses(get_signature_statuses_not_found_response())
-    }
-
-    /// Mocks for `resubmit_transactions` sending the replacement transaction, built on the
-    /// block at `block_height`: `getSlot` → `getBlock` → `sendTransaction`.
-    pub fn resubmit_transaction(self, block_height: u64) -> Self {
-        self.get_current_block(block_height, REPLACEMENT_BLOCKHASH)
-            .expect(
-                send_transaction_request(),
-                send_transaction_response(REPLACEMENT_SIGNATURE),
-            )
-    }
-
-    /// Mocks for `finalize_transactions` reporting the pending transaction as finalized at
-    /// `block_height`.
-    pub fn finalize_transaction(self, block_height: u64) -> Self {
-        self.get_current_block(block_height, IGNORED_BLOCKHASH)
-            .check_signature_statuses(get_signature_statuses_finalized_response())
-    }
-
-    /// Mock for `getTransaction` for a sweep of [`DEFAULT_CALLER_DEPOSIT_ADDRESS`] under the
-    /// given signature, reporting metadata that credits the minter's main account with the
-    /// sweepable amount minus the transaction fee of one signature.
-    pub fn get_sweep_transaction(self, signature: &Signature, sweepable_amount: Lamport) -> Self {
+    /// Mock for `getAccountInfo` returning an initialized durable nonce account
+    /// whose nonce authority is the minter's main address.
+    pub fn get_nonce_account(self) -> Self {
         self.expect(
-            get_transaction_request(&signature.to_string()),
-            sweep_transaction_response(sweepable_amount),
+            get_account_info_request(),
+            get_account_info_nonce_response(),
         )
     }
 
-    fn check_signature_statuses(self, response: JsonRpcResponse) -> Self {
-        self.expect(get_signature_statuses_request(), response)
+    /// Mocks for the withdrawal timer submitting a durable-nonce transaction:
+    /// `getAccountInfo` reading the nonce account → `sendTransaction`.
+    pub fn submit_withdrawal_transaction(self) -> Self {
+        self.get_nonce_account().expect(
+            send_transaction_request(),
+            send_transaction_response(SUBMITTED_SIGNATURE),
+        )
+    }
+
+    /// Mocks for `finalize_transactions` finding only in-flight withdrawal
+    /// transactions, which carry a durable nonce and need no current block:
+    /// a single `getSignatureStatuses` reporting them as finalized.
+    pub fn finalize_withdrawal_transaction(self, signature: &Signature) -> Self {
+        self.check_signature_statuses(signature, get_signature_statuses_finalized_response())
+    }
+
+    /// Mocks for `finalize_transactions` finding the pending transaction with the given
+    /// signature expired at `block_height`: `getSlot` → `getBlock` → `getSignatureStatuses`
+    /// reporting it as not found.
+    pub fn mark_transaction_expired(self, signature: &Signature, block_height: u64) -> Self {
+        self.get_current_block(block_height, IGNORED_BLOCKHASH)
+            .check_signature_statuses(signature, get_signature_statuses_not_found_response())
+    }
+
+    /// Mocks for `finalize_transactions` reporting the pending transaction with the given
+    /// signature as finalized at `block_height`.
+    pub fn finalize_transaction(self, signature: &Signature, block_height: u64) -> Self {
+        self.get_current_block(block_height, IGNORED_BLOCKHASH)
+            .check_signature_statuses(signature, get_signature_statuses_finalized_response())
+    }
+
+    /// Mock for `getTransaction` returning the given signed sweep of
+    /// [`DEFAULT_CALLER_DEPOSIT_ADDRESS`], reporting metadata that credits the minter's main
+    /// account with the sweepable amount minus the transaction fee of one signature.
+    pub fn get_sweep_transaction(self, sweep: &Transaction, sweepable_amount: Lamport) -> Self {
+        self.expect(
+            get_transaction_request(&sweep.signatures[0]),
+            sweep_transaction_response(sweep, sweepable_amount),
+        )
+    }
+
+    fn check_signature_statuses(self, signature: &Signature, response: JsonRpcResponse) -> Self {
+        self.expect(get_signature_statuses_request(signature), response)
     }
 
     fn get_current_block(self, block_height: u64, blockhash: &str) -> Self {
@@ -248,101 +214,22 @@ impl MockBuilder {
 // ── JSON-RPC request matchers and response builders ─────────────────────────
 // These are private helpers used by `MockBuilder` methods above.
 
-/// [`getTransaction`] request for [`DEPOSIT_TRANSACTION_SIGNATURE`].
-fn get_deposit_transaction_request() -> JsonRpcRequestMatcher {
-    get_transaction_request(DEPOSIT_TRANSACTION_SIGNATURE)
-}
-
-fn get_transaction_request(signature: &str) -> JsonRpcRequestMatcher {
+/// [`getTransaction`] request for the given signature.
+fn get_transaction_request(signature: &solana_signature::Signature) -> JsonRpcRequestMatcher {
     JsonRpcRequestMatcher::with_method("getTransaction").with_params(json!([
-        signature,
+        signature.to_string(),
         {"encoding": "base64", "commitment": "finalized", "maxSupportedTransactionVersion": 0}
     ]))
 }
 
-/// JSON-RPC response for [`get_deposit_transaction_request`].
-/// Can be obtained with the following `curl` command:
-/// ```bash
-/// curl --location 'https://api.devnet.solana.com' \
-/// --header 'Content-Type: application/json' \
-/// --data '{
-///     "jsonrpc": "2.0",
-///     "id": 1,
-///     "method": "getTransaction",
-///     "params": [
-///         "5N4jM4eZGdeKJdFVFM7pY5GU79juLiJE7gALPpYXD1fkZEWkwc2cMW48Frxo8HkbRxLiSy5WkqLSEwb48Mam4amT",
-///         "base64"
-///     ]
-/// }'
-/// ```
-pub fn get_deposit_transaction_response() -> JsonRpcResponse {
-    JsonRpcResponse::from(json!({
-        "jsonrpc": "2.0",
-        "result": {
-            "blockTime": 1772109375,
-            "meta": {
-                "computeUnitsConsumed": 150,
-                "costUnits": 1481,
-                "err": null,
-                "fee": 5000,
-                "innerInstructions": [],
-                "loadedAddresses": {
-                    "readonly": [],
-                    "writable": []
-                },
-                "logMessages": [
-                    "Program 11111111111111111111111111111111 invoke [1]",
-                    "Program 11111111111111111111111111111111 success"
-                ],
-                "postBalances": [
-                    4895801440_u64,
-                    500000000,
-                    1
-                ],
-                "postTokenBalances": [],
-                "preBalances": [
-                    5395806440_u64,
-                    0,
-                    1
-                ],
-                "preTokenBalances": [],
-                "rewards": [],
-                "status": {
-                    "Ok": null
-                }
-            },
-            "slot": 444797867,
-            "transaction": [
-                "Ado7qZrS2+XlOxCKlqFvtqzPQwvkbexjBYX9skG0JPuuFkwMe84uuIJnkzJumblHEWfuckKgoFqAOtmU0e2/oA4BAAEDIg5JU11WGypQAKfOpxcE0+UIiKney1G6hf+6GRXcmsex8D/gzAX2xhtlU/yePL5FYisYvQgGX/u3TyCP76Ea9AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAANGG6Jzufiyr0XO6naCKA8ZwrP6mGXfGtQf97Ki/UleMBAgIAAQwCAAAAAGXNHQAAAAA=",
-                "base64"
-            ]
-        },
-        "id": 1
-    }))
-}
-
-/// JSON-RPC `getTransaction` response for a sweep transaction moving the sweepable
-/// amount of [`DEFAULT_CALLER_DEPOSIT_ADDRESS`], minus the fee it pays as the only
-/// signer, to [`MINTER_ADDRESS`].
-fn sweep_transaction_response(sweepable_amount: Lamport) -> JsonRpcResponse {
+/// JSON-RPC `getTransaction` response for the given sweep, with balances showing the
+/// sweepable amount of [`DEFAULT_CALLER_DEPOSIT_ADDRESS`], minus the fee it pays as the
+/// only signer, moved to [`MINTER_ADDRESS`].
+fn sweep_transaction_response(sweep: &Transaction, sweepable_amount: Lamport) -> JsonRpcResponse {
     const MAIN_BALANCE_BEFORE_SWEEP: Lamport = 5_000_000_000;
-    let deposit_address: Address = DEFAULT_CALLER_DEPOSIT_ADDRESS.parse().unwrap();
     let transfer_amount = sweepable_amount - FEE_PER_SIGNATURE;
-    let message = solana_message::Message::new_with_blockhash(
-        &[solana_system_interface::instruction::transfer(
-            &deposit_address,
-            &MINTER_ADDRESS,
-            transfer_amount,
-        )],
-        Some(&deposit_address),
-        &solana_hash::Hash::default(),
-    );
-    let transaction = solana_transaction::versioned::VersionedTransaction::from(
-        solana_transaction::Transaction::new_unsigned(message),
-    );
-    let encoded_transaction = STANDARD.encode(
-        bincode::serialize(&transaction).expect("serializing the transaction should succeed"),
-    );
+    let encoded_transaction = STANDARD
+        .encode(bincode::serialize(sweep).expect("serializing the transaction should succeed"));
     JsonRpcResponse::from(json!({
         "jsonrpc": "2.0",
         "result": {
@@ -374,6 +261,40 @@ fn sweep_transaction_response(sweepable_amount: Lamport) -> JsonRpcResponse {
         },
         "id": 1
     }))
+}
+
+fn get_account_info_request() -> JsonRpcRequestMatcher {
+    JsonRpcRequestMatcher::with_method("getAccountInfo")
+}
+
+fn get_account_info_nonce_response() -> JsonRpcResponse {
+    JsonRpcResponse::from(json!({
+        "jsonrpc": "2.0",
+        "result": {
+            "context": { "apiVersion": "2.0.15", "slot": 341_197_053 },
+            "value": {
+                "data": [nonce_account_data(), "base64"],
+                "executable": false,
+                "lamports": 1_447_680,
+                "owner": "11111111111111111111111111111111",
+                "rentEpoch": 18_446_744_073_709_551_615_u64,
+                "space": 80
+            }
+        },
+        "id": 1
+    }))
+}
+
+fn nonce_account_data() -> String {
+    let nonce_account = Versions::new(State::Initialized(Data::new(
+        MINTER_ADDRESS,
+        DurableNonce::from_blockhash(&Hash::from([0x4E; 32])),
+        FEE_PER_SIGNATURE,
+    )));
+    STANDARD.encode(
+        bincode::serialize(&nonce_account)
+            .expect("BUG: serializing a nonce account should succeed"),
+    )
 }
 
 fn get_balance_request() -> JsonRpcRequestMatcher {
@@ -425,8 +346,11 @@ fn get_block_response(block_height: u64, blockhash: &str) -> JsonRpcResponse {
     }))
 }
 
-fn get_signature_statuses_request() -> JsonRpcRequestMatcher {
-    JsonRpcRequestMatcher::with_method("getSignatureStatuses")
+fn get_signature_statuses_request(signature: &Signature) -> JsonRpcRequestMatcher {
+    JsonRpcRequestMatcher::with_method("getSignatureStatuses").with_params(json!([
+        [signature.to_string()],
+        {"searchTransactionHistory": true}
+    ]))
 }
 
 /// Response to a `getSignatureStatuses` request for the single pending transaction,

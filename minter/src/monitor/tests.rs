@@ -1,28 +1,32 @@
 use super::{
-    MAX_BLOCKHASH_AGE_IN_BLOCKS, MAX_SIGNATURES_PER_STATUS_CHECK, finalize_transactions,
-    resubmit_transactions,
+    MAX_BLOCKHASH_AGE_IN_BLOCKS, MAX_SIGNATURES_PER_STATUS_CHECK, MIN_REBROADCAST_AGE,
+    finalize_transactions,
 };
-use crate::test_fixtures::signer::{sign_as_minter, sign_for};
 use crate::{
     constants::MAX_CONCURRENT_RPC_CALLS,
     rpc::BlockHeight,
-    state::{TaskType, event::EventType, mutate_state, read_state, reset_state},
+    state::{
+        MinterTransaction, TaskType,
+        event::{EventType, VersionedMessage},
+        mutate_state, read_state, reset_state,
+    },
     storage::reset_events,
     test_fixtures::{
-        EventsAssert, MINIMUM_WITHDRAWAL_AMOUNT, account, account_signature,
-        confirmed_block_at_height, deposit_id, events, init_balance, init_schnorr_master_key,
-        init_state, minter_signature, runtime::TestCanisterRuntime, signature,
+        EventsAssert, GetTransactionResult, MINIMUM_WITHDRAWAL_AMOUNT, account,
+        confirmed_block_at_height, events, finalized_status, init_balance, init_schnorr_master_key,
+        init_state, runtime::TestCanisterRuntime, signature,
     },
 };
 use sol_rpc_types::{
-    ConfirmedBlock, MultiRpcResult, RpcError, Signature, Slot, TransactionConfirmationStatus,
-    TransactionError, TransactionStatus,
+    ConfirmedBlock, MultiRpcResult, RpcError, SendTransactionParams, Slot,
+    TransactionConfirmationStatus, TransactionError, TransactionStatus,
 };
+use solana_transaction::Transaction;
 
 type SlotResult = MultiRpcResult<Slot>;
 type BlockResult = MultiRpcResult<ConfirmedBlock>;
-type SendTransactionResult = MultiRpcResult<Signature>;
 type SignatureStatusesResult = MultiRpcResult<Vec<Option<TransactionStatus>>>;
+type SendTransactionResult = MultiRpcResult<sol_rpc_types::Signature>;
 
 const CURRENT_SLOT: Slot = 408_807_102;
 const SUBMISSION_SLOT: Slot = CURRENT_SLOT - 10;
@@ -30,8 +34,6 @@ const CURRENT_BLOCK_HEIGHT: BlockHeight = BlockHeight::new(CURRENT_SLOT - 1_000)
 const OLDEST_VALID_BLOCK_HEIGHT: BlockHeight =
     BlockHeight::new(CURRENT_BLOCK_HEIGHT.get() - MAX_BLOCKHASH_AGE_IN_BLOCKS.get());
 const EXPIRED_BLOCK_HEIGHT: BlockHeight = BlockHeight::new(OLDEST_VALID_BLOCK_HEIGHT.get() - 1);
-const RESUBMISSION_SLOT: Slot = CURRENT_SLOT + 5;
-const RESUBMISSION_BLOCK_HEIGHT: BlockHeight = BlockHeight::new(RESUBMISSION_SLOT - 1_000);
 
 mod finalization {
     use super::*;
@@ -39,16 +41,17 @@ mod finalization {
     #[tokio::test]
     async fn should_return_early_if_no_submitted_transactions() {
         setup();
+        let events_before = EventsAssert::from_recorded();
 
         finalize_transactions(TestCanisterRuntime::new().with_increasing_time()).await;
 
-        EventsAssert::assert_no_events_recorded();
+        assert_eq!(EventsAssert::from_recorded(), events_before);
     }
 
     #[tokio::test]
     async fn should_return_early_if_task_already_active() {
         setup();
-        submit_consolidation_transaction(CURRENT_BLOCK_HEIGHT);
+        submit_sweep_transaction(CURRENT_BLOCK_HEIGHT);
 
         mutate_state(|s| {
             s.active_tasks_mut().insert(TaskType::FinalizeTransactions);
@@ -63,19 +66,30 @@ mod finalization {
     }
 
     #[tokio::test]
-    async fn should_return_early_if_fetching_current_block_fails() {
+    async fn should_finalize_but_not_expire_transactions_if_fetching_current_block_fails() {
         setup();
-        submit_consolidation_transaction(EXPIRED_BLOCK_HEIGHT);
-
-        let events_before = EventsAssert::from_recorded();
+        let finalized = submit_withdrawal_transaction_with_signature(1);
+        let not_found = submit_sweep_transaction_with_signature(2, EXPIRED_BLOCK_HEIGHT);
 
         let runtime = TestCanisterRuntime::new()
-            .add_recent_block(Err(RpcError::ValidationError("Error".to_string())));
+            .with_increasing_time()
+            .add_recent_block(Err(RpcError::ValidationError("Error".to_string())))
+            .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![
+                Some(finalized_status()),
+                None,
+            ])));
 
         finalize_transactions(runtime).await;
 
-        let events_after = EventsAssert::from_recorded();
-        assert_eq!(events_before, events_after);
+        let events = EventsAssert::from_recorded().expect_contains_event_eq(
+            EventType::SucceededTransaction {
+                signature: finalized,
+            },
+        );
+        assert!(!events.contains_event(&EventType::ExpiredTransaction {
+            signature: not_found
+        }));
+        read_state(|s| assert!(s.submitted_transactions().contains_key(&not_found)));
     }
 
     #[tokio::test]
@@ -84,14 +98,11 @@ mod finalization {
 
         let num = MAX_CONCURRENT_RPC_CALLS * MAX_SIGNATURES_PER_STATUS_CHECK + 1;
         for i in 0..num {
-            submit_consolidation_transaction_with_signature(i, CURRENT_BLOCK_HEIGHT);
+            submit_withdrawal_transaction_with_signature(i);
         }
 
         // Round 1: finalizes MAX_CONCURRENT_RPC_CALLS batches, 1 transaction unchecked → reschedule
-        let mut runtime = TestCanisterRuntime::new()
-            .with_increasing_time()
-            .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
-            .add_stub_response(BlockResult::Consistent(Ok(current_block())));
+        let mut runtime = TestCanisterRuntime::new().with_increasing_time();
         for _ in 0..MAX_CONCURRENT_RPC_CALLS {
             runtime = runtime.add_stub_response(SignatureStatusesResult::Consistent(Ok(
                 vec![Some(finalized_status()); MAX_SIGNATURES_PER_STATUS_CHECK],
@@ -106,8 +117,6 @@ mod finalization {
         // Round 2: finalizes the remaining 1 transaction → no reschedule
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
-            .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
-            .add_stub_response(BlockResult::Consistent(Ok(current_block())))
             .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![Some(
                 finalized_status(),
             )])));
@@ -122,7 +131,7 @@ mod finalization {
     async fn should_finalize_transaction_with_finalized_status() {
         setup();
 
-        let signature = submit_consolidation_transaction(CURRENT_BLOCK_HEIGHT);
+        let signature = submit_sweep_transaction(CURRENT_BLOCK_HEIGHT);
 
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
@@ -130,7 +139,8 @@ mod finalization {
             .add_stub_response(BlockResult::Consistent(Ok(current_block())))
             .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![Some(
                 finalized_status(),
-            )])));
+            )])))
+            .add_stub_response(GetTransactionResult::Consistent(Ok(None)));
 
         finalize_transactions(runtime).await;
 
@@ -158,7 +168,7 @@ mod finalization {
         reset_events();
         setup();
 
-        submit_consolidation_transaction(block_height);
+        submit_sweep_transaction(block_height);
 
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
@@ -177,10 +187,118 @@ mod finalization {
     }
 
     #[tokio::test]
+    async fn should_finalize_an_in_flight_withdrawal_without_fetching_a_block() {
+        setup();
+        let signature = submit_withdrawal_transaction();
+
+        let runtime = TestCanisterRuntime::new()
+            .with_increasing_time()
+            .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![Some(
+                finalized_status(),
+            )])));
+
+        finalize_transactions(runtime).await;
+
+        EventsAssert::from_recorded()
+            .expect_contains_event_eq(EventType::SucceededTransaction { signature });
+        read_state(|s| {
+            assert!(s.submitted_transactions().is_empty());
+            assert!(s.succeeded_transactions().contains(&signature));
+        });
+    }
+
+    #[tokio::test]
+    async fn should_rebroadcast_a_missing_withdrawal_unchanged() {
+        setup();
+        let signature = submit_withdrawal_transaction();
+        let events_before = EventsAssert::from_recorded();
+
+        let runtime = TestCanisterRuntime::new()
+            .with_increasing_time_from(min_rebroadcast_age_nanos())
+            .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![None])))
+            .add_stub_response(SendTransactionResult::Consistent(Ok(signature.into())));
+
+        finalize_transactions(runtime.clone()).await;
+
+        let sent = runtime.sent_transactions();
+        assert_eq!(sent.len(), 1);
+        assert_eq!(
+            sent[0].get_transaction(),
+            encoded_submitted_transaction(&signature)
+        );
+        assert_eq!(sent[0].skip_preflight, Some(true));
+        assert_eq!(EventsAssert::from_recorded(), events_before);
+        read_state(|s| assert!(s.submitted_transactions().contains_key(&signature)));
+    }
+
+    #[tokio::test]
+    async fn should_rebroadcast_a_missing_withdrawal_only_after_the_minimum_age() {
+        setup();
+        let signature = submit_withdrawal_transaction();
+
+        let too_early = TestCanisterRuntime::new()
+            .with_increasing_time()
+            .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![None])));
+
+        finalize_transactions(too_early.clone()).await;
+
+        assert!(too_early.sent_transactions().is_empty());
+
+        let old_enough = TestCanisterRuntime::new()
+            .with_increasing_time_from(min_rebroadcast_age_nanos())
+            .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![None])))
+            .add_stub_response(SendTransactionResult::Consistent(Ok(signature.into())));
+
+        finalize_transactions(old_enough.clone()).await;
+
+        assert_eq!(old_enough.sent_transactions().len(), 1);
+        read_state(|s| assert!(s.submitted_transactions().contains_key(&signature)));
+    }
+
+    fn min_rebroadcast_age_nanos() -> u64 {
+        MIN_REBROADCAST_AGE.as_nanos() as u64
+    }
+
+    fn encoded_submitted_transaction(signature: &solana_signature::Signature) -> String {
+        let message = read_state(|s| {
+            match s
+                .submitted_transactions()
+                .get(signature)
+                .expect("the transaction is submitted")
+            {
+                MinterTransaction::Withdrawal {
+                    message: VersionedMessage::Legacy(message),
+                    ..
+                } => message.clone(),
+                other => panic!("expected a withdrawal transaction, got {other:?}"),
+            }
+        });
+        let transaction = Transaction {
+            signatures: vec![*signature],
+            message,
+        };
+        SendTransactionParams::try_from(transaction)
+            .expect("the transaction is serializable")
+            .get_transaction()
+            .to_string()
+    }
+
+    fn submit_withdrawal_transaction() -> solana_signature::Signature {
+        submit_withdrawal_transaction_with_signature(0x77)
+    }
+
+    fn submit_withdrawal_transaction_with_signature(i: usize) -> solana_signature::Signature {
+        let signature = signature(i);
+        events::accept_withdrawal(account(i), i as u64, MINIMUM_WITHDRAWAL_AMOUNT);
+        events::submit_withdrawal(signature, vec![i as u64]);
+        signature
+    }
+
+    #[tokio::test]
     async fn should_record_failed_transaction_event_on_error() {
         setup();
 
-        let signature = submit_consolidation_transaction(CURRENT_BLOCK_HEIGHT);
+        let signature = submit_sweep_transaction(CURRENT_BLOCK_HEIGHT);
 
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
@@ -214,9 +332,9 @@ mod finalization {
         let sig_a = 0x01;
         let sig_b = 0x02;
         let sig_c = 0x03;
-        submit_consolidation_transaction_with_signature(sig_a, CURRENT_BLOCK_HEIGHT);
-        submit_consolidation_transaction_with_signature(sig_b, CURRENT_BLOCK_HEIGHT);
-        submit_consolidation_transaction_with_signature(sig_c, CURRENT_BLOCK_HEIGHT);
+        submit_sweep_transaction_with_signature(sig_a, CURRENT_BLOCK_HEIGHT);
+        submit_sweep_transaction_with_signature(sig_b, CURRENT_BLOCK_HEIGHT);
+        submit_sweep_transaction_with_signature(sig_c, CURRENT_BLOCK_HEIGHT);
 
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
@@ -226,7 +344,9 @@ mod finalization {
                 Some(finalized_status()),
                 None,
                 Some(finalized_status()),
-            ])));
+            ])))
+            .add_stub_response(GetTransactionResult::Consistent(Ok(None)))
+            .add_stub_response(GetTransactionResult::Consistent(Ok(None)));
 
         finalize_transactions(runtime).await;
 
@@ -241,7 +361,54 @@ mod finalization {
         read_state(|s| {
             assert_eq!(s.submitted_transactions().len(), 1);
             assert!(s.submitted_transactions().contains_key(&signature(sig_b)));
-            assert!(s.transactions_to_resubmit().is_empty());
+        });
+    }
+
+    #[tokio::test]
+    async fn should_never_expire_nonce_withdrawal_with_missing_status() {
+        setup();
+        let sweep = submit_sweep_transaction_with_signature(1, EXPIRED_BLOCK_HEIGHT);
+        let nonce_withdrawal = submit_withdrawal_transaction_with_signature(2);
+
+        let runtime = TestCanisterRuntime::new()
+            .with_increasing_time()
+            .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
+            .add_stub_response(BlockResult::Consistent(Ok(current_block())))
+            .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![None, None])));
+
+        finalize_transactions(runtime).await;
+
+        let events = EventsAssert::from_recorded()
+            .expect_contains_event_eq(EventType::ExpiredTransaction { signature: sweep });
+        assert!(!events.contains_event(&EventType::ExpiredTransaction {
+            signature: nonce_withdrawal
+        }));
+        read_state(|s| assert!(s.submitted_transactions().contains_key(&nonce_withdrawal)));
+    }
+
+    #[tokio::test]
+    async fn should_not_expire_transaction_if_status_check_fails() {
+        setup();
+
+        submit_sweep_transaction(EXPIRED_BLOCK_HEIGHT);
+
+        let events_before = EventsAssert::from_recorded();
+
+        let finalize_runtime = TestCanisterRuntime::new()
+            .with_increasing_time()
+            .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
+            .add_stub_response(BlockResult::Consistent(Ok(current_block())))
+            .add_stub_response(SignatureStatusesResult::Consistent(Err(
+                RpcError::ValidationError("Error".to_string()),
+            )));
+
+        finalize_transactions(finalize_runtime).await;
+
+        let events_after = EventsAssert::from_recorded();
+        assert_eq!(events_before, events_after);
+
+        read_state(|s| {
+            assert_eq!(s.submitted_transactions().len(), 1);
         });
     }
 
@@ -275,7 +442,7 @@ mod finalization {
             reset_state();
             reset_events();
             setup();
-            let signature = submit_consolidation_transaction(case.transaction_block_height);
+            let signature = submit_sweep_transaction(case.transaction_block_height);
             let runtime = TestCanisterRuntime::new()
                 .with_increasing_time()
                 .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
@@ -288,12 +455,6 @@ mod finalization {
                 .contains_event(&EventType::ExpiredTransaction { signature });
             assert_eq!(expired, case.should_expire, "{}", case.name);
             read_state(|s| {
-                assert_eq!(
-                    s.transactions_to_resubmit().contains_key(&signature),
-                    case.should_expire,
-                    "{}",
-                    case.name
-                );
                 assert_eq!(
                     s.submitted_transactions().contains_key(&signature),
                     !case.should_expire,
@@ -321,242 +482,11 @@ mod finalization {
             confirmation_status: Some(TransactionConfirmationStatus::Processed),
         }
     }
-
-    fn finalized_status() -> TransactionStatus {
-        TransactionStatus {
-            slot: 0,
-            status: Ok(()),
-            err: None,
-            confirmation_status: Some(TransactionConfirmationStatus::Finalized),
-        }
-    }
-}
-
-mod resubmission {
-    use super::*;
-
-    #[tokio::test]
-    async fn should_return_early_if_no_transactions_to_resubmit() {
-        setup();
-
-        resubmit_transactions(TestCanisterRuntime::new().with_increasing_time()).await;
-
-        EventsAssert::assert_no_events_recorded();
-    }
-
-    #[tokio::test]
-    async fn should_return_early_if_task_already_active() {
-        setup();
-        let sig = submit_consolidation_transaction(EXPIRED_BLOCK_HEIGHT);
-        events::expire_transaction(sig);
-
-        mutate_state(|s| {
-            s.active_tasks_mut().insert(TaskType::ResubmitTransactions);
-        });
-
-        let events_before = EventsAssert::from_recorded();
-
-        resubmit_transactions(TestCanisterRuntime::new()).await;
-
-        let events_after = EventsAssert::from_recorded();
-        assert_eq!(events_before, events_after);
-    }
-
-    #[tokio::test]
-    async fn should_resubmit_expired_transaction_with_no_status() {
-        setup();
-
-        let old_signature = submit_consolidation_transaction(EXPIRED_BLOCK_HEIGHT);
-        let new_signature = account_signature(&account(1));
-        events::expire_transaction(old_signature);
-
-        read_state(|s| {
-            assert!(s.transactions_to_resubmit().contains_key(&old_signature));
-        });
-
-        let resubmit_runtime = TestCanisterRuntime::new()
-            .with_increasing_time()
-            .add_stub_response(SlotResult::Consistent(Ok(RESUBMISSION_SLOT)))
-            .add_stub_response(BlockResult::Consistent(Ok(confirmed_block_at_height(
-                RESUBMISSION_BLOCK_HEIGHT,
-            ))))
-            .add_stub_response(SendTransactionResult::Consistent(Ok(new_signature.into())))
-            .add_signer(sign_for(&account(1)));
-
-        resubmit_transactions(resubmit_runtime).await;
-
-        EventsAssert::from_recorded()
-            .expect_contains_event_eq(EventType::ExpiredTransaction {
-                signature: old_signature,
-            })
-            .expect_contains_event_eq(EventType::ResubmittedTransaction {
-                old_signature,
-                new_signature,
-                new_block_height: RESUBMISSION_BLOCK_HEIGHT,
-            });
-
-        read_state(|s| {
-            assert_eq!(s.submitted_transactions().len(), 1);
-            let resubmitted = s.submitted_transactions().get(&new_signature).unwrap();
-            assert_eq!(resubmitted.block_height, RESUBMISSION_BLOCK_HEIGHT);
-        });
-    }
-
-    #[tokio::test]
-    async fn should_resubmit_expired_withdrawal_signed_by_the_minter() {
-        setup();
-        init_balance();
-
-        let old_signature = signature(1);
-        let burn_index = 1;
-        events::accept_withdrawal(account(1), burn_index, MINIMUM_WITHDRAWAL_AMOUNT);
-        events::submit_withdrawal_at_height(old_signature, EXPIRED_BLOCK_HEIGHT, vec![burn_index]);
-        events::expire_transaction(old_signature);
-
-        let new_signature = minter_signature();
-
-        let resubmit_runtime = TestCanisterRuntime::new()
-            .with_increasing_time()
-            .add_stub_response(SlotResult::Consistent(Ok(RESUBMISSION_SLOT)))
-            .add_stub_response(BlockResult::Consistent(Ok(confirmed_block_at_height(
-                RESUBMISSION_BLOCK_HEIGHT,
-            ))))
-            .add_stub_response(SendTransactionResult::Consistent(Ok(new_signature.into())))
-            .add_signer(sign_as_minter());
-
-        resubmit_transactions(resubmit_runtime).await;
-
-        EventsAssert::from_recorded().expect_contains_event_eq(EventType::ResubmittedTransaction {
-            old_signature,
-            new_signature,
-            new_block_height: RESUBMISSION_BLOCK_HEIGHT,
-        });
-
-        read_state(|s| {
-            assert_eq!(s.submitted_transactions().len(), 1);
-            assert!(s.submitted_transactions().contains_key(&new_signature));
-        });
-    }
-
-    #[tokio::test]
-    async fn should_not_resubmit_expired_transaction_if_status_check_fails() {
-        setup();
-
-        submit_consolidation_transaction(EXPIRED_BLOCK_HEIGHT);
-
-        let events_before = EventsAssert::from_recorded();
-
-        let finalize_runtime = TestCanisterRuntime::new()
-            .with_increasing_time()
-            .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
-            .add_stub_response(BlockResult::Consistent(Ok(confirmed_block_at_height(
-                RESUBMISSION_BLOCK_HEIGHT,
-            ))))
-            .add_stub_response(SignatureStatusesResult::Consistent(Err(
-                RpcError::ValidationError("Error".to_string()),
-            )));
-
-        finalize_transactions(finalize_runtime).await;
-
-        let events_after = EventsAssert::from_recorded();
-        assert_eq!(events_before, events_after);
-
-        read_state(|s| {
-            assert_eq!(s.submitted_transactions().len(), 1);
-            assert!(s.transactions_to_resubmit().is_empty());
-        });
-    }
-
-    #[tokio::test]
-    async fn should_record_resubmission_event_even_if_submission_fails() {
-        setup();
-
-        let old_signature = submit_consolidation_transaction(EXPIRED_BLOCK_HEIGHT);
-        let new_signature = account_signature(&account(1));
-        events::expire_transaction(old_signature);
-
-        let resubmit_runtime = TestCanisterRuntime::new()
-            .with_increasing_time()
-            .add_stub_response(SlotResult::Consistent(Ok(RESUBMISSION_SLOT)))
-            .add_stub_response(BlockResult::Consistent(Ok(confirmed_block_at_height(
-                RESUBMISSION_BLOCK_HEIGHT,
-            ))))
-            .add_stub_response(SendTransactionResult::Inconsistent(vec![]))
-            .add_signer(sign_for(&account(1)));
-
-        resubmit_transactions(resubmit_runtime).await;
-
-        EventsAssert::from_recorded()
-            .expect_contains_event_eq(EventType::ExpiredTransaction {
-                signature: old_signature,
-            })
-            .expect_contains_event_eq(EventType::ResubmittedTransaction {
-                old_signature,
-                new_signature,
-                new_block_height: RESUBMISSION_BLOCK_HEIGHT,
-            });
-    }
-
-    #[tokio::test]
-    async fn should_reschedule_until_all_transactions_resubmitted() {
-        setup();
-
-        let num_transactions = MAX_CONCURRENT_RPC_CALLS + 1;
-        for i in 0..num_transactions {
-            let sig = submit_consolidation_transaction_with_signature(i, EXPIRED_BLOCK_HEIGHT);
-            events::expire_transaction(sig);
-        }
-
-        // Round 1: resubmits MAX_CONCURRENT_RPC_CALLS transactions, 1 remain → reschedule
-        let mut runtime = TestCanisterRuntime::new()
-            .with_increasing_time()
-            .add_stub_response(SlotResult::Consistent(Ok(RESUBMISSION_SLOT)))
-            .add_stub_response(BlockResult::Consistent(Ok(confirmed_block_at_height(
-                RESUBMISSION_BLOCK_HEIGHT,
-            ))));
-        for i in 0..MAX_CONCURRENT_RPC_CALLS {
-            runtime = runtime
-                .add_stub_response(SendTransactionResult::Consistent(Ok(
-                    signature(0xA0 + i).into()
-                )))
-                .add_signer(sign_for(&account(i)));
-        }
-
-        resubmit_transactions(runtime.clone()).await;
-
-        read_state(|s| {
-            assert_eq!(s.submitted_transactions().len(), MAX_CONCURRENT_RPC_CALLS);
-            assert_eq!(
-                s.transactions_to_resubmit().len(),
-                num_transactions - MAX_CONCURRENT_RPC_CALLS
-            );
-        });
-        assert_eq!(runtime.set_timer_call_count(), 1);
-
-        // Round 2: resubmits remaining transaction → no reschedule
-        let mut runtime = TestCanisterRuntime::new()
-            .with_increasing_time()
-            .add_stub_response(SlotResult::Consistent(Ok(RESUBMISSION_SLOT)))
-            .add_stub_response(BlockResult::Consistent(Ok(confirmed_block_at_height(
-                RESUBMISSION_BLOCK_HEIGHT,
-            ))));
-        for i in 0..(num_transactions - MAX_CONCURRENT_RPC_CALLS) {
-            runtime = runtime
-                .add_stub_response(SendTransactionResult::Consistent(Ok(
-                    signature(0xB0 + i).into()
-                )))
-                .add_signer(sign_for(&account(MAX_CONCURRENT_RPC_CALLS + i)));
-        }
-
-        resubmit_transactions(runtime.clone()).await;
-
-        assert!(read_state(|s| s.transactions_to_resubmit().is_empty()));
-        assert_eq!(runtime.set_timer_call_count(), 0);
-    }
 }
 
 fn setup() {
     init_state();
+    init_balance();
     init_schnorr_master_key();
 }
 
@@ -564,17 +494,17 @@ fn current_block() -> ConfirmedBlock {
     confirmed_block_at_height(CURRENT_BLOCK_HEIGHT)
 }
 
-fn submit_consolidation_transaction(block_height: BlockHeight) -> solana_signature::Signature {
-    submit_consolidation_transaction_with_signature(1, block_height)
+fn submit_sweep_transaction(block_height: BlockHeight) -> solana_signature::Signature {
+    submit_sweep_transaction_with_signature(1, block_height)
 }
 
-fn submit_consolidation_transaction_with_signature(
+fn submit_sweep_transaction_with_signature(
     i: usize,
     block_height: BlockHeight,
 ) -> solana_signature::Signature {
     let signature = signature(i);
-    events::accept_deposit(deposit_id(i), 1_000_000);
-    events::mint_deposit(deposit_id(i), i as u64);
-    events::submit_consolidation_at_height(signature, account(i), block_height, vec![i as u64]);
+    let deposit_id = crate::state::read_state(|state| state.deposits().next_id());
+    events::queue_deposit(deposit_id, account(i), 1_000_000);
+    events::submit_sweep_at_height(signature, vec![deposit_id], block_height);
     signature
 }

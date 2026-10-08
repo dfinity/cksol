@@ -1,6 +1,8 @@
-use crate::{Setup, SetupBuilder};
-use assert_matches::assert_matches;
-use cksol_types::{DepositStatus, ProcessDepositArgs, WithdrawalStatus};
+use crate::{
+    Setup, SetupBuilder,
+    fixtures::{MINTER_ADDRESS, RENT_EXEMPTION_THRESHOLD},
+};
+use cksol_types::WithdrawalStatus;
 use icrc_ledger_types::icrc1::account::Account;
 use sol_rpc_types::{InstallArgs, Lamport, OverrideProvider, RegexSubstitution, RoundingError};
 use solana_address::Address;
@@ -10,6 +12,8 @@ use solana_client::{
 };
 use solana_keypair::{Keypair, Signer};
 use solana_signature::Signature;
+use solana_system_interface::instruction::create_nonce_account;
+use solana_transaction::Transaction;
 use std::{
     net::{TcpListener, UdpSocket},
     ops::RangeInclusive,
@@ -24,6 +28,9 @@ use std::{
 
 /// Solana base fee per signature included in a transaction.
 pub const FEE_PER_SIGNATURE: Lamport = 5_000;
+
+/// Rent exemption minimum of a durable nonce account for its 80 bytes of state.
+pub const NONCE_ACCOUNT_RENT_EXEMPTION: Lamport = 1_447_680;
 
 /// A `solana-test-validator` process owned by a single test.
 ///
@@ -123,8 +130,33 @@ impl SolanaTestValidator {
         rpc.get_fee_for_message(&transfer.message).await.ok()
     }
 
-    /// Creates a test setup whose SOL RPC canister talks to this validator.
+    /// Creates a test setup whose SOL RPC canister talks to this validator,
+    /// with a real durable nonce account created on the validator for the
+    /// minter's deterministic main address before the minter is installed, so
+    /// that withdrawal transactions can be submitted against it.
     pub async fn setup(&self) -> Setup {
+        self.setup_with_nonce_accounts(1).await
+    }
+
+    /// Like [`Self::setup`], with a pool of `count` durable nonce accounts.
+    pub async fn setup_with_nonce_accounts(&self, count: usize) -> Setup {
+        let nonce_accounts = self
+            .create_nonce_accounts(count, &MINTER_ADDRESS)
+            .await
+            .iter()
+            .map(Address::to_string)
+            .collect();
+        self.setup_builder()
+            .with_nonce_accounts(nonce_accounts)
+            .build()
+            .await
+    }
+
+    /// A [`SetupBuilder`] preconfigured so the SOL RPC canister talks to this
+    /// validator. The default nonce account pool is a placeholder that does not
+    /// exist on the validator, so a test whose minter submits withdrawals must
+    /// pass accounts from [`Self::create_nonce_accounts`] or use [`Self::setup`].
+    pub fn setup_builder(&self) -> SetupBuilder {
         SetupBuilder::new()
             .with_proxy_canister()
             .with_pocket_ic_live_mode()
@@ -137,48 +169,25 @@ impl SolanaTestValidator {
                 }),
                 ..InstallArgs::default()
             })
-            .build()
-            .await
     }
 
-    /// Deposits `amount` to the deposit address of `account`, has the minter
-    /// process it, and returns the deposit address and the minted amount.
-    pub async fn deposit_to_account(
+    /// Transfers `amount` to the deposit address of `account`, waits for the
+    /// transfer to be finalized, and returns the deposit address.
+    pub async fn fund_deposit_address(
         &self,
         setup: &Setup,
         account: Account,
         amount: Lamport,
-    ) -> (Address, Lamport) {
-        let expected_mint_amount = amount - Setup::DEFAULT_MANUAL_DEPOSIT_FEE;
+    ) -> Address {
         let deposit_address = setup.minter().get_deposit_address(account).await.into();
 
         println!("Depositing {amount} Lamport to address {deposit_address}");
 
-        let balance_before = setup.ledger().balance_of(account).await;
-        assert_eq!(balance_before, 0);
-
-        let deposit_signature = self.transfer_to(deposit_address, amount).await;
-
-        let result = setup
-            .minter()
-            .process_deposit(ProcessDepositArgs {
-                owner: Some(account.owner),
-                subaccount: account.subaccount,
-                signature: deposit_signature.into(),
-            })
+        self.transfer_to(deposit_address, amount).await;
+        self.wait_for_finalized_balance(&deposit_address, amount)
             .await;
-        assert_matches!(result, Ok(DepositStatus::Minted {
-            minted_amount,
-            deposit_id,
-            block_index: _,
-        }) if minted_amount == expected_mint_amount
-            && deposit_id.signature == deposit_signature.into()
-            && deposit_id.account == account);
 
-        let balance_after = setup.ledger().balance_of(account).await;
-        assert_eq!(balance_after, expected_mint_amount);
-
-        (deposit_address, expected_mint_amount)
+        deposit_address
     }
 
     /// The JSON-RPC URL of this validator.
@@ -223,10 +232,15 @@ impl SolanaTestValidator {
     }
 
     /// Transfers `amount` to `address` from a freshly airdropped account and
-    /// waits for the transfer to be finalized.
+    /// waits for the transfer to be finalized. The sender is funded so that it
+    /// stays rent-exempt after the transfer, whatever the amount.
     pub async fn transfer_to(&self, address: Address, amount: Lamport) -> Signature {
         let sender = Keypair::new();
-        self.airdrop_and_confirm(sender.pubkey(), 2 * amount).await;
+        self.airdrop_and_confirm(
+            sender.pubkey(),
+            amount + FEE_PER_SIGNATURE + RENT_EXEMPTION_THRESHOLD,
+        )
+        .await;
 
         let rpc = self.rpc_client();
         let recent_blockhash = rpc.get_latest_blockhash().await.unwrap();
@@ -236,6 +250,64 @@ impl SolanaTestValidator {
         self.confirm_transaction(&signature, CommitmentConfig::finalized())
             .await;
         signature
+    }
+
+    /// Creates `count` durable nonce accounts with `authority` as their nonce
+    /// authority, funded by a freshly airdropped account, and returns their
+    /// addresses once their creation is finalized.
+    pub async fn create_nonce_accounts(&self, count: usize, authority: &Address) -> Vec<Address> {
+        let funder = Keypair::new();
+        let cost_per_account = NONCE_ACCOUNT_RENT_EXEMPTION + 2 * FEE_PER_SIGNATURE;
+        self.airdrop_and_confirm(funder.pubkey(), 2 * count as u64 * cost_per_account)
+            .await;
+
+        let rpc = self.rpc_client();
+        let mut addresses = Vec::with_capacity(count);
+        for _ in 0..count {
+            let nonce_account = Keypair::new();
+            let instructions = create_nonce_account(
+                &funder.pubkey(),
+                &nonce_account.pubkey(),
+                authority,
+                NONCE_ACCOUNT_RENT_EXEMPTION,
+            );
+            let blockhash = rpc.get_latest_blockhash().await.unwrap();
+            let transaction = Transaction::new_signed_with_payer(
+                &instructions,
+                Some(&funder.pubkey()),
+                &[&funder, &nonce_account],
+                blockhash,
+            );
+            let signature = rpc.send_transaction(&transaction).await.unwrap();
+            self.confirm_transaction(&signature, CommitmentConfig::finalized())
+                .await;
+            addresses.push(nonce_account.pubkey());
+        }
+        addresses
+    }
+
+    /// The nonce value currently stored by the given durable nonce account,
+    /// read at `finalized` commitment.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the account does not exist or is not an initialized nonce account.
+    pub async fn get_nonce_value(&self, address: &Address) -> solana_hash::Hash {
+        let account = self
+            .rpc_client()
+            .get_account_with_commitment(address, CommitmentConfig::finalized())
+            .await
+            .expect("Failed to read the nonce account")
+            .value
+            .unwrap_or_else(|| panic!("Nonce account {address} does not exist"));
+        let versions: solana_nonce::versions::Versions = bincode::deserialize(&account.data)
+            .unwrap_or_else(|e| panic!("Account {address} is not a nonce account: {e}"));
+        match versions.state() {
+            solana_nonce::state::State::Initialized(data) => data.blockhash(),
+            solana_nonce::state::State::Uninitialized => {
+                panic!("Nonce account {address} is not initialized")
+            }
+        }
     }
 
     pub async fn airdrop_and_confirm(&self, address: Address, airdrop_amount: Lamport) {

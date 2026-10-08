@@ -45,14 +45,13 @@ The minter controls one or more Solana addresses derived from a [threshold Schno
 
 1. **Get a deposit address.** Call `get_deposit_address` on the minter with your ICP principal (and an optional subaccount). The minter returns a Solana address derived specifically for your account.
 
-2. **Send SOL.** Transfer SOL to that deposit address from any Solana wallet.
+2. **Send SOL.** Transfer SOL to that deposit address from any Solana wallet, in one or several transfers. No memo or transaction signature is needed, so deposits can come straight from an exchange.
 
-3. **Notify the minter.** Call `process_deposit` on the minter with the Solana transaction signature and the same owner/subaccount used in step 1. This call requires attaching cycles (see `process_deposit_required_cycles` in `get_minter_info`). The minter:
-   - Fetches the transaction from Solana via the SOL RPC canister.
-   - Verifies it is a valid transfer to your deposit address.
-   - Mints the corresponding amount of ckSOL (minus the deposit fee) to your ICRC-1 ledger account.
+3. **Notify the minter.** Call `deposit_sol` on the minter with the same owner/subaccount used in step 1. This call requires attaching cycles (see `deposit_sol_required_cycles` in `get_minter_info`; unused cycles are refunded). The minter reads the balance of your deposit address, queues it for a sweep, and returns a *deposit id*.
 
-4. **Consolidation.** The minter periodically consolidates funds from individual deposit addresses into its main Solana account.
+4. **Sweep and mint.** On timers, the minter sweeps the deposit address to its main Solana account and, once the sweep transaction is finalized, mints the swept amount of ckSOL (minus the deposit's share of the sweep transaction fee) to your ICRC-1 ledger account.
+
+5. **Track the deposit.** Call `deposit_status` with the deposit id to follow the progress: `Queued` → `Swept` → `Finalized` → `Minted`.
 
 ```mermaid
 sequenceDiagram
@@ -65,12 +64,16 @@ sequenceDiagram
     Minter-->>User: deposit_address
 
     User->>Solana: transfer SOL to deposit_address
-    Solana-->>User: tx_signature
 
-    User->>Minter: process_deposit(owner, subaccount, signature)
-    Minter->>Solana: fetch & verify transaction
-    Minter->>Ledger: mint with icrc1_transfer(to=user, amount - deposit_fee)
-    Ledger-->>Minter: block_index
+    User->>Minter: deposit_sol(owner, subaccount) + cycles
+    Minter->>Solana: read deposit_address balance
+    Minter-->>User: deposit_id
+
+    Note over Minter,Solana: (processed asynchronously by the minter)
+    Minter->>Solana: sweep deposit_address to main account
+    Minter->>Ledger: mint with icrc1_transfer(to=user, swept amount - fee share)
+
+    User->>Minter: deposit_status(deposit_id)
     Minter-->>User: Minted { block_index, minted_amount }
 ```
 
@@ -173,20 +176,28 @@ icp canister call -e prod cksol_minter get_deposit_address \
 
 ### Notify the minter of a deposit
 
-After sending SOL to your deposit address, call `process_deposit` with the Solana transaction signature to trigger minting. Pass the same `owner`/`subaccount` used when calling `get_deposit_address` — when `owner` is `null`, it defaults to your calling identity's principal. Replace `<SIGNATURE>` with the base-58 encoded transaction signature.
+After sending SOL to your deposit address, call `deposit_sol` to queue the deposit address for a sweep to the minter's main account. Pass the same `owner`/`subaccount` used when calling `get_deposit_address` — when `owner` is `null`, it defaults to your calling identity's principal.
 
 > [!NOTE]
-> This call requires attaching cycles — check the required amount via `get_minter_info` (`process_deposit_required_cycles` field). If your identity does not hold cycles directly, you can [convert ICP to cycles](https://cli.internetcomputer.org/0.2/guides/tokens-and-cycles/#converting-icp-to-cycles) first, or route the call through a proxy canister using `--proxy <proxy-principal> --cycles <amount>`.
+> This call requires attaching cycles — check the required amount via `get_minter_info` (`deposit_sol_required_cycles` field); unused cycles are refunded. If your identity does not hold cycles directly, you can [convert ICP to cycles](https://cli.internetcomputer.org/0.2/guides/tokens-and-cycles/#converting-icp-to-cycles) first, or route the call through a proxy canister using `--proxy <proxy-principal> --cycles <amount>`.
 
 ```sh
-icp canister call -e prod cksol_minter process_deposit \
-  '(record { owner = null; subaccount = null; signature = "<SIGNATURE>" })'
+icp canister call -e prod cksol_minter deposit_sol \
+  '(record { owner = null; subaccount = null })'
 ```
 
-A successful response looks like:
+A successful response returns the deposit id, which you can use to track the deposit:
 
 ```
-(variant { Ok = variant { Minted = record { block_index = 42; minted_amount = 990_000_000; deposit_id = ... } } })
+(variant { Ok = 42 : nat64 })
+```
+
+### Check a deposit status
+
+After calling `deposit_sol`, track the deposit using the deposit id returned in the response. The status moves through `Queued` → `Swept` → `Finalized` → `Minted` as the minter sweeps the deposit address and mints ckSOL:
+
+```sh
+icp canister call -e prod cksol_minter deposit_status '(42 : nat64)' --query
 ```
 
 ### Submit a withdrawal request
@@ -221,13 +232,12 @@ icp canister call -e prod cksol_minter withdrawal_status \
 ├── minter/                  # ckSOL minter canister
 │   ├── src/
 │   │   ├── address/         # Deposit address derivation
-│   │   ├── consolidate/     # Deposit consolidation logic
 │   │   ├── dashboard/       # HTTP dashboard
 │   │   ├── lifecycle.rs     # Canister init/upgrade and event log
 │   │   ├── metrics.rs       # Prometheus metrics
 │   │   ├── monitor/         # Transaction monitoring
 │   │   ├── state/           # Minter state and event sourcing
-│   │   ├── deposit/manual/  # Manual deposit processing
+│   │   ├── deposit/sweep/   # Deposit sweeping and minting
 │   │   ├── withdraw/        # Withdrawal processing
 │   │   └── ...
 │   └── cksol_minter.did     # Candid interface

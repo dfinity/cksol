@@ -32,21 +32,6 @@ pub fn encode_metrics(w: &mut MetricsEncoder<Vec<u8>>, s: &State) -> std::io::Re
         "Total number of events in the event log.",
     )?;
     w.encode_gauge(
-        "accepted_deposits",
-        s.accepted_deposits().len().metric_value(),
-        "Number of accepted deposits pending minting.",
-    )?;
-    w.encode_gauge(
-        "quarantined_deposits",
-        s.quarantined_deposits().len().metric_value(),
-        "Number of quarantined deposits.",
-    )?;
-    w.encode_gauge(
-        "minted_deposits",
-        s.minted_deposits().len().metric_value(),
-        "Number of minted deposits.",
-    )?;
-    w.encode_gauge(
         "finalized_deposits",
         s.deposits().finalized().deposit_count().metric_value(),
         "Number of deposits whose sweep is finalized but not yet credited.",
@@ -87,13 +72,9 @@ pub fn encode_metrics(w: &mut MetricsEncoder<Vec<u8>>, s: &State) -> std::io::Re
         mint_unresolved.metric_value(),
     )?;
     w.encode_gauge(
-        "deposits_to_consolidate",
-        s.deposits_to_consolidate().len().metric_value(),
-        "Number of deposits pending consolidation.",
-    )?;
-    w.encode_gauge(
         "pending_withdrawal_requests",
-        s.pending_withdrawal_requests().len().metric_value(),
+        (s.pending_withdrawal_requests().len() + s.created_withdrawal_requests().len())
+            .metric_value(),
         "Number of pending withdrawal requests.",
     )?;
     w.encode_gauge(
@@ -160,6 +141,11 @@ pub fn encode_metrics(w: &mut MetricsEncoder<Vec<u8>>, s: &State) -> std::io::Re
         "post_upgrade_instructions_consumed",
         storage::with_unstable_metrics(|m| m.post_upgrade_instructions_consumed).metric_value(),
         "Number of instructions consumed during the last post-upgrade.",
+    )?;
+    w.encode_counter(
+        "withdrawal_transaction_rebroadcasts",
+        storage::with_unstable_metrics(|m| m.withdrawal_transaction_rebroadcasts).metric_value(),
+        "Number of re-broadcast attempts of withdrawal transactions since the last upgrade.",
     )?;
     Ok(())
 }

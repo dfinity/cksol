@@ -1,6 +1,7 @@
 use super::*;
 use crate::test_fixtures::signer::{sign_as_minter, sign_for};
 use crate::{
+    address::{derivation_path, derive_public_key},
     constants::FEE_PER_SIGNATURE,
     state::{event::VersionedMessage, read_state},
     test_fixtures::{
@@ -24,14 +25,6 @@ fn derive_address(account: &Account) -> Address {
     Address::from(derive_public_key(&master_key, derivation_path(account)).serialize_raw())
 }
 
-fn expecting_all(sources: &[(Account, Lamport)]) -> TestCanisterRuntime {
-    sources
-        .iter()
-        .fold(TestCanisterRuntime::new(), |runtime, (account, _)| {
-            runtime.add_signer(sign_for(account))
-        })
-}
-
 fn minter_signing_once() -> TestCanisterRuntime {
     TestCanisterRuntime::new().add_signer(sign_as_minter())
 }
@@ -44,424 +37,236 @@ fn transfer_amount_from_instruction(instruction: &solana_transaction::CompiledIn
     u64::from_le_bytes(instruction.data[4..12].try_into().unwrap())
 }
 
-mod consolidation_tests {
+mod sweep_tests {
     use super::*;
+    use crate::test_fixtures::{planned_sweep, queued_deposit_of};
 
     #[tokio::test]
-    async fn should_create_signed_transaction_with_single_source() {
+    async fn should_sign_a_sweep_with_a_single_deposit() {
         setup();
-        let source_account = Account {
+        let account = Account {
             owner: Principal::from_slice(&[1, 2, 3]),
             subaccount: None,
         };
         let amount: Lamport = 500_000_000;
         let blockhash = Hash::new_from_array([0xBB; 32]);
+        let sweep = planned_sweep([(0, queued_deposit_of(account, amount))]);
+        let runtime = TestCanisterRuntime::new().add_signer(sign_for(&account));
 
-        let source_address = derive_address(&source_account);
+        let (tx, signers) = sign_sweep_transaction(&runtime, &sweep, blockhash)
+            .await
+            .expect("signing should succeed");
 
-        let runtime = TestCanisterRuntime::new().add_signer(sign_for(&source_account));
-        let (tx, signers) = create_signed_consolidation_transaction(
-            &runtime,
-            vec![(source_account, amount)],
-            blockhash,
-        )
-        .await
-        .expect("transaction creation should succeed");
-
-        // Verify signers list
-        assert_eq!(signers, vec![Signer::Account(source_account)]);
-
-        // Fee payer is the source address
-        assert_eq!(tx.message.account_keys[0], source_address);
-        // Target is the minter address
+        assert_eq!(signers, vec![Signer::Account(account)]);
+        assert_eq!(tx.message.account_keys[0], derive_address(&account));
         assert!(tx.message.account_keys.contains(&MINTER_ADDRESS));
-        // Should contain system program id
-        assert!(
-            tx.message
-                .account_keys
-                .contains(&Address::new_from_array([0u8; 32]))
-        );
-
-        // One transfer instruction
         assert_eq!(tx.message.instructions.len(), 1);
-
-        // Transfer amount should be reduced by the transaction fee
         assert_eq!(
             transfer_amount_from_instruction(&tx.message.instructions[0]),
             amount - FEE_PER_SIGNATURE
         );
-
-        // Signature is placed for the source address (position 0 = fee payer)
-        assert_eq!(tx.signatures[0], account_signature(&source_account));
-
-        // Recent blockhash is set
+        assert_eq!(tx.signatures, vec![account_signature(&account)]);
         assert_eq!(tx.message.recent_blockhash, blockhash);
     }
 
     #[tokio::test]
-    async fn should_create_signed_transaction_with_multiple_sources() {
+    async fn should_sign_with_the_deposits_in_the_order_of_the_message() {
         setup();
-        let account_1 = Account {
+        let smaller = Account {
             owner: Principal::from_slice(&[1]),
             subaccount: None,
         };
-        let account_2 = Account {
+        let larger = Account {
             owner: Principal::from_slice(&[2]),
             subaccount: None,
         };
-        let amount_1: Lamport = 100_000_000;
-        let amount_2: Lamport = 200_000_000;
-        let blockhash = Hash::new_from_array([0xDD; 32]);
-
-        let source_1 = derive_address(&account_1);
-        let source_2 = derive_address(&account_2);
-
+        let sweep = planned_sweep([
+            (0, queued_deposit_of(smaller, 100_000_000)),
+            (1, queued_deposit_of(larger, 200_000_000)),
+        ]);
         let runtime = TestCanisterRuntime::new()
-            .add_signer(sign_for(&account_1))
-            .add_signer(sign_for(&account_2));
-        let (tx, signers) = create_signed_consolidation_transaction(
-            &runtime,
-            vec![(account_1, amount_1), (account_2, amount_2)],
-            blockhash,
-        )
-        .await
-        .expect("transaction creation should succeed");
+            .add_signer(sign_for(&smaller))
+            .add_signer(sign_for(&larger));
 
-        // Verify signers list (fee payer first, then sources)
-        assert_eq!(
-            signers,
-            vec![Signer::Account(account_1), Signer::Account(account_2)]
-        );
+        let (tx, signers) =
+            sign_sweep_transaction(&runtime, &sweep, Hash::new_from_array([0xDD; 32]))
+                .await
+                .expect("signing should succeed");
 
-        // Two signers => two signatures
-        assert_eq!(tx.signatures.len(), 2);
-        // Fee payer is source_1
-        assert_eq!(tx.message.account_keys[0], source_1);
-
-        // Two transfer instructions
-        assert_eq!(tx.message.instructions.len(), 2);
-
-        // Fee payer's transfer is reduced by the transaction fee
-        let expected_fee = FEE_PER_SIGNATURE * 2;
-        let fee_payer_instruction = tx
-            .message
-            .instructions
+        assert_eq!(signers.len(), 2);
+        assert_eq!(signers[0], Signer::Account(larger));
+        let signer_addresses: Vec<Address> = signers
             .iter()
-            .find(|ix| tx.message.account_keys[ix.accounts[0] as usize] == source_1)
-            .expect("fee payer instruction not found");
-        assert_eq!(
-            transfer_amount_from_instruction(fee_payer_instruction),
-            amount_1 - expected_fee
-        );
-
-        // Other source's transfer is not reduced
-        let other_instruction = tx
-            .message
-            .instructions
+            .map(|signer| match signer {
+                Signer::Account(account) => derive_address(account),
+                Signer::Minter => panic!("BUG: the minter does not sign sweeps"),
+            })
+            .collect();
+        assert_eq!(tx.message.account_keys[..2], signer_addresses);
+        let signatures: Vec<_> = signers
             .iter()
-            .find(|ix| tx.message.account_keys[ix.accounts[0] as usize] == source_2)
-            .expect("other source instruction not found");
-        assert_eq!(
-            transfer_amount_from_instruction(other_instruction),
-            amount_2
-        );
-
-        // Verify signatures are at correct positions
-        let pos_1 = tx
-            .message
-            .account_keys
-            .iter()
-            .position(|k| *k == source_1)
-            .unwrap();
-        let pos_2 = tx
-            .message
-            .account_keys
-            .iter()
-            .position(|k| *k == source_2)
-            .unwrap();
-        assert_eq!(tx.signatures[pos_1], account_signature(&account_1));
-        assert_eq!(tx.signatures[pos_2], account_signature(&account_2));
+            .map(|signer| match signer {
+                Signer::Account(account) => account_signature(account),
+                Signer::Minter => panic!("BUG: the minter does not sign sweeps"),
+            })
+            .collect();
+        assert_eq!(tx.signatures, signatures);
     }
 
     #[tokio::test]
     async fn should_fail_when_signing_is_rejected() {
         setup();
-        let source_account = Account {
+        let account = Account {
             owner: Principal::from_slice(&[1]),
             subaccount: None,
         };
-        let blockhash = Hash::new_from_array([0xBB; 32]);
-
-        let runtime =
-            TestCanisterRuntime::new().add_signer(
-                sign_for(&source_account).expect([Err(SignCallError::CallFailed(
-                    CallRejected::with_rejection(4, "signing service unavailable".to_string())
-                        .into(),
-                ))]),
-            );
-
-        let result = create_signed_consolidation_transaction(
-            &runtime,
-            vec![(source_account, 500_000_000)],
-            blockhash,
-        )
-        .await;
-
-        assert!(result.is_err());
-    }
-
-    #[tokio::test]
-    async fn should_fail_when_signing_fails_for_one_of_the_sources() {
-        setup();
-        let account_1 = Account {
-            owner: Principal::from_slice(&[1]),
-            subaccount: None,
-        };
-        let account_2 = Account {
-            owner: Principal::from_slice(&[2]),
-            subaccount: None,
-        };
-        let blockhash = Hash::new_from_array([0xDD; 32]);
-
-        let runtime = TestCanisterRuntime::new()
-            .add_signer(sign_for(&account_1))
-            .add_signer(sign_for(&account_2).expect([Err(SignCallError::CallFailed(
-                CallRejected::with_rejection(5, "canister trapped".to_string()).into(),
-            ))]));
-
-        let result = create_signed_consolidation_transaction(
-            &runtime,
-            vec![(account_1, 100_000_000), (account_2, 100_000_000)],
-            blockhash,
-        )
-        .await;
-
-        assert!(result.is_err());
-    }
-
-    #[tokio::test]
-    async fn should_fail_when_too_many_signatures() {
-        setup();
-        let blockhash = Hash::new_from_array([0xBB; 32]);
-
-        // Create MAX_SIGNATURES + 1 unique sources, exceeding the limit
-        let sources: Vec<(Account, Lamport)> = (0..=MAX_SIGNATURES)
-            .map(|i| {
-                (
-                    Account {
-                        owner: Principal::from_slice(&[i as u8]),
-                        subaccount: None,
-                    },
-                    100_000_000,
-                )
-            })
-            .collect();
+        let sweep = planned_sweep([(0, queued_deposit_of(account, 500_000_000))]);
+        let runtime = TestCanisterRuntime::new().add_signer(sign_for(&account).expect([Err(
+            SignCallError::CallFailed(
+                CallRejected::with_rejection(4, "signing service unavailable".to_string()).into(),
+            ),
+        )]));
 
         let result =
-            create_signed_consolidation_transaction(&expecting_all(&sources), sources, blockhash)
-                .await;
+            sign_sweep_transaction(&runtime, &sweep, Hash::new_from_array([0xBB; 32])).await;
 
-        assert_matches!(
-            result,
-            Err(CreateTransferError::TransactionTooLarge {
-                max: MAX_TX_SIZE,
-                ..
-            })
-        );
-    }
-
-    #[tokio::test]
-    async fn should_not_fail_for_max_signatures() {
-        setup();
-        let blockhash = Hash::new_from_array([0xBB; 32]);
-
-        // Create exactly MAX_SIGNATURES unique sources
-        let sources: Vec<(Account, Lamport)> = (0..MAX_SIGNATURES)
-            .map(|i| {
-                (
-                    Account {
-                        owner: Principal::from_slice(&[i as u8 + 1; 29]),
-                        subaccount: Some([3u8; 32]),
-                    },
-                    u64::MAX,
-                )
-            })
-            .collect();
-
-        let result =
-            create_signed_consolidation_transaction(&expecting_all(&sources), sources, blockhash)
-                .await;
-
-        assert!(result.is_ok());
-    }
-
-    #[tokio::test]
-    async fn should_fail_when_transaction_too_large() {
-        setup();
-        let blockhash = Hash::new_from_array([0xBB; 32]);
-        // MAX_SIGNATURES + 1 unique sources to exceed MAX_TX_SIZE
-        const NUM_SOURCES: usize = MAX_SIGNATURES as usize + 1;
-
-        let sources: Vec<(Account, Lamport)> = (0..NUM_SOURCES)
-            .map(|i| {
-                (
-                    Account {
-                        owner: Principal::from_slice(&[i as u8]),
-                        subaccount: None,
-                    },
-                    100_000_000,
-                )
-            })
-            .collect();
-
-        let result =
-            create_signed_consolidation_transaction(&expecting_all(&sources), sources, blockhash)
-                .await;
-
-        assert_matches!(
-            result,
-            Err(CreateTransferError::TransactionTooLarge {
-                max: MAX_TX_SIZE,
-                ..
-            })
-        );
-    }
-
-    #[tokio::test]
-    #[should_panic(expected = "source accounts must be unique")]
-    async fn should_panic_on_duplicate_accounts() {
-        setup();
-        let account_1 = Account {
-            owner: Principal::from_slice(&[1]),
-            subaccount: None,
-        };
-        let blockhash = Hash::new_from_array([0xAA; 32]);
-
-        let _ = create_signed_consolidation_transaction(
-            &TestCanisterRuntime::new(),
-            vec![(account_1, 100_000_000), (account_1, 300_000_000)],
-            blockhash,
-        )
-        .await;
-    }
-
-    #[tokio::test]
-    async fn should_use_first_source_as_fee_payer() {
-        setup();
-        let account_1 = Account {
-            owner: Principal::from_slice(&[1]),
-            subaccount: None,
-        };
-        let account_2 = Account {
-            owner: Principal::from_slice(&[2]),
-            subaccount: None,
-        };
-        let blockhash = Hash::new_from_array([0xAA; 32]);
-
-        let account_1_address = derive_address(&account_1);
-
-        let runtime = TestCanisterRuntime::new()
-            .add_signer(sign_for(&account_1))
-            .add_signer(sign_for(&account_2));
-        let (tx, _signers) = create_signed_consolidation_transaction(
-            &runtime,
-            vec![(account_1, 100_000_000), (account_2, 200_000_000)],
-            blockhash,
-        )
-        .await
-        .expect("transaction creation should succeed");
-
-        // First source (account_1) is the fee payer (position 0)
-        assert_eq!(tx.message.account_keys[0], account_1_address);
-    }
-
-    #[tokio::test]
-    async fn should_transfer_to_minter_address() {
-        setup();
-        let source_account = Account {
-            owner: Principal::from_slice(&[1]),
-            subaccount: None,
-        };
-        let blockhash = Hash::new_from_array([0xBB; 32]);
-
-        let runtime = TestCanisterRuntime::new().add_signer(sign_for(&source_account));
-        let (tx, _signers) = create_signed_consolidation_transaction(
-            &runtime,
-            vec![(source_account, 500_000_000)],
-            blockhash,
-        )
-        .await
-        .expect("transaction creation should succeed");
-
-        // Target address is the minter's consolidated address
-        assert!(tx.message.account_keys.contains(&MINTER_ADDRESS));
+        assert_matches!(result, Err(CreateTransferError::SigningFailed(_)));
     }
 }
 
 mod batch_withdrawal_tests {
     use super::*;
+    use solana_message::{MessageHeader, compiled_instruction::CompiledInstruction};
 
-    #[tokio::test]
-    async fn should_create_batch_withdrawal_with_single_target() {
-        setup();
-        let target = Address::new_from_array([0xAA; 32]);
-        let amount: Lamport = 500_000_000;
-        let blockhash = Hash::new_from_array([0xBB; 32]);
+    const NONCE_ACCOUNT: Address = Address::new_from_array([0x11; 32]);
+    const TARGET_1: Address = Address::new_from_array([0xAA; 32]);
+    const TARGET_2: Address = Address::new_from_array([0xBB; 32]);
 
-        let (tx, signers) = create_signed_batch_withdrawal_transaction(
-            &minter_signing_once(),
-            &[(target, amount)],
-            blockhash,
+    fn nonce_value() -> Hash {
+        Hash::new_from_array([0xCC; 32])
+    }
+
+    /// Historical withdrawal events replay only if the builder always compiles to the same
+    /// message, so a failure here means a dependency bump broke replay — not that the
+    /// expected message needs updating.
+    #[test]
+    fn should_build_the_recorded_withdrawal_message() {
+        let message = build_batch_withdrawal_message(
+            &MINTER_ADDRESS,
+            &NONCE_ACCOUNT,
+            nonce_value(),
+            &[(TARGET_1, 100), (TARGET_2, 200)],
         )
-        .await
-        .expect("transaction creation should succeed");
+        .expect("the message fits within the transaction size limit");
 
-        assert_eq!(signers, vec![Signer::Minter]);
-        assert_eq!(tx.signatures.len(), 1);
-        assert_eq!(tx.signatures[0], minter_signature());
-        assert_eq!(tx.message.account_keys[0], MINTER_ADDRESS);
-        assert!(tx.message.account_keys.contains(&target));
-        assert_eq!(tx.message.instructions.len(), 1);
-        assert_eq!(tx.message.recent_blockhash, blockhash);
+        assert_eq!(
+            message,
+            Message {
+                header: MessageHeader {
+                    num_required_signatures: 1,
+                    num_readonly_signed_accounts: 0,
+                    num_readonly_unsigned_accounts: 2,
+                },
+                account_keys: vec![
+                    MINTER_ADDRESS,
+                    NONCE_ACCOUNT,
+                    TARGET_1,
+                    TARGET_2,
+                    solana_system_interface::program::ID,
+                    solana_sdk_ids::sysvar::recent_blockhashes::ID,
+                ],
+                recent_blockhash: nonce_value(),
+                instructions: vec![
+                    advance_nonce_instruction(),
+                    transfer_instruction(2, 100),
+                    transfer_instruction(3, 200),
+                ],
+            }
+        );
+    }
+
+    #[test]
+    fn should_fit_a_full_batch_within_the_maximum_transaction_size() {
+        let message = build_batch_withdrawal_message(
+            &MINTER_ADDRESS,
+            &NONCE_ACCOUNT,
+            nonce_value(),
+            &targets(MAX_WITHDRAWALS_PER_NONCE_TX),
+        )
+        .expect("a full batch fits within the transaction size limit");
+
+        let transaction_size = 1 + message.serialize().len() + BYTES_PER_SIGNATURE;
+        assert!(
+            transaction_size <= MAX_TX_SIZE,
+            "transaction size {transaction_size} exceeds {MAX_TX_SIZE}"
+        );
+    }
+
+    #[test]
+    fn should_reject_a_message_exceeding_the_maximum_transaction_size() {
+        const NUM_TARGETS: usize = 25;
+
+        let result = build_batch_withdrawal_message(
+            &MINTER_ADDRESS,
+            &NONCE_ACCOUNT,
+            nonce_value(),
+            &targets(NUM_TARGETS),
+        );
+
+        assert_matches!(
+            result,
+            Err(CreateTransferError::TransactionTooLarge {
+                max: MAX_TX_SIZE,
+                ..
+            })
+        );
+    }
+
+    #[test]
+    fn should_charge_the_fee_reserved_per_batch() {
+        let message = build_batch_withdrawal_message(
+            &MINTER_ADDRESS,
+            &NONCE_ACCOUNT,
+            nonce_value(),
+            &targets(MAX_WITHDRAWALS_PER_NONCE_TX),
+        )
+        .expect("a full batch fits within the transaction size limit");
+
+        assert_eq!(
+            VersionedMessage::Legacy(message).transaction_fee(),
+            BATCH_WITHDRAWAL_TX_FEE
+        );
     }
 
     #[tokio::test]
-    async fn should_create_batch_withdrawal_with_multiple_targets() {
+    async fn should_sign_the_message_verbatim_with_the_minter_key_only() {
         setup();
-        let target_1 = Address::new_from_array([0xAA; 32]);
-        let target_2 = Address::new_from_array([0xBB; 32]);
-        let target_3 = Address::new_from_array([0xCC; 32]);
-        let blockhash = Hash::new_from_array([0xDD; 32]);
-
-        let (tx, signers) = create_signed_batch_withdrawal_transaction(
-            &minter_signing_once(),
-            &[(target_1, 100), (target_2, 200), (target_3, 300)],
-            blockhash,
+        let message = build_batch_withdrawal_message(
+            &MINTER_ADDRESS,
+            &NONCE_ACCOUNT,
+            nonce_value(),
+            &[(TARGET_1, 100)],
         )
-        .await
-        .expect("transaction creation should succeed");
+        .expect("the message fits within the transaction size limit");
 
-        // Only the minter signs
-        assert_eq!(signers, vec![Signer::Minter]);
-        assert_eq!(tx.signatures.len(), 1);
+        let transaction = sign_batch_withdrawal_message(&minter_signing_once(), message.clone())
+            .await
+            .expect("signing should succeed");
 
-        // Fee payer is at position 0
-        assert_eq!(tx.message.account_keys[0], MINTER_ADDRESS);
-
-        // All targets are in account keys
-        assert!(tx.message.account_keys.contains(&target_1));
-        assert!(tx.message.account_keys.contains(&target_2));
-        assert!(tx.message.account_keys.contains(&target_3));
-
-        // One instruction per target
-        assert_eq!(tx.message.instructions.len(), 3);
+        assert_eq!(transaction.signatures, vec![minter_signature()]);
+        assert_eq!(transaction.message, message);
     }
 
     #[tokio::test]
     async fn should_fail_when_signing_fails() {
         setup();
-        let target = Address::new_from_array([0xAA; 32]);
-        let blockhash = Hash::new_from_array([0xBB; 32]);
+        let message = build_batch_withdrawal_message(
+            &MINTER_ADDRESS,
+            &NONCE_ACCOUNT,
+            nonce_value(),
+            &[(TARGET_1, 100)],
+        )
+        .expect("the message fits within the transaction size limit");
 
         let runtime = TestCanisterRuntime::new().add_signer(sign_as_minter().expect([Err(
             SignCallError::CallFailed(
@@ -469,87 +274,49 @@ mod batch_withdrawal_tests {
             ),
         )]));
 
-        let result =
-            create_signed_batch_withdrawal_transaction(&runtime, &[(target, 100)], blockhash).await;
+        let result = sign_batch_withdrawal_message(&runtime, message).await;
 
         assert!(result.is_err());
     }
 
-    #[tokio::test]
-    async fn should_create_batch_withdrawal_at_max_capacity() {
-        setup();
-        let blockhash = Hash::new_from_array([0xDD; 32]);
-
-        let targets: Vec<(Address, Lamport)> = (0..MAX_WITHDRAWALS_PER_TX)
+    fn targets(count: usize) -> Vec<(Address, Lamport)> {
+        (0..count)
             .map(|i| {
-                let mut addr = [0u8; 32];
-                addr[0] = i as u8;
-                addr[1] = (i >> 8) as u8;
-                (Address::new_from_array(addr), 1_000_000)
+                let mut address = [0u8; 32];
+                address[0] = i as u8;
+                address[1] = (i >> 8) as u8;
+                (Address::new_from_array(address), 1_000_000)
             })
-            .collect();
-
-        let (tx, signers) =
-            create_signed_batch_withdrawal_transaction(&minter_signing_once(), &targets, blockhash)
-                .await
-                .expect("transaction creation should succeed at max capacity");
-
-        assert_eq!(signers, vec![Signer::Minter]);
-        assert_eq!(tx.signatures.len(), 1);
-        assert_eq!(tx.message.instructions.len(), MAX_WITHDRAWALS_PER_TX);
+            .collect()
     }
 
-    #[tokio::test]
-    async fn should_charge_the_fee_reserved_per_batch() {
-        setup();
-        let blockhash = Hash::new_from_array([0xDD; 32]);
-        let targets: Vec<(Address, Lamport)> = (0..MAX_WITHDRAWALS_PER_TX)
-            .map(|i| {
-                let mut addr = [0u8; 32];
-                addr[0] = i as u8;
-                addr[1] = (i >> 8) as u8;
-                (Address::new_from_array(addr), 1_000_000)
-            })
-            .collect();
-
-        let (tx, _signers) =
-            create_signed_batch_withdrawal_transaction(&minter_signing_once(), &targets, blockhash)
-                .await
-                .expect("transaction creation should succeed at max capacity");
-
-        assert_eq!(
-            VersionedMessage::Legacy(tx.message).transaction_fee(),
-            BATCH_WITHDRAWAL_TX_FEE
-        );
+    fn advance_nonce_instruction() -> CompiledInstruction {
+        const ADVANCE_NONCE_ACCOUNT_DISCRIMINANT: u32 = 4;
+        const SYSTEM_PROGRAM_INDEX: u8 = 4;
+        const NONCE_ACCOUNT_INDEX: u8 = 1;
+        const RECENT_BLOCKHASHES_SYSVAR_INDEX: u8 = 5;
+        const MINTER_INDEX: u8 = 0;
+        CompiledInstruction {
+            program_id_index: SYSTEM_PROGRAM_INDEX,
+            accounts: vec![
+                NONCE_ACCOUNT_INDEX,
+                RECENT_BLOCKHASHES_SYSVAR_INDEX,
+                MINTER_INDEX,
+            ],
+            data: ADVANCE_NONCE_ACCOUNT_DISCRIMINANT.to_le_bytes().to_vec(),
+        }
     }
 
-    #[tokio::test]
-    async fn should_return_error_when_exceeding_tx_size_limit() {
-        setup();
-        let blockhash = Hash::new_from_array([0xDD; 32]);
-
-        // Each additional target adds ~49 bytes (32-byte key + 17-byte instruction).
-        // With a base of ~166 bytes and MAX_TX_SIZE = 1232, the limit is around 21-22.
-        // Use 25 targets to reliably exceed the limit.
-        const NUM_TARGETS: usize = 25;
-        let targets: Vec<(Address, Lamport)> = (0..NUM_TARGETS)
-            .map(|i| {
-                let mut addr = [0u8; 32];
-                addr[0] = i as u8;
-                (Address::new_from_array(addr), 1_000_000)
-            })
-            .collect();
-
-        let result =
-            create_signed_batch_withdrawal_transaction(&minter_signing_once(), &targets, blockhash)
-                .await;
-
-        assert_matches!(
-            result,
-            Err(CreateTransferError::TransactionTooLarge {
-                max: MAX_TX_SIZE,
-                ..
-            })
-        );
+    fn transfer_instruction(to_index: u8, amount: Lamport) -> CompiledInstruction {
+        const TRANSFER_DISCRIMINANT: u32 = 2;
+        const SYSTEM_PROGRAM_INDEX: u8 = 4;
+        const MINTER_INDEX: u8 = 0;
+        let mut data = TRANSFER_DISCRIMINANT.to_le_bytes().to_vec();
+        data.extend_from_slice(&amount.to_le_bytes());
+        CompiledInstruction {
+            program_id_index: SYSTEM_PROGRAM_INDEX,
+            accounts: vec![MINTER_INDEX, to_index],
+            data,
+        }
     }
 }

@@ -27,41 +27,13 @@ fn apply_state_transition(state: &mut State, payload: &EventType, timestamp: u64
         EventType::AcceptedWithdrawalRequest(request) => {
             state.process_accepted_withdrawal(request, timestamp);
         }
-        EventType::AcceptedManualDeposit {
-            deposit_id,
-            deposit_amount,
-            amount_to_mint,
-        } => {
-            state.process_accepted_deposit(deposit_id, deposit_amount, amount_to_mint);
-        }
-        EventType::QuarantinedDeposit(deposit_id) => state.process_quarantined_deposit(deposit_id),
-        EventType::Minted {
-            deposit_id,
-            mint_block_index,
-        } => {
-            state.process_mint(deposit_id, mint_block_index);
-        }
         EventType::SubmittedTransaction {
             signature,
             message,
             signers,
             purpose,
-            block_height,
         } => {
-            state.process_transaction_submitted(
-                signature,
-                message,
-                signers,
-                purpose,
-                *block_height,
-            );
-        }
-        EventType::ResubmittedTransaction {
-            old_signature,
-            new_signature,
-            new_block_height,
-        } => {
-            state.process_transaction_resubmitted(old_signature, new_signature, *new_block_height);
+            state.process_transaction_submitted(signature, message, signers, purpose, timestamp);
         }
         EventType::SucceededTransaction { signature } => {
             state.process_transaction_succeeded(signature);
@@ -107,6 +79,13 @@ fn apply_state_transition(state: &mut State, payload: &EventType, timestamp: u64
         }
         EventType::QuarantinedPendingMint { deposit_id } => {
             state.process_quarantined_pending_mint(*deposit_id);
+        }
+        EventType::CreatedWithdrawalTransaction {
+            burn_indices,
+            nonce_account,
+            nonce_value,
+        } => {
+            state.process_transaction_created(burn_indices, nonce_account, *nonce_value);
         }
     }
 }
