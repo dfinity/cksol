@@ -1,7 +1,7 @@
 use crate::{
     constants::{
         GET_ACCOUNT_INFO_CYCLES, GET_BALANCE_CYCLES, GET_RECENT_BLOCK_MAX_TRIES,
-        GET_SIGNATURE_STATUSES_CYCLES, GET_TRANSACTION_CYCLES, MAX_HTTP_OUTCALL_RESPONSE_BYTES,
+        GET_SIGNATURE_STATUSES_CYCLES, GET_TRANSACTION_CYCLES,
     },
     runtime::CanisterRuntime,
     state::read_state,
@@ -47,7 +47,6 @@ pub async fn get_transaction<R: CanisterRuntime>(
         .with_encoding(GetTransactionEncoding::Base64)
         .with_commitment(CommitmentLevel::Finalized)
         .with_max_supported_transaction_version(0)
-        .with_response_size_estimate(MAX_HTTP_OUTCALL_RESPONSE_BYTES)
         .with_cycles(GET_TRANSACTION_CYCLES)
         .try_send()
         .await;
@@ -374,7 +373,6 @@ pub async fn get_signature_statuses<R: CanisterRuntime>(
         .get_signature_statuses(signatures)
         .map_err(GetSignatureStatusesError::RpcError)?
         .with_search_transaction_history(true)
-        .with_response_size_estimate(MAX_HTTP_OUTCALL_RESPONSE_BYTES)
         .with_cycles(GET_SIGNATURE_STATUSES_CYCLES)
         .try_send()
         .await;

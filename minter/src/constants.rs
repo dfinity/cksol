@@ -34,11 +34,6 @@ pub const MAX_PENDING_MINTS_PER_ROUND: usize = 10;
 /// pending mint older than that is quarantined instead of retried.
 pub const LEDGER_DEDUPLICATION_WINDOW: Duration = Duration::from_hours(24);
 
-/// Matches the ICP HTTPS outcall response limit for variable-length RPC calls
-/// such as `getTransaction` and `getSignatureStatuses`:
-/// https://docs.internetcomputer.org/references/ic-interface-spec#ic-http_request
-pub const MAX_HTTP_OUTCALL_RESPONSE_BYTES: u64 = 2_000_000;
-
 /// Cycles to attach for `getTransaction` RPC calls.
 pub const GET_TRANSACTION_CYCLES: u128 = 50_000_000_000;
 
