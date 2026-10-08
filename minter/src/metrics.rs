@@ -105,12 +105,12 @@ pub fn encode_metrics(w: &mut MetricsEncoder<Vec<u8>>, s: &State) -> std::io::Re
     w.encode_gauge(
         "oldest_in_flight_deposit_age_seconds",
         age_seconds(s.deposits().oldest_in_flight_queued_at()).metric_value(),
-        "Age of the oldest in-flight deposit in seconds, from queued until minted. Returns 0 if there are no in-flight deposits.",
+        "Age of the oldest in-flight deposit in seconds, from queued until minted, dropped or quarantined. Returns 0 if there are no in-flight deposits.",
     )?;
     w.encode_gauge(
         "oldest_pending_mint_age_seconds",
         age_seconds(s.deposits().oldest_pending_mint_created_at()).metric_value(),
-        "Age of the oldest pending ckSOL mint in seconds, from the created_at_time the ledger deduplicates it by, counting up to the deduplication window. Returns 0 if there are no pending mints.",
+        "Age of the oldest pending ckSOL mint in seconds, from the created_at_time the ledger deduplicates it by. Returns 0 if there are no pending mints.",
     )?;
     let mut failed_credit_attempts = w.counter_vec(
         "failed_credit_attempts",
