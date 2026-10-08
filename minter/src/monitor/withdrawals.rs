@@ -253,7 +253,7 @@ async fn finalize_landed_withdrawal<R: CanisterRuntime>(
         }
         Ok(None) => {
             log!(
-                Priority::Info,
+                Priority::Error,
                 "Withdrawal transaction {signature} landed but was not found, retrying next round"
             );
             return Finalization::UnresolvedOutcome;
