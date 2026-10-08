@@ -96,15 +96,17 @@ pub enum FailedMintReason {
     Expired,
     Rejected,
     LedgerError,
+    CreatedInFuture,
     CallError,
     UnknownOutcome,
 }
 
 impl FailedMintReason {
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::Expired,
         Self::Rejected,
         Self::LedgerError,
+        Self::CreatedInFuture,
         Self::CallError,
         Self::UnknownOutcome,
     ];
@@ -114,6 +116,7 @@ impl FailedMintReason {
             Self::Expired => "expired",
             Self::Rejected => "rejected",
             Self::LedgerError => "ledger_error",
+            Self::CreatedInFuture => "created_in_future",
             Self::CallError => "call_error",
             Self::UnknownOutcome => "unknown_outcome",
         }

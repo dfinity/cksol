@@ -133,7 +133,7 @@ async fn should_retry_after_transient_failure_with_exactly_the_same_arguments() 
                     ledger_time: 0,
                 }))
             },
-            FailedMintReason::LedgerError,
+            FailedMintReason::CreatedInFuture,
         ),
         (
             "the call to the ledger fails",

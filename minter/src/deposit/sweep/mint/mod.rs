@@ -143,15 +143,22 @@ async fn process_pending_mint<R: CanisterRuntime>(
             record_quarantined_pending_mint(runtime, deposit_id);
         }
         Ok(Err(
-            transient @ (TransferError::TemporarilyUnavailable
-            | TransferError::GenericError { .. }
-            | TransferError::CreatedInFuture { .. }),
+            transient
+            @ (TransferError::TemporarilyUnavailable | TransferError::GenericError { .. }),
         )) => {
             ScopeGuard::into_inner(quarantine_unless_defused);
             record_failed_mint_attempt(FailedMintReason::LedgerError);
             log!(
                 Priority::Info,
                 "Failed to mint deposit {deposit_id}, retrying on the next round: {transient:?}"
+            );
+        }
+        Ok(Err(clock_skew @ TransferError::CreatedInFuture { .. })) => {
+            ScopeGuard::into_inner(quarantine_unless_defused);
+            record_failed_mint_attempt(FailedMintReason::CreatedInFuture);
+            log!(
+                Priority::Info,
+                "Failed to mint deposit {deposit_id}, retrying on the next round: {clock_skew:?}"
             );
         }
         Err(ic_error) => {
