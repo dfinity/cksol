@@ -1,5 +1,5 @@
 use crate::state::{QuarantineCause, State};
-use crate::storage::{self, FailedCreditReason, FailedMintReason};
+use crate::storage::{self, FailedCreditReason, FailedMintReason, UndecidedWithdrawalReason};
 use ic_metrics_encoder::MetricsEncoder;
 
 const WASM_PAGE_SIZE_IN_BYTES: usize = 65536;
@@ -147,6 +147,16 @@ pub fn encode_metrics(w: &mut MetricsEncoder<Vec<u8>>, s: &State) -> std::io::Re
         storage::with_unstable_metrics(|m| m.withdrawal_transaction_rebroadcasts).metric_value(),
         "Number of re-broadcast attempts of withdrawal transactions since the last upgrade.",
     )?;
+    let mut undecided_withdrawal_transactions = w.gauge_vec(
+        "undecided_withdrawal_transactions",
+        "Number of in-flight withdrawal transactions left undecided by the last finalization round, by reason: a stale nonce read, a failed nonce read, or a nonce advance whose outcome could not be fetched.",
+    )?;
+    for reason in UndecidedWithdrawalReason::ALL {
+        undecided_withdrawal_transactions = undecided_withdrawal_transactions.value(
+            &[("reason", reason.label())],
+            storage::undecided_withdrawal_transaction_count(reason).metric_value(),
+        )?;
+    }
     Ok(())
 }
 

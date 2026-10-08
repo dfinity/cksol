@@ -37,3 +37,24 @@ pub enum ReadNonceError {
         minter_address: Address,
     },
 }
+
+impl ReadNonceError {
+    /// Whether the read failed because the RPC call did not produce an agreed response,
+    /// as opposed to an account that is not a nonce account of the minter.
+    pub fn is_rpc_failure(&self) -> bool {
+        match self {
+            ReadNonceError::GetNonceAccount(
+                GetNonceAccountError::IcError(_)
+                | GetNonceAccountError::RpcError(_)
+                | GetNonceAccountError::InconsistentRpcResults,
+            ) => true,
+            ReadNonceError::GetNonceAccount(
+                GetNonceAccountError::AccountNotFound
+                | GetNonceAccountError::UnexpectedAccountMetadata { .. }
+                | GetNonceAccountError::NotAnInitializedNonceAccount(_)
+                | GetNonceAccountError::LegacyNonceAccount,
+            )
+            | ReadNonceError::ForeignAuthority { .. } => false,
+        }
+    }
+}

@@ -39,6 +39,7 @@ pub(crate) struct Metrics {
     pub failed_credit_attempts: BTreeMap<FailedCreditReason, u64>,
     pub failed_mint_attempts: BTreeMap<FailedMintReason, u64>,
     pub withdrawal_transaction_rebroadcasts: u64,
+    pub undecided_withdrawal_transactions: BTreeMap<UndecidedWithdrawalReason, u64>,
 }
 
 impl Metrics {
@@ -48,6 +49,7 @@ impl Metrics {
             failed_credit_attempts: BTreeMap::new(),
             failed_mint_attempts: BTreeMap::new(),
             withdrawal_transaction_rebroadcasts: 0,
+            undecided_withdrawal_transactions: BTreeMap::new(),
         }
     }
 }
@@ -129,6 +131,45 @@ pub(crate) fn record_failed_mint_attempt(reason: FailedMintReason) {
 
 pub(crate) fn failed_mint_attempt_count(reason: FailedMintReason) -> u64 {
     with_unstable_metrics(|m| m.failed_mint_attempts.get(&reason).copied().unwrap_or(0))
+}
+
+/// Why an in-flight withdrawal transaction was left undecided by a finalization round.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum UndecidedWithdrawalReason {
+    StaleNonce,
+    NonceReadFailed,
+    UnresolvedOutcome,
+}
+
+impl UndecidedWithdrawalReason {
+    pub const ALL: [Self; 3] = [
+        Self::StaleNonce,
+        Self::NonceReadFailed,
+        Self::UnresolvedOutcome,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::StaleNonce => "stale_nonce",
+            Self::NonceReadFailed => "nonce_read_failed",
+            Self::UnresolvedOutcome => "unresolved_outcome",
+        }
+    }
+}
+
+pub(crate) fn set_undecided_withdrawal_transactions(
+    counts: BTreeMap<UndecidedWithdrawalReason, u64>,
+) {
+    with_unstable_metrics_mut(|m| m.undecided_withdrawal_transactions = counts);
+}
+
+pub(crate) fn undecided_withdrawal_transaction_count(reason: UndecidedWithdrawalReason) -> u64 {
+    with_unstable_metrics(|m| {
+        m.undecided_withdrawal_transactions
+            .get(&reason)
+            .copied()
+            .unwrap_or(0)
+    })
 }
 
 /// Appends the event to the event log.

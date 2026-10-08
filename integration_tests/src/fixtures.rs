@@ -48,6 +48,11 @@ const MOCK_SLOT: u64 = 100_000_000;
 const SUBMITTED_BLOCKHASH: &str = "4sGjMW1sUnHzSxGspuhpqLDx6wiyjNtZAMdL4VZHirAn";
 const SUBMITTED_SIGNATURE: &str =
     "5VERv8NMvzbJMEkV8xnrLkEaWRtSz9CosKDYjCJjBRnbJLgp8uirBgmQpjKhoR4tjF3ZpRzrFmBV6UjKdiSZkQUW";
+/// Seed of the nonce value the mocked nonce account stores when the withdrawal timer reads it.
+const SUBMITTED_NONCE_SEED: [u8; 32] = [0x4E; 32];
+/// Seed of the nonce value the mocked nonce account stores once the submitted withdrawal
+/// transaction has advanced it.
+const ADVANCED_NONCE_SEED: [u8; 32] = [0x4F; 32];
 /// Blockhash the mocks report for a block a timer only reads the height of.
 const IGNORED_BLOCKHASH: &str = "CzBVNFJkh7WkQDfJUiDjLc7kPrJd8kR2yiCvwBUhSe7Y";
 
@@ -154,7 +159,7 @@ impl MockBuilder {
     pub fn get_nonce_account(self) -> Self {
         self.expect(
             get_account_info_request(),
-            get_account_info_nonce_response(),
+            get_account_info_nonce_response(SUBMITTED_NONCE_SEED),
         )
     }
 
@@ -167,11 +172,19 @@ impl MockBuilder {
         )
     }
 
-    /// Mocks for `finalize_transactions` finding only in-flight withdrawal
-    /// transactions, which carry a durable nonce and need no current block:
-    /// a single `getSignatureStatuses` reporting them as finalized.
-    pub fn finalize_withdrawal_transaction(self, signature: &Signature) -> Self {
-        self.check_signature_statuses(signature, get_signature_statuses_finalized_response())
+    /// Mocks for `finalize_transactions` finding only the given in-flight withdrawal
+    /// transaction, which carries a durable nonce and needs no current block:
+    /// `getAccountInfo` reporting its nonce account advanced → `getTransaction`
+    /// reporting it as succeeded.
+    pub fn finalize_withdrawal_transaction(self, withdrawal: &Transaction) -> Self {
+        self.expect(
+            get_account_info_request(),
+            get_account_info_nonce_response(ADVANCED_NONCE_SEED),
+        )
+        .expect(
+            get_transaction_request(&withdrawal.signatures[0]),
+            withdrawal_transaction_response(withdrawal),
+        )
     }
 
     /// Mocks for `finalize_transactions` finding the pending transaction with the given
@@ -263,17 +276,49 @@ fn sweep_transaction_response(sweep: &Transaction, sweepable_amount: Lamport) ->
     }))
 }
 
+/// JSON-RPC `getTransaction` response for the given withdrawal transaction, finalized without
+/// error.
+fn withdrawal_transaction_response(withdrawal: &Transaction) -> JsonRpcResponse {
+    let encoded_transaction = STANDARD.encode(
+        bincode::serialize(withdrawal).expect("serializing the transaction should succeed"),
+    );
+    JsonRpcResponse::from(json!({
+        "jsonrpc": "2.0",
+        "result": {
+            "blockTime": 1700000000_i64,
+            "meta": {
+                "computeUnitsConsumed": 450,
+                "err": null,
+                "fee": FEE_PER_SIGNATURE,
+                "innerInstructions": [],
+                "loadedAddresses": { "readonly": [], "writable": [] },
+                "logMessages": [],
+                "postBalances": [],
+                "postTokenBalances": [],
+                "preBalances": [],
+                "preTokenBalances": [],
+                "rewards": [],
+                "status": { "Ok": null }
+            },
+            "slot": 350_000_000_u64,
+            "transaction": [encoded_transaction, "base64"],
+            "version": "legacy"
+        },
+        "id": 1
+    }))
+}
+
 fn get_account_info_request() -> JsonRpcRequestMatcher {
     JsonRpcRequestMatcher::with_method("getAccountInfo")
 }
 
-fn get_account_info_nonce_response() -> JsonRpcResponse {
+fn get_account_info_nonce_response(nonce_seed: [u8; 32]) -> JsonRpcResponse {
     JsonRpcResponse::from(json!({
         "jsonrpc": "2.0",
         "result": {
             "context": { "apiVersion": "2.0.15", "slot": 341_197_053 },
             "value": {
-                "data": [nonce_account_data(), "base64"],
+                "data": [nonce_account_data(nonce_seed), "base64"],
                 "executable": false,
                 "lamports": 1_447_680,
                 "owner": "11111111111111111111111111111111",
@@ -285,10 +330,10 @@ fn get_account_info_nonce_response() -> JsonRpcResponse {
     }))
 }
 
-fn nonce_account_data() -> String {
+fn nonce_account_data(nonce_seed: [u8; 32]) -> String {
     let nonce_account = Versions::new(State::Initialized(Data::new(
         MINTER_ADDRESS,
-        DurableNonce::from_blockhash(&Hash::from([0x4E; 32])),
+        DurableNonce::from_blockhash(&Hash::from(nonce_seed)),
         FEE_PER_SIGNATURE,
     )));
     STANDARD.encode(

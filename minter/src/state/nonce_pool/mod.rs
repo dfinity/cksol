@@ -84,6 +84,23 @@ impl DurableNoncePool {
             .is_some_and(|account| account.seen_nonce_values.contains(nonce_value))
     }
 
+    /// Classifies a finalized read of `address` while the account is bound to an
+    /// in-flight transaction carrying `bound_nonce_value`.
+    pub fn classify_read(
+        &self,
+        address: &Address,
+        bound_nonce_value: &Hash,
+        read_nonce_value: &Hash,
+    ) -> NonceRead {
+        if read_nonce_value == bound_nonce_value {
+            NonceRead::Unchanged
+        } else if self.has_seen(address, read_nonce_value) {
+            NonceRead::Stale
+        } else {
+            NonceRead::Advanced
+        }
+    }
+
     pub fn addresses(&self) -> impl Iterator<Item = &Address> {
         self.accounts.keys()
     }
@@ -128,6 +145,17 @@ impl NonceAccount {
     fn is_free(&self) -> bool {
         self.state == NonceAccountState::Free
     }
+}
+
+/// What a finalized read of a nonce account bound to an in-flight transaction proves.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NonceRead {
+    /// The account still stores the bound nonce value: the transaction has not landed.
+    Unchanged,
+    /// The account stores a value bound to an earlier transaction: the response lags behind.
+    Stale,
+    /// The account stores a value the minter never bound: the transaction has landed.
+    Advanced,
 }
 
 /// The lifecycle state of a durable nonce account in the pool.

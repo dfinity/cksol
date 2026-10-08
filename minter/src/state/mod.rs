@@ -46,7 +46,7 @@ pub use deposits::{
     QueuedDeposit, SettledSweep, Sweep, SweepMismatch, SweepRecoveryError, SweepSettlementError,
     Sweeps, SweptDeposit, Transfer, UnreadableOutcome,
 };
-pub use nonce_pool::{DurableNoncePool, NoncePoolError};
+pub use nonce_pool::{DurableNoncePool, NoncePoolError, NonceRead};
 
 thread_local! {
     static STATE: RefCell<Option<State>> = RefCell::default();
