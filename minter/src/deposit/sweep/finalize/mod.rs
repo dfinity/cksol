@@ -54,7 +54,7 @@ pub async fn credit_finalized_sweeps<R: CanisterRuntime>(runtime: &R) -> bool {
             Ok(Some(outcome)) => outcome,
             Ok(None) => {
                 log!(
-                    Priority::Info,
+                    Priority::Error,
                     "Finalized sweep {signature} was not returned by getTransaction, retrying later"
                 );
                 record_failed_credit_attempt(FailedCreditReason::NotFound);
@@ -85,7 +85,7 @@ pub async fn credit_finalized_sweeps<R: CanisterRuntime>(runtime: &R) -> bool {
             },
             Err(SweepSettlementError::Unreadable(e)) => {
                 log!(
-                    Priority::Info,
+                    Priority::Error,
                     "Could not read the outcome of sweep {signature}: {e}, retrying later"
                 );
                 record_failed_credit_attempt(FailedCreditReason::Unreadable);
