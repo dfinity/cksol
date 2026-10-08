@@ -1,27 +1,45 @@
-use super::{signer::MockSchnorrSigner, stubs::Stubs};
-use crate::{runtime::CanisterRuntime, signer::SchnorrSigner};
-use candid::{CandidType, Principal};
+use super::{
+    confirmed_block,
+    signer::{MockSchnorrSigner, SignerExpectation, sign_for},
+    stubs::Stubs,
+};
+use crate::{
+    constants::GET_RECENT_BLOCK_MAX_TRIES, runtime::CanisterRuntime, signer::SchnorrSigner,
+};
+use async_trait::async_trait;
+use candid::{
+    CandidType, Principal,
+    utils::{ArgumentDecoder, ArgumentEncoder, decode_args, encode_args},
+};
 use ic_canister_runtime::{IcError, Runtime, StubRuntime};
-use ic_cdk_management_canister::{SchnorrPublicKeyArgs, SchnorrPublicKeyResult, SignCallError};
+use ic_cdk::call::{CallPerformFailed, Error as CallError};
+use ic_cdk_management_canister::{SchnorrPublicKeyArgs, SchnorrPublicKeyResult};
+use icrc_ledger_types::icrc1::account::Account;
+use serde::de::DeserializeOwned;
+use sol_rpc_types::{
+    MultiRpcResult, RpcConfig, RpcResult, RpcSources, SendTransactionParams, Signature, Slot,
+};
 use std::{
     future::Future,
     sync::{Arc, Mutex},
     time::Duration,
 };
+use tokio::task::yield_now;
 
 pub const TEST_CANISTER_ID: Principal = Principal::from_slice(&[0xCA; 10]);
 
 #[derive(Clone, Default)]
 pub struct TestCanisterRuntime {
-    inter_canister_call_runtime: StubRuntime,
+    inter_canister_call_runtime: RecordingStubRuntime,
     signer: MockSchnorrSigner,
     times: Stubs<u64>,
-    instruction_counts: Stubs<u64>,
-    msg_cycles_accept: Stubs<u128>,
+    expects_charges: bool,
+    msg_cycles_accepted: Arc<Mutex<Vec<u128>>>,
     msg_cycles_available: Stubs<u128>,
     msg_cycles_refunded: Stubs<u128>,
-    set_timer_call_count: Arc<Mutex<usize>>,
-    schnorr_public_key_results: Stubs<SchnorrPublicKeyResult>,
+    set_timer_delays: Arc<Mutex<Vec<Duration>>>,
+    schnorr_public_key_results: Stubs<Result<SchnorrPublicKeyResult, CallError>>,
+    schnorr_public_key_call_count: Arc<Mutex<usize>>,
 }
 
 impl TestCanisterRuntime {
@@ -29,20 +47,68 @@ impl TestCanisterRuntime {
         Self::default()
     }
 
+    /// Registers the mocks for one transaction paid for by `fee_payer` and submitted under
+    /// `transaction_signature`. See [`TransactionBuilder`].
+    pub fn transaction_builder(
+        self,
+        fee_payer: Account,
+        transaction_signature: solana_signature::Signature,
+    ) -> TransactionBuilder {
+        TransactionBuilder::new(self, fee_payer, transaction_signature)
+    }
+
     pub fn add_stub_response<Out: CandidType>(mut self, response: Out) -> Self {
-        self.inter_canister_call_runtime =
-            self.inter_canister_call_runtime.add_stub_response(response);
+        self.inter_canister_call_runtime.stub = self
+            .inter_canister_call_runtime
+            .stub
+            .add_stub_response(response);
         self
     }
 
     pub fn add_stub_error(mut self, error: IcError) -> Self {
-        self.inter_canister_call_runtime = self.inter_canister_call_runtime.add_stub_error(error);
+        self.inter_canister_call_runtime.stub =
+            self.inter_canister_call_runtime.stub.add_stub_error(error);
         self
     }
 
-    pub fn with_time(mut self, timestamp: u64) -> Self {
-        self.times = self.times.add(timestamp);
-        self
+    /// The inter-canister update calls made through this runtime, in call order.
+    pub fn sent_update_calls(&self) -> Vec<SentUpdateCall> {
+        self.inter_canister_call_runtime
+            .sent_update_calls
+            .lock()
+            .unwrap()
+            .clone()
+    }
+
+    /// The parameters of the `sendTransaction` calls made through this runtime, in call order.
+    pub fn sent_transactions(&self) -> Vec<SendTransactionParams> {
+        self.sent_update_calls()
+            .iter()
+            .filter(|call| call.method == "sendTransaction")
+            .map(|call| {
+                let (_sources, _config, params): (
+                    RpcSources,
+                    Option<RpcConfig>,
+                    SendTransactionParams,
+                ) = call.args();
+                params
+            })
+            .collect()
+    }
+
+    pub fn add_recent_block(mut self, result: RpcResult<Slot>) -> Self {
+        match result {
+            Ok(slot) => self
+                .add_stub_response(MultiRpcResult::Consistent(Ok(slot)))
+                .add_stub_response(MultiRpcResult::Consistent(Ok(confirmed_block()))),
+            Err(error) => {
+                for _ in 0..GET_RECENT_BLOCK_MAX_TRIES.get() {
+                    self = self
+                        .add_stub_response(MultiRpcResult::<Slot>::Consistent(Err(error.clone())));
+                }
+                self
+            }
+        }
     }
 
     pub fn add_times<I>(mut self, times: I) -> Self
@@ -55,14 +121,22 @@ impl TestCanisterRuntime {
         self
     }
 
-    pub fn with_increasing_time(mut self) -> Self {
-        self.times = (0..).into();
+    pub fn with_increasing_time(self) -> Self {
+        self.with_increasing_time_from(0)
+    }
+
+    pub fn with_increasing_time_from(mut self, start: u64) -> Self {
+        self.times = (start..).into();
         self
     }
 
-    pub fn add_msg_cycles_accept(mut self, value: u128) -> Self {
-        self.msg_cycles_accept = self.msg_cycles_accept.add(value);
+    pub fn expecting_charges(mut self) -> Self {
+        self.expects_charges = true;
         self
+    }
+
+    pub fn msg_cycles_accepted(&self) -> Vec<u128> {
+        self.msg_cycles_accepted.lock().unwrap().clone()
     }
 
     pub fn add_msg_cycles_available(mut self, value: u128) -> Self {
@@ -75,24 +149,33 @@ impl TestCanisterRuntime {
         self
     }
 
-    pub fn add_signature(mut self, signature: [u8; 64]) -> Self {
-        self.signer = self.signer.add_signature(signature);
-        self
-    }
-
-    pub fn add_schnorr_signing_error(mut self, error: SignCallError) -> Self {
-        self.signer = self.signer.add_response(Err(error));
+    pub fn add_signer(mut self, expectation: SignerExpectation) -> Self {
+        self.signer = self.signer.add_signer(expectation);
         self
     }
 
     pub fn with_schnorr_public_key(mut self, result: SchnorrPublicKeyResult) -> Self {
-        self.schnorr_public_key_results = self.schnorr_public_key_results.add(result);
+        self.schnorr_public_key_results = self.schnorr_public_key_results.add(Ok(result));
         self
     }
 
-    #[cfg(any(test, not(feature = "canbench-rs")))]
+    pub fn with_schnorr_public_key_call_failure(mut self) -> Self {
+        self.schnorr_public_key_results = self
+            .schnorr_public_key_results
+            .add(Err(CallPerformFailed.into()));
+        self
+    }
+
     pub(crate) fn set_timer_call_count(&self) -> usize {
-        *self.set_timer_call_count.lock().unwrap()
+        self.set_timer_delays().len()
+    }
+
+    pub(crate) fn set_timer_delays(&self) -> Vec<Duration> {
+        self.set_timer_delays.lock().unwrap().clone()
+    }
+
+    pub(crate) fn schnorr_public_key_call_count(&self) -> usize {
+        *self.schnorr_public_key_call_count.lock().unwrap()
     }
 }
 
@@ -115,11 +198,17 @@ impl CanisterRuntime for TestCanisterRuntime {
     }
 
     fn instruction_counter(&self) -> u64 {
-        self.instruction_counts.next()
+        unimplemented!("TestCanisterRuntime does not model the instruction counter")
     }
 
     fn msg_cycles_accept(&self, amount: u128) -> u128 {
-        assert_eq!(self.msg_cycles_accept.next(), amount);
+        assert!(
+            self.expects_charges,
+            "a test that does not expect the caller to be charged must not accept cycles, \
+             but {amount} cycles were accepted: call \
+             TestCanisterRuntime::expecting_charges() to opt in to being charged"
+        );
+        self.msg_cycles_accepted.lock().unwrap().push(amount);
         amount
     }
 
@@ -131,17 +220,126 @@ impl CanisterRuntime for TestCanisterRuntime {
         self.msg_cycles_refunded.next()
     }
 
-    fn set_timer<F, Fut>(&self, _delay: Duration, _f: F) -> ic_cdk_timers::TimerId
+    fn set_timer<F, Fut>(&self, delay: Duration, _f: F) -> ic_cdk_timers::TimerId
     where
         Self: Sized,
         F: FnOnce(Self) -> Fut + 'static,
         Fut: Future<Output = ()> + 'static,
     {
-        *self.set_timer_call_count.lock().unwrap() += 1;
+        self.set_timer_delays.lock().unwrap().push(delay);
         Default::default()
     }
 
-    async fn schnorr_public_key(&self, _args: SchnorrPublicKeyArgs) -> SchnorrPublicKeyResult {
+    async fn schnorr_public_key(
+        &self,
+        _args: SchnorrPublicKeyArgs,
+    ) -> Result<SchnorrPublicKeyResult, CallError> {
+        *self.schnorr_public_key_call_count.lock().unwrap() += 1;
+        suspend_like_an_inter_canister_call().await;
         self.schnorr_public_key_results.next()
+    }
+}
+
+/// Wraps [`StubRuntime`] to record the method and Candid-encoded arguments of every
+/// update call, so that a test can assert exactly what was sent.
+#[derive(Clone, Default)]
+struct RecordingStubRuntime {
+    stub: StubRuntime,
+    sent_update_calls: Arc<Mutex<Vec<SentUpdateCall>>>,
+}
+
+/// An inter-canister update call recorded by [`TestCanisterRuntime`].
+#[derive(Clone, Debug, PartialEq)]
+pub struct SentUpdateCall {
+    pub method: String,
+    args: Vec<u8>,
+}
+
+impl SentUpdateCall {
+    /// Decodes the single Candid argument of the recorded call.
+    pub fn single_arg<Arg: CandidType + DeserializeOwned>(&self) -> Arg {
+        let (arg,) = self.args();
+        arg
+    }
+
+    /// Decodes the Candid arguments of the recorded call.
+    pub fn args<Args: for<'a> ArgumentDecoder<'a>>(&self) -> Args {
+        decode_args(&self.args).expect("Failed to decode the call arguments")
+    }
+}
+
+#[async_trait]
+impl Runtime for RecordingStubRuntime {
+    async fn update_call<In, Out>(
+        &self,
+        id: Principal,
+        method: &str,
+        args: In,
+        cycles: u128,
+    ) -> Result<Out, IcError>
+    where
+        In: ArgumentEncoder + Send,
+        Out: CandidType + DeserializeOwned,
+    {
+        self.sent_update_calls.lock().unwrap().push(SentUpdateCall {
+            method: method.to_string(),
+            args: encode_args(args).expect("Failed to encode the call arguments"),
+        });
+        self.stub.update_call(id, method, (), cycles).await
+    }
+
+    async fn query_call<In, Out>(
+        &self,
+        id: Principal,
+        method: &str,
+        args: In,
+    ) -> Result<Out, IcError>
+    where
+        In: ArgumentEncoder + Send,
+        Out: CandidType + DeserializeOwned,
+    {
+        self.stub.query_call(id, method, args).await
+    }
+}
+
+/// Suspends the caller once, so that concurrent callers all reach the call before any of
+/// them sees its response, as they do on the IC.
+async fn suspend_like_an_inter_canister_call() {
+    yield_now().await;
+}
+
+/// Expects the fee payer to sign with the transaction signature, answers the
+/// `sendTransaction` call with it, and expects every account added with
+/// [`Self::add_signers`] to sign with its own derived signature, which the test reads back
+/// with `account_signature`.
+///
+/// Chain a further [`TestCanisterRuntime::transaction_builder`] onto [`Self::build`] for
+/// each additional transaction a test expects.
+pub struct TransactionBuilder(TestCanisterRuntime);
+
+impl TransactionBuilder {
+    fn new(
+        runtime: TestCanisterRuntime,
+        fee_payer: Account,
+        transaction_signature: solana_signature::Signature,
+    ) -> Self {
+        Self(
+            runtime
+                .add_signer(sign_for(&fee_payer).expect([Ok(transaction_signature)]))
+                .add_stub_response(MultiRpcResult::<Signature>::Consistent(Ok(
+                    transaction_signature.into(),
+                ))),
+        )
+    }
+
+    pub fn add_signers(mut self, accounts: impl IntoIterator<Item = Account>) -> Self {
+        for account in accounts {
+            self.0 = self.0.add_signer(sign_for(&account));
+        }
+        self
+    }
+
+    pub fn build(self) -> TestCanisterRuntime {
+        self.0
     }
 }

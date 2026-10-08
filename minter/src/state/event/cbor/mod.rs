@@ -53,6 +53,101 @@ pub mod signature {
     }
 }
 
+pub mod address {
+    use minicbor::{
+        decode::{Decoder, Error},
+        encode::{Encoder, Write},
+    };
+    use solana_address::Address;
+
+    pub fn decode<Ctx>(d: &mut Decoder<'_>, _ctx: &mut Ctx) -> Result<Address, Error> {
+        let bytes = d.bytes()?;
+        Address::try_from(bytes).map_err(|e| Error::message(e.to_string()))
+    }
+
+    pub fn encode<Ctx, W: Write>(
+        v: &Address,
+        e: &mut Encoder<W>,
+        _ctx: &mut Ctx,
+    ) -> Result<(), minicbor::encode::Error<W::Error>> {
+        e.bytes(v.as_ref())?;
+        Ok(())
+    }
+}
+
+pub mod ed25519_public_key {
+    use ic_ed25519::PublicKey;
+    use minicbor::{
+        decode::{Decoder, Error},
+        encode::{Encoder, Write},
+    };
+
+    pub fn decode<Ctx>(d: &mut Decoder<'_>, _ctx: &mut Ctx) -> Result<PublicKey, Error> {
+        let bytes = d.bytes()?;
+        PublicKey::deserialize_raw(bytes).map_err(|e| Error::message(e.to_string()))
+    }
+
+    pub fn encode<Ctx, W: Write>(
+        v: &PublicKey,
+        e: &mut Encoder<W>,
+        _ctx: &mut Ctx,
+    ) -> Result<(), minicbor::encode::Error<W::Error>> {
+        e.bytes(&v.serialize_raw())?;
+        Ok(())
+    }
+}
+
+pub mod hash {
+    use minicbor::{
+        decode::{Decoder, Error},
+        encode::{Encoder, Write},
+    };
+    use solana_hash::{HASH_BYTES, Hash};
+
+    pub fn decode<Ctx>(d: &mut Decoder<'_>, _ctx: &mut Ctx) -> Result<Hash, Error> {
+        let bytes: [u8; HASH_BYTES] = d
+            .bytes()?
+            .try_into()
+            .map_err(|_| Error::message(format!("expected {HASH_BYTES} hash bytes")))?;
+        Ok(Hash::from(bytes))
+    }
+
+    pub fn encode<Ctx, W: Write>(
+        v: &Hash,
+        e: &mut Encoder<W>,
+        _ctx: &mut Ctx,
+    ) -> Result<(), minicbor::encode::Error<W::Error>> {
+        e.bytes(v.as_ref())?;
+        Ok(())
+    }
+}
+
+pub mod deposit_balance {
+    use crate::state::DepositBalance;
+    use minicbor::{
+        decode::{Decoder, Error},
+        encode::{Encoder, Write},
+    };
+
+    pub fn decode<Ctx>(d: &mut Decoder<'_>, _ctx: &mut Ctx) -> Result<DepositBalance, Error> {
+        let balance = d.u64()?;
+        DepositBalance::new(balance).ok_or_else(|| {
+            Error::message(format!(
+                "deposit balance of {balance} lamports below the rent exemption threshold"
+            ))
+        })
+    }
+
+    pub fn encode<Ctx, W: Write>(
+        v: &DepositBalance,
+        e: &mut Encoder<W>,
+        _ctx: &mut Ctx,
+    ) -> Result<(), minicbor::encode::Error<W::Error>> {
+        e.u64(u64::from(*v))?;
+        Ok(())
+    }
+}
+
 pub mod id_vec {
     use minicbor::{
         decode::{Decoder, Error},

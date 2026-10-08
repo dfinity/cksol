@@ -1,10 +1,18 @@
 use crate::{
+    address::minter_address,
+    constants::RENT_EXEMPTION_THRESHOLD,
     lifecycle,
     numeric::{LedgerBurnIndex, LedgerMintIndex},
+    rpc::BlockHeight,
     runtime::IcCanisterRuntime,
+    sol_transfer::build_batch_withdrawal_message,
     state::{
+        DepositBalance, QueuedDeposit, SchnorrPublicKey, Sweep,
         audit::{process_event, replay_events},
-        event::{DepositId, EventType, TransactionPurpose, VersionedMessage, WithdrawalRequest},
+        event::{
+            CreditedDeposit, EventType, Signer, TransactionPurpose, VersionedMessage,
+            WithdrawalRequest,
+        },
         init_once_state, mutate_state, reset_state,
     },
     storage::{reset_events, total_event_count, with_event_iter},
@@ -12,29 +20,38 @@ use crate::{
 use canbench_rs::bench;
 use candid::Principal;
 use cksol_types_internal::{Ed25519KeyName, InitArgs, SolanaNetwork};
+use ic_ed25519::{PocketIcMasterPublicKeyId, PublicKey};
 use icrc_ledger_types::icrc1::account::Account;
 use solana_signature::Signature;
 
 const INDEX_OFFSET_QUARANTINE: usize = 10_000;
 const INDEX_OFFSET_WITHDRAWAL: usize = 20_000;
-const INDEX_OFFSET_FAILED: usize = 30_000;
+const INDEX_OFFSET_DROPPED: usize = 30_000;
 const INDEX_OFFSET_EXPIRED: usize = 40_000;
-const INDEX_OFFSET_RESUBMIT: usize = 50_000;
 
 fn init_args() -> InitArgs {
     InitArgs {
         sol_rpc_canister_id: Principal::from_slice(&[1_u8; 20]),
         ledger_canister_id: Principal::from_slice(&[2_u8; 20]),
-        manual_deposit_fee: 10_000,
-        automated_deposit_fee: 10_000_000,
         master_key_name: Ed25519KeyName::default(),
         minimum_withdrawal_amount: 10_000_000,
         minimum_deposit_amount: 10_000_000,
         withdrawal_fee: 5_000_000,
-        process_deposit_required_cycles: 1_000_000_000_000,
+        deposit_sol_required_cycles: 1_000_000_000_000,
         solana_network: SolanaNetwork::Mainnet,
-        deposit_consolidation_fee: 10_000_000_000,
+        deposit_sol_fee: 10_000_000_000,
+        nonce_accounts: vec![nonce_account().to_string()],
     }
+}
+
+fn nonce_account() -> solana_address::Address {
+    solana_address::Address::from([0x4E; 32])
+}
+
+fn nonce_value(i: usize) -> solana_hash::Hash {
+    let mut bytes = [0u8; 32];
+    bytes[..8].copy_from_slice(&(i as u64).to_le_bytes());
+    solana_hash::Hash::from(bytes)
 }
 
 fn signature(i: usize) -> Signature {
@@ -49,279 +66,194 @@ fn principal(i: usize) -> Principal {
     Principal::from_slice(&principal_bytes)
 }
 
-fn deposit_id(i: usize) -> DepositId {
-    DepositId {
-        signature: signature(i),
-        account: Account {
-            owner: principal(i),
-            subaccount: None,
-        },
-    }
-}
-
-fn message() -> solana_message::Message {
-    let payer = solana_address::Address::from([0x42; 32]);
-    solana_message::Message::new_with_blockhash(&[], Some(&payer), &solana_message::Hash::default())
-}
-
-fn minter_account() -> Account {
+fn account(i: usize) -> Account {
     Account {
-        owner: Principal::from_slice(&[0xCA; 10]),
+        owner: principal(i),
         subaccount: None,
     }
 }
 
+/// The master key the generator records, as the management canister returns it
+/// under PocketIC, so the sweep destination matches the one the state derives.
+fn master_key() -> SchnorrPublicKey {
+    SchnorrPublicKey {
+        public_key: PublicKey::pocketic_key(PocketIcMasterPublicKeyId::Key1),
+        chain_code: [1; 32],
+    }
+}
+
+fn nonce_withdrawal_message(
+    nonce_value: solana_hash::Hash,
+    destination: solana_address::Address,
+    amount: u64,
+) -> solana_message::Message {
+    build_batch_withdrawal_message(
+        &minter_address(&master_key()),
+        &nonce_account(),
+        nonce_value,
+        &[(destination, amount)],
+    )
+    .expect("BUG: a single-transfer withdrawal message fits in a transaction")
+}
+
+fn record(event: EventType) {
+    let runtime = IcCanisterRuntime::new();
+    mutate_state(|s| process_event(s, event, &runtime));
+}
+
+fn queue_and_sweep(deposit_id: u64, account_index: usize, amount: u64, sig: Signature) {
+    let account = account(account_index);
+    let deposit = QueuedDeposit {
+        account,
+        address: deposit_address(account_index),
+        balance: DepositBalance::new(amount + RENT_EXEMPTION_THRESHOLD)
+            .expect("BUG: the balance covers the rent exemption threshold"),
+    };
+    record(EventType::QueuedDeposit {
+        deposit_id,
+        account,
+        address: deposit.address,
+        balance: deposit.balance,
+    });
+    let sweep = Sweep::plan([(deposit_id, deposit)], minter_address(&master_key()));
+    record(EventType::SubmittedTransaction {
+        signature: sig,
+        message: VersionedMessage::Legacy(sweep.sweep_message(solana_message::Hash::default())),
+        signers: vec![Signer::Account(account)],
+        purpose: TransactionPurpose::SweepDeposit {
+            deposit_ids: vec![deposit_id],
+            block_height: BlockHeight::new(0),
+        },
+    });
+}
+
+fn deposit_address(account_index: usize) -> solana_address::Address {
+    let mut bytes = [0u8; 32];
+    bytes[..8].copy_from_slice(&(account_index as u64).to_le_bytes());
+    solana_address::Address::from(bytes)
+}
+
+fn accept_and_submit_withdrawal(account_index: usize, burn_index: u64, sig: Signature) {
+    const WITHDRAWAL_FEE: u64 = 5_000_000;
+    const WITHDRAWAL_AMOUNT: u64 = 10_000_000;
+    const AMOUNT_TO_TRANSFER: u64 = WITHDRAWAL_AMOUNT - WITHDRAWAL_FEE;
+
+    let destination = [0u8; 32];
+    let burn_indices = vec![LedgerBurnIndex::from(burn_index)];
+    record(EventType::AcceptedWithdrawalRequest(WithdrawalRequest {
+        account: account(account_index),
+        solana_address: destination,
+        burn_block_index: LedgerBurnIndex::from(burn_index),
+        burned_amount: WITHDRAWAL_AMOUNT,
+        amount_to_transfer: AMOUNT_TO_TRANSFER,
+    }));
+    record(EventType::CreatedWithdrawalTransaction {
+        burn_indices: burn_indices.clone(),
+        nonce_account: nonce_account(),
+        nonce_value: nonce_value(account_index),
+    });
+    record(EventType::SubmittedTransaction {
+        signature: sig,
+        message: VersionedMessage::Legacy(nonce_withdrawal_message(
+            nonce_value(account_index),
+            solana_address::Address::from(destination),
+            AMOUNT_TO_TRANSFER,
+        )),
+        signers: vec![Signer::Minter],
+        purpose: TransactionPurpose::Withdrawal { burn_indices },
+    });
+}
+
 /// Populates the event log with ~10k events covering every event type
-/// except Upgrade, then clears in-memory state so that
-/// `replay_events` can rebuild it from stable storage.
+/// except Upgrade and the quarantined-pending-mint case, then clears
+/// in-memory state so that `replay_events` can rebuild it from stable storage.
 fn setup_10k_events() {
     reset_events();
     reset_state();
 
     let runtime = IcCanisterRuntime::new();
-    lifecycle::init(init_args(), runtime.clone());
+    lifecycle::init(init_args(), runtime);
 
-    let deposit_fee: u64 = 10_000;
+    // A sweep takes its destination from the recorded minter public key, so the
+    // log starts with the event that records it.
+    let master_key = master_key();
+    record(EventType::MinterPublicKeyFetched {
+        public_key: master_key.public_key,
+        chain_code: master_key.chain_code,
+    });
+
+    const SWEEP_FEE: u64 = 5_000;
     let amount: u64 = 1_000_000_000;
-    let withdrawal_fee: u64 = 5_000_000;
-    let withdrawal_amount: u64 = 10_000_000;
-    let minter = minter_account();
+    let mut next_deposit_id: u64 = 0;
 
-    // Successful deposit cycles: accept → mint → submit consolidation → succeed
-    // 1000 × 4 = 4000 events
+    // Successful deposit cycles: queue → sweep → succeed → credit → mint
+    // 1000 × 5 = 5000 events
     for i in 0..1000 {
-        let id = deposit_id(i);
+        let deposit_id = next_deposit_id;
+        next_deposit_id += 1;
         let sig = signature(i);
-        let mint_index = LedgerMintIndex::from(i as u64);
 
-        mutate_state(|s| {
-            process_event(
-                s,
-                EventType::AcceptedManualDeposit {
-                    deposit_id: id,
-                    deposit_amount: amount,
-                    amount_to_mint: amount - deposit_fee,
-                },
-                &runtime,
-            )
+        queue_and_sweep(deposit_id, i, amount, sig);
+        record(EventType::SucceededTransaction { signature: sig });
+        record(EventType::CreditedSweep {
+            signature: sig,
+            amount_received: amount - SWEEP_FEE,
+            mints: vec![CreditedDeposit {
+                deposit_id,
+                amount_to_mint: amount - SWEEP_FEE,
+            }],
         });
-        mutate_state(|s| {
-            process_event(
-                s,
-                EventType::Minted {
-                    deposit_id: id,
-                    mint_block_index: mint_index,
-                },
-                &runtime,
-            )
-        });
-        mutate_state(|s| {
-            process_event(
-                s,
-                EventType::SubmittedTransaction {
-                    signature: sig,
-                    message: VersionedMessage::Legacy(message()),
-                    signers: vec![minter],
-                    slot: 0,
-                    purpose: TransactionPurpose::ConsolidateDeposits {
-                        mint_indices: vec![mint_index],
-                    },
-                },
-                &runtime,
-            )
-        });
-        mutate_state(|s| {
-            process_event(
-                s,
-                EventType::SucceededTransaction { signature: sig },
-                &runtime,
-            )
+        record(EventType::MintedSweptDeposit {
+            deposit_id,
+            mint_block_index: LedgerMintIndex::from(i as u64),
         });
     }
 
-    // Quarantined deposits: accept → quarantine
-    // 200 × 2 = 400 events
+    // Quarantined sweeps: queue → sweep → succeed → quarantine
+    // 200 × 4 = 800 events
     for i in 0..200 {
-        let id = deposit_id(INDEX_OFFSET_QUARANTINE + i);
+        let deposit_id = next_deposit_id;
+        next_deposit_id += 1;
+        let sig = signature(INDEX_OFFSET_QUARANTINE + i);
 
-        mutate_state(|s| {
-            process_event(
-                s,
-                EventType::AcceptedManualDeposit {
-                    deposit_id: id,
-                    deposit_amount: amount,
-                    amount_to_mint: amount - deposit_fee,
-                },
-                &runtime,
-            )
-        });
-        mutate_state(|s| process_event(s, EventType::QuarantinedDeposit(id), &runtime));
+        queue_and_sweep(deposit_id, INDEX_OFFSET_QUARANTINE + i, amount, sig);
+        record(EventType::SucceededTransaction { signature: sig });
+        record(EventType::QuarantinedSweep { signature: sig });
     }
 
-    // Withdrawal cycles: accept withdrawal → submit withdrawal → succeed
-    // 500 × 3 = 1500 events
-    for i in 0..500 {
-        let sig = signature(INDEX_OFFSET_WITHDRAWAL + i);
-        let burn_index = LedgerBurnIndex::from(i as u64);
-
-        mutate_state(|s| {
-            process_event(
-                s,
-                EventType::AcceptedWithdrawalRequest(WithdrawalRequest {
-                    account: deposit_id(i).account,
-                    solana_address: [0u8; 32],
-                    burn_block_index: burn_index,
-                    burned_amount: withdrawal_amount,
-                    amount_to_transfer: withdrawal_amount - withdrawal_fee,
-                }),
-                &runtime,
-            )
-        });
-        mutate_state(|s| {
-            process_event(
-                s,
-                EventType::SubmittedTransaction {
-                    signature: sig,
-                    message: VersionedMessage::Legacy(message()),
-                    signers: vec![minter],
-                    slot: 0,
-                    purpose: TransactionPurpose::WithdrawSol {
-                        burn_indices: vec![burn_index],
-                    },
-                },
-                &runtime,
-            )
-        });
-        mutate_state(|s| {
-            process_event(
-                s,
-                EventType::SucceededTransaction { signature: sig },
-                &runtime,
-            )
-        });
-    }
-
-    // Failed consolidation cycles: accept → mint → submit → fail
+    // Withdrawal cycles: accept withdrawal → create transaction → submit → succeed
     // 500 × 4 = 2000 events
     for i in 0..500 {
-        let id = deposit_id(INDEX_OFFSET_FAILED + i);
-        let sig = signature(INDEX_OFFSET_FAILED + i);
-        let mint_index = LedgerMintIndex::from((INDEX_OFFSET_FAILED + i) as u64);
+        let sig = signature(INDEX_OFFSET_WITHDRAWAL + i);
 
-        mutate_state(|s| {
-            process_event(
-                s,
-                EventType::AcceptedManualDeposit {
-                    deposit_id: id,
-                    deposit_amount: amount,
-                    amount_to_mint: amount - deposit_fee,
-                },
-                &runtime,
-            )
-        });
-        mutate_state(|s| {
-            process_event(
-                s,
-                EventType::Minted {
-                    deposit_id: id,
-                    mint_block_index: mint_index,
-                },
-                &runtime,
-            )
-        });
-        mutate_state(|s| {
-            process_event(
-                s,
-                EventType::SubmittedTransaction {
-                    signature: sig,
-                    message: VersionedMessage::Legacy(message()),
-                    signers: vec![minter],
-                    slot: 0,
-                    purpose: TransactionPurpose::ConsolidateDeposits {
-                        mint_indices: vec![mint_index],
-                    },
-                },
-                &runtime,
-            )
-        });
-        mutate_state(|s| {
-            process_event(s, EventType::FailedTransaction { signature: sig }, &runtime)
-        });
+        accept_and_submit_withdrawal(i, i as u64, sig);
+        record(EventType::SucceededTransaction { signature: sig });
     }
 
-    // Expired + resubmitted cycles: accept → mint → submit → expire → resubmit → succeed
-    // 300 × 6 = 1800 events
+    // Dropped sweeps: queue → sweep → fail
+    // 500 × 3 = 1500 events
+    for i in 0..500 {
+        let deposit_id = next_deposit_id;
+        next_deposit_id += 1;
+        let sig = signature(INDEX_OFFSET_DROPPED + i);
+
+        queue_and_sweep(deposit_id, INDEX_OFFSET_DROPPED + i, amount, sig);
+        record(EventType::FailedTransaction { signature: sig });
+    }
+
+    // Expired sweeps: queue → sweep → expire
+    // 300 × 3 = 900 events
     for i in 0..300 {
-        let id = deposit_id(INDEX_OFFSET_EXPIRED + i);
-        let old_sig = signature(INDEX_OFFSET_EXPIRED + i);
-        let new_sig = signature(INDEX_OFFSET_RESUBMIT + i);
-        let mint_index = LedgerMintIndex::from((INDEX_OFFSET_EXPIRED + i) as u64);
+        let deposit_id = next_deposit_id;
+        next_deposit_id += 1;
+        let sig = signature(INDEX_OFFSET_EXPIRED + i);
 
-        mutate_state(|s| {
-            process_event(
-                s,
-                EventType::AcceptedManualDeposit {
-                    deposit_id: id,
-                    deposit_amount: amount,
-                    amount_to_mint: amount - deposit_fee,
-                },
-                &runtime,
-            )
-        });
-        mutate_state(|s| {
-            process_event(
-                s,
-                EventType::Minted {
-                    deposit_id: id,
-                    mint_block_index: mint_index,
-                },
-                &runtime,
-            )
-        });
-        mutate_state(|s| {
-            process_event(
-                s,
-                EventType::SubmittedTransaction {
-                    signature: old_sig,
-                    message: VersionedMessage::Legacy(message()),
-                    signers: vec![minter],
-                    slot: 0,
-                    purpose: TransactionPurpose::ConsolidateDeposits {
-                        mint_indices: vec![mint_index],
-                    },
-                },
-                &runtime,
-            )
-        });
-        mutate_state(|s| {
-            process_event(
-                s,
-                EventType::ExpiredTransaction { signature: old_sig },
-                &runtime,
-            )
-        });
-        mutate_state(|s| {
-            process_event(
-                s,
-                EventType::ResubmittedTransaction {
-                    old_signature: old_sig,
-                    new_signature: new_sig,
-                    new_slot: 1,
-                },
-                &runtime,
-            )
-        });
-        mutate_state(|s| {
-            process_event(
-                s,
-                EventType::SucceededTransaction { signature: new_sig },
-                &runtime,
-            )
-        });
+        queue_and_sweep(deposit_id, INDEX_OFFSET_EXPIRED + i, amount, sig);
+        record(EventType::ExpiredTransaction { signature: sig });
     }
 
-    // Total: 1 (init) + 4000 + 400 + 1500 + 2000 + 1800 = 9701 events
-    assert_eq!(total_event_count(), 9701);
+    // Total: 1 (init) + 1 (minter public key) + 5000 + 800 + 2000 + 1500 + 900 = 10202 events
+    assert_eq!(total_event_count(), 10202);
     reset_state();
 }
 

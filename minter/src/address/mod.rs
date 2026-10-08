@@ -1,35 +1,39 @@
 use crate::{
+    constants::MINTER_PUBLIC_KEY_RETRY_DELAY,
     runtime::CanisterRuntime,
-    state::{SchnorrPublicKey, mutate_state, read_state},
+    state::{SchnorrPublicKey, audit::process_event, event::EventType, mutate_state, read_state},
 };
+use canlog::log;
+use cksol_types_internal::log::Priority;
 use ic_cdk_management_canister::{SchnorrAlgorithm, SchnorrKeyId, SchnorrPublicKeyArgs};
 use ic_ed25519::{DerivationIndex, DerivationPath as IcDerivationPath, PublicKey};
 use icrc_ledger_types::icrc1::account::Account;
 use solana_address::Address;
+use thiserror::Error;
 
 #[cfg(test)]
 mod tests;
 
 pub(crate) type DerivationPath = Vec<Vec<u8>>;
 
+/// Derivation path of the minter's main address: the empty path, i.e. the master key
+/// itself. Account paths always start with the schema tag (see [`derivation_path`]),
+/// so the main address can never collide with any deposit address.
+pub const MINTER_DERIVATION_PATH: DerivationPath = Vec::new();
+
 /// Implementation of the `get_deposit_address` canister endpoint.
-/// Because the endpoint is a query, it must be synchronous and cannot fetch the
-/// master key on demand — it traps if the key has not yet been initialized.
+/// Traps until the master key fetch scheduled by `init` has completed, as the
+/// endpoint has no error variant to report the missing key with.
 pub fn get_deposit_address(account: &Account) -> Address {
     let master_key = read_state(|s| s.minter_public_key().cloned())
         .unwrap_or_else(|| ic_cdk::trap("master key not yet initialized"));
     account_address(&master_key, account)
 }
 
-pub fn minter_account<R: CanisterRuntime>(runtime: &R) -> Account {
-    Account {
-        owner: runtime.canister_self(),
-        subaccount: None,
-    }
-}
-
-pub fn minter_address<R: CanisterRuntime>(master_key: &SchnorrPublicKey, runtime: &R) -> Address {
-    account_address(master_key, &minter_account(runtime))
+/// The minter's main Solana address, holding the swept funds:
+/// the master public key itself, on [`MINTER_DERIVATION_PATH`].
+pub fn minter_address(master_key: &SchnorrPublicKey) -> Address {
+    master_key.public_key.serialize_raw().into()
 }
 
 pub fn account_address(master_key: &SchnorrPublicKey, account: &Account) -> Address {
@@ -38,10 +42,36 @@ pub fn account_address(master_key: &SchnorrPublicKey, account: &Account) -> Addr
         .into()
 }
 
-pub async fn lazy_get_schnorr_master_key<R: CanisterRuntime>(runtime: &R) -> SchnorrPublicKey {
-    if let Some(public_key) = read_state(|s| s.minter_public_key().cloned()) {
-        return public_key;
+/// The minter's Schnorr master public key is only unavailable in the short window
+/// between the first initialization of the minter and the completion of the
+/// key fetch scheduled by `init`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Error)]
+#[error("the minter public key is not yet available, try again later")]
+pub struct MinterPublicKeyNotYetAvailable;
+
+pub fn minter_public_key() -> Result<SchnorrPublicKey, MinterPublicKeyNotYetAvailable> {
+    read_state(|s| s.minter_public_key().cloned()).ok_or(MinterPublicKeyNotYetAvailable)
+}
+
+/// Fetches the minter's Schnorr master public key and records it in a
+/// [`EventType::MinterPublicKeyFetched`] event, so that replaying the event log
+/// makes the key available without any asynchronous fetch.
+///
+/// Returns without fetching once the key is available, so the event is recorded
+/// at most once over the lifetime of the minter. Concurrent calls may each fetch
+/// the key, but only the first one records the event. A fetch that traps, for
+/// example on a rejected management canister call, reschedules itself after
+/// [`MINTER_PUBLIC_KEY_RETRY_DELAY`].
+pub async fn fetch_and_record_minter_public_key<R: CanisterRuntime>(runtime: R) {
+    if read_state(|s| s.minter_public_key().is_some()) {
+        return;
     }
+    let retry = scopeguard::guard(runtime.clone(), |runtime| {
+        runtime.set_timer(
+            MINTER_PUBLIC_KEY_RETRY_DELAY,
+            fetch_and_record_minter_public_key,
+        );
+    });
 
     let key_name = read_state(|s| s.master_key_name());
 
@@ -53,16 +83,39 @@ pub async fn lazy_get_schnorr_master_key<R: CanisterRuntime>(runtime: &R) -> Sch
             name: key_name.to_string(),
         },
     };
-    let response = runtime.schnorr_public_key(arg).await;
-
-    let schnorr_public_key = SchnorrPublicKey {
-        public_key: PublicKey::deserialize_raw(response.public_key.as_slice())
-            .expect("Failed to deserialize public key"),
-        chain_code: response.chain_code.as_slice().try_into().unwrap(),
+    let response = match retry.schnorr_public_key(arg).await {
+        Ok(response) => response,
+        Err(e) => {
+            log!(
+                Priority::Error,
+                "Failed to fetch the minter public key, retrying: {e}"
+            );
+            return;
+        }
     };
 
-    mutate_state(|s| s.set_once_minter_public_key(schnorr_public_key.clone()));
-    schnorr_public_key
+    let public_key = PublicKey::deserialize_raw(response.public_key.as_slice())
+        .expect("the management canister returns a valid Ed25519 public key");
+    let chain_code = response
+        .chain_code
+        .as_slice()
+        .try_into()
+        .expect("the management canister returns a 32-byte chain code");
+
+    let runtime = scopeguard::ScopeGuard::into_inner(retry);
+    mutate_state(|state| {
+        if state.minter_public_key().is_some() {
+            return;
+        }
+        process_event(
+            state,
+            EventType::MinterPublicKeyFetched {
+                public_key,
+                chain_code,
+            },
+            &runtime,
+        );
+    });
 }
 
 fn derive_public_key_from_account(

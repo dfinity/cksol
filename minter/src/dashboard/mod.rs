@@ -1,13 +1,12 @@
 use crate::{
     address::minter_address,
-    runtime::CanisterRuntime,
-    state::{ConsolidationTransaction, State},
+    state::{QuarantineCause, State},
 };
 use askama::Template;
 use candid::Principal;
 use cksol_types_internal::SolanaNetwork;
 use ic_http_types::HttpRequest;
-use std::str::FromStr;
+use std::{collections::BTreeMap, str::FromStr};
 
 const LAMPORTS_PER_SOL: u64 = 1_000_000_000;
 
@@ -39,9 +38,9 @@ pub(crate) const DEFAULT_PAGE_SIZE: usize = 100;
 
 #[derive(Default, Clone)]
 pub struct DashboardPaginationParameters {
-    pub minted_deposits_start: usize,
+    pub quarantined_swept_deposits_start: usize,
+    pub minted_sweeps_start: usize,
     pub withdrawals_start: usize,
-    pub consolidations_start: usize,
 }
 
 impl DashboardPaginationParameters {
@@ -55,18 +54,21 @@ impl DashboardPaginationParameters {
         }
 
         Ok(Self {
-            minted_deposits_start: parse(req, "minted_deposits_start")?,
+            quarantined_swept_deposits_start: parse(req, "quarantined_swept_deposits_start")?,
+            minted_sweeps_start: parse(req, "minted_sweeps_start")?,
             withdrawals_start: parse(req, "withdrawals_start")?,
-            consolidations_start: parse(req, "consolidations_start")?,
         })
     }
 
     /// Returns a query string fragment with all pagination params except `exclude`.
     fn other_params(&self, exclude: &str) -> String {
         [
-            ("minted_deposits_start", self.minted_deposits_start),
+            (
+                "quarantined_swept_deposits_start",
+                self.quarantined_swept_deposits_start,
+            ),
+            ("minted_sweeps_start", self.minted_sweeps_start),
             ("withdrawals_start", self.withdrawals_start),
-            ("consolidations_start", self.consolidations_start),
         ]
         .into_iter()
         .filter(|(name, _)| *name != exclude)
@@ -92,7 +94,36 @@ impl<T: Clone> DashboardPaginatedTable<T> {
         page_offset_query_param: &str,
         other_query_params: String,
     ) -> Self {
-        let total_items = items.len();
+        Self::from_rows(
+            items.iter(),
+            Clone::clone,
+            current_page_offset,
+            page_size,
+            num_cols,
+            table_reference,
+            page_offset_query_param,
+            other_query_params,
+        )
+    }
+
+    /// Paginates without materializing the whole table: only the rows of the current page
+    /// go through `to_row`, so rendering one page stays constant in the number of rows.
+    #[allow(clippy::too_many_arguments)]
+    pub fn from_rows<I, F>(
+        rows: I,
+        to_row: F,
+        current_page_offset: usize,
+        page_size: usize,
+        num_cols: usize,
+        table_reference: &str,
+        page_offset_query_param: &str,
+        other_query_params: String,
+    ) -> Self
+    where
+        I: ExactSizeIterator,
+        F: Fn(I::Item) -> T,
+    {
+        let total_items = rows.len();
 
         // Align offset to page boundary and clamp to the last valid page.
         let offset = if page_size == 0 || total_items == 0 {
@@ -104,7 +135,7 @@ impl<T: Clone> DashboardPaginatedTable<T> {
         };
 
         Self {
-            current_page: items.iter().skip(offset).take(page_size).cloned().collect(),
+            current_page: rows.skip(offset).take(page_size).map(to_row).collect(),
             pagination: DashboardTablePagination::new(
                 total_items,
                 offset,
@@ -176,19 +207,6 @@ impl DashboardTablePagination {
 // --- Dashboard data ---
 
 #[derive(Clone)]
-pub struct DashboardConsolidation {
-    pub transaction: String,
-    pub deposits: Vec<DashboardConsolidationDeposit>,
-    pub status: &'static str,
-}
-
-#[derive(Clone)]
-pub struct DashboardConsolidationDeposit {
-    pub mint_index: String,
-    pub deposit_amount: String,
-}
-
-#[derive(Clone)]
 pub struct DashboardWithdrawal {
     pub transaction: Option<String>,
     pub account: String,
@@ -198,14 +216,26 @@ pub struct DashboardWithdrawal {
     pub status: &'static str,
 }
 
+/// A deposit of a finalized sweep whose outcome did not match its plan, shown with the
+/// amount the sweep planned to move so that an operator can resolve it manually.
 #[derive(Clone)]
-pub struct DashboardDeposit {
-    pub signature: String,
+pub struct DashboardQuarantinedDeposit {
+    pub deposit_id: String,
     pub account: String,
-    pub deposit_amount: String,
+    pub signature: String,
+    pub cause: &'static str,
+    pub planned_amount: String,
+    /// The mint the deposit is still owed, or `-` when the sweep was never credited.
+    pub amount_to_mint: String,
+}
+
+/// A swept deposit whose ckSOL mint landed on the ledger.
+#[derive(Clone)]
+pub struct DashboardMintedSweep {
+    pub deposit_id: String,
+    pub account: String,
     pub minted_amount: String,
     pub mint_block_index: String,
-    pub status: &'static str,
 }
 
 #[derive(Template)]
@@ -217,142 +247,68 @@ pub struct DashboardTemplate {
     pub ledger_canister_id: Principal,
     pub sol_rpc_canister_id: Principal,
     pub master_key_name: String,
-    pub manual_deposit_fee: String,
-    pub automated_deposit_fee: String,
     pub withdrawal_fee: String,
     pub minimum_deposit_amount: String,
     pub minimum_withdrawal_amount: String,
     pub balance: String,
-    pub deposits_table: DashboardPaginatedTable<DashboardDeposit>,
-    pub consolidations_table: DashboardPaginatedTable<DashboardConsolidation>,
+    pub quarantined_swept_deposits_table: DashboardPaginatedTable<DashboardQuarantinedDeposit>,
+    pub minted_sweeps_table: DashboardPaginatedTable<DashboardMintedSweep>,
     pub withdrawals_table: DashboardPaginatedTable<DashboardWithdrawal>,
 }
 
 impl DashboardTemplate {
-    pub fn from_state<R: CanisterRuntime>(
-        state: &State,
-        runtime: &R,
-        pagination: DashboardPaginationParameters,
-    ) -> Self {
+    pub fn from_state(state: &State, pagination: DashboardPaginationParameters) -> Self {
         let minter_address = state
             .minter_public_key()
-            .map(|key| minter_address(key, runtime).to_string())
+            .map(|key| minter_address(key).to_string())
             .unwrap_or_default();
 
-        let deposits_to_consolidate = state.deposits_to_consolidate();
-        let mut deposits: Vec<DashboardDeposit> = Vec::new();
-
-        fn push_deposit(
-            deposits: &mut Vec<DashboardDeposit>,
-            deposit_id: &crate::state::event::DepositId,
-            deposit: &crate::state::Deposit,
-            mint_block_index: String,
-            status: &'static str,
-        ) {
-            deposits.push(DashboardDeposit {
-                signature: deposit_id.signature.to_string(),
-                account: deposit_id.account.to_string(),
-                deposit_amount: lamports_to_sol(deposit.deposit_amount),
-                minted_amount: lamports_to_sol(deposit.amount_to_mint),
-                mint_block_index,
-                status,
-            });
-        }
-
-        // Accepted and quarantined (in-progress) newest-first, then minted/consolidated newest-first.
-        for (deposit_id, deposit) in state.accepted_deposits().iter().rev() {
-            push_deposit(
-                &mut deposits,
-                deposit_id,
-                deposit,
-                String::new(),
-                "Accepted",
-            );
-        }
-        for (deposit_id, deposit) in state.quarantined_deposits().iter().rev() {
-            push_deposit(
-                &mut deposits,
-                deposit_id,
-                deposit,
-                String::new(),
-                "Quarantined",
-            );
-        }
-        for (deposit_id, minted) in state.minted_deposits().iter().rev() {
-            let pending_consolidation = deposits_to_consolidate.contains_key(&minted.block_index);
-            push_deposit(
-                &mut deposits,
-                deposit_id,
-                &minted.deposit,
-                minted.block_index.to_string(),
-                if pending_consolidation {
-                    "Minted"
-                } else {
-                    "Consolidated"
-                },
-            );
-        }
-
-        let deposits_table = DashboardPaginatedTable::from_items(
-            &deposits,
-            pagination.minted_deposits_start,
-            DEFAULT_PAGE_SIZE,
-            6,
-            "deposits",
-            "minted_deposits_start",
-            pagination.other_params("minted_deposits_start"),
-        );
-
-        let consolidation_transactions = state.consolidation_transactions();
-
-        fn to_dashboard_consolidation(
-            signature: &solana_signature::Signature,
-            info: &ConsolidationTransaction,
-            status: &'static str,
-        ) -> DashboardConsolidation {
-            let mut deposits: Vec<_> = info.deposits.iter().collect();
-            deposits.sort_by(|a, b| b.0.cmp(&a.0));
-            DashboardConsolidation {
-                transaction: signature.to_string(),
-                deposits: deposits
-                    .into_iter()
-                    .map(|(mint_index, amount)| DashboardConsolidationDeposit {
-                        mint_index: mint_index.to_string(),
-                        deposit_amount: lamports_to_sol(*amount),
-                    })
-                    .collect(),
-                status,
-            }
-        }
-
-        let consolidations: Vec<DashboardConsolidation> = consolidation_transactions
+        let quarantined_swept_deposits: Vec<DashboardQuarantinedDeposit> = state
+            .deposits()
+            .quarantined()
             .iter()
             .rev()
-            .filter_map(|(sig, info)| {
-                let status = if state.submitted_transactions().contains_key(sig) {
-                    "Submitted"
-                } else if state.succeeded_transactions().contains(sig) {
-                    "Succeeded"
-                } else if state.failed_transactions().contains_key(sig) {
-                    "Failed"
-                } else if state.transactions_to_resubmit().contains_key(sig) {
-                    "Queued for resubmission"
-                } else {
-                    return None;
-                };
-                Some(to_dashboard_consolidation(sig, info, status))
+            .map(|(deposit_id, quarantined)| DashboardQuarantinedDeposit {
+                deposit_id: deposit_id.to_string(),
+                account: quarantined.account().to_string(),
+                signature: quarantined.sweep_signature().to_string(),
+                cause: match quarantined.cause {
+                    QuarantineCause::SweepUnreadable => "Sweep unreadable",
+                    QuarantineCause::MintUnresolved { .. } => "Mint unresolved",
+                },
+                planned_amount: lamports_to_sol(quarantined.planned_amount()),
+                amount_to_mint: match quarantined.cause {
+                    QuarantineCause::SweepUnreadable => "-".to_string(),
+                    QuarantineCause::MintUnresolved { amount_to_mint, .. } => {
+                        lamports_to_sol(amount_to_mint)
+                    }
+                },
             })
             .collect();
+        let quarantined_swept_deposits_table = DashboardPaginatedTable::from_items(
+            &quarantined_swept_deposits,
+            pagination.quarantined_swept_deposits_start,
+            DEFAULT_PAGE_SIZE,
+            6,
+            "quarantined-swept-deposits",
+            "quarantined_swept_deposits_start",
+            pagination.other_params("quarantined_swept_deposits_start"),
+        );
 
-        // The num_cols for consolidations uses the max column span (transaction + status + deposit columns)
-        let consolidations_table = DashboardPaginatedTable::from_items(
-            &consolidations,
-            pagination.consolidations_start,
+        let minted_sweeps_table = DashboardPaginatedTable::from_rows(
+            state.deposits().minted().iter().rev(),
+            |(deposit_id, minted)| DashboardMintedSweep {
+                deposit_id: deposit_id.to_string(),
+                account: minted.deposit.deposit.account.to_string(),
+                minted_amount: lamports_to_sol(minted.minted_amount),
+                mint_block_index: minted.mint_block_index.to_string(),
+            },
+            pagination.minted_sweeps_start,
             DEFAULT_PAGE_SIZE,
             4,
-            "consolidations",
-            "consolidations_start",
-            pagination.other_params("consolidations_start"),
+            "minted-sweeps",
+            "minted_sweeps_start",
+            pagination.other_params("minted_sweeps_start"),
         );
 
         let mut withdrawals: Vec<DashboardWithdrawal> = Vec::new();
@@ -375,7 +331,12 @@ impl DashboardTemplate {
         }
 
         // Pending and sent (active) newest-first, then finalized (succeeded/failed) newest-first.
-        for (burn_index, pending) in state.pending_withdrawal_requests().iter().rev() {
+        let pending_and_created_requests: BTreeMap<_, _> = state
+            .pending_withdrawal_requests()
+            .iter()
+            .chain(state.created_withdrawal_requests())
+            .collect();
+        for (burn_index, pending) in pending_and_created_requests.into_iter().rev() {
             push_withdrawal(
                 &mut withdrawals,
                 burn_index,
@@ -430,14 +391,12 @@ impl DashboardTemplate {
             ledger_canister_id: state.ledger_canister_id(),
             sol_rpc_canister_id: state.sol_rpc_canister_id(),
             master_key_name: state.master_key_name().to_string(),
-            manual_deposit_fee: lamports_to_sol(state.manual_deposit_fee()),
-            automated_deposit_fee: lamports_to_sol(state.automated_deposit_fee()),
             withdrawal_fee: lamports_to_sol(state.withdrawal_fee()),
             minimum_deposit_amount: lamports_to_sol(state.minimum_deposit_amount()),
             minimum_withdrawal_amount: lamports_to_sol(state.minimum_withdrawal_amount()),
             balance: lamports_to_sol(state.balance()),
-            deposits_table,
-            consolidations_table,
+            quarantined_swept_deposits_table,
+            minted_sweeps_table,
             withdrawals_table,
         }
     }

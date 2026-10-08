@@ -1,11 +1,9 @@
 use crate::{
-    address::{
-        DerivationPath, derivation_path, derive_public_key, lazy_get_schnorr_master_key,
-        minter_address,
-    },
+    address::{DerivationPath, MINTER_DERIVATION_PATH},
     constants::FEE_PER_SIGNATURE,
     runtime::CanisterRuntime,
     signer::{SchnorrSigner, sign_bytes},
+    state::{Sweep, event::Signer},
 };
 use derive_more::From;
 use ic_cdk_management_canister::SignCallError;
@@ -14,7 +12,7 @@ use sol_rpc_types::Lamport;
 use solana_address::Address;
 use solana_hash::Hash;
 use solana_system_interface::instruction;
-use solana_transaction::{Instruction, Message, Transaction};
+use solana_transaction::{Message, Transaction};
 use std::collections::BTreeMap;
 use thiserror::Error;
 
@@ -25,9 +23,12 @@ pub const MAX_SIGNATURES: u64 = 10;
 pub const MAX_TX_SIZE: usize = 1_232;
 const BYTES_PER_SIGNATURE: usize = 64;
 
-/// Upper bound on the number of withdrawal transfers that fit in a single
-/// Solana transaction when the fee-payer is the only signer.
-pub const MAX_WITHDRAWALS_PER_TX: usize = 20;
+/// Maximum number of withdrawal transfers batched into a single
+/// durable-nonce transaction.
+pub const MAX_WITHDRAWALS_PER_NONCE_TX: usize = 10;
+
+/// Fee charged for a batch withdrawal transaction, which is signed by the fee payer only.
+pub const BATCH_WITHDRAWAL_TX_FEE: Lamport = FEE_PER_SIGNATURE;
 
 #[derive(Debug, Error, From)]
 pub enum CreateTransferError {
@@ -37,130 +38,81 @@ pub enum CreateTransferError {
     SigningFailed(SignCallError),
 }
 
-/// Creates a signed Solana transaction that transfers lamports from
-/// each minter-controlled source address to the minter's consolidated address.
+/// Signs the transaction of a planned sweep with the deposit addresses it transfers from.
 ///
-/// The first source account is used as the fee payer. Its transfer amount
-/// is reduced by the transaction fee.
-///
-/// Returns the signed transaction and the list of signer accounts.
-///
-/// # Panics
-///
-/// * Panics if `sources` is empty.
-/// * Panics if source accounts are not unique.
-/// * Panics if the IC returns a signature that is not exactly 64 bytes.
-pub async fn create_signed_consolidation_transaction<R: CanisterRuntime>(
+/// Returns the signed transaction and the signer accounts in the order of the signatures.
+pub async fn sign_sweep_transaction<R: CanisterRuntime>(
     runtime: &R,
-    sources: Vec<(Account, Lamport)>,
+    sweep: &Sweep,
     recent_blockhash: Hash,
-) -> Result<(Transaction, Vec<Account>), CreateTransferError> {
-    assert!(!sources.is_empty(), "BUG: sources must not be empty");
-
-    let master_public_key = lazy_get_schnorr_master_key(runtime).await;
-    let target_address = minter_address(&master_public_key, runtime);
-    let (derivation_paths, addresses): (Vec<_>, Vec<_>) = sources
-        .iter()
-        .map(|(account, _)| {
-            let path = derivation_path(account);
-            let public_key = derive_public_key(&master_public_key, path.to_vec());
-            (path, Address::from(public_key.serialize_raw()))
-        })
-        .unzip();
-
-    let fee_payer_address = &addresses[0];
-    let transaction_fee = FEE_PER_SIGNATURE * sources.len() as u64;
-
-    let instructions: Vec<Instruction> = addresses
-        .iter()
-        .zip(&sources)
-        .enumerate()
-        .map(|(index, (source, (_, amount)))| {
-            let transfer_amount = if index == 0 {
-                amount
-                    .checked_sub(transaction_fee)
-                    .expect("BUG: fee payer has insufficient funds to cover the transaction fee")
-            } else {
-                *amount
-            };
-            instruction::transfer(source, &target_address, transfer_amount)
-        })
+) -> Result<(Transaction, Vec<Signer>), CreateTransferError> {
+    let mut transaction = Transaction::new_unsigned(sweep.sweep_message(recent_blockhash));
+    let accounts_by_address: BTreeMap<Address, Account> = sweep
+        .deposits()
+        .values()
+        .map(|deposit| (deposit.address, deposit.account))
         .collect();
-
-    let message =
-        Message::new_with_blockhash(&instructions, Some(fee_payer_address), &recent_blockhash);
-    let mut transaction = Transaction::new_unsigned(message);
-
-    assert_eq!(
-        transaction.message.signer_keys().len(),
-        sources.len(),
-        "BUG: source accounts must be unique"
-    );
-
-    // Re-order signers to match the order of the message account keys
-    let mut signer_map: BTreeMap<Address, (Account, DerivationPath)> = addresses
-        .into_iter()
-        .zip(
-            sources
-                .iter()
-                .map(|(account, _)| *account)
-                .zip(derivation_paths),
-        )
-        .collect();
-    let (signer_accounts, signer_derivation_paths): (Vec<_>, Vec<_>) = transaction
+    let signers: Vec<Signer> = transaction
         .message
         .signer_keys()
         .iter()
         .map(|key| {
-            signer_map
-                .remove(key)
-                .expect("BUG: signer key not found in source addresses")
+            let account = accounts_by_address.get(key).copied().unwrap_or_else(|| {
+                panic!("BUG: signer {key} is not a deposit address of the sweep")
+            });
+            Signer::Account(account)
         })
-        .unzip();
-
-    sign_transaction(&mut transaction, signer_derivation_paths, &runtime.signer()).await?;
-
-    Ok((transaction, signer_accounts))
-}
-
-/// Creates a signed Solana transaction that transfers lamports from a single
-/// minter-controlled address (the fee payer) to multiple target addresses.
-///
-/// Returns the signed transaction and the list of signer accounts
-/// (only the fee payer).
-///
-/// # Panics
-///
-/// Panics if the IC returns a signature that is not exactly 64 bytes.
-pub async fn create_signed_batch_withdrawal_transaction<R: CanisterRuntime>(
-    runtime: &R,
-    targets: &[(Address, Lamport)],
-    recent_blockhash: Hash,
-) -> Result<(Transaction, Vec<Account>), CreateTransferError> {
-    let fee_payer_account = Account::from(runtime.canister_self());
-    let master_public_key = lazy_get_schnorr_master_key(runtime).await;
-    let fee_payer_derivation_path = derivation_path(&fee_payer_account);
-    let fee_payer_address = Address::from(
-        derive_public_key(&master_public_key, fee_payer_derivation_path.to_vec()).serialize_raw(),
-    );
-
-    let instructions: Vec<Instruction> = targets
-        .iter()
-        .map(|(target, amount)| instruction::transfer(&fee_payer_address, target, *amount))
         .collect();
-
-    let message =
-        Message::new_with_blockhash(&instructions, Some(&fee_payer_address), &recent_blockhash);
-    let mut transaction = Transaction::new_unsigned(message);
 
     sign_transaction(
         &mut transaction,
-        vec![fee_payer_derivation_path],
+        signers.iter().map(Signer::derivation_path),
         &runtime.signer(),
     )
     .await?;
 
-    Ok((transaction, vec![fee_payer_account]))
+    Ok((transaction, signers))
+}
+
+/// Builds the unsigned message of a batch withdrawal transaction: an
+/// `AdvanceNonceAccount` instruction first, followed by one transfer from the
+/// minter's main address per withdrawal request, carrying the nonce value in
+/// place of a recent blockhash. The main address is the fee payer, the source
+/// of all transfers, and the nonce authority, so the transaction has a single
+/// signature.
+pub fn build_batch_withdrawal_message(
+    minter_address: &Address,
+    nonce_account: &Address,
+    nonce_value: Hash,
+    transfers: &[(Address, Lamport)],
+) -> Result<Message, CreateTransferError> {
+    let mut instructions = vec![instruction::advance_nonce_account(
+        nonce_account,
+        minter_address,
+    )];
+    instructions.extend(
+        transfers
+            .iter()
+            .map(|(target, amount)| instruction::transfer(minter_address, target, *amount)),
+    );
+    let message = Message::new_with_blockhash(&instructions, Some(minter_address), &nonce_value);
+    ensure_within_transaction_size(&message)?;
+    Ok(message)
+}
+
+/// Signs the given withdrawal message with the minter's master key.
+pub async fn sign_batch_withdrawal_message<R: CanisterRuntime>(
+    runtime: &R,
+    message: Message,
+) -> Result<Transaction, CreateTransferError> {
+    let mut transaction = Transaction::new_unsigned(message);
+    sign_transaction(
+        &mut transaction,
+        [MINTER_DERIVATION_PATH],
+        &runtime.signer(),
+    )
+    .await?;
+    Ok(transaction)
 }
 
 // Sign transaction, return error if it exceeds the maximum transaction size.
@@ -169,17 +121,21 @@ async fn sign_transaction(
     signer_derivation_paths: impl IntoIterator<Item = DerivationPath>,
     signer: &impl SchnorrSigner,
 ) -> Result<(), CreateTransferError> {
-    let message_bytes = transaction.message_data();
-    let message_len = message_bytes.len();
-    transaction.signatures = sign_bytes(signer_derivation_paths, signer, message_bytes).await?;
+    ensure_within_transaction_size(&transaction.message)?;
+    transaction.signatures =
+        sign_bytes(signer_derivation_paths, signer, transaction.message_data()).await?;
+    Ok(())
+}
 
-    let tx_size = 1 + message_len + transaction.signatures.len() * BYTES_PER_SIGNATURE;
+fn ensure_within_transaction_size(message: &Message) -> Result<(), CreateTransferError> {
+    let tx_size = 1
+        + message.serialize().len()
+        + message.header.num_required_signatures as usize * BYTES_PER_SIGNATURE;
     if tx_size > MAX_TX_SIZE {
         return Err(CreateTransferError::TransactionTooLarge {
             max: MAX_TX_SIZE,
             got: tx_size,
         });
     }
-
     Ok(())
 }

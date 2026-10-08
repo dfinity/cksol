@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # vim: ft=bash
-# Build ckSOL minter inside docker. This outputs cksol_minter.wasm.gz.
+# Build ckSOL minter inside docker. This outputs wasms/cksol_minter.wasm.gz.
 
 set -euo pipefail
 
@@ -24,7 +24,7 @@ EOF
 function help() {
     cat << EOF
 
-This will create (and override) "./cksol_minter.wasm.gz".
+This will create (and override) "./wasms/cksol_minter.wasm.gz".
 EOF
 }
 

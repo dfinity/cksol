@@ -1,11 +1,16 @@
 //! Since the init args for the ICRC1 ledger are not published in a public crate,
 //! redefine them here to initialize the canister correctly.
 use candid::{CandidType, Deserialize, Nat, Principal};
-use cksol_types::MAX_SERIALIZED_MEMO_BYTES;
 use icrc_ledger_types::{icrc::generic_value::Value, icrc1::account::Account};
 use serde::Serialize;
 
 pub const LEDGER_TRANSFER_FEE: u64 = 50;
+/// The `max_memo_length` the ckSOL ledger is deployed with, matching the value most
+/// ICRC-1 ledgers use.
+///
+/// One byte below the largest memo the minter can produce, so the mint of a deposit
+/// id beyond `u32::MAX` would not fit. Raising it takes a ledger upgrade.
+const LEDGER_MAX_MEMO_BYTES: u16 = 80;
 const NNS_ROOT_PRINCIPAL: Principal = Principal::from_slice(&[0_u8, 0, 0, 0, 0, 0, 0, 3, 1, 1]);
 const FEE_COLLECTOR_SUBACCOUNT: [u8; 32] = [
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x0f,
@@ -42,7 +47,7 @@ pub fn ledger_init_args(
             cycles_for_archive_creation: Some(100_000_000_000_000),
             max_transactions_per_response: None,
         },
-        max_memo_length: Some(MAX_SERIALIZED_MEMO_BYTES),
+        max_memo_length: Some(LEDGER_MAX_MEMO_BYTES),
         feature_flags: None,
         index_principal: None,
     })

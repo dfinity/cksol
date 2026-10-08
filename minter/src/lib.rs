@@ -1,5 +1,4 @@
 pub mod address;
-pub mod consolidate;
 mod constants;
 mod cycles;
 pub mod dashboard;
@@ -19,7 +18,7 @@ pub mod storage;
 pub mod utils;
 pub mod withdraw;
 
-#[cfg(any(test, feature = "canbench-rs"))]
+#[cfg(test)]
 pub mod test_fixtures;
 
 #[cfg(feature = "canbench-rs")]

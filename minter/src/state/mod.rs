@@ -1,30 +1,52 @@
 use crate::{
-    constants::{FEE_PER_SIGNATURE, RENT_EXEMPTION_THRESHOLD},
+    address::{account_address, minter_address},
+    constants::{FEE_PER_SIGNATURE, GET_BALANCE_CYCLES, RENT_EXEMPTION_THRESHOLD},
     ledger::client::LedgerClient,
     numeric::{LedgerBurnIndex, LedgerMintIndex},
-    state::event::{DepositId, TransactionPurpose, VersionedMessage, WithdrawalRequest},
+    rpc::BlockHeight,
+    sol_transfer::{
+        BATCH_WITHDRAWAL_TX_FEE, MAX_SIGNATURES, MAX_WITHDRAWALS_PER_NONCE_TX,
+        build_batch_withdrawal_message,
+    },
+    state::event::{
+        CreditedDeposit, Signer, TransactionPurpose, VersionedMessage, WithdrawalRequest,
+    },
     utils::insertion_ordered_map::InsertionOrderedMap,
 };
 use candid::Principal;
-use cksol_types::{DepositStatus, TxFinalizedStatus, WithdrawalStatus};
+use cksol_types::{DepositSolId, TxFinalizedStatus, WithdrawSolStatus};
 use cksol_types_internal::SolanaNetwork;
 use cksol_types_internal::{Ed25519KeyName, InitArgs, UpgradeArgs};
 use ic_canister_runtime::Runtime;
 use ic_ed25519::PublicKey;
 use icrc_ledger_types::icrc1::account::Account;
 use sol_rpc_client::SolRpcClient;
-use sol_rpc_types::{ConsensusStrategy, Lamport, RpcSources, Slot, SolanaCluster};
+use sol_rpc_types::{ConsensusStrategy, Lamport, RpcSources, SolanaCluster};
+use solana_address::Address;
+use solana_hash::Hash;
+use solana_message::Message;
 use solana_signature::Signature;
 use std::{
     cell::RefCell,
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, btree_map},
+    iter::Peekable,
+    str::FromStr,
 };
 
 #[cfg(test)]
 mod tests;
 
 pub mod audit;
+mod deposits;
 pub mod event;
+mod nonce_pool;
+
+pub use deposits::{
+    DepositBalance, Deposits, MintedSweep, PendingMint, QuarantineCause, QuarantinedDeposit,
+    QueuedDeposit, SettledSweep, Sweep, SweepMismatch, SweepRecoveryError, SweepSettlementError,
+    Sweeps, SweptDeposit, Transfer, UnreadableOutcome,
+};
+pub use nonce_pool::{DurableNoncePool, NoncePoolError};
 
 thread_local! {
     static STATE: RefCell<Option<State>> = RefCell::default();
@@ -82,29 +104,24 @@ pub struct State {
     ledger_canister_id: Principal,
     sol_rpc_canister_id: Principal,
     solana_network: SolanaNetwork,
-    manual_deposit_fee: Lamport,
-    automated_deposit_fee: Lamport,
     withdrawal_fee: Lamport,
     minimum_withdrawal_amount: Lamport,
     minimum_deposit_amount: Lamport,
-    process_deposit_required_cycles: u128,
-    deposit_consolidation_fee: u128,
-    monitored_accounts: BTreeSet<Account>,
-    pending_process_deposit_request_guards: BTreeSet<Account>,
+    deposit_sol_required_cycles: u128,
+    deposit_sol_fee: u128,
+    pending_deposit_sol_request_guards: BTreeSet<Account>,
     pending_withdrawal_request_guards: BTreeSet<Account>,
-    accepted_deposits: InsertionOrderedMap<DepositId, Deposit>,
-    quarantined_deposits: InsertionOrderedMap<DepositId, Deposit>,
-    minted_deposits: InsertionOrderedMap<DepositId, MintedDeposit>,
+    deposits: Deposits,
     pending_withdrawal_requests: BTreeMap<LedgerBurnIndex, PendingWithdrawalRequest>,
+    created_withdrawal_requests: BTreeMap<LedgerBurnIndex, PendingWithdrawalRequest>,
     sent_withdrawal_requests: BTreeMap<LedgerBurnIndex, SentWithdrawalRequest>,
     successful_withdrawal_requests: BTreeMap<LedgerBurnIndex, SentWithdrawalRequest>,
     failed_withdrawal_requests: BTreeMap<LedgerBurnIndex, SentWithdrawalRequest>,
-    deposits_to_consolidate: BTreeMap<LedgerMintIndex, (Account, Lamport)>,
-    submitted_transactions: InsertionOrderedMap<Signature, SolanaTransaction>,
-    transactions_to_resubmit: InsertionOrderedMap<Signature, SolanaTransaction>,
+    submitted_transactions: InsertionOrderedMap<Signature, MinterTransaction>,
+    created_withdrawal_txs: BTreeMap<Address, CreatedWithdrawalTransaction>,
     succeeded_transactions: BTreeSet<Signature>,
-    failed_transactions: InsertionOrderedMap<Signature, SolanaTransaction>,
-    consolidation_transactions: InsertionOrderedMap<Signature, ConsolidationTransaction>,
+    failed_transactions: InsertionOrderedMap<Signature, MinterTransaction>,
+    nonce_pool: DurableNoncePool,
     active_tasks: BTreeSet<TaskType>,
     balance: Lamport,
 }
@@ -114,17 +131,21 @@ impl State {
         self.minter_public_key.as_ref()
     }
 
-    /// Set the minter public key only once.
+    /// Cache the minter public key.
     ///
-    /// This is expected to happen only when the minter was freshly installed or after a canister upgrade.
+    /// Concurrent calls may each fetch the key before either one caches it.
+    /// All of them fetch with identical arguments and thus obtain the same key,
+    /// so caching the same key again is a no-op.
     ///
     /// # Panics
-    /// This method will panic if the public key was already set
-    pub fn set_once_minter_public_key(&mut self, public_key: SchnorrPublicKey) {
-        if self.minter_public_key.is_some() {
-            panic!("BUG: minter public key is already set")
+    /// This method will panic if a different public key is already cached,
+    /// since the minter public key must never change.
+    pub fn cache_minter_public_key(&mut self, public_key: SchnorrPublicKey) {
+        match &self.minter_public_key {
+            None => self.minter_public_key = Some(public_key),
+            Some(cached) if *cached == public_key => {}
+            Some(_) => panic!("BUG: attempt to overwrite the minter public key"),
         }
-        self.minter_public_key = Some(public_key);
     }
 
     pub fn sol_rpc_canister_id(&self) -> Principal {
@@ -139,16 +160,8 @@ impl State {
         self.master_key_name
     }
 
-    pub fn manual_deposit_fee(&self) -> u64 {
-        self.manual_deposit_fee
-    }
-
-    pub fn automated_deposit_fee(&self) -> u64 {
-        self.automated_deposit_fee
-    }
-
-    pub fn deposit_consolidation_fee(&self) -> u128 {
-        self.deposit_consolidation_fee
+    pub fn deposit_sol_fee(&self) -> u128 {
+        self.deposit_sol_fee
     }
 
     pub fn withdrawal_fee(&self) -> u64 {
@@ -167,20 +180,12 @@ impl State {
         self.solana_network
     }
 
-    pub fn process_deposit_required_cycles(&self) -> u128 {
-        self.process_deposit_required_cycles
+    pub fn deposit_sol_required_cycles(&self) -> u128 {
+        self.deposit_sol_required_cycles
     }
 
-    pub fn accepted_deposits(&self) -> &InsertionOrderedMap<DepositId, Deposit> {
-        &self.accepted_deposits
-    }
-
-    pub fn quarantined_deposits(&self) -> &InsertionOrderedMap<DepositId, Deposit> {
-        &self.quarantined_deposits
-    }
-
-    pub fn minted_deposits(&self) -> &InsertionOrderedMap<DepositId, MintedDeposit> {
-        &self.minted_deposits
+    pub fn deposits(&self) -> &Deposits {
+        &self.deposits
     }
 
     pub fn sent_withdrawal_requests(&self) -> &BTreeMap<LedgerBurnIndex, SentWithdrawalRequest> {
@@ -197,46 +202,42 @@ impl State {
         &self.failed_withdrawal_requests
     }
 
-    pub fn deposits_to_consolidate(&self) -> &BTreeMap<LedgerMintIndex, (Account, Lamport)> {
-        &self.deposits_to_consolidate
-    }
-
-    pub fn submitted_transactions(&self) -> &InsertionOrderedMap<Signature, SolanaTransaction> {
+    pub fn submitted_transactions(&self) -> &InsertionOrderedMap<Signature, MinterTransaction> {
         &self.submitted_transactions
     }
 
-    pub fn transactions_to_resubmit(&self) -> &InsertionOrderedMap<Signature, SolanaTransaction> {
-        &self.transactions_to_resubmit
+    pub fn created_withdrawal_txs(&self) -> &BTreeMap<Address, CreatedWithdrawalTransaction> {
+        &self.created_withdrawal_txs
     }
 
     pub fn process_transaction_expired(&mut self, signature: &Signature) {
         assert!(
             !self.succeeded_transactions.contains(signature),
-            "BUG: cannot mark already succeeded transaction {signature} for resubmission"
+            "BUG: cannot mark already succeeded transaction {signature} as expired"
         );
         assert!(
             !self.failed_transactions.contains_key(signature),
-            "BUG: cannot mark already failed transaction {signature} for resubmission"
+            "BUG: cannot mark already failed transaction {signature} as expired"
         );
         let transaction = self
             .submitted_transactions
             .remove(signature)
             .unwrap_or_else(|| {
-                panic!("BUG: cannot mark non-submitted transaction {signature} for resubmission")
+                panic!("BUG: cannot mark non-submitted transaction {signature} as expired")
             });
-        assert!(
-            self.transactions_to_resubmit
-                .insert(*signature, transaction)
-                .is_none(),
-            "BUG: transaction {signature} is already queued for resubmission"
-        );
+        match transaction {
+            MinterTransaction::SweepDeposit { .. } => self.deposits.drop_swept(signature),
+            MinterTransaction::Withdrawal { .. } => {
+                panic!("BUG: durable-nonce withdrawal transaction {signature} cannot expire")
+            }
+        }
     }
 
     pub fn succeeded_transactions(&self) -> &BTreeSet<Signature> {
         &self.succeeded_transactions
     }
 
-    pub fn failed_transactions(&self) -> &InsertionOrderedMap<Signature, SolanaTransaction> {
+    pub fn failed_transactions(&self) -> &InsertionOrderedMap<Signature, MinterTransaction> {
         &self.failed_transactions
     }
 
@@ -244,51 +245,12 @@ impl State {
         self.balance
     }
 
-    pub fn monitored_accounts(&self) -> &BTreeSet<Account> {
-        &self.monitored_accounts
+    pub fn nonce_pool(&self) -> &DurableNoncePool {
+        &self.nonce_pool
     }
 
-    pub(crate) fn process_started_monitoring_account(&mut self, account: &Account) {
-        self.monitored_accounts.insert(*account);
-    }
-
-    pub(crate) fn process_stopped_monitoring_account(&mut self, account: &Account) {
-        self.monitored_accounts.remove(account);
-    }
-
-    pub fn consolidation_transactions(
-        &self,
-    ) -> &InsertionOrderedMap<Signature, ConsolidationTransaction> {
-        &self.consolidation_transactions
-    }
-
-    pub fn deposit_status(&self, deposit_id: &DepositId) -> Option<DepositStatus> {
-        if self.quarantined_deposits.contains_key(deposit_id) {
-            return Some(DepositStatus::Quarantined((*deposit_id).into()));
-        }
-        if let Some(Deposit {
-            deposit_amount,
-            amount_to_mint,
-        }) = self.accepted_deposits.get(deposit_id)
-        {
-            return Some(DepositStatus::Processing {
-                deposit_amount: *deposit_amount,
-                amount_to_mint: *amount_to_mint,
-                deposit_id: (*deposit_id).into(),
-            });
-        }
-        if let Some(MintedDeposit {
-            block_index,
-            deposit: Deposit { amount_to_mint, .. },
-        }) = self.minted_deposits.get(deposit_id)
-        {
-            return Some(DepositStatus::Minted {
-                block_index: *block_index.get(),
-                minted_amount: *amount_to_mint,
-                deposit_id: (*deposit_id).into(),
-            });
-        }
-        None
+    pub fn nonce_pool_addresses(&self) -> BTreeSet<Address> {
+        self.nonce_pool.addresses().copied().collect()
     }
 
     pub fn sol_rpc_client<R: Runtime>(&self, runtime: R) -> SolRpcClient<R> {
@@ -307,8 +269,8 @@ impl State {
         LedgerClient::new(runtime, self.ledger_canister_id)
     }
 
-    pub fn pending_process_deposit_request_guards_mut(&mut self) -> &mut BTreeSet<Account> {
-        &mut self.pending_process_deposit_request_guards
+    pub fn pending_deposit_sol_request_guards_mut(&mut self) -> &mut BTreeSet<Account> {
+        &mut self.pending_deposit_sol_request_guards
     }
 
     pub fn pending_withdrawal_request_guards_mut(&mut self) -> &mut BTreeSet<Account> {
@@ -317,11 +279,6 @@ impl State {
 
     pub fn active_tasks_mut(&mut self) -> &mut BTreeSet<TaskType> {
         &mut self.active_tasks
-    }
-
-    fn transaction_fee(&self, message: &VersionedMessage) -> Lamport {
-        let VersionedMessage::Legacy(msg) = message;
-        FEE_PER_SIGNATURE * msg.header.num_required_signatures as u64
     }
 
     fn validate(&self) -> Result<(), InvalidStateError> {
@@ -338,30 +295,35 @@ impl State {
                 "ERROR: provided canister IDs are not distinct!".to_string(),
             ));
         }
-        if self.automated_deposit_fee < self.manual_deposit_fee {
-            return Err(InvalidStateError::InvalidDepositFees {
-                automated_deposit_fee: self.automated_deposit_fee,
-                manual_deposit_fee: self.manual_deposit_fee,
-            });
-        }
-        if self.minimum_deposit_amount < self.automated_deposit_fee {
-            return Err(InvalidStateError::InvalidDepositFees {
-                automated_deposit_fee: self.automated_deposit_fee,
-                manual_deposit_fee: self.manual_deposit_fee,
-            });
-        }
-        if self.minimum_deposit_amount < FEE_PER_SIGNATURE + RENT_EXEMPTION_THRESHOLD {
+        let maximum_sweep_fee = MAX_SIGNATURES * FEE_PER_SIGNATURE;
+        if self.minimum_deposit_amount < maximum_sweep_fee + RENT_EXEMPTION_THRESHOLD {
             return Err(InvalidStateError::InvalidMinimumDepositAmount {
                 minimum_deposit_amount: self.minimum_deposit_amount,
-                fee_per_signature: FEE_PER_SIGNATURE,
+                maximum_sweep_fee,
                 rent_exemption_threshold: RENT_EXEMPTION_THRESHOLD,
             });
+        }
+        if self.minimum_deposit_amount < 2 * RENT_EXEMPTION_THRESHOLD + FEE_PER_SIGNATURE {
+            return Err(
+                InvalidStateError::MinimumDepositAmountLeavesMainAddressBelowRent {
+                    minimum_deposit_amount: self.minimum_deposit_amount,
+                    rent_exemption_threshold: RENT_EXEMPTION_THRESHOLD,
+                    fee_per_signature: FEE_PER_SIGNATURE,
+                },
+            );
         }
         if self.minimum_withdrawal_amount < self.withdrawal_fee + RENT_EXEMPTION_THRESHOLD {
             return Err(InvalidStateError::InvalidMinimumWithdrawalAmount {
                 minimum_withdrawal_amount: self.minimum_withdrawal_amount,
                 withdrawal_fee: self.withdrawal_fee,
                 rent_exemption_threshold: RENT_EXEMPTION_THRESHOLD,
+            });
+        }
+        if self.deposit_sol_required_cycles < GET_BALANCE_CYCLES + self.deposit_sol_fee {
+            return Err(InvalidStateError::DepositSolRequiredCyclesTooLow {
+                required_cycles: self.deposit_sol_required_cycles,
+                get_balance_cycles: GET_BALANCE_CYCLES,
+                deposit_sol_fee: self.deposit_sol_fee,
             });
         }
         Ok(())
@@ -371,23 +333,16 @@ impl State {
         &mut self,
         UpgradeArgs {
             sol_rpc_canister_id,
-            manual_deposit_fee,
-            automated_deposit_fee,
             minimum_withdrawal_amount,
             minimum_deposit_amount,
             withdrawal_fee,
-            process_deposit_required_cycles,
-            deposit_consolidation_fee,
+            deposit_sol_required_cycles,
+            deposit_sol_fee,
+            nonce_accounts_to_add,
         }: UpgradeArgs,
     ) -> Result<(), InvalidStateError> {
         if let Some(sol_rpc_canister_id) = sol_rpc_canister_id {
             self.sol_rpc_canister_id = sol_rpc_canister_id;
-        }
-        if let Some(manual_deposit_fee) = manual_deposit_fee {
-            self.manual_deposit_fee = manual_deposit_fee;
-        }
-        if let Some(automated_deposit_fee) = automated_deposit_fee {
-            self.automated_deposit_fee = automated_deposit_fee;
         }
         if let Some(withdrawal_fee) = withdrawal_fee {
             self.withdrawal_fee = withdrawal_fee;
@@ -398,89 +353,162 @@ impl State {
         if let Some(minimum_deposit_amount) = minimum_deposit_amount {
             self.minimum_deposit_amount = minimum_deposit_amount;
         }
-        if let Some(process_deposit_required_cycles) = process_deposit_required_cycles {
-            self.process_deposit_required_cycles = process_deposit_required_cycles as u128;
+        if let Some(deposit_sol_required_cycles) = deposit_sol_required_cycles {
+            self.deposit_sol_required_cycles = deposit_sol_required_cycles as u128;
         }
-        if let Some(deposit_consolidation_fee) = deposit_consolidation_fee {
-            self.deposit_consolidation_fee = deposit_consolidation_fee as u128;
+        if let Some(deposit_sol_fee) = deposit_sol_fee {
+            self.deposit_sol_fee = deposit_sol_fee as u128;
+        }
+        if let Some(nonce_accounts) = nonce_accounts_to_add {
+            let nonce_accounts = parse_nonce_accounts(nonce_accounts)?;
+            self.ensure_no_incomplete_withdrawal_to(&nonce_accounts)?;
+            self.nonce_pool.add_accounts(nonce_accounts)?;
         }
         self.validate()
     }
 
-    fn process_accepted_deposit(
+    /// An incomplete withdrawal survives an upgrade, so an address may only
+    /// join the nonce pool once no queued or in-flight transfer targets it;
+    /// otherwise the withdrawal would credit a minter-controlled account.
+    fn ensure_no_incomplete_withdrawal_to(
+        &self,
+        nonce_accounts: &[Address],
+    ) -> Result<(), InvalidStateError> {
+        let incomplete_destinations: BTreeSet<Address> = self
+            .pending_withdrawal_requests
+            .values()
+            .chain(self.created_withdrawal_requests.values())
+            .map(|pending| &pending.request)
+            .chain(
+                self.sent_withdrawal_requests
+                    .values()
+                    .map(|sent| &sent.request),
+            )
+            .map(|request| Address::from(request.solana_address))
+            .collect();
+        match nonce_accounts
+            .iter()
+            .find(|address| incomplete_destinations.contains(address))
+        {
+            Some(address) => Err(InvalidStateError::NonceAccountIsWithdrawalDestination(
+                *address,
+            )),
+            None => Ok(()),
+        }
+    }
+
+    fn process_queued_deposit(
         &mut self,
-        deposit_id: &DepositId,
-        deposit_amount: &Lamport,
-        amount_to_mint: &Lamport,
+        deposit_id: DepositSolId,
+        account: &Account,
+        address: &Address,
+        balance: DepositBalance,
+        queued_at: u64,
     ) {
-        assert!(
-            !self.quarantined_deposits.contains_key(deposit_id),
-            "Attempted to accept already quarantined deposit: {deposit_id:?}"
-        );
-        assert!(
-            !self.minted_deposits.contains_key(deposit_id),
-            "Attempted to accept an already minted deposit: {deposit_id:?}"
-        );
-        assert_eq!(
-            self.accepted_deposits.insert(
-                *deposit_id,
-                Deposit {
-                    deposit_amount: *deposit_amount,
-                    amount_to_mint: *amount_to_mint,
-                }
+        debug_assert_eq!(
+            *address,
+            account_address(
+                self.minter_public_key
+                    .as_ref()
+                    .expect("BUG: a deposit was queued before the minter public key was recorded"),
+                account,
             ),
-            None,
-            "Attempted to accept an already accepted deposit: {deposit_id:?}"
+            "Attempted to queue deposit {deposit_id} with address {address} not derived from account {account:?}",
+        );
+        self.deposits.queue(
+            deposit_id,
+            QueuedDeposit {
+                account: *account,
+                address: *address,
+                balance,
+            },
+            queued_at,
         );
     }
 
-    fn process_quarantined_deposit(&mut self, deposit_id: &DepositId) {
+    fn process_credited_sweep(
+        &mut self,
+        signature: &Signature,
+        amount_received: Lamport,
+        mints: &[CreditedDeposit],
+        timestamp: u64,
+    ) {
+        let amount_to_mint: Lamport = mints.iter().map(|mint| mint.amount_to_mint).sum();
         assert!(
-            !self.minted_deposits.contains_key(deposit_id),
-            "Attempted to quarantine an already minted deposit: {deposit_id:?}"
+            amount_to_mint <= amount_received,
+            "Attempted to credit sweep {signature} with mints of {amount_to_mint} lamports exceeding the {amount_received} lamports received"
         );
-        let accepted_deposit = self
-            .accepted_deposits
-            .remove(deposit_id)
-            .unwrap_or_else(|| {
-                panic!("Attempted to quarantine an unknown deposit: {deposit_id:?}")
-            });
-        assert_eq!(
-            self.quarantined_deposits
-                .insert(*deposit_id, accepted_deposit),
-            None,
-            "Attempted to quarantine already quarantined deposit: {deposit_id:?}"
-        );
+        self.deposits.credit_sweep(signature, mints, timestamp);
+        self.balance += amount_received;
     }
 
-    pub fn withdrawal_status(&self, block_index: u64) -> WithdrawalStatus {
+    fn process_minted_swept_deposit(
+        &mut self,
+        deposit_id: DepositSolId,
+        mint_block_index: &LedgerMintIndex,
+    ) {
+        self.deposits.mint(deposit_id, *mint_block_index);
+    }
+
+    fn process_quarantined_pending_mint(&mut self, deposit_id: DepositSolId) {
+        self.deposits.quarantine_pending_mint(deposit_id);
+    }
+
+    fn process_quarantined_sweep(&mut self, signature: &Signature) {
+        self.deposits.quarantine_sweep(signature);
+    }
+
+    pub fn withdrawal_status(&self, block_index: u64) -> WithdrawSolStatus {
         let burn_index = LedgerBurnIndex::from(block_index);
-        if self.pending_withdrawal_requests.contains_key(&burn_index) {
-            return WithdrawalStatus::Pending;
+        if self.pending_withdrawal_requests.contains_key(&burn_index)
+            || self.created_withdrawal_requests.contains_key(&burn_index)
+        {
+            return WithdrawSolStatus::Pending;
         }
         if let Some(sent) = self.sent_withdrawal_requests.get(&burn_index) {
-            return WithdrawalStatus::TxSent {
+            return WithdrawSolStatus::TxSent {
                 transaction_id: sent.signature.into(),
             };
         }
         if let Some(sent) = self.successful_withdrawal_requests.get(&burn_index) {
-            return WithdrawalStatus::TxFinalized(TxFinalizedStatus::Success {
+            return WithdrawSolStatus::TxFinalized(TxFinalizedStatus::Success {
                 transaction_id: sent.signature.into(),
                 effective_transaction_fee: None,
             });
         }
         if let Some(sent) = self.failed_withdrawal_requests.get(&burn_index) {
-            return WithdrawalStatus::TxFinalized(TxFinalizedStatus::Failure {
+            return WithdrawSolStatus::TxFinalized(TxFinalizedStatus::Failure {
                 transaction_id: sent.signature.into(),
             });
         }
-        WithdrawalStatus::NotFound
+        WithdrawSolStatus::NotFound
     }
 
     pub fn pending_withdrawal_requests(
         &self,
     ) -> &BTreeMap<LedgerBurnIndex, PendingWithdrawalRequest> {
         &self.pending_withdrawal_requests
+    }
+
+    pub fn created_withdrawal_requests(
+        &self,
+    ) -> &BTreeMap<LedgerBurnIndex, PendingWithdrawalRequest> {
+        &self.created_withdrawal_requests
+    }
+
+    pub fn withdrawal_batches(&self) -> WithdrawalBatches<'_> {
+        WithdrawalBatches {
+            pending_requests: self.pending_withdrawal_requests.values().peekable(),
+            available_balance: self.balance.saturating_sub(RENT_EXEMPTION_THRESHOLD),
+        }
+    }
+
+    pub fn can_create_withdrawal_transaction(&self) -> bool {
+        self.nonce_pool.num_free_accounts() > 0 && self.withdrawal_batches().next().is_some()
+    }
+
+    pub fn has_unsigned_withdrawal_transaction(&self) -> bool {
+        !self.created_withdrawal_txs.is_empty()
     }
 
     /// Returns the creation timestamp (in nanoseconds) of the oldest incomplete withdrawal request.
@@ -490,8 +518,12 @@ impl State {
             .pending_withdrawal_requests
             .values()
             .map(|r| r.created_at);
+        let created = self
+            .created_withdrawal_requests
+            .values()
+            .map(|r| r.created_at);
         let sent = self.sent_withdrawal_requests.values().map(|r| r.created_at);
-        pending.chain(sent).min()
+        pending.chain(created).chain(sent).min()
     }
 
     fn process_accepted_withdrawal(&mut self, request: &WithdrawalRequest, created_at: u64) {
@@ -509,45 +541,13 @@ impl State {
         );
     }
 
-    fn process_mint(&mut self, deposit_id: &DepositId, mint_block_index: &LedgerMintIndex) {
-        assert!(
-            !self.quarantined_deposits.contains_key(deposit_id),
-            "Attempted to mint ckSOL for a quarantined deposit: {deposit_id:?}",
-        );
-        let deposit = self
-            .accepted_deposits
-            .remove(deposit_id)
-            .unwrap_or_else(|| {
-                panic!("Attempted to mint ckSOL for an unknown deposit: {deposit_id:?}")
-            });
-        assert_eq!(
-            self.deposits_to_consolidate.insert(
-                *mint_block_index,
-                (deposit_id.account, deposit.deposit_amount)
-            ),
-            None,
-            "Attempted to consolidate funds for an already consolidated mint index: {mint_block_index:?}",
-        );
-        assert_eq!(
-            self.minted_deposits.insert(
-                *deposit_id,
-                MintedDeposit {
-                    block_index: *mint_block_index,
-                    deposit,
-                }
-            ),
-            None,
-            "Attempted to mint ckSOL twice for the same deposit: {deposit_id:?}",
-        );
-    }
-
     fn process_transaction_submitted(
         &mut self,
         signature: &Signature,
         transaction: &VersionedMessage,
-        signers: &[Account],
-        slot: Slot,
+        signers: &[Signer],
         purpose: &TransactionPurpose,
+        timestamp: u64,
     ) {
         assert!(
             !self.succeeded_transactions.contains(signature),
@@ -557,109 +557,180 @@ impl State {
             !self.failed_transactions.contains_key(signature),
             "Attempted to submit already failed transaction {signature:?}"
         );
-        let amount = match purpose {
-            TransactionPurpose::ConsolidateDeposits { mint_indices } => {
-                let mut total: Lamport = 0;
-                let mut deposits = Vec::with_capacity(mint_indices.len());
-                for mint_index in mint_indices {
-                    let (_account, deposit_amount) = self
-                        .deposits_to_consolidate
-                        .remove(mint_index)
-                        .unwrap_or_else(|| {
-                            panic!("Attempted to consolidate unknown mint index: {mint_index:?}")
-                        });
-                    total += deposit_amount;
-                    deposits.push((*mint_index, deposit_amount));
+        let submitted_transaction = match purpose {
+            TransactionPurpose::Withdrawal { burn_indices } => self.send_nonce_withdrawal(
+                signature,
+                transaction.clone(),
+                signers,
+                burn_indices,
+                timestamp,
+            ),
+            TransactionPurpose::SweepDeposit {
+                deposit_ids,
+                block_height,
+            } => {
+                let sweep_destination = minter_address(self.minter_public_key.as_ref().expect(
+                    "BUG: a sweep was submitted before the minter public key was recorded",
+                ));
+                self.deposits
+                    .sweep(deposit_ids, sweep_destination, transaction, signature);
+                MinterTransaction::SweepDeposit {
+                    block_height: *block_height,
                 }
-                self.consolidation_transactions
-                    .insert(*signature, ConsolidationTransaction { deposits });
-                total
-            }
-            TransactionPurpose::WithdrawSol { burn_indices } => {
-                let mut total: Lamport = 0;
-                for burn_index in burn_indices {
-                    let pending = self
-                        .pending_withdrawal_requests
-                        .remove(burn_index)
-                        .unwrap_or_else(|| {
-                            panic!("Attempted to send transaction for unknown withdrawal request: {burn_index:?}")
-                        });
-                    total += pending.request.amount_to_transfer;
-                    assert_eq!(
-                        self.sent_withdrawal_requests.insert(
-                            *burn_index,
-                            SentWithdrawalRequest {
-                                request: pending.request,
-                                signature: *signature,
-                                created_at: pending.created_at,
-                            },
-                        ),
-                        None,
-                        "Attempted to send transaction for already sent withdrawal request: {burn_index:?}"
-                    );
-                }
-                let tx_fee = self.transaction_fee(transaction);
-                self.balance = self
-                    .balance
-                    .checked_sub(total + tx_fee)
-                    .expect("BUG: insufficient minter balance for withdrawal");
-                total
             }
         };
         assert_eq!(
-            self.submitted_transactions.insert(
-                *signature,
-                SolanaTransaction {
-                    message: transaction.clone(),
-                    signers: signers.to_vec(),
-                    slot,
-                    purpose: purpose.clone(),
-                    amount,
-                }
-            ),
+            self.submitted_transactions
+                .insert(*signature, submitted_transaction),
             None,
             "Attempted to submit transaction with signature {signature:?} twice"
         );
     }
 
-    fn process_transaction_resubmitted(
+    fn process_transaction_created(
         &mut self,
-        old_signature: &Signature,
-        new_signature: &Signature,
-        new_slot: Slot,
+        burn_indices: &[LedgerBurnIndex],
+        nonce_account: &Address,
+        nonce_value: Hash,
     ) {
-        let old_transaction = self
-            .transactions_to_resubmit
-            .remove(old_signature)
-            .unwrap_or_else(|| {
-                panic!("Attempted to resubmit unknown transaction with signature {old_signature:?}")
-            });
-        assert!(
-            !self.succeeded_transactions.contains(new_signature),
-            "Attempted to resubmit with signature {new_signature:?} that already succeeded"
-        );
-        assert!(
-            !self.failed_transactions.contains_key(new_signature),
-            "Attempted to resubmit with signature {new_signature:?} that already failed"
-        );
-        let new_transaction = SolanaTransaction {
-            slot: new_slot,
-            ..old_transaction
-        };
+        self.nonce_pool.bind(nonce_account, nonce_value);
+        let mut total: Lamport = 0;
+        for burn_index in burn_indices {
+            let pending = self
+                .pending_withdrawal_requests
+                .remove(burn_index)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "Attempted to create transaction for unknown withdrawal request: {burn_index:?}"
+                    )
+                });
+            total = total
+                .checked_add(pending.request.amount_to_transfer)
+                .expect("BUG: total amount of a withdrawal transaction overflows");
+            assert_eq!(
+                self.created_withdrawal_requests
+                    .insert(*burn_index, pending),
+                None,
+                "Attempted to create transaction for already created withdrawal request: {burn_index:?}"
+            );
+        }
+        self.balance = self
+            .balance
+            .checked_sub(total + BATCH_WITHDRAWAL_TX_FEE)
+            .expect("BUG: insufficient minter balance for withdrawal");
         assert_eq!(
-            self.submitted_transactions
-                .insert(*new_signature, new_transaction),
+            self.created_withdrawal_txs.insert(
+                *nonce_account,
+                CreatedWithdrawalTransaction {
+                    nonce_value,
+                    burn_indices: burn_indices.to_vec(),
+                }
+            ),
             None,
-            "Attempted to resubmit transaction with signature {new_signature:?} that already exists"
+            "BUG: nonce account {nonce_account} already has a created transaction"
         );
-        if let Some(info) = self.consolidation_transactions.remove(old_signature) {
-            self.consolidation_transactions.insert(*new_signature, info);
+    }
+
+    fn send_nonce_withdrawal(
+        &mut self,
+        signature: &Signature,
+        message: VersionedMessage,
+        signers: &[Signer],
+        burn_indices: &[LedgerBurnIndex],
+        submitted_at: u64,
+    ) -> MinterTransaction {
+        let nonce_account = message.advanced_nonce_account().unwrap_or_else(|| {
+            panic!("BUG: withdrawal transaction {signature} does not start with an AdvanceNonceAccount instruction")
+        });
+        let created = self
+            .created_withdrawal_txs
+            .remove(&nonce_account)
+            .unwrap_or_else(|| {
+                panic!(
+                    "BUG: no withdrawal transaction was created for nonce account {nonce_account}"
+                )
+            });
+        assert_eq!(
+            burn_indices, created.burn_indices,
+            "BUG: withdrawal transaction {signature} does not serve the withdrawal requests bound to nonce account {nonce_account}"
+        );
+        assert_eq!(
+            message,
+            VersionedMessage::Legacy(self.bound_withdrawal_message(&nonce_account, &created)),
+            "BUG: withdrawal transaction {signature} does not carry the message bound to nonce account {nonce_account}"
+        );
+        assert_eq!(
+            signers,
+            [Signer::Minter],
+            "BUG: withdrawal transaction {signature} must be signed by the minter only"
+        );
+        for burn_index in &created.burn_indices {
+            let pending = self
+                .created_withdrawal_requests
+                .remove(burn_index)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "BUG: withdrawal request {burn_index:?} of a created transaction is not in the created bucket"
+                    )
+                });
+            assert_eq!(
+                self.sent_withdrawal_requests.insert(
+                    *burn_index,
+                    SentWithdrawalRequest {
+                        request: pending.request,
+                        signature: *signature,
+                        created_at: pending.created_at,
+                    },
+                ),
+                None,
+                "Attempted to send transaction for already sent withdrawal request: {burn_index:?}"
+            );
         }
-        for sent in self.sent_withdrawal_requests.values_mut() {
-            if &sent.signature == old_signature {
-                sent.signature = *new_signature;
-            }
+        MinterTransaction::Withdrawal {
+            message,
+            nonce_account,
+            nonce_value: created.nonce_value,
+            submitted_at,
         }
+    }
+
+    fn bound_withdrawal_message(
+        &self,
+        nonce_account: &Address,
+        created: &CreatedWithdrawalTransaction,
+    ) -> Message {
+        let minter_address =
+            minter_address(self.minter_public_key.as_ref().expect(
+                "BUG: a withdrawal was submitted before the minter public key was recorded",
+            ));
+        let transfers: Vec<(Address, Lamport)> = created
+            .burn_indices
+            .iter()
+            .map(|burn_index| {
+                let request = &self
+                    .created_withdrawal_requests
+                    .get(burn_index)
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "BUG: withdrawal request {burn_index:?} of a created transaction is not in the created bucket"
+                        )
+                    })
+                    .request;
+                (
+                    Address::from(request.solana_address),
+                    request.amount_to_transfer,
+                )
+            })
+            .collect();
+        build_batch_withdrawal_message(
+            &minter_address,
+            nonce_account,
+            created.nonce_value,
+            &transfers,
+        )
+        .unwrap_or_else(|e| {
+            panic!("BUG: cannot rebuild the withdrawal message bound to nonce account {nonce_account}: {e}")
+        })
     }
 
     fn process_transaction_succeeded(&mut self, signature: &Signature) {
@@ -673,20 +744,12 @@ impl State {
             .unwrap_or_else(|| {
                 panic!("Attempted to mark unknown transaction {signature:?} as succeeded")
             });
-        if matches!(
-            transaction.purpose,
-            TransactionPurpose::ConsolidateDeposits { .. }
-        ) {
-            let tx_fee = self.transaction_fee(&transaction.message);
-            self.balance += transaction
-                .amount
-                .checked_sub(tx_fee)
-                .expect("BUG: consolidation amount is less than transaction fee");
+        match transaction {
+            MinterTransaction::SweepDeposit { .. } => self.deposits.finalize_swept(signature),
+            MinterTransaction::Withdrawal { nonce_account, .. } => {
+                self.nonce_pool.free(&nonce_account)
+            }
         }
-        assert!(
-            !self.transactions_to_resubmit.contains_key(signature),
-            "BUG: transaction {signature} is queued for resubmission but is being marked as succeeded"
-        );
         assert!(
             self.succeeded_transactions.insert(*signature),
             "Attempted to mark transaction {signature:?} as succeeded twice"
@@ -709,10 +772,12 @@ impl State {
             .unwrap_or_else(|| {
                 panic!("Attempted to mark unknown transaction {signature:?} as failed")
             });
-        assert!(
-            !self.transactions_to_resubmit.contains_key(signature),
-            "BUG: transaction {signature} is queued for resubmission but is being marked as failed"
-        );
+        match &transaction {
+            MinterTransaction::SweepDeposit { .. } => self.deposits.drop_swept(signature),
+            MinterTransaction::Withdrawal { nonce_account, .. } => {
+                self.nonce_pool.free(nonce_account)
+            }
+        }
         assert_eq!(
             self.failed_transactions.insert(*signature, transaction),
             None,
@@ -729,20 +794,50 @@ impl State {
 #[derive(Debug, PartialEq, Eq)]
 pub enum InvalidStateError {
     InvalidCanisterId(String),
-    InvalidDepositFees {
-        automated_deposit_fee: u64,
-        manual_deposit_fee: u64,
-    },
     InvalidMinimumDepositAmount {
         minimum_deposit_amount: u64,
-        fee_per_signature: u64,
+        maximum_sweep_fee: u64,
         rent_exemption_threshold: u64,
+    },
+    MinimumDepositAmountLeavesMainAddressBelowRent {
+        minimum_deposit_amount: u64,
+        rent_exemption_threshold: u64,
+        fee_per_signature: u64,
     },
     InvalidMinimumWithdrawalAmount {
         minimum_withdrawal_amount: u64,
         withdrawal_fee: u64,
         rent_exemption_threshold: u64,
     },
+    DepositSolRequiredCyclesTooLow {
+        required_cycles: u128,
+        get_balance_cycles: u128,
+        deposit_sol_fee: u128,
+    },
+    InvalidNonceAccount(String),
+    DuplicateNonceAccount(Address),
+    NonceAccountIsWithdrawalDestination(Address),
+}
+
+impl From<NoncePoolError> for InvalidStateError {
+    fn from(error: NoncePoolError) -> Self {
+        match error {
+            NoncePoolError::DuplicateAccount(address) => Self::DuplicateNonceAccount(address),
+        }
+    }
+}
+
+fn parse_nonce_accounts(addresses: Vec<String>) -> Result<Vec<Address>, InvalidStateError> {
+    addresses
+        .into_iter()
+        .map(|address| {
+            Address::from_str(&address).map_err(|error| {
+                InvalidStateError::InvalidNonceAccount(format!(
+                    "ERROR: failed to parse nonce account {address}: {error}"
+                ))
+            })
+        })
+        .collect()
 }
 
 impl TryFrom<InitArgs> for State {
@@ -752,46 +847,41 @@ impl TryFrom<InitArgs> for State {
         InitArgs {
             sol_rpc_canister_id,
             ledger_canister_id,
-            manual_deposit_fee,
-            automated_deposit_fee,
             master_key_name,
             minimum_withdrawal_amount,
             minimum_deposit_amount,
             withdrawal_fee,
-            process_deposit_required_cycles,
+            deposit_sol_required_cycles,
             solana_network,
-            deposit_consolidation_fee,
+            deposit_sol_fee,
+            nonce_accounts,
         }: InitArgs,
     ) -> Result<Self, Self::Error> {
+        let nonce_pool = DurableNoncePool::new(parse_nonce_accounts(nonce_accounts)?)?;
         let state = Self {
             minter_public_key: None,
             master_key_name,
             ledger_canister_id,
             sol_rpc_canister_id,
             solana_network,
-            manual_deposit_fee,
-            automated_deposit_fee,
             withdrawal_fee,
             minimum_withdrawal_amount,
             minimum_deposit_amount,
-            process_deposit_required_cycles: process_deposit_required_cycles as u128,
-            deposit_consolidation_fee: deposit_consolidation_fee as u128,
-            monitored_accounts: BTreeSet::new(),
-            pending_process_deposit_request_guards: BTreeSet::new(),
+            deposit_sol_required_cycles: deposit_sol_required_cycles as u128,
+            deposit_sol_fee: deposit_sol_fee as u128,
+            pending_deposit_sol_request_guards: BTreeSet::new(),
             pending_withdrawal_request_guards: BTreeSet::new(),
-            accepted_deposits: InsertionOrderedMap::new(),
-            quarantined_deposits: InsertionOrderedMap::new(),
-            minted_deposits: InsertionOrderedMap::new(),
+            deposits: Deposits::default(),
             pending_withdrawal_requests: BTreeMap::new(),
+            created_withdrawal_requests: BTreeMap::new(),
             sent_withdrawal_requests: BTreeMap::new(),
             successful_withdrawal_requests: BTreeMap::new(),
             failed_withdrawal_requests: BTreeMap::new(),
-            deposits_to_consolidate: BTreeMap::new(),
             submitted_transactions: InsertionOrderedMap::new(),
-            transactions_to_resubmit: InsertionOrderedMap::new(),
+            created_withdrawal_txs: BTreeMap::new(),
             succeeded_transactions: BTreeSet::new(),
             failed_transactions: InsertionOrderedMap::new(),
-            consolidation_transactions: InsertionOrderedMap::new(),
+            nonce_pool,
             active_tasks: BTreeSet::new(),
             balance: 0,
         };
@@ -805,6 +895,59 @@ impl TryFrom<InitArgs> for State {
 pub struct PendingWithdrawalRequest {
     pub request: WithdrawalRequest,
     pub created_at: u64,
+}
+
+/// Groups pending withdrawal requests, oldest first, into batches that the
+/// minter balance can pay for, including one transaction fee per batch and
+/// holding back the rent exemption threshold so a withdrawal transaction can
+/// never leave the main address below it.
+///
+/// Iteration stops at the first request the remaining balance cannot cover,
+/// so requests are never reordered or skipped.
+pub struct WithdrawalBatches<'a> {
+    pending_requests: Peekable<btree_map::Values<'a, LedgerBurnIndex, PendingWithdrawalRequest>>,
+    available_balance: Lamport,
+}
+
+impl Iterator for WithdrawalBatches<'_> {
+    type Item = Vec<WithdrawalRequest>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let mut batch = Vec::new();
+        while batch.len() < MAX_WITHDRAWALS_PER_NONCE_TX {
+            let reserved_fee = if batch.is_empty() {
+                BATCH_WITHDRAWAL_TX_FEE
+            } else {
+                0
+            };
+            let Some(pending) = self.pending_requests.peek() else {
+                break;
+            };
+            let Some(remaining_balance) = pending
+                .request
+                .amount_to_transfer
+                .checked_add(reserved_fee)
+                .and_then(|cost| self.available_balance.checked_sub(cost))
+            else {
+                break;
+            };
+            self.available_balance = remaining_balance;
+            batch.push(pending.request.clone());
+            self.pending_requests.next();
+        }
+        if batch.is_empty() { None } else { Some(batch) }
+    }
+}
+
+/// The binding of a durable nonce account and its nonce value to the
+/// withdrawal requests of a transaction whose threshold signature was not yet
+/// recorded. The binding determines the transaction message, so that a signing
+/// failure leads to re-signing the identical message instead of building a new
+/// one for the same nonce value.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CreatedWithdrawalTransaction {
+    pub nonce_value: Hash,
+    pub burn_indices: Vec<LedgerBurnIndex>,
 }
 
 /// A withdrawal request that has been submitted in a Solana transaction.
@@ -821,47 +964,29 @@ pub struct SchnorrPublicKey {
     pub chain_code: [u8; 32],
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Deposit {
-    pub deposit_amount: Lamport,
-    pub amount_to_mint: Lamport,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct MintedDeposit {
-    pub block_index: LedgerMintIndex,
-    pub deposit: Deposit,
-}
-
 #[derive(Copy, Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum TaskType {
-    DepositConsolidation,
+    SweepDeposits,
     Mint,
     FinalizeTransactions,
-    ResubmitTransactions,
     WithdrawalProcessing,
-    PollMonitoredAddresses,
-}
-
-/// Details about a consolidation transaction, capturing the individual
-/// deposits (by mint index and amount) being consolidated.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ConsolidationTransaction {
-    pub deposits: Vec<(LedgerMintIndex, Lamport)>,
-}
-
-impl ConsolidationTransaction {
-    pub fn total_amount(&self) -> Lamport {
-        self.deposits.iter().map(|(_, amount)| amount).sum()
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SolanaTransaction {
-    pub message: VersionedMessage,
-    pub signers: Vec<Account>,
-    pub slot: Slot,
-    pub purpose: TransactionPurpose,
-    /// Total transfer amount in lamports (excluding fees).
-    pub amount: Lamport,
+pub enum MinterTransaction {
+    SweepDeposit {
+        /// The block height of the block whose blockhash the transaction uses.
+        block_height: BlockHeight,
+    },
+    /// A durable-nonce withdrawal transaction, which never expires: it stays
+    /// in flight until it is finalized.
+    Withdrawal {
+        message: VersionedMessage,
+        /// The durable nonce account whose nonce value the transaction uses.
+        nonce_account: Address,
+        /// The durable nonce value the transaction uses instead of a recent blockhash.
+        nonce_value: Hash,
+        /// The time, in nanoseconds since the epoch, at which the transaction was recorded as submitted.
+        submitted_at: u64,
+    },
 }

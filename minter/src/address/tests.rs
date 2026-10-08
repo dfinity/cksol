@@ -1,14 +1,20 @@
 use crate::{
     address::{
-        account_address, derive_public_key_from_account, get_deposit_address,
-        lazy_get_schnorr_master_key,
+        MinterPublicKeyNotYetAvailable, account_address, derive_public_key_from_account,
+        fetch_and_record_minter_public_key, get_deposit_address, minter_address, minter_public_key,
     },
-    state::{SchnorrPublicKey, read_state},
-    test_fixtures::{account, init_schnorr_master_key, init_state, runtime::TestCanisterRuntime},
+    state::{SchnorrPublicKey, event::EventType, read_state},
+    test_fixtures::{
+        EventsAssert, MINTER_ACCOUNT, account, init_schnorr_master_key, init_state,
+        runtime::TestCanisterRuntime,
+    },
 };
+use futures::{FutureExt, join};
 use ic_cdk_management_canister::SchnorrPublicKeyResult;
 use ic_ed25519::{PocketIcMasterPublicKeyId, PublicKey};
 use icrc_ledger_types::icrc1::account::Account;
+use solana_address::Address;
+use std::panic::AssertUnwindSafe;
 
 #[test]
 fn test_derive_default_subaccount() {
@@ -63,21 +69,131 @@ fn test_derive_different_chain_code() {
     );
 }
 
-mod lazy_schnorr_master_key {
+mod minter_address_tests {
+    use super::*;
+
+    #[test]
+    fn should_differ_from_deposit_address_of_minter_account() {
+        assert_ne!(
+            minter_address(&test_key()),
+            account_address(&test_key(), &MINTER_ACCOUNT)
+        );
+    }
+
+    #[test]
+    fn should_be_raw_master_public_key() {
+        let master_key = test_key();
+        assert_eq!(
+            minter_address(&master_key),
+            Address::from(master_key.public_key.serialize_raw())
+        );
+    }
+}
+
+mod fetch_and_record_minter_public_key_tests {
     use super::*;
 
     #[tokio::test]
-    async fn fetches_key_then_uses_cache() {
+    async fn records_the_fetched_key_then_skips_the_fetch() {
+        init_state();
+        let runtime = TestCanisterRuntime::new()
+            .with_increasing_time()
+            .with_schnorr_public_key(test_key_result());
+
+        fetch_and_record_minter_public_key(runtime.clone()).await;
+
+        assert_eq!(
+            read_state(|s| s.minter_public_key().cloned()),
+            Some(test_key())
+        );
+        EventsAssert::from_recorded()
+            .expect_event_eq(test_key_fetched_event())
+            .assert_no_more_events();
+
+        fetch_and_record_minter_public_key(runtime.clone()).await;
+
+        assert_eq!(runtime.schnorr_public_key_call_count(), 1);
+        assert_eq!(runtime.set_timer_call_count(), 0);
+        EventsAssert::from_recorded()
+            .expect_event_eq(test_key_fetched_event())
+            .assert_no_more_events();
+    }
+
+    #[tokio::test]
+    async fn interleaved_first_calls_both_fetch_but_record_one_event() {
+        init_state();
+        let runtime = TestCanisterRuntime::new()
+            .with_increasing_time()
+            .with_schnorr_public_key(test_key_result())
+            .with_schnorr_public_key(test_key_result());
+
+        join!(
+            fetch_and_record_minter_public_key(runtime.clone()),
+            fetch_and_record_minter_public_key(runtime.clone())
+        );
+
+        assert_eq!(runtime.schnorr_public_key_call_count(), 2);
+        assert_eq!(runtime.set_timer_call_count(), 0);
+        assert_eq!(
+            read_state(|s| s.minter_public_key().cloned()),
+            Some(test_key())
+        );
+        EventsAssert::from_recorded()
+            .expect_event_eq(test_key_fetched_event())
+            .assert_no_more_events();
+    }
+
+    #[tokio::test]
+    async fn reschedules_the_fetch_after_a_failed_call() {
+        init_state();
+        let runtime = TestCanisterRuntime::new().with_schnorr_public_key_call_failure();
+
+        fetch_and_record_minter_public_key(runtime.clone()).await;
+
+        assert_eq!(runtime.set_timer_call_count(), 1);
+        assert_eq!(read_state(|s| s.minter_public_key().cloned()), None);
+        EventsAssert::from_recorded().assert_no_more_events();
+    }
+
+    #[tokio::test]
+    async fn reschedules_the_fetch_after_a_trap() {
+        init_state();
+        let runtime = TestCanisterRuntime::new();
+
+        let fetch = AssertUnwindSafe(fetch_and_record_minter_public_key(runtime.clone()))
+            .catch_unwind()
+            .await;
+
+        assert!(fetch.is_err());
+        assert_eq!(runtime.set_timer_call_count(), 1);
+        assert_eq!(read_state(|s| s.minter_public_key().cloned()), None);
+        EventsAssert::from_recorded().assert_no_more_events();
+    }
+
+    fn test_key_fetched_event() -> EventType {
+        let key = test_key();
+        EventType::MinterPublicKeyFetched {
+            public_key: key.public_key,
+            chain_code: key.chain_code,
+        }
+    }
+}
+
+mod minter_public_key_tests {
+    use super::*;
+
+    #[test]
+    fn errors_until_the_key_is_available() {
         init_state();
 
-        // First call: no key cached, stub returns test_key.
-        let runtime = TestCanisterRuntime::new().with_schnorr_public_key(test_key_result());
-        let result = lazy_get_schnorr_master_key(&runtime).await;
-        assert_eq!(result, test_key());
+        assert_eq!(minter_public_key(), Err(MinterPublicKeyNotYetAvailable));
 
-        // Second call: key is now cached — no stubs left, would panic if it hit the runtime.
-        let cached = lazy_get_schnorr_master_key(&runtime).await;
-        assert_eq!(result, cached);
+        init_schnorr_master_key();
+
+        assert_eq!(
+            minter_public_key(),
+            Ok(read_state(|s| s.minter_public_key().cloned().unwrap()))
+        );
     }
 }
 

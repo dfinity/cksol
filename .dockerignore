@@ -1,0 +1,14 @@
+target/
+wasms/
+.git/
+.github/
+.claude/
+.icp/
+.canbench
+.canbench_output
+docs/
+static/
+test-ledger/
+proptest-regressions/
+*.wasm
+*.wasm.gz

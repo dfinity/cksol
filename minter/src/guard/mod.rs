@@ -1,5 +1,5 @@
 use crate::state::{State, TaskType, mutate_state};
-use cksol_types::{ProcessDepositError, WithdrawalError};
+use cksol_types::{DepositSolError, WithdrawSolError};
 use icrc_ledger_types::icrc1::account::Account;
 use std::{collections::BTreeSet, marker::PhantomData};
 
@@ -14,7 +14,7 @@ pub enum GuardError {
     TooManyConcurrentRequests,
 }
 
-impl From<GuardError> for ProcessDepositError {
+impl From<GuardError> for DepositSolError {
     fn from(e: GuardError) -> Self {
         match e {
             GuardError::AlreadyProcessing => Self::AlreadyProcessing,
@@ -25,7 +25,7 @@ impl From<GuardError> for ProcessDepositError {
     }
 }
 
-impl From<GuardError> for WithdrawalError {
+impl From<GuardError> for WithdrawSolError {
     fn from(e: GuardError) -> Self {
         match e {
             GuardError::AlreadyProcessing => Self::AlreadyProcessing,
@@ -38,14 +38,6 @@ impl From<GuardError> for WithdrawalError {
 
 pub trait PendingRequests {
     fn pending_requests(state: &mut State) -> &mut BTreeSet<Account>;
-}
-
-pub struct PendingProcessDepositRequests;
-
-impl PendingRequests for PendingProcessDepositRequests {
-    fn pending_requests(state: &mut State) -> &mut BTreeSet<Account> {
-        state.pending_process_deposit_request_guards_mut()
-    }
 }
 
 /// Guards a block from executing twice when called by the same user and from being
@@ -84,6 +76,14 @@ impl<R: PendingRequests> Drop for Guard<R> {
     }
 }
 
+pub struct PendingDepositSolRequests;
+
+impl PendingRequests for PendingDepositSolRequests {
+    fn pending_requests(state: &mut State) -> &mut BTreeSet<Account> {
+        state.pending_deposit_sol_request_guards_mut()
+    }
+}
+
 pub struct PendingWithdrawalRequests;
 
 impl PendingRequests for PendingWithdrawalRequests {
@@ -92,9 +92,7 @@ impl PendingRequests for PendingWithdrawalRequests {
     }
 }
 
-pub fn process_deposit_guard(
-    account: Account,
-) -> Result<Guard<PendingProcessDepositRequests>, GuardError> {
+pub fn deposit_sol_guard(account: Account) -> Result<Guard<PendingDepositSolRequests>, GuardError> {
     Guard::new(account)
 }
 

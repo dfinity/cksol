@@ -1,21 +1,20 @@
 use candid::Principal;
 use canlog::{Log, Sort};
 use cksol_minter::{
-    address::lazy_get_schnorr_master_key,
-    consolidate::{DEPOSIT_CONSOLIDATION_DELAY, consolidate_deposits},
-    deposit::automatic::{POLL_MONITORED_ADDRESSES_DELAY, poll_monitored_addresses},
-    monitor::{
-        FINALIZE_TRANSACTIONS_DELAY, RESUBMIT_TRANSACTIONS_DELAY, finalize_transactions,
-        resubmit_transactions,
+    address::{fetch_and_record_minter_public_key, minter_address},
+    deposit::sweep::{
+        PROCESS_PENDING_MINTS_DELAY, SWEEP_DEPOSITS_DELAY, process_pending_mints,
+        sweep_queued_deposits,
     },
+    monitor::{FINALIZE_TRANSACTIONS_DELAY, finalize_transactions},
     runtime::IcCanisterRuntime,
     state::read_state,
     withdraw::{WITHDRAWAL_PROCESSING_DELAY, process_pending_withdrawals},
 };
 use cksol_types::{
-    Address, DepositStatus, GetDepositAddressArgs, MinterInfo, ProcessDepositArgs,
-    ProcessDepositError, UpdateBalanceArgs, UpdateBalanceError, WithdrawalArgs, WithdrawalError,
-    WithdrawalOk, WithdrawalStatus, WithdrawalStatusArgs,
+    Address, DepositSolArgs, DepositSolError, DepositSolId, DepositSolStatus,
+    GetDepositAddressArgs, MinterInfo, WithdrawSolArgs, WithdrawSolError, WithdrawSolOk,
+    WithdrawSolStatus, WithdrawSolStatusArgs,
 };
 use cksol_types_internal::{MinterArg, log::Priority};
 use ic_http_types::{HttpRequest, HttpResponse, HttpResponseBuilder};
@@ -59,31 +58,25 @@ fn post_upgrade(args: Option<MinterArg>) {
     setup_timers();
 }
 
-#[ic_cdk::query]
+#[ic_cdk::update]
 fn get_deposit_address(args: GetDepositAddressArgs) -> Address {
-    let account = assert_non_anonymous_account(args.owner, args.subaccount);
+    let account = assert_valid_deposit_account(args.owner, args.subaccount);
     cksol_minter::address::get_deposit_address(&account).into()
 }
 
 #[ic_cdk::update]
-fn update_balance(args: UpdateBalanceArgs) -> Result<(), UpdateBalanceError> {
-    let account = assert_non_anonymous_account(args.owner, args.subaccount);
-    cksol_minter::deposit::automatic::update_balance(&IcCanisterRuntime::new(), account)
+async fn deposit_sol(args: DepositSolArgs) -> Result<DepositSolId, DepositSolError> {
+    let account = resolve_account(args.owner, args.subaccount);
+    cksol_minter::deposit::sweep::deposit_sol(&IcCanisterRuntime::new(), account).await
+}
+
+#[ic_cdk::query]
+fn deposit_sol_status(deposit_id: DepositSolId) -> DepositSolStatus {
+    cksol_minter::deposit::sweep::deposit_status(deposit_id)
 }
 
 #[ic_cdk::update]
-async fn process_deposit(args: ProcessDepositArgs) -> Result<DepositStatus, ProcessDepositError> {
-    let account = assert_non_anonymous_account(args.owner, args.subaccount);
-    cksol_minter::deposit::manual::process_deposit(
-        IcCanisterRuntime::new(),
-        account,
-        args.signature.into(),
-    )
-    .await
-}
-
-#[ic_cdk::update]
-async fn withdraw(args: WithdrawalArgs) -> Result<WithdrawalOk, WithdrawalError> {
+async fn withdraw_sol(args: WithdrawSolArgs) -> Result<WithdrawSolOk, WithdrawSolError> {
     let account = assert_non_anonymous_account(None, args.from_subaccount);
 
     cksol_minter::withdraw::withdraw(
@@ -96,7 +89,7 @@ async fn withdraw(args: WithdrawalArgs) -> Result<WithdrawalOk, WithdrawalError>
 }
 
 #[ic_cdk::update]
-fn withdrawal_status(args: WithdrawalStatusArgs) -> WithdrawalStatus {
+fn withdraw_sol_status(args: WithdrawSolStatusArgs) -> WithdrawSolStatus {
     cksol_minter::withdraw::withdrawal_status(args.block_index)
 }
 
@@ -104,7 +97,9 @@ fn withdrawal_status(args: WithdrawalStatusArgs) -> WithdrawalStatus {
 fn get_events(
     args: cksol_types_internal::event::GetEventsArgs,
 ) -> cksol_types_internal::event::GetEventsResult {
-    use cksol_minter::state::event::{Event, EventType, TransactionPurpose, VersionedMessage};
+    use cksol_minter::state::event::{
+        Event, EventType, Signer, TransactionPurpose, VersionedMessage,
+    };
     use cksol_types_internal::event;
 
     const MAX_EVENTS_PER_RESPONSE: u64 = 2_000;
@@ -129,43 +124,22 @@ fn get_events(
                     amount_to_transfer: request.amount_to_transfer,
                 }
             }
-            EventType::AcceptedManualDeposit {
-                deposit_id,
-                deposit_amount,
-                amount_to_mint,
-            } => event::EventType::AcceptedManualDeposit {
-                signature: deposit_id.signature.into(),
-                account: deposit_id.account,
-                deposit_amount,
-                amount_to_mint,
-            },
-            EventType::Minted {
-                deposit_id,
-                mint_block_index,
-            } => event::EventType::Minted {
-                signature: deposit_id.signature.into(),
-                account: deposit_id.account,
-                mint_block_index: *mint_block_index.get(),
-            },
-            EventType::QuarantinedDeposit(deposit_id) => event::EventType::QuarantinedDeposit {
-                signature: deposit_id.signature.into(),
-                account: deposit_id.account,
-            },
             EventType::SubmittedTransaction {
                 signature,
                 message,
                 signers,
-                slot,
                 purpose,
             } => {
                 let purpose = match purpose {
-                    TransactionPurpose::ConsolidateDeposits { mint_indices } => {
-                        event::TransactionPurpose::ConsolidateDeposits {
-                            mint_indices: mint_indices.iter().map(|idx| *idx.get()).collect(),
-                        }
-                    }
-                    TransactionPurpose::WithdrawSol { burn_indices } => {
-                        event::TransactionPurpose::WithdrawSol {
+                    TransactionPurpose::SweepDeposit {
+                        deposit_ids,
+                        block_height,
+                    } => event::TransactionPurpose::SweepDeposit {
+                        deposit_ids,
+                        block_height: block_height.get(),
+                    },
+                    TransactionPurpose::Withdrawal { burn_indices } => {
+                        event::TransactionPurpose::Withdrawal {
                             burn_indices: burn_indices.iter().map(|idx| *idx.get()).collect(),
                         }
                     }
@@ -180,20 +154,16 @@ fn get_events(
                             )
                         }
                     },
-                    signers,
-                    slot,
+                    signers: signers
+                        .into_iter()
+                        .map(|signer| match signer {
+                            Signer::Minter => event::Signer::Minter,
+                            Signer::Account(account) => event::Signer::Account(account),
+                        })
+                        .collect(),
                     purpose,
                 }
             }
-            EventType::ResubmittedTransaction {
-                old_signature,
-                new_signature,
-                new_slot,
-            } => event::EventType::ResubmittedTransaction {
-                old_signature: old_signature.into(),
-                new_signature: new_signature.into(),
-                new_slot,
-            },
             EventType::SucceededTransaction { signature } => {
                 event::EventType::SucceededTransaction {
                     signature: signature.into(),
@@ -205,12 +175,61 @@ fn get_events(
             EventType::ExpiredTransaction { signature } => event::EventType::ExpiredTransaction {
                 signature: signature.into(),
             },
-            EventType::StartedMonitoringAccount { account } => {
-                event::EventType::StartedMonitoringAccount { account }
+            EventType::QueuedDeposit {
+                deposit_id,
+                account,
+                address,
+                balance,
+            } => event::EventType::QueuedDeposit {
+                deposit_id,
+                account,
+                address: address.into(),
+                balance: balance.into(),
+            },
+            EventType::CreditedSweep {
+                signature,
+                amount_received,
+                mints,
+            } => event::EventType::CreditedSweep {
+                signature: signature.into(),
+                amount_received,
+                mints: mints
+                    .into_iter()
+                    .map(|mint| event::CreditedDeposit {
+                        deposit_id: mint.deposit_id,
+                        amount_to_mint: mint.amount_to_mint,
+                    })
+                    .collect(),
+            },
+            EventType::QuarantinedSweep { signature } => event::EventType::QuarantinedSweep {
+                signature: signature.into(),
+            },
+            EventType::MinterPublicKeyFetched {
+                public_key,
+                chain_code,
+            } => event::EventType::MinterPublicKeyFetched {
+                public_key: public_key.serialize_raw().to_vec(),
+                chain_code: chain_code.to_vec(),
+            },
+            EventType::MintedSweptDeposit {
+                deposit_id,
+                mint_block_index,
+            } => event::EventType::MintedSweptDeposit {
+                deposit_id,
+                mint_block_index: *mint_block_index.get(),
+            },
+            EventType::QuarantinedPendingMint { deposit_id } => {
+                event::EventType::QuarantinedPendingMint { deposit_id }
             }
-            EventType::StoppedMonitoringAccount { account } => {
-                event::EventType::StoppedMonitoringAccount { account }
-            }
+            EventType::CreatedWithdrawalTransaction {
+                burn_indices,
+                nonce_account,
+                nonce_value,
+            } => event::EventType::CreatedWithdrawalTransaction {
+                burn_indices: burn_indices.iter().map(|idx| *idx.get()).collect(),
+                nonce_account: nonce_account.into(),
+                nonce_value: nonce_value.into(),
+            },
         }
     }
 
@@ -229,14 +248,20 @@ fn get_events(
 #[ic_cdk::query]
 fn get_minter_info() -> MinterInfo {
     read_state(|s| MinterInfo {
-        manual_deposit_fee: s.manual_deposit_fee(),
-        automated_deposit_fee: s.automated_deposit_fee(),
-        deposit_consolidation_fee: s.deposit_consolidation_fee(),
+        deposit_sol_fee: s.deposit_sol_fee(),
         minimum_withdrawal_amount: s.minimum_withdrawal_amount(),
         minimum_deposit_amount: s.minimum_deposit_amount(),
         withdrawal_fee: s.withdrawal_fee(),
-        process_deposit_required_cycles: s.process_deposit_required_cycles(),
+        deposit_sol_required_cycles: s.deposit_sol_required_cycles(),
         balance: s.balance(),
+        minter_address: s
+            .minter_public_key()
+            .map(|key| minter_address(key).to_string()),
+        nonce_accounts: s
+            .nonce_pool_addresses()
+            .iter()
+            .map(|address| address.to_string())
+            .collect(),
     })
 }
 
@@ -254,9 +279,7 @@ fn http_request(request: HttpRequest) -> HttpResponse {
                         .build();
                 }
             };
-            let runtime = IcCanisterRuntime::new();
-            let dashboard =
-                read_state(|state| DashboardTemplate::from_state(state, &runtime, pagination));
+            let dashboard = read_state(|state| DashboardTemplate::from_state(state, pagination));
             HttpResponseBuilder::ok()
                 .header("Content-Type", "text/html; charset=utf-8")
                 .with_body_and_content_length(dashboard.render().unwrap())
@@ -336,39 +359,44 @@ fn http_request(request: HttpRequest) -> HttpResponse {
     }
 }
 
+fn resolve_account(owner: Option<Principal>, subaccount: Option<Subaccount>) -> Account {
+    let owner = owner.unwrap_or_else(ic_cdk::api::msg_caller);
+    Account { owner, subaccount }
+}
+
 fn assert_non_anonymous_account(
     owner: Option<Principal>,
     subaccount: Option<Subaccount>,
 ) -> Account {
-    let owner = owner.unwrap_or_else(ic_cdk::api::msg_caller);
-    assert_ne!(
-        owner,
-        Principal::anonymous(),
-        "the owner must be non-anonymous"
-    );
-    Account { owner, subaccount }
+    let account = resolve_account(owner, subaccount);
+    cksol_minter::utils::assert_non_anonymous_account(&account);
+    account
+}
+
+fn assert_valid_deposit_account(
+    owner: Option<Principal>,
+    subaccount: Option<Subaccount>,
+) -> Account {
+    let account = resolve_account(owner, subaccount);
+    cksol_minter::utils::assert_valid_deposit_owner(&account, ic_cdk::api::canister_self());
+    account
 }
 
 fn setup_timers() {
     ic_cdk_timers::set_timer(Duration::from_secs(0), async {
-        // Initialize the minter's Ed25519 public key
-        let runtime = IcCanisterRuntime::new();
-        let _ = lazy_get_schnorr_master_key(&runtime).await;
-    });
-    ic_cdk_timers::set_timer_interval(DEPOSIT_CONSOLIDATION_DELAY, async || {
-        consolidate_deposits(IcCanisterRuntime::new()).await;
+        fetch_and_record_minter_public_key(IcCanisterRuntime::new()).await;
     });
     ic_cdk_timers::set_timer_interval(WITHDRAWAL_PROCESSING_DELAY, async || {
         process_pending_withdrawals(IcCanisterRuntime::new()).await;
     });
+    ic_cdk_timers::set_timer_interval(SWEEP_DEPOSITS_DELAY, async || {
+        sweep_queued_deposits(IcCanisterRuntime::new()).await;
+    });
+    ic_cdk_timers::set_timer_interval(PROCESS_PENDING_MINTS_DELAY, async || {
+        process_pending_mints(IcCanisterRuntime::new()).await;
+    });
     ic_cdk_timers::set_timer_interval(FINALIZE_TRANSACTIONS_DELAY, async || {
         finalize_transactions(IcCanisterRuntime::new()).await;
-    });
-    ic_cdk_timers::set_timer_interval(RESUBMIT_TRANSACTIONS_DELAY, async || {
-        resubmit_transactions(IcCanisterRuntime::new()).await;
-    });
-    ic_cdk_timers::set_timer_interval(POLL_MONITORED_ADDRESSES_DELAY, async || {
-        poll_monitored_addresses(IcCanisterRuntime::new()).await;
     });
 }
 

@@ -1,0 +1,652 @@
+use super::{
+    Sweep, SweepMismatch, SweepRecoveryError, SweepSettlementError, Sweeps, Transfer,
+    UnreadableOutcome,
+};
+use crate::{
+    constants::{FEE_PER_SIGNATURE, RENT_EXEMPTION_THRESHOLD},
+    state::event::VersionedMessage,
+    test_fixtures::{
+        MINTER_ADDRESS, account, devnet_sweep, planned_sweep, queued_deposit, queued_deposit_of,
+        signature, sweep_message,
+    },
+};
+use cksol_types::DepositSolId;
+use sol_rpc_types::Lamport;
+use solana_hash::Hash;
+use solana_transaction::TransactionError;
+use solana_transaction_status_client_types::{
+    EncodedConfirmedTransactionWithStatusMeta, UiTransactionError,
+};
+
+const SWEEPABLE_AMOUNTS: [Lamport; 3] = [30_000_000, 20_000_000, 10_000_000];
+
+#[test]
+fn should_find_deposits_by_sweep_signature_and_by_deposit_id() {
+    let mut sweeps = Sweeps::default();
+    let first_sweep = signature(1);
+    let second_sweep = signature(2);
+    sweeps.insert(
+        first_sweep,
+        planned_sweep([(0, queued_deposit(0)), (2, queued_deposit(2))]),
+    );
+    sweeps.insert(second_sweep, planned_sweep([(1, queued_deposit(1))]));
+
+    assert_eq!(
+        sweeps.get(&first_sweep),
+        Some(&planned_sweep([
+            (0, queued_deposit(0)),
+            (2, queued_deposit(2))
+        ]))
+    );
+    assert_eq!(sweeps.get(&signature(3)), None);
+    assert_eq!(sweeps.deposit(0), Some((&first_sweep, &queued_deposit(0))));
+    assert_eq!(sweeps.deposit(1), Some((&second_sweep, &queued_deposit(1))));
+    assert_eq!(sweeps.deposit(3), None);
+    assert_eq!(
+        sweeps.signatures().collect::<Vec<_>>(),
+        vec![&first_sweep, &second_sweep]
+    );
+    assert_eq!(sweeps.len(), 2);
+    assert_eq!(sweeps.deposit_count(), 3);
+    assert!(!sweeps.is_empty());
+}
+
+#[test]
+fn should_remove_a_sweep_by_signature() {
+    let mut sweeps = Sweeps::default();
+    let removed_sweep = signature(1);
+    let kept_sweep = signature(2);
+    sweeps.insert(
+        removed_sweep,
+        planned_sweep([(0, queued_deposit(0)), (2, queued_deposit(2))]),
+    );
+    sweeps.insert(kept_sweep, planned_sweep([(1, queued_deposit(1))]));
+
+    assert_eq!(
+        sweeps.remove(&removed_sweep),
+        Some(planned_sweep([
+            (0, queued_deposit(0)),
+            (2, queued_deposit(2))
+        ]))
+    );
+
+    assert_eq!(sweeps.remove(&removed_sweep), None);
+    assert_eq!(sweeps.deposit(0), None);
+    assert_eq!(sweeps.deposit(1), Some((&kept_sweep, &queued_deposit(1))));
+    assert_eq!(sweeps.deposit_count(), 1);
+}
+
+#[test]
+fn should_report_an_empty_collection() {
+    let sweeps = Sweeps::default();
+
+    assert!(sweeps.is_empty());
+    assert_eq!(sweeps.len(), 0);
+    assert_eq!(sweeps.deposit_count(), 0);
+    assert_eq!(sweeps.signatures().count(), 0);
+}
+
+#[test]
+#[should_panic(expected = "Attempted to record sweep")]
+fn should_panic_when_inserting_a_sweep_with_a_known_signature() {
+    let mut sweeps = Sweeps::default();
+    let sweep_signature = signature(1);
+    sweeps.insert(sweep_signature, planned_sweep([(0, queued_deposit(0))]));
+
+    sweeps.insert(sweep_signature, planned_sweep([(1, queued_deposit(1))]));
+}
+
+mod plan {
+    use super::{
+        FEE_PER_SIGNATURE, Lamport, MINTER_ADDRESS, Sweep, Transfer, account, planned_sweep,
+        queued_deposit_of,
+    };
+    use crate::{
+        state::event::CreditedDeposit,
+        test_fixtures::arb::{arb_address, arb_sweep_deposits},
+    };
+    use proptest::{prop_assert, prop_assert_eq, proptest};
+
+    #[test]
+    fn should_charge_the_fee_to_the_largest_deposit_and_transfer_it_first() {
+        let smallest = queued_deposit_of(account(1), 1_000_000);
+        let largest = queued_deposit_of(account(2), 3_000_000);
+        let middle = queued_deposit_of(account(3), 2_000_000);
+
+        let sweep = planned_sweep([(0, smallest), (1, largest), (2, middle)]);
+
+        assert_eq!(sweep.fee_payer(), 1);
+        assert_eq!(sweep.fee(), 3 * FEE_PER_SIGNATURE);
+        assert_eq!(sweep.minter_address(), MINTER_ADDRESS);
+        assert_eq!(
+            sweep.transfers(),
+            vec![
+                Transfer {
+                    deposit_id: 1,
+                    from: largest.address,
+                    amount: 3_000_000 - 3 * FEE_PER_SIGNATURE,
+                },
+                Transfer {
+                    deposit_id: 2,
+                    from: middle.address,
+                    amount: 2_000_000,
+                },
+                Transfer {
+                    deposit_id: 0,
+                    from: smallest.address,
+                    amount: 1_000_000,
+                },
+            ]
+        );
+        assert_eq!(sweep.expected_received(), 6_000_000 - 3 * FEE_PER_SIGNATURE);
+        assert_eq!(
+            sweep.mints(),
+            vec![
+                CreditedDeposit {
+                    deposit_id: 0,
+                    amount_to_mint: 1_000_000 - FEE_PER_SIGNATURE,
+                },
+                CreditedDeposit {
+                    deposit_id: 1,
+                    amount_to_mint: 3_000_000 - FEE_PER_SIGNATURE,
+                },
+                CreditedDeposit {
+                    deposit_id: 2,
+                    amount_to_mint: 2_000_000 - FEE_PER_SIGNATURE,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn should_break_ties_by_the_lowest_deposit_id() {
+        let first = queued_deposit_of(account(1), 1_000_000);
+        let second = queued_deposit_of(account(2), 1_000_000);
+
+        let sweep = planned_sweep([(3, second), (1, first)]);
+
+        assert_eq!(sweep.fee_payer(), 1);
+        assert_eq!(
+            sweep
+                .transfers()
+                .iter()
+                .map(|transfer| transfer.deposit_id)
+                .collect::<Vec<_>>(),
+            vec![1, 3]
+        );
+    }
+
+    #[test]
+    fn should_charge_the_whole_fee_to_a_single_deposit() {
+        let sweep = planned_sweep([(7, queued_deposit_of(account(1), 1_000_000))]);
+
+        assert_eq!(sweep.fee_payer(), 7);
+        assert_eq!(sweep.fee(), FEE_PER_SIGNATURE);
+        assert_eq!(sweep.expected_received(), 1_000_000 - FEE_PER_SIGNATURE);
+        assert_eq!(
+            sweep.mints(),
+            vec![CreditedDeposit {
+                deposit_id: 7,
+                amount_to_mint: 1_000_000 - FEE_PER_SIGNATURE,
+            }]
+        );
+    }
+
+    proptest! {
+        #[test]
+        fn should_never_mint_more_than_the_sweep_receives(
+            deposits in arb_sweep_deposits(),
+            minter_address in arb_address(),
+        ) {
+            let sweep = Sweep::plan(deposits.clone(), minter_address);
+
+            let mints = sweep.mints();
+
+            prop_assert_eq!(
+                mints.iter().map(|mint| mint.deposit_id).collect::<Vec<_>>(),
+                deposits.keys().copied().collect::<Vec<_>>()
+            );
+            for mint in &mints {
+                prop_assert!(mint.amount_to_mint <= deposits[&mint.deposit_id].sweepable_amount());
+            }
+            prop_assert!(
+                mints.iter().map(|mint| mint.amount_to_mint).sum::<Lamport>()
+                    <= sweep.expected_received()
+            );
+        }
+    }
+}
+
+mod message {
+    use super::{
+        FEE_PER_SIGNATURE, Hash, Lamport, MINTER_ADDRESS, SWEEPABLE_AMOUNTS, account, sweep_of,
+    };
+    use crate::test_fixtures::deposit_address;
+    use solana_message::{Message, MessageHeader, compiled_instruction::CompiledInstruction};
+
+    #[test]
+    fn should_transfer_from_every_deposit_address_to_the_minter_address() {
+        let sweep = sweep_of(SWEEPABLE_AMOUNTS);
+        let transfers = sweep.transfers();
+
+        let message = sweep.sweep_message(Hash::default());
+
+        assert_eq!(message.header.num_required_signatures, 3);
+        assert_eq!(message.account_keys[0], transfers[0].from);
+        let mut other_signers = vec![transfers[1].from, transfers[2].from];
+        other_signers.sort();
+        assert_eq!(message.account_keys[1..3], other_signers);
+        assert_eq!(
+            message.account_keys[3..],
+            [MINTER_ADDRESS, solana_system_interface::program::ID]
+        );
+        assert_eq!(message.instructions.len(), 3);
+        assert_eq!(transfers[0].amount, 30_000_000 - 3 * FEE_PER_SIGNATURE);
+        assert_eq!(transfers[1].amount, 20_000_000);
+        assert_eq!(transfers[2].amount, 10_000_000);
+    }
+
+    /// Historical sweep events replay only if a plan always compiles to the same message,
+    /// so a failure here means a dependency bump broke replay — not that the expected
+    /// message needs updating.
+    #[test]
+    fn should_build_the_message_recorded_for_the_plan() {
+        let sweep = sweep_of(SWEEPABLE_AMOUNTS);
+
+        let message = sweep.sweep_message(Hash::default());
+
+        assert_eq!(
+            message,
+            Message {
+                header: MessageHeader {
+                    num_required_signatures: 3,
+                    num_readonly_signed_accounts: 0,
+                    num_readonly_unsigned_accounts: 1,
+                },
+                account_keys: vec![
+                    deposit_address(account(1)),
+                    deposit_address(account(3)),
+                    deposit_address(account(2)),
+                    MINTER_ADDRESS,
+                    solana_system_interface::program::ID,
+                ],
+                recent_blockhash: Hash::default(),
+                instructions: vec![
+                    transfer_instruction(0, 30_000_000 - 3 * FEE_PER_SIGNATURE),
+                    transfer_instruction(2, 20_000_000),
+                    transfer_instruction(1, 10_000_000),
+                ],
+            }
+        );
+    }
+
+    fn transfer_instruction(from_index: u8, amount: Lamport) -> CompiledInstruction {
+        const TRANSFER_DISCRIMINANT: u32 = 2;
+        const SYSTEM_PROGRAM_INDEX: u8 = 4;
+        const MINTER_ADDRESS_INDEX: u8 = 3;
+        let mut data = TRANSFER_DISCRIMINANT.to_le_bytes().to_vec();
+        data.extend_from_slice(&amount.to_le_bytes());
+        CompiledInstruction {
+            program_id_index: SYSTEM_PROGRAM_INDEX,
+            accounts: vec![from_index, MINTER_ADDRESS_INDEX],
+            data,
+        }
+    }
+}
+
+mod settle {
+    use super::{
+        EncodedConfirmedTransactionWithStatusMeta, RENT_EXEMPTION_THRESHOLD, SweepMismatch,
+        SweepSettlementError, TransactionError, UiTransactionError, UnreadableOutcome, account,
+        devnet_sweep, planned_sweep, queued_deposit_of,
+    };
+    use crate::test_fixtures::fetched;
+
+    type Deviation = fn(&mut EncodedConfirmedTransactionWithStatusMeta);
+
+    const FEE_PAYER: solana_address::Address = devnet_sweep::DEPOSITS[0].0;
+    const SECOND_DEPOSIT: solana_address::Address = devnet_sweep::DEPOSITS[1].0;
+    const SECOND_SWEEPABLE_AMOUNT: u64 = devnet_sweep::DEPOSITS[1].1 - RENT_EXEMPTION_THRESHOLD;
+
+    #[test]
+    fn should_settle_an_outcome_matching_the_plan() {
+        let cases: [(&str, Deviation); 3] = [
+            ("the sweep executed as planned", |_| {}),
+            (
+                "a late transfer left extra on a deposit address",
+                |outcome| {
+                    let (pre, post) = devnet_sweep::balances(outcome, SECOND_DEPOSIT);
+                    devnet_sweep::set_balances(
+                        outcome,
+                        SECOND_DEPOSIT,
+                        pre + 123_456,
+                        post + 123_456,
+                    );
+                },
+            ),
+            ("a lower fee left extra on the fee payer", |outcome| {
+                let (pre, post) = devnet_sweep::balances(outcome, FEE_PAYER);
+                devnet_sweep::set_balances(outcome, FEE_PAYER, pre, post + 1_000);
+                devnet_sweep::meta(outcome).fee = devnet_sweep::FEE - 1_000;
+            }),
+        ];
+
+        for (name, deviate) in cases {
+            let mut outcome = devnet_sweep::outcome();
+            deviate(&mut outcome);
+
+            let fetched = fetched(outcome);
+            let settled = devnet_sweep::sweep()
+                .settle(&fetched.transaction, fetched.meta.as_ref())
+                .unwrap_or_else(|e| panic!("{name}: {e}"));
+
+            assert_eq!(
+                settled.amount_received(),
+                devnet_sweep::AMOUNT_RECEIVED,
+                "{name}"
+            );
+            assert_eq!(settled.into_mints(), devnet_sweep::mints(), "{name}");
+        }
+    }
+
+    #[test]
+    fn should_reject_an_outcome_that_cannot_be_read() {
+        let cases: [(&str, Deviation, UnreadableOutcome); 2] = [
+            (
+                "the meta field is missing",
+                |outcome| outcome.transaction.meta = None,
+                UnreadableOutcome::NoMetaField,
+            ),
+            (
+                "the balances do not cover all account keys",
+                |outcome| {
+                    devnet_sweep::meta(outcome).post_balances.pop();
+                },
+                UnreadableOutcome::IncompleteBalances,
+            ),
+        ];
+
+        for (name, deviate, expected) in cases {
+            let mut outcome = devnet_sweep::outcome();
+            deviate(&mut outcome);
+
+            let fetched = fetched(outcome);
+            assert_eq!(
+                devnet_sweep::sweep().settle(&fetched.transaction, fetched.meta.as_ref()),
+                Err(SweepSettlementError::Unreadable(expected)),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn should_reject_an_outcome_that_does_not_match_the_plan() {
+        let cases: [(&str, Deviation, SweepMismatch); 9] = [
+            (
+                "the transaction failed",
+                |outcome| {
+                    devnet_sweep::set_error(
+                        outcome,
+                        UiTransactionError::from(TransactionError::InsufficientFundsForFee),
+                    )
+                },
+                SweepMismatch::TransactionFailed {
+                    error: TransactionError::InsufficientFundsForFee.to_string(),
+                },
+            ),
+            (
+                "the executed message is another sweep",
+                |outcome| {
+                    let other_sweep = planned_sweep(
+                        devnet_sweep::deposits()
+                            .into_iter()
+                            .chain([(9, queued_deposit_of(account(9), 5_000_000))]),
+                    );
+                    devnet_sweep::set_message(
+                        outcome,
+                        other_sweep.sweep_message(Default::default()),
+                    );
+                },
+                SweepMismatch::UnexpectedMessage,
+            ),
+            (
+                "the fee exceeds the planned fee",
+                |outcome| devnet_sweep::meta(outcome).fee = devnet_sweep::FEE + 1,
+                SweepMismatch::UnexpectedFee {
+                    expected: devnet_sweep::FEE,
+                    actual: devnet_sweep::FEE + 1,
+                },
+            ),
+            (
+                "a deposit address moved by the wrong amount",
+                |outcome| {
+                    devnet_sweep::set_balances(
+                        outcome,
+                        SECOND_DEPOSIT,
+                        RENT_EXEMPTION_THRESHOLD + SECOND_SWEEPABLE_AMOUNT,
+                        RENT_EXEMPTION_THRESHOLD + 1,
+                    )
+                },
+                SweepMismatch::UnexpectedBalanceChange {
+                    address: SECOND_DEPOSIT,
+                    pre: RENT_EXEMPTION_THRESHOLD + SECOND_SWEEPABLE_AMOUNT,
+                    post: RENT_EXEMPTION_THRESHOLD + 1,
+                    expected_decrease: SECOND_SWEEPABLE_AMOUNT,
+                },
+            ),
+            (
+                "the fee payer paid more than its transfer and the fee",
+                |outcome| {
+                    let (pre, post) = devnet_sweep::balances(outcome, FEE_PAYER);
+                    devnet_sweep::set_balances(outcome, FEE_PAYER, pre + 1, post)
+                },
+                SweepMismatch::UnexpectedBalanceChange {
+                    address: FEE_PAYER,
+                    pre: devnet_sweep::DEPOSITS[0].1 + 1,
+                    post: RENT_EXEMPTION_THRESHOLD,
+                    expected_decrease: devnet_sweep::DEPOSITS[0].1 - RENT_EXEMPTION_THRESHOLD,
+                },
+            ),
+            (
+                "a deposit address is left below the rent exemption threshold",
+                |outcome| {
+                    devnet_sweep::set_balances(
+                        outcome,
+                        SECOND_DEPOSIT,
+                        SECOND_SWEEPABLE_AMOUNT + RENT_EXEMPTION_THRESHOLD - 1,
+                        RENT_EXEMPTION_THRESHOLD - 1,
+                    )
+                },
+                SweepMismatch::NotRentExempt {
+                    address: SECOND_DEPOSIT,
+                    post: RENT_EXEMPTION_THRESHOLD - 1,
+                },
+            ),
+            (
+                "the main account was debited",
+                |outcome| devnet_sweep::set_balances(outcome, devnet_sweep::MINTER_ADDRESS, 1, 0),
+                SweepMismatch::MainAccountDebited { pre: 1, post: 0 },
+            ),
+            (
+                "the main account received less than planned",
+                |outcome| {
+                    devnet_sweep::set_balances(
+                        outcome,
+                        devnet_sweep::MINTER_ADDRESS,
+                        0,
+                        devnet_sweep::AMOUNT_RECEIVED - 1,
+                    )
+                },
+                SweepMismatch::UnexpectedAmountReceived {
+                    expected: devnet_sweep::AMOUNT_RECEIVED,
+                    actual: devnet_sweep::AMOUNT_RECEIVED - 1,
+                },
+            ),
+            (
+                "the main account received more than planned",
+                |outcome| {
+                    devnet_sweep::set_balances(
+                        outcome,
+                        devnet_sweep::MINTER_ADDRESS,
+                        0,
+                        devnet_sweep::AMOUNT_RECEIVED + 1,
+                    )
+                },
+                SweepMismatch::UnexpectedAmountReceived {
+                    expected: devnet_sweep::AMOUNT_RECEIVED,
+                    actual: devnet_sweep::AMOUNT_RECEIVED + 1,
+                },
+            ),
+        ];
+
+        for (name, deviate, expected) in cases {
+            let mut outcome = devnet_sweep::outcome();
+            deviate(&mut outcome);
+
+            let fetched = fetched(outcome);
+            assert_eq!(
+                devnet_sweep::sweep().settle(&fetched.transaction, fetched.meta.as_ref()),
+                Err(SweepSettlementError::Mismatch(expected)),
+                "{name}"
+            );
+        }
+    }
+}
+
+/// The sweep of the given sweepable amounts from the accounts `1..`, deposit ids from `0`.
+fn sweep_of<const N: usize>(sweepable_amounts: [Lamport; N]) -> Sweep {
+    planned_sweep(
+        sweepable_amounts
+            .into_iter()
+            .enumerate()
+            .map(|(index, sweepable_amount)| {
+                (
+                    index as DepositSolId,
+                    queued_deposit_of(account(index + 1), sweepable_amount),
+                )
+            }),
+    )
+}
+
+mod recover {
+    use super::{
+        MINTER_ADDRESS, Sweep, SweepRecoveryError, VersionedMessage, queued_deposit, sweep_message,
+    };
+    use crate::test_fixtures::arb::{arb_address, arb_hash, arb_sweep_deposits};
+    use proptest::{prop_assert_eq, proptest};
+    use solana_hash::Hash;
+
+    proptest! {
+        #[test]
+        fn should_recover_the_planned_sweep_from_its_message(
+            deposits in arb_sweep_deposits(),
+            minter_address in arb_address(),
+            blockhash in arb_hash(),
+        ) {
+            let planned = Sweep::plan(deposits.clone(), minter_address);
+            let submitted = VersionedMessage::Legacy(planned.sweep_message(blockhash));
+
+            let recovered = Sweep::recover(deposits, minter_address, &submitted);
+
+            prop_assert_eq!(recovered, Ok(planned));
+        }
+    }
+
+    #[test]
+    fn should_fail_when_the_plan_does_not_build_the_submitted_message() {
+        let deposits = [(0, queued_deposit(0)), (1, queued_deposit(1))];
+        let planned = sweep_message(deposits);
+        type Mutation = fn(&mut solana_message::Message);
+        let mutations: [(&str, Mutation); 3] = [
+            ("another fee payer", |message| {
+                message.account_keys.swap(0, 1)
+            }),
+            ("another amount", |message| {
+                message.instructions[0].data[4] ^= 1
+            }),
+            ("a transfer less", |message| {
+                message.instructions.pop();
+            }),
+        ];
+
+        for (name, mutate) in mutations {
+            let VersionedMessage::Legacy(mut message) = planned.clone();
+            mutate(&mut message);
+            let submitted = VersionedMessage::Legacy(message);
+
+            let sweep = Sweep::recover(deposits, MINTER_ADDRESS, &submitted);
+
+            assert_eq!(
+                sweep,
+                Err(SweepRecoveryError::UnexpectedMessage {
+                    planned: Box::new(planned.clone()),
+                    submitted: Box::new(submitted),
+                }),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn should_fail_when_the_message_sweeps_to_another_destination() {
+        let deposits = [(0, queued_deposit(0)), (1, queued_deposit(1))];
+        let other_destination = solana_address::Address::from([7; 32]);
+        assert_ne!(other_destination, MINTER_ADDRESS);
+        let submitted = sweep_message(deposits);
+
+        let sweep = Sweep::recover(deposits, other_destination, &submitted);
+
+        assert_eq!(
+            sweep,
+            Err(SweepRecoveryError::UnexpectedMessage {
+                planned: Box::new(VersionedMessage::Legacy(
+                    Sweep::plan(deposits, other_destination).sweep_message(Hash::default())
+                )),
+                submitted: Box::new(submitted),
+            })
+        );
+    }
+
+    #[test]
+    fn should_fail_when_the_message_has_no_transfers() {
+        let deposit = queued_deposit(0);
+        let message = solana_message::Message::new(&[], Some(&deposit.address));
+        let submitted = VersionedMessage::Legacy(message);
+
+        let sweep = Sweep::recover([(0, deposit)], MINTER_ADDRESS, &submitted);
+
+        assert_eq!(
+            sweep,
+            Err(SweepRecoveryError::UnexpectedMessage {
+                planned: Box::new(VersionedMessage::Legacy(
+                    Sweep::plan([(0, deposit)], MINTER_ADDRESS).sweep_message(Hash::default())
+                )),
+                submitted: Box::new(submitted),
+            })
+        );
+    }
+}
+
+#[test]
+#[should_panic(expected = "while another sweep holds it")]
+fn should_panic_when_inserting_a_sweep_whose_deposit_another_sweep_holds() {
+    let mut sweeps = Sweeps::default();
+    sweeps.insert(signature(1), planned_sweep([(0, queued_deposit(0))]));
+
+    sweeps.insert(
+        signature(2),
+        planned_sweep([(0, queued_deposit(0)), (1, queued_deposit(1))]),
+    );
+}
+
+#[test]
+#[should_panic(expected = "without deposits")]
+fn should_panic_when_creating_a_sweep_without_deposits() {
+    planned_sweep([]);
+}
+
+#[test]
+#[should_panic(expected = "with deposit 0 twice")]
+fn should_panic_when_creating_a_sweep_with_a_duplicated_deposit() {
+    planned_sweep([(0, queued_deposit(0)), (0, queued_deposit(0))]);
+}

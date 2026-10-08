@@ -1,5 +1,8 @@
 use crate::{
-    guard::{GuardError, MAX_CONCURRENT, TimerGuard, TimerGuardError, process_deposit_guard},
+    guard::{
+        GuardError, MAX_CONCURRENT, TimerGuard, TimerGuardError, deposit_sol_guard,
+        withdrawal_guard,
+    },
     state::TaskType,
     test_fixtures::init_state,
 };
@@ -28,11 +31,11 @@ mod guard {
         let account1 = account(0, None);
         let account2 = account(0, Some(0));
         {
-            let _guard = process_deposit_guard(account1).unwrap();
-            let res = process_deposit_guard(account2).err();
+            let _guard = deposit_sol_guard(account1).unwrap();
+            let res = deposit_sol_guard(account2).err();
             assert_eq!(res, Some(GuardError::AlreadyProcessing));
         }
-        let _guard = process_deposit_guard(account1).unwrap();
+        let _guard = deposit_sol_guard(account1).unwrap();
     }
 
     #[test]
@@ -41,9 +44,22 @@ mod guard {
 
         let account = account(0, None);
         {
-            let _guard = process_deposit_guard(account).unwrap();
+            let _guard = deposit_sol_guard(account).unwrap();
         }
-        let _guard = process_deposit_guard(account).unwrap();
+        let _guard = deposit_sol_guard(account).unwrap();
+    }
+
+    #[test]
+    fn should_guard_deposit_sol_independently_of_withdrawals() {
+        init_state();
+
+        let account = account(0, None);
+        let _withdrawal_guard = withdrawal_guard(account).unwrap();
+        let _deposit_sol_guard = deposit_sol_guard(account).unwrap();
+
+        let res = deposit_sol_guard(account).err();
+
+        assert_eq!(res, Some(GuardError::AlreadyProcessing));
     }
 
     #[test]
@@ -52,18 +68,18 @@ mod guard {
 
         let guards: Vec<_> = (0..MAX_CONCURRENT / 2)
             .map(|id| {
-                process_deposit_guard(account(0, Some(id as u8))).unwrap_or_else(|e| {
+                deposit_sol_guard(account(0, Some(id as u8))).unwrap_or_else(|e| {
                     panic!("Could not create guard for subaccount {id}: {e:#?}")
                 })
             })
             .chain((MAX_CONCURRENT / 2..MAX_CONCURRENT).map(|id| {
-                process_deposit_guard(account(id as u64, None))
+                deposit_sol_guard(account(id as u64, None))
                     .unwrap_or_else(|e| panic!("Could not create guard for principal {id}: {e:#?}"))
             }))
             .collect();
         assert_eq!(guards.len(), MAX_CONCURRENT);
         let account = account(MAX_CONCURRENT as u64 + 1, None);
-        let res = process_deposit_guard(account).err();
+        let res = deposit_sol_guard(account).err();
         assert_eq!(res, Some(GuardError::TooManyConcurrentRequests));
     }
 }
@@ -75,7 +91,7 @@ mod timer_guard {
     fn should_create_guard_successfully() {
         init_state();
 
-        let guard = TimerGuard::new(TaskType::DepositConsolidation);
+        let guard = TimerGuard::new(TaskType::SweepDeposits);
         assert!(guard.is_ok());
     }
 
@@ -83,8 +99,8 @@ mod timer_guard {
     fn should_prevent_concurrent_access_to_same_task() {
         init_state();
 
-        let _guard = TimerGuard::new(TaskType::DepositConsolidation).unwrap();
-        let result = TimerGuard::new(TaskType::DepositConsolidation);
+        let _guard = TimerGuard::new(TaskType::SweepDeposits).unwrap();
+        let result = TimerGuard::new(TaskType::SweepDeposits);
 
         assert_eq!(result, Err(TimerGuardError::AlreadyProcessing));
     }
@@ -94,10 +110,10 @@ mod timer_guard {
         init_state();
 
         {
-            let _guard = TimerGuard::new(TaskType::DepositConsolidation).unwrap();
+            let _guard = TimerGuard::new(TaskType::SweepDeposits).unwrap();
         }
 
-        let guard = TimerGuard::new(TaskType::DepositConsolidation);
+        let guard = TimerGuard::new(TaskType::SweepDeposits);
         assert!(guard.is_ok());
     }
 
@@ -105,7 +121,7 @@ mod timer_guard {
     fn should_allow_concurrent_access_to_different_tasks() {
         init_state();
 
-        let _guard1 = TimerGuard::new(TaskType::DepositConsolidation).unwrap();
+        let _guard1 = TimerGuard::new(TaskType::SweepDeposits).unwrap();
         let guard2 = TimerGuard::new(TaskType::Mint);
 
         assert!(guard2.is_ok());

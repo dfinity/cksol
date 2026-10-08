@@ -2,6 +2,12 @@ name: 'ckSOL'
 
 on:
   pull_request:
+    types:
+      - opened
+      - reopened
+      - edited
+      - synchronize
+  merge_group:
   push:
     branches:
       - main
@@ -16,22 +22,48 @@ env:
   RUSTFLAGS: "-Dwarnings"
 
 jobs:
+  conventional-pr-title:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    env:
+      TITLE: ${{ github.event.pull_request.title }}
+    steps:
+      # Conventional commit patterns:
+      #   verb: description
+      #   verb!: description of breaking change
+      #   verb(scope): Description of change to $scope
+      #   verb(scope)!: Description of breaking change to $scope
+      # verb: feat, fix, ...
+      # scope: refers to the part of code being changed.  E.g. " (accounts)" or " (accounts,canisters)"
+      # !: Indicates that the PR contains a breaking change.
+      - run: |
+          if [[ "$TITLE" =~ ^(feat|fix|chore|build|ci|docs|style|refactor|perf|test)(\([-a-zA-Z0-9,]+\))?\!?\: ]]; then
+              echo pass
+          else
+              echo "PR title does not match conventions"
+              exit 1
+          fi
+
   lint:
     runs-on: ubuntu-latest
     steps:
       - name: 'Checkout'
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: 'Setup mise'
+        uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+        env:
+          MISE_LOCKED: 1
+        with:
+          # Disable cache to avoid issues with wasm32 target
+          # See https://github.com/jdx/mise-action/issues/215
+          cache: false
 
       - name: 'Check code'
         run: |
           cargo fmt --all -- --check
           cargo clippy --locked --verbose --tests --benches --workspace -- -D clippy::all
           cargo clippy --locked --verbose --target wasm32-unknown-unknown -p cksol_minter -- -D clippy::all
-
-      - name: 'Install cargo-sort'
-        uses: taiki-e/install-action@97a5807a604e12de3a13b52d868ebecaeeea757c # v2.75.4
-        with:
-          tool: cargo-sort@2.0.1
 
       - name: 'Check Cargo.toml'
         run: cargo sort --workspace --check
@@ -40,21 +72,13 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: 'Checkout'
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # TODO: Revert to './scripts/docker-build' once the archive.ubuntu.com
-      # outage is resolved, or once we have a more resilient Docker build
-      # (e.g. using a mirror or pre-cached apt packages). The Docker build
-      # depends on apt packages from archive.ubuntu.com which are currently
-      # unavailable, blocking CI.
-      - name: 'Build (non-reproducible stand-in)'
-        run: |
-          rustup target add wasm32-unknown-unknown
-          cargo build --locked --target wasm32-unknown-unknown --release --package cksol_minter
-          gzip -fckn9 target/wasm32-unknown-unknown/release/cksol_minter.wasm > ./wasms/cksol_minter.wasm.gz
+      - name: 'Docker build'
+        run: ./scripts/docker-build
 
       - name: 'Archive Artifact'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: cksol_minter.wasm.gz
           path: ./wasms/cksol_minter.wasm.gz
@@ -70,18 +94,54 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: 'Checkout'
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: 'Run unit tests'
         run: cargo test --locked --workspace --exclude cksol-int-tests
 
-  benchmarks:
+  coverage:
     runs-on: ubuntu-latest
     steps:
       - name: 'Checkout'
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: 'Install canbench'
-        run: cargo install canbench --version 0.4.1 --locked
+      - name: 'Setup mise'
+        uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+        env:
+          MISE_LOCKED: 1
+        with:
+          # Disable cache to avoid issues with wasm32 target
+          # See https://github.com/jdx/mise-action/issues/215
+          cache: false
+
+      - name: 'Measure coverage'
+        run: ./scripts/coverage
+
+      - name: 'Add summary'
+        run: cat ./coverage/summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 'Archive Artifact'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage
+          path: ./coverage
+          if-no-files-found: error
+
+  benchmarks:
+    runs-on: ubuntu-latest
+    env:
+      MISE_ENV: bench
+    steps:
+      - name: 'Checkout'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: 'Setup mise'
+        uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+        env:
+          MISE_LOCKED: 1
+        with:
+          # Disable cache to avoid issues with wasm32 target
+          # See https://github.com/jdx/mise-action/issues/215
+          cache: false
 
       - name: 'Run benchmarks'
         run: cd minter && canbench --less-verbose
@@ -91,14 +151,14 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: 'Checkout'
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: 'Download Artifacts'
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: cksol_minter.wasm.gz
 
-      - name: 'Set CKSOL_MINTER_WASM_PATH for load_wasm'
+      - name: 'Set CKSOL_MINTER_WASM_PATH'
         run: |
           echo "CKSOL_MINTER_WASM_PATH=$GITHUB_WORKSPACE/cksol_minter.wasm.gz" >> "$GITHUB_ENV"
 
@@ -113,9 +173,25 @@ jobs:
           echo "/home/runner/.local/share/solana/install/active_release/bin" >> $GITHUB_PATH
         shell: bash
 
-      - name: 'Start Solana test validator'
-        run: |
-          solana-test-validator &
-
       - name: 'Cargo test'
         run: cargo test --package cksol-int-tests -- --test-threads 2 --nocapture
+
+  # Gate job: the single required status check for the merge queue.
+  # Adding or removing CI jobs only requires updating the `needs` list below,
+  # with no change to the repo's ruleset.
+  ci-pass:
+    if: always()
+    needs:
+      - conventional-pr-title
+      - lint
+      - reproducible-build
+      - unit-tests
+      - coverage
+      - benchmarks
+      - integration-tests
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          if [[ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" == "true" ]]; then
+            exit 1
+          fi

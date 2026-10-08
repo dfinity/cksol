@@ -1,7 +1,7 @@
 use crate::{
     runtime::CanisterRuntime,
     state::{
-        State,
+        SchnorrPublicKey, State,
         event::{Event, EventType},
     },
     storage,
@@ -27,35 +27,13 @@ fn apply_state_transition(state: &mut State, payload: &EventType, timestamp: u64
         EventType::AcceptedWithdrawalRequest(request) => {
             state.process_accepted_withdrawal(request, timestamp);
         }
-        EventType::AcceptedManualDeposit {
-            deposit_id,
-            deposit_amount,
-            amount_to_mint,
-        } => {
-            state.process_accepted_deposit(deposit_id, deposit_amount, amount_to_mint);
-        }
-        EventType::QuarantinedDeposit(deposit_id) => state.process_quarantined_deposit(deposit_id),
-        EventType::Minted {
-            deposit_id,
-            mint_block_index,
-        } => {
-            state.process_mint(deposit_id, mint_block_index);
-        }
         EventType::SubmittedTransaction {
             signature,
             message,
             signers,
-            slot,
             purpose,
         } => {
-            state.process_transaction_submitted(signature, message, signers, *slot, purpose);
-        }
-        EventType::ResubmittedTransaction {
-            old_signature,
-            new_signature,
-            new_slot,
-        } => {
-            state.process_transaction_resubmitted(old_signature, new_signature, *new_slot);
+            state.process_transaction_submitted(signature, message, signers, purpose, timestamp);
         }
         EventType::SucceededTransaction { signature } => {
             state.process_transaction_succeeded(signature);
@@ -66,11 +44,48 @@ fn apply_state_transition(state: &mut State, payload: &EventType, timestamp: u64
         EventType::ExpiredTransaction { signature } => {
             state.process_transaction_expired(signature);
         }
-        EventType::StartedMonitoringAccount { account } => {
-            state.process_started_monitoring_account(account);
+        EventType::QueuedDeposit {
+            deposit_id,
+            account,
+            address,
+            balance,
+        } => {
+            state.process_queued_deposit(*deposit_id, account, address, *balance, timestamp);
         }
-        EventType::StoppedMonitoringAccount { account } => {
-            state.process_stopped_monitoring_account(account);
+        EventType::CreditedSweep {
+            signature,
+            amount_received,
+            mints,
+        } => {
+            state.process_credited_sweep(signature, *amount_received, mints, timestamp);
+        }
+        EventType::QuarantinedSweep { signature } => {
+            state.process_quarantined_sweep(signature);
+        }
+        EventType::MinterPublicKeyFetched {
+            public_key,
+            chain_code,
+        } => {
+            state.cache_minter_public_key(SchnorrPublicKey {
+                public_key: *public_key,
+                chain_code: *chain_code,
+            });
+        }
+        EventType::MintedSweptDeposit {
+            deposit_id,
+            mint_block_index,
+        } => {
+            state.process_minted_swept_deposit(*deposit_id, mint_block_index);
+        }
+        EventType::QuarantinedPendingMint { deposit_id } => {
+            state.process_quarantined_pending_mint(*deposit_id);
+        }
+        EventType::CreatedWithdrawalTransaction {
+            burn_indices,
+            nonce_account,
+            nonce_value,
+        } => {
+            state.process_transaction_created(burn_indices, nonce_account, *nonce_value);
         }
     }
 }

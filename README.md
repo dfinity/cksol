@@ -45,14 +45,13 @@ The minter controls one or more Solana addresses derived from a [threshold Schno
 
 1. **Get a deposit address.** Call `get_deposit_address` on the minter with your ICP principal (and an optional subaccount). The minter returns a Solana address derived specifically for your account.
 
-2. **Send SOL.** Transfer SOL to that deposit address from any Solana wallet.
+2. **Send SOL.** Transfer SOL to that deposit address from any Solana wallet, in one or several transfers. No memo or transaction signature is needed, so deposits can come straight from an exchange.
 
-3. **Notify the minter.** Call `process_deposit` on the minter with the Solana transaction signature and the same owner/subaccount used in step 1. This call requires attaching cycles (see `process_deposit_required_cycles` in `get_minter_info`). The minter:
-   - Fetches the transaction from Solana via the SOL RPC canister.
-   - Verifies it is a valid transfer to your deposit address.
-   - Mints the corresponding amount of ckSOL (minus the deposit fee) to your ICRC-1 ledger account.
+3. **Notify the minter.** Call `deposit_sol` on the minter with the same owner/subaccount used in step 1. This call requires attaching cycles (see `deposit_sol_required_cycles` in `get_minter_info`; unused cycles are refunded). The minter reads the balance of your deposit address, queues it for a sweep, and returns a *deposit id*.
 
-4. **Consolidation.** The minter periodically consolidates funds from individual deposit addresses into its main Solana account.
+4. **Sweep and mint.** On timers, the minter sweeps the deposit address to its main Solana account and, once the sweep transaction is finalized, mints the swept amount of ckSOL (minus the deposit's share of the sweep transaction fee) to your ICRC-1 ledger account.
+
+5. **Track the deposit.** Call `deposit_sol_status` with the deposit id to follow the progress: `Queued` → `Swept` → `Finalized` → `Minted`.
 
 ```mermaid
 sequenceDiagram
@@ -65,12 +64,16 @@ sequenceDiagram
     Minter-->>User: deposit_address
 
     User->>Solana: transfer SOL to deposit_address
-    Solana-->>User: tx_signature
 
-    User->>Minter: process_deposit(owner, subaccount, signature)
-    Minter->>Solana: fetch & verify transaction
-    Minter->>Ledger: mint with icrc1_transfer(to=user, amount - deposit_fee)
-    Ledger-->>Minter: block_index
+    User->>Minter: deposit_sol(owner, subaccount) + cycles
+    Minter->>Solana: read deposit_address balance
+    Minter-->>User: deposit_id
+
+    Note over Minter,Solana: (processed asynchronously by the minter)
+    Minter->>Solana: sweep deposit_address to main account
+    Minter->>Ledger: mint with icrc1_transfer(to=user, swept amount - fee share)
+
+    User->>Minter: deposit_sol_status(deposit_id)
     Minter-->>User: Minted { block_index, minted_amount }
 ```
 
@@ -78,13 +81,13 @@ sequenceDiagram
 
 1. **Approve the minter.** Grant the minter an [ICRC-2](https://github.com/dfinity/ICRC-1/blob/main/standards/ICRC-2/README.md) allowance on your ckSOL ledger account.
 
-2. **Submit a withdrawal request.** Call `withdraw` on the minter with the destination Solana address and the amount in [lamports](https://solana.com/docs/terminology#lamport). The minter:
+2. **Submit a withdrawal request.** Call `withdraw_sol` on the minter with the destination Solana address and the amount in [lamports](https://solana.com/docs/terminology#lamport). The minter:
    - Burns the requested ckSOL from your ledger account via [icrc2_transfer_from](https://github.com/dfinity/ICRC-1/blob/main/standards/ICRC-2/README.md#icrc2_transfer_from).
    - Queues the corresponding SOL transfer.
 
 3. **Transaction submission.** The minter constructs a Solana transaction, signs it using chain-key Ed25519, and submits it via the SOL RPC canister.
 
-4. **Monitor status.** Call `withdrawal_status` with the ledger burn index returned by `withdraw` to track the status of your withdrawal request (`Pending` → `TxSent` → `TxFinalized`).
+4. **Monitor status.** Call `withdraw_sol_status` with the ledger burn index returned by `withdraw_sol` to track the status of your withdrawal request (`Pending` → `TxSent` → `TxFinalized`).
 
 ```mermaid
 sequenceDiagram
@@ -96,7 +99,7 @@ sequenceDiagram
     User->>Ledger: icrc2_approve(spender=minter, amount)
     Ledger-->>User: ok
 
-    User->>Minter: withdraw(destination_address, amount)
+    User->>Minter: withdraw_sol(destination_address, amount)
     Minter->>Ledger: burn with icrc2_transfer_from(from=user, to=burn, amount)
     Ledger-->>Minter: burn_block_index
     Minter-->>User: burn_block_index
@@ -104,7 +107,7 @@ sequenceDiagram
     Note over Minter,Solana: (processed asynchronously by the minter)
     Minter->>Solana: submit SOL transfer to destination_address
 
-    User->>Minter: withdrawal_status(burn_block_index)
+    User->>Minter: withdraw_sol_status(burn_block_index)
     Minter-->>User: TxFinalized(Success)
 ```
 
@@ -123,6 +126,8 @@ graph TD
     RPC -->|HTTPS outcalls| Providers["Solana JSON-RPC providers\n(Ankr, Helius, dRPC, ...)"]
     Providers --> Solana["Solana Blockchain"]
 ```
+
+The full design rationale, including fees and flows, is in the [design document](docs/design.md).
 
 **ckSOL Minter** — The main canister in this repository. It manages the deposit and withdrawal lifecycle, holds custody of SOL via chain-key addresses, signs Solana transactions using threshold Schnorr over Ed25519, and interacts with the ckSOL ledger.
 
@@ -168,25 +173,33 @@ Returns the Solana address you should send SOL to in order to deposit. When `own
 
 ```sh
 icp canister call -e prod cksol_minter get_deposit_address \
-  '(record { owner = null; subaccount = null })' --query
+  '(record { owner = null; subaccount = null })'
 ```
 
 ### Notify the minter of a deposit
 
-After sending SOL to your deposit address, call `process_deposit` with the Solana transaction signature to trigger minting. Pass the same `owner`/`subaccount` used when calling `get_deposit_address` — when `owner` is `null`, it defaults to your calling identity's principal. Replace `<SIGNATURE>` with the base-58 encoded transaction signature.
+After sending SOL to your deposit address, call `deposit_sol` to queue the deposit address for a sweep to the minter's main account. Pass the same `owner`/`subaccount` used when calling `get_deposit_address` — when `owner` is `null`, it defaults to your calling identity's principal.
 
 > [!NOTE]
-> This call requires attaching cycles — check the required amount via `get_minter_info` (`process_deposit_required_cycles` field). If your identity does not hold cycles directly, you can [convert ICP to cycles](https://cli.internetcomputer.org/0.2/guides/tokens-and-cycles/#converting-icp-to-cycles) first, or route the call through a proxy canister using `--proxy <proxy-principal> --cycles <amount>`.
+> This call requires attaching cycles — check the required amount via `get_minter_info` (`deposit_sol_required_cycles` field); unused cycles are refunded. If your identity does not hold cycles directly, you can [convert ICP to cycles](https://cli.internetcomputer.org/0.2/guides/tokens-and-cycles/#converting-icp-to-cycles) first, or route the call through a proxy canister using `--proxy <proxy-principal> --cycles <amount>`.
 
 ```sh
-icp canister call -e prod cksol_minter process_deposit \
-  '(record { owner = null; subaccount = null; signature = "<SIGNATURE>" })'
+icp canister call -e prod cksol_minter deposit_sol \
+  '(record { owner = null; subaccount = null })'
 ```
 
-A successful response looks like:
+A successful response returns the deposit id, which you can use to track the deposit:
 
 ```
-(variant { Ok = variant { Minted = record { block_index = 42; minted_amount = 990_000_000; deposit_id = ... } } })
+(variant { Ok = 42 : nat64 })
+```
+
+### Check a deposit status
+
+After calling `deposit_sol`, track the deposit using the deposit id returned in the response. The status moves through `Queued` → `Swept` → `Finalized` → `Minted` as the minter sweeps the deposit address and mints ckSOL:
+
+```sh
+icp canister call -e prod cksol_minter deposit_sol_status '(42 : nat64)' --query
 ```
 
 ### Submit a withdrawal request
@@ -194,7 +207,7 @@ A successful response looks like:
 Burns ckSOL from your ledger account and initiates a transfer of the equivalent SOL to the given Solana address. Replace `<SOLANA_ADDRESS>` with the destination address and `<AMOUNT>` with the amount in lamports. The optional `from_subaccount` field defaults to `null` (the default subaccount):
 
 ```sh
-icp canister call -e prod cksol_minter withdraw \
+icp canister call -e prod cksol_minter withdraw_sol \
   '(record { address = "<SOLANA_ADDRESS>"; amount = <AMOUNT>; from_subaccount = null })'
 ```
 
@@ -206,10 +219,10 @@ A successful response returns the burn block index, which you can use to track t
 
 ### Check a withdrawal status
 
-After calling `withdraw`, track the status using the `block_index` returned in the response:
+After calling `withdraw_sol`, track the status using the `block_index` returned in the response:
 
 ```sh
-icp canister call -e prod cksol_minter withdrawal_status \
+icp canister call -e prod cksol_minter withdraw_sol_status \
   '(record { block_index = 42 })'
 ```
 
@@ -221,13 +234,12 @@ icp canister call -e prod cksol_minter withdrawal_status \
 ├── minter/                  # ckSOL minter canister
 │   ├── src/
 │   │   ├── address/         # Deposit address derivation
-│   │   ├── consolidate/     # Deposit consolidation logic
 │   │   ├── dashboard/       # HTTP dashboard
 │   │   ├── lifecycle.rs     # Canister init/upgrade and event log
 │   │   ├── metrics.rs       # Prometheus metrics
 │   │   ├── monitor/         # Transaction monitoring
 │   │   ├── state/           # Minter state and event sourcing
-│   │   ├── deposit/manual/  # Manual deposit processing
+│   │   ├── deposit/sweep/   # Deposit sweeping and minting
 │   │   ├── withdraw/        # Withdrawal processing
 │   │   └── ...
 │   └── cksol_minter.did     # Candid interface
@@ -235,9 +247,10 @@ icp canister call -e prod cksol_minter withdrawal_status \
 │   ├── types/               # Public ckSOL types (cksol-types crate)
 │   └── types-internal/      # Internal types and event definitions
 ├── integration_tests/       # End-to-end tests using PocketIC
+├── docs/
+│   └── design.md            # Design document
 └── scripts/
-    ├── build                # Build script for the minter Wasm
-    └── bootstrap            # Install build dependencies
+    └── build                # Build script for the minter Wasm
 ```
 
 <a id="development"></a>
@@ -245,16 +258,35 @@ icp canister call -e prod cksol_minter withdrawal_status \
 
 ### Prerequisites
 
-- [Rust](https://rustup.rs/) — the correct toolchain version is pinned in `rust-toolchain.toml`.
-- [`ic-wasm`](https://github.com/dfinity/ic-wasm) version 0.3.5 — used for Wasm post-processing.
-- `jq` — used by `./scripts/build` to generate Wasm metadata.
-- `gzip` — used by `./scripts/build` to compress the output Wasm.
-
-Install the Rust toolchain and `ic-wasm` by running:
+Install [`mise`](https://mise.jdx.dev/) and then provision the pinned toolchain
+(Rust with the `wasm32-unknown-unknown` target, `cargo-sort`,
+[`ic-wasm`](https://github.com/dfinity/ic-wasm), `cargo-llvm-cov` and `jq`):
 
 ```sh
-./scripts/bootstrap
+mise install
 ```
+
+Tool versions are defined in [`mise.toml`](./mise.toml) and their download
+checksums in [`mise.lock`](./mise.lock), so local, CI and the reproducible
+Docker build stay in sync.
+
+`canbench` is kept out of that set, because only the benchmarks need it and
+building it from source costs about two minutes. It lives in
+[`mise.bench.toml`](./mise.bench.toml) instead, which mise loads only for the
+`bench` environment:
+
+```sh
+MISE_ENV=bench mise install
+```
+
+> [!NOTE]
+> Upstream publishes a single Linux x86-64 `canbench` binary, and mise offers it
+> for every platform. On macOS or Windows that binary will install but not run,
+> so build it from source instead: `cargo install --locked canbench`.
+
+Additionally:
+
+- `gzip` — used by `./scripts/build` to compress the output Wasm.
 
 ### Building
 
@@ -264,7 +296,7 @@ Build the minter Wasm:
 ./scripts/build --cksol_minter
 ```
 
-The resulting `cksol_minter.wasm.gz` will be written to the repository root.
+The resulting `cksol_minter.wasm.gz` will be written to the `wasms/` directory.
 
 You can also build the Rust workspace directly (without Wasm post-processing):
 
@@ -276,22 +308,35 @@ cargo build
 
 The test suite has two parts:
 
-**Unit tests and PocketIC integration tests** — no external dependencies:
+**Unit tests** — no external dependencies:
 
 ```sh
 cargo test --lib
+```
+
+**PocketIC integration tests** — require the minter Wasm, which is read from `wasms/cksol_minter.wasm.gz` (written by both `./scripts/docker-build` and `./scripts/build --cksol_minter`), unless the `CKSOL_MINTER_WASM_PATH` environment variable points to it:
+
+```sh
+./scripts/build --cksol_minter
 cargo test -p cksol-int-tests --test tests
 ```
 
-**Solana validator integration tests** — require a running [`solana-test-validator`](https://solana.com/docs/intro/installation) at `http://localhost:8899`:
+**Solana validator integration tests** — require the [Solana CLI](https://solana.com/docs/intro/installation) to be installed, so that each test can start its own `solana-test-validator`:
 
 ```sh
-solana-test-validator &
 cargo test -p cksol-int-tests --test solana_test_validator
 ```
 
 > [!CAUTION]
-> Running `cargo test` without arguments will attempt all tests, including the Solana validator suite, and will fail if no validator is running.
+> Running `cargo test` without arguments will attempt all tests, including the Solana validator suite, and will fail if the Solana CLI is not installed.
+
+**Coverage** — measures the unit tests only, since the integration tests drive a prebuilt Wasm that host instrumentation cannot observe:
+
+```sh
+./scripts/coverage
+```
+
+This writes `coverage/`, including a browsable report at `coverage/html/index.html`. CI runs the same script and publishes the summary and the report as a build artifact.
 
 <a id="related-projects"></a>
 ## 🔗 Related Projects
