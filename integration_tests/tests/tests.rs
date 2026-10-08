@@ -11,7 +11,7 @@ use cksol_int_tests::{
 };
 use cksol_types::{
     DepositSolArgs, DepositSolError, DepositSolStatus, GetDepositAddressArgs, Lamport, MinterInfo,
-    TxFinalizedStatus, WithdrawalArgs, WithdrawalError, WithdrawalStatus,
+    TxFinalizedStatus, WithdrawSolArgs, WithdrawSolStatus, WithdrawalError,
 };
 use cksol_types_internal::{
     UpgradeArgs,
@@ -313,7 +313,7 @@ mod withdrawal_tests {
     async fn should_validate_solana_address() {
         let setup = SetupBuilder::new().build().await;
 
-        let args = WithdrawalArgs {
+        let args = WithdrawSolArgs {
             from_subaccount: None,
             amount: u64::MAX,
             address: "InvalidAddress".to_string(),
@@ -323,7 +323,7 @@ mod withdrawal_tests {
         let err = result.unwrap_err();
         assert_matches!(err, WithdrawalError::MalformedAddress(_));
 
-        let args = WithdrawalArgs {
+        let args = WithdrawSolArgs {
             from_subaccount: None,
             amount: u64::MAX,
             address: "E4MpwNnMWs2XtW5gVrxZvyS7fMq31QD5HvbxmwP45Tz3".to_string(),
@@ -364,7 +364,7 @@ mod withdrawal_tests {
 
         let result = setup
             .minter()
-            .withdraw_sol(WithdrawalArgs {
+            .withdraw_sol(WithdrawSolArgs {
                 from_subaccount: None,
                 amount: Setup::DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT,
                 address: SYSTEM_PROGRAM_ID.to_string(),
@@ -384,7 +384,7 @@ mod withdrawal_tests {
     async fn should_check_minimum_withdrawal_amount() {
         let setup = SetupBuilder::new().build().await;
 
-        let args = WithdrawalArgs {
+        let args = WithdrawSolArgs {
             from_subaccount: None,
             amount: Setup::DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT,
             address: "E4MpwNnMWs2XtW5gVrxZvyS7fMq31QD5HvbxmwP45Tz3".to_string(),
@@ -414,7 +414,7 @@ mod withdrawal_tests {
             }
         );
 
-        let args = WithdrawalArgs {
+        let args = WithdrawSolArgs {
             from_subaccount: None,
             amount: new_minimum_withdrawal_amount,
             address: "E4MpwNnMWs2XtW5gVrxZvyS7fMq31QD5HvbxmwP45Tz3".to_string(),
@@ -460,7 +460,7 @@ mod withdrawal_tests {
 
         let result = setup
             .minter()
-            .withdraw_sol(WithdrawalArgs {
+            .withdraw_sol(WithdrawSolArgs {
                 from_subaccount: None,
                 amount: WITHDRAWAL_AMOUNT,
                 address: "E4MpwNnMWs2XtW5gVrxZvyS7fMq31QD5HvbxmwP45Tz3".to_string(),
@@ -474,7 +474,7 @@ mod withdrawal_tests {
         // Test insufficient allowance
         let result = setup
             .minter()
-            .withdraw_sol(WithdrawalArgs {
+            .withdraw_sol(WithdrawSolArgs {
                 from_subaccount: subaccount,
                 amount: WITHDRAWAL_AMOUNT,
                 address: "E4MpwNnMWs2XtW5gVrxZvyS7fMq31QD5HvbxmwP45Tz3".to_string(),
@@ -502,7 +502,7 @@ mod withdrawal_tests {
 
         let result = setup
             .minter()
-            .withdraw_sol(WithdrawalArgs {
+            .withdraw_sol(WithdrawSolArgs {
                 from_subaccount: subaccount,
                 amount: WITHDRAWAL_AMOUNT,
                 address: "E4MpwNnMWs2XtW5gVrxZvyS7fMq31QD5HvbxmwP45Tz3".to_string(),
@@ -551,7 +551,7 @@ mod withdrawal_tests {
 
         let result = setup
             .minter()
-            .withdraw_sol(WithdrawalArgs {
+            .withdraw_sol(WithdrawSolArgs {
                 from_subaccount: None,
                 amount: WITHDRAWAL_AMOUNT,
                 address: WITHDRAWAL_ADDRESS.to_string(),
@@ -580,7 +580,7 @@ mod withdrawal_tests {
     }
 
     #[tokio::test]
-    async fn should_return_withdrawal_sol_status() {
+    async fn should_return_withdraw_sol_status() {
         const WITHDRAWAL_AMOUNT: u64 = 100_000_000;
         const WITHDRAWAL_ADDRESS: &str = "E4MpwNnMWs2XtW5gVrxZvyS7fMq31QD5HvbxmwP45Tz3";
 
@@ -608,7 +608,7 @@ mod withdrawal_tests {
 
         let result = setup
             .minter()
-            .withdraw_sol(WithdrawalArgs {
+            .withdraw_sol(WithdrawSolArgs {
                 from_subaccount: None,
                 amount: WITHDRAWAL_AMOUNT,
                 address: WITHDRAWAL_ADDRESS.to_string(),
@@ -617,13 +617,13 @@ mod withdrawal_tests {
 
         let block_index = result.expect("burn should succeed").block_index;
 
-        let status = setup.minter().withdrawal_sol_status(block_index).await;
-        assert_eq!(status, WithdrawalStatus::Pending);
+        let status = setup.minter().withdraw_sol_status(block_index).await;
+        assert_eq!(status, WithdrawSolStatus::Pending);
         // 0 is the initial mint block, should be NotFound
-        let status = setup.minter().withdrawal_sol_status(0).await;
-        assert_eq!(status, WithdrawalStatus::NotFound);
-        let status = setup.minter().withdrawal_sol_status(u64::MAX).await;
-        assert_eq!(status, WithdrawalStatus::NotFound);
+        let status = setup.minter().withdraw_sol_status(0).await;
+        assert_eq!(status, WithdrawSolStatus::NotFound);
+        let status = setup.minter().withdraw_sol_status(u64::MAX).await;
+        assert_eq!(status, WithdrawSolStatus::NotFound);
 
         setup.drop().await;
     }
@@ -655,7 +655,7 @@ mod withdrawal_tests {
             )
             .await;
 
-        let args = WithdrawalArgs {
+        let args = WithdrawSolArgs {
             from_subaccount: None,
             amount: WITHDRAWAL_AMOUNT,
             address: WITHDRAWAL_ADDRESS.to_string(),
@@ -726,7 +726,7 @@ mod withdrawal_tests {
 
         let WithdrawalOk { block_index } = setup
             .minter()
-            .withdraw_sol(WithdrawalArgs {
+            .withdraw_sol(WithdrawSolArgs {
                 from_subaccount: None,
                 amount: WITHDRAWAL_AMOUNT,
                 address: WITHDRAWAL_ADDRESS.to_string(),
@@ -765,9 +765,9 @@ mod withdrawal_tests {
         });
 
         // Withdrawal status should be TxSent with some signature
-        let status = setup.minter().withdrawal_sol_status(block_index).await;
+        let status = setup.minter().withdraw_sol_status(block_index).await;
         let transaction_id = match &status {
-            WithdrawalStatus::TxSent { transaction_id } => transaction_id.clone(),
+            WithdrawSolStatus::TxSent { transaction_id } => transaction_id.clone(),
             other => panic!("Expected TxSent, got: {other:?}"),
         };
 
@@ -779,8 +779,8 @@ mod withdrawal_tests {
             .await
             .expect("upgrade should succeed");
         assert_eq!(
-            setup.minter().withdrawal_sol_status(block_index).await,
-            WithdrawalStatus::TxSent {
+            setup.minter().withdraw_sol_status(block_index).await,
+            WithdrawSolStatus::TxSent {
                 transaction_id: transaction_id.clone()
             }
         );
@@ -796,9 +796,9 @@ mod withdrawal_tests {
             )
             .await;
 
-        let status = setup.minter().withdrawal_sol_status(block_index).await;
+        let status = setup.minter().withdraw_sol_status(block_index).await;
         match &status {
-            WithdrawalStatus::TxFinalized(TxFinalizedStatus::Success {
+            WithdrawSolStatus::TxFinalized(TxFinalizedStatus::Success {
                 transaction_id: finalized_transaction_id,
                 ..
             }) => {
@@ -1242,7 +1242,7 @@ mod anonymous_caller_tests {
         // `withdraw_sol` endpoint (no `owner` field, only anonymous caller applies)
         let minter = setup.minter_with_caller(Principal::anonymous());
         let result = minter
-            .try_withdraw_sol(WithdrawalArgs {
+            .try_withdraw_sol(WithdrawSolArgs {
                 from_subaccount: None,
                 amount: Setup::DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT,
                 address: "E4MpwNnMWs2XtW5gVrxZvyS7fMq31QD5HvbxmwP45Tz3".to_string(),
@@ -1371,7 +1371,7 @@ mod metrics_tests {
 
         setup
             .minter()
-            .withdraw_sol(WithdrawalArgs {
+            .withdraw_sol(WithdrawSolArgs {
                 from_subaccount: None,
                 amount: WITHDRAWAL_AMOUNT,
                 address: WITHDRAWAL_ADDRESS.to_string(),

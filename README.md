@@ -87,7 +87,7 @@ sequenceDiagram
 
 3. **Transaction submission.** The minter constructs a Solana transaction, signs it using chain-key Ed25519, and submits it via the SOL RPC canister.
 
-4. **Monitor status.** Call `withdrawal_sol_status` with the ledger burn index returned by `withdraw_sol` to track the status of your withdrawal request (`Pending` → `TxSent` → `TxFinalized`).
+4. **Monitor status.** Call `withdraw_sol_status` with the ledger burn index returned by `withdraw_sol` to track the status of your withdrawal request (`Pending` → `TxSent` → `TxFinalized`).
 
 ```mermaid
 sequenceDiagram
@@ -107,7 +107,7 @@ sequenceDiagram
     Note over Minter,Solana: (processed asynchronously by the minter)
     Minter->>Solana: submit SOL transfer to destination_address
 
-    User->>Minter: withdrawal_sol_status(burn_block_index)
+    User->>Minter: withdraw_sol_status(burn_block_index)
     Minter-->>User: TxFinalized(Success)
 ```
 
@@ -205,7 +205,7 @@ icp canister call -e prod cksol_minter deposit_sol_status '(42 : nat64)' --query
 Burns ckSOL from your ledger account and initiates a transfer of the equivalent SOL to the given Solana address. Replace `<SOLANA_ADDRESS>` with the destination address and `<AMOUNT>` with the amount in lamports. The optional `from_subaccount` field defaults to `null` (the default subaccount):
 
 ```sh
-icp canister call -e prod cksol_minter withdraw \
+icp canister call -e prod cksol_minter withdraw_sol \
   '(record { address = "<SOLANA_ADDRESS>"; amount = <AMOUNT>; from_subaccount = null })'
 ```
 
@@ -220,7 +220,7 @@ A successful response returns the burn block index, which you can use to track t
 After calling `withdraw_sol`, track the status using the `block_index` returned in the response:
 
 ```sh
-icp canister call -e prod cksol_minter withdrawal_sol_status \
+icp canister call -e prod cksol_minter withdraw_sol_status \
   '(record { block_index = 42 })'
 ```
 

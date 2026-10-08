@@ -13,8 +13,8 @@ use cksol_minter::{
 };
 use cksol_types::{
     Address, DepositSolArgs, DepositSolError, DepositSolId, DepositSolStatus,
-    GetDepositAddressArgs, MinterInfo, WithdrawalArgs, WithdrawalError, WithdrawalOk,
-    WithdrawalStatus, WithdrawalStatusArgs,
+    GetDepositAddressArgs, MinterInfo, WithdrawSolArgs, WithdrawSolStatus, WithdrawSolStatusArgs,
+    WithdrawalError, WithdrawalOk,
 };
 use cksol_types_internal::{MinterArg, log::Priority};
 use ic_http_types::{HttpRequest, HttpResponse, HttpResponseBuilder};
@@ -76,7 +76,7 @@ fn deposit_sol_status(deposit_id: DepositSolId) -> DepositSolStatus {
 }
 
 #[ic_cdk::update]
-async fn withdraw_sol(args: WithdrawalArgs) -> Result<WithdrawalOk, WithdrawalError> {
+async fn withdraw_sol(args: WithdrawSolArgs) -> Result<WithdrawalOk, WithdrawalError> {
     let account = assert_non_anonymous_account(None, args.from_subaccount);
 
     cksol_minter::withdraw::withdraw(
@@ -89,7 +89,7 @@ async fn withdraw_sol(args: WithdrawalArgs) -> Result<WithdrawalOk, WithdrawalEr
 }
 
 #[ic_cdk::update]
-fn withdrawal_sol_status(args: WithdrawalStatusArgs) -> WithdrawalStatus {
+fn withdraw_sol_status(args: WithdrawSolStatusArgs) -> WithdrawSolStatus {
     cksol_minter::withdraw::withdrawal_status(args.block_index)
 }
 

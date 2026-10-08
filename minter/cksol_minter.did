@@ -217,7 +217,7 @@ type UpgradeArgs = record {
     nonce_accounts_to_add : opt vec text;
 };
 
-type WithdrawalArgs = record {
+type WithdrawSolArgs = record {
     // The subaccount to burn ckSOL from.
     from_subaccount : opt blob;
     // The amount of ckSOL in Lamports that the client wants to withdraw.
@@ -232,8 +232,8 @@ type WithdrawalOk = record {
     block_index : LedgerBurnIndex
 };
 
-// Arguments for a request to the `withdrawal_sol_status` endpoint.
-type WithdrawalStatusArgs = record {
+// Arguments for a request to the `withdraw_sol_status` endpoint.
+type WithdrawSolStatusArgs = record {
     // The burn block index returned by the `withdraw_sol` endpoint.
     block_index : LedgerBurnIndex;
 };
@@ -264,7 +264,7 @@ type WithdrawalError = variant {
 };
 
 // The result of a call to the `withdraw_sol` endpoint.
-type WithdrawalResult = variant { Ok : WithdrawalOk; Err : WithdrawalError };
+type WithdrawSolResult = variant { Ok : WithdrawalOk; Err : WithdrawalError };
 
 // Status of a finalized transaction.
 type TxFinalizedStatus = variant {
@@ -281,7 +281,7 @@ type TxFinalizedStatus = variant {
 };
 
 // Retrieve the status of a withdrawal request.
-type WithdrawalStatus = variant {
+type WithdrawSolStatus = variant {
     // Withdrawal request is not found.
     NotFound;
     // Withdrawal request is waiting to be processed.
@@ -534,10 +534,10 @@ service : (MinterArg) -> {
     deposit_sol_status: (DepositSolId) -> (DepositSolStatus) query;
 
     // Submits a request to convert ckSOL to Solana.
-    withdraw_sol : (WithdrawalArgs) -> (WithdrawalResult);
+    withdraw_sol : (WithdrawSolArgs) -> (WithdrawSolResult);
 
     // Retrieve the status of a Solana withdrawal request.
-    withdrawal_sol_status : (WithdrawalStatusArgs) -> (WithdrawalStatus);
+    withdraw_sol_status : (WithdrawSolStatusArgs) -> (WithdrawSolStatus);
 
     // *WARNING*: This is a debug endpoint, backwards-compatibility is not guaranteed.
     // Returns events from the event log starting at the given index.

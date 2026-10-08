@@ -1,7 +1,7 @@
 use std::str::FromStr;
 use std::time::Duration;
 
-use cksol_types::{WithdrawalError, WithdrawalOk, WithdrawalStatus};
+use cksol_types::{WithdrawSolStatus, WithdrawalError, WithdrawalOk};
 use icrc_ledger_types::icrc1::account::Account;
 use sol_rpc_types::Lamport;
 use solana_address::Address;
@@ -411,6 +411,6 @@ async fn send_transaction<R: CanisterRuntime>(runtime: &R, transaction: Transact
     }
 }
 
-pub fn withdrawal_status(block_index: u64) -> WithdrawalStatus {
+pub fn withdrawal_status(block_index: u64) -> WithdrawSolStatus {
     read_state(|s| s.withdrawal_status(block_index))
 }
