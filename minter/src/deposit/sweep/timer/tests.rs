@@ -18,7 +18,11 @@ use crate::{
 };
 use assert_matches::assert_matches;
 use cksol_types::{DepositSolId, DepositSolStatus};
-use sol_rpc_types::{Lamport, MultiRpcResult, RpcError, Signature, Slot};
+use sol_rpc_types::{
+    CommitmentLevel, GetBlockCommitmentLevel, GetBlockParams, GetSlotParams, GetSlotRpcConfig,
+    Lamport, MultiRpcResult, RpcConfig, RpcError, RpcSources, SendTransactionParams, Signature,
+    Slot,
+};
 use solana_address::Address;
 use solana_system_interface::instruction::SystemInstruction;
 
@@ -181,6 +185,48 @@ async fn should_record_event_even_if_transaction_submission_fails() {
         DepositSolStatus::Swept {
             signature: fee_payer_signature.into()
         }
+    );
+}
+
+#[tokio::test]
+async fn should_build_and_simulate_the_sweep_at_confirmed_commitment() {
+    setup();
+    queue_deposit(0, account(1), MINIMUM_DEPOSIT_AMOUNT);
+    let runtime = TestCanisterRuntime::new()
+        .with_increasing_time()
+        .add_recent_block(Ok(SLOT))
+        .add_stub_response(SendTransactionResult::Consistent(Ok(account_signature(
+            &account(1),
+        )
+        .into())))
+        .add_signer(sign_for(&account(1)));
+
+    sweep_queued_deposits(runtime.clone()).await;
+
+    let [get_slot, get_block, send_transaction] = runtime.sent_update_calls().try_into().unwrap();
+    assert_eq!(get_slot.method, "getSlot");
+    let (_sources, _config, slot_params): (
+        RpcSources,
+        Option<GetSlotRpcConfig>,
+        Option<GetSlotParams>,
+    ) = get_slot.args();
+    assert_eq!(
+        slot_params.and_then(|params| params.commitment),
+        Some(CommitmentLevel::Confirmed)
+    );
+    assert_eq!(get_block.method, "getBlock");
+    let (_sources, _config, block_params): (RpcSources, Option<RpcConfig>, GetBlockParams) =
+        get_block.args();
+    assert_eq!(
+        block_params.commitment,
+        Some(GetBlockCommitmentLevel::Confirmed)
+    );
+    assert_eq!(send_transaction.method, "sendTransaction");
+    let (_sources, _config, send_params): (RpcSources, Option<RpcConfig>, SendTransactionParams) =
+        send_transaction.args();
+    assert_eq!(
+        send_params.preflight_commitment,
+        Some(CommitmentLevel::Confirmed)
     );
 }
 

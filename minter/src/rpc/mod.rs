@@ -160,8 +160,14 @@ impl From<GetBalanceError> for DepositSolError {
 pub async fn submit_transaction<R: CanisterRuntime>(
     runtime: &R,
     transaction: Transaction,
+    preflight_commitment: CommitmentLevel,
 ) -> Result<Signature, SubmitTransactionError> {
-    send_transaction(runtime, transaction, Preflight::Simulate).await
+    send_transaction(
+        runtime,
+        transaction,
+        Preflight::Simulate(preflight_commitment),
+    )
+    .await
 }
 
 /// Submits a withdrawal transaction without the providers' preflight
@@ -176,7 +182,7 @@ pub async fn submit_transaction_skipping_preflight<R: CanisterRuntime>(
 }
 
 enum Preflight {
-    Simulate,
+    Simulate(CommitmentLevel),
     Skip,
 }
 
@@ -187,7 +193,9 @@ async fn send_transaction<R: CanisterRuntime>(
 ) -> Result<Signature, SubmitTransactionError> {
     let client = read_state(|state| state.sol_rpc_client(runtime.inter_canister_call_runtime()));
     let request = match preflight {
-        Preflight::Simulate => client.send_transaction(transaction),
+        Preflight::Simulate(commitment) => client
+            .send_transaction(transaction)
+            .with_preflight_commitment(commitment),
         Preflight::Skip => client
             .send_transaction(transaction)
             .with_skip_preflight(true),
@@ -291,8 +299,12 @@ pub enum GetNonceAccountError {
 
 pub async fn get_recent_block<R: CanisterRuntime>(
     runtime: &R,
+    commitment: CommitmentLevel,
 ) -> Result<Block, GetRecentBlockError> {
-    let client = read_state(|state| state.sol_rpc_client(runtime.inter_canister_call_runtime()));
+    let client =
+        read_state(|state| state.sol_rpc_client_builder(runtime.inter_canister_call_runtime()))
+            .with_default_commitment_level(commitment)
+            .build();
     match client
         .get_recent_block()
         .with_num_tries(GET_RECENT_BLOCK_MAX_TRIES)

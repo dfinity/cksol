@@ -20,6 +20,7 @@ use crate::{
 use assert_matches::assert_matches;
 use ic_canister_runtime::IcError;
 use sol_rpc_types::{
+    CommitmentLevel, GetBlockCommitmentLevel, GetBlockParams, GetSlotParams, GetSlotRpcConfig,
     HttpOutcallError, RpcConfig, RpcError, RpcSource, RpcSources, SendTransactionParams,
     SupportedRpcProviderId,
 };
@@ -259,7 +260,7 @@ mod submit_transaction_tests {
             SendTransactionResult::Consistent(Ok(expected_signature.clone())),
         );
 
-        let result = submit_transaction(&runtime, transaction()).await;
+        let result = submit_transaction(&runtime, transaction(), CommitmentLevel::Confirmed).await;
 
         assert_eq!(result, Ok(expected_signature.into()));
     }
@@ -270,7 +271,7 @@ mod submit_transaction_tests {
 
         let runtime = TestCanisterRuntime::new().add_stub_error(IcError::CallPerformFailed);
 
-        let result = submit_transaction(&runtime, transaction()).await;
+        let result = submit_transaction(&runtime, transaction(), CommitmentLevel::Confirmed).await;
 
         assert_eq!(
             result,
@@ -291,7 +292,7 @@ mod submit_transaction_tests {
         let runtime = TestCanisterRuntime::new()
             .add_stub_response(SendTransactionResult::Consistent(Err(rpc_error.clone())));
 
-        let result = submit_transaction(&runtime, transaction()).await;
+        let result = submit_transaction(&runtime, transaction(), CommitmentLevel::Confirmed).await;
 
         assert_eq!(result, Err(SubmitTransactionError::RpcError(rpc_error)));
     }
@@ -314,7 +315,7 @@ mod submit_transaction_tests {
         let runtime = TestCanisterRuntime::new()
             .add_stub_response(SendTransactionResult::Inconsistent(results));
 
-        let result = submit_transaction(&runtime, transaction()).await;
+        let result = submit_transaction(&runtime, transaction(), CommitmentLevel::Confirmed).await;
 
         assert_eq!(result, Err(SubmitTransactionError::InconsistentRpcResults));
     }
@@ -325,10 +326,24 @@ mod submit_transaction_tests {
         let runtime = TestCanisterRuntime::new()
             .add_stub_response(SendTransactionResult::Consistent(Ok(signature())));
 
-        let result = submit_transaction(&runtime, transaction()).await;
+        let result = submit_transaction(&runtime, transaction(), CommitmentLevel::Confirmed).await;
 
         assert_eq!(result, Ok(signature().into()));
         assert_eq!(sent_params(&runtime).skip_preflight, None);
+    }
+
+    #[tokio::test]
+    async fn should_simulate_at_the_requested_commitment() {
+        init_state();
+        for commitment in [CommitmentLevel::Confirmed, CommitmentLevel::Finalized] {
+            let runtime = TestCanisterRuntime::new()
+                .add_stub_response(SendTransactionResult::Consistent(Ok(signature())));
+
+            let result = submit_transaction(&runtime, transaction(), commitment.clone()).await;
+
+            assert_eq!(result, Ok(signature().into()));
+            assert_eq!(sent_params(&runtime).preflight_commitment, Some(commitment));
+        }
     }
 
     #[tokio::test]
@@ -518,7 +533,7 @@ mod get_recent_block_tests {
                 confirmed_block_at_height(block_height),
             ))));
 
-        let result = get_recent_block(&runtime).await;
+        let result = get_recent_block(&runtime, CommitmentLevel::Finalized).await;
 
         assert_eq!(
             result,
@@ -542,7 +557,7 @@ mod get_recent_block_tests {
                 },
             ))));
 
-        let result = get_recent_block(&runtime).await;
+        let result = get_recent_block(&runtime, CommitmentLevel::Finalized).await;
 
         assert_eq!(
             result,
@@ -556,13 +571,49 @@ mod get_recent_block_tests {
         let runtime = TestCanisterRuntime::new()
             .add_recent_block(Err(RpcError::ValidationError("Error".to_string())));
 
-        let result = get_recent_block(&runtime).await;
+        let result = get_recent_block(&runtime, CommitmentLevel::Finalized).await;
 
         assert_matches!(
             result,
             Err(GetRecentBlockError::Failed(errors))
                 if errors.len() == GET_RECENT_BLOCK_MAX_TRIES.get()
         );
+    }
+
+    #[tokio::test]
+    async fn should_fetch_slot_and_block_at_the_requested_commitment() {
+        init_state();
+        for (commitment, block_commitment) in [
+            (
+                CommitmentLevel::Confirmed,
+                GetBlockCommitmentLevel::Confirmed,
+            ),
+            (
+                CommitmentLevel::Finalized,
+                GetBlockCommitmentLevel::Finalized,
+            ),
+        ] {
+            let runtime = TestCanisterRuntime::new().add_recent_block(Ok(SLOT));
+
+            let result = get_recent_block(&runtime, commitment.clone()).await;
+
+            assert_matches!(result, Ok(Block { slot: SLOT, .. }));
+            let [get_slot, get_block] = runtime.sent_update_calls().try_into().unwrap();
+            assert_eq!(get_slot.method, "getSlot");
+            let (_sources, _config, slot_params): (
+                RpcSources,
+                Option<GetSlotRpcConfig>,
+                Option<GetSlotParams>,
+            ) = get_slot.args();
+            assert_eq!(
+                slot_params.and_then(|params| params.commitment),
+                Some(commitment)
+            );
+            assert_eq!(get_block.method, "getBlock");
+            let (_sources, _config, block_params): (RpcSources, Option<RpcConfig>, GetBlockParams) =
+                get_block.args();
+            assert_eq!(block_params.commitment, Some(block_commitment));
+        }
     }
 
     fn blockhash() -> sol_rpc_types::Hash {

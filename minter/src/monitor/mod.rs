@@ -18,6 +18,7 @@ use crate::{
 use canlog::log;
 use cksol_types_internal::log::Priority;
 use itertools::Itertools;
+use sol_rpc_types::CommitmentLevel;
 use solana_signature::Signature;
 use solana_transaction::Transaction;
 use solana_transaction_status_client_types::TransactionConfirmationStatus;
@@ -148,7 +149,7 @@ async fn check_submitted_transactions<R: CanisterRuntime>(runtime: &R) -> bool {
 }
 
 async fn fetch_current_block_height<R: CanisterRuntime>(runtime: &R) -> Option<BlockHeight> {
-    match get_recent_block(runtime).await {
+    match get_recent_block(runtime, CommitmentLevel::Finalized).await {
         Ok(block) => Some(block.block_height),
         Err(e) => {
             log!(

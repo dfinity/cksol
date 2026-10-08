@@ -16,6 +16,7 @@ use canlog::log;
 use cksol_types::DepositSolId;
 use cksol_types_internal::log::Priority;
 use itertools::Itertools;
+use sol_rpc_types::CommitmentLevel;
 use solana_address::Address;
 use solana_signature::Signature;
 use std::time::Duration;
@@ -25,6 +26,8 @@ use thiserror::Error;
 mod tests;
 
 pub(crate) const MAX_DEPOSITS_PER_SWEEP: usize = MAX_SIGNATURES as usize;
+
+const SWEEP_BLOCKHASH_COMMITMENT: CommitmentLevel = CommitmentLevel::Confirmed;
 
 pub async fn sweep_queued_deposits<R: CanisterRuntime>(runtime: R) {
     let _guard = match TimerGuard::new(TaskType::SweepDeposits) {
@@ -46,7 +49,7 @@ pub async fn sweep_queued_deposits<R: CanisterRuntime>(runtime: R) {
     };
     let sweep_destination = minter_address(&master_key);
 
-    let block = match get_recent_block(&runtime).await {
+    let block = match get_recent_block(&runtime, SWEEP_BLOCKHASH_COMMITMENT).await {
         Ok(block) => block,
         Err(e) => {
             log!(
@@ -143,7 +146,7 @@ async fn submit_sweep_transaction<R: CanisterRuntime>(
         )
     });
 
-    submit_transaction(runtime, transaction).await?;
+    submit_transaction(runtime, transaction, SWEEP_BLOCKHASH_COMMITMENT).await?;
 
     Ok(signature)
 }

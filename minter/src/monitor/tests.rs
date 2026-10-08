@@ -18,7 +18,8 @@ use crate::{
     },
 };
 use sol_rpc_types::{
-    ConfirmedBlock, MultiRpcResult, RpcError, SendTransactionParams, Slot,
+    CommitmentLevel, ConfirmedBlock, GetBlockCommitmentLevel, GetBlockParams, GetSlotParams,
+    GetSlotRpcConfig, MultiRpcResult, RpcConfig, RpcError, RpcSources, SendTransactionParams, Slot,
     TransactionConfirmationStatus, TransactionError, TransactionStatus,
 };
 use solana_transaction::Transaction;
@@ -410,6 +411,38 @@ mod finalization {
         read_state(|s| {
             assert_eq!(s.submitted_transactions().len(), 1);
         });
+    }
+
+    #[tokio::test]
+    async fn should_fetch_the_current_block_height_at_finalized_commitment() {
+        setup();
+        submit_sweep_transaction(OLDEST_VALID_BLOCK_HEIGHT);
+        let runtime = TestCanisterRuntime::new()
+            .with_increasing_time()
+            .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
+            .add_stub_response(BlockResult::Consistent(Ok(current_block())))
+            .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![None])));
+
+        finalize_transactions(runtime.clone()).await;
+
+        let calls = runtime.sent_update_calls();
+        let get_slot = calls.iter().find(|call| call.method == "getSlot").unwrap();
+        let (_sources, _config, slot_params): (
+            RpcSources,
+            Option<GetSlotRpcConfig>,
+            Option<GetSlotParams>,
+        ) = get_slot.args();
+        assert_eq!(
+            slot_params.and_then(|params| params.commitment),
+            Some(CommitmentLevel::Finalized)
+        );
+        let get_block = calls.iter().find(|call| call.method == "getBlock").unwrap();
+        let (_sources, _config, block_params): (RpcSources, Option<RpcConfig>, GetBlockParams) =
+            get_block.args();
+        assert_eq!(
+            block_params.commitment,
+            Some(GetBlockCommitmentLevel::Finalized)
+        );
     }
 
     struct ExpiryCase {
