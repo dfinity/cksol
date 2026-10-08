@@ -144,6 +144,7 @@ The full design rationale, including fees and flows, is in the [design document]
 |----------|-------------|
 | Minter | [`ljyxk-riaaa-aaaar-qb5mq-cai`](https://dashboard.internetcomputer.org/canister/ljyxk-riaaa-aaaar-qb5mq-cai) |
 | Ledger | [`la34w-haaaa-aaaar-qb5na-cai`](https://dashboard.internetcomputer.org/canister/la34w-haaaa-aaaar-qb5na-cai) |
+| Ledger Index | [`2r6ji-gyaaa-aaaar-qb6fq-cai`](https://dashboard.internetcomputer.org/canister/2r6ji-gyaaa-aaaar-qb6fq-cai) |
 
 ### <img src="static/images/cksol-token.svg" width="20" valign="middle"> ckSOL — 🚀 Production (Solana Mainnet)
 
@@ -151,6 +152,7 @@ The full design rationale, including fees and flows, is in the [design document]
 |----------|-------------|
 | Minter | `lh22c-kyaaa-aaaar-qb5nq-cai` *(not yet deployed)* |
 | Ledger | `ls5lp-lqaaa-aaaar-qb5oa-cai` *(not yet deployed)* |
+| Ledger Index | `2ezyf-hqaaa-aaaar-qb6ga-cai` *(not yet deployed)* |
 
 <a id="interacting-via-the-cli"></a>
 ## 💻 Interacting via the CLI
