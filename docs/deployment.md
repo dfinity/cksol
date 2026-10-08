@@ -156,7 +156,7 @@ Initialization arguments:
         max_message_size_bytes = null;
         max_transactions_per_response = null;
         cycles_for_archive_creation = opt (100_000_000_000_000 : nat64);
-        controller_id = principal "r7inp-6aaaa-aaaaa-aaabq-cai";
+        controller_id = principal "cmqvo-qqaaa-aaaai-q3waa-cai";
         more_controller_ids = null;
       };
       index_principal = opt principal "2r6ji-gyaaa-aaaar-qb6fq-cai";
@@ -177,3 +177,47 @@ The minting account is the minter's default account and the fee collector is the
 The transfer fee of 500 lamports follows [Section 3.3.1 of the design](design.md#331-cksol-ledger-fees).
 Archiving is effectively disabled by setting `trigger_threshold` to 4,200,000,000 blocks.
 The other archive options match those of the ckETH ledger (proposal [126170](https://dashboard.internetcomputer.org/proposal/126170)), so that archives are controlled by the NNS root canister if archiving is enabled by a later upgrade.
+
+## Index
+
+Initialization arguments:
+
+<table>
+<tr>
+<th>Production</th>
+<th>Staging</th>
+</tr>
+<tr>
+<td>
+
+```candid
+(
+  opt variant {
+    Init = record {
+      ledger_id = principal "ls5lp-lqaaa-aaaar-qb5oa-cai";
+      retrieve_blocks_from_ledger_interval_seconds = null;
+    }
+  },
+)
+```
+
+</td>
+<td>
+
+```candid
+(
+  opt variant {
+    Init = record {
+      ledger_id = principal "la34w-haaaa-aaaar-qb5na-cai";
+      retrieve_blocks_from_ledger_interval_seconds = null;
+    }
+  },
+)
+```
+
+</td>
+</tr>
+</table>
+
+The index takes an optional argument, hence the leading `opt`.
+Leaving `retrieve_blocks_from_ledger_interval_seconds` unset uses the index's default polling interval.
