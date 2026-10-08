@@ -3,7 +3,7 @@
 #![forbid(unsafe_code)]
 #![forbid(missing_docs)]
 
-use candid::{CandidType, Nat, Principal};
+use candid::{CandidType, Principal};
 use icrc_ledger_types::icrc1::account::{Account, Subaccount};
 pub use memo::{BurnMemo, MAX_SERIALIZED_MEMO_BYTES, Memo, MintMemo};
 use serde::{Deserialize, Serialize};
@@ -226,8 +226,6 @@ pub enum TxFinalizedStatus {
     Success {
         /// The unique identifier (signature) of the Solana transaction.
         transaction_id: Signature,
-        /// The fee that was paid by the user.
-        effective_transaction_fee: Option<Nat>,
     },
     /// The transaction failed.
     Failure {

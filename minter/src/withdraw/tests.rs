@@ -592,7 +592,6 @@ mod process_pending_withdrawals_tests {
             withdrawal_status(1),
             WithdrawalStatus::TxFinalized(TxFinalizedStatus::Success {
                 transaction_id: minter_signature().into(),
-                effective_transaction_fee: None,
             })
         );
     }
@@ -1022,7 +1021,6 @@ mod withdrawal_finalization_tests {
             withdrawal_status(1),
             WithdrawalStatus::TxFinalized(TxFinalizedStatus::Success {
                 transaction_id: tx_signature.into(),
-                effective_transaction_fee: None,
             })
         );
     }

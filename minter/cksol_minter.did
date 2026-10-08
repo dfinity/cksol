@@ -271,8 +271,6 @@ type TxFinalizedStatus = variant {
     // Transaction was successful.
     Success : record {
         transaction_id : Signature;
-        // The fee that was paid by the user.
-        effective_transaction_fee: opt nat;
     };
     // Transaction failed.
     Failure : record {

@@ -1304,7 +1304,6 @@ mod withdrawal_transactions {
                 s.withdrawal_status(0),
                 WithdrawalStatus::TxFinalized(TxFinalizedStatus::Success {
                     transaction_id: signature(7).into(),
-                    effective_transaction_fee: None,
                 })
             );
         });
