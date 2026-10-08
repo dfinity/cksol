@@ -3,7 +3,7 @@ use crate::{
     rpc::{
         Block, BlockHeight, GetBalanceError, GetNonceAccountError, GetRecentBlockError,
         GetTransactionError, NonceAccount, SubmitTransactionError, get_balance, get_nonce_account,
-        get_recent_block, get_transaction, submit_transaction,
+        get_recent_block, get_signature_statuses, get_transaction, submit_transaction,
         submit_transaction_skipping_preflight,
     },
     test_fixtures::{
@@ -20,9 +20,9 @@ use crate::{
 use assert_matches::assert_matches;
 use ic_canister_runtime::IcError;
 use sol_rpc_types::{
-    CommitmentLevel, GetBlockCommitmentLevel, GetBlockParams, GetSlotParams, GetSlotRpcConfig,
-    HttpOutcallError, RpcConfig, RpcError, RpcSource, RpcSources, SendTransactionParams,
-    SupportedRpcProviderId,
+    CommitmentLevel, GetBlockCommitmentLevel, GetBlockParams, GetSignatureStatusesParams,
+    GetSlotParams, GetSlotRpcConfig, GetTransactionParams, HttpOutcallError, RpcConfig, RpcError,
+    RpcSource, RpcSources, SendTransactionParams, SupportedRpcProviderId,
 };
 use solana_transaction::{Message, Transaction};
 use solana_transaction_status_client_types::{EncodedTransaction, TransactionBinaryEncoding};
@@ -243,6 +243,55 @@ mod get_transaction_tests {
         let result = get_transaction(&runtime, legacy_deposit_transaction_signature()).await;
 
         assert_eq!(result, Ok(Some(fetched(legacy_deposit_transaction()))))
+    }
+
+    #[tokio::test]
+    async fn should_leave_the_response_size_estimate_to_the_sol_rpc_canister() {
+        init_state();
+        let runtime =
+            TestCanisterRuntime::new().add_stub_response(MultiRpcResult::Consistent(Ok(None)));
+
+        let result = get_transaction(&runtime, legacy_deposit_transaction_signature()).await;
+
+        assert_eq!(result, Ok(None));
+        let [call] = runtime.sent_update_calls().try_into().unwrap();
+        assert_eq!(call.method, "getTransaction");
+        let (_sources, config, _params): (RpcSources, Option<RpcConfig>, GetTransactionParams) =
+            call.args();
+        assert_eq!(
+            config.and_then(|config| config.response_size_estimate),
+            None
+        );
+    }
+}
+
+mod get_signature_statuses_tests {
+    use super::*;
+
+    type MultiRpcResult =
+        sol_rpc_types::MultiRpcResult<Vec<Option<sol_rpc_types::TransactionStatus>>>;
+
+    #[tokio::test]
+    async fn should_leave_the_response_size_estimate_to_the_sol_rpc_canister() {
+        init_state();
+        let runtime = TestCanisterRuntime::new()
+            .add_stub_response(MultiRpcResult::Consistent(Ok(vec![None])));
+
+        let result =
+            get_signature_statuses(&runtime, &[legacy_deposit_transaction_signature()]).await;
+
+        assert_eq!(result, Ok(vec![None]));
+        let [call] = runtime.sent_update_calls().try_into().unwrap();
+        assert_eq!(call.method, "getSignatureStatuses");
+        let (_sources, config, _params): (
+            RpcSources,
+            Option<RpcConfig>,
+            GetSignatureStatusesParams,
+        ) = call.args();
+        assert_eq!(
+            config.and_then(|config| config.response_size_estimate),
+            None
+        );
     }
 }
 
