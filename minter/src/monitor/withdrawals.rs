@@ -10,7 +10,9 @@ use crate::{
         event::{EventType, VersionedMessage},
         mutate_state, read_state,
     },
-    storage::with_unstable_metrics_mut,
+    storage::{
+        UndecidedWithdrawalReason, set_undecided_withdrawal_transactions, with_unstable_metrics_mut,
+    },
     withdraw::nonce::read_verified_nonce,
 };
 use canlog::log;
@@ -21,12 +23,19 @@ use solana_hash::Hash;
 use solana_message::Message;
 use solana_signature::Signature;
 use solana_transaction::{Transaction, versioned::VersionedTransaction};
-use std::time::Duration;
+use std::{collections::BTreeMap, time::Duration};
 
 #[derive(Default)]
 pub(super) struct InFlightNonces {
     unchanged: Vec<InFlightWithdrawal>,
     advanced: Vec<InFlightWithdrawal>,
+    undecided: BTreeMap<UndecidedWithdrawalReason, u64>,
+}
+
+impl InFlightNonces {
+    fn leave_undecided(&mut self, reason: UndecidedWithdrawalReason) {
+        *self.undecided.entry(reason).or_insert(0) += 1;
+    }
 }
 
 pub(super) async fn read_in_flight_nonces<R: CanisterRuntime>(runtime: &R) -> InFlightNonces {
@@ -52,7 +61,10 @@ pub(super) async fn read_in_flight_nonces<R: CanisterRuntime>(runtime: &R) -> In
             match nonce_read {
                 Some(NonceRead::Unchanged) => nonces.unchanged.push(withdrawal),
                 Some(NonceRead::Advanced) => nonces.advanced.push(withdrawal),
-                Some(NonceRead::Stale) | None => {}
+                Some(NonceRead::Stale) => {
+                    nonces.leave_undecided(UndecidedWithdrawalReason::StaleNonce)
+                }
+                None => nonces.leave_undecided(UndecidedWithdrawalReason::NonceReadFailed),
             }
         }
     }
@@ -95,9 +107,12 @@ pub(super) async fn finalize_transactions_batch<R: CanisterRuntime>(
         .filter(|finalization| *finalization == Finalization::UnresolvedOutcome)
         .count();
     }
-    with_unstable_metrics_mut(|metrics| {
-        metrics.withdrawal_transactions_with_unresolved_outcome = num_unresolved_outcomes as u64
-    });
+    let mut undecided = nonces.undecided.clone();
+    undecided.insert(
+        UndecidedWithdrawalReason::UnresolvedOutcome,
+        num_unresolved_outcomes as u64,
+    );
+    set_undecided_withdrawal_transactions(undecided);
 }
 
 struct InFlightWithdrawal {

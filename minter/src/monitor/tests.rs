@@ -11,7 +11,7 @@ use crate::{
         event::{EventType, VersionedMessage},
         mutate_state, read_state, reset_state,
     },
-    storage::{reset_events, with_unstable_metrics},
+    storage::{UndecidedWithdrawalReason, reset_events, undecided_withdrawal_transaction_count},
     test_fixtures::{
         EventsAssert, GetTransactionResult, MINIMUM_WITHDRAWAL_AMOUNT, NONCE_ACCOUNT, account,
         confirmed_block_at_height, devnet_sweep, durable_nonce, events, failed_withdrawal_response,
@@ -496,6 +496,10 @@ mod withdrawal_finalization {
         assert_eq!(EventsAssert::from_recorded(), events_before);
         assert!(runtime.sent_transactions().is_empty());
         read_state(|s| assert!(s.submitted_transactions().contains_key(&signature)));
+        assert_eq!(
+            undecided_withdrawal_transaction_count(UndecidedWithdrawalReason::StaleNonce),
+            1
+        );
     }
 
     #[tokio::test]
@@ -518,7 +522,7 @@ mod withdrawal_finalization {
             assert_eq!(s.nonce_pool().num_free_accounts(), 0);
         });
         assert_eq!(
-            with_unstable_metrics(|m| m.withdrawal_transactions_with_unresolved_outcome),
+            undecided_withdrawal_transaction_count(UndecidedWithdrawalReason::UnresolvedOutcome),
             1
         );
     }
