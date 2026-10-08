@@ -489,8 +489,9 @@ impl Runtime for MockRuntime {
             method.to_string(),
             CandidArgs::of(args),
             cycles,
-        )?;
-        Ok(Decode!(&response, Out).expect("BUG: failed to decode Candid response"))
+        );
+        suspend_like_an_inter_canister_call().await;
+        Ok(Decode!(&response?, Out).expect("BUG: failed to decode Candid response"))
     }
 
     async fn query_call<In, Out>(
@@ -508,6 +509,7 @@ impl Runtime for MockRuntime {
                 .lock()
                 .unwrap()
                 .query_call(id, method.to_string(), CandidArgs::of(args));
+        suspend_like_an_inter_canister_call().await;
         Ok(Decode!(&response?, Out).expect("BUG: failed to decode Candid response"))
     }
 }
