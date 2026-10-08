@@ -50,7 +50,7 @@ fn apply_state_transition(state: &mut State, payload: &EventType, timestamp: u64
             address,
             balance,
         } => {
-            state.process_queued_deposit(*deposit_id, account, address, *balance);
+            state.process_queued_deposit(*deposit_id, account, address, *balance, timestamp);
         }
         EventType::CreditedSweep {
             signature,

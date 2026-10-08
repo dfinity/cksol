@@ -22,8 +22,8 @@ pub(crate) type DerivationPath = Vec<Vec<u8>>;
 pub const MINTER_DERIVATION_PATH: DerivationPath = Vec::new();
 
 /// Implementation of the `get_deposit_address` canister endpoint.
-/// Because the endpoint is a query, it must be synchronous and cannot fetch the
-/// master key on demand — it traps if the key has not yet been initialized.
+/// Traps until the master key fetch scheduled by `init` has completed, as the
+/// endpoint has no error variant to report the missing key with.
 pub fn get_deposit_address(account: &Account) -> Address {
     let master_key = read_state(|s| s.minter_public_key().cloned())
         .unwrap_or_else(|| ic_cdk::trap("master key not yet initialized"));

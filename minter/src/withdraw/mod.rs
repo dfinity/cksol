@@ -1,7 +1,7 @@
 use std::str::FromStr;
 use std::time::Duration;
 
-use cksol_types::{WithdrawalError, WithdrawalOk, WithdrawalStatus};
+use cksol_types::{WithdrawSolError, WithdrawSolOk, WithdrawSolStatus};
 use icrc_ledger_types::icrc1::account::Account;
 use sol_rpc_types::Lamport;
 use solana_address::Address;
@@ -46,17 +46,17 @@ pub async fn withdraw<R: CanisterRuntime>(
     from: Account,
     amount_to_burn: u64,
     address: String,
-) -> Result<WithdrawalOk, WithdrawalError> {
+) -> Result<WithdrawSolOk, WithdrawSolError> {
     let minimum_withdrawal_amount = read_state(|s| s.minimum_withdrawal_amount());
     if amount_to_burn < minimum_withdrawal_amount {
-        return Err(WithdrawalError::ValueTooSmall {
+        return Err(WithdrawSolError::ValueTooSmall {
             minimum_withdrawal_amount,
             withdrawal_amount: amount_to_burn,
         });
     }
 
     let solana_address = Address::from_str(&address)
-        .map_err(|e| WithdrawalError::MalformedAddress(e.to_string()))?;
+        .map_err(|e| WithdrawSolError::MalformedAddress(e.to_string()))?;
     validate_destination(&solana_address)?;
     validate_nonce_pool_not_empty()?;
 
@@ -72,10 +72,10 @@ pub async fn withdraw<R: CanisterRuntime>(
     )
     .await
     .map_err(|e| match e {
-        BurnError::TemporarilyUnavailable(msg) => WithdrawalError::TemporarilyUnavailable(msg),
-        BurnError::InsufficientFunds { balance } => WithdrawalError::InsufficientFunds { balance },
+        BurnError::TemporarilyUnavailable(msg) => WithdrawSolError::TemporarilyUnavailable(msg),
+        BurnError::InsufficientFunds { balance } => WithdrawSolError::InsufficientFunds { balance },
         BurnError::InsufficientAllowance { allowance } => {
-            WithdrawalError::InsufficientAllowance { allowance }
+            WithdrawSolError::InsufficientAllowance { allowance }
         }
     })?;
 
@@ -101,33 +101,33 @@ pub async fn withdraw<R: CanisterRuntime>(
         "Accepted withdrawal request from {from:?}: burned {amount_to_burn} lamports, queued withdrawal of {amount_to_transfer} lamports to {solana_address} (burn block index {block_index})"
     );
 
-    Ok(WithdrawalOk { block_index })
+    Ok(WithdrawSolOk { block_index })
 }
 
-fn validate_destination(destination: &Address) -> Result<(), WithdrawalError> {
+fn validate_destination(destination: &Address) -> Result<(), WithdrawSolError> {
     if reserved_account_keys::is_reserved_account_key(destination) {
-        return Err(WithdrawalError::InvalidDestination(format!(
+        return Err(WithdrawSolError::InvalidDestination(format!(
             "{destination} is an account key reserved by the Solana runtime"
         )));
     }
     if read_state(|s| s.nonce_pool().contains(destination)) {
-        return Err(WithdrawalError::InvalidDestination(format!(
+        return Err(WithdrawSolError::InvalidDestination(format!(
             "{destination} is a durable nonce account of the ckSOL minter"
         )));
     }
     let master_key =
-        minter_public_key().map_err(|e| WithdrawalError::TemporarilyUnavailable(e.to_string()))?;
+        minter_public_key().map_err(|e| WithdrawSolError::TemporarilyUnavailable(e.to_string()))?;
     if destination == &minter_address(&master_key) {
-        return Err(WithdrawalError::InvalidDestination(format!(
+        return Err(WithdrawSolError::InvalidDestination(format!(
             "{destination} is the ckSOL minter's main address"
         )));
     }
     Ok(())
 }
 
-fn validate_nonce_pool_not_empty() -> Result<(), WithdrawalError> {
+fn validate_nonce_pool_not_empty() -> Result<(), WithdrawSolError> {
     if read_state(|s| s.nonce_pool().is_empty()) {
-        return Err(WithdrawalError::TemporarilyUnavailable(
+        return Err(WithdrawSolError::TemporarilyUnavailable(
             "The durable nonce account pool is empty, no withdrawal can be processed".to_string(),
         ));
     }
@@ -411,6 +411,6 @@ async fn send_transaction<R: CanisterRuntime>(runtime: &R, transaction: Transact
     }
 }
 
-pub fn withdrawal_status(block_index: u64) -> WithdrawalStatus {
+pub fn withdrawal_status(block_index: u64) -> WithdrawSolStatus {
     read_state(|s| s.withdrawal_status(block_index))
 }
