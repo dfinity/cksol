@@ -2,7 +2,7 @@ use crate::{
     Setup, SetupBuilder,
     fixtures::{MINTER_ADDRESS, RENT_EXEMPTION_THRESHOLD},
 };
-use cksol_types::WithdrawalStatus;
+use cksol_types::WithdrawSolStatus;
 use icrc_ledger_types::icrc1::account::Account;
 use sol_rpc_types::{InstallArgs, Lamport, OverrideProvider, RegexSubstitution, RoundingError};
 use solana_address::Address;
@@ -381,8 +381,8 @@ impl SolanaTestValidator {
 pub async fn wait_for_withdrawal_finalized(setup: &Setup, burn_index: u64) {
     for _ in 0..15 {
         if matches!(
-            setup.minter().withdrawal_status(burn_index).await,
-            WithdrawalStatus::TxFinalized(_)
+            setup.minter().withdraw_sol_status(burn_index).await,
+            WithdrawSolStatus::TxFinalized(_)
         ) {
             return;
         }

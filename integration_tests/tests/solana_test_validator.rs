@@ -7,8 +7,8 @@ use cksol_int_tests::{
     validator::{FEE_PER_SIGNATURE, SolanaTestValidator, wait_for_withdrawal_finalized},
 };
 use cksol_types::{
-    DepositSolId, DepositSolStatus, Signature, TxFinalizedStatus, WithdrawalArgs, WithdrawalError,
-    WithdrawalStatus,
+    DepositSolId, DepositSolStatus, Signature, TxFinalizedStatus, WithdrawSolArgs,
+    WithdrawSolError, WithdrawSolStatus,
 };
 use cksol_types_internal::{UpgradeArgs, event::EventType};
 use icrc_ledger_types::icrc1::account::Account;
@@ -134,7 +134,7 @@ async fn should_deposit_and_withdraw() {
 
                     setup
                         .minter()
-                        .withdraw(WithdrawalArgs {
+                        .withdraw_sol(WithdrawSolArgs {
                             from_subaccount: account.subaccount,
                             amount: withdrawal_amount,
                             address: withdrawal_address.to_string(),
@@ -285,7 +285,7 @@ async fn should_batch_withdrawals_over_two_nonce_accounts_and_reuse_a_freed_one(
     let withdraw_to = async |destination: &Address| {
         setup
             .minter()
-            .withdraw(WithdrawalArgs {
+            .withdraw_sol(WithdrawSolArgs {
                 from_subaccount: account.subaccount,
                 amount: WITHDRAWAL_AMOUNT,
                 address: destination.to_string(),
@@ -312,7 +312,7 @@ async fn should_batch_withdrawals_over_two_nonce_accounts_and_reuse_a_freed_one(
     let balance_before_rejection = setup.ledger().balance_of(account).await;
     assert_matches!(
         withdraw_to(&pool[0]).await,
-        Err(WithdrawalError::InvalidDestination(_))
+        Err(WithdrawSolError::InvalidDestination(_))
     );
     assert_eq!(
         setup.ledger().balance_of(account).await,
@@ -340,8 +340,8 @@ async fn should_batch_withdrawals_over_two_nonce_accounts_and_reuse_a_freed_one(
     for &burn_index in &burn_indices {
         wait_for_withdrawal_finalized(&setup, burn_index).await;
         assert_matches!(
-            setup.minter().withdrawal_status(burn_index).await,
-            WithdrawalStatus::TxFinalized(TxFinalizedStatus::Success { .. })
+            setup.minter().withdraw_sol_status(burn_index).await,
+            WithdrawSolStatus::TxFinalized(TxFinalizedStatus::Success { .. })
         );
     }
     assert_eq!(
@@ -385,8 +385,8 @@ async fn should_batch_withdrawals_over_two_nonce_accounts_and_reuse_a_freed_one(
     setup.advance_time(Duration::from_mins(1)).await;
     wait_for_withdrawal_finalized(&setup, reuse_burn_index).await;
     assert_matches!(
-        setup.minter().withdrawal_status(reuse_burn_index).await,
-        WithdrawalStatus::TxFinalized(TxFinalizedStatus::Success { .. })
+        setup.minter().withdraw_sol_status(reuse_burn_index).await,
+        WithdrawSolStatus::TxFinalized(TxFinalizedStatus::Success { .. })
     );
     assert_eq!(
         validator.get_balance(&reuse_destination).await,
@@ -461,7 +461,7 @@ async fn should_sweep_a_full_batch_of_deposits_in_one_transaction() {
 
     for (&deposit_id, &deposit_amount) in deposit_ids.iter().zip(&deposit_amounts) {
         assert_eq!(
-            setup.minter().deposit_status(deposit_id).await,
+            setup.minter().deposit_sol_status(deposit_id).await,
             DepositSolStatus::Queued {
                 sweepable_amount: deposit_amount - RENT_EXEMPTION_THRESHOLD
             }
@@ -497,7 +497,7 @@ async fn should_sweep_a_full_batch_of_deposits_in_one_transaction() {
     }
     for &deposit_id in &deposit_ids {
         assert_eq!(
-            setup.minter().deposit_status(deposit_id).await,
+            setup.minter().deposit_sol_status(deposit_id).await,
             DepositSolStatus::Swept {
                 signature: sweep_signature.clone()
             }
@@ -508,7 +508,7 @@ async fn should_sweep_a_full_batch_of_deposits_in_one_transaction() {
 
     for &deposit_id in &deposit_ids {
         assert_eq!(
-            setup.minter().deposit_status(deposit_id).await,
+            setup.minter().deposit_sol_status(deposit_id).await,
             DepositSolStatus::Finalized {
                 signature: sweep_signature.clone()
             }
@@ -561,7 +561,7 @@ async fn should_sweep_sub_rent_remainder_together_with_the_deposit() {
 
     let sweepable_amount = deposit_address_balance - RENT_EXEMPTION_THRESHOLD;
     assert_eq!(
-        setup.minter().deposit_status(deposit_id).await,
+        setup.minter().deposit_sol_status(deposit_id).await,
         DepositSolStatus::Queued { sweepable_amount }
     );
 
