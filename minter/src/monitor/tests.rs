@@ -16,7 +16,8 @@ use crate::{
         EventsAssert, GetTransactionResult, MINIMUM_WITHDRAWAL_AMOUNT, NONCE_ACCOUNT, account,
         confirmed_block_at_height, devnet_sweep, durable_nonce, events, failed_withdrawal_response,
         finalized_status, init_balance, init_schnorr_master_key, init_state, nonce_account_info,
-        runtime::TestCanisterRuntime, signature, succeeded_withdrawal_response,
+        runtime::TestCanisterRuntime, signature, succeeded_transaction_response,
+        succeeded_withdrawal_response,
     },
 };
 use sol_rpc_types::{
@@ -520,6 +521,35 @@ mod withdrawal_finalization {
             with_unstable_metrics(|m| m.withdrawal_transactions_with_unresolved_outcome),
             1
         );
+    }
+
+    #[tokio::test]
+    async fn should_not_finalize_a_withdrawal_fetched_with_another_message() {
+        setup_with_signing_key();
+        let other_message =
+            solana_message::Message::new(&[], Some(&devnet_sweep::minter_main_address()));
+        let signature = devnet_sweep::minter_signature_of(&other_message);
+        events::accept_withdrawal(account(1), 1, MINIMUM_WITHDRAWAL_AMOUNT);
+        events::create_withdrawal_batch_transaction(durable_nonce(BOUND_NONCE_SEED), vec![1]);
+        events::submit_signed_withdrawal_batch_transaction_under(
+            signature,
+            durable_nonce(BOUND_NONCE_SEED),
+            vec![1],
+        );
+        let events_before = EventsAssert::from_recorded();
+
+        let runtime = TestCanisterRuntime::new()
+            .with_increasing_time()
+            .add_stub_response(nonce_read(UNSEEN_NONCE_SEED))
+            .add_stub_response(succeeded_transaction_response(&signature, other_message));
+
+        finalize_transactions(runtime).await;
+
+        assert_eq!(EventsAssert::from_recorded(), events_before);
+        read_state(|s| {
+            assert!(s.submitted_transactions().contains_key(&signature));
+            assert_eq!(s.nonce_pool().num_free_accounts(), 0);
+        });
     }
 
     fn assert_nonce_account_is_free() {

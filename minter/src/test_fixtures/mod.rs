@@ -372,6 +372,15 @@ pub fn failed_withdrawal_response(signature: &solana_signature::Signature) -> Ge
     )
 }
 
+/// The `getTransaction` response for a transaction with the given signature and message,
+/// finalized without error.
+pub fn succeeded_transaction_response(
+    signature: &solana_signature::Signature,
+    message: solana_message::Message,
+) -> GetTransactionResult {
+    transaction_response(signature, message, serde_json::Value::Null)
+}
+
 fn withdrawal_response(
     signature: &solana_signature::Signature,
     error: serde_json::Value,
@@ -386,6 +395,14 @@ fn withdrawal_response(
                 other => panic!("BUG: expected a submitted withdrawal transaction, got {other:?}"),
             },
         );
+    transaction_response(signature, message, error)
+}
+
+fn transaction_response(
+    signature: &solana_signature::Signature,
+    message: solana_message::Message,
+    error: serde_json::Value,
+) -> GetTransactionResult {
     let transaction = solana_transaction::Transaction {
         signatures: vec![*signature],
         message,
@@ -1072,16 +1089,38 @@ pub mod events {
             .into_iter()
             .map(LedgerBurnIndex::from)
             .collect();
-        let message = build_batch_withdrawal_message(
-            &devnet_sweep::minter_main_address(),
-            &NONCE_ACCOUNT,
-            nonce_value,
-            &created_withdrawal_transfers(&burn_indices),
-        )
-        .expect("BUG: the withdrawal batch message exceeds the transaction size");
+        let message = signed_withdrawal_batch_message(nonce_value, &burn_indices);
         let signature = devnet_sweep::minter_signature_of(&message);
         record_submitted_withdrawal(signature, message, burn_indices);
         signature
+    }
+
+    /// Records a `SubmittedTransaction` under `signature` for the withdrawal transaction that
+    /// [`submit_signed_withdrawal_batch_transaction`] would submit, whatever `signature` signs.
+    pub fn submit_signed_withdrawal_batch_transaction_under(
+        signature: Signature,
+        nonce_value: solana_hash::Hash,
+        burn_indices: Vec<u64>,
+    ) {
+        let burn_indices: Vec<LedgerBurnIndex> = burn_indices
+            .into_iter()
+            .map(LedgerBurnIndex::from)
+            .collect();
+        let message = signed_withdrawal_batch_message(nonce_value, &burn_indices);
+        record_submitted_withdrawal(signature, message, burn_indices);
+    }
+
+    fn signed_withdrawal_batch_message(
+        nonce_value: solana_hash::Hash,
+        burn_indices: &[LedgerBurnIndex],
+    ) -> solana_message::Message {
+        build_batch_withdrawal_message(
+            &devnet_sweep::minter_main_address(),
+            &NONCE_ACCOUNT,
+            nonce_value,
+            &created_withdrawal_transfers(burn_indices),
+        )
+        .expect("BUG: the withdrawal batch message exceeds the transaction size")
     }
 
     fn record_submitted_withdrawal(

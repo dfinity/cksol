@@ -20,7 +20,7 @@ use solana_address::Address;
 use solana_hash::Hash;
 use solana_message::Message;
 use solana_signature::Signature;
-use solana_transaction::Transaction;
+use solana_transaction::{Transaction, versioned::VersionedTransaction};
 use std::time::Duration;
 
 #[derive(Default)]
@@ -116,6 +116,13 @@ impl InFlightWithdrawal {
         }
     }
 
+    fn carries_message_of(&self, transaction: &VersionedTransaction) -> bool {
+        match &transaction.message {
+            solana_message::VersionedMessage::Legacy(message) => *message == self.message,
+            solana_message::VersionedMessage::V0(_) => false,
+        }
+    }
+
     fn is_old_enough_to_rebroadcast(&self, now: u64) -> bool {
         Duration::from_nanos(now.saturating_sub(self.submitted_at)) >= MIN_REBROADCAST_AGE
     }
@@ -198,6 +205,15 @@ async fn finalize_landed_withdrawal<R: CanisterRuntime>(
 ) -> Finalization {
     let signature = withdrawal.signature;
     let event = match get_transaction(runtime, signature).await {
+        Ok(Some(FetchedTransaction { transaction, .. }))
+            if !withdrawal.carries_message_of(&transaction) =>
+        {
+            log!(
+                Priority::Error,
+                "Withdrawal transaction {signature} was fetched with another message than submitted, retrying next round"
+            );
+            return Finalization::UnresolvedOutcome;
+        }
         Ok(Some(FetchedTransaction {
             meta: Some(meta), ..
         })) => match meta.err {
