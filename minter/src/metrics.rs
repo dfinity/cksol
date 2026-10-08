@@ -1,8 +1,9 @@
 use crate::state::{QuarantineCause, State};
-use crate::storage;
+use crate::storage::{self, FailedCreditReason, FailedMintReason};
 use ic_metrics_encoder::MetricsEncoder;
 
 const WASM_PAGE_SIZE_IN_BYTES: usize = 65536;
+const NANOS_PER_SECOND: u64 = 1_000_000_000;
 
 pub fn encode_metrics(w: &mut MetricsEncoder<Vec<u8>>, s: &State) -> std::io::Result<()> {
     w.encode_gauge(
@@ -72,7 +73,8 @@ pub fn encode_metrics(w: &mut MetricsEncoder<Vec<u8>>, s: &State) -> std::io::Re
     )?;
     w.encode_gauge(
         "pending_withdrawal_requests",
-        s.pending_withdrawal_requests().len().metric_value(),
+        (s.pending_withdrawal_requests().len() + s.created_withdrawal_requests().len())
+            .metric_value(),
         "Number of pending withdrawal requests.",
     )?;
     w.encode_gauge(
@@ -95,18 +97,41 @@ pub fn encode_metrics(w: &mut MetricsEncoder<Vec<u8>>, s: &State) -> std::io::Re
         s.failed_transactions().len().metric_value(),
         "Number of failed Solana transactions.",
     )?;
-    let oldest_incomplete_withdrawal_age_seconds = s
-        .oldest_incomplete_withdrawal_created_at()
-        .map(|created_at| {
-            let now = ic_cdk::api::time();
-            now.saturating_sub(created_at) / 1_000_000_000
-        })
-        .unwrap_or(0);
     w.encode_gauge(
         "oldest_incomplete_withdrawal_age_seconds",
-        oldest_incomplete_withdrawal_age_seconds.metric_value(),
+        age_seconds(s.oldest_incomplete_withdrawal_created_at()).metric_value(),
         "Age of the oldest incomplete withdrawal request in seconds. Returns 0 if there are no incomplete withdrawals.",
     )?;
+    w.encode_gauge(
+        "oldest_in_flight_deposit_age_seconds",
+        age_seconds(s.deposits().oldest_in_flight_queued_at()).metric_value(),
+        "Age of the oldest in-flight deposit in seconds, from queued until minted, dropped or quarantined. Returns 0 if there are no in-flight deposits.",
+    )?;
+    w.encode_gauge(
+        "oldest_pending_mint_age_seconds",
+        age_seconds(s.deposits().oldest_pending_mint_created_at()).metric_value(),
+        "Age of the oldest pending ckSOL mint in seconds, from the created_at_time the ledger deduplicates it by. Returns 0 if there are no pending mints.",
+    )?;
+    let mut failed_credit_attempts = w.counter_vec(
+        "failed_credit_attempts",
+        "Number of failed attempts to credit the deposits of a finalized sweep, by reason.",
+    )?;
+    for reason in FailedCreditReason::ALL {
+        failed_credit_attempts = failed_credit_attempts.value(
+            &[("reason", reason.label())],
+            storage::failed_credit_attempt_count(reason).metric_value(),
+        )?;
+    }
+    let mut failed_mint_attempts = w.counter_vec(
+        "failed_mint_attempts",
+        "Number of failed attempts to mint a pending deposit on the ckSOL ledger, by reason.",
+    )?;
+    for reason in FailedMintReason::ALL {
+        failed_mint_attempts = failed_mint_attempts.value(
+            &[("reason", reason.label())],
+            storage::failed_mint_attempt_count(reason).metric_value(),
+        )?;
+    }
     w.encode_gauge(
         "minter_balance",
         s.balance().metric_value(),
@@ -117,7 +142,18 @@ pub fn encode_metrics(w: &mut MetricsEncoder<Vec<u8>>, s: &State) -> std::io::Re
         storage::with_unstable_metrics(|m| m.post_upgrade_instructions_consumed).metric_value(),
         "Number of instructions consumed during the last post-upgrade.",
     )?;
+    w.encode_counter(
+        "withdrawal_transaction_rebroadcasts",
+        storage::with_unstable_metrics(|m| m.withdrawal_transaction_rebroadcasts).metric_value(),
+        "Number of re-broadcast attempts of withdrawal transactions since the last upgrade.",
+    )?;
     Ok(())
+}
+
+fn age_seconds(start: Option<u64>) -> u64 {
+    start
+        .map(|start| ic_cdk::api::time().saturating_sub(start) / NANOS_PER_SECOND)
+        .unwrap_or(0)
 }
 
 pub trait MetricValue {

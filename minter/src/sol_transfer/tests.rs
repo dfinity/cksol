@@ -136,149 +136,82 @@ mod sweep_tests {
 
 mod batch_withdrawal_tests {
     use super::*;
+    use solana_message::{MessageHeader, compiled_instruction::CompiledInstruction};
 
-    #[tokio::test]
-    async fn should_create_batch_withdrawal_with_single_target() {
-        setup();
-        let target = Address::new_from_array([0xAA; 32]);
-        let amount: Lamport = 500_000_000;
-        let blockhash = Hash::new_from_array([0xBB; 32]);
+    const NONCE_ACCOUNT: Address = Address::new_from_array([0x11; 32]);
+    const TARGET_1: Address = Address::new_from_array([0xAA; 32]);
+    const TARGET_2: Address = Address::new_from_array([0xBB; 32]);
 
-        let (tx, signers) = create_signed_batch_withdrawal_transaction(
-            &minter_signing_once(),
-            &[(target, amount)],
-            blockhash,
+    fn nonce_value() -> Hash {
+        Hash::new_from_array([0xCC; 32])
+    }
+
+    /// Historical withdrawal events replay only if the builder always compiles to the same
+    /// message, so a failure here means a dependency bump broke replay — not that the
+    /// expected message needs updating.
+    #[test]
+    fn should_build_the_recorded_withdrawal_message() {
+        let message = build_batch_withdrawal_message(
+            &MINTER_ADDRESS,
+            &NONCE_ACCOUNT,
+            nonce_value(),
+            &[(TARGET_1, 100), (TARGET_2, 200)],
         )
-        .await
-        .expect("transaction creation should succeed");
-
-        assert_eq!(signers, vec![Signer::Minter]);
-        assert_eq!(tx.signatures.len(), 1);
-        assert_eq!(tx.signatures[0], minter_signature());
-        assert_eq!(tx.message.account_keys[0], MINTER_ADDRESS);
-        assert!(tx.message.account_keys.contains(&target));
-        assert_eq!(tx.message.instructions.len(), 1);
-        assert_eq!(tx.message.recent_blockhash, blockhash);
-    }
-
-    #[tokio::test]
-    async fn should_create_batch_withdrawal_with_multiple_targets() {
-        setup();
-        let target_1 = Address::new_from_array([0xAA; 32]);
-        let target_2 = Address::new_from_array([0xBB; 32]);
-        let target_3 = Address::new_from_array([0xCC; 32]);
-        let blockhash = Hash::new_from_array([0xDD; 32]);
-
-        let (tx, signers) = create_signed_batch_withdrawal_transaction(
-            &minter_signing_once(),
-            &[(target_1, 100), (target_2, 200), (target_3, 300)],
-            blockhash,
-        )
-        .await
-        .expect("transaction creation should succeed");
-
-        // Only the minter signs
-        assert_eq!(signers, vec![Signer::Minter]);
-        assert_eq!(tx.signatures.len(), 1);
-
-        // Fee payer is at position 0
-        assert_eq!(tx.message.account_keys[0], MINTER_ADDRESS);
-
-        // All targets are in account keys
-        assert!(tx.message.account_keys.contains(&target_1));
-        assert!(tx.message.account_keys.contains(&target_2));
-        assert!(tx.message.account_keys.contains(&target_3));
-
-        // One instruction per target
-        assert_eq!(tx.message.instructions.len(), 3);
-    }
-
-    #[tokio::test]
-    async fn should_fail_when_signing_fails() {
-        setup();
-        let target = Address::new_from_array([0xAA; 32]);
-        let blockhash = Hash::new_from_array([0xBB; 32]);
-
-        let runtime = TestCanisterRuntime::new().add_signer(sign_as_minter().expect([Err(
-            SignCallError::CallFailed(
-                CallRejected::with_rejection(4, "signing service unavailable".to_string()).into(),
-            ),
-        )]));
-
-        let result =
-            create_signed_batch_withdrawal_transaction(&runtime, &[(target, 100)], blockhash).await;
-
-        assert!(result.is_err());
-    }
-
-    #[tokio::test]
-    async fn should_create_batch_withdrawal_at_max_capacity() {
-        setup();
-        let blockhash = Hash::new_from_array([0xDD; 32]);
-
-        let targets: Vec<(Address, Lamport)> = (0..MAX_WITHDRAWALS_PER_TX)
-            .map(|i| {
-                let mut addr = [0u8; 32];
-                addr[0] = i as u8;
-                addr[1] = (i >> 8) as u8;
-                (Address::new_from_array(addr), 1_000_000)
-            })
-            .collect();
-
-        let (tx, signers) =
-            create_signed_batch_withdrawal_transaction(&minter_signing_once(), &targets, blockhash)
-                .await
-                .expect("transaction creation should succeed at max capacity");
-
-        assert_eq!(signers, vec![Signer::Minter]);
-        assert_eq!(tx.signatures.len(), 1);
-        assert_eq!(tx.message.instructions.len(), MAX_WITHDRAWALS_PER_TX);
-    }
-
-    #[tokio::test]
-    async fn should_charge_the_fee_reserved_per_batch() {
-        setup();
-        let blockhash = Hash::new_from_array([0xDD; 32]);
-        let targets: Vec<(Address, Lamport)> = (0..MAX_WITHDRAWALS_PER_TX)
-            .map(|i| {
-                let mut addr = [0u8; 32];
-                addr[0] = i as u8;
-                addr[1] = (i >> 8) as u8;
-                (Address::new_from_array(addr), 1_000_000)
-            })
-            .collect();
-
-        let (tx, _signers) =
-            create_signed_batch_withdrawal_transaction(&minter_signing_once(), &targets, blockhash)
-                .await
-                .expect("transaction creation should succeed at max capacity");
+        .expect("the message fits within the transaction size limit");
 
         assert_eq!(
-            VersionedMessage::Legacy(tx.message).transaction_fee(),
-            BATCH_WITHDRAWAL_TX_FEE
+            message,
+            Message {
+                header: MessageHeader {
+                    num_required_signatures: 1,
+                    num_readonly_signed_accounts: 0,
+                    num_readonly_unsigned_accounts: 2,
+                },
+                account_keys: vec![
+                    MINTER_ADDRESS,
+                    NONCE_ACCOUNT,
+                    TARGET_1,
+                    TARGET_2,
+                    solana_system_interface::program::ID,
+                    solana_sdk_ids::sysvar::recent_blockhashes::ID,
+                ],
+                recent_blockhash: nonce_value(),
+                instructions: vec![
+                    advance_nonce_instruction(),
+                    transfer_instruction(2, 100),
+                    transfer_instruction(3, 200),
+                ],
+            }
         );
     }
 
-    #[tokio::test]
-    async fn should_return_error_when_exceeding_tx_size_limit() {
-        setup();
-        let blockhash = Hash::new_from_array([0xDD; 32]);
+    #[test]
+    fn should_fit_a_full_batch_within_the_maximum_transaction_size() {
+        let message = build_batch_withdrawal_message(
+            &MINTER_ADDRESS,
+            &NONCE_ACCOUNT,
+            nonce_value(),
+            &targets(MAX_WITHDRAWALS_PER_NONCE_TX),
+        )
+        .expect("a full batch fits within the transaction size limit");
 
-        // Each additional target adds ~49 bytes (32-byte key + 17-byte instruction).
-        // With a base of ~166 bytes and MAX_TX_SIZE = 1232, the limit is around 21-22.
-        // Use 25 targets to reliably exceed the limit.
+        let transaction_size = 1 + message.serialize().len() + BYTES_PER_SIGNATURE;
+        assert!(
+            transaction_size <= MAX_TX_SIZE,
+            "transaction size {transaction_size} exceeds {MAX_TX_SIZE}"
+        );
+    }
+
+    #[test]
+    fn should_reject_a_message_exceeding_the_maximum_transaction_size() {
         const NUM_TARGETS: usize = 25;
-        let targets: Vec<(Address, Lamport)> = (0..NUM_TARGETS)
-            .map(|i| {
-                let mut addr = [0u8; 32];
-                addr[0] = i as u8;
-                (Address::new_from_array(addr), 1_000_000)
-            })
-            .collect();
 
-        let result =
-            create_signed_batch_withdrawal_transaction(&minter_signing_once(), &targets, blockhash)
-                .await;
+        let result = build_batch_withdrawal_message(
+            &MINTER_ADDRESS,
+            &NONCE_ACCOUNT,
+            nonce_value(),
+            &targets(NUM_TARGETS),
+        );
 
         assert_matches!(
             result,
@@ -287,5 +220,103 @@ mod batch_withdrawal_tests {
                 ..
             })
         );
+    }
+
+    #[test]
+    fn should_charge_the_fee_reserved_per_batch() {
+        let message = build_batch_withdrawal_message(
+            &MINTER_ADDRESS,
+            &NONCE_ACCOUNT,
+            nonce_value(),
+            &targets(MAX_WITHDRAWALS_PER_NONCE_TX),
+        )
+        .expect("a full batch fits within the transaction size limit");
+
+        assert_eq!(
+            VersionedMessage::Legacy(message).transaction_fee(),
+            BATCH_WITHDRAWAL_TX_FEE
+        );
+    }
+
+    #[tokio::test]
+    async fn should_sign_the_message_verbatim_with_the_minter_key_only() {
+        setup();
+        let message = build_batch_withdrawal_message(
+            &MINTER_ADDRESS,
+            &NONCE_ACCOUNT,
+            nonce_value(),
+            &[(TARGET_1, 100)],
+        )
+        .expect("the message fits within the transaction size limit");
+
+        let transaction = sign_batch_withdrawal_message(&minter_signing_once(), message.clone())
+            .await
+            .expect("signing should succeed");
+
+        assert_eq!(transaction.signatures, vec![minter_signature()]);
+        assert_eq!(transaction.message, message);
+    }
+
+    #[tokio::test]
+    async fn should_fail_when_signing_fails() {
+        setup();
+        let message = build_batch_withdrawal_message(
+            &MINTER_ADDRESS,
+            &NONCE_ACCOUNT,
+            nonce_value(),
+            &[(TARGET_1, 100)],
+        )
+        .expect("the message fits within the transaction size limit");
+
+        let runtime = TestCanisterRuntime::new().add_signer(sign_as_minter().expect([Err(
+            SignCallError::CallFailed(
+                CallRejected::with_rejection(4, "signing service unavailable".to_string()).into(),
+            ),
+        )]));
+
+        let result = sign_batch_withdrawal_message(&runtime, message).await;
+
+        assert!(result.is_err());
+    }
+
+    fn targets(count: usize) -> Vec<(Address, Lamport)> {
+        (0..count)
+            .map(|i| {
+                let mut address = [0u8; 32];
+                address[0] = i as u8;
+                address[1] = (i >> 8) as u8;
+                (Address::new_from_array(address), 1_000_000)
+            })
+            .collect()
+    }
+
+    fn advance_nonce_instruction() -> CompiledInstruction {
+        const ADVANCE_NONCE_ACCOUNT_DISCRIMINANT: u32 = 4;
+        const SYSTEM_PROGRAM_INDEX: u8 = 4;
+        const NONCE_ACCOUNT_INDEX: u8 = 1;
+        const RECENT_BLOCKHASHES_SYSVAR_INDEX: u8 = 5;
+        const MINTER_INDEX: u8 = 0;
+        CompiledInstruction {
+            program_id_index: SYSTEM_PROGRAM_INDEX,
+            accounts: vec![
+                NONCE_ACCOUNT_INDEX,
+                RECENT_BLOCKHASHES_SYSVAR_INDEX,
+                MINTER_INDEX,
+            ],
+            data: ADVANCE_NONCE_ACCOUNT_DISCRIMINANT.to_le_bytes().to_vec(),
+        }
+    }
+
+    fn transfer_instruction(to_index: u8, amount: Lamport) -> CompiledInstruction {
+        const TRANSFER_DISCRIMINANT: u32 = 2;
+        const SYSTEM_PROGRAM_INDEX: u8 = 4;
+        const MINTER_INDEX: u8 = 0;
+        let mut data = TRANSFER_DISCRIMINANT.to_le_bytes().to_vec();
+        data.extend_from_slice(&amount.to_le_bytes());
+        CompiledInstruction {
+            program_id_index: SYSTEM_PROGRAM_INDEX,
+            accounts: vec![MINTER_INDEX, to_index],
+            data,
+        }
     }
 }

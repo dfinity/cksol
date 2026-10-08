@@ -1,25 +1,32 @@
 use crate::test_fixtures::signer::sign_as_minter;
 use crate::{
-    constants::{FEE_PER_SIGNATURE, MAX_CONCURRENT_RPC_CALLS},
+    constants::{
+        FEE_PER_SIGNATURE, MAX_CONCURRENT_RPC_CALLS, MAX_CONCURRENT_SIGNATURES,
+        RENT_EXEMPTION_THRESHOLD,
+    },
     guard::{TimerGuard, withdrawal_guard},
-    rpc::BlockHeight,
-    sol_transfer::MAX_WITHDRAWALS_PER_TX,
-    state::{TaskType, event::TransactionPurpose, read_state},
+    sol_transfer::MAX_WITHDRAWALS_PER_NONCE_TX,
+    state::{
+        MinterTransaction, TaskType,
+        event::{Signer, TransactionPurpose},
+        read_state,
+    },
     test_fixtures::{
         EventsAssert, MINIMUM_WITHDRAWAL_AMOUNT, MINTER_ACCOUNT, MINTER_ADDRESS, NONCE_ACCOUNT,
-        WITHDRAWAL_FEE, account, confirmed_block_at_height, events, init_balance, init_balance_to,
-        init_schnorr_master_key, init_state, init_state_with_args, minter_signature,
-        minter_signature_nth, runtime::TestCanisterRuntime, signature, valid_init_args,
+        WITHDRAWAL_FEE, account, events, init_balance, init_balance_to, init_schnorr_master_key,
+        init_state, init_state_with_args, minter_signature, runtime::TestCanisterRuntime,
+        signature, valid_init_args,
     },
-    withdraw::{process_pending_withdrawals, withdraw, withdrawal_status},
+    withdraw::{
+        WITHDRAWAL_PROCESSING_RETRY_DELAY, process_pending_withdrawals, withdraw, withdrawal_status,
+    },
 };
 use assert_matches::assert_matches;
 use candid::{Nat, Principal};
-use canlog::Log;
 use cksol_types::TxFinalizedStatus;
 use cksol_types::WithdrawalStatus;
 use cksol_types::{BurnMemo, Memo, WithdrawalError, WithdrawalOk};
-use cksol_types_internal::{InitArgs, log::Priority};
+use cksol_types_internal::InitArgs;
 use ic_canister_runtime::IcError;
 use ic_cdk::call::CallRejected;
 use ic_cdk_management_canister::SignCallError;
@@ -29,6 +36,7 @@ use icrc_ledger_types::{
 };
 use sol_rpc_types::{MultiRpcResult, RpcError};
 use solana_signature::Signature;
+use std::time::Duration;
 
 const VALID_ADDRESS: &str = "E4MpwNnMWs2XtW5gVrxZvyS7fMq31QD5HvbxmwP45Tz3";
 
@@ -351,12 +359,29 @@ async fn should_return_error_if_already_processing() {
 
 mod process_pending_withdrawals_tests {
     use super::*;
+    use crate::{
+        monitor::{MIN_REBROADCAST_AGE, finalize_transactions},
+        runtime::CanisterRuntime,
+        sol_transfer::build_batch_withdrawal_message,
+        state::event::EventType,
+        test_fixtures::{
+            address, durable_nonce,
+            events::{
+                create_withdrawal_batch_transaction, create_withdrawal_batch_transaction_on,
+                submit_withdrawal_batch_transaction,
+            },
+            finalized_status, minter_signature_nth, nonce_account_info,
+        },
+    };
 
+    type GetAccountInfoResult = MultiRpcResult<Option<sol_rpc_types::AccountInfo>>;
     type SendTransactionResult = MultiRpcResult<sol_rpc_types::Signature>;
+    type SignatureStatusesResult = MultiRpcResult<Vec<Option<sol_rpc_types::TransactionStatus>>>;
 
     #[tokio::test]
     async fn should_do_nothing_if_no_pending_withdrawals() {
         init_state();
+        init_schnorr_master_key();
 
         // We return early, therefore no RPC calls are made
         let runtime = TestCanisterRuntime::new();
@@ -381,6 +406,7 @@ mod process_pending_withdrawals_tests {
     #[tokio::test]
     async fn should_acquire_and_release_guard() {
         init_state();
+        init_schnorr_master_key();
 
         let runtime = TestCanisterRuntime::new();
         process_pending_withdrawals(runtime).await;
@@ -411,7 +437,7 @@ mod process_pending_withdrawals_tests {
     }
 
     #[tokio::test]
-    async fn should_not_panic_when_withdrawing_exactly_the_minter_balance() {
+    async fn should_hold_back_rent_when_withdrawing_exactly_the_minter_balance() {
         init_state();
         init_schnorr_master_key();
 
@@ -459,11 +485,8 @@ mod process_pending_withdrawals_tests {
     #[tokio::test]
     async fn should_process_only_affordable_withdrawals() {
         init_state();
-        init_balance_to(12_500_000);
+        init_balance_to(12_500_000 + RENT_EXEMPTION_THRESHOLD);
         init_schnorr_master_key();
-
-        let tx_signature = minter_signature();
-        let slot = 1;
 
         // The minter balance is sufficient for the first two withdrawals
         events::accept_withdrawal(account(1), 0, 5_000_000 + WITHDRAWAL_FEE);
@@ -473,10 +496,13 @@ mod process_pending_withdrawals_tests {
         let events_before = EventsAssert::from_recorded();
 
         let runtime = TestCanisterRuntime::new()
-            .add_recent_block(Ok(slot))
-            .expect_send_transaction(
-                tx_signature,
-                SendTransactionResult::Consistent(Ok(tx_signature.into())),
+            .expect_get_account_info(
+                NONCE_ACCOUNT,
+                GetAccountInfoResult::Consistent(Ok(Some(nonce_account_info(MINTER_ADDRESS, 1)))),
+            )
+            .expect_send_transaction_skipping_preflight(
+                minter_signature(),
+                SendTransactionResult::Consistent(Ok(minter_signature().into())),
             )
             .add_signer(sign_as_minter())
             .with_increasing_time();
@@ -488,214 +514,575 @@ mod process_pending_withdrawals_tests {
         assert_matches!(withdrawal_status(1), WithdrawalStatus::TxSent { .. });
         assert_eq!(withdrawal_status(2), WithdrawalStatus::Pending);
 
-        // One new event (the submitted transaction batching both withdrawals)
+        // Two new events: the created and the submitted transaction batching both withdrawals
         let events_after = EventsAssert::from_recorded();
-        assert_eq!(events_after.len(), events_before.len() + 1);
+        assert_eq!(events_after.len(), events_before.len() + 2);
     }
 
     #[tokio::test]
-    async fn should_process_when_pending_withdrawals_exist() {
+    async fn should_record_the_transaction_before_signing_and_submit_it() {
         init_state();
         init_balance();
         init_schnorr_master_key();
 
-        let tx_signature = minter_signature();
-        let slot = 100;
-        let block_height = BlockHeight::new(90);
         events::accept_withdrawal(account(1), 1, MINIMUM_WITHDRAWAL_AMOUNT);
+        let events_before = EventsAssert::from_recorded();
 
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
-            .expect_recent_block(slot, confirmed_block_at_height(block_height))
-            .expect_send_transaction(
-                tx_signature,
-                SendTransactionResult::Consistent(Ok(tx_signature.into())),
+            .expect_get_account_info(
+                NONCE_ACCOUNT,
+                GetAccountInfoResult::Consistent(Ok(Some(nonce_account_info(MINTER_ADDRESS, 1)))),
+            )
+            .expect_send_transaction_skipping_preflight(
+                minter_signature(),
+                SendTransactionResult::Consistent(Ok(minter_signature().into())),
             )
             .add_signer(sign_as_minter());
 
         process_pending_withdrawals(runtime).await;
 
-        assert_matches!(withdrawal_status(1), WithdrawalStatus::TxSent { .. });
+        let expected_message = build_batch_withdrawal_message(
+            &MINTER_ADDRESS,
+            &NONCE_ACCOUNT,
+            durable_nonce(1),
+            &[(
+                solana_address::Address::from([0u8; 32]),
+                MINIMUM_WITHDRAWAL_AMOUNT - WITHDRAWAL_FEE,
+            )],
+        )
+        .unwrap();
+        let events_after = EventsAssert::from_recorded();
+        assert_eq!(events_after.len(), events_before.len() + 2);
+        events_after
+            .expect_contains_event_eq(EventType::CreatedWithdrawalTransaction {
+                burn_indices: vec![1_u64.into()],
+                nonce_account: NONCE_ACCOUNT,
+                nonce_value: durable_nonce(1),
+            })
+            .expect_contains_event_eq(EventType::SubmittedTransaction {
+                signature: minter_signature(),
+                message: expected_message.clone().into(),
+                signers: vec![Signer::Minter],
+                purpose: TransactionPurpose::Withdrawal {
+                    burn_indices: vec![1_u64.into()],
+                },
+            });
+
         read_state(|s| {
-            let submitted = s.submitted_transactions().get(&tx_signature).unwrap();
-            assert_eq!(submitted.block_height, block_height);
-            assert_eq!(
-                submitted.purpose,
-                TransactionPurpose::WithdrawSol {
-                    burn_indices: vec![1_u64.into()]
-                }
-            );
+            let submitted = s.submitted_transactions().get(&minter_signature()).unwrap();
+            let MinterTransaction::Withdrawal {
+                message,
+                nonce_account,
+                nonce_value,
+                ..
+            } = submitted
+            else {
+                panic!("expected a withdrawal transaction, got {submitted:?}");
+            };
+            assert_eq!(*message, expected_message.into());
+            assert_eq!(*nonce_account, NONCE_ACCOUNT);
+            assert_eq!(*nonce_value, durable_nonce(1));
         });
+        assert_matches!(withdrawal_status(1), WithdrawalStatus::TxSent { .. });
     }
 
     #[tokio::test]
-    async fn should_log_error_when_blockhash_fetch_fails() {
+    async fn should_rebroadcast_a_withdrawal_whose_initial_send_failed_until_it_finalizes() {
+        init_state();
+        init_balance();
+        init_schnorr_master_key();
+        events::accept_withdrawal(account(1), 1, MINIMUM_WITHDRAWAL_AMOUNT);
+
+        let sent_transaction = signed_by_minter(
+            build_batch_withdrawal_message(
+                &MINTER_ADDRESS,
+                &NONCE_ACCOUNT,
+                durable_nonce(1),
+                &[(
+                    solana_address::Address::from([0u8; 32]),
+                    MINIMUM_WITHDRAWAL_AMOUNT - WITHDRAWAL_FEE,
+                )],
+            )
+            .unwrap(),
+        );
+
+        let submission = TestCanisterRuntime::new()
+            .with_increasing_time()
+            .expect_get_account_info(
+                NONCE_ACCOUNT,
+                GetAccountInfoResult::Consistent(Ok(Some(nonce_account_info(MINTER_ADDRESS, 1)))),
+            )
+            .expect_send_exact_transaction_skipping_preflight(
+                sent_transaction.clone(),
+                SendTransactionResult::Consistent(Err(RpcError::ValidationError(
+                    "send failed".to_string(),
+                ))),
+            )
+            .add_signer(sign_as_minter());
+        process_pending_withdrawals(submission.clone()).await;
+        assert_matches!(withdrawal_status(1), WithdrawalStatus::TxSent { .. });
+
+        let rebroadcast = TestCanisterRuntime::new()
+            .with_increasing_time_from(submission.time() + MIN_REBROADCAST_AGE.as_nanos() as u64)
+            .expect_get_signature_statuses(
+                vec![minter_signature()],
+                SignatureStatusesResult::Consistent(Ok(vec![None])),
+            )
+            .expect_send_exact_transaction_skipping_preflight(
+                sent_transaction,
+                SendTransactionResult::Consistent(Ok(minter_signature().into())),
+            );
+        finalize_transactions(rebroadcast).await;
+        assert_matches!(withdrawal_status(1), WithdrawalStatus::TxSent { .. });
+
+        let finalization = TestCanisterRuntime::new()
+            .with_increasing_time()
+            .expect_get_signature_statuses(
+                vec![minter_signature()],
+                SignatureStatusesResult::Consistent(Ok(vec![Some(finalized_status())])),
+            );
+        finalize_transactions(finalization).await;
+        assert_eq!(
+            withdrawal_status(1),
+            WithdrawalStatus::TxFinalized(TxFinalizedStatus::Success {
+                transaction_id: minter_signature().into(),
+                effective_transaction_fee: None,
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn should_skip_the_batch_when_the_nonce_read_fails() {
         init_state();
         init_schnorr_master_key();
         init_balance();
+        init_schnorr_master_key();
 
         events::accept_withdrawal(account(1), 1, MINIMUM_WITHDRAWAL_AMOUNT);
-
         let events_before = EventsAssert::from_recorded();
 
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
-            .add_recent_block(Err(RpcError::ValidationError(
-                "slot unavailable".to_string(),
-            )));
+            .expect_get_account_info(
+                NONCE_ACCOUNT,
+                GetAccountInfoResult::Consistent(Err(RpcError::ValidationError(
+                    "account unavailable".to_string(),
+                ))),
+            );
 
         process_pending_withdrawals(runtime).await;
 
-        // No withdrawal transaction event should be recorded
-        let events_after = EventsAssert::from_recorded();
-        assert_eq!(events_before, events_after);
-
-        let mut log: Log<Priority> = Log::default();
-        log.push_logs(Priority::Info);
-        assert!(
-            log.entries
-                .iter()
-                .any(|e| e.message.contains("Failed to fetch recent blockhash")),
-            "Expected info log about blockhash failure, got: {:?}",
-            log.entries
-        );
-
+        assert_eq!(EventsAssert::from_recorded(), events_before);
         assert_eq!(withdrawal_status(1), WithdrawalStatus::Pending);
+        assert_nonce_account_free();
     }
 
     #[tokio::test]
-    async fn should_not_process_batch_on_sig_error() {
+    async fn should_skip_the_batch_when_the_nonce_read_is_stale() {
         init_state();
         init_balance();
         init_schnorr_master_key();
 
-        let slot = 1;
         events::accept_withdrawal(account(1), 1, MINIMUM_WITHDRAWAL_AMOUNT);
-        events::accept_withdrawal(account(2), 2, MINIMUM_WITHDRAWAL_AMOUNT);
+        create_withdrawal_batch_transaction(durable_nonce(1), vec![1]);
+        submit_withdrawal_batch_transaction(signature(0x50), durable_nonce(1), vec![1]);
+        events::succeed_transaction(signature(0x50));
 
+        events::accept_withdrawal(account(2), 2, MINIMUM_WITHDRAWAL_AMOUNT);
         let events_before = EventsAssert::from_recorded();
 
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
-            .add_recent_block(Ok(slot))
-            .add_signer(sign_as_minter().expect([Err(SignCallError::CallFailed(
-                CallRejected::with_rejection(4, "signing service unavailable".to_string()).into(),
-            ))]));
+            .expect_get_account_info(
+                NONCE_ACCOUNT,
+                GetAccountInfoResult::Consistent(Ok(Some(nonce_account_info(MINTER_ADDRESS, 1)))),
+            );
 
         process_pending_withdrawals(runtime).await;
 
-        // No transaction event should be recorded (signing failed)
-        let events_after = EventsAssert::from_recorded();
-        assert_eq!(events_before, events_after);
-
-        // An error should be logged for the whole batch
-        let mut log: Log<Priority> = Log::default();
-        log.push_logs(Priority::Error);
-        assert!(
-            log.entries.iter().any(|e| e
-                .message
-                .contains("Failed to create batch withdrawal transaction for burn indices")),
-            "Expected error log about batch sig failure, got: {:?}",
-            log.entries
-        );
-
-        // Both withdrawals remain pending since they were in the same batch
-        assert_matches!(withdrawal_status(1), WithdrawalStatus::Pending);
-        assert_matches!(withdrawal_status(2), WithdrawalStatus::Pending);
+        assert_eq!(EventsAssert::from_recorded(), events_before);
+        assert_eq!(withdrawal_status(2), WithdrawalStatus::Pending);
+        assert_nonce_account_free();
     }
 
     #[tokio::test]
-    async fn should_batch_withdrawals_into_transactions() {
+    async fn should_re_sign_the_identical_message_after_a_signing_failure() {
         init_state();
         init_balance();
         init_schnorr_master_key();
 
-        let request_count = MAX_WITHDRAWALS_PER_TX as u64 + 1;
-        let slot = 1;
+        events::accept_withdrawal(account(1), 1, MINIMUM_WITHDRAWAL_AMOUNT);
+        let expected_message = build_batch_withdrawal_message(
+            &MINTER_ADDRESS,
+            &NONCE_ACCOUNT,
+            durable_nonce(1),
+            &[(
+                solana_address::Address::from([0u8; 32]),
+                MINIMUM_WITHDRAWAL_AMOUNT - WITHDRAWAL_FEE,
+            )],
+        )
+        .unwrap();
 
-        for i in 0..request_count {
-            events::accept_withdrawal(account(i as usize), i, MINIMUM_WITHDRAWAL_AMOUNT);
+        let failing_runtime = TestCanisterRuntime::new()
+            .with_increasing_time()
+            .expect_get_account_info(
+                NONCE_ACCOUNT,
+                GetAccountInfoResult::Consistent(Ok(Some(nonce_account_info(MINTER_ADDRESS, 1)))),
+            )
+            .add_signer(
+                sign_as_minter()
+                    .of_message(expected_message.serialize())
+                    .expect([Err(SignCallError::CallFailed(
+                        CallRejected::with_rejection(4, "signing service unavailable".to_string())
+                            .into(),
+                    ))]),
+            );
+
+        process_pending_withdrawals(failing_runtime).await;
+
+        let num_events_after_failure = EventsAssert::from_recorded().len();
+        EventsAssert::from_recorded().expect_contains_event_eq(
+            EventType::CreatedWithdrawalTransaction {
+                burn_indices: vec![1_u64.into()],
+                nonce_account: NONCE_ACCOUNT,
+                nonce_value: durable_nonce(1),
+            },
+        );
+        assert_eq!(withdrawal_status(1), WithdrawalStatus::Pending);
+
+        let recovering_runtime = TestCanisterRuntime::new()
+            .with_increasing_time()
+            .add_signer(sign_as_minter().of_message(expected_message.serialize()))
+            .expect_send_transaction_skipping_preflight(
+                minter_signature(),
+                SendTransactionResult::Consistent(Ok(minter_signature().into())),
+            );
+
+        process_pending_withdrawals(recovering_runtime).await;
+
+        let events_after_recovery = EventsAssert::from_recorded();
+        assert_eq!(events_after_recovery.len(), num_events_after_failure + 1);
+        events_after_recovery.expect_contains_event_eq(EventType::SubmittedTransaction {
+            signature: minter_signature(),
+            message: expected_message.into(),
+            signers: vec![Signer::Minter],
+            purpose: TransactionPurpose::Withdrawal {
+                burn_indices: vec![1_u64.into()],
+            },
+        });
+        assert_matches!(withdrawal_status(1), WithdrawalStatus::TxSent { .. });
+    }
+
+    #[tokio::test]
+    async fn should_never_share_a_nonce_account_between_concurrent_batches() {
+        let second_nonce_account = address(2);
+        init_state_with_args(InitArgs {
+            nonce_accounts: vec![NONCE_ACCOUNT.to_string(), second_nonce_account.to_string()],
+            ..valid_init_args()
+        });
+        init_balance();
+        init_schnorr_master_key();
+
+        let num_requests = MAX_WITHDRAWALS_PER_NONCE_TX + 1;
+        for i in 0..num_requests {
+            events::accept_withdrawal(account(i), i as u64, MINIMUM_WITHDRAWAL_AMOUNT);
         }
 
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
-            .add_recent_block(Ok(slot))
-            .expect_send_transaction(
-                minter_signature_nth(0),
-                SendTransactionResult::Consistent(Ok(signature(1).into())),
+            .expect_get_account_info(
+                NONCE_ACCOUNT,
+                GetAccountInfoResult::Consistent(Ok(Some(nonce_account_info(MINTER_ADDRESS, 1)))),
             )
-            .expect_send_transaction(
+            .expect_get_account_info(
+                second_nonce_account,
+                GetAccountInfoResult::Consistent(Ok(Some(nonce_account_info(MINTER_ADDRESS, 2)))),
+            )
+            .expect_send_transaction_skipping_preflight(
+                minter_signature_nth(0),
+                SendTransactionResult::Consistent(Ok(minter_signature_nth(0).into())),
+            )
+            .expect_send_transaction_skipping_preflight(
                 minter_signature_nth(1),
-                SendTransactionResult::Consistent(Ok(signature(2).into())),
+                SendTransactionResult::Consistent(Ok(minter_signature_nth(1).into())),
             )
             .add_signer(sign_as_minter().times(2));
 
         process_pending_withdrawals(runtime).await;
 
-        // All withdrawals should be processed in a single invocation
-        // (2 batches in 1 round, both within MAX_CONCURRENT_RPC_CALLS)
-        for i in 0..request_count {
-            assert_matches!(withdrawal_status(i), WithdrawalStatus::TxSent { .. });
+        for i in 0..num_requests {
+            assert_matches!(withdrawal_status(i as u64), WithdrawalStatus::TxSent { .. });
         }
-
-        // Verify that withdrawals were split into 2 batches
-        read_state(|s| assert_eq!(s.submitted_transactions().len(), 2));
+        read_state(|s| {
+            let nonce_accounts: std::collections::BTreeSet<_> = s
+                .submitted_transactions()
+                .iter()
+                .map(|(_, tx)| match tx {
+                    MinterTransaction::Withdrawal { nonce_account, .. } => *nonce_account,
+                    MinterTransaction::SweepDeposit { .. } => {
+                        panic!("expected a withdrawal transaction, got {tx:?}")
+                    }
+                })
+                .collect();
+            assert_eq!(
+                nonce_accounts,
+                [NONCE_ACCOUNT, second_nonce_account].into_iter().collect()
+            );
+        });
     }
 
     #[tokio::test]
-    async fn should_reschedule_until_all_withdrawals_processed() {
+    async fn should_sign_at_most_the_concurrent_signatures_oldest_first_without_creating_more() {
+        let num_bound = MAX_CONCURRENT_SIGNATURES + 1;
+        let free_nonce_account = address(num_bound + 1);
+        let bound_nonce_account = |burn_index: usize| address(num_bound - burn_index);
+        init_state_with_args(InitArgs {
+            nonce_accounts: (0..num_bound)
+                .map(bound_nonce_account)
+                .chain([free_nonce_account])
+                .map(|nonce_account| nonce_account.to_string())
+                .collect(),
+            ..valid_init_args()
+        });
+        init_balance();
+        init_schnorr_master_key();
+
+        for burn_index in 0..num_bound {
+            events::accept_withdrawal(
+                account(burn_index),
+                burn_index as u64,
+                MINIMUM_WITHDRAWAL_AMOUNT,
+            );
+            create_withdrawal_batch_transaction_on(
+                bound_nonce_account(burn_index),
+                durable_nonce(burn_index),
+                vec![burn_index as u64],
+            );
+        }
+        let pending_burn_index = num_bound as u64;
+        events::accept_withdrawal(
+            account(num_bound),
+            pending_burn_index,
+            MINIMUM_WITHDRAWAL_AMOUNT,
+        );
+
+        let runtime = (0..MAX_CONCURRENT_SIGNATURES)
+            .fold(TestCanisterRuntime::new(), |runtime, i| {
+                runtime.expect_send_transaction_skipping_preflight(
+                    minter_signature_nth(i),
+                    SendTransactionResult::Consistent(Ok(minter_signature_nth(i).into())),
+                )
+            })
+            .with_increasing_time()
+            .add_signer(sign_as_minter().times(MAX_CONCURRENT_SIGNATURES));
+
+        process_pending_withdrawals(runtime).await;
+
+        for burn_index in 0..MAX_CONCURRENT_SIGNATURES {
+            assert_matches!(
+                withdrawal_status(burn_index as u64),
+                WithdrawalStatus::TxSent { .. }
+            );
+        }
+        assert_eq!(
+            withdrawal_status(MAX_CONCURRENT_SIGNATURES as u64),
+            WithdrawalStatus::Pending
+        );
+        read_state(|s| {
+            assert_eq!(
+                s.created_withdrawal_txs().keys().collect::<Vec<_>>(),
+                vec![&bound_nonce_account(MAX_CONCURRENT_SIGNATURES)]
+            );
+            assert!(
+                s.pending_withdrawal_requests()
+                    .contains_key(&pending_burn_index.into())
+            );
+        });
+    }
+
+    #[tokio::test]
+    async fn should_cap_the_batches_at_the_free_nonce_accounts() {
         init_state();
         init_balance();
         init_schnorr_master_key();
 
-        let num_requests = MAX_WITHDRAWALS_PER_TX * MAX_CONCURRENT_RPC_CALLS + 1;
+        let num_requests = MAX_WITHDRAWALS_PER_NONCE_TX + 1;
         for i in 0..num_requests {
             events::accept_withdrawal(account(i), i as u64, MINIMUM_WITHDRAWAL_AMOUNT);
         }
 
-        let slot = 1;
-
-        // Round 1: processes MAX_CONCURRENT_RPC_CALLS batches, 1 request remains → reschedule
-        let mut runtime = TestCanisterRuntime::new()
-            .with_increasing_time()
-            .add_recent_block(Ok(slot));
-        for i in 0..MAX_CONCURRENT_RPC_CALLS {
-            runtime = runtime.expect_send_transaction(
-                minter_signature_nth(i),
-                SendTransactionResult::Consistent(Ok(signature(i + 1).into())),
-            );
-        }
-        let runtime = runtime.add_signer(sign_as_minter().times(MAX_CONCURRENT_RPC_CALLS));
-
-        process_pending_withdrawals(runtime.clone()).await;
-
-        read_state(|s| {
-            assert_eq!(s.submitted_transactions().len(), MAX_CONCURRENT_RPC_CALLS);
-            assert_eq!(s.pending_withdrawal_requests().len(), 1);
-        });
-        assert_eq!(runtime.set_timer_call_count(), 1);
-
-        // Round 2: processes the remaining 1 request → no reschedule
-        let signature_continuing_round_1 = minter_signature_nth(MAX_CONCURRENT_RPC_CALLS);
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
-            .add_recent_block(Ok(slot))
-            .add_signer(sign_as_minter().expect([Ok(signature_continuing_round_1)]))
-            .expect_send_transaction(
-                signature_continuing_round_1,
-                SendTransactionResult::Consistent(Ok(signature_continuing_round_1.into())),
+            .expect_get_account_info(
+                NONCE_ACCOUNT,
+                GetAccountInfoResult::Consistent(Ok(Some(nonce_account_info(MINTER_ADDRESS, 1)))),
+            )
+            .expect_send_transaction_skipping_preflight(
+                minter_signature(),
+                SendTransactionResult::Consistent(Ok(minter_signature().into())),
+            )
+            .add_signer(sign_as_minter());
+
+        process_pending_withdrawals(runtime.clone()).await;
+
+        for i in 0..MAX_WITHDRAWALS_PER_NONCE_TX {
+            assert_matches!(withdrawal_status(i as u64), WithdrawalStatus::TxSent { .. });
+        }
+        assert_eq!(
+            withdrawal_status(MAX_WITHDRAWALS_PER_NONCE_TX as u64),
+            WithdrawalStatus::Pending
+        );
+        read_state(|s| assert_eq!(s.submitted_transactions().len(), 1));
+        assert_eq!(runtime.set_timer_call_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn should_retry_later_when_an_affordable_batch_is_left_behind() {
+        let second_nonce_account = address(2);
+        init_state_with_args(InitArgs {
+            nonce_accounts: vec![NONCE_ACCOUNT.to_string(), second_nonce_account.to_string()],
+            ..valid_init_args()
+        });
+        init_balance();
+        init_schnorr_master_key();
+
+        let num_requests = MAX_WITHDRAWALS_PER_NONCE_TX + 1;
+        for i in 0..num_requests {
+            events::accept_withdrawal(account(i), i as u64, MINIMUM_WITHDRAWAL_AMOUNT);
+        }
+
+        let runtime = TestCanisterRuntime::new()
+            .with_increasing_time()
+            .expect_get_account_info(
+                second_nonce_account,
+                GetAccountInfoResult::Consistent(Ok(Some(nonce_account_info(MINTER_ADDRESS, 1)))),
+            )
+            .expect_get_account_info(
+                NONCE_ACCOUNT,
+                GetAccountInfoResult::Consistent(Err(RpcError::ValidationError(
+                    "account unavailable".to_string(),
+                ))),
+            )
+            .expect_send_transaction_skipping_preflight(
+                minter_signature(),
+                SendTransactionResult::Consistent(Ok(minter_signature().into())),
+            )
+            .add_signer(sign_as_minter());
+
+        process_pending_withdrawals(runtime.clone()).await;
+
+        read_state(|s| assert_eq!(s.submitted_transactions().len(), 1));
+        assert_eq!(
+            withdrawal_status(MAX_WITHDRAWALS_PER_NONCE_TX as u64),
+            WithdrawalStatus::Pending
+        );
+        assert_eq!(
+            runtime.set_timer_delays(),
+            vec![WITHDRAWAL_PROCESSING_RETRY_DELAY]
+        );
+    }
+
+    #[tokio::test]
+    async fn should_not_retry_early_when_the_round_made_no_progress() {
+        init_state();
+        init_balance();
+        init_schnorr_master_key();
+
+        events::accept_withdrawal(account(1), 1, MINIMUM_WITHDRAWAL_AMOUNT);
+
+        let runtime = TestCanisterRuntime::new()
+            .with_increasing_time()
+            .expect_get_account_info(
+                NONCE_ACCOUNT,
+                GetAccountInfoResult::Consistent(Err(RpcError::ValidationError(
+                    "account unavailable".to_string(),
+                ))),
             );
 
         process_pending_withdrawals(runtime.clone()).await;
 
+        assert_eq!(withdrawal_status(1), WithdrawalStatus::Pending);
+        assert_eq!(runtime.set_timer_delays(), Vec::<Duration>::new());
+    }
+
+    #[tokio::test]
+    async fn should_retry_later_when_a_bound_withdrawal_is_left_unsigned() {
+        init_state();
+        init_balance();
+        init_schnorr_master_key();
+
+        events::accept_withdrawal(account(1), 1, MINIMUM_WITHDRAWAL_AMOUNT);
+
+        let runtime = TestCanisterRuntime::new()
+            .with_increasing_time()
+            .expect_get_account_info(
+                NONCE_ACCOUNT,
+                GetAccountInfoResult::Consistent(Ok(Some(nonce_account_info(MINTER_ADDRESS, 1)))),
+            )
+            .add_signer(sign_as_minter().expect([Err(SignCallError::CallFailed(
+                CallRejected::with_rejection(4, "signing service unavailable".to_string()).into(),
+            ))]));
+
+        process_pending_withdrawals(runtime.clone()).await;
+
+        read_state(|s| assert_eq!(s.created_withdrawal_txs().len(), 1));
+        assert_eq!(
+            runtime.set_timer_delays(),
+            vec![WITHDRAWAL_PROCESSING_RETRY_DELAY]
+        );
+    }
+
+    #[tokio::test]
+    async fn should_not_reschedule_without_a_free_nonce_account_even_with_affordable_batches_left()
+    {
+        init_state();
+        let num_affordable_batches = MAX_CONCURRENT_RPC_CALLS + 1;
+        let num_affordable_requests = MAX_CONCURRENT_RPC_CALLS * MAX_WITHDRAWALS_PER_NONCE_TX + 1;
+        init_balance_to(
+            FEE_PER_SIGNATURE
+                + num_affordable_requests as u64 * (MINIMUM_WITHDRAWAL_AMOUNT - WITHDRAWAL_FEE)
+                + num_affordable_batches as u64 * FEE_PER_SIGNATURE
+                + RENT_EXEMPTION_THRESHOLD,
+        );
+        init_schnorr_master_key();
+
+        for i in 0..=num_affordable_requests {
+            events::accept_withdrawal(account(i), i as u64, MINIMUM_WITHDRAWAL_AMOUNT);
+        }
+
+        let runtime = TestCanisterRuntime::new()
+            .with_increasing_time()
+            .expect_get_account_info(
+                NONCE_ACCOUNT,
+                GetAccountInfoResult::Consistent(Ok(Some(nonce_account_info(MINTER_ADDRESS, 1)))),
+            )
+            .expect_send_transaction_skipping_preflight(
+                minter_signature(),
+                SendTransactionResult::Consistent(Ok(minter_signature().into())),
+            )
+            .add_signer(sign_as_minter());
+
+        process_pending_withdrawals(runtime.clone()).await;
+
+        read_state(|s| assert_eq!(s.submitted_transactions().len(), 1));
+        assert_eq!(runtime.set_timer_delays(), Vec::<Duration>::new());
+    }
+
+    fn signed_by_minter(message: solana_message::Message) -> solana_transaction::Transaction {
+        solana_transaction::Transaction {
+            signatures: vec![minter_signature()],
+            message,
+        }
+    }
+
+    fn assert_nonce_account_free() {
         read_state(|s| {
-            assert!(s.pending_withdrawal_requests().is_empty());
             assert_eq!(
-                s.submitted_transactions().len(),
-                MAX_CONCURRENT_RPC_CALLS + 1
-            );
+                s.nonce_pool().free_accounts().collect::<Vec<_>>(),
+                vec![&NONCE_ACCOUNT]
+            )
         });
-        assert_eq!(runtime.set_timer_call_count(), 0);
     }
 }
 

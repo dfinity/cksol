@@ -25,7 +25,6 @@ use tokio::join;
 
 const WITHDRAWAL_PROCESSING_DELAY: Duration = Duration::from_mins(1);
 const FINALIZE_TRANSACTIONS_DELAY: Duration = Duration::from_mins(2);
-const RESUBMIT_TRANSACTIONS_DELAY: Duration = Duration::from_mins(3);
 const SWEEP_DEPOSITS_DELAY: Duration = Duration::from_mins(1);
 /// Number of blocks a blockhash stays valid for, as the minter counts them.
 const MAX_BLOCKHASH_AGE_IN_BLOCKS: u64 = 150;
@@ -66,11 +65,12 @@ async fn deposit_and_credit_funds(setup: &Setup) {
 
     // Finalize and credit
     setup.advance_time(FINALIZE_TRANSACTIONS_DELAY).await;
+    let sweep = setup.minter().signed_transaction(&sweep_signature).await;
     setup
         .execute_http_mocks(
             MockBuilder::with_start_id(16)
-                .finalize_transaction(SUBMISSION_BLOCK_HEIGHT)
-                .get_sweep_transaction(&sweep_signature, SWEEPABLE_AMOUNT)
+                .finalize_transaction(&sweep_signature, SUBMISSION_BLOCK_HEIGHT)
+                .get_sweep_transaction(&sweep, SWEEPABLE_AMOUNT)
                 .build(),
         )
         .await;
@@ -734,90 +734,75 @@ mod withdrawal_tests {
             .await
             .expect("withdraw should succeed");
 
+        // The withdrawal timer reads the durable nonce account and submits the
+        // transaction with the nonce value in place of a recent blockhash.
         setup.advance_time(WITHDRAWAL_PROCESSING_DELAY).await;
         setup
             .execute_http_mocks(
                 MockBuilder::with_start_id(32)
-                    .submit_transaction(SUBMISSION_BLOCK_HEIGHT)
+                    .submit_withdrawal_transaction()
                     .build(),
             )
             .await;
 
+        let nonce_account = Setup::DEFAULT_NONCE_ACCOUNT.to_string();
         setup.minter().assert_that_events().await.satisfy(|events| {
             check!(events.iter().any(|e| matches!(
                 e,
+                EventType::CreatedWithdrawalTransaction {
+                    burn_indices,
+                    nonce_account: account,
+                    ..
+                } if burn_indices == &[block_index] && account.to_string() == nonce_account
+            )));
+            check!(events.iter().any(|e| matches!(
+                e,
                 EventType::SubmittedTransaction {
-                    purpose: TransactionPurpose::WithdrawSol { burn_indices },
-                    block_height,
+                    purpose: TransactionPurpose::Withdrawal { burn_indices },
                     ..
                 } if burn_indices == &[block_index]
-                  && block_height == &SUBMISSION_BLOCK_HEIGHT
             )));
         });
 
         // Withdrawal status should be TxSent with some signature
         let status = setup.minter().withdrawal_status(block_index).await;
-        let original_transaction_id = match &status {
+        let transaction_id = match &status {
             WithdrawalStatus::TxSent { transaction_id } => transaction_id.clone(),
             other => panic!("Expected TxSent, got: {other:?}"),
         };
 
-        // Advance time to trigger finalize_transactions, which fetches the current block,
-        // checks statuses (not found), and marks the expired transaction for resubmission.
-        setup.advance_time(FINALIZE_TRANSACTIONS_DELAY).await;
+        // An upgrade replays the created and submitted withdrawal events; the
+        // in-flight transaction must survive the replay unchanged.
         setup
-            .execute_http_mocks(
-                MockBuilder::with_start_id(44)
-                    .mark_transaction_expired(EXPIRY_BLOCK_HEIGHT)
-                    .build(),
-            )
-            .await;
-
-        // Advance time to trigger resubmit_transactions. finalize_transactions also
-        // fires but has no pending transactions, so it makes no HTTP outcalls.
-        setup.advance_time(RESUBMIT_TRANSACTIONS_DELAY).await;
-        setup
-            .execute_http_mocks(
-                MockBuilder::with_start_id(56)
-                    .resubmit_transaction(EXPIRY_BLOCK_HEIGHT)
-                    .build(),
-            )
-            .await;
-
-        // Withdrawal status should now have a different signature
-        let status = setup.minter().withdrawal_status(block_index).await;
-        let resubmitted_transaction_id = match &status {
-            WithdrawalStatus::TxSent { transaction_id } => {
-                assert_ne!(
-                    *transaction_id, original_transaction_id,
-                    "Expected transaction ID to change after resubmission"
-                );
-                transaction_id.clone()
+            .minter()
+            .upgrade(UpgradeArgs::default())
+            .await
+            .expect("upgrade should succeed");
+        assert_eq!(
+            setup.minter().withdrawal_status(block_index).await,
+            WithdrawalStatus::TxSent {
+                transaction_id: transaction_id.clone()
             }
-            other => panic!("Expected TxSent after resubmission, got: {other:?}"),
-        };
+        );
 
-        // Advance time to trigger finalize_transactions again. This time the
-        // transaction is reported as finalized.
+        // Only the in-flight withdrawal is monitored, so the finalization timer
+        // checks the signature statuses without fetching a current block.
         setup.advance_time(FINALIZE_TRANSACTIONS_DELAY).await;
         setup
             .execute_http_mocks(
-                MockBuilder::with_start_id(68)
-                    .finalize_transaction(EXPIRY_BLOCK_HEIGHT)
+                MockBuilder::with_start_id(40)
+                    .finalize_withdrawal_transaction(&transaction_id)
                     .build(),
             )
             .await;
 
-        // Withdrawal status should now be TxFinalized with Success
         let status = setup.minter().withdrawal_status(block_index).await;
         match &status {
             WithdrawalStatus::TxFinalized(TxFinalizedStatus::Success {
-                transaction_id, ..
+                transaction_id: finalized_transaction_id,
+                ..
             }) => {
-                assert_eq!(
-                    *transaction_id, resubmitted_transaction_id,
-                    "Expected finalized transaction ID to match resubmitted transaction ID"
-                );
+                assert_eq!(*finalized_transaction_id, transaction_id);
             }
             other => panic!("Expected TxFinalized(Success), got: {other:?}"),
         }
@@ -999,18 +984,19 @@ mod deposit_sol_tests {
                 e,
                 EventType::SubmittedTransaction {
                     signature,
-                    purpose: TransactionPurpose::SweepDeposits { deposit_ids },
+                    purpose: TransactionPurpose::SweepDeposit { deposit_ids, .. },
                     ..
                 } if *signature == sweep_signature && deposit_ids == &[deposit_id]
             )));
         });
 
         setup.advance_time(FINALIZE_TRANSACTIONS_DELAY).await;
+        let sweep = setup.minter().signed_transaction(&sweep_signature).await;
         setup
             .execute_http_mocks(
                 MockBuilder::with_start_id(16)
-                    .finalize_transaction(SUBMISSION_BLOCK_HEIGHT)
-                    .get_sweep_transaction(&sweep_signature, SWEEPABLE_AMOUNT)
+                    .finalize_transaction(&sweep_signature, SUBMISSION_BLOCK_HEIGHT)
+                    .get_sweep_transaction(&sweep, SWEEPABLE_AMOUNT)
                     .build(),
             )
             .await;
@@ -1063,7 +1049,7 @@ mod deposit_sol_tests {
         setup
             .execute_http_mocks(
                 MockBuilder::with_start_id(16)
-                    .mark_transaction_expired(EXPIRY_BLOCK_HEIGHT)
+                    .mark_transaction_expired(&sweep_signature, EXPIRY_BLOCK_HEIGHT)
                     .build(),
             )
             .await;
@@ -1079,11 +1065,6 @@ mod deposit_sol_tests {
                 e,
                 EventType::ExpiredTransaction { signature } if *signature == sweep_signature
             )));
-            check!(
-                !events
-                    .iter()
-                    .any(|e| matches!(e, EventType::ResubmittedTransaction { .. }))
-            );
         });
         let setup = setup
             .check_metrics()
@@ -1134,11 +1115,12 @@ mod deposit_sol_tests {
 
         setup.advance_time(FINALIZE_TRANSACTIONS_DELAY).await;
         let amount_not_in_the_plan = BALANCE_ABOVE_MINIMUM - RENT_EXEMPTION_THRESHOLD + 1;
+        let sweep = setup.minter().signed_transaction(&sweep_signature).await;
         setup
             .execute_http_mocks(
                 MockBuilder::with_start_id(16)
-                    .finalize_transaction(SUBMISSION_BLOCK_HEIGHT)
-                    .get_sweep_transaction(&sweep_signature, amount_not_in_the_plan)
+                    .finalize_transaction(&sweep_signature, SUBMISSION_BLOCK_HEIGHT)
+                    .get_sweep_transaction(&sweep, amount_not_in_the_plan)
                     .build(),
             )
             .await;
@@ -1322,6 +1304,33 @@ mod metrics_tests {
             // Only the init and minter public key events should have been recorded
             .assert_contains_metric_matching(r#"total_event_count 2 \d+"#)
             .assert_contains_metric_matching(r#"minter_balance 0 \d+"#)
+            .assert_contains_metric_matching(r#"oldest_in_flight_deposit_age_seconds 0 \d+"#)
+            .assert_contains_metric_matching(r#"oldest_pending_mint_age_seconds 0 \d+"#)
+            .assert_contains_metric_matching(
+                r#"failed_credit_attempts\{reason="not_found"\} 0 \d+"#,
+            )
+            .assert_contains_metric_matching(
+                r#"failed_credit_attempts\{reason="rpc_error"\} 0 \d+"#,
+            )
+            .assert_contains_metric_matching(
+                r#"failed_credit_attempts\{reason="invalid_response"\} 0 \d+"#,
+            )
+            .assert_contains_metric_matching(
+                r#"failed_credit_attempts\{reason="unreadable"\} 0 \d+"#,
+            )
+            .assert_contains_metric_matching(r#"failed_credit_attempts\{reason="mismatch"\} 0 \d+"#)
+            .assert_contains_metric_matching(r#"failed_mint_attempts\{reason="expired"\} 0 \d+"#)
+            .assert_contains_metric_matching(r#"failed_mint_attempts\{reason="rejected"\} 0 \d+"#)
+            .assert_contains_metric_matching(
+                r#"failed_mint_attempts\{reason="ledger_error"\} 0 \d+"#,
+            )
+            .assert_contains_metric_matching(
+                r#"failed_mint_attempts\{reason="created_in_future"\} 0 \d+"#,
+            )
+            .assert_contains_metric_matching(r#"failed_mint_attempts\{reason="call_error"\} 0 \d+"#)
+            .assert_contains_metric_matching(
+                r#"failed_mint_attempts\{reason="unknown_outcome"\} 0 \d+"#,
+            )
             .into()
             .drop()
             .await;

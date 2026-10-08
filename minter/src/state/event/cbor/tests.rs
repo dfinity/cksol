@@ -141,6 +141,32 @@ mod ed25519_public_key_tests {
     }
 }
 
+mod hash_tests {
+    use super::*;
+    use crate::test_fixtures::arb::arb_hash;
+
+    proptest! {
+        #[test]
+        fn hash_minicbor_roundtrip(hash in arb_hash()) {
+            let encoded = encode_hash(&hash);
+            let decoded = decode_hash(&encoded);
+            prop_assert_eq!(hash, decoded);
+        }
+    }
+
+    fn encode_hash(hash: &solana_hash::Hash) -> Vec<u8> {
+        let mut buf = Vec::new();
+        let mut encoder = minicbor::Encoder::new(&mut buf);
+        cbor::hash::encode(hash, &mut encoder, &mut ()).unwrap();
+        buf
+    }
+
+    fn decode_hash(bytes: &[u8]) -> solana_hash::Hash {
+        let mut decoder = minicbor::Decoder::new(bytes);
+        cbor::hash::decode(&mut decoder, &mut ()).unwrap()
+    }
+}
+
 mod message_tests {
     use super::*;
 

@@ -43,6 +43,7 @@ pub(super) fn derivation_path_signature(
 pub fn sign_for(account: &Account) -> SignerExpectation {
     SignerExpectation {
         derivation_path: derivation_path(account),
+        message: None,
         answers: Answers::Derived(1),
     }
 }
@@ -52,6 +53,7 @@ pub fn sign_for(account: &Account) -> SignerExpectation {
 pub fn sign_as_minter() -> SignerExpectation {
     SignerExpectation {
         derivation_path: MINTER_DERIVATION_PATH,
+        message: None,
         answers: Answers::Derived(1),
     }
 }
@@ -60,6 +62,7 @@ pub fn sign_as_minter() -> SignerExpectation {
 #[derive(Clone)]
 pub struct SignerExpectation {
     derivation_path: DerivationPath,
+    message: Option<Vec<u8>>,
     answers: Answers,
 }
 
@@ -68,6 +71,12 @@ impl SignerExpectation {
     /// signature, so no two of them are alike.
     pub fn times(mut self, count: usize) -> Self {
         self.answers = Answers::Derived(count);
+        self
+    }
+
+    /// Expects every signing request to be for exactly `message`.
+    pub fn of_message(mut self, message: Vec<u8>) -> Self {
+        self.message = Some(message);
         self
     }
 
@@ -174,8 +183,14 @@ impl MockSchnorrSigner {
 
                 for signature in signatures {
                     let expected_path = expectation.derivation_path.clone();
+                    let expected_message = expectation.message.clone();
                     mock.expect_sign()
-                        .withf(move |_message, path| path == &expected_path)
+                        .withf(move |message, path| {
+                            path == &expected_path
+                                && expected_message
+                                    .as_ref()
+                                    .is_none_or(|expected| expected == message)
+                        })
                         .times(1)
                         .return_once(move |_message, _path| {
                             signature.map(|signature| signature.as_ref().to_vec())

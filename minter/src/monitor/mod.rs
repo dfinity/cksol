@@ -1,37 +1,40 @@
 use crate::{
-    address::DerivationPath,
     constants::MAX_CONCURRENT_RPC_CALLS,
     deposit::sweep::credit_finalized_sweeps,
     guard::TimerGuard,
     rpc::{
-        Block, BlockHeight, SubmitTransactionError, get_recent_block, get_signature_statuses,
-        submit_transaction,
+        BlockHeight, get_recent_block, get_signature_statuses,
+        submit_transaction_skipping_preflight,
     },
     runtime::CanisterRuntime,
-    signer::sign_bytes,
     state::{
-        TaskType,
+        MinterTransaction, TaskType,
         audit::process_event,
-        event::{EventType, Signer, VersionedMessage},
+        event::{EventType, VersionedMessage},
         mutate_state, read_state,
     },
+    storage::with_unstable_metrics_mut,
 };
 use canlog::log;
 use cksol_types_internal::log::Priority;
-use ic_cdk_management_canister::SignCallError;
 use itertools::Itertools;
 use solana_signature::Signature;
 use solana_transaction::Transaction;
 use solana_transaction_status_client_types::TransactionConfirmationStatus;
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
-use thiserror::Error;
 
 #[cfg(test)]
 mod tests;
 
 pub const FINALIZE_TRANSACTIONS_DELAY: Duration = Duration::from_mins(2);
-pub const RESUBMIT_TRANSACTIONS_DELAY: Duration = Duration::from_mins(3);
+/// Minimum time since its submission before a withdrawal transaction without a
+/// status is re-broadcast. The minter sends transactions without `maxRetries`,
+/// so an Agave RPC node keeps re-sending a durable-nonce transaction every 2 s
+/// until it lands, its nonce advances, or 150 blocks (about 60 to 90 s) pass.
+/// Re-broadcasting earlier would only duplicate the work of the RPC node.
+/// See https://github.com/anza-xyz/agave/blob/master/rpc/src/rpc.rs
+pub const MIN_REBROADCAST_AGE: Duration = Duration::from_secs(90);
 /// A leader accepts a transaction while its blockhash is still among the last
 /// `MAX_PROCESSING_AGE` entries of the recent-blockhash queue, which holds one
 /// entry per non-skipped slot. The public documentation describes this window
@@ -46,7 +49,7 @@ const MAX_BLOCKHASH_AGE_IN_BLOCKS: BlockHeight = BlockHeight::new(150);
 const MAX_SIGNATURES_PER_STATUS_CHECK: usize = 256;
 
 /// Check the status of all submitted transactions, finalize succeeded/failed
-/// ones, and mark expired transactions for resubmission.
+/// ones, drop expired sweeps, and re-broadcast withdrawals that have no status.
 pub async fn finalize_transactions<R: CanisterRuntime>(runtime: R) {
     let _guard = match TimerGuard::new(TaskType::FinalizeTransactions) {
         Ok(guard) => guard,
@@ -67,30 +70,39 @@ pub async fn finalize_transactions<R: CanisterRuntime>(runtime: R) {
 
 /// Returns whether the finalization timer must run again immediately.
 async fn check_submitted_transactions<R: CanisterRuntime>(runtime: &R) -> bool {
-    let all_transactions: BTreeMap<Signature, BlockHeight> = read_state(|state| {
-        state
-            .submitted_transactions()
-            .iter()
-            .map(|(sig, tx)| (*sig, tx.block_height))
-            .collect()
+    let (signatures, blockhash_transactions): (
+        BTreeSet<Signature>,
+        BTreeMap<Signature, BlockHeight>,
+    ) = read_state(|state| {
+        let submitted = state.submitted_transactions();
+        (
+            submitted.iter().map(|(sig, _)| *sig).collect(),
+            submitted
+                .iter()
+                .filter_map(|(sig, tx)| match tx {
+                    MinterTransaction::SweepDeposit { block_height, .. } => {
+                        Some((*sig, *block_height))
+                    }
+                    MinterTransaction::Withdrawal { .. } => None,
+                })
+                .collect(),
+        )
     });
-    if all_transactions.is_empty() {
+    if signatures.is_empty() {
         return false;
     }
 
     // Fetch the current block before checking statuses: if a transaction finalizes
     // after we snapshot the block, the status check will see it as finalized rather
     // than missing, so it will never be incorrectly marked as expired.
-    let current_block = match get_recent_block(runtime).await {
-        Ok(block) => block,
-        Err(e) => {
-            log!(Priority::Info, "Failed to get current block: {e}");
-            return true;
-        }
+    let current_block_height = if blockhash_transactions.is_empty() {
+        None
+    } else {
+        fetch_current_block_height(runtime).await
     };
 
-    let signatures: Vec<Signature> = all_transactions.keys().copied().collect();
-    let statuses = check_transaction_statuses(runtime, signatures).await;
+    let num_transactions = signatures.len();
+    let statuses = check_transaction_statuses(runtime, signatures.into_iter().collect()).await;
 
     for (signature, error) in &statuses.errored {
         log!(
@@ -121,8 +133,44 @@ async fn check_submitted_transactions<R: CanisterRuntime>(runtime: &R) -> bool {
         });
     }
 
-    for signature in &statuses.not_found {
-        if !is_blockhash_expired(all_transactions[signature], current_block.block_height) {
+    if let Some(current_block_height) = current_block_height {
+        expire_transactions(
+            runtime,
+            &statuses.not_found,
+            &blockhash_transactions,
+            current_block_height,
+        );
+    }
+
+    rebroadcast_withdrawal_transactions(runtime, &statuses.not_found).await;
+
+    num_transactions > MAX_CONCURRENT_RPC_CALLS * MAX_SIGNATURES_PER_STATUS_CHECK
+}
+
+async fn fetch_current_block_height<R: CanisterRuntime>(runtime: &R) -> Option<BlockHeight> {
+    match get_recent_block(runtime).await {
+        Ok(block) => Some(block.block_height),
+        Err(e) => {
+            log!(
+                Priority::Info,
+                "Failed to get current block, skipping the expiry check this round: {e}"
+            );
+            None
+        }
+    }
+}
+
+fn expire_transactions<R: CanisterRuntime>(
+    runtime: &R,
+    not_found: &BTreeSet<Signature>,
+    blockhash_transactions: &BTreeMap<Signature, BlockHeight>,
+    current_block_height: BlockHeight,
+) {
+    for signature in not_found {
+        let Some(transaction_block_height) = blockhash_transactions.get(signature) else {
+            continue;
+        };
+        if !is_blockhash_expired(*transaction_block_height, current_block_height) {
             continue;
         }
         log!(Priority::Info, "Transaction {signature} expired");
@@ -136,8 +184,62 @@ async fn check_submitted_transactions<R: CanisterRuntime>(runtime: &R) -> bool {
             )
         });
     }
+}
 
-    all_transactions.len() > MAX_CONCURRENT_RPC_CALLS * MAX_SIGNATURES_PER_STATUS_CHECK
+async fn rebroadcast_withdrawal_transactions<R: CanisterRuntime>(
+    runtime: &R,
+    not_found: &BTreeSet<Signature>,
+) {
+    let now = runtime.time();
+    let batches: Vec<Vec<Transaction>> = read_state(|state| {
+        not_found
+            .iter()
+            .filter_map(
+                |signature| match state.submitted_transactions().get(signature)? {
+                    MinterTransaction::Withdrawal {
+                        message: VersionedMessage::Legacy(message),
+                        submitted_at,
+                        ..
+                    } if is_old_enough_to_rebroadcast(*submitted_at, now) => Some(Transaction {
+                        signatures: vec![*signature],
+                        message: message.clone(),
+                    }),
+                    MinterTransaction::Withdrawal { .. }
+                    | MinterTransaction::SweepDeposit { .. } => None,
+                },
+            )
+            .chunks(MAX_CONCURRENT_RPC_CALLS)
+            .into_iter()
+            .map(Iterator::collect)
+            .collect()
+    });
+    for batch in batches {
+        futures::future::join_all(
+            batch
+                .into_iter()
+                .map(|transaction| rebroadcast_transaction(runtime, transaction)),
+        )
+        .await;
+    }
+}
+
+fn is_old_enough_to_rebroadcast(submitted_at: u64, now: u64) -> bool {
+    Duration::from_nanos(now.saturating_sub(submitted_at)) >= MIN_REBROADCAST_AGE
+}
+
+async fn rebroadcast_transaction<R: CanisterRuntime>(runtime: &R, transaction: Transaction) {
+    let signature = transaction.signatures[0];
+    with_unstable_metrics_mut(|m| m.withdrawal_transaction_rebroadcasts += 1);
+    match submit_transaction_skipping_preflight(runtime, transaction).await {
+        Ok(_) => log!(
+            Priority::Info,
+            "Re-broadcast withdrawal transaction {signature}"
+        ),
+        Err(e) => log!(
+            Priority::Info,
+            "Failed to re-broadcast withdrawal transaction {signature} (will retry next round): {e}"
+        ),
+    }
 }
 
 fn is_blockhash_expired(
@@ -145,47 +247,6 @@ fn is_blockhash_expired(
     current_block_height: BlockHeight,
 ) -> bool {
     current_block_height.saturating_sub(transaction_block_height) > MAX_BLOCKHASH_AGE_IN_BLOCKS
-}
-
-/// Resubmit transactions that have been marked for resubmission by
-/// [`finalize_transactions`].
-pub async fn resubmit_transactions<R: CanisterRuntime>(runtime: R) {
-    let _guard = match TimerGuard::new(TaskType::ResubmitTransactions) {
-        Ok(guard) => guard,
-        Err(_) => return,
-    };
-
-    let to_resubmit: Vec<_> = read_state(|state| {
-        state
-            .transactions_to_resubmit()
-            .iter()
-            .map(|(sig, tx)| {
-                (
-                    *sig,
-                    tx.message.clone(),
-                    tx.signers
-                        .iter()
-                        .map(Signer::derivation_path)
-                        .collect::<Vec<DerivationPath>>(),
-                )
-            })
-            .collect()
-    });
-    if to_resubmit.is_empty() {
-        return;
-    }
-
-    let more_to_process = to_resubmit.len() > MAX_CONCURRENT_RPC_CALLS;
-    let reschedule = scopeguard::guard(runtime.clone(), |runtime| {
-        runtime.set_timer(Duration::ZERO, resubmit_transactions);
-    });
-
-    resubmit_expired_transactions(&runtime, to_resubmit).await;
-
-    if !more_to_process {
-        // All work fits in this round
-        scopeguard::ScopeGuard::into_inner(reschedule);
-    }
 }
 
 /// Result of checking transaction statuses.
@@ -196,7 +257,7 @@ struct TransactionStatuses {
     succeeded: BTreeSet<Signature>,
     /// Transactions that finalized with an on-chain error.
     errored: BTreeMap<Signature, String>,
-    /// Transactions with no on-chain status (safe to resubmit if expired).
+    /// Transactions with no on-chain status.
     not_found: BTreeSet<Signature>,
 }
 
@@ -250,80 +311,4 @@ async fn check_transaction_statuses<R: CanisterRuntime>(
     }
 
     result
-}
-
-async fn resubmit_expired_transactions<R: CanisterRuntime>(
-    runtime: &R,
-    to_resubmit: Vec<(Signature, VersionedMessage, Vec<DerivationPath>)>,
-) {
-    let block = match get_recent_block(runtime).await {
-        Ok(block) => block,
-        Err(e) => {
-            log!(Priority::Info, "Failed to get recent blockhash: {e}");
-            return;
-        }
-    };
-
-    futures::future::join_all(to_resubmit.into_iter().take(MAX_CONCURRENT_RPC_CALLS).map(
-        async |(old_signature, message, derivation_paths)| {
-            match try_resubmit_transaction(runtime, old_signature, message, derivation_paths, block)
-                .await
-            {
-                Ok(new_sig) => log!(
-                    Priority::Info,
-                    "Resubmitted transaction {old_signature} as {new_sig}"
-                ),
-                Err(e) => log!(
-                    Priority::Info,
-                    "Failed to resubmit transaction {old_signature}: {e}"
-                ),
-            }
-        },
-    ))
-    .await;
-}
-
-async fn try_resubmit_transaction<R: CanisterRuntime>(
-    runtime: &R,
-    old_signature: Signature,
-    versioned_message: VersionedMessage,
-    derivation_paths: Vec<DerivationPath>,
-    block: Block,
-) -> Result<Signature, ResubmitError> {
-    let VersionedMessage::Legacy(mut message) = versioned_message;
-    message.recent_blockhash = block.blockhash;
-
-    let mut transaction = Transaction::new_unsigned(message);
-    transaction.signatures = sign_bytes(
-        derivation_paths,
-        &runtime.signer(),
-        transaction.message_data(),
-    )
-    .await?;
-
-    let new_signature = transaction.signatures[0];
-
-    mutate_state(|state| {
-        process_event(
-            state,
-            EventType::ResubmittedTransaction {
-                old_signature,
-                new_signature,
-                new_block_height: block.block_height,
-            },
-            runtime,
-        )
-    });
-
-    submit_transaction(runtime, transaction).await?;
-
-    Ok(new_signature)
-}
-
-#[derive(Debug, Error)]
-enum ResubmitError {
-    #[error("failed to submit new transaction: {0}")]
-    Submit(#[from] SubmitTransactionError),
-    #[error("failed to sign transaction: {0}")]
-    Signing(#[from] SignCallError),
 }

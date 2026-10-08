@@ -6,8 +6,8 @@ use super::{
 };
 use crate::{
     constants::{
-        GET_BALANCE_CYCLES, GET_RECENT_BLOCK_MAX_TRIES, GET_SIGNATURE_STATUSES_CYCLES,
-        GET_TRANSACTION_CYCLES, MAX_HTTP_OUTCALL_RESPONSE_BYTES,
+        GET_ACCOUNT_INFO_CYCLES, GET_BALANCE_CYCLES, GET_RECENT_BLOCK_MAX_TRIES,
+        GET_SIGNATURE_STATUSES_CYCLES, GET_TRANSACTION_CYCLES, MAX_HTTP_OUTCALL_RESPONSE_BYTES,
     },
     runtime::CanisterRuntime,
     signer::SchnorrSigner,
@@ -32,10 +32,11 @@ use icrc_ledger_types::{
 use mockall::{mock, predicate::eq};
 use serde::de::DeserializeOwned;
 use sol_rpc_types::{
-    CommitmentLevel, ConfirmedBlock, ConsensusStrategy, GetBalanceParams, GetBlockParams,
-    GetSignatureStatusesParams, GetSlotParams, GetSlotRpcConfig, GetTransactionEncoding,
-    GetTransactionParams, Lamport, MultiRpcResult, RpcConfig, RpcResult, RpcSources,
-    SendTransactionParams, Slot, SolanaCluster, TransactionDetails, TransactionStatus,
+    AccountInfo, CommitmentLevel, ConfirmedBlock, ConsensusStrategy, GetAccountInfoEncoding,
+    GetAccountInfoParams, GetBalanceParams, GetBlockParams, GetSignatureStatusesParams,
+    GetSlotParams, GetSlotRpcConfig, GetTransactionEncoding, GetTransactionParams, Lamport,
+    MultiRpcResult, RpcConfig, RpcResult, RpcSources, SendTransactionParams, Slot, SolanaCluster,
+    TransactionDetails, TransactionStatus,
 };
 use solana_address::Address;
 use solana_transaction::Transaction;
@@ -67,7 +68,7 @@ pub struct TestCanisterRuntime {
     msg_cycles_accepted: Arc<Mutex<Vec<u128>>>,
     msg_cycles_available: Stubs<u128>,
     msg_cycles_refunded: Stubs<u128>,
-    set_timer_call_count: Arc<Mutex<usize>>,
+    set_timer_delays: Arc<Mutex<Vec<Duration>>>,
     schnorr_public_key_results: Stubs<Result<SchnorrPublicKeyResult, CallError>>,
     schnorr_public_key_call_count: Arc<Mutex<usize>>,
 }
@@ -143,14 +144,62 @@ impl TestCanisterRuntime {
         self.expect_once(get_signature_statuses_call(&signatures), response.into())
     }
 
-    /// Expects one `sendTransaction` call whose transaction carries `transaction_signature`
-    /// as its first signature, i.e. was signed by the fee payer with it.
+    pub fn expect_get_account_info(
+        self,
+        address: Address,
+        response: impl Into<CallResponse<MultiRpcResult<Option<AccountInfo>>>>,
+    ) -> Self {
+        self.expect_once(get_account_info_call(address), response.into())
+    }
+
+    /// Expects one `sendTransaction` call with the providers' preflight simulation whose
+    /// transaction carries `transaction_signature` as its first signature, i.e. was signed by
+    /// the fee payer with it.
     pub fn expect_send_transaction(
         self,
         transaction_signature: solana_signature::Signature,
         response: impl Into<CallResponse<MultiRpcResult<sol_rpc_types::Signature>>>,
     ) -> Self {
-        let response = response.into().encode();
+        self.expect_send_transaction_signed_with(transaction_signature, None, response.into())
+    }
+
+    /// Expects one `sendTransaction` call skipping the providers' preflight simulation whose
+    /// transaction carries `transaction_signature` as its first signature.
+    pub fn expect_send_transaction_skipping_preflight(
+        self,
+        transaction_signature: solana_signature::Signature,
+        response: impl Into<CallResponse<MultiRpcResult<sol_rpc_types::Signature>>>,
+    ) -> Self {
+        self.expect_send_transaction_signed_with(transaction_signature, Some(true), response.into())
+    }
+
+    /// Expects one `sendTransaction` call skipping the providers' preflight simulation that
+    /// sends exactly `transaction`.
+    pub fn expect_send_exact_transaction_skipping_preflight(
+        self,
+        transaction: Transaction,
+        response: impl Into<CallResponse<MultiRpcResult<sol_rpc_types::Signature>>>,
+    ) -> Self {
+        let mut params = SendTransactionParams::try_from(transaction)
+            .expect("BUG: failed to serialize the expected transaction");
+        params.skip_preflight = Some(true);
+        self.expect_once(
+            sol_rpc_call(
+                "sendTransaction",
+                (rpc_sources(), Some(rpc_config()), params),
+                SOL_RPC_DEFAULT_REQUEST_CYCLES,
+            ),
+            response.into(),
+        )
+    }
+
+    fn expect_send_transaction_signed_with(
+        self,
+        transaction_signature: solana_signature::Signature,
+        skip_preflight: Option<bool>,
+        response: CallResponse<MultiRpcResult<sol_rpc_types::Signature>>,
+    ) -> Self {
+        let response = response.encode();
         self.inter_canister_calls
             .lock()
             .unwrap()
@@ -159,7 +208,10 @@ impl TestCanisterRuntime {
                 *id == sol_rpc_canister_id()
                     && method == "sendTransaction"
                     && *cycles == SOL_RPC_DEFAULT_REQUEST_CYCLES
-                    && sent_transaction_signature(args) == Some(transaction_signature)
+                    && sent_transaction(args).is_some_and(|params| {
+                        params.skip_preflight == skip_preflight
+                            && first_signature(&params) == Some(transaction_signature)
+                    })
             })
             .times(1)
             .return_once(move |_, _, _, _| response);
@@ -208,8 +260,12 @@ impl TestCanisterRuntime {
         self
     }
 
-    pub fn with_increasing_time(mut self) -> Self {
-        self.times = (0..).into();
+    pub fn with_increasing_time(self) -> Self {
+        self.with_increasing_time_from(0)
+    }
+
+    pub fn with_increasing_time_from(mut self, start: u64) -> Self {
+        self.times = (start..).into();
         self
     }
 
@@ -250,7 +306,11 @@ impl TestCanisterRuntime {
     }
 
     pub(crate) fn set_timer_call_count(&self) -> usize {
-        *self.set_timer_call_count.lock().unwrap()
+        self.set_timer_delays().len()
+    }
+
+    pub(crate) fn set_timer_delays(&self) -> Vec<Duration> {
+        self.set_timer_delays.lock().unwrap().clone()
     }
 
     pub(crate) fn schnorr_public_key_call_count(&self) -> usize {
@@ -324,13 +384,13 @@ impl CanisterRuntime for TestCanisterRuntime {
         self.msg_cycles_refunded.next()
     }
 
-    fn set_timer<F, Fut>(&self, _delay: Duration, _f: F) -> ic_cdk_timers::TimerId
+    fn set_timer<F, Fut>(&self, delay: Duration, _f: F) -> ic_cdk_timers::TimerId
     where
         Self: Sized,
         F: FnOnce(Self) -> Fut + 'static,
         Fut: Future<Output = ()> + 'static,
     {
-        *self.set_timer_call_count.lock().unwrap() += 1;
+        self.set_timer_delays.lock().unwrap().push(delay);
         Default::default()
     }
 
@@ -582,8 +642,11 @@ fn get_transaction_call(signature: solana_signature::Signature) -> UpdateCall {
 }
 
 fn get_signature_statuses_call(signatures: &[solana_signature::Signature]) -> UpdateCall {
-    let params = GetSignatureStatusesParams::try_from(signatures.iter().collect::<Vec<_>>())
-        .expect("BUG: too many signatures for one getSignatureStatuses call");
+    let params = GetSignatureStatusesParams {
+        search_transaction_history: Some(true),
+        ..GetSignatureStatusesParams::try_from(signatures.iter().collect::<Vec<_>>())
+            .expect("BUG: too many signatures for one getSignatureStatuses call")
+    };
     sol_rpc_call(
         "getSignatureStatuses",
         (
@@ -595,14 +658,33 @@ fn get_signature_statuses_call(signatures: &[solana_signature::Signature]) -> Up
     )
 }
 
-/// The first signature of the transaction sent in the given `sendTransaction` arguments,
-/// i.e. the fee payer's signature identifying the submitted transaction.
-fn sent_transaction_signature(args: &CandidArgs) -> Option<solana_signature::Signature> {
+fn get_account_info_call(address: Address) -> UpdateCall {
+    sol_rpc_call(
+        "getAccountInfo",
+        (
+            rpc_sources(),
+            Some(rpc_config()),
+            GetAccountInfoParams {
+                commitment: Some(CommitmentLevel::Finalized),
+                encoding: Some(GetAccountInfoEncoding::Base64),
+                ..GetAccountInfoParams::from_pubkey(address)
+            },
+        ),
+        GET_ACCOUNT_INFO_CYCLES,
+    )
+}
+
+/// The parameters of the given `sendTransaction` arguments, if they are sent with the
+/// minter's RPC sources and configuration.
+fn sent_transaction(args: &CandidArgs) -> Option<SendTransactionParams> {
     let (sources, config, params): (RpcSources, Option<RpcConfig>, SendTransactionParams) =
         args.decode().ok()?;
-    if sources != rpc_sources() || config != Some(rpc_config()) {
-        return None;
-    }
+    (sources == rpc_sources() && config == Some(rpc_config())).then_some(params)
+}
+
+/// The first signature of the sent transaction, i.e. the fee payer's signature identifying
+/// the submitted transaction.
+fn first_signature(params: &SendTransactionParams) -> Option<solana_signature::Signature> {
     let transaction = STANDARD.decode(params.get_transaction()).ok()?;
     let transaction: Transaction = bincode::deserialize(&transaction).ok()?;
     transaction.signatures.first().copied()

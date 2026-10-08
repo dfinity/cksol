@@ -134,10 +134,10 @@ async fn submit_sweep_transaction<R: CanisterRuntime>(
                 signature,
                 message: transaction.message.clone().into(),
                 signers,
-                purpose: TransactionPurpose::SweepDeposits {
+                purpose: TransactionPurpose::SweepDeposit {
                     deposit_ids: sweep.deposits().keys().copied().collect(),
+                    block_height: block.block_height,
                 },
-                block_height: block.block_height,
             },
             runtime,
         )

@@ -6,6 +6,7 @@ use crate::{
         Sweep, SweepSettlementError, audit::process_event, event::EventType, mutate_state,
         read_state,
     },
+    storage::{FailedCreditReason, record_failed_credit_attempt},
 };
 use canlog::log;
 use cksol_types_internal::log::Priority;
@@ -53,9 +54,18 @@ pub async fn credit_finalized_sweeps<R: CanisterRuntime>(runtime: &R) -> bool {
             Ok(Some(outcome)) => outcome,
             Ok(None) => {
                 log!(
-                    Priority::Info,
+                    Priority::Error,
                     "Finalized sweep {signature} was not returned by getTransaction, retrying later"
                 );
+                record_failed_credit_attempt(FailedCreditReason::NotFound);
+                continue;
+            }
+            Err(e) if e.is_response_untrustworthy() => {
+                log!(
+                    Priority::Error,
+                    "Failed to fetch finalized sweep {signature}: {e}, retrying later"
+                );
+                record_failed_credit_attempt(FailedCreditReason::InvalidResponse);
                 continue;
             }
             Err(e) => {
@@ -63,10 +73,11 @@ pub async fn credit_finalized_sweeps<R: CanisterRuntime>(runtime: &R) -> bool {
                     Priority::Info,
                     "Failed to fetch finalized sweep {signature}: {e}, retrying later"
                 );
+                record_failed_credit_attempt(FailedCreditReason::RpcError);
                 continue;
             }
         };
-        let event = match sweep.settle(&outcome) {
+        let event = match sweep.settle(&outcome.transaction, outcome.meta.as_ref()) {
             Ok(settled) => EventType::CreditedSweep {
                 signature,
                 amount_received: settled.amount_received(),
@@ -74,9 +85,10 @@ pub async fn credit_finalized_sweeps<R: CanisterRuntime>(runtime: &R) -> bool {
             },
             Err(SweepSettlementError::Unreadable(e)) => {
                 log!(
-                    Priority::Info,
+                    Priority::Error,
                     "Could not read the outcome of sweep {signature}: {e}, retrying later"
                 );
+                record_failed_credit_attempt(FailedCreditReason::Unreadable);
                 continue;
             }
             Err(SweepSettlementError::Mismatch(e)) => {
@@ -84,6 +96,7 @@ pub async fn credit_finalized_sweeps<R: CanisterRuntime>(runtime: &R) -> bool {
                     Priority::Error,
                     "Quarantining the deposits of sweep {signature}: {e}"
                 );
+                record_failed_credit_attempt(FailedCreditReason::Mismatch);
                 EventType::QuarantinedSweep { signature }
             }
         };

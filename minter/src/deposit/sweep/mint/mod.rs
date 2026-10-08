@@ -8,6 +8,7 @@ use crate::{
         PendingMint, State, TaskType, audit::process_event, event::EventType, mutate_state,
         read_state,
     },
+    storage::{FailedMintReason, record_failed_mint_attempt},
 };
 use canlog::log;
 use cksol_types::{DepositSolId, Memo, MintMemo};
@@ -84,11 +85,13 @@ async fn process_pending_mint<R: CanisterRuntime>(
             Priority::Error,
             "Quarantining deposit {deposit_id}: its pending mint is older than the deduplication window of the ledger"
         );
+        record_failed_mint_attempt(FailedMintReason::Expired);
         record_quarantined_pending_mint(runtime, deposit_id);
         return;
     }
 
     let quarantine_unless_defused = scopeguard::guard(deposit_id, |deposit_id| {
+        record_failed_mint_attempt(FailedMintReason::UnknownOutcome);
         record_quarantined_pending_mint(runtime, deposit_id);
     });
 
@@ -118,34 +121,49 @@ async fn process_pending_mint<R: CanisterRuntime>(
             ScopeGuard::into_inner(quarantine_unless_defused);
         }
         Ok(Err(TransferError::TooOld)) => {
+            ScopeGuard::into_inner(quarantine_unless_defused);
+            record_failed_mint_attempt(FailedMintReason::Expired);
             log!(
                 Priority::Error,
                 "Quarantining deposit {deposit_id}: the ledger rejected its mint as outside the deduplication window"
             );
+            record_quarantined_pending_mint(runtime, deposit_id);
         }
         Ok(Err(
             rejection @ (TransferError::BadFee { .. }
             | TransferError::BadBurn { .. }
             | TransferError::InsufficientFunds { .. }),
         )) => {
+            ScopeGuard::into_inner(quarantine_unless_defused);
+            record_failed_mint_attempt(FailedMintReason::Rejected);
             log!(
                 Priority::Error,
                 "Quarantining deposit {deposit_id}: the ledger definitively rejected its mint from the minting account: {rejection:?}"
             );
+            record_quarantined_pending_mint(runtime, deposit_id);
         }
         Ok(Err(
-            transient @ (TransferError::TemporarilyUnavailable
-            | TransferError::GenericError { .. }
-            | TransferError::CreatedInFuture { .. }),
+            transient
+            @ (TransferError::TemporarilyUnavailable | TransferError::GenericError { .. }),
         )) => {
             ScopeGuard::into_inner(quarantine_unless_defused);
+            record_failed_mint_attempt(FailedMintReason::LedgerError);
             log!(
                 Priority::Info,
                 "Failed to mint deposit {deposit_id}, retrying on the next round: {transient:?}"
             );
         }
+        Ok(Err(clock_skew @ TransferError::CreatedInFuture { .. })) => {
+            ScopeGuard::into_inner(quarantine_unless_defused);
+            record_failed_mint_attempt(FailedMintReason::CreatedInFuture);
+            log!(
+                Priority::Info,
+                "Failed to mint deposit {deposit_id}, retrying on the next round: {clock_skew:?}"
+            );
+        }
         Err(ic_error) => {
             ScopeGuard::into_inner(quarantine_unless_defused);
+            record_failed_mint_attempt(FailedMintReason::CallError);
             log!(
                 Priority::Info,
                 "Failed to mint deposit {deposit_id}, retrying on the next round: {ic_error}"

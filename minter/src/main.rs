@@ -6,10 +6,7 @@ use cksol_minter::{
         PROCESS_PENDING_MINTS_DELAY, SWEEP_DEPOSITS_DELAY, process_pending_mints,
         sweep_queued_deposits,
     },
-    monitor::{
-        FINALIZE_TRANSACTIONS_DELAY, RESUBMIT_TRANSACTIONS_DELAY, finalize_transactions,
-        resubmit_transactions,
-    },
+    monitor::{FINALIZE_TRANSACTIONS_DELAY, finalize_transactions},
     runtime::IcCanisterRuntime,
     state::read_state,
     withdraw::{WITHDRAWAL_PROCESSING_DELAY, process_pending_withdrawals},
@@ -132,16 +129,19 @@ fn get_events(
                 message,
                 signers,
                 purpose,
-                block_height,
             } => {
                 let purpose = match purpose {
-                    TransactionPurpose::WithdrawSol { burn_indices } => {
-                        event::TransactionPurpose::WithdrawSol {
+                    TransactionPurpose::SweepDeposit {
+                        deposit_ids,
+                        block_height,
+                    } => event::TransactionPurpose::SweepDeposit {
+                        deposit_ids,
+                        block_height: block_height.get(),
+                    },
+                    TransactionPurpose::Withdrawal { burn_indices } => {
+                        event::TransactionPurpose::Withdrawal {
                             burn_indices: burn_indices.iter().map(|idx| *idx.get()).collect(),
                         }
-                    }
-                    TransactionPurpose::SweepDeposits { deposit_ids } => {
-                        event::TransactionPurpose::SweepDeposits { deposit_ids }
                     }
                 };
                 event::EventType::SubmittedTransaction {
@@ -162,18 +162,8 @@ fn get_events(
                         })
                         .collect(),
                     purpose,
-                    block_height: block_height.get(),
                 }
             }
-            EventType::ResubmittedTransaction {
-                old_signature,
-                new_signature,
-                new_block_height,
-            } => event::EventType::ResubmittedTransaction {
-                old_signature: old_signature.into(),
-                new_signature: new_signature.into(),
-                new_block_height: new_block_height.get(),
-            },
             EventType::SucceededTransaction { signature } => {
                 event::EventType::SucceededTransaction {
                     signature: signature.into(),
@@ -231,6 +221,15 @@ fn get_events(
             EventType::QuarantinedPendingMint { deposit_id } => {
                 event::EventType::QuarantinedPendingMint { deposit_id }
             }
+            EventType::CreatedWithdrawalTransaction {
+                burn_indices,
+                nonce_account,
+                nonce_value,
+            } => event::EventType::CreatedWithdrawalTransaction {
+                burn_indices: burn_indices.iter().map(|idx| *idx.get()).collect(),
+                nonce_account: nonce_account.into(),
+                nonce_value: nonce_value.into(),
+            },
         }
     }
 
@@ -398,9 +397,6 @@ fn setup_timers() {
     });
     ic_cdk_timers::set_timer_interval(FINALIZE_TRANSACTIONS_DELAY, async || {
         finalize_transactions(IcCanisterRuntime::new()).await;
-    });
-    ic_cdk_timers::set_timer_interval(RESUBMIT_TRANSACTIONS_DELAY, async || {
-        resubmit_transactions(IcCanisterRuntime::new()).await;
     });
 }
 

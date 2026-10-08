@@ -1,22 +1,27 @@
 use crate::{
     constants::GET_RECENT_BLOCK_MAX_TRIES,
     rpc::{
-        Block, BlockHeight, GetBalanceError, GetRecentBlockError, GetTransactionError,
-        SubmitTransactionError, get_balance, get_recent_block, get_transaction, submit_transaction,
+        Block, BlockHeight, GetBalanceError, GetNonceAccountError, GetRecentBlockError,
+        GetTransactionError, NonceAccount, SubmitTransactionError, get_balance, get_nonce_account,
+        get_recent_block, get_transaction, submit_transaction,
+        submit_transaction_skipping_preflight,
     },
     test_fixtures::{
-        confirmed_block, confirmed_block_at_height,
+        MINTER_ADDRESS, confirmed_block, confirmed_block_at_height,
         deposit::{
             DEPOSIT_ADDRESS, legacy_deposit_transaction, legacy_deposit_transaction_signature,
         },
-        init_state,
+        durable_nonce, fetched, init_state, legacy_nonce_account_info, nonce_account_address,
+        nonce_account_info,
         runtime::TestCanisterRuntime,
+        uninitialized_nonce_account_info,
     },
 };
 use assert_matches::assert_matches;
 use ic_canister_runtime::IcError;
 use sol_rpc_types::{HttpOutcallError, RpcError, RpcSource, SupportedRpcProviderId};
 use solana_transaction::{Message, Transaction};
+use solana_transaction_status_client_types::{EncodedTransaction, TransactionBinaryEncoding};
 
 mod get_balance_tests {
     use super::*;
@@ -157,6 +162,90 @@ mod get_transaction_tests {
     }
 
     #[tokio::test]
+    async fn should_fail_if_returned_transaction_has_another_signature() {
+        init_state();
+
+        let queried = solana_signature::Signature::from([7; 64]);
+
+        let runtime = TestCanisterRuntime::new().expect_get_transaction(
+            queried,
+            MultiRpcResult::Consistent(Ok(Some(legacy_deposit_transaction().try_into().unwrap()))),
+        );
+
+        let result = get_transaction(&runtime, queried).await;
+
+        assert_eq!(
+            result,
+            Err(GetTransactionError::SignatureMismatch {
+                queried,
+                returned: Some(Box::new(legacy_deposit_transaction_signature())),
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn should_fail_if_returned_transaction_cannot_be_decoded() {
+        init_state();
+
+        let mut transaction = legacy_deposit_transaction();
+        transaction.transaction.transaction = EncodedTransaction::Binary(
+            "not a transaction".to_string(),
+            TransactionBinaryEncoding::Base64,
+        );
+
+        let runtime = TestCanisterRuntime::new().expect_get_transaction(
+            legacy_deposit_transaction_signature(),
+            MultiRpcResult::Consistent(Ok(Some(transaction.try_into().unwrap()))),
+        );
+
+        let result = get_transaction(&runtime, legacy_deposit_transaction_signature()).await;
+
+        assert_eq!(
+            result,
+            Err(GetTransactionError::UndecodableTransaction {
+                queried: legacy_deposit_transaction_signature()
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn should_fail_if_the_signature_does_not_sign_the_returned_message() {
+        init_state();
+
+        let mut transaction = legacy_deposit_transaction();
+        let mut decoded = transaction
+            .transaction
+            .transaction
+            .decode()
+            .expect("BUG: the fixture transaction should decode");
+        let solana_message::VersionedMessage::Legacy(message) = &mut decoded.message else {
+            panic!("BUG: the fixture is a legacy transaction");
+        };
+        message.recent_blockhash = solana_hash::Hash::new_from_array([0x5A; 32]);
+        transaction.transaction.transaction = EncodedTransaction::Binary(
+            base64::Engine::encode(
+                &base64::engine::general_purpose::STANDARD,
+                bincode::serialize(&decoded).expect("BUG: the transaction should serialize"),
+            ),
+            TransactionBinaryEncoding::Base64,
+        );
+
+        let runtime = TestCanisterRuntime::new().expect_get_transaction(
+            legacy_deposit_transaction_signature(),
+            MultiRpcResult::Consistent(Ok(Some(transaction.try_into().unwrap()))),
+        );
+
+        let result = get_transaction(&runtime, legacy_deposit_transaction_signature()).await;
+
+        assert_eq!(
+            result,
+            Err(GetTransactionError::InvalidSignature {
+                queried: legacy_deposit_transaction_signature()
+            })
+        );
+    }
+
+    #[tokio::test]
     async fn should_return_transaction() {
         init_state();
 
@@ -167,7 +256,7 @@ mod get_transaction_tests {
 
         let result = get_transaction(&runtime, legacy_deposit_transaction_signature()).await;
 
-        assert_eq!(result, Ok(Some(legacy_deposit_transaction())))
+        assert_eq!(result, Ok(Some(fetched(legacy_deposit_transaction()))))
     }
 }
 
@@ -251,6 +340,32 @@ mod submit_transaction_tests {
         assert_eq!(result, Err(SubmitTransactionError::InconsistentRpcResults));
     }
 
+    #[tokio::test]
+    async fn should_keep_the_preflight_simulation() {
+        init_state();
+        let runtime = TestCanisterRuntime::new().expect_send_transaction(
+            transaction_signature(),
+            SendTransactionResult::Consistent(Ok(signature())),
+        );
+
+        let result = submit_transaction(&runtime, transaction()).await;
+
+        assert_eq!(result, Ok(signature().into()));
+    }
+
+    #[tokio::test]
+    async fn should_skip_the_preflight_simulation_when_requested() {
+        init_state();
+        let runtime = TestCanisterRuntime::new().expect_send_transaction_skipping_preflight(
+            transaction_signature(),
+            SendTransactionResult::Consistent(Ok(signature())),
+        );
+
+        let result = submit_transaction_skipping_preflight(&runtime, transaction()).await;
+
+        assert_eq!(result, Ok(signature().into()));
+    }
+
     fn transaction() -> Transaction {
         let message = Message::new(&[], None);
         Transaction {
@@ -265,6 +380,155 @@ mod submit_transaction_tests {
 
     fn signature() -> sol_rpc_types::Signature {
         transaction_signature().into()
+    }
+}
+
+mod get_nonce_account_tests {
+    use super::*;
+    use sol_rpc_types::{AccountData, AccountEncoding};
+
+    type GetAccountInfoResult = sol_rpc_types::MultiRpcResult<Option<sol_rpc_types::AccountInfo>>;
+
+    #[tokio::test]
+    async fn should_return_the_authority_and_nonce_value() {
+        init_state();
+
+        let runtime = TestCanisterRuntime::new().expect_get_account_info(
+            nonce_account_address(),
+            GetAccountInfoResult::Consistent(Ok(Some(nonce_account_info(MINTER_ADDRESS, 1)))),
+        );
+
+        let result = get_nonce_account(&runtime, nonce_account_address()).await;
+
+        assert_eq!(
+            result,
+            Ok(NonceAccount {
+                authority: MINTER_ADDRESS,
+                nonce: durable_nonce(1),
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn should_fail_if_account_not_found() {
+        init_state();
+
+        let runtime = TestCanisterRuntime::new().expect_get_account_info(
+            nonce_account_address(),
+            GetAccountInfoResult::Consistent(Ok(None)),
+        );
+
+        let result = get_nonce_account(&runtime, nonce_account_address()).await;
+
+        assert_eq!(result, Err(GetNonceAccountError::AccountNotFound));
+    }
+
+    #[tokio::test]
+    async fn should_fail_if_call_fails_or_results_are_wrong() {
+        init_state();
+        let rpc_error = RpcError::ValidationError("Error 1".to_string());
+        let inconsistent = vec![(
+            RpcSource::Supported(SupportedRpcProviderId::AnkrMainnet),
+            Err(rpc_error.clone()),
+        )];
+
+        for (runtime, expected) in [
+            (
+                TestCanisterRuntime::new()
+                    .expect_get_account_info(nonce_account_address(), IcError::CallPerformFailed),
+                GetNonceAccountError::IcError(IcError::CallPerformFailed),
+            ),
+            (
+                TestCanisterRuntime::new().expect_get_account_info(
+                    nonce_account_address(),
+                    GetAccountInfoResult::Consistent(Err(rpc_error.clone())),
+                ),
+                GetNonceAccountError::RpcError(rpc_error.clone()),
+            ),
+            (
+                TestCanisterRuntime::new().expect_get_account_info(
+                    nonce_account_address(),
+                    GetAccountInfoResult::Inconsistent(inconsistent.clone()),
+                ),
+                GetNonceAccountError::InconsistentRpcResults,
+            ),
+        ] {
+            let result = get_nonce_account(&runtime, nonce_account_address()).await;
+
+            assert_eq!(result, Err(expected));
+        }
+    }
+
+    #[tokio::test]
+    async fn should_fail_if_account_is_not_a_non_executable_system_program_account() {
+        init_state();
+
+        let foreign_owner_account = sol_rpc_types::AccountInfo {
+            owner: MINTER_ADDRESS.to_string(),
+            ..nonce_account_info(MINTER_ADDRESS, 1)
+        };
+        let executable_account = sol_rpc_types::AccountInfo {
+            executable: true,
+            ..nonce_account_info(MINTER_ADDRESS, 1)
+        };
+
+        for account in [foreign_owner_account, executable_account] {
+            let runtime = TestCanisterRuntime::new().expect_get_account_info(
+                nonce_account_address(),
+                GetAccountInfoResult::Consistent(Ok(Some(account))),
+            );
+
+            let result = get_nonce_account(&runtime, nonce_account_address()).await;
+
+            assert_matches!(
+                result,
+                Err(GetNonceAccountError::UnexpectedAccountMetadata { .. })
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn should_fail_if_account_is_a_legacy_nonce_account() {
+        init_state();
+
+        let runtime = TestCanisterRuntime::new().expect_get_account_info(
+            nonce_account_address(),
+            GetAccountInfoResult::Consistent(Ok(Some(legacy_nonce_account_info(MINTER_ADDRESS)))),
+        );
+
+        let result = get_nonce_account(&runtime, nonce_account_address()).await;
+
+        assert_eq!(result, Err(GetNonceAccountError::LegacyNonceAccount));
+    }
+
+    #[tokio::test]
+    async fn should_fail_if_account_is_not_an_initialized_nonce_account() {
+        init_state();
+
+        let account_with_data = |data: &str| sol_rpc_types::AccountInfo {
+            data: AccountData::Binary(data.to_string(), AccountEncoding::Base64),
+            ..nonce_account_info(MINTER_ADDRESS, 1)
+        };
+        let invalid_base64_account = account_with_data("not base64!");
+        let invalid_nonce_state_account = account_with_data("AAAA");
+
+        for account in [
+            uninitialized_nonce_account_info(),
+            invalid_base64_account,
+            invalid_nonce_state_account,
+        ] {
+            let runtime = TestCanisterRuntime::new().expect_get_account_info(
+                nonce_account_address(),
+                GetAccountInfoResult::Consistent(Ok(Some(account))),
+            );
+
+            let result = get_nonce_account(&runtime, nonce_account_address()).await;
+
+            assert_matches!(
+                result,
+                Err(GetNonceAccountError::NotAnInitializedNonceAccount(_))
+            );
+        }
     }
 }
 

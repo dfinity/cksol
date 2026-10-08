@@ -8,7 +8,7 @@ use cksol_types::{
 };
 use cksol_types_internal::{
     MinterArg,
-    event::{Event, GetEventsResult},
+    event::{Event, EventType, GetEventsResult, VersionedTransactionMessage},
     log::Priority,
 };
 use ic_canister_runtime::Runtime;
@@ -28,6 +28,8 @@ use pocket_ic::{PocketIcBuilder, RejectResponse, nonblocking::PocketIc};
 use serde::de::DeserializeOwned;
 use sol_rpc_client::SolRpcClient;
 use sol_rpc_types::{Lamport, RpcAccess};
+use solana_address::address;
+use solana_transaction::Transaction;
 use std::{default::Default, env::var, fs, ops::Deref, path::PathBuf, time::Duration, vec};
 
 pub mod events;
@@ -127,7 +129,8 @@ impl Setup {
     pub const DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT: Lamport = 2_000_000; // 0.002 SOL
     pub const DEFAULT_CALLER: Principal =
         Principal::from_slice(&[0xff, 0xff, 0xff, 0xff, 0xff, 0xe0, 0x0, 0x3, 0x1, 0x1]);
-    pub const DEFAULT_NONCE_ACCOUNT: &'static str = "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx";
+    pub const DEFAULT_NONCE_ACCOUNT: solana_address::Address =
+        address!("US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx");
 
     pub async fn new(
         make_live: PocketIcMode,
@@ -341,6 +344,17 @@ impl Setup {
         self.env.as_ref().unwrap().advance_time(duration).await
     }
 
+    /// Stops the automatic progress of a live instance, so that its time and timers
+    /// stand still until [`Self::resume_progress`] is called.
+    pub async fn stop_progress(&self) {
+        self.env.as_ref().unwrap().stop_progress().await
+    }
+
+    /// Resumes the automatic progress of a live instance stopped by [`Self::stop_progress`].
+    pub async fn resume_progress(&self) {
+        self.env.as_ref().unwrap().auto_progress().await;
+    }
+
     /// Advances time and then lets the timers that became due complete their round.
     ///
     /// An instance that produces blocks on its own only needs wall-clock time for the
@@ -539,6 +553,26 @@ impl CkSolMinter<'_> {
 
     pub async fn assert_that_events(&self) -> MinterEventAssert {
         MinterEventAssert::new(self.get_all_events().await)
+    }
+
+    pub async fn signed_transaction(&self, signature: &cksol_types::Signature) -> Transaction {
+        let message = self
+            .get_all_events()
+            .await
+            .into_iter()
+            .find_map(|event| match event.payload {
+                EventType::SubmittedTransaction {
+                    signature: submitted,
+                    transaction: VersionedTransactionMessage::Legacy(message),
+                    ..
+                } if submitted == *signature => Some(message),
+                _ => None,
+            })
+            .expect("the transaction should have been submitted");
+        Transaction {
+            signatures: vec![signature.to_string().parse().expect("valid signature")],
+            message: bincode::deserialize(&message).expect("valid legacy message"),
+        }
     }
 
     pub async fn get_all_events(&self) -> Vec<Event> {

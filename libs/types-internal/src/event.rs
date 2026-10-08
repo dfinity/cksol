@@ -4,7 +4,7 @@ use crate::{InitArgs, UpgradeArgs};
 use candid::CandidType;
 use icrc_ledger_types::icrc1::account::Account;
 use serde::Deserialize;
-use sol_rpc_types::{Lamport, Pubkey as Address, Signature};
+use sol_rpc_types::{Hash, Lamport, Pubkey as Address, Signature};
 
 /// A minter event that can be serialized to Candid.
 #[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]
@@ -44,19 +44,9 @@ pub enum EventType {
         transaction: VersionedTransactionMessage,
         /// The signers in signature order (fee payer first).
         signers: Vec<Signer>,
-        /// The purpose of this transaction.
+        /// The purpose of this transaction, with what the minter needs to
+        /// track it until it is finalized.
         purpose: TransactionPurpose,
-        /// The block height of the block whose blockhash the transaction uses.
-        block_height: u64,
-    },
-    /// A previously submitted transaction was resubmitted with a new signature.
-    ResubmittedTransaction {
-        /// The signature of the old transaction being replaced.
-        old_signature: Signature,
-        /// The signature of the new transaction.
-        new_signature: Signature,
-        /// The block height of the new blockhash used in the resubmitted transaction.
-        new_block_height: u64,
     },
     /// A previously submitted Solana transaction has been finalized successfully.
     SucceededTransaction {
@@ -70,8 +60,7 @@ pub enum EventType {
     },
     /// A previously submitted Solana transaction has an expired blockhash
     /// and a null on-chain status, meaning it will never be executed.
-    /// A withdrawal transaction is marked for resubmission;
-    /// the deposits of a sweep transaction are dropped instead.
+    /// The deposits of the expired sweep transaction are dropped.
     ExpiredTransaction {
         /// The signature of the expired Solana transaction.
         signature: Signature,
@@ -139,6 +128,17 @@ pub enum EventType {
         /// The identifier of the deposit whose pending mint was quarantined.
         deposit_id: u64,
     },
+    /// The minter bound a durable nonce account and its nonce value to the
+    /// withdrawal requests of the given burn indices, before requesting the
+    /// threshold signature. The binding determines the transaction message.
+    CreatedWithdrawalTransaction {
+        /// The ledger burn indices of the withdrawal requests served by this transaction.
+        burn_indices: Vec<u64>,
+        /// The durable nonce account bound to this transaction.
+        nonce_account: Address,
+        /// The nonce value the transaction carries in place of a recent blockhash.
+        nonce_value: Hash,
+    },
 }
 
 /// The mint enqueued for one deposit of a `CreditedSweep` event.
@@ -164,15 +164,21 @@ pub enum Signer {
 /// The purpose of a submitted Solana transaction.
 #[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]
 pub enum TransactionPurpose {
-    /// Send withdrawals to users' Solana addresses.
-    WithdrawSol {
-        /// The burn transaction indices on the ckSOL ledger.
-        burn_indices: Vec<u64>,
-    },
-    /// Sweep the deposit addresses of deposits queued by `deposit_sol` into the minter's main account.
-    SweepDeposits {
+    /// Sweep the deposit addresses of deposits queued by `deposit_sol` into
+    /// the minter's main account. The transaction uses a recent blockhash and
+    /// is dropped once the blockhash expires.
+    SweepDeposit {
         /// The ids of the swept deposits.
         deposit_ids: Vec<u64>,
+        /// The block height of the block whose blockhash the transaction uses.
+        block_height: u64,
+    },
+    /// Send withdrawals to users' Solana addresses. The transaction carries
+    /// the nonce value of a durable nonce account instead of a recent
+    /// blockhash, so it never expires.
+    Withdrawal {
+        /// The burn transaction indices on the ckSOL ledger.
+        burn_indices: Vec<u64>,
     },
 }
 

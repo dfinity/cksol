@@ -1,7 +1,8 @@
 use crate::{
     address::{MINTER_DERIVATION_PATH, account_address, derivation_path},
-    constants::RENT_EXEMPTION_THRESHOLD,
-    rpc::BlockHeight,
+    constants::{FEE_PER_SIGNATURE, RENT_EXEMPTION_THRESHOLD},
+    rpc::{BlockHeight, FetchedTransaction},
+    sol_transfer::build_batch_withdrawal_message,
     state::{
         DepositBalance, QueuedDeposit, SchnorrPublicKey, State, Sweep,
         event::{Event, EventType, VersionedMessage},
@@ -9,6 +10,7 @@ use crate::{
     },
     storage::with_event_iter,
 };
+use base64::{Engine, engine::general_purpose::STANDARD};
 use candid::Principal;
 use cksol_types::DepositSolId;
 use cksol_types_internal::{Ed25519KeyName, InitArgs, SolanaNetwork};
@@ -17,6 +19,10 @@ use ic_ed25519::{PocketIcMasterPublicKeyId, PublicKey};
 use icrc_ledger_types::icrc1::account::Account;
 use sol_rpc_types::{Lamport, MultiRpcResult};
 use solana_address::{Address, address};
+use solana_nonce::{
+    state::{Data as NonceData, DurableNonce, State as NonceState},
+    versions::Versions as NonceVersions,
+};
 use solana_transaction_status_client_types::{
     EncodedConfirmedTransactionWithStatusMeta, EncodedTransaction,
     EncodedTransactionWithStatusMeta, TransactionBinaryEncoding, UiLoadedAddresses,
@@ -175,6 +181,91 @@ pub fn confirmed_block_at_height(block_height: BlockHeight) -> sol_rpc_types::Co
     }
 }
 
+/// A successful transaction status at the `finalized` commitment level.
+pub fn finalized_status() -> sol_rpc_types::TransactionStatus {
+    sol_rpc_types::TransactionStatus {
+        slot: 0,
+        status: Ok(()),
+        err: None,
+        confirmation_status: Some(sol_rpc_types::TransactionConfirmationStatus::Finalized),
+    }
+}
+
+/// A test durable nonce account address, distinct from any deposit address.
+pub fn nonce_account_address() -> Address {
+    Address::from([0x4E; 32])
+}
+
+/// Returns the batch withdrawal message of [`MINTER_ADDRESS`] that advances
+/// `nonce_account`, carries `nonce_value` in place of a recent blockhash and
+/// performs the given transfers.
+pub fn withdrawal_batch_message(
+    nonce_account: Address,
+    nonce_value: solana_hash::Hash,
+    transfers: &[(Address, Lamport)],
+) -> solana_message::Message {
+    build_batch_withdrawal_message(&MINTER_ADDRESS, &nonce_account, nonce_value, transfers)
+        .expect("BUG: the withdrawal batch message exceeds the transaction size")
+}
+
+/// Returns the nonce value stored by [`nonce_account_info`] for the same `nonce_seed`.
+pub fn durable_nonce(nonce_seed: usize) -> solana_hash::Hash {
+    *DurableNonce::from_blockhash(&seed_hash(nonce_seed)).as_hash()
+}
+
+/// Returns a `getAccountInfo` response for an initialized durable nonce account with
+/// the given authority, storing the nonce value [`durable_nonce`] of the same `nonce_seed`.
+pub fn nonce_account_info(authority: Address, nonce_seed: usize) -> sol_rpc_types::AccountInfo {
+    nonce_account_info_in_state(NonceState::Initialized(NonceData::new(
+        authority,
+        DurableNonce::from_blockhash(&seed_hash(nonce_seed)),
+        FEE_PER_SIGNATURE,
+    )))
+}
+
+/// Returns a `getAccountInfo` response for a nonce account that has not been initialized.
+pub fn uninitialized_nonce_account_info() -> sol_rpc_types::AccountInfo {
+    nonce_account_info_in_state(NonceState::Uninitialized)
+}
+
+/// Returns a `getAccountInfo` response for an initialized nonce account in the legacy format.
+pub fn legacy_nonce_account_info(authority: Address) -> sol_rpc_types::AccountInfo {
+    nonce_account_info_in_versions(NonceVersions::Legacy(Box::new(NonceState::Initialized(
+        NonceData::new(
+            authority,
+            DurableNonce::from_blockhash(&seed_hash(1)),
+            FEE_PER_SIGNATURE,
+        ),
+    ))))
+}
+
+fn nonce_account_info_in_state(state: NonceState) -> sol_rpc_types::AccountInfo {
+    nonce_account_info_in_versions(NonceVersions::new(state))
+}
+
+fn nonce_account_info_in_versions(versions: NonceVersions) -> sol_rpc_types::AccountInfo {
+    const SYSTEM_PROGRAM_ID: &str = "11111111111111111111111111111111";
+    let data =
+        bincode::serialize(&versions).expect("BUG: serializing a nonce account should succeed");
+    sol_rpc_types::AccountInfo {
+        lamports: 1_447_680,
+        space: data.len() as u64,
+        data: sol_rpc_types::AccountData::Binary(
+            STANDARD.encode(data),
+            sol_rpc_types::AccountEncoding::Base64,
+        ),
+        owner: SYSTEM_PROGRAM_ID.to_string(),
+        executable: false,
+        rent_epoch: u64::MAX,
+    }
+}
+
+fn seed_hash(seed: usize) -> solana_hash::Hash {
+    let mut bytes = [0u8; 32];
+    bytes[..8].copy_from_slice(&(seed as u64).to_le_bytes());
+    solana_hash::Hash::from(bytes)
+}
+
 /// Returns an [`Account`] with a deterministic principal derived from `i`.
 /// The deposit of `account(deposit_id + 1)` with `1_000_000 * (deposit_id + 1)` sweepable
 /// lamports, so that a sequence of deposits has distinct accounts and amounts, each covering
@@ -255,6 +346,19 @@ pub fn minter_signature_nth(occurrence: usize) -> solana_signature::Signature {
     signer::derivation_path_signature(&MINTER_DERIVATION_PATH, occurrence)
 }
 
+/// The [`FetchedTransaction`] that [`rpc::get_transaction`] returns for the given
+/// `getTransaction` output.
+pub fn fetched(outcome: EncodedConfirmedTransactionWithStatusMeta) -> FetchedTransaction {
+    FetchedTransaction {
+        transaction: outcome
+            .transaction
+            .transaction
+            .decode()
+            .expect("BUG: the fixture transaction should decode"),
+        meta: outcome.transaction.meta,
+    }
+}
+
 /// A sweep of four deposits that the minter submitted on devnet as transaction
 /// `59vLxkN5YGgBrHGTQMCrntNi7CrAxfkQxYek2v3hUgKfujgGtfkSDZZmFyVw6S59uTH2FEwWcvntPiEkdN5Ep5W2`,
 /// with the `getTransaction` response the minter settles it against, and ways to deviate
@@ -264,6 +368,7 @@ pub mod devnet_sweep {
     use crate::state::{DepositBalance, QueuedDeposit, Sweep, event::CreditedDeposit};
     use base64::{Engine, engine::general_purpose::STANDARD};
     use cksol_types::DepositSolId;
+    use icrc_ledger_types::icrc1::account::Account;
     use serde_json::json;
     use sol_rpc_types::Lamport;
     use solana_address::{Address, address};
@@ -276,8 +381,44 @@ pub mod devnet_sweep {
 
     pub const MINTER_ADDRESS: Address = address!("5yazYQT1Kwm3jEjMp58J5329gzbxA232fnPajemCeKbL");
 
-    /// The devnet deposits with their addresses replaced by ones the test master key
-    /// derives, so the sweep can flow through the event-sourced state.
+    /// Caches the master public key whose children sign [`derived_outcome`], so a sweep
+    /// of [`derived_deposits`] can flow through the event-sourced state.
+    pub fn init_master_key() {
+        crate::state::mutate_state(|s| s.cache_minter_public_key(master_key()));
+    }
+
+    pub fn master_key() -> crate::state::SchnorrPublicKey {
+        crate::state::SchnorrPublicKey {
+            public_key: master_private_key().public_key(),
+            chain_code: MASTER_CHAIN_CODE,
+        }
+    }
+
+    pub fn minter_main_address() -> Address {
+        crate::address::minter_address(&master_key())
+    }
+
+    const MASTER_CHAIN_CODE: [u8; 32] = [7; 32];
+
+    fn master_private_key() -> ic_ed25519::PrivateKey {
+        ic_ed25519::PrivateKey::generate_from_seed(b"devnet sweep master key")
+    }
+
+    fn sign_as(account: &Account, message: &[u8]) -> solana_signature::Signature {
+        let path = ic_ed25519::DerivationPath::new(
+            crate::address::derivation_path(account)
+                .into_iter()
+                .map(ic_ed25519::DerivationIndex)
+                .collect(),
+        );
+        let (child, _chain_code) =
+            master_private_key().derive_subkey_with_chain_code(&path, &MASTER_CHAIN_CODE);
+        solana_signature::Signature::from(child.sign_message(message))
+    }
+
+    /// The deposits of the devnet sweep with their addresses derived from
+    /// [`master_key`], so that their sweep satisfies the queued-address check
+    /// and its rebuilt message can be signed by [`sign_as`].
     pub fn derived_deposits() -> Vec<(DepositSolId, QueuedDeposit)> {
         DEPOSITS
             .into_iter()
@@ -288,7 +429,7 @@ pub mod devnet_sweep {
                     index as DepositSolId,
                     QueuedDeposit {
                         account,
-                        address: super::deposit_address(account),
+                        address: crate::address::account_address(&master_key(), &account),
                         balance: DepositBalance::new(balance)
                             .expect("BUG: the balance covers the rent exemption threshold"),
                     },
@@ -297,28 +438,68 @@ pub mod devnet_sweep {
             .collect()
     }
 
-    pub fn derived_sweep() -> Sweep {
-        Sweep::plan(derived_deposits(), super::MINTER_ADDRESS)
+    /// A deposit queued while [`master_key`] is recorded, so its address must be
+    /// derived from that key.
+    pub fn fresh_deposit(account: Account, sweepable_amount: Lamport) -> QueuedDeposit {
+        QueuedDeposit {
+            account,
+            address: crate::address::account_address(&master_key(), &account),
+            balance: DepositBalance::new(
+                sweepable_amount + crate::constants::RENT_EXEMPTION_THRESHOLD,
+            )
+            .expect("BUG: the balance covers the rent exemption threshold"),
+        }
     }
 
-    /// The devnet outcome rewritten over [`derived_deposits`]: the message is rebuilt
-    /// from the plan with the recorded blockhash and the balances are remapped to the
-    /// new account order, while the signatures, fee and amounts stay the devnet ones.
-    pub fn derived_outcome() -> EncodedConfirmedTransactionWithStatusMeta {
-        let mut outcome = outcome();
-        let transaction = outcome
+    pub fn derived_sweep() -> Sweep {
+        Sweep::plan(derived_deposits(), minter_main_address())
+    }
+
+    /// The first signature of the transaction of [`derived_outcome`], under which the
+    /// sweep is submitted and queried.
+    pub fn transaction_signature() -> solana_signature::Signature {
+        derived_transaction().signatures[0]
+    }
+
+    fn derived_transaction() -> VersionedTransaction {
+        let real = outcome()
             .transaction
             .transaction
             .decode()
             .expect("BUG: the devnet transaction should decode");
-        let message = derived_sweep().sweep_message(*transaction.message.recent_blockhash());
-        let patched = VersionedTransaction {
-            signatures: transaction.signatures,
+        let message = derived_sweep().sweep_message(*real.message.recent_blockhash());
+        let address_to_account: std::collections::BTreeMap<Address, Account> = derived_deposits()
+            .into_iter()
+            .map(|(_, deposit)| (deposit.address, deposit.account))
+            .collect();
+        let message_bytes = message.serialize();
+        let signatures = message.account_keys[..message.header.num_required_signatures as usize]
+            .iter()
+            .map(|signer| {
+                sign_as(
+                    address_to_account
+                        .get(signer)
+                        .expect("BUG: every signer of the sweep is a deposit address"),
+                    &message_bytes,
+                )
+            })
+            .collect();
+        VersionedTransaction {
+            signatures,
             message: solana_message::VersionedMessage::Legacy(message),
-        };
+        }
+    }
+
+    /// The devnet outcome rewritten over [`derived_deposits`]: the message is rebuilt
+    /// from the plan with the recorded blockhash and signed by the deposit keys, and
+    /// the balances are remapped to the new account order, while the fee and amounts
+    /// stay the devnet ones.
+    pub fn derived_outcome() -> EncodedConfirmedTransactionWithStatusMeta {
+        let mut outcome = outcome();
         outcome.transaction.transaction = EncodedTransaction::Binary(
             STANDARD.encode(
-                bincode::serialize(&patched).expect("BUG: the transaction should serialize"),
+                bincode::serialize(&derived_transaction())
+                    .expect("BUG: the transaction should serialize"),
             ),
             TransactionBinaryEncoding::Base64,
         );
@@ -330,7 +511,7 @@ pub mod devnet_sweep {
                 crate::constants::RENT_EXEMPTION_THRESHOLD,
             );
         }
-        set_balances(&mut outcome, super::MINTER_ADDRESS, 0, AMOUNT_RECEIVED);
+        set_balances(&mut outcome, minter_main_address(), 0, AMOUNT_RECEIVED);
         set_balances(&mut outcome, solana_system_interface::program::ID, 1, 1);
         outcome
     }
@@ -533,8 +714,8 @@ pub mod devnet_sweep {
 /// All helpers operate on the global thread-local state via [`mutate_state`].
 pub mod events {
     use super::{
-        DEFAULT_BLOCK_HEIGHT, MINTER_ADDRESS, WITHDRAWAL_FEE, queued_deposit, queued_deposit_of,
-        runtime::TestCanisterRuntime,
+        DEFAULT_BLOCK_HEIGHT, MINTER_ADDRESS, NONCE_ACCOUNT, WITHDRAWAL_FEE, queued_deposit,
+        queued_deposit_of, runtime::TestCanisterRuntime, withdrawal_batch_message,
     };
     use crate::deposit::sweep::deposit_status;
     use crate::{
@@ -552,15 +733,6 @@ pub mod events {
     use sol_rpc_types::Lamport;
     use solana_address::Address;
     use solana_signature::Signature;
-
-    fn message() -> solana_message::Message {
-        let payer = solana_address::Address::from([0x42; 32]);
-        solana_message::Message::new_with_blockhash(
-            &[],
-            Some(&payer),
-            &solana_message::Hash::default(),
-        )
-    }
 
     /// The runtime is only used by [`process_event`] to supply timestamps
     /// for the state transition and for the event log entry.
@@ -607,10 +779,27 @@ pub mod events {
         submit_sweep_to(signature, deposit_ids, MINTER_ADDRESS)
     }
 
+    pub fn submit_sweep_at_height(
+        signature: Signature,
+        deposit_ids: Vec<DepositSolId>,
+        block_height: BlockHeight,
+    ) {
+        submit_sweep_to_at_height(signature, deposit_ids, MINTER_ADDRESS, block_height)
+    }
+
     pub fn submit_sweep_to(
         signature: Signature,
         deposit_ids: Vec<DepositSolId>,
         minter_address: Address,
+    ) {
+        submit_sweep_to_at_height(signature, deposit_ids, minter_address, DEFAULT_BLOCK_HEIGHT)
+    }
+
+    fn submit_sweep_to_at_height(
+        signature: Signature,
+        deposit_ids: Vec<DepositSolId>,
+        minter_address: Address,
+        block_height: BlockHeight,
     ) {
         let deposits: Vec<_> = read_state(|state| {
             deposit_ids
@@ -634,8 +823,10 @@ pub mod events {
                         .sweep_message(solana_hash::Hash::default())
                         .into(),
                     signers,
-                    purpose: TransactionPurpose::SweepDeposits { deposit_ids },
-                    block_height: DEFAULT_BLOCK_HEIGHT,
+                    purpose: TransactionPurpose::SweepDeposit {
+                        deposit_ids,
+                        block_height,
+                    },
                 },
                 &runtime(),
             )
@@ -722,33 +913,147 @@ pub mod events {
         });
     }
 
-    pub fn submit_withdrawal(signature: Signature, burn_indices: Vec<u64>) {
-        submit_withdrawal_at_height(signature, DEFAULT_BLOCK_HEIGHT, burn_indices);
+    /// Records a `CreatedWithdrawalTransaction` for the given withdrawals, binding
+    /// [`NONCE_ACCOUNT`] to `nonce_value`.
+    pub fn create_withdrawal_batch_transaction(
+        nonce_value: solana_hash::Hash,
+        burn_indices: Vec<u64>,
+    ) {
+        create_withdrawal_batch_transaction_on(NONCE_ACCOUNT, nonce_value, burn_indices);
     }
 
-    pub fn submit_withdrawal_at_height(
-        signature: Signature,
-        block_height: BlockHeight,
+    /// Records a `CreatedWithdrawalTransaction` for the given withdrawals, binding
+    /// `nonce_account` to `nonce_value`.
+    pub fn create_withdrawal_batch_transaction_on(
+        nonce_account: Address,
+        nonce_value: solana_hash::Hash,
         burn_indices: Vec<u64>,
     ) {
         mutate_state(|state| {
             process_event(
                 state,
-                EventType::SubmittedTransaction {
-                    signature,
-                    message: message().into(),
-                    signers: vec![Signer::Minter],
-                    purpose: TransactionPurpose::WithdrawSol {
-                        burn_indices: burn_indices
-                            .into_iter()
-                            .map(LedgerBurnIndex::from)
-                            .collect(),
-                    },
-                    block_height,
+                EventType::CreatedWithdrawalTransaction {
+                    burn_indices: burn_indices
+                        .into_iter()
+                        .map(LedgerBurnIndex::from)
+                        .collect(),
+                    nonce_account,
+                    nonce_value,
                 },
                 &runtime(),
             )
         });
+    }
+
+    /// Records a `SubmittedTransaction` for the durable-nonce withdrawal
+    /// transaction advancing [`NONCE_ACCOUNT`] with `nonce_value` and
+    /// transferring the created withdrawal requests of `burn_indices`.
+    pub fn submit_withdrawal_batch_transaction(
+        signature: Signature,
+        nonce_value: solana_hash::Hash,
+        burn_indices: Vec<u64>,
+    ) {
+        let burn_indices: Vec<LedgerBurnIndex> = burn_indices
+            .into_iter()
+            .map(LedgerBurnIndex::from)
+            .collect();
+        let message = withdrawal_batch_message(
+            NONCE_ACCOUNT,
+            nonce_value,
+            &created_withdrawal_transfers(&burn_indices),
+        );
+        mutate_state(|state| {
+            process_event(
+                state,
+                EventType::SubmittedTransaction {
+                    signature,
+                    message: message.into(),
+                    signers: vec![Signer::Minter],
+                    purpose: TransactionPurpose::Withdrawal { burn_indices },
+                },
+                &runtime(),
+            )
+        });
+    }
+
+    /// Marks the given withdrawals as sent under `signature` by creating and
+    /// submitting a withdrawal transaction bound to a dedicated nonce account
+    /// derived from the signature, which is first added to the pool through an
+    /// upgrade event, so that repeated calls never contend for one account.
+    pub fn submit_withdrawal(signature: Signature, burn_indices: Vec<u64>) {
+        let nonce_account = add_nonce_account_of(&signature);
+        let nonce_value = nonce_value_of(&signature);
+        let burn_indices: Vec<LedgerBurnIndex> = burn_indices
+            .into_iter()
+            .map(LedgerBurnIndex::from)
+            .collect();
+        mutate_state(|state| {
+            process_event(
+                state,
+                EventType::CreatedWithdrawalTransaction {
+                    burn_indices: burn_indices.clone(),
+                    nonce_account,
+                    nonce_value,
+                },
+                &runtime(),
+            )
+        });
+        let message = withdrawal_batch_message(
+            nonce_account,
+            nonce_value,
+            &created_withdrawal_transfers(&burn_indices),
+        );
+        mutate_state(|state| {
+            process_event(
+                state,
+                EventType::SubmittedTransaction {
+                    signature,
+                    message: message.into(),
+                    signers: vec![Signer::Minter],
+                    purpose: TransactionPurpose::Withdrawal { burn_indices },
+                },
+                &runtime(),
+            )
+        });
+    }
+
+    fn created_withdrawal_transfers(burn_indices: &[LedgerBurnIndex]) -> Vec<(Address, Lamport)> {
+        read_state(|state| {
+            burn_indices
+                .iter()
+                .map(|burn_index| {
+                    let request = &state.created_withdrawal_requests()[burn_index].request;
+                    (
+                        Address::from(request.solana_address),
+                        request.amount_to_transfer,
+                    )
+                })
+                .collect()
+        })
+    }
+
+    fn add_nonce_account_of(signature: &Signature) -> Address {
+        use sha2::Digest;
+        let digest = sha2::Sha256::digest(signature.as_ref());
+        let nonce_account = Address::from(<[u8; 32]>::from(digest));
+        mutate_state(|state| {
+            process_event(
+                state,
+                EventType::Upgrade(cksol_types_internal::UpgradeArgs {
+                    nonce_accounts_to_add: Some(vec![nonce_account.to_string()]),
+                    ..cksol_types_internal::UpgradeArgs::default()
+                }),
+                &runtime(),
+            )
+        });
+        nonce_account
+    }
+
+    fn nonce_value_of(signature: &Signature) -> solana_hash::Hash {
+        let bytes: [u8; 32] = signature.as_ref()[32..]
+            .try_into()
+            .expect("BUG: a signature holds exactly 64 bytes");
+        solana_hash::Hash::from(bytes)
     }
 
     pub fn succeed_transaction(signature: Signature) {
@@ -776,20 +1081,6 @@ pub mod events {
             process_event(
                 state,
                 EventType::ExpiredTransaction { signature },
-                &runtime(),
-            )
-        });
-    }
-
-    pub fn resubmit_transaction(old_signature: Signature, new_signature: Signature) {
-        mutate_state(|state| {
-            process_event(
-                state,
-                EventType::ResubmittedTransaction {
-                    old_signature,
-                    new_signature,
-                    new_block_height: DEFAULT_BLOCK_HEIGHT,
-                },
                 &runtime(),
             )
         });
@@ -1050,32 +1341,16 @@ pub mod arb {
                 arb_signature(),
                 arb_message(),
                 prop::collection::vec(arb_signer(), 1..10),
-                prop_oneof![
-                    prop::collection::vec(arb_ledger_burn_index(), 1..10)
-                        .prop_map(|burn_indices| TransactionPurpose::WithdrawSol { burn_indices }),
-                    prop::collection::vec(any::<u64>(), 1..10)
-                        .prop_map(|deposit_ids| TransactionPurpose::SweepDeposits { deposit_ids }),
-                ],
-                arb_block_height(),
+                arb_transaction_purpose(),
             )
-                .prop_map(|(signature, message, signers, purpose, block_height)| {
+                .prop_map(|(signature, message, signers, purpose)| {
                     EventType::SubmittedTransaction {
                         signature,
                         message: message.into(),
                         signers,
                         purpose,
-                        block_height,
                     }
                 }),
-            (arb_signature(), arb_signature(), arb_block_height(),).prop_map(
-                |(old_signature, new_signature, new_block_height)| {
-                    EventType::ResubmittedTransaction {
-                        old_signature,
-                        new_signature,
-                        new_block_height,
-                    }
-                }
-            ),
             arb_signature().prop_map(|signature| EventType::SucceededTransaction { signature }),
             arb_signature().prop_map(|signature| EventType::FailedTransaction { signature }),
             arb_signature().prop_map(|signature| EventType::ExpiredTransaction { signature }),
@@ -1119,6 +1394,18 @@ pub mod arb {
                 }
             }),
             any::<u64>().prop_map(|deposit_id| EventType::QuarantinedPendingMint { deposit_id }),
+            (
+                prop::collection::vec(arb_ledger_burn_index(), 1..10),
+                arb_address(),
+                arb_hash(),
+            )
+                .prop_map(|(burn_indices, nonce_account, nonce_value)| {
+                    EventType::CreatedWithdrawalTransaction {
+                        burn_indices,
+                        nonce_account,
+                        nonce_value,
+                    }
+                }),
         ]
     }
 
@@ -1127,6 +1414,23 @@ pub mod arb {
             deposit_id,
             amount_to_mint,
         })
+    }
+
+    fn arb_transaction_purpose() -> impl Strategy<Value = TransactionPurpose> {
+        prop_oneof![
+            (
+                prop::collection::vec(any::<u64>(), 1..10),
+                arb_block_height()
+            )
+                .prop_map(|(deposit_ids, block_height)| {
+                    TransactionPurpose::SweepDeposit {
+                        deposit_ids,
+                        block_height,
+                    }
+                }),
+            prop::collection::vec(arb_ledger_burn_index(), 1..10)
+                .prop_map(|burn_indices| TransactionPurpose::Withdrawal { burn_indices }),
+        ]
     }
 
     pub fn arb_event() -> impl Strategy<Value = Event> {

@@ -3,7 +3,7 @@ use crate::{
     constants::{GET_BALANCE_CYCLES, LEDGER_DEDUPLICATION_WINDOW, MAX_PENDING_MINTS_PER_ROUND},
     deposit::sweep::{deposit_sol, timer::MAX_DEPOSITS_PER_SWEEP},
     state::{TaskType, event::EventType, mutate_state, read_state, reset_state},
-    storage::reset_events,
+    storage::{FailedMintReason, failed_mint_attempt_count, reset_events},
     test_fixtures::{
         BLOCK_INDEX, DEPOSIT_SOL_REQUIRED_CYCLES, EventsAssert, MINIMUM_DEPOSIT_AMOUNT, account,
         deposit_address,
@@ -109,10 +109,11 @@ async fn should_record_duplicate_reply_as_minted() {
 
 #[tokio::test]
 async fn should_retry_after_transient_failure_with_exactly_the_same_arguments() {
-    let transient_failures: Vec<(&str, CallResponse<MintResult>)> = vec![
+    let transient_failures: [(&str, CallResponse<MintResult>, FailedMintReason); 4] = [
         (
             "the ledger is temporarily unavailable",
             CallResponse::Reply(Err(TransferError::TemporarilyUnavailable)),
+            FailedMintReason::LedgerError,
         ),
         (
             "the ledger returns a generic error",
@@ -120,18 +121,22 @@ async fn should_retry_after_transient_failure_with_exactly_the_same_arguments() 
                 error_code: Nat::from(42_u8),
                 message: "out of luck".to_string(),
             })),
+            FailedMintReason::LedgerError,
         ),
         (
             "the minter clock is ahead of the ledger",
             CallResponse::Reply(Err(TransferError::CreatedInFuture { ledger_time: 0 })),
+            FailedMintReason::CreatedInFuture,
         ),
         (
             "the call to the ledger fails",
             CallResponse::Failed(IcError::CallPerformFailed),
+            FailedMintReason::CallError,
         ),
     ];
 
-    for (name, failure) in transient_failures {
+    let mut expected_attempts = std::collections::BTreeMap::new();
+    for (name, failure, expected_reason) in transient_failures {
         setup();
         let pending = credited_pending_mint();
         let events_before = EventsAssert::from_recorded();
@@ -141,6 +146,12 @@ async fn should_retry_after_transient_failure_with_exactly_the_same_arguments() 
 
         process_pending_mints(failing_runtime.clone()).await;
 
+        *expected_attempts.entry(expected_reason).or_insert(0_u64) += 1;
+        assert_eq!(
+            failed_mint_attempt_count(expected_reason),
+            expected_attempts[&expected_reason],
+            "{name}"
+        );
         assert_eq!(
             deposit_status(pending.deposit_id),
             DepositSolStatus::Finalized {
@@ -171,6 +182,7 @@ async fn should_quarantine_pending_mint() {
         name: &'static str,
         ledger_response: Option<CallResponse<MintResult>>,
         traps: bool,
+        expected_reason: FailedMintReason,
     }
     let stale_now = CREDITED_AT_TIME + LEDGER_DEDUPLICATION_WINDOW.as_nanos() as u64 + 1;
     let cases = [
@@ -178,11 +190,13 @@ async fn should_quarantine_pending_mint() {
             name: "the pending mint is older than the deduplication window of the ledger",
             ledger_response: None,
             traps: false,
+            expected_reason: FailedMintReason::Expired,
         },
         QuarantineCase {
             name: "the ledger rejects the mint as too old",
             ledger_response: Some(CallResponse::Reply(Err(TransferError::TooOld))),
             traps: false,
+            expected_reason: FailedMintReason::Expired,
         },
         QuarantineCase {
             name: "the ledger rejects the fee of the mint",
@@ -190,6 +204,7 @@ async fn should_quarantine_pending_mint() {
                 expected_fee: Nat::from(10_u8),
             }))),
             traps: false,
+            expected_reason: FailedMintReason::Rejected,
         },
         QuarantineCase {
             name: "the ledger takes the mint for a burn below the minimum",
@@ -197,6 +212,7 @@ async fn should_quarantine_pending_mint() {
                 min_burn_amount: Nat::from(10_u8),
             }))),
             traps: false,
+            expected_reason: FailedMintReason::Rejected,
         },
         QuarantineCase {
             name: "the ledger reports insufficient funds on the minting account",
@@ -204,18 +220,22 @@ async fn should_quarantine_pending_mint() {
                 balance: Nat::from(0_u8),
             }))),
             traps: false,
+            expected_reason: FailedMintReason::Rejected,
         },
         QuarantineCase {
             name: "the callback traps after the ledger minted because mint index is not u64",
             ledger_response: Some(CallResponse::Reply(Ok(Nat::from(u128::MAX)))),
             traps: true,
+            expected_reason: FailedMintReason::UnknownOutcome,
         },
     ];
 
+    let mut expected_attempts = std::collections::BTreeMap::new();
     for QuarantineCase {
         name,
         ledger_response,
         traps,
+        expected_reason,
     } in cases
     {
         setup();
@@ -242,6 +262,14 @@ async fn should_quarantine_pending_mint() {
         EventsAssert::from_recorded().expect_contains_event_eq(EventType::QuarantinedPendingMint {
             deposit_id: pending.deposit_id,
         });
+        *expected_attempts.entry(expected_reason).or_insert(0_u64) += 1;
+        for reason in FailedMintReason::ALL {
+            assert_eq!(
+                failed_mint_attempt_count(reason),
+                expected_attempts.get(&reason).copied().unwrap_or(0),
+                "{name}: {reason:?}"
+            );
+        }
         assert_eq!(runtime.set_timer_call_count(), 0, "{name}");
     }
 }
