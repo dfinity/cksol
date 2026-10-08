@@ -42,20 +42,6 @@ pub async fn get_transaction<R: CanisterRuntime>(
     runtime: &R,
     signature: Signature,
 ) -> Result<Option<FetchedTransaction>, GetTransactionError> {
-    let Some(outcome) = get_finalized_transaction(runtime, signature).await? else {
-        return Ok(None);
-    };
-    let transaction = ensure_signed_with(&outcome, signature)?;
-    Ok(Some(FetchedTransaction {
-        transaction,
-        meta: outcome.transaction.meta,
-    }))
-}
-
-async fn get_finalized_transaction<R: CanisterRuntime>(
-    runtime: &R,
-    signature: Signature,
-) -> Result<Option<EncodedConfirmedTransactionWithStatusMeta>, GetTransactionError> {
     let result = read_state(|state| state.sol_rpc_client(runtime.inter_canister_call_runtime()))
         .get_transaction(signature)
         .with_encoding(GetTransactionEncoding::Base64)
@@ -66,7 +52,14 @@ async fn get_finalized_transaction<R: CanisterRuntime>(
         .try_send()
         .await;
     match result? {
-        MultiRpcResult::Consistent(Ok(outcome)) => Ok(outcome),
+        MultiRpcResult::Consistent(Ok(Some(outcome))) => {
+            let transaction = ensure_signed_with(&outcome, signature)?;
+            Ok(Some(FetchedTransaction {
+                transaction,
+                meta: outcome.transaction.meta,
+            }))
+        }
+        MultiRpcResult::Consistent(Ok(None)) => Ok(None),
         MultiRpcResult::Consistent(Err(e)) => Err(GetTransactionError::RpcError(e)),
         MultiRpcResult::Inconsistent(_) => Err(GetTransactionError::InconsistentRpcResults),
     }
