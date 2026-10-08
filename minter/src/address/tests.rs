@@ -1,7 +1,8 @@
 use crate::{
     address::{
-        MinterPublicKeyNotYetAvailable, account_address, derive_public_key_from_account,
-        fetch_and_record_minter_public_key, get_deposit_address, minter_address, minter_public_key,
+        MINTER_DERIVATION_PATH, MinterPublicKeyNotYetAvailable, account_address,
+        derive_public_key_from_account, fetch_and_record_minter_public_key, get_deposit_address,
+        minter_address, minter_public_key,
     },
     state::{SchnorrPublicKey, event::EventType, read_state},
     test_fixtures::{
@@ -11,7 +12,7 @@ use crate::{
 };
 use futures::{FutureExt, join};
 use ic_cdk_management_canister::SchnorrPublicKeyResult;
-use ic_ed25519::{PocketIcMasterPublicKeyId, PublicKey};
+use ic_ed25519::{CanisterId, MasterPublicKeyId, PocketIcMasterPublicKeyId, PublicKey};
 use icrc_ledger_types::icrc1::account::Account;
 use solana_address::Address;
 use std::panic::AssertUnwindSafe;
@@ -71,6 +72,7 @@ fn test_derive_different_chain_code() {
 
 mod minter_address_tests {
     use super::*;
+    use solana_address::address;
 
     #[test]
     fn should_differ_from_deposit_address_of_minter_account() {
@@ -87,6 +89,37 @@ mod minter_address_tests {
             minter_address(&master_key),
             Address::from(master_key.public_key.serialize_raw())
         );
+    }
+
+    #[test]
+    fn should_derive_mainnet_minter_addresses_offline() {
+        const CKSOL_MINTER_PRODUCTION_CANISTER_ID: &'static str = "lh22c-kyaaa-aaaar-qb5nq-cai";
+        const CKSOL_MINTER_STAGING_CANISTER_ID: &'static str = "ljyxk-riaaa-aaaar-qb5mq-cai";
+
+        for (minter_id, expected_address) in [
+            (
+                CKSOL_MINTER_PRODUCTION_CANISTER_ID,
+                address!("GXVewvv6HehcLFYCmwpqh5CrMjqN9zJ8rqzGq3HEt9Ax"),
+            ),
+            (
+                CKSOL_MINTER_STAGING_CANISTER_ID,
+                address!("Br8eRkeya8hy3sHCYqtWqGeNNZ349aPSUKGVYFWKKer1"),
+            ),
+        ] {
+            let (master_public_key, chain_code) = PublicKey::derive_mainnet_key(
+                MasterPublicKeyId::Key1,
+                &CanisterId::from_text(minter_id).unwrap(),
+                &MINTER_DERIVATION_PATH,
+            );
+            let minter_address = minter_address(&SchnorrPublicKey {
+                public_key: master_public_key,
+                chain_code,
+            });
+            assert_eq!(
+                minter_address, expected_address,
+                "unexpected main address for minter {minter_id}"
+            );
+        }
     }
 }
 
