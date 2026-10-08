@@ -25,6 +25,7 @@ mod tests;
 mod withdrawals;
 
 pub const FINALIZE_TRANSACTIONS_DELAY: Duration = Duration::from_mins(2);
+pub const FINALIZE_TRANSACTIONS_RETRY_DELAY: Duration = Duration::from_secs(10);
 /// Minimum time since its submission before a withdrawal transaction whose nonce
 /// account still stores its nonce value is re-broadcast. The minter sends
 /// transactions without `maxRetries`, so an Agave RPC node keeps re-sending a
@@ -56,7 +57,7 @@ pub async fn finalize_transactions<R: CanisterRuntime>(runtime: R) {
     };
 
     let reschedule = scopeguard::guard(runtime.clone(), |runtime| {
-        runtime.set_timer(Duration::ZERO, finalize_transactions);
+        runtime.set_timer(FINALIZE_TRANSACTIONS_RETRY_DELAY, finalize_transactions);
     });
 
     let more_transactions_to_check = check_sweep_transactions(&runtime).await;

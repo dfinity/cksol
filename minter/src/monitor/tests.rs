@@ -1,6 +1,6 @@
 use super::{
-    MAX_BLOCKHASH_AGE_IN_BLOCKS, MAX_SIGNATURES_PER_STATUS_CHECK, MIN_REBROADCAST_AGE,
-    finalize_transactions,
+    FINALIZE_TRANSACTIONS_RETRY_DELAY, MAX_BLOCKHASH_AGE_IN_BLOCKS,
+    MAX_SIGNATURES_PER_STATUS_CHECK, MIN_REBROADCAST_AGE, finalize_transactions,
 };
 use crate::{
     constants::MAX_CONCURRENT_RPC_CALLS,
@@ -125,7 +125,10 @@ mod finalization {
                 .count(),
             MAX_CONCURRENT_RPC_CALLS
         );
-        assert_eq!(runtime.set_timer_call_count(), 1);
+        assert_eq!(
+            runtime.set_timer_delays(),
+            vec![FINALIZE_TRANSACTIONS_RETRY_DELAY]
+        );
     }
 
     #[tokio::test]
