@@ -196,7 +196,7 @@ async fn should_quarantine_pending_mint() {
         runtime: TestCanisterRuntime,
         expected_ledger_calls: usize,
         traps: bool,
-        expected_reason: Option<FailedMintReason>,
+        expected_reason: FailedMintReason,
     }
     let stale_now = CREDITED_AT_TIME + LEDGER_DEDUPLICATION_WINDOW.as_nanos() as u64 + 1;
     let cases = [
@@ -205,14 +205,14 @@ async fn should_quarantine_pending_mint() {
             runtime: TestCanisterRuntime::new().add_times([stale_now; 3]),
             expected_ledger_calls: 0,
             traps: false,
-            expected_reason: Some(FailedMintReason::Expired),
+            expected_reason: FailedMintReason::Expired,
         },
         QuarantineCase {
             name: "the ledger rejects the mint as too old",
             runtime: mint_runtime([Err(TransferError::TooOld)]),
             expected_ledger_calls: 1,
             traps: false,
-            expected_reason: Some(FailedMintReason::Expired),
+            expected_reason: FailedMintReason::Expired,
         },
         QuarantineCase {
             name: "the ledger rejects the fee of the mint",
@@ -221,7 +221,7 @@ async fn should_quarantine_pending_mint() {
             })]),
             expected_ledger_calls: 1,
             traps: false,
-            expected_reason: Some(FailedMintReason::Rejected),
+            expected_reason: FailedMintReason::Rejected,
         },
         QuarantineCase {
             name: "the ledger takes the mint for a burn below the minimum",
@@ -230,7 +230,7 @@ async fn should_quarantine_pending_mint() {
             })]),
             expected_ledger_calls: 1,
             traps: false,
-            expected_reason: Some(FailedMintReason::Rejected),
+            expected_reason: FailedMintReason::Rejected,
         },
         QuarantineCase {
             name: "the ledger reports insufficient funds on the minting account",
@@ -239,14 +239,14 @@ async fn should_quarantine_pending_mint() {
             })]),
             expected_ledger_calls: 1,
             traps: false,
-            expected_reason: Some(FailedMintReason::Rejected),
+            expected_reason: FailedMintReason::Rejected,
         },
         QuarantineCase {
             name: "the callback traps after the ledger minted because mint index is not u64",
             runtime: mint_runtime([Ok(Nat::from(u128::MAX))]),
             expected_ledger_calls: 1,
             traps: true,
-            expected_reason: None,
+            expected_reason: FailedMintReason::UnknownOutcome,
         },
     ];
 
@@ -282,9 +282,7 @@ async fn should_quarantine_pending_mint() {
         EventsAssert::from_recorded().expect_contains_event_eq(EventType::QuarantinedPendingMint {
             deposit_id: pending.deposit_id,
         });
-        if let Some(reason) = expected_reason {
-            *expected_attempts.entry(reason).or_insert(0_u64) += 1;
-        }
+        *expected_attempts.entry(expected_reason).or_insert(0_u64) += 1;
         for reason in FailedMintReason::ALL {
             assert_eq!(
                 failed_mint_attempt_count(reason),

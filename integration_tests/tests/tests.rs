@@ -1325,6 +1325,9 @@ mod metrics_tests {
                 r#"failed_mint_attempts\{reason="ledger_error"\} 0 \d+"#,
             )
             .assert_contains_metric_matching(r#"failed_mint_attempts\{reason="call_error"\} 0 \d+"#)
+            .assert_contains_metric_matching(
+                r#"failed_mint_attempts\{reason="unknown_outcome"\} 0 \d+"#,
+            )
             .into()
             .drop()
             .await;

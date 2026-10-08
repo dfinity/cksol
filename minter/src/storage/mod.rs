@@ -97,14 +97,16 @@ pub enum FailedMintReason {
     Rejected,
     LedgerError,
     CallError,
+    UnknownOutcome,
 }
 
 impl FailedMintReason {
-    pub const ALL: [Self; 4] = [
+    pub const ALL: [Self; 5] = [
         Self::Expired,
         Self::Rejected,
         Self::LedgerError,
         Self::CallError,
+        Self::UnknownOutcome,
     ];
 
     pub fn label(self) -> &'static str {
@@ -113,6 +115,7 @@ impl FailedMintReason {
             Self::Rejected => "rejected",
             Self::LedgerError => "ledger_error",
             Self::CallError => "call_error",
+            Self::UnknownOutcome => "unknown_outcome",
         }
     }
 }

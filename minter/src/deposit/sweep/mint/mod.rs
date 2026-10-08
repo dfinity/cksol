@@ -91,6 +91,7 @@ async fn process_pending_mint<R: CanisterRuntime>(
     }
 
     let quarantine_unless_defused = scopeguard::guard(deposit_id, |deposit_id| {
+        record_failed_mint_attempt(FailedMintReason::UnknownOutcome);
         record_quarantined_pending_mint(runtime, deposit_id);
     });
 
@@ -120,22 +121,26 @@ async fn process_pending_mint<R: CanisterRuntime>(
             ScopeGuard::into_inner(quarantine_unless_defused);
         }
         Ok(Err(TransferError::TooOld)) => {
+            ScopeGuard::into_inner(quarantine_unless_defused);
             record_failed_mint_attempt(FailedMintReason::Expired);
             log!(
                 Priority::Error,
                 "Quarantining deposit {deposit_id}: the ledger rejected its mint as outside the deduplication window"
             );
+            record_quarantined_pending_mint(runtime, deposit_id);
         }
         Ok(Err(
             rejection @ (TransferError::BadFee { .. }
             | TransferError::BadBurn { .. }
             | TransferError::InsufficientFunds { .. }),
         )) => {
+            ScopeGuard::into_inner(quarantine_unless_defused);
             record_failed_mint_attempt(FailedMintReason::Rejected);
             log!(
                 Priority::Error,
                 "Quarantining deposit {deposit_id}: the ledger definitively rejected its mint from the minting account: {rejection:?}"
             );
+            record_quarantined_pending_mint(runtime, deposit_id);
         }
         Ok(Err(
             transient @ (TransferError::TemporarilyUnavailable
