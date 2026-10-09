@@ -13,7 +13,7 @@ on:
     branches:
       - main
     tags:
-      - v*
+      - '*-v*'
     paths-ignore:
       - "README.md"
 env:
@@ -38,7 +38,7 @@ jobs:
       # scope: refers to the part of code being changed.  E.g. " (accounts)" or " (accounts,canisters)"
       # !: Indicates that the PR contains a breaking change.
       - run: |
-          if [[ "$TITLE" =~ ^(feat|fix|chore|build|ci|docs|style|refactor|perf|test)(\([-a-zA-Z0-9,]+\))?\!?\: ]]; then
+          if [[ "$TITLE" =~ ^(feat|fix|chore|build|ci|docs|style|refactor|perf|test)(\([-a-zA-Z0-9_,]+\))?\!?\: ]]; then
               echo pass
           else
               echo "PR title does not match conventions"
@@ -82,12 +82,15 @@ jobs:
         run: just docker-build
 
       - name: 'Archive Artifact'
+        # `archive: false` uploads the file as-is, without zip-wrapping. The
+        # artifact name is taken from the file name (the `name:` input is
+        # ignored in this mode). Downloaders get exactly the bytes whose
+        # SHA-256 is shown in the job summary below.
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: cksol_minter.wasm.gz
           path: ./wasms/cksol_minter.wasm.gz
           if-no-files-found: error
-          compression-level: 0
+          archive: false
 
       - name: 'Add summary'
         run: |
@@ -99,8 +102,17 @@ jobs:
     steps:
       - name: 'Checkout'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: 'Setup mise'
+        uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+        env:
+          MISE_LOCKED: 1
+        with:
+          # Disable cache to avoid issues with wasm32 target
+          # See https://github.com/jdx/mise-action/issues/215
+          cache: false
+
       - name: 'Run unit tests'
-        run: cargo test --locked --workspace --exclude cksol-int-tests
+        run: just unit-tests
 
   coverage:
     runs-on: ubuntu-latest
@@ -157,6 +169,15 @@ jobs:
       - name: 'Checkout'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: 'Setup mise'
+        uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+        env:
+          MISE_LOCKED: 1
+        with:
+          # Disable cache to avoid issues with wasm32 target
+          # See https://github.com/jdx/mise-action/issues/215
+          cache: false
+
       - name: 'Download Artifacts'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -177,8 +198,8 @@ jobs:
           echo "/home/runner/.local/share/solana/install/active_release/bin" >> $GITHUB_PATH
         shell: bash
 
-      - name: 'Cargo test'
-        run: cargo test --package cksol-int-tests -- --test-threads 2 --nocapture
+      - name: 'Run integration tests'
+        run: just integration-tests
 
   # Gate job: the single required status check for the merge queue.
   # Adding or removing CI jobs only requires updating the `needs` list below,

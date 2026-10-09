@@ -9,8 +9,8 @@ ci: lint build test
 lint:
     cargo fmt --all -- --check
     cargo sort --workspace --check
-    cargo clippy --locked --verbose --tests --benches --workspace -- -D clippy::all
-    cargo clippy --locked --verbose --target wasm32-unknown-unknown -p cksol_minter -- -D clippy::all
+    cargo clippy --locked --verbose --tests --benches --workspace -- -D clippy::all -D warnings
+    cargo clippy --locked --verbose --target wasm32-unknown-unknown -p cksol_minter -- -D clippy::all -D warnings
 
 # Build canister WASM (native; fast loop for development)
 build:
