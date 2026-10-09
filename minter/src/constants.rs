@@ -35,6 +35,13 @@ pub const MAX_PENDING_MINTS_PER_ROUND: usize = 10;
 pub const LEDGER_DEDUPLICATION_WINDOW: Duration = Duration::from_hours(24);
 
 /// Cycles to attach for `getTransaction` RPC calls.
+///
+/// The SOL RPC canister charges about 3.2B cycles for a `getTransaction`
+/// request with the default 3-out-of-4 provider consensus and its default
+/// response size estimate of 10 KiB, which fits a full sweep or withdrawal
+/// transaction. The attached amount leaves a wide margin for provider or price
+/// changes and for the SOL RPC canister doubling the response size estimate
+/// after an oversized response; the unused part is refunded.
 pub const GET_TRANSACTION_CYCLES: u128 = 50_000_000_000;
 
 /// Cycles to attach for `getBalance` RPC calls.
@@ -47,7 +54,17 @@ pub const GET_TRANSACTION_CYCLES: u128 = 50_000_000_000;
 pub const GET_BALANCE_CYCLES: u128 = 10_000_000_000;
 
 /// Cycles to attach for `getSignatureStatuses` RPC calls.
-pub const GET_SIGNATURE_STATUSES_CYCLES: u128 = 1_000_000_000_000;
+///
+/// The SOL RPC canister charges about 2.3B cycles for a `getSignatureStatuses`
+/// request for one signature and about 10.7B cycles for 256 signatures, the
+/// largest batch, with the default 3-out-of-4 provider consensus and its
+/// default response size estimate of 256 bytes per signature. The attached
+/// amount leaves a wide margin for provider or price changes and for the SOL
+/// RPC canister doubling the response size estimate after an oversized
+/// response; the unused part is refunded. Up to `MAX_CONCURRENT_RPC_CALLS`
+/// requests run at once, so the minter needs that many times this amount
+/// available.
+pub const GET_SIGNATURE_STATUSES_CYCLES: u128 = 50_000_000_000;
 
 /// Cycles to attach for `getAccountInfo` RPC calls.
 ///
