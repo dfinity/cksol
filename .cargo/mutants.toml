@@ -1,0 +1,6 @@
+exclude_globs = [
+    "integration_tests/**",
+    "minter/src/canbench.rs",
+]
+test_package = ["cksol_minter", "cksol-types", "cksol-types-internal"]
+cap_lints = true

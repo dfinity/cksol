@@ -62,6 +62,9 @@ node_modules/
 out
 dist
 /coverage/
+/mutants.out/
+/mutants.out.old/
+/mutants.diff
 .dfx
 pocket-ic
 ic-wasm

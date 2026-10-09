@@ -86,6 +86,20 @@ checksum = "sha256:9bf63f9daaee8d812207807435a1bff23d7b7e50c573b7c2a36b8aa50974e
 url = "https://github.com/dfinity/ic-wasm/releases/download/0.11.1/ic-wasm-x86_64-apple-darwin.tar.xz"
 url_api = "https://api.github.com/repos/dfinity/ic-wasm/releases/assets/500087023"
 
+[[tools."github:sourcefrog/cargo-mutants"]]
+version = "27.1.0"
+backend = "github:sourcefrog/cargo-mutants"
+
+[tools."github:sourcefrog/cargo-mutants"."platforms.linux-x64"]
+checksum = "sha256:dfe6dc37d0342c891d2829b5a695aa57c2d0edecef7e7d0399a30cc6e206411e"
+url = "https://github.com/sourcefrog/cargo-mutants/releases/download/v27.1.0/cargo-mutants-x86_64-unknown-linux-gnu.tar.gz"
+url_api = "https://api.github.com/repos/sourcefrog/cargo-mutants/releases/assets/436335520"
+
+[tools."github:sourcefrog/cargo-mutants"."platforms.macos-x64"]
+checksum = "sha256:7109a9e9673fe0b977f622e6f32383b6d1cbbf3fbb63b7c30db3267462c74670"
+url = "https://github.com/sourcefrog/cargo-mutants/releases/download/v27.1.0/cargo-mutants-x86_64-apple-darwin.tar.gz"
+url_api = "https://api.github.com/repos/sourcefrog/cargo-mutants/releases/assets/436336082"
+
 [[tools.rust]]
 version = "1.93.0"
 backend = "core:rust"
