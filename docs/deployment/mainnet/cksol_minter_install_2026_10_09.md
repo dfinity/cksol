@@ -2,7 +2,7 @@
 
 Repository: `https://github.com/dfinity/cksol.git`
 
-Git hash: `bfeae694767f24decc7e45a0e3335f9f76163438`
+Git hash: `bb61dcf2045bca4333a732268c1b6d19e113ba93`
 
 New compressed Wasm hash: `21374814ae5ed3063762d53a0a66d9d60524792ae0d30670465172ad9c1273a8`
 
@@ -24,7 +24,7 @@ See the [design document](https://github.com/dfinity/cksol/blob/bfeae694767f24de
 
 ```
 git fetch
-git checkout bfeae694767f24decc7e45a0e3335f9f76163438
+git checkout bb61dcf2045bca4333a732268c1b6d19e113ba93
 didc encode -d minter/cksol_minter.did -t '(MinterArg)' '(variant { Init = record {
     sol_rpc_canister_id = principal "tghme-zyaaa-aaaar-qarca-cai";
     ledger_canister_id = principal "ls5lp-lqaaa-aaaar-qb5oa-cai";
@@ -70,7 +70,7 @@ Verify that the hash of the gzipped WASM matches the proposed hash.
 
 ```
 git fetch
-git checkout bfeae694767f24decc7e45a0e3335f9f76163438
+git checkout bb61dcf2045bca4333a732268c1b6d19e113ba93
 "./scripts/docker-build"
 sha256sum ./wasms/cksol_minter.wasm.gz
 ```
