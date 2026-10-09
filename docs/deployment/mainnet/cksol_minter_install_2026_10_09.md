@@ -13,21 +13,12 @@ Target canister: `lh22c-kyaaa-aaaar-qb5nq-cai`
 ---
 
 ## Motivation
-TODO: THIS MUST BE FILLED OUT
+This proposal installs the mainnet ckSOL minter to the governance-controlled canister ID [`lh22c-kyaaa-aaaar-qb5nq-cai`](https://dashboard.internetcomputer.org/canister/lh22c-kyaaa-aaaar-qb5nq-cai) on subnet [`pzp6e-ekpqk-3c5x7-2h6so-njoeq-mt45d-h3h6c-q3mxf-vpeq5-fk5o7-yae`](https://dashboard.internetcomputer.org/subnet/pzp6e-ekpqk-3c5x7-2h6so-njoeq-mt45d-h3h6c-q3mxf-vpeq5-fk5o7-yae).
 
-## Canister Settings
-
-The following settings were changed from their default value before handing over control to the NNS
-
-| Setting                 | Default value                    | New value                               |
-|-------------------------|----------------------------------|-----------------------------------------|
-| `reserved_cycles_limit` | `5_000_000_000_000` (5T cycles)  | `1_000_000_000_000_000_000`             |
-| `memory_allocation`     | `0` (best-effort)                | `1_073_741_824` (1 GiB)                 |
-
-These values match those of the ckBTC minter, see proposals [143837](https://dashboard.internetcomputer.org/proposal/143837) and [143902](https://dashboard.internetcomputer.org/proposal/143902).
-Under subnet storage pressure, memory growth outside of the memory allocation must reserve cycles and is rejected once `reserved_cycles_limit` is reached.
-A reserved memory allocation of 1 GiB ensures that growth within that allocation reserves no cycles, and the higher limit ensures that growth beyond it is not rejected because of the limit.
-The current values can be obtained by calling the [`canister_status`](https://dashboard.internetcomputer.org/canister/r7inp-6aaaa-aaaaa-aaabq-cai#canister_status) endpoint of the NNS root canister.
+ckSOL is a chain-key token on the Internet Computer backed 1:1 by SOL, the native token of the Solana blockchain.
+The ckSOL minter converts SOL to ckSOL by minting ckSOL on the ckSOL ledger for SOL deposited to an address controlled by the minter, and converts ckSOL to SOL by burning ckSOL and sending SOL to a Solana address chosen by the user.
+The minter controls its Solana addresses with threshold Ed25519 signatures and interacts with Solana through the [SOL RPC canister](https://dashboard.internetcomputer.org/canister/tghme-zyaaa-aaaar-qarca-cai).
+See the [design document](https://github.com/dfinity/cksol/blob/bfeae694767f24decc7e45a0e3335f9f76163438/docs/design.md) for details.
 
 ## Install args
 
