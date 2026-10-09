@@ -14,7 +14,7 @@ use crate::{
     utils::insertion_ordered_map::InsertionOrderedMap,
 };
 use candid::Principal;
-use cksol_types::{DepositSolId, TxFinalizedStatus, WithdrawalStatus};
+use cksol_types::{DepositSolId, TxFinalizedStatus, WithdrawSolStatus};
 use cksol_types_internal::SolanaNetwork;
 use cksol_types_internal::{Ed25519KeyName, InitArgs, UpgradeArgs};
 use ic_canister_runtime::Runtime;
@@ -46,7 +46,7 @@ pub use deposits::{
     QueuedDeposit, SettledSweep, Sweep, SweepMismatch, SweepRecoveryError, SweepSettlementError,
     Sweeps, SweptDeposit, Transfer, UnreadableOutcome,
 };
-pub use nonce_pool::{DurableNoncePool, NoncePoolError};
+pub use nonce_pool::{DurableNoncePool, NoncePoolError, NonceRead};
 
 thread_local! {
     static STATE: RefCell<Option<State>> = RefCell::default();
@@ -406,6 +406,7 @@ impl State {
         account: &Account,
         address: &Address,
         balance: DepositBalance,
+        queued_at: u64,
     ) {
         debug_assert_eq!(
             *address,
@@ -424,6 +425,7 @@ impl State {
                 address: *address,
                 balance,
             },
+            queued_at,
         );
     }
 
@@ -459,29 +461,29 @@ impl State {
         self.deposits.quarantine_sweep(signature);
     }
 
-    pub fn withdrawal_status(&self, block_index: u64) -> WithdrawalStatus {
+    pub fn withdrawal_status(&self, block_index: u64) -> WithdrawSolStatus {
         let burn_index = LedgerBurnIndex::from(block_index);
         if self.pending_withdrawal_requests.contains_key(&burn_index)
             || self.created_withdrawal_requests.contains_key(&burn_index)
         {
-            return WithdrawalStatus::Pending;
+            return WithdrawSolStatus::Pending;
         }
         if let Some(sent) = self.sent_withdrawal_requests.get(&burn_index) {
-            return WithdrawalStatus::TxSent {
+            return WithdrawSolStatus::TxSent {
                 transaction_id: sent.signature.into(),
             };
         }
         if let Some(sent) = self.successful_withdrawal_requests.get(&burn_index) {
-            return WithdrawalStatus::TxFinalized(TxFinalizedStatus::Success {
+            return WithdrawSolStatus::TxFinalized(TxFinalizedStatus::Success {
                 transaction_id: sent.signature.into(),
             });
         }
         if let Some(sent) = self.failed_withdrawal_requests.get(&burn_index) {
-            return WithdrawalStatus::TxFinalized(TxFinalizedStatus::Failure {
+            return WithdrawSolStatus::TxFinalized(TxFinalizedStatus::Failure {
                 transaction_id: sent.signature.into(),
             });
         }
-        WithdrawalStatus::NotFound
+        WithdrawSolStatus::NotFound
     }
 
     pub fn pending_withdrawal_requests(

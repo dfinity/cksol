@@ -102,8 +102,9 @@ mod queued_deposits {
 
     #[test]
     fn should_replay_queued_deposits_like_direct_transitions() {
+        let queued_at = |deposit_id| 10 * (deposit_id + 1);
         let queued = |deposit_id| Event {
-            timestamp: 0,
+            timestamp: queued_at(deposit_id),
             payload: EventType::QueuedDeposit {
                 deposit_id,
                 account: queued_deposit(deposit_id).account,
@@ -128,12 +129,17 @@ mod queued_deposits {
                 &deposit.account,
                 &deposit.address,
                 deposit.balance,
+                queued_at(deposit_id),
             );
         }
 
         let replayed = replay_events([init, key_fetched, queued(0), queued(1)]);
 
         assert_eq!(replayed, expected);
+        assert_eq!(
+            replayed.deposits().oldest_in_flight_queued_at(),
+            Some(queued_at(0))
+        );
     }
 }
 
@@ -1229,7 +1235,7 @@ mod withdrawal_transactions {
             withdrawal_batch_message,
         },
     };
-    use cksol_types::{TxFinalizedStatus, WithdrawalStatus};
+    use cksol_types::{TxFinalizedStatus, WithdrawSolStatus};
 
     const AMOUNT_TO_TRANSFER: u64 = MINIMUM_WITHDRAWAL_AMOUNT - WITHDRAWAL_FEE;
 
@@ -1250,7 +1256,7 @@ mod withdrawal_transactions {
             assert!(s.pending_withdrawal_requests().is_empty());
             assert!(s.created_withdrawal_requests().contains_key(&0_u64.into()));
             assert!(s.created_withdrawal_txs().contains_key(&NONCE_ACCOUNT));
-            assert_eq!(s.withdrawal_status(0), WithdrawalStatus::Pending);
+            assert_eq!(s.withdrawal_status(0), WithdrawSolStatus::Pending);
         });
     }
 
@@ -1281,7 +1287,7 @@ mod withdrawal_transactions {
             assert_eq!(*nonce_value, durable_nonce(1));
             assert_eq!(
                 s.withdrawal_status(0),
-                WithdrawalStatus::TxSent {
+                WithdrawSolStatus::TxSent {
                     transaction_id: signature(7).into()
                 }
             );
@@ -1302,7 +1308,7 @@ mod withdrawal_transactions {
             assert!(s.submitted_transactions().is_empty());
             assert_eq!(
                 s.withdrawal_status(0),
-                WithdrawalStatus::TxFinalized(TxFinalizedStatus::Success {
+                WithdrawSolStatus::TxFinalized(TxFinalizedStatus::Success {
                     transaction_id: signature(7).into(),
                 })
             );
@@ -1328,7 +1334,7 @@ mod withdrawal_transactions {
             );
             assert_eq!(
                 s.withdrawal_status(0),
-                WithdrawalStatus::TxFinalized(TxFinalizedStatus::Failure {
+                WithdrawSolStatus::TxFinalized(TxFinalizedStatus::Failure {
                     transaction_id: signature(7).into(),
                 })
             );
@@ -1356,7 +1362,7 @@ mod withdrawal_transactions {
                 .map(|tx| tx.nonce_value),
             Some(durable_nonce(1))
         );
-        assert_eq!(replayed.withdrawal_status(0), WithdrawalStatus::Pending);
+        assert_eq!(replayed.withdrawal_status(0), WithdrawSolStatus::Pending);
         assert_eq!(replayed.nonce_pool().num_free_accounts(), 0);
     }
 
@@ -1396,7 +1402,7 @@ mod withdrawal_transactions {
         assert_eq!(*nonce_value, durable_nonce(1));
         assert_eq!(
             replayed.withdrawal_status(0),
-            WithdrawalStatus::TxSent {
+            WithdrawSolStatus::TxSent {
                 transaction_id: signature(7).into()
             }
         );

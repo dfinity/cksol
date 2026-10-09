@@ -51,7 +51,7 @@ The minter controls one or more Solana addresses derived from a [threshold Schno
 
 4. **Sweep and mint.** On timers, the minter sweeps the deposit address to its main Solana account and, once the sweep transaction is finalized, mints the swept amount of ckSOL (minus the deposit's share of the sweep transaction fee) to your ICRC-1 ledger account.
 
-5. **Track the deposit.** Call `deposit_status` with the deposit id to follow the progress: `Queued` → `Swept` → `Finalized` → `Minted`.
+5. **Track the deposit.** Call `deposit_sol_status` with the deposit id to follow the progress: `Queued` → `Swept` → `Finalized` → `Minted`.
 
 ```mermaid
 sequenceDiagram
@@ -73,7 +73,7 @@ sequenceDiagram
     Minter->>Solana: sweep deposit_address to main account
     Minter->>Ledger: mint with icrc1_transfer(to=user, swept amount - fee share)
 
-    User->>Minter: deposit_status(deposit_id)
+    User->>Minter: deposit_sol_status(deposit_id)
     Minter-->>User: Minted { block_index, minted_amount }
 ```
 
@@ -81,13 +81,13 @@ sequenceDiagram
 
 1. **Approve the minter.** Grant the minter an [ICRC-2](https://github.com/dfinity/ICRC-1/blob/main/standards/ICRC-2/README.md) allowance on your ckSOL ledger account.
 
-2. **Submit a withdrawal request.** Call `withdraw` on the minter with the destination Solana address and the amount in [lamports](https://solana.com/docs/terminology#lamport). The minter:
+2. **Submit a withdrawal request.** Call `withdraw_sol` on the minter with the destination Solana address and the amount in [lamports](https://solana.com/docs/terminology#lamport). The minter:
    - Burns the requested ckSOL from your ledger account via [icrc2_transfer_from](https://github.com/dfinity/ICRC-1/blob/main/standards/ICRC-2/README.md#icrc2_transfer_from).
    - Queues the corresponding SOL transfer.
 
 3. **Transaction submission.** The minter constructs a Solana transaction, signs it using chain-key Ed25519, and submits it via the SOL RPC canister.
 
-4. **Monitor status.** Call `withdrawal_status` with the ledger burn index returned by `withdraw` to track the status of your withdrawal request (`Pending` → `TxSent` → `TxFinalized`).
+4. **Monitor status.** Call `withdraw_sol_status` with the ledger burn index returned by `withdraw_sol` to track the status of your withdrawal request (`Pending` → `TxSent` → `TxFinalized`).
 
 ```mermaid
 sequenceDiagram
@@ -99,7 +99,7 @@ sequenceDiagram
     User->>Ledger: icrc2_approve(spender=minter, amount)
     Ledger-->>User: ok
 
-    User->>Minter: withdraw(destination_address, amount)
+    User->>Minter: withdraw_sol(destination_address, amount)
     Minter->>Ledger: burn with icrc2_transfer_from(from=user, to=burn, amount)
     Ledger-->>Minter: burn_block_index
     Minter-->>User: burn_block_index
@@ -107,7 +107,7 @@ sequenceDiagram
     Note over Minter,Solana: (processed asynchronously by the minter)
     Minter->>Solana: submit SOL transfer to destination_address
 
-    User->>Minter: withdrawal_status(burn_block_index)
+    User->>Minter: withdraw_sol_status(burn_block_index)
     Minter-->>User: TxFinalized(Success)
 ```
 
@@ -144,6 +144,7 @@ The full design rationale, including fees and flows, is in the [design document]
 |----------|-------------|
 | Minter | [`ljyxk-riaaa-aaaar-qb5mq-cai`](https://dashboard.internetcomputer.org/canister/ljyxk-riaaa-aaaar-qb5mq-cai) |
 | Ledger | [`la34w-haaaa-aaaar-qb5na-cai`](https://dashboard.internetcomputer.org/canister/la34w-haaaa-aaaar-qb5na-cai) |
+| Ledger Index | [`2r6ji-gyaaa-aaaar-qb6fq-cai`](https://dashboard.internetcomputer.org/canister/2r6ji-gyaaa-aaaar-qb6fq-cai) |
 
 ### <img src="static/images/cksol-token.svg" width="20" valign="middle"> ckSOL — 🚀 Production (Solana Mainnet)
 
@@ -151,6 +152,7 @@ The full design rationale, including fees and flows, is in the [design document]
 |----------|-------------|
 | Minter | `lh22c-kyaaa-aaaar-qb5nq-cai` *(not yet deployed)* |
 | Ledger | `ls5lp-lqaaa-aaaar-qb5oa-cai` *(not yet deployed)* |
+| Ledger Index | `2ezyf-hqaaa-aaaar-qb6ga-cai` *(not yet deployed)* |
 
 <a id="interacting-via-the-cli"></a>
 ## 💻 Interacting via the CLI
@@ -171,7 +173,7 @@ Returns the Solana address you should send SOL to in order to deposit. When `own
 
 ```sh
 icp canister call -e prod cksol_minter get_deposit_address \
-  '(record { owner = null; subaccount = null })' --query
+  '(record { owner = null; subaccount = null })'
 ```
 
 ### Notify the minter of a deposit
@@ -197,7 +199,7 @@ A successful response returns the deposit id, which you can use to track the dep
 After calling `deposit_sol`, track the deposit using the deposit id returned in the response. The status moves through `Queued` → `Swept` → `Finalized` → `Minted` as the minter sweeps the deposit address and mints ckSOL:
 
 ```sh
-icp canister call -e prod cksol_minter deposit_status '(42 : nat64)' --query
+icp canister call -e prod cksol_minter deposit_sol_status '(42 : nat64)' --query
 ```
 
 ### Submit a withdrawal request
@@ -205,7 +207,7 @@ icp canister call -e prod cksol_minter deposit_status '(42 : nat64)' --query
 Burns ckSOL from your ledger account and initiates a transfer of the equivalent SOL to the given Solana address. Replace `<SOLANA_ADDRESS>` with the destination address and `<AMOUNT>` with the amount in lamports. The optional `from_subaccount` field defaults to `null` (the default subaccount):
 
 ```sh
-icp canister call -e prod cksol_minter withdraw \
+icp canister call -e prod cksol_minter withdraw_sol \
   '(record { address = "<SOLANA_ADDRESS>"; amount = <AMOUNT>; from_subaccount = null })'
 ```
 
@@ -217,10 +219,10 @@ A successful response returns the burn block index, which you can use to track t
 
 ### Check a withdrawal status
 
-After calling `withdraw`, track the status using the `block_index` returned in the response:
+After calling `withdraw_sol`, track the status using the `block_index` returned in the response:
 
 ```sh
-icp canister call -e prod cksol_minter withdrawal_status \
+icp canister call -e prod cksol_minter withdraw_sol_status \
   '(record { block_index = 42 })'
 ```
 

@@ -1,8 +1,9 @@
 use super::{
-    MAX_BLOCKHASH_AGE_IN_BLOCKS, MAX_SIGNATURES_PER_STATUS_CHECK, MIN_REBROADCAST_AGE,
-    finalize_transactions,
+    FINALIZE_TRANSACTIONS_RETRY_DELAY, MAX_BLOCKHASH_AGE_IN_BLOCKS,
+    MAX_SIGNATURES_PER_STATUS_CHECK, MIN_REBROADCAST_AGE, finalize_transactions,
 };
 use crate::{
+    address::minter_address,
     constants::MAX_CONCURRENT_RPC_CALLS,
     rpc::BlockHeight,
     state::{
@@ -10,11 +11,13 @@ use crate::{
         event::{EventType, VersionedMessage},
         mutate_state, read_state, reset_state,
     },
-    storage::reset_events,
+    storage::{UndecidedWithdrawalReason, reset_events, undecided_withdrawal_transaction_count},
     test_fixtures::{
-        EventsAssert, GetTransactionResult, MINIMUM_WITHDRAWAL_AMOUNT, account,
-        confirmed_block_at_height, events, finalized_status, init_balance, init_schnorr_master_key,
-        init_state, runtime::TestCanisterRuntime, signature,
+        EventsAssert, GetTransactionResult, MINIMUM_WITHDRAWAL_AMOUNT, NONCE_ACCOUNT, account,
+        confirmed_block_at_height, devnet_sweep, durable_nonce, events, failed_withdrawal_response,
+        finalized_status, init_balance, init_schnorr_master_key, init_state, nonce_account_info,
+        runtime::TestCanisterRuntime, signature, succeeded_transaction_response,
+        succeeded_withdrawal_response,
     },
 };
 use sol_rpc_types::{
@@ -28,6 +31,7 @@ type SlotResult = MultiRpcResult<Slot>;
 type BlockResult = MultiRpcResult<ConfirmedBlock>;
 type SignatureStatusesResult = MultiRpcResult<Vec<Option<TransactionStatus>>>;
 type SendTransactionResult = MultiRpcResult<sol_rpc_types::Signature>;
+type GetAccountInfoResult = MultiRpcResult<Option<sol_rpc_types::AccountInfo>>;
 
 const CURRENT_SLOT: Slot = 408_807_102;
 const SUBMISSION_SLOT: Slot = CURRENT_SLOT - 10;
@@ -69,7 +73,7 @@ mod finalization {
     #[tokio::test]
     async fn should_finalize_but_not_expire_transactions_if_fetching_current_block_fails() {
         setup();
-        let finalized = submit_withdrawal_transaction_with_signature(1);
+        let finalized = submit_sweep_transaction_with_signature(1, EXPIRED_BLOCK_HEIGHT);
         let not_found = submit_sweep_transaction_with_signature(2, EXPIRED_BLOCK_HEIGHT);
 
         let runtime = TestCanisterRuntime::new()
@@ -78,7 +82,8 @@ mod finalization {
             .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![
                 Some(finalized_status()),
                 None,
-            ])));
+            ])))
+            .add_stub_response(GetTransactionResult::Consistent(Ok(None)));
 
         finalize_transactions(runtime).await;
 
@@ -94,38 +99,38 @@ mod finalization {
     }
 
     #[tokio::test]
-    async fn should_reschedule_until_all_transactions_finalized() {
+    async fn should_reschedule_while_more_sweeps_are_in_flight_than_a_round_checks() {
         setup();
 
         let num = MAX_CONCURRENT_RPC_CALLS * MAX_SIGNATURES_PER_STATUS_CHECK + 1;
         for i in 0..num {
-            submit_withdrawal_transaction_with_signature(i);
+            submit_sweep_transaction_with_signature(i, CURRENT_BLOCK_HEIGHT);
         }
 
-        // Round 1: finalizes MAX_CONCURRENT_RPC_CALLS batches, 1 transaction unchecked → reschedule
-        let mut runtime = TestCanisterRuntime::new().with_increasing_time();
-        for _ in 0..MAX_CONCURRENT_RPC_CALLS {
-            runtime = runtime.add_stub_response(SignatureStatusesResult::Consistent(Ok(
-                vec![Some(finalized_status()); MAX_SIGNATURES_PER_STATUS_CHECK],
-            )));
-        }
-
-        finalize_transactions(runtime.clone()).await;
-
-        assert_eq!(read_state(|s| s.submitted_transactions().len()), 1);
-        assert_eq!(runtime.set_timer_call_count(), 1);
-
-        // Round 2: finalizes the remaining 1 transaction → no reschedule
-        let runtime = TestCanisterRuntime::new()
+        let mut runtime = TestCanisterRuntime::new()
             .with_increasing_time()
-            .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![Some(
-                finalized_status(),
-            )])));
+            .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
+            .add_stub_response(BlockResult::Consistent(Ok(current_block())));
+        for _ in 0..MAX_CONCURRENT_RPC_CALLS {
+            runtime = runtime.add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![
+                    None;
+                    MAX_SIGNATURES_PER_STATUS_CHECK
+                ])));
+        }
 
         finalize_transactions(runtime.clone()).await;
 
-        assert!(read_state(|s| s.submitted_transactions().is_empty()));
-        assert_eq!(runtime.set_timer_call_count(), 0);
+        assert_eq!(
+            called_methods(&runtime)
+                .iter()
+                .filter(|method| *method == "getSignatureStatuses")
+                .count(),
+            MAX_CONCURRENT_RPC_CALLS
+        );
+        assert_eq!(
+            runtime.set_timer_delays(),
+            vec![FINALIZE_TRANSACTIONS_RETRY_DELAY]
+        );
     }
 
     #[tokio::test]
@@ -185,114 +190,6 @@ mod finalization {
         assert_eq!(events_before, events_after);
 
         read_state(|s| assert_eq!(s.submitted_transactions().len(), 1));
-    }
-
-    #[tokio::test]
-    async fn should_finalize_an_in_flight_withdrawal_without_fetching_a_block() {
-        setup();
-        let signature = submit_withdrawal_transaction();
-
-        let runtime = TestCanisterRuntime::new()
-            .with_increasing_time()
-            .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![Some(
-                finalized_status(),
-            )])));
-
-        finalize_transactions(runtime).await;
-
-        EventsAssert::from_recorded()
-            .expect_contains_event_eq(EventType::SucceededTransaction { signature });
-        read_state(|s| {
-            assert!(s.submitted_transactions().is_empty());
-            assert!(s.succeeded_transactions().contains(&signature));
-        });
-    }
-
-    #[tokio::test]
-    async fn should_rebroadcast_a_missing_withdrawal_unchanged() {
-        setup();
-        let signature = submit_withdrawal_transaction();
-        let events_before = EventsAssert::from_recorded();
-
-        let runtime = TestCanisterRuntime::new()
-            .with_increasing_time_from(min_rebroadcast_age_nanos())
-            .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![None])))
-            .add_stub_response(SendTransactionResult::Consistent(Ok(signature.into())));
-
-        finalize_transactions(runtime.clone()).await;
-
-        let sent = runtime.sent_transactions();
-        assert_eq!(sent.len(), 1);
-        assert_eq!(
-            sent[0].get_transaction(),
-            encoded_submitted_transaction(&signature)
-        );
-        assert_eq!(sent[0].skip_preflight, Some(true));
-        assert_eq!(EventsAssert::from_recorded(), events_before);
-        read_state(|s| assert!(s.submitted_transactions().contains_key(&signature)));
-    }
-
-    #[tokio::test]
-    async fn should_rebroadcast_a_missing_withdrawal_only_after_the_minimum_age() {
-        setup();
-        let signature = submit_withdrawal_transaction();
-
-        let too_early = TestCanisterRuntime::new()
-            .with_increasing_time()
-            .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![None])));
-
-        finalize_transactions(too_early.clone()).await;
-
-        assert!(too_early.sent_transactions().is_empty());
-
-        let old_enough = TestCanisterRuntime::new()
-            .with_increasing_time_from(min_rebroadcast_age_nanos())
-            .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![None])))
-            .add_stub_response(SendTransactionResult::Consistent(Ok(signature.into())));
-
-        finalize_transactions(old_enough.clone()).await;
-
-        assert_eq!(old_enough.sent_transactions().len(), 1);
-        read_state(|s| assert!(s.submitted_transactions().contains_key(&signature)));
-    }
-
-    fn min_rebroadcast_age_nanos() -> u64 {
-        MIN_REBROADCAST_AGE.as_nanos() as u64
-    }
-
-    fn encoded_submitted_transaction(signature: &solana_signature::Signature) -> String {
-        let message = read_state(|s| {
-            match s
-                .submitted_transactions()
-                .get(signature)
-                .expect("the transaction is submitted")
-            {
-                MinterTransaction::Withdrawal {
-                    message: VersionedMessage::Legacy(message),
-                    ..
-                } => message.clone(),
-                other => panic!("expected a withdrawal transaction, got {other:?}"),
-            }
-        });
-        let transaction = Transaction {
-            signatures: vec![*signature],
-            message,
-        };
-        SendTransactionParams::try_from(transaction)
-            .expect("the transaction is serializable")
-            .get_transaction()
-            .to_string()
-    }
-
-    fn submit_withdrawal_transaction() -> solana_signature::Signature {
-        submit_withdrawal_transaction_with_signature(0x77)
-    }
-
-    fn submit_withdrawal_transaction_with_signature(i: usize) -> solana_signature::Signature {
-        let signature = signature(i);
-        events::accept_withdrawal(account(i), i as u64, MINIMUM_WITHDRAWAL_AMOUNT);
-        events::submit_withdrawal(signature, vec![i as u64]);
-        signature
     }
 
     #[tokio::test]
@@ -366,16 +263,17 @@ mod finalization {
     }
 
     #[tokio::test]
-    async fn should_never_expire_nonce_withdrawal_with_missing_status() {
+    async fn should_never_expire_nonce_withdrawal_with_unchanged_nonce() {
         setup();
         let sweep = submit_sweep_transaction_with_signature(1, EXPIRED_BLOCK_HEIGHT);
-        let nonce_withdrawal = submit_withdrawal_transaction_with_signature(2);
+        let nonce_withdrawal = submit_withdrawal_bound_to(2, BOUND_NONCE_SEED);
 
         let runtime = TestCanisterRuntime::new()
             .with_increasing_time()
             .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
             .add_stub_response(BlockResult::Consistent(Ok(current_block())))
-            .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![None, None])));
+            .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![None])))
+            .add_stub_response(nonce_read(BOUND_NONCE_SEED));
 
         finalize_transactions(runtime).await;
 
@@ -517,10 +415,266 @@ mod finalization {
     }
 }
 
+mod withdrawal_finalization {
+    use super::*;
+
+    #[tokio::test]
+    async fn should_record_a_withdrawal_as_succeeded_once_its_nonce_advanced() {
+        setup_with_signing_key();
+        let signature = submit_signed_withdrawal_bound_to(1, BOUND_NONCE_SEED);
+
+        let runtime = TestCanisterRuntime::new()
+            .with_increasing_time()
+            .add_stub_response(nonce_read(UNSEEN_NONCE_SEED))
+            .add_stub_response(succeeded_withdrawal_response(&signature));
+
+        finalize_transactions(runtime.clone()).await;
+
+        EventsAssert::from_recorded()
+            .expect_contains_event_eq(EventType::SucceededTransaction { signature });
+        read_state(|s| {
+            assert!(s.submitted_transactions().is_empty());
+            assert!(s.succeeded_transactions().contains(&signature));
+        });
+        assert_nonce_account_is_free();
+        assert_eq!(
+            called_methods(&runtime),
+            vec!["getAccountInfo", "getTransaction"]
+        );
+    }
+
+    #[tokio::test]
+    async fn should_record_a_withdrawal_as_failed_once_its_nonce_advanced_with_an_error() {
+        setup_with_signing_key();
+        let signature = submit_signed_withdrawal_bound_to(1, BOUND_NONCE_SEED);
+
+        let runtime = TestCanisterRuntime::new()
+            .with_increasing_time()
+            .add_stub_response(nonce_read(UNSEEN_NONCE_SEED))
+            .add_stub_response(failed_withdrawal_response(&signature));
+
+        finalize_transactions(runtime).await;
+
+        EventsAssert::from_recorded()
+            .expect_contains_event_eq(EventType::FailedTransaction { signature });
+        read_state(|s| {
+            assert!(s.submitted_transactions().is_empty());
+            assert!(s.failed_transactions().contains_key(&signature));
+        });
+        assert_nonce_account_is_free();
+    }
+
+    #[tokio::test]
+    async fn should_rebroadcast_a_withdrawal_with_an_unchanged_nonce_unchanged() {
+        setup_with_signing_key();
+        let signature = submit_signed_withdrawal_bound_to(1, BOUND_NONCE_SEED);
+        let events_before = EventsAssert::from_recorded();
+
+        let runtime = TestCanisterRuntime::new()
+            .with_increasing_time_from(min_rebroadcast_age_nanos())
+            .add_stub_response(nonce_read(BOUND_NONCE_SEED))
+            .add_stub_response(SendTransactionResult::Consistent(Ok(signature.into())));
+
+        finalize_transactions(runtime.clone()).await;
+
+        let sent = runtime.sent_transactions();
+        assert_eq!(sent.len(), 1);
+        assert_eq!(
+            sent[0].get_transaction(),
+            encoded_submitted_transaction(&signature)
+        );
+        assert_eq!(sent[0].skip_preflight, Some(true));
+        assert_eq!(EventsAssert::from_recorded(), events_before);
+        read_state(|s| assert!(s.submitted_transactions().contains_key(&signature)));
+    }
+
+    #[tokio::test]
+    async fn should_rebroadcast_a_withdrawal_with_an_unchanged_nonce_only_after_the_minimum_age() {
+        setup_with_signing_key();
+        let signature = submit_signed_withdrawal_bound_to(1, BOUND_NONCE_SEED);
+
+        let too_early = TestCanisterRuntime::new()
+            .with_increasing_time()
+            .add_stub_response(nonce_read(BOUND_NONCE_SEED));
+
+        finalize_transactions(too_early.clone()).await;
+
+        assert!(too_early.sent_transactions().is_empty());
+
+        let old_enough = TestCanisterRuntime::new()
+            .with_increasing_time_from(min_rebroadcast_age_nanos())
+            .add_stub_response(nonce_read(BOUND_NONCE_SEED))
+            .add_stub_response(SendTransactionResult::Consistent(Ok(signature.into())));
+
+        finalize_transactions(old_enough.clone()).await;
+
+        assert_eq!(old_enough.sent_transactions().len(), 1);
+        read_state(|s| assert!(s.submitted_transactions().contains_key(&signature)));
+    }
+
+    #[tokio::test]
+    async fn should_take_no_decision_on_a_stale_nonce_read() {
+        setup_with_signing_key();
+        let landed = submit_signed_withdrawal_bound_to(1, STALE_NONCE_SEED);
+        events::succeed_transaction(landed);
+        let signature = submit_signed_withdrawal_bound_to(2, BOUND_NONCE_SEED);
+        let events_before = EventsAssert::from_recorded();
+
+        let runtime = TestCanisterRuntime::new()
+            .with_increasing_time_from(min_rebroadcast_age_nanos())
+            .add_stub_response(nonce_read(STALE_NONCE_SEED));
+
+        finalize_transactions(runtime.clone()).await;
+
+        assert_eq!(EventsAssert::from_recorded(), events_before);
+        assert!(runtime.sent_transactions().is_empty());
+        read_state(|s| assert!(s.submitted_transactions().contains_key(&signature)));
+        assert_eq!(
+            undecided_withdrawal_transaction_count(UndecidedWithdrawalReason::StaleNonce),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn should_keep_the_nonce_account_bound_until_the_outcome_is_known() {
+        setup_with_signing_key();
+        let signature = submit_signed_withdrawal_bound_to(1, BOUND_NONCE_SEED);
+        let events_before = EventsAssert::from_recorded();
+
+        let runtime = TestCanisterRuntime::new()
+            .with_increasing_time_from(min_rebroadcast_age_nanos())
+            .add_stub_response(nonce_read(UNSEEN_NONCE_SEED))
+            .add_stub_response(GetTransactionResult::Consistent(Ok(None)));
+
+        finalize_transactions(runtime.clone()).await;
+
+        assert_eq!(EventsAssert::from_recorded(), events_before);
+        assert!(runtime.sent_transactions().is_empty());
+        read_state(|s| {
+            assert!(s.submitted_transactions().contains_key(&signature));
+            assert_eq!(s.nonce_pool().num_free_accounts(), 0);
+        });
+        assert_eq!(
+            undecided_withdrawal_transaction_count(UndecidedWithdrawalReason::UnresolvedOutcome),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn should_not_finalize_a_withdrawal_fetched_with_another_message() {
+        setup_with_signing_key();
+        let other_message =
+            solana_message::Message::new(&[], Some(&devnet_sweep::minter_main_address()));
+        let signature = devnet_sweep::minter_signature_of(&other_message);
+        events::accept_withdrawal(account(1), 1, MINIMUM_WITHDRAWAL_AMOUNT);
+        events::create_withdrawal_batch_transaction(durable_nonce(BOUND_NONCE_SEED), vec![1]);
+        events::submit_signed_withdrawal_batch_transaction_under(
+            signature,
+            durable_nonce(BOUND_NONCE_SEED),
+            vec![1],
+        );
+        let events_before = EventsAssert::from_recorded();
+
+        let runtime = TestCanisterRuntime::new()
+            .with_increasing_time()
+            .add_stub_response(nonce_read(UNSEEN_NONCE_SEED))
+            .add_stub_response(succeeded_transaction_response(&signature, other_message));
+
+        finalize_transactions(runtime).await;
+
+        assert_eq!(EventsAssert::from_recorded(), events_before);
+        read_state(|s| {
+            assert!(s.submitted_transactions().contains_key(&signature));
+            assert_eq!(s.nonce_pool().num_free_accounts(), 0);
+        });
+    }
+
+    fn assert_nonce_account_is_free() {
+        read_state(|s| {
+            assert!(
+                s.nonce_pool()
+                    .free_accounts()
+                    .any(|account| *account == NONCE_ACCOUNT)
+            )
+        });
+    }
+}
+
+const BOUND_NONCE_SEED: usize = 1;
+const STALE_NONCE_SEED: usize = 2;
+const UNSEEN_NONCE_SEED: usize = 3;
+
+fn min_rebroadcast_age_nanos() -> u64 {
+    MIN_REBROADCAST_AGE.as_nanos() as u64
+}
+
+fn encoded_submitted_transaction(signature: &solana_signature::Signature) -> String {
+    let message = read_state(|s| {
+        match s
+            .submitted_transactions()
+            .get(signature)
+            .expect("the transaction is submitted")
+        {
+            MinterTransaction::Withdrawal {
+                message: VersionedMessage::Legacy(message),
+                ..
+            } => message.clone(),
+            other => panic!("expected a withdrawal transaction, got {other:?}"),
+        }
+    });
+    let transaction = Transaction {
+        signatures: vec![*signature],
+        message,
+    };
+    SendTransactionParams::try_from(transaction)
+        .expect("the transaction is serializable")
+        .get_transaction()
+        .to_string()
+}
+
+/// Submits a withdrawal transaction under `signature(i)` bound to [`NONCE_ACCOUNT`]
+/// and to the nonce value that [`nonce_read`] returns for `nonce_seed`.
+fn submit_withdrawal_bound_to(i: usize, nonce_seed: usize) -> solana_signature::Signature {
+    let signature = signature(i);
+    events::accept_withdrawal(account(i), i as u64, MINIMUM_WITHDRAWAL_AMOUNT);
+    events::create_withdrawal_batch_transaction(durable_nonce(nonce_seed), vec![i as u64]);
+    events::submit_withdrawal_batch_transaction(
+        signature,
+        durable_nonce(nonce_seed),
+        vec![i as u64],
+    );
+    signature
+}
+
+fn submit_signed_withdrawal_bound_to(i: usize, nonce_seed: usize) -> solana_signature::Signature {
+    events::accept_withdrawal(account(i), i as u64, MINIMUM_WITHDRAWAL_AMOUNT);
+    events::create_withdrawal_batch_transaction(durable_nonce(nonce_seed), vec![i as u64]);
+    events::submit_signed_withdrawal_batch_transaction(durable_nonce(nonce_seed), vec![i as u64])
+}
+
+fn nonce_read(nonce_seed: usize) -> GetAccountInfoResult {
+    let minter_address = read_state(|s| s.minter_public_key().map(minter_address))
+        .expect("the minter public key is cached");
+    GetAccountInfoResult::Consistent(Ok(Some(nonce_account_info(minter_address, nonce_seed))))
+}
+
+fn called_methods(runtime: &TestCanisterRuntime) -> Vec<String> {
+    runtime
+        .sent_update_calls()
+        .into_iter()
+        .map(|call| call.method)
+        .collect()
+}
+
 fn setup() {
     init_state();
     init_balance();
     init_schnorr_master_key();
+}
+
+fn setup_with_signing_key() {
+    init_state();
+    devnet_sweep::init_balance();
 }
 
 fn current_block() -> ConfirmedBlock {
