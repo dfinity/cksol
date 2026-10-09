@@ -7,3 +7,4 @@ minter/Cargo.toml
 minter/CHANGELOG.md
 libs/types/Cargo.toml
 libs/types/CHANGELOG.md
+integration_tests/Cargo.toml
