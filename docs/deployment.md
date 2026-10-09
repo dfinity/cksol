@@ -13,7 +13,7 @@ See `should_derive_mainnet_minter_addresses_offline` for an example.
 ## Create nonce accounts
 
 Withdrawals are sent as durable-nonce transactions, so the minter needs a pool of durable nonce accounts whose nonce authority is the minter's address.
-Without them, `withdraw` returns `TemporarilyUnavailable("The durable nonce account pool is empty, no withdrawal can be processed")`.
+Without them, `withdraw_sol` returns `TemporarilyUnavailable("The durable nonce account pool is empty, no withdrawal can be processed")`.
 
 The commands below use the [Solana CLI](https://solana.com/docs/intro/installation) and the staging minter on Devnet.
 For production, use the production minter's address and `--url mainnet-beta`.
@@ -133,7 +133,7 @@ The fees and minimum amounts follow [Section 3.3 of the design](design.md#33-fee
 | `deposit_sol_fee`             | 45B cycles            | Covers the threshold signature and the RPC calls of a sweep containing a single deposit.        |
 | `deposit_sol_required_cycles` | 1T cycles             | Must be at least `GET_BALANCE_CYCLES` (10B) plus `deposit_sol_fee`; unused cycles are refunded. |
 | `minimum_deposit_amount`      | 0.02 SOL (20,000,000) | Must be at least twice the rent exemption threshold plus the fee of one signature.              |
-| `withdrawal_fee`              | 0.001 SOL (1,000,000) | Covers `getAccountInfo`, `sendTransaction`, `getSignatureStatuses` and the threshold signature. |
+| `withdrawal_fee`              | 0.001 SOL (1,000,000) | Covers `getAccountInfo`, `sendTransaction`, `getTransaction` and the threshold signature.       |
 | `minimum_withdrawal_amount`   | 0.002 SOL (2,000,000) | Must be at least the withdrawal fee plus the rent exemption threshold.                          |
 | `nonce_accounts`              | empty                 | Replace with the addresses created in [Create nonce accounts](#create-nonce-accounts).          |
 
@@ -281,8 +281,6 @@ Leaving `retrieve_blocks_from_ledger_interval_seconds` unset uses the index's de
 
 ## Test
 
-### Deposit SOL
-
 The commands below use the staging minter and ledger.
 For production, replace the canister IDs with those of the production minter and ledger.
 
@@ -292,10 +290,12 @@ LEDGER=la34w-haaaa-aaaar-qb5na-cai
 OWNER=$(icp identity principal --identity demo)
 ```
 
-### Get the deposit address
+### Deposit SOL
+
+#### Get the deposit address
 
 ```shell
-icp canister call $MINTER get_deposit_address "(record { owner = opt principal \"$OWNER\"; subaccount = null })" --query -n ic
+icp canister call $MINTER get_deposit_address "(record { owner = opt principal \"$OWNER\"; subaccount = null })" -n ic
 ```
 
 Send SOL to the returned address ([faucet](https://faucet.solana.com/)).
@@ -305,7 +305,7 @@ The balance of the deposit address must be at least `minimum_deposit_amount`, wh
 icp canister call $MINTER get_minter_info '()' --query -n ic
 ```
 
-### Queue the deposit
+#### Queue the deposit
 
 `deposit_sol` requires `deposit_sol_required_cycles` (1T cycles) to be attached to the call.
 Since an identity cannot attach cycles, route the call through a proxy canister that holds cycles:
@@ -323,10 +323,10 @@ The minter sees the proxy canister as the caller, so `owner` must be set explici
 Otherwise, the ckSOL would be minted to the proxy canister.
 The call returns the deposit ID, e.g. `(variant { Ok = 0 : nat64 })`.
 
-### Check the deposit status
+#### Check the deposit status
 
 ```shell
-icp canister call $MINTER deposit_status '(0 : nat64)' --query -n ic
+icp canister call $MINTER deposit_sol_status '(0 : nat64)' --query -n ic
 ```
 
 The status goes through `Queued`, `Swept`, `Finalized` and `Minted`.
@@ -335,3 +335,36 @@ Once minted, the ckSOL balance of the owner is:
 ```shell
 icp canister call $LEDGER icrc1_balance_of "(record { owner = principal \"$OWNER\"; subaccount = null })" --query -n ic
 ```
+
+### Withdraw SOL
+
+Withdrawals require nonce accounts, see [Create nonce accounts](#create-nonce-accounts).
+Without them, `withdraw_sol` returns `TemporarilyUnavailable` and burns nothing.
+
+#### Approve the minter
+
+The minter burns the withdrawn ckSOL with `icrc2_transfer_from`, so the owner must first approve the minter for the amount to withdraw.
+The approval costs the ledger transfer fee of 500 lamports, so withdrawing the whole balance means withdrawing the balance minus 500 lamports:
+
+```shell
+AMOUNT=1000000
+DESTINATION=6TqNg48mSd5evmY66JVfGeGTwszrU1YLCeSw3GJ2qsUC
+icp canister call $LEDGER icrc2_approve "(record { spender = record { owner = principal \"$MINTER\"; subaccount = null }; amount = $AMOUNT : nat; from_subaccount = null; expected_allowance = null; expires_at = null; fee = null; memo = null; created_at_time = null })" --identity demo -n ic
+```
+
+#### Withdraw
+
+```shell
+icp canister call $MINTER withdraw_sol "(record { from_subaccount = null; amount = $AMOUNT : nat64; address = \"$DESTINATION\" })" --identity demo -n ic
+```
+
+The amount must be at least `minimum_withdrawal_amount`, and the destination receives the amount minus `withdrawal_fee`.
+The call returns the index of the burn transaction on the ledger, e.g. `(variant { Ok = record { block_index = 2 : nat64 } })`.
+
+#### Check the withdrawal status
+
+```shell
+icp canister call $MINTER withdraw_sol_status '(record { block_index = 2 : nat64 })' -n ic
+```
+
+The status goes through `Pending`, `TxSent` and `TxFinalized`.
