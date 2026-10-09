@@ -15,6 +15,19 @@ Target canister: `lh22c-kyaaa-aaaar-qb5nq-cai`
 ## Motivation
 TODO: THIS MUST BE FILLED OUT
 
+## Canister Settings
+
+The following settings were changed from their default value before handing over control to the NNS
+
+| Setting                 | Default value                    | New value                               |
+|-------------------------|----------------------------------|-----------------------------------------|
+| `reserved_cycles_limit` | `5_000_000_000_000` (5T cycles)  | `1_000_000_000_000_000_000`             |
+| `memory_allocation`     | `0` (best-effort)                | `1_073_741_824` (1 GiB)                 |
+
+These values match those of the ckBTC minter, see proposals [143837](https://dashboard.internetcomputer.org/proposal/143837) and [143902](https://dashboard.internetcomputer.org/proposal/143902).
+Under subnet storage pressure, memory growth outside of the memory allocation must reserve cycles and is rejected once `reserved_cycles_limit` is reached.
+A reserved memory allocation of 1 GiB ensures that growth within that allocation reserves no cycles, and the higher limit ensures that growth beyond it is not rejected because of the limit.
+The current values can be obtained by calling the [`canister_status`](https://dashboard.internetcomputer.org/canister/r7inp-6aaaa-aaaaa-aaabq-cai#canister_status) endpoint of the NNS root canister.
 
 ## Install args
 
