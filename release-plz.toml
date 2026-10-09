@@ -1,0 +1,55 @@
+[workspace]
+# path of the git-cliff configuration
+changelog_config = "cliff.toml"
+
+# enable changelog updates
+changelog_update = true
+
+# do not run `cargo update`: release the lockfile that was tested on main
+dependencies_update = false
+
+# No GitHub releases by default — opt in per package with `git_release_enable = true`.
+# The minter's draft GitHub release is created by the Publish workflow (publish.yml),
+# not by release-plz; cksol-types is git tag + crates.io only.
+git_release_enable = false
+
+# only release when the head commit is a merged release-plz PR
+release_always = false
+
+# Enable git tags for all packages by default
+git_tag_enable = true
+git_tag_name = "{{ package }}-v{{ version }}"
+
+# creates the git release as draft
+git_release_draft = true
+
+# the release PR is opened as a draft; review it, mark it ready, then merge
+pr_draft = true
+
+# labels for the release PR
+pr_labels = ["release"]
+
+# disallow updating repositories with uncommitted changes
+allow_dirty = false
+
+# disallow packaging with uncommitted changes
+publish_allow_dirty = false
+
+[[package]]
+name = "cksol_minter"
+git_only = true # publish = false, so there is no registry baseline; derive the version and changelog from the git tag
+semver_check = false # binary canister, no public Rust API to guard
+publish = false # the canister is released as a wasm asset, never to crates.io
+
+[[package]]
+name = "cksol-types"
+# published to crates.io; no separate GitHub release (the crates.io publish + git tag is enough)
+publish = true
+
+[[package]]
+name = "cksol-types-internal"
+release = false # internal types, not released
+
+[[package]]
+name = "cksol-int-tests"
+release = false # test crate, not released

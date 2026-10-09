@@ -1,0 +1,41 @@
+name: Release
+
+on:
+  workflow_dispatch:
+
+jobs:
+  # Create a PR with the new versions and changelog, preparing the next release.
+  release-plz-pr:
+    name: Release-plz PR
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: write
+    concurrency:
+      group: release-plz-${{ github.ref }}
+      cancel-in-progress: false
+    steps:
+      - name: 'Checkout'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: 'Run release-plz'
+        # The action version also selects the cargo-semver-checks it installs,
+        # which is not overridable: v0.5.105 pinned 0.40, too old to read the
+        # rustdoc JSON emitted by the toolchain in rust-toolchain.toml, so the
+        # API compatibility check errored out and release-plz reported every
+        # release as API compatible. v0.5.131 pins 0.48, which reads it. Keep in
+        # step with publish.yml, and re-check this when bumping the toolchain:
+        # the check fails silently, it does not fail the workflow.
+        uses: release-plz/action@2eb1d8bcb770b4c48ccfaad919734b38b51958c9 # v0.5.131
+        with:
+          command: release-pr
+          # Pin the release-plz binary. >= 0.3.142 creates the PR branch via the
+          # GitHub API (authenticated with the token) instead of `git push`,
+          # which otherwise fails with "could not read Username". >= 0.3.151
+          # adds the `git_only` config the canister package relies on, with the
+          # git-only-with-path-dependency fixes landing through 0.3.157.
+          version: 0.3.159
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
