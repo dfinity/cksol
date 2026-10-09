@@ -7,8 +7,3 @@ minter/Cargo.toml
 minter/CHANGELOG.md
 libs/types/Cargo.toml
 libs/types/CHANGELOG.md
-
-# Dependent manifests: release-plz rewrites their intra-workspace version
-# requirements when a workspace dependency's version bumps
-libs/types-internal/Cargo.toml
-integration_tests/Cargo.toml
