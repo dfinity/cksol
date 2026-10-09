@@ -36,6 +36,7 @@ name = "cksol_minter"
 git_only = true # publish = false, so there is no registry baseline; derive the version and changelog from the git tag
 semver_check = false # binary canister, no public Rust API to guard
 publish = false # the canister is released as a wasm asset, never to crates.io
+git_tag_name = "{{ package }}-v{{ version }}"
 
 [[package]]
 name = "cksol-types"
