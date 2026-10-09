@@ -5,8 +5,8 @@ changelog_config = "cliff.toml"
 # enable changelog updates
 changelog_update = true
 
-# update dependencies with `cargo update`
-dependencies_update = true
+# do not run `cargo update`: release the lockfile that was tested on main
+dependencies_update = false
 
 # No GitHub releases by default — opt in per package with `git_release_enable = true`.
 # The minter's draft GitHub release is created by the Publish workflow (publish.yml),
