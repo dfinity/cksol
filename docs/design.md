@@ -21,7 +21,6 @@
   - [3.4. OFAC Checks](#34-ofac-checks)
   - [3.5. Events](#35-events)
   - [3.6. API](#36-api)
-- [4. Testing](#4-testing)
 
 ## 1. High-Level Goal
 
@@ -660,14 +659,3 @@ The ckSOL minter exposes the following endpoints:
 7. `get_events(start, length)`: Returns a page of the event log, at most 2000 events per call. This is a debug endpoint; backwards compatibility is not guaranteed for it.
 
 The authoritative interface is the Candid file [`minter/cksol_minter.did`](../minter/cksol_minter.did).
-
-## 4. Testing
-
-In addition to the product-security review of the design and the code, the team will also conduct extensive testing of the ckSOL minter. The different test scenarios are collected here:
-
-1. Withdraw SOL to a Solana program that always fails.
-    1. ✅ Attempts to send SOL to a Solana program always fail (no SOL is transferred).
-2. Mint ckSOL using multiple transfers all to the same destination account.
-    1. ✅ [Sample transaction](https://explorer.solana.com/tx/3AfVrhtTMZqkWPUktYjsVuzpCc2T15doU6S6UPGMJhBgjj4Gp5qNyM2F4H52vb3SDvGXBEfhUTGnDuKVGKKAtKyG?cluster=devnet) sending the same amount from different accounts to a ckSOL minter controlled address. The mint happened at block index 19.
-    2. ✅ [Sample transaction](https://explorer.solana.com/tx/4Er3GnXCJvesEmQLB24AKxY8ZUR2JzRVvZhPgYj7ygW1wNXEKDudZ4hNL9MP1tMNuRicMqeQqgdiqHJ23yekw4wU?cluster=devnet) sending different amounts to the same recipient. The mint happened at block index 20.
-    3. ✅ [Sample transaction](https://explorer.solana.com/tx/qo9AnFCRdAPr4dZjiJ7CVpSKa3APVgGGLQ8bPVhRr4dqsCsQCvHsUnVbRad2vHTLtUvKDyxfWkoFFAxZKrtSsDE?cluster=devnet) sending half of the minimum deposit amount in two separate transfers each, resulting in a total amount of exactly the minimum deposit amount. The mint happened at block index 54.
