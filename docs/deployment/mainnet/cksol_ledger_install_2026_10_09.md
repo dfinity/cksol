@@ -14,6 +14,7 @@ Target canister: `ls5lp-lqaaa-aaaar-qb5oa-cai`
 
 ## Motivation
 This proposal installs the mainnet ckSOL ledger to the governance-controlled canister ID [`ls5lp-lqaaa-aaaar-qb5oa-cai`](https://dashboard.internetcomputer.org/canister/ls5lp-lqaaa-aaaar-qb5oa-cai) on subnet [`pzp6e-ekpqk-3c5x7-2h6so-njoeq-mt45d-h3h6c-q3mxf-vpeq5-fk5o7-yae`](https://dashboard.internetcomputer.org/subnet/pzp6e-ekpqk-3c5x7-2h6so-njoeq-mt45d-h3h6c-q3mxf-vpeq5-fk5o7-yae).
+The installed Wasm is the ledger of the latest ICRC ledger suite release [ledger-suite-icrc-2026-03-09](https://github.com/dfinity/ic/releases/tag/ledger-suite-icrc-2026-03-09).
 
 ckSOL is a chain-key token on the Internet Computer backed 1:1 by SOL, the native token of the Solana blockchain.
 The ckSOL ledger is an ICRC-1, ICRC-2 and ICRC-3 compliant ledger that holds the ckSOL balances.
