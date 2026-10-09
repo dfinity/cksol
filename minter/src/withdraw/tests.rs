@@ -604,7 +604,6 @@ mod process_pending_withdrawals_tests {
             withdrawal_status(1),
             WithdrawSolStatus::TxFinalized(TxFinalizedStatus::Success {
                 transaction_id: signature.into(),
-                effective_transaction_fee: None,
             })
         );
     }
@@ -1040,7 +1039,6 @@ mod withdrawal_finalization_tests {
             withdrawal_status(1),
             WithdrawSolStatus::TxFinalized(TxFinalizedStatus::Success {
                 transaction_id: tx_signature.into(),
-                effective_transaction_fee: None,
             })
         );
     }

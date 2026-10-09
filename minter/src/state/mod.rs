@@ -20,7 +20,7 @@ use cksol_types_internal::{Ed25519KeyName, InitArgs, UpgradeArgs};
 use ic_canister_runtime::Runtime;
 use ic_ed25519::PublicKey;
 use icrc_ledger_types::icrc1::account::Account;
-use sol_rpc_client::SolRpcClient;
+use sol_rpc_client::{ClientBuilder, SolRpcClient};
 use sol_rpc_types::{ConsensusStrategy, Lamport, RpcSources, SolanaCluster};
 use solana_address::Address;
 use solana_hash::Hash;
@@ -254,6 +254,10 @@ impl State {
     }
 
     pub fn sol_rpc_client<R: Runtime>(&self, runtime: R) -> SolRpcClient<R> {
+        self.sol_rpc_client_builder(runtime).build()
+    }
+
+    pub fn sol_rpc_client_builder<R: Runtime>(&self, runtime: R) -> ClientBuilder<R> {
         SolRpcClient::builder(runtime, self.sol_rpc_canister_id)
             .with_rpc_sources(RpcSources::Default(SolanaCluster::from(
                 self.solana_network,
@@ -262,7 +266,6 @@ impl State {
                 min: 3,
                 total: Some(4),
             })
-            .build()
     }
 
     pub fn ledger_client<R: Runtime>(&self, runtime: R) -> LedgerClient<R> {
@@ -473,7 +476,6 @@ impl State {
         if let Some(sent) = self.successful_withdrawal_requests.get(&burn_index) {
             return WithdrawSolStatus::TxFinalized(TxFinalizedStatus::Success {
                 transaction_id: sent.signature.into(),
-                effective_transaction_fee: None,
             });
         }
         if let Some(sent) = self.failed_withdrawal_requests.get(&burn_index) {

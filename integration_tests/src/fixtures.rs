@@ -12,7 +12,7 @@ use icrc_ledger_types::{
 };
 use pocket_ic::nonblocking::PocketIc;
 use serde_json::json;
-use sol_rpc_types::Lamport;
+use sol_rpc_types::{GetBlockCommitmentLevel, Lamport};
 use solana_address::{Address, address};
 use solana_hash::Hash;
 use solana_nonce::{
@@ -147,11 +147,15 @@ impl MockBuilder {
     /// Mocks for a timer submitting a transaction built on the block at `block_height`:
     /// `getSlot` → `getBlock` → `sendTransaction`.
     pub fn submit_transaction(self, block_height: u64) -> Self {
-        self.get_current_block(block_height, SUBMITTED_BLOCKHASH)
-            .expect(
-                send_transaction_request(),
-                send_transaction_response(SUBMITTED_SIGNATURE),
-            )
+        self.get_current_block(
+            block_height,
+            SUBMITTED_BLOCKHASH,
+            GetBlockCommitmentLevel::Confirmed,
+        )
+        .expect(
+            send_transaction_request(),
+            send_transaction_response(SUBMITTED_SIGNATURE),
+        )
     }
 
     /// Mock for `getAccountInfo` returning an initialized durable nonce account
@@ -191,15 +195,23 @@ impl MockBuilder {
     /// signature expired at `block_height`: `getSlot` → `getBlock` → `getSignatureStatuses`
     /// reporting it as not found.
     pub fn mark_transaction_expired(self, signature: &Signature, block_height: u64) -> Self {
-        self.get_current_block(block_height, IGNORED_BLOCKHASH)
-            .check_signature_statuses(signature, get_signature_statuses_not_found_response())
+        self.get_current_block(
+            block_height,
+            IGNORED_BLOCKHASH,
+            GetBlockCommitmentLevel::Finalized,
+        )
+        .check_signature_statuses(signature, get_signature_statuses_not_found_response())
     }
 
     /// Mocks for `finalize_transactions` reporting the pending transaction with the given
     /// signature as finalized at `block_height`.
     pub fn finalize_transaction(self, signature: &Signature, block_height: u64) -> Self {
-        self.get_current_block(block_height, IGNORED_BLOCKHASH)
-            .check_signature_statuses(signature, get_signature_statuses_finalized_response())
+        self.get_current_block(
+            block_height,
+            IGNORED_BLOCKHASH,
+            GetBlockCommitmentLevel::Finalized,
+        )
+        .check_signature_statuses(signature, get_signature_statuses_finalized_response())
     }
 
     /// Mock for `getTransaction` returning the given signed sweep of
@@ -216,9 +228,14 @@ impl MockBuilder {
         self.expect(get_signature_statuses_request(signature), response)
     }
 
-    fn get_current_block(self, block_height: u64, blockhash: &str) -> Self {
+    fn get_current_block(
+        self,
+        block_height: u64,
+        blockhash: &str,
+        commitment: GetBlockCommitmentLevel,
+    ) -> Self {
         self.expect(get_slot_request(), get_slot_response()).expect(
-            get_block_request(),
+            get_block_request(commitment),
             get_block_response(block_height, blockhash),
         )
     }
@@ -366,12 +383,13 @@ fn get_slot_response() -> JsonRpcResponse {
     }))
 }
 
-fn get_block_request() -> JsonRpcRequestMatcher {
+fn get_block_request(commitment: GetBlockCommitmentLevel) -> JsonRpcRequestMatcher {
     JsonRpcRequestMatcher::with_method("getBlock").with_params(json!([
         MOCK_SLOT,
         {
             "transactionDetails": "none",
             "rewards": false,
+            "commitment": commitment,
             "maxSupportedTransactionVersion": 0
         }
     ]))

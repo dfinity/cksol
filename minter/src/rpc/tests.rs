@@ -3,7 +3,7 @@ use crate::{
     rpc::{
         Block, BlockHeight, GetBalanceError, GetNonceAccountError, GetRecentBlockError,
         GetTransactionError, NonceAccount, SubmitTransactionError, get_balance, get_nonce_account,
-        get_recent_block, get_transaction, submit_transaction,
+        get_recent_block, get_signature_statuses, get_transaction, submit_transaction,
         submit_transaction_skipping_preflight,
     },
     test_fixtures::{
@@ -20,8 +20,9 @@ use crate::{
 use assert_matches::assert_matches;
 use ic_canister_runtime::IcError;
 use sol_rpc_types::{
-    HttpOutcallError, RpcConfig, RpcError, RpcSource, RpcSources, SendTransactionParams,
-    SupportedRpcProviderId,
+    CommitmentLevel, GetBlockCommitmentLevel, GetBlockParams, GetSignatureStatusesParams,
+    GetSlotParams, GetSlotRpcConfig, GetTransactionParams, HttpOutcallError, RpcConfig, RpcError,
+    RpcSource, RpcSources, SendTransactionParams, SupportedRpcProviderId,
 };
 use solana_transaction::{Message, Transaction};
 use solana_transaction_status_client_types::{EncodedTransaction, TransactionBinaryEncoding};
@@ -243,6 +244,55 @@ mod get_transaction_tests {
 
         assert_eq!(result, Ok(Some(fetched(legacy_deposit_transaction()))))
     }
+
+    #[tokio::test]
+    async fn should_leave_the_response_size_estimate_to_the_sol_rpc_canister() {
+        init_state();
+        let runtime =
+            TestCanisterRuntime::new().add_stub_response(MultiRpcResult::Consistent(Ok(None)));
+
+        let result = get_transaction(&runtime, legacy_deposit_transaction_signature()).await;
+
+        assert_eq!(result, Ok(None));
+        let [call] = runtime.sent_update_calls().try_into().unwrap();
+        assert_eq!(call.method, "getTransaction");
+        let (_sources, config, _params): (RpcSources, Option<RpcConfig>, GetTransactionParams) =
+            call.args();
+        assert_eq!(
+            config.and_then(|config| config.response_size_estimate),
+            None
+        );
+    }
+}
+
+mod get_signature_statuses_tests {
+    use super::*;
+
+    type MultiRpcResult =
+        sol_rpc_types::MultiRpcResult<Vec<Option<sol_rpc_types::TransactionStatus>>>;
+
+    #[tokio::test]
+    async fn should_leave_the_response_size_estimate_to_the_sol_rpc_canister() {
+        init_state();
+        let runtime = TestCanisterRuntime::new()
+            .add_stub_response(MultiRpcResult::Consistent(Ok(vec![None])));
+
+        let result =
+            get_signature_statuses(&runtime, &[legacy_deposit_transaction_signature()]).await;
+
+        assert_eq!(result, Ok(vec![None]));
+        let [call] = runtime.sent_update_calls().try_into().unwrap();
+        assert_eq!(call.method, "getSignatureStatuses");
+        let (_sources, config, _params): (
+            RpcSources,
+            Option<RpcConfig>,
+            GetSignatureStatusesParams,
+        ) = call.args();
+        assert_eq!(
+            config.and_then(|config| config.response_size_estimate),
+            None
+        );
+    }
 }
 
 mod submit_transaction_tests {
@@ -259,7 +309,7 @@ mod submit_transaction_tests {
             SendTransactionResult::Consistent(Ok(expected_signature.clone())),
         );
 
-        let result = submit_transaction(&runtime, transaction()).await;
+        let result = submit_transaction(&runtime, transaction(), CommitmentLevel::Confirmed).await;
 
         assert_eq!(result, Ok(expected_signature.into()));
     }
@@ -270,7 +320,7 @@ mod submit_transaction_tests {
 
         let runtime = TestCanisterRuntime::new().add_stub_error(IcError::CallPerformFailed);
 
-        let result = submit_transaction(&runtime, transaction()).await;
+        let result = submit_transaction(&runtime, transaction(), CommitmentLevel::Confirmed).await;
 
         assert_eq!(
             result,
@@ -291,7 +341,7 @@ mod submit_transaction_tests {
         let runtime = TestCanisterRuntime::new()
             .add_stub_response(SendTransactionResult::Consistent(Err(rpc_error.clone())));
 
-        let result = submit_transaction(&runtime, transaction()).await;
+        let result = submit_transaction(&runtime, transaction(), CommitmentLevel::Confirmed).await;
 
         assert_eq!(result, Err(SubmitTransactionError::RpcError(rpc_error)));
     }
@@ -314,7 +364,7 @@ mod submit_transaction_tests {
         let runtime = TestCanisterRuntime::new()
             .add_stub_response(SendTransactionResult::Inconsistent(results));
 
-        let result = submit_transaction(&runtime, transaction()).await;
+        let result = submit_transaction(&runtime, transaction(), CommitmentLevel::Confirmed).await;
 
         assert_eq!(result, Err(SubmitTransactionError::InconsistentRpcResults));
     }
@@ -325,10 +375,24 @@ mod submit_transaction_tests {
         let runtime = TestCanisterRuntime::new()
             .add_stub_response(SendTransactionResult::Consistent(Ok(signature())));
 
-        let result = submit_transaction(&runtime, transaction()).await;
+        let result = submit_transaction(&runtime, transaction(), CommitmentLevel::Confirmed).await;
 
         assert_eq!(result, Ok(signature().into()));
         assert_eq!(sent_params(&runtime).skip_preflight, None);
+    }
+
+    #[tokio::test]
+    async fn should_simulate_at_the_requested_commitment() {
+        init_state();
+        for commitment in [CommitmentLevel::Confirmed, CommitmentLevel::Finalized] {
+            let runtime = TestCanisterRuntime::new()
+                .add_stub_response(SendTransactionResult::Consistent(Ok(signature())));
+
+            let result = submit_transaction(&runtime, transaction(), commitment.clone()).await;
+
+            assert_eq!(result, Ok(signature().into()));
+            assert_eq!(sent_params(&runtime).preflight_commitment, Some(commitment));
+        }
     }
 
     #[tokio::test]
@@ -518,7 +582,7 @@ mod get_recent_block_tests {
                 confirmed_block_at_height(block_height),
             ))));
 
-        let result = get_recent_block(&runtime).await;
+        let result = get_recent_block(&runtime, CommitmentLevel::Finalized).await;
 
         assert_eq!(
             result,
@@ -542,7 +606,7 @@ mod get_recent_block_tests {
                 },
             ))));
 
-        let result = get_recent_block(&runtime).await;
+        let result = get_recent_block(&runtime, CommitmentLevel::Finalized).await;
 
         assert_eq!(
             result,
@@ -556,13 +620,49 @@ mod get_recent_block_tests {
         let runtime = TestCanisterRuntime::new()
             .add_recent_block(Err(RpcError::ValidationError("Error".to_string())));
 
-        let result = get_recent_block(&runtime).await;
+        let result = get_recent_block(&runtime, CommitmentLevel::Finalized).await;
 
         assert_matches!(
             result,
             Err(GetRecentBlockError::Failed(errors))
                 if errors.len() == GET_RECENT_BLOCK_MAX_TRIES.get()
         );
+    }
+
+    #[tokio::test]
+    async fn should_fetch_slot_and_block_at_the_requested_commitment() {
+        init_state();
+        for (commitment, block_commitment) in [
+            (
+                CommitmentLevel::Confirmed,
+                GetBlockCommitmentLevel::Confirmed,
+            ),
+            (
+                CommitmentLevel::Finalized,
+                GetBlockCommitmentLevel::Finalized,
+            ),
+        ] {
+            let runtime = TestCanisterRuntime::new().add_recent_block(Ok(SLOT));
+
+            let result = get_recent_block(&runtime, commitment.clone()).await;
+
+            assert_matches!(result, Ok(Block { slot: SLOT, .. }));
+            let [get_slot, get_block] = runtime.sent_update_calls().try_into().unwrap();
+            assert_eq!(get_slot.method, "getSlot");
+            let (_sources, _config, slot_params): (
+                RpcSources,
+                Option<GetSlotRpcConfig>,
+                Option<GetSlotParams>,
+            ) = get_slot.args();
+            assert_eq!(
+                slot_params.and_then(|params| params.commitment),
+                Some(commitment)
+            );
+            assert_eq!(get_block.method, "getBlock");
+            let (_sources, _config, block_params): (RpcSources, Option<RpcConfig>, GetBlockParams) =
+                get_block.args();
+            assert_eq!(block_params.commitment, Some(block_commitment));
+        }
     }
 
     fn blockhash() -> sol_rpc_types::Hash {
