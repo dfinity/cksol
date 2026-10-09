@@ -127,7 +127,7 @@ graph TD
     Providers --> Solana["Solana Blockchain"]
 ```
 
-The full design rationale, including fees and flows, is in the [design document](docs/design.md).
+The full design rationale, including fees and flows, is in the [design document](docs/design.md). The [deployment guide](docs/deployment.md) covers installing the minter, ledger and index, creating the durable nonce accounts, and running a deposit and withdrawal round trip.
 
 **ckSOL Minter** — The main canister in this repository. It manages the deposit and withdrawal lifecycle, holds custody of SOL via chain-key addresses, signs Solana transactions using threshold Schnorr over Ed25519, and interacts with the ckSOL ledger.
 
@@ -248,7 +248,8 @@ icp canister call -e prod cksol_minter withdraw_sol_status \
 │   └── types-internal/      # Internal types and event definitions
 ├── integration_tests/       # End-to-end tests using PocketIC
 ├── docs/
-│   └── design.md            # Design document
+│   ├── design.md            # Design document
+│   └── deployment.md        # Deployment and smoke-test guide
 └── scripts/
     └── build                # Build script for the minter Wasm
 ```
