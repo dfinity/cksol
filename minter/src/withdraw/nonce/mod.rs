@@ -46,7 +46,7 @@ impl ReadNonceError {
             ReadNonceError::GetNonceAccount(
                 GetNonceAccountError::IcError(_)
                 | GetNonceAccountError::RpcError(_)
-                | GetNonceAccountError::InconsistentRpcResults,
+                | GetNonceAccountError::InconsistentRpcResults(_),
             ) => true,
             ReadNonceError::GetNonceAccount(
                 GetNonceAccountError::AccountNotFound
