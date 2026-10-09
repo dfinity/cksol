@@ -29,7 +29,7 @@ The goal is to support a new ICRC-2 (and ICRC-3) compliant token on the IC, call
 
 ## 2. Overview
 
-The ckSOL functionality is introduced with a new canister (**ckSOL minter**) together with an instance of the ICRC ledger suite, in particular a ledger canister (**ckSOL ledger**), index canister, and archive canisters. The ckSOL minter *default account* is the *minting account* of the ckSOL ledger.
+The ckSOL functionality is introduced with a new canister (**ckSOL minter**) together with an instance of the ICRC ledger suite, in particular a ledger canister (**ckSOL ledger**) and an index canister. Archiving is deliberately disabled, by setting the archive trigger threshold beyond any reachable block count, so the suite spawns no archive canisters. The ckSOL minter *default account* is the *minting account* of the ckSOL ledger.
 
 The ckSOL minter is the canister responsible for managing deposited SOL and minting/burning ckSOL. Concretely, it provides the following functionality:
 
@@ -49,7 +49,7 @@ graph LR
     User((User))
     subgraph IC["Internet Computer"]
         Minter["ckSOL minter"]
-        Ledger["ckSOL ledger suite<br/>(ledger, index, archives)"]
+        Ledger["ckSOL ledger suite<br/>(ledger, index)"]
         RPC["SOL RPC canister"]
     end
     Solana["Solana"]
@@ -221,7 +221,7 @@ sequenceDiagram
     RPC-->>-Minter: signature
     deactivate Minter
 
-    Note over Minter: ⏱️ Finalization timer (Section 3.2.2)
+    Note over Minter: ⏱️ Finalization timer (Section 3.2.5)
     activate Minter
     Minter->>+RPC: getSignatureStatuses([signature])
     RPC-->>-Minter: finalized
@@ -240,7 +240,7 @@ sequenceDiagram
     Minter-->>-User: Minted { block index, amount }
 ```
 
-**Request.** The flow is triggered by calling `deposit_sol` with the user's account (principal ID and subaccount) as parameters. The principal may differ from the caller's, so that a frontend or another canister can pay for a user's deposit, but it must not be the anonymous principal. The endpoint requires cycles to be attached; the required amount is exposed as `deposit_sol_required_cycles` in `get_minter_info` and, as explained below, most of it is refunded. At most one deposit per account can be in flight: if a deposit for the given account is queued, swept, or finalized but not yet minted, the call returns the id of that deposit and refunds all attached cycles without contacting the SOL RPC canister, so that a retried call is idempotent. Only a deposit that is minted or dropped allows a new sweep of the same account. If the latest deposit of the account is quarantined, the call is rejected with an error carrying the id of the quarantined deposit, since the outcome of its sweep did not match the plan the minter submitted and the deposit could not be credited safely, and the account remains rejected until a minter upgrade resolves the quarantined deposit; a new deposit has to use a different subaccount. The account is reserved before the first inter-canister call, so that concurrent calls for the same account cannot both pass this check, and the reservation is released on every error path.
+**Request.** The flow is triggered by calling `deposit_sol` with the user's account (principal ID and subaccount) as parameters. The principal may differ from the caller's, so that a frontend or another canister can pay for a user's deposit, but it must be neither the anonymous principal nor the ckSOL minter's own principal, whose deposit address is the main address. The endpoint requires cycles to be attached; the required amount is exposed as `deposit_sol_required_cycles` in `get_minter_info` and, as explained below, most of it is refunded. At most one deposit per account can be in flight: if a deposit for the given account is queued, swept, or finalized but not yet minted, the call returns the id of that deposit and refunds all attached cycles without contacting the SOL RPC canister, so that a retried call is idempotent. Only a deposit that is minted or dropped allows a new sweep of the same account. If the latest deposit of the account is quarantined, the call is rejected with an error carrying the id of the quarantined deposit, since the outcome of its sweep did not match the plan the minter submitted and the deposit could not be credited safely, and the account remains rejected until a minter upgrade resolves the quarantined deposit; a new deposit has to use a different subaccount. The account is reserved before the first inter-canister call, so that concurrent calls for the same account cannot both pass this check, and the reservation is released on every error path.
 
 **Balance check.** The ckSOL minter calls the `getBalance` endpoint of the SOL RPC canister for the deposit address at the `finalized` commitment level. No `minContextSlot` is set: the SOL RPC canister returns no context slot, so the slot at which a previous sweep of the address was finalized cannot be learned, and the 3-out-of-4 provider consensus is part of the trust model. A balance that a lagging provider reports too high cannot cause an over-mint either, since ckSOL is minted only once the sweep transaction has been finalized and the amount credited is read from that transaction, and a sweep built on an inflated balance is not a valid transaction. The *sweepable amount* is the balance minus the **rent exemption threshold** (890,880 lamports for an account without data), or zero if the balance does not exceed the threshold. This threshold is deliberately left on the deposit address: Solana rejects any transaction that would leave an account with a nonzero balance below the threshold, so sweeping the whole balance would fail as soon as a small transfer arrived between the balance check and the execution of the sweep. Keeping the threshold on the address makes the sweep independent of concurrent transfers. The threshold is paid once per deposit address, since later sweeps find it already in place.
 
@@ -270,12 +270,12 @@ In both cases the queued deposits are marked as *dropped*, and the number of dro
 | Stage | Alice | Bob | Paid by | Notes |
 | --- | --- | --- | --- | --- |
 | 1. Transfer to the deposit address | 1,000,000,000 lamports (1 SOL) | 50,000,000 lamports (0.05 SOL) | User's wallet | The Solana fee of 5,000 lamports for this transfer is paid by the sender on top of the amount and is not visible to the ckSOL minter. |
-| 2. `deposit_sol` with 1T cycles attached | charged 47.1B cycles (0.068 USD) | charged 47.1B cycles (0.068 USD) | Caller, in cycles | 2.1B cycles for `getBalance` plus the deposit_sol fee of 45B cycles. 952.9B cycles are refunded. |
+| 2. `deposit_sol` with 1T cycles attached | charged 47.31B cycles (0.068 USD) | charged 47.31B cycles (0.068 USD) | Caller, in cycles | 2.31B cycles for `getBalance` plus the deposit_sol fee of 45B cycles. 952.69B cycles are refunded. |
 | 3. Sweepable amount | 999,109,120 lamports | 49,109,120 lamports | | Balance minus the rent exemption threshold of 890,880 lamports (0.089 USD), which stays on the deposit address. |
 | 4. Sweep transaction fee | 10,000 lamports paid on-chain | 0 | Fee payer (Alice) | Two signatures at 5,000 lamports each. Alice transfers 999,099,120 lamports, Bob transfers 49,109,120 lamports. Both deposit addresses end at 890,880 lamports; the main account receives 1,048,208,240 lamports. |
 | 5. Mint | 999,104,120 lamports (0.99910412 ckSOL) | 49,104,120 lamports (0.04910412 ckSOL) | | Sweepable amount minus the shortfall share of `ceil(10,000 / 2) = 5,000` lamports, the shortfall being the 1,048,218,240 lamports swept minus the 1,048,208,240 received. The total minted equals the amount received on the main account. |
 
-For Alice, converting 1 SOL to ckSOL costs 895,880 lamports (0.0896 USD) on Solana, of which 890,880 lamports remain on her deposit address and are not charged again for her next deposit, plus 47.1B cycles (0.068 USD). Bob pays the same, so smaller deposits pay a proportionally larger share; a first deposit of exactly the minimum deposit amount of 0.02 SOL would be credited 19,104,120 lamports, i.e., 95.5% of the amount deposited.
+For Alice, converting 1 SOL to ckSOL costs 895,880 lamports (0.0896 USD) on Solana, of which 890,880 lamports remain on her deposit address and are not charged again for her next deposit, plus 47.31B cycles (0.068 USD). Bob pays the same, so smaller deposits pay a proportionally larger share; a first deposit of exactly the minimum deposit amount of 0.02 SOL would be credited 19,104,120 lamports, i.e., 95.5% of the amount deposited.
 
 If Bob then withdraws everything, he first approves the ckSOL minter, which costs the ledger transfer fee of 500 lamports, and then withdraws the remaining 49,103,620 lamports. After the withdrawal fee of 1,000,000 lamports, the destination address receives 48,103,620 lamports (0.04810362 SOL). The whole round trip from 0.05 SOL to 0.04810362 SOL costs 1,896,380 lamports (0.19 USD), of which 890,880 lamports are still under the control of the ckSOL minter on Bob's deposit address, plus the cycles attached to `deposit_sol`.
 
@@ -313,7 +313,7 @@ sequenceDiagram
     deactivate Minter
 ```
 
-All transactions are created on a timer. Since a transaction must contain a recent block hash, such a block hash must be obtained first: A `getSlot` call is used to get a recent slot, followed by a `getBlock` call to retrieve block details, in particular the block hash, for the slot received in the first step. Note that it is possible that there is no block for a certain slot, in which case `getSlot` needs to be called again, followed by another call to `getBlock`. The figure only shows the happy path of one call each. Given a recent block hash, the transaction is built, obtaining an EdDSA signature for each transfer to be made within that transaction. The block height of the block whose hash is used is persisted together with the transaction. A block hash is valid for 150 blocks after that height, so the *last valid block height* of the transaction is the persisted height plus 150, and that is what expiry is later checked against. Once the transaction is signed and serialized, it is sent to the SOL RPC canister, which forwards it to the RPC providers.
+Sweep transactions are created on a timer. Since a sweep must contain a recent block hash, such a block hash must be obtained first: A `getSlot` call is used to get a recent slot, followed by a `getBlock` call to retrieve block details, in particular the block hash, for the slot received in the first step. Note that it is possible that there is no block for a certain slot, in which case `getSlot` needs to be called again, followed by another call to `getBlock`. The figure only shows the happy path of one call each. Given a recent block hash, the transaction is built, obtaining an EdDSA signature for each transfer to be made within that transaction. The block height of the block whose hash is used is persisted together with the transaction. A block hash is valid for 150 blocks after that height, so the *last valid block height* of the transaction is the persisted height plus 150, and that is what expiry is later checked against. Once the transaction is signed and serialized, it is sent to the SOL RPC canister, which forwards it to the RPC providers.
 
 The block hash of a sweep is read at the `confirmed` commitment level, and the preflight simulation that the SOL RPC canister runs before broadcasting uses the same level. The 150-block validity window of a block hash lasts roughly 90 seconds on mainnet and about 36 seconds on Devnet, and a block hash read at `finalized` has already spent part of it by the time it is obtained, since finalization lags the chain tip. A sweep built on such a hash can therefore expire before it reaches the chain: on Devnet this dropped 18 of 50 deposits in a staging stress test, two sweeps being rejected by every provider with `BlockhashNotFound`. Reading the block hash at `confirmed` gives the sweep close to the full window. The expiry check of [Section 3.2.5](#325-finalization-and-re-broadcast) keeps reading the current block height at `finalized`, so a sweep is only ever declared expired against a height that can no longer be rolled back.
 
@@ -397,7 +397,7 @@ sequenceDiagram
     Note over Solana,Minter: ⏱️ Withdrawal transaction submission flow
 ```
 
-Since Solana has a high block rate, the timer should execute more frequently compared to ckBTC. The proposed interval is **10 seconds**. A shorter interval between calls implies that there is a lower chance of retrieval requests being batched together; however, it is preferable to have smaller batches, as transactions are cheap and it provides a better user experience.
+Since Solana has a high block rate, the timer should execute more frequently compared to ckBTC. A shorter interval between calls implies that there is a lower chance of retrieval requests being batched together; however, it is preferable to have smaller batches, as transactions are cheap and it provides a better user experience. The interval originally proposed here was **10 seconds**; the implementation runs the timer every **minute** and reschedules it after 10 seconds when a round made progress and work remains. Whether to close that gap is still open.
 
 There is a **minimum withdrawal amount**, which is defined in [Section 3.3.3](#333-minimum-swap-amounts).
 
@@ -545,37 +545,30 @@ The maximum response sizes for each endpoint are listed here:
 - `sendTransaction`: 128 bytes
 - `getSlot`: 44 bytes
 
-The following maximum response sizes were used to determine the cycles costs of the individual endpoints:
+The measurements above were taken over arbitrary mainnet transactions. The ckSOL minter does not size any of its requests from them: it sets no response size estimate at all, so every call is priced with the SOL RPC canister's default estimate for that method, each of which includes a 2 KiB allowance for headers. The defaults are 10 KiB for `getTransaction` and 256 bytes per signature for `getSignatureStatuses`, and 512 + 2048 bytes for `getAccountInfo`, with the other methods sized comparably.
 
-- `getAccountInfo`: 500 bytes
-- `getSignaturesForAddress`: 20,000 bytes
-- `getTransaction`: the SOL RPC canister's default estimate of 10 KiB
-- `getBalance`: 150 bytes
-- `getSignatureStatuses`: the SOL RPC canister's default estimate of 256 bytes per signature
-- `getBlock`: 500 bytes
-- `sendTransaction`: 250 bytes
-- `getSlot`: 100 bytes
+The `getTransaction` default is smaller than the 31,985 bytes measured above, which is not a problem: the only transactions the ckSOL minter ever fetches are the ones it built itself, and those are capped at the maximum transaction size of 1232 bytes, so their responses stay around 1 KB rather than the tens of kilobytes an arbitrary mainnet transaction can reach. An underestimate is not fatal either, since the SOL RPC canister retries an oversized response with double the estimate.
 
 Using the [cost estimation endpoints](https://dashboard.internetcomputer.org/canister/tghme-zyaaa-aaaar-qarca-cai) of the SOL RPC canister, the following estimates are computed for the cycles cost of each required endpoint, using the response sizes above on mainnet for commitment level `finalized` and requiring 3 out of 4 responses to agree. The ckSOL minter attaches more than these amounts, leaving a margin for provider or price changes and for the SOL RPC canister doubling its response size estimate after an oversized response; the unused part is refunded:
 
-- `getAccountInfo`: 2.1B cycles
+- `getAccountInfo`: 2.34B cycles
 - `getSignaturesForAddress`: 4.3B cycles
 - `getTransaction`: 3.2B cycles
 - `sendTransaction`: 2.2B cycles
-- `getSlot`: 2.1B cycles
-- `getBlock`: 2.2B cycles
-- `getBalance`: 2.1B cycles
+- `getSlot`: 2.29B cycles
+- `getBlock`: 2.34B cycles
+- `getBalance`: 2.31B cycles
 - `getSignatureStatuses`: 2.3B (1 sig.), 10.7B (256 sig., the largest batch) cycles
 
 The **automatic deposit fee** is not derived here. The automated flow of [Section 3.1.1](#311-automated-flow-outdated) is not implemented, so there is no parameter to size, and its fee has to be derived again against the then-current RPC costs when the flow is revisited.
 
-The **manual deposit fee** is not a parameter but the depositor's share of the shortfall between what the sweep transaction moved and what arrived on the main account, derived from the finalized transaction as described in [Section 3.1.2](#312-manual-flow). Under the current fee schedule that shortfall is the transaction fee of `5000 * k` lamports for `k` signatures, so the share is `ceil(5000 * k / k) = 5000` lamports. In addition, the depositor leaves the rent exemption threshold of 890,880 lamports on the deposit address the first time it is swept. The cycles consumed by the manual flow are charged to the caller of `deposit_sol`: the cost of the `getBalance` call, roughly 2.1B cycles given its small response, plus the **deposit_sol fee**. The latter must cover the threshold signature of 26.2B cycles and, for a sweep containing a single deposit, all the RPC calls of the sweep and finalization timers, i.e., `getSlot`, `getBlock`, `sendTransaction`, `getSignatureStatuses`, and `getTransaction`, for about 12.0B cycles when each of them succeeds on its first attempt. A deposit_sol fee of **45B cycles** covers that case.
+The **manual deposit fee** is not a parameter but the depositor's share of the shortfall between what the sweep transaction moved and what arrived on the main account, derived from the finalized transaction as described in [Section 3.1.2](#312-manual-flow). Under the current fee schedule that shortfall is the transaction fee of `5000 * k` lamports for `k` signatures, so the share is `ceil(5000 * k / k) = 5000` lamports. In addition, the depositor leaves the rent exemption threshold of 890,880 lamports on the deposit address the first time it is swept. The cycles consumed by the manual flow are charged to the caller of `deposit_sol`: the cost of the `getBalance` call, roughly 2.31B cycles, plus the **deposit_sol fee**. The latter must cover the threshold signature of 26.2B cycles and, for a sweep containing a single deposit, all the RPC calls of the sweep and finalization timers, i.e., `getSlot`, `getBlock`, `sendTransaction`, `getSignatureStatuses`, and `getTransaction`, for about 12.3B cycles when each of them succeeds on its first attempt. A deposit_sol fee of **45B cycles** covers that case.
 
-Three costs are deliberately left outside the fee and absorbed by the ckSOL minter. Fetching a recent block is configured for up to three attempts of one `getSlot` and one `getBlock` each, since a slot may have no block, so it costs up to 12.9B instead of 4.3B cycles; a single-deposit sweep that needs all three attempts therefore comes to about 46.8B cycles and exceeds the fee. Retries of the `getTransaction` call after a failure are not charged either, nor are the status checks of the finalization timer, which are batched for all in-flight transactions. In each case the ckSOL minter accepts the risk of spending more cycles than it received for a deposit, as the alternative of an attempt budget adds complexity for failures that should be rare.
+Three costs are deliberately left outside the fee and absorbed by the ckSOL minter. Fetching a recent block is configured for up to three attempts of one `getSlot` and one `getBlock` each, since a slot may have no block, so it costs up to 13.9B instead of 4.6B cycles; a single-deposit sweep that needs all three attempts therefore comes to about 47.8B cycles and exceeds the fee. Retries of the `getTransaction` call after a failure are not charged either, nor are the status checks of the finalization timer, which are batched for all in-flight transactions. In each case the ckSOL minter accepts the risk of spending more cycles than it received for a deposit, as the alternative of an attempt budget adds complexity for failures that should be rare.
 
 When a deposit address holding x SOL is swept for the first time, the user receives x SOL minus the rent exemption threshold minus the fee share in their account. Later sweeps of the same address only deduct the fee share, since the threshold is already in place.
 
-The **withdrawal fee** can be lower, as it only requires the execution of the withdrawal transaction submission flow and its finalization, i.e., per withdrawal transaction one `getAccountInfo` call to read the nonce account at creation, one `sendTransaction` call, one `getAccountInfo` call per round of the finalization timer until the transaction has landed, typically a single one since a round runs every 2 minutes and a transaction finalizes within seconds, and one `getTransaction` call to read its outcome, for a total cost of 2.1B + 2.2B + 2.1B + 3.2B = 9.6B cycles, which corresponds to 0.0096 XDR = 0.013824 USD = 0.00013824 SOL. Adding the threshold signature cost of 0.000377 SOL, the total cost is 0.00051524 SOL. Rounding up, the withdrawal fee of **0.001 SOL** remains sufficient, even though it is charged per withdrawal while the costs above are incurred per withdrawal transaction, which batches up to 10 withdrawals. Re-broadcasts of a withdrawal transaction that has not landed, together with the additional nonce reads they imply, and retries of the `getTransaction` call are not covered by this fee: the ckSOL minter accepts their cost, as described in [Section 3.2.5](#325-finalization-and-re-broadcast).
+The **withdrawal fee** can be lower, as it only requires the execution of the withdrawal transaction submission flow and its finalization, i.e., per withdrawal transaction one `getAccountInfo` call to read the nonce account at creation, one `sendTransaction` call, one `getAccountInfo` call per round of the finalization timer until the transaction has landed, typically a single one since a round runs every 2 minutes and a transaction finalizes within seconds, and one `getTransaction` call to read its outcome, for a total cost of 2.34B + 2.2B + 2.34B + 3.2B = 10.1B cycles, which corresponds to 0.0101 XDR = 0.014544 USD = 0.00014544 SOL. Adding the threshold signature cost of 0.000377 SOL, the total cost is 0.00052244 SOL. Rounding up, the withdrawal fee of **0.001 SOL** remains sufficient, even though it is charged per withdrawal while the costs above are incurred per withdrawal transaction, which batches up to 10 withdrawals. Re-broadcasts of a withdrawal transaction that has not landed, together with the additional nonce reads they imply, and retries of the `getTransaction` call are not covered by this fee: the ckSOL minter accepts their cost, as described in [Section 3.2.5](#325-finalization-and-re-broadcast).
 
 When the user withdraws x SOL, the user receives x SOL minus the withdrawal fee in the destination account.
 
@@ -678,4 +671,3 @@ In addition to the product-security review of the design and the code, the team 
     1. ✅ [Sample transaction](https://explorer.solana.com/tx/3AfVrhtTMZqkWPUktYjsVuzpCc2T15doU6S6UPGMJhBgjj4Gp5qNyM2F4H52vb3SDvGXBEfhUTGnDuKVGKKAtKyG?cluster=devnet) sending the same amount from different accounts to a ckSOL minter controlled address. The mint happened at block index 19.
     2. ✅ [Sample transaction](https://explorer.solana.com/tx/4Er3GnXCJvesEmQLB24AKxY8ZUR2JzRVvZhPgYj7ygW1wNXEKDudZ4hNL9MP1tMNuRicMqeQqgdiqHJ23yekw4wU?cluster=devnet) sending different amounts to the same recipient. The mint happened at block index 20.
     3. ✅ [Sample transaction](https://explorer.solana.com/tx/qo9AnFCRdAPr4dZjiJ7CVpSKa3APVgGGLQ8bPVhRr4dqsCsQCvHsUnVbRad2vHTLtUvKDyxfWkoFFAxZKrtSsDE?cluster=devnet) sending half of the minimum deposit amount in two separate transfers each, resulting in a total amount of exactly the minimum deposit amount. The mint happened at block index 54.
-3. Mint ckSOL using inner instructions.
