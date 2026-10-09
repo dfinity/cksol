@@ -13,7 +13,12 @@ Target canister: `ls5lp-lqaaa-aaaar-qb5oa-cai`
 ---
 
 ## Motivation
-TODO: THIS MUST BE FILLED OUT
+This proposal installs the mainnet ckSOL ledger to the governance-controlled canister ID [`ls5lp-lqaaa-aaaar-qb5oa-cai`](https://dashboard.internetcomputer.org/canister/ls5lp-lqaaa-aaaar-qb5oa-cai) on subnet [`pzp6e-ekpqk-3c5x7-2h6so-njoeq-mt45d-h3h6c-q3mxf-vpeq5-fk5o7-yae`](https://dashboard.internetcomputer.org/subnet/pzp6e-ekpqk-3c5x7-2h6so-njoeq-mt45d-h3h6c-q3mxf-vpeq5-fk5o7-yae).
+
+ckSOL is a chain-key token on the Internet Computer backed 1:1 by SOL, the native token of the Solana blockchain.
+The ckSOL ledger is an ICRC-1, ICRC-2 and ICRC-3 compliant ledger that holds the ckSOL balances.
+The [ckSOL minter](https://dashboard.internetcomputer.org/canister/lh22c-kyaaa-aaaar-qb5nq-cai) mints ckSOL on this ledger when SOL is deposited and burns ckSOL when SOL is withdrawn.
+See the [design document](https://github.com/dfinity/cksol/blob/bfeae694767f24decc7e45a0e3335f9f76163438/docs/design.md) for details.
 
 
 ## Install args
