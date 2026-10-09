@@ -347,7 +347,7 @@ The minter burns the withdrawn ckSOL with `icrc2_transfer_from`, so the owner mu
 The approval costs the ledger transfer fee of 500 lamports, so withdrawing the whole balance means withdrawing the balance minus 500 lamports:
 
 ```shell
-AMOUNT=1000000
+AMOUNT=2000000
 DESTINATION=6TqNg48mSd5evmY66JVfGeGTwszrU1YLCeSw3GJ2qsUC
 icp canister call $LEDGER icrc2_approve "(record { spender = record { owner = principal \"$MINTER\"; subaccount = null }; amount = $AMOUNT : nat; from_subaccount = null; expected_allowance = null; expires_at = null; fee = null; memo = null; created_at_time = null })" --identity demo -n ic
 ```
