@@ -17,14 +17,15 @@ use solana_transaction::Transaction;
 use std::{
     net::{TcpListener, UdpSocket},
     ops::RangeInclusive,
-    path::PathBuf,
-    process::{Child, Command, Stdio},
+    path::{Path, PathBuf},
+    process::{Child, Command},
     sync::{
         OnceLock,
         atomic::{AtomicU16, Ordering},
     },
     time::Duration,
 };
+use tokio::sync::OnceCell;
 
 /// Solana base fee per signature included in a transaction.
 pub const FEE_PER_SIGNATURE: Lamport = 5_000;
@@ -32,20 +33,25 @@ pub const FEE_PER_SIGNATURE: Lamport = 5_000;
 /// Rent exemption minimum of a durable nonce account for its 80 bytes of state.
 pub const NONCE_ACCOUNT_RENT_EXEMPTION: Lamport = 1_447_680;
 
+const TICKS_PER_SLOT: u16 = 16;
+const READINESS_POLL_INTERVAL: Duration = Duration::from_millis(500);
+const READINESS_POLLS_ON_WARM_LEDGER: u32 = 60;
+const READINESS_POLLS_ON_FRESH_LEDGER: u32 = 240;
+
 /// A `solana-test-validator` process owned by a single test.
 ///
-/// Every validator listens on its own block of ports and writes to its own
-/// ledger directory, so tests can run in parallel. The process is killed and
-/// the ledger directory removed when the value is dropped.
+/// Every validator listens on its own block of ports and works in its own
+/// directory, so tests can run in parallel. The process is killed and the
+/// directory removed when the value is dropped.
 pub struct SolanaTestValidator {
     process: Child,
-    ledger_dir: PathBuf,
+    working_dir: PathBuf,
     rpc_url: String,
 }
 
 impl SolanaTestValidator {
-    /// Starts a new validator and waits until it accepts transactions at the
-    /// regular fee.
+    /// Starts a new validator on a copy of the [`WarmLedger`] shared by the
+    /// test binary and waits until it accepts transactions at the regular fee.
     ///
     /// Slots are shortened to 16 ticks so that a transaction is
     /// finalized within a few seconds, while a blockhash still stays valid for
@@ -54,20 +60,33 @@ impl SolanaTestValidator {
     ///
     /// # Panics
     ///
-    /// Panics if `solana-test-validator` cannot be spawned or does not become
-    /// ready within a minute.
+    /// Panics if `solana-test-validator` cannot be spawned, if the warm ledger
+    /// cannot be produced, or if the validator does not become ready within 30
+    /// seconds.
     pub async fn start() -> Self {
-        const TICKS_PER_SLOT: u16 = 16;
+        let validator = Self::spawn(LedgerSource::Warm(WarmLedger::shared().await));
+        validator
+            .wait_until_ready(READINESS_POLLS_ON_WARM_LEDGER)
+            .await
+            .unwrap_or_else(|error| panic!("{error}"));
+        validator
+    }
+
+    fn spawn(ledger: LedgerSource<'_>) -> Self {
         let ports = ValidatorPorts::reserve();
-        let ledger_dir =
+        let working_dir =
             std::env::temp_dir().join(format!("cksol-solana-test-validator-{}", ports.rpc));
-        let process = Command::new("solana-test-validator")
+        let _ = std::fs::remove_dir_all(&working_dir);
+        std::fs::create_dir_all(ledger_dir(&working_dir))
+            .expect("failed to create the validator ledger directory");
+        let output = std::fs::File::create(output_path(&working_dir))
+            .expect("failed to create the validator output file");
+        let mut command = Command::new("solana-test-validator");
+        command
             .arg("--ledger")
-            .arg(&ledger_dir)
-            .arg("--reset")
+            .arg(ledger_dir(&working_dir))
             .arg("--quiet")
             .args(["--bind-address", "127.0.0.1"])
-            .args(["--ticks-per-slot", &TICKS_PER_SLOT.to_string()])
             .args(["--rpc-port", &ports.rpc.to_string()])
             .args(["--faucet-port", &ports.faucet.to_string()])
             .args(["--gossip-port", &ports.gossip.to_string()])
@@ -75,35 +94,70 @@ impl SolanaTestValidator {
                 "--dynamic-port-range",
                 &format!("{}-{}", ports.dynamic.start(), ports.dynamic.end()),
             ])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            .stdout(
+                output
+                    .try_clone()
+                    .expect("failed to duplicate the validator output file"),
+            )
+            .stderr(output);
+        match ledger {
+            LedgerSource::Fresh => {
+                command
+                    .arg("--reset")
+                    .args(["--ticks-per-slot", &TICKS_PER_SLOT.to_string()]);
+            }
+            LedgerSource::Warm(warm_ledger) => warm_ledger.write_to(&ledger_dir(&working_dir)),
+        }
+        let process = command
             .spawn()
             .expect("failed to start solana-test-validator: is the Solana CLI installed?");
-        let validator = Self {
+        Self {
             process,
-            ledger_dir,
+            working_dir,
             rpc_url: format!("http://localhost:{}", ports.rpc),
-        };
-        validator.wait_until_ready().await;
-        validator
+        }
     }
 
-    /// The minter builds transactions on the block at the finalized slot rounded
-    /// down by the SOL RPC canister. A freshly started validator charges no fee
-    /// for its first blocks, so readiness means that block has the regular fee.
-    async fn wait_until_ready(&self) {
+    /// The minter builds transactions on the block at the confirmed slot rounded
+    /// down by the SOL RPC canister, so readiness means that block charges the
+    /// regular fee.
+    async fn wait_until_ready(&self, max_polls: u32) -> Result<(), String> {
         let rpc = self.rpc_client();
         let probe = Keypair::new();
-        for _ in 0..240 {
+        for _ in 0..max_polls {
             if self.fee_at_block_used_by_minter(&rpc, &probe).await == Some(FEE_PER_SIGNATURE) {
-                return;
+                return Ok(());
             }
-            tokio::time::sleep(Duration::from_millis(500)).await;
+            tokio::time::sleep(READINESS_POLL_INTERVAL).await;
         }
-        panic!(
-            "solana-test-validator at {} did not become ready",
+        Err(format!(
+            "solana-test-validator at {} did not become ready within {:?}, output:\n{}",
+            self.rpc_url,
+            READINESS_POLL_INTERVAL * max_polls,
+            self.output()
+        ))
+    }
+
+    /// Stops the validator so that another one can resume its ledger, leaving
+    /// the working directory untouched.
+    fn shut_down(&mut self) {
+        let signalled = Command::new("kill")
+            .args(["-TERM", &self.process.id().to_string()])
+            .status()
+            .expect("failed to signal solana-test-validator");
+        assert!(
+            signalled.success(),
+            "failed to stop solana-test-validator at {}",
             self.rpc_url
         );
+        self.process
+            .wait()
+            .expect("failed to wait for solana-test-validator to stop");
+    }
+
+    fn output(&self) -> String {
+        std::fs::read_to_string(output_path(&self.working_dir))
+            .unwrap_or_else(|error| format!("<unavailable: {error}>"))
     }
 
     async fn fee_at_block_used_by_minter(
@@ -111,14 +165,15 @@ impl SolanaTestValidator {
         rpc: &RpcClient,
         probe: &Keypair,
     ) -> Option<Lamport> {
-        let finalized_slot = rpc
-            .get_slot_with_commitment(CommitmentConfig::finalized())
+        let confirmed_slot = rpc
+            .get_slot_with_commitment(CommitmentConfig::confirmed())
             .await
             .ok()?;
         let block = rpc
             .get_block_with_config(
-                RoundingError::default().round(finalized_slot),
+                RoundingError::default().round(confirmed_slot),
                 RpcBlockConfig {
+                    commitment: Some(CommitmentConfig::confirmed()),
                     rewards: Some(false),
                     ..RpcBlockConfig::default()
                 },
@@ -395,8 +450,103 @@ impl Drop for SolanaTestValidator {
     fn drop(&mut self) {
         let _ = self.process.kill();
         let _ = self.process.wait();
-        let _ = std::fs::remove_dir_all(&self.ledger_dir);
+        let _ = std::fs::remove_dir_all(&self.working_dir);
     }
+}
+
+/// The ledger a validator starts from.
+enum LedgerSource<'a> {
+    /// A brand-new ledger, which charges no transaction fee for the blocks
+    /// before the first one the minter can build on.
+    Fresh,
+    /// A copy of a ledger that already charges the regular fee.
+    Warm(&'a WarmLedger),
+}
+
+/// The contents of the ledger directory of a validator that was shut down once
+/// it charged the regular fee, kept in memory so that every test can start a
+/// validator on its own copy of it instead of waiting for a fresh ledger to
+/// reach that point.
+struct WarmLedger {
+    entries: Vec<LedgerEntry>,
+}
+
+enum LedgerEntry {
+    Directory(PathBuf),
+    File { path: PathBuf, contents: Vec<u8> },
+}
+
+impl WarmLedger {
+    /// The warm ledger of this test binary, produced by the first caller and
+    /// then reused by all of them. A failed attempt is reported to every caller
+    /// instead of being retried, so that a broken environment costs the
+    /// readiness timeout once.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the ledger cannot be produced.
+    async fn shared() -> &'static Self {
+        static SHARED: OnceCell<Result<WarmLedger, String>> = OnceCell::const_new();
+        SHARED
+            .get_or_init(Self::produce)
+            .await
+            .as_ref()
+            .unwrap_or_else(|error| panic!("{error}"))
+    }
+
+    async fn produce() -> Result<Self, String> {
+        let mut validator = SolanaTestValidator::spawn(LedgerSource::Fresh);
+        validator
+            .wait_until_ready(READINESS_POLLS_ON_FRESH_LEDGER)
+            .await?;
+        validator.shut_down();
+        Ok(Self {
+            entries: ledger_entries(&ledger_dir(&validator.working_dir), Path::new("")),
+        })
+    }
+
+    fn write_to(&self, ledger_dir: &Path) {
+        for entry in &self.entries {
+            match entry {
+                LedgerEntry::Directory(path) => std::fs::create_dir_all(ledger_dir.join(path))
+                    .expect("failed to create a warm ledger directory"),
+                LedgerEntry::File { path, contents } => {
+                    std::fs::write(ledger_dir.join(path), contents)
+                        .expect("failed to write a warm ledger file")
+                }
+            }
+        }
+    }
+}
+
+/// The directories and files under `dir`, with paths relative to
+/// `relative_path`. Symbolic links are skipped: the only one a ledger directory
+/// holds is an alias of the validator log, which a resumed validator recreates.
+fn ledger_entries(dir: &Path, relative_path: &Path) -> Vec<LedgerEntry> {
+    let mut entries = Vec::new();
+    for entry in std::fs::read_dir(dir).expect("failed to read the warm ledger directory") {
+        let entry = entry.expect("failed to read a warm ledger directory entry");
+        let file_type = entry
+            .file_type()
+            .expect("failed to read the type of a warm ledger entry");
+        let path = relative_path.join(entry.file_name());
+        if file_type.is_dir() {
+            entries.push(LedgerEntry::Directory(path.clone()));
+            entries.extend(ledger_entries(&entry.path(), &path));
+        } else if file_type.is_file() {
+            let contents = std::fs::read(entry.path()).expect("failed to read a warm ledger file");
+            entries.push(LedgerEntry::File { path, contents });
+        }
+    }
+    entries
+}
+
+fn ledger_dir(working_dir: &Path) -> PathBuf {
+    working_dir.join("ledger")
+}
+
+fn output_path(working_dir: &Path) -> PathBuf {
+    working_dir.join("output.log")
 }
 
 /// The ports a `solana-test-validator` binds: the JSON-RPC port together with
