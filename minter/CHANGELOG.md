@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.1.0] - 2026-10-09
 
-First release of the ckSOL minter, which mints ckSOL on the ICP ledger for SOL deposited on Solana and sends SOL back when ckSOL is burned. It is deployed on staging against Solana Devnet as ckDevnetSOL; the production minter for Solana Mainnet is not deployed yet.
+First release of the ckSOL minter, which mints ckSOL on the ckSOL ledger for SOL deposited on Solana and sends SOL back when ckSOL is burned. It is deployed on staging against Solana Devnet as ckDevnetSOL; the production minter for Solana Mainnet is not deployed yet.
 
 ### Added
 
