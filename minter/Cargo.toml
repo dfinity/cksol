@@ -22,8 +22,8 @@ bincode = { workspace = true }
 canbench-rs = { workspace = true, optional = true }
 candid = { workspace = true }
 canlog = { workspace = true, features = ["derive"] }
-cksol-types = { path = "../libs/types" }
-cksol-types-internal = { path = "../libs/types-internal", features = ["event", "log"] }
+cksol-types = { version = "0.1.0", path = "../libs/types" }
+cksol-types-internal = { version = "0.1.0", path = "../libs/types-internal", features = ["event", "log"] }
 derive_more = { workspace = true }
 futures = { workspace = true }
 hex = { workspace = true }

@@ -1,4 +1,5 @@
 [tools]
+just = "1.38.0"
 "github:dfinity/ic-wasm" = "0.11.1"
 "aqua:taiki-e/cargo-llvm-cov" = "0.9.1"
 "aqua:jqlang/jq" = "1.8.2"
