@@ -10,11 +10,12 @@ dependencies_update = true
 
 # No GitHub releases by default — opt in per package with `git_release_enable = true`.
 # The minter's draft GitHub release is created by the Publish workflow (publish.yml),
-# not by release-plz.
+# not by release-plz; cksol-types is git tag + crates.io only.
 git_release_enable = false
 
 # Enable git tags for all packages by default
 git_tag_enable = true
+git_tag_name = "{{ package }}-v{{ version }}"
 
 # creates the git release as draft
 git_release_draft = true
@@ -36,12 +37,11 @@ name = "cksol_minter"
 git_only = true # publish = false, so there is no registry baseline; derive the version and changelog from the git tag
 semver_check = false # binary canister, no public Rust API to guard
 publish = false # the canister is released as a wasm asset, never to crates.io
-git_tag_name = "{{ package }}-v{{ version }}"
 
 [[package]]
 name = "cksol-types"
-# not released yet; set `release = true` + `publish = true` to start publishing to crates.io
-release = false
+# published to crates.io; no separate GitHub release (the crates.io publish + git tag is enough)
+publish = true
 
 [[package]]
 name = "cksol-types-internal"
