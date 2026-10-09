@@ -12,7 +12,7 @@ use ic_canister_runtime::IcError;
 use minicbor::{Decode, Encode};
 use sol_rpc_types::{
     CommitmentLevel, GetAccountInfoEncoding, GetTransactionEncoding, Lamport, MultiRpcResult,
-    RpcError, Slot,
+    RpcError, RpcResult, RpcSource, Slot,
 };
 use solana_account_decoder_client_types::UiAccount;
 use solana_address::Address;
@@ -60,7 +60,9 @@ pub async fn get_transaction<R: CanisterRuntime>(
         }
         MultiRpcResult::Consistent(Ok(None)) => Ok(None),
         MultiRpcResult::Consistent(Err(e)) => Err(GetTransactionError::RpcError(e)),
-        MultiRpcResult::Inconsistent(_) => Err(GetTransactionError::InconsistentRpcResults),
+        MultiRpcResult::Inconsistent(results) => Err(GetTransactionError::InconsistentRpcResults(
+            ProviderBreakdown::new(&results),
+        )),
     }
 }
 
@@ -94,8 +96,9 @@ pub enum GetTransactionError {
     IcError(IcError),
     #[error("RPC error while fetching transaction: {0}")]
     RpcError(RpcError),
-    #[error("Inconsistent RPC results for transaction")]
-    InconsistentRpcResults,
+    #[error("Inconsistent RPC results for transaction ({0})")]
+    #[from(ignore)]
+    InconsistentRpcResults(ProviderBreakdown),
     #[error("Transaction returned for {queried} cannot be decoded")]
     #[from(ignore)]
     UndecodableTransaction { queried: Signature },
@@ -119,7 +122,7 @@ impl GetTransactionError {
             | GetTransactionError::InvalidSignature { .. } => true,
             GetTransactionError::IcError(_)
             | GetTransactionError::RpcError(_)
-            | GetTransactionError::InconsistentRpcResults => false,
+            | GetTransactionError::InconsistentRpcResults(_) => false,
         }
     }
 }
@@ -137,7 +140,9 @@ pub async fn get_balance<R: CanisterRuntime>(
     match result? {
         MultiRpcResult::Consistent(Ok(balance)) => Ok(balance),
         MultiRpcResult::Consistent(Err(e)) => Err(GetBalanceError::RpcError(e)),
-        MultiRpcResult::Inconsistent(_) => Err(GetBalanceError::InconsistentRpcResults),
+        MultiRpcResult::Inconsistent(results) => Err(GetBalanceError::InconsistentRpcResults(
+            ProviderBreakdown::new(&results),
+        )),
     }
 }
 
@@ -147,8 +152,9 @@ pub enum GetBalanceError {
     IcError(IcError),
     #[error("RPC error while fetching balance: {0}")]
     RpcError(RpcError),
-    #[error("Inconsistent RPC results for balance")]
-    InconsistentRpcResults,
+    #[error("Inconsistent RPC results for balance ({0})")]
+    #[from(ignore)]
+    InconsistentRpcResults(ProviderBreakdown),
 }
 
 impl From<GetBalanceError> for DepositSolError {
@@ -203,7 +209,9 @@ async fn send_transaction<R: CanisterRuntime>(
     match request.try_send().await {
         Ok(MultiRpcResult::Consistent(Ok(signature))) => Ok(signature),
         Ok(MultiRpcResult::Consistent(Err(e))) => Err(SubmitTransactionError::RpcError(e)),
-        Ok(MultiRpcResult::Inconsistent(_)) => Err(SubmitTransactionError::InconsistentRpcResults),
+        Ok(MultiRpcResult::Inconsistent(results)) => Err(
+            SubmitTransactionError::InconsistentRpcResults(ProviderBreakdown::new(&results)),
+        ),
         Err(e) => Err(SubmitTransactionError::IcError(e)),
     }
 }
@@ -214,8 +222,9 @@ pub enum SubmitTransactionError {
     IcError(IcError),
     #[error("RPC error while sending transaction: {0}")]
     RpcError(RpcError),
-    #[error("Inconsistent RPC results for sendTransaction")]
-    InconsistentRpcResults,
+    #[error("Inconsistent RPC results for sendTransaction ({0})")]
+    #[from(ignore)]
+    InconsistentRpcResults(ProviderBreakdown),
 }
 
 pub async fn get_nonce_account<R: CanisterRuntime>(
@@ -233,7 +242,9 @@ pub async fn get_nonce_account<R: CanisterRuntime>(
         MultiRpcResult::Consistent(Ok(Some(account))) => NonceAccount::try_from(account),
         MultiRpcResult::Consistent(Ok(None)) => Err(GetNonceAccountError::AccountNotFound),
         MultiRpcResult::Consistent(Err(e)) => Err(GetNonceAccountError::RpcError(e)),
-        MultiRpcResult::Inconsistent(_) => Err(GetNonceAccountError::InconsistentRpcResults),
+        MultiRpcResult::Inconsistent(results) => Err(GetNonceAccountError::InconsistentRpcResults(
+            ProviderBreakdown::new(&results),
+        )),
     }
 }
 
@@ -283,8 +294,8 @@ pub enum GetNonceAccountError {
     IcError(#[from] IcError),
     #[error("RPC error while fetching nonce account: {0}")]
     RpcError(RpcError),
-    #[error("Inconsistent RPC results for getAccountInfo")]
-    InconsistentRpcResults,
+    #[error("Inconsistent RPC results for getAccountInfo ({0})")]
+    InconsistentRpcResults(ProviderBreakdown),
     #[error("Nonce account not found")]
     AccountNotFound,
     #[error(
@@ -391,7 +402,9 @@ pub async fn get_signature_statuses<R: CanisterRuntime>(
     match result? {
         MultiRpcResult::Consistent(Ok(statuses)) => Ok(statuses),
         MultiRpcResult::Consistent(Err(e)) => Err(GetSignatureStatusesError::RpcError(e)),
-        MultiRpcResult::Inconsistent(_) => Err(GetSignatureStatusesError::InconsistentRpcResults),
+        MultiRpcResult::Inconsistent(results) => Err(
+            GetSignatureStatusesError::InconsistentRpcResults(ProviderBreakdown::new(&results)),
+        ),
     }
 }
 
@@ -401,6 +414,64 @@ pub enum GetSignatureStatusesError {
     IcError(#[from] IcError),
     #[error("RPC error while fetching signature statuses: {0}")]
     RpcError(RpcError),
-    #[error("Inconsistent RPC results for getSignatureStatuses")]
-    InconsistentRpcResults,
+    #[error("Inconsistent RPC results for getSignatureStatuses ({0})")]
+    InconsistentRpcResults(ProviderBreakdown),
+}
+
+/// Longest error message kept per provider: a provider's error can carry a whole HTTP response body.
+const MAX_PROVIDER_ERROR_LEN: usize = 300;
+
+/// Which providers returned the same answer, and why the others failed, when the providers did not
+/// agree: what tells a provider that fails apart from one that answers differently. Only says which
+/// providers agree, not what they answered, to stay short whatever the response size.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProviderBreakdown(String);
+
+impl ProviderBreakdown {
+    fn new<T: PartialEq>(results: &[(RpcSource, RpcResult<T>)]) -> Self {
+        let mut answers: Vec<(&T, Vec<String>)> = Vec::new();
+        let mut errors = Vec::new();
+        for (source, result) in results {
+            let provider = provider_name(source);
+            match result {
+                Ok(answer) => match answers.iter_mut().find(|(other, _)| *other == answer) {
+                    Some((_, providers)) => providers.push(provider),
+                    None => answers.push((answer, vec![provider])),
+                },
+                Err(e) => errors.push(format!("{provider}: {}", truncated(&e.to_string()))),
+            }
+        }
+        let parts: Vec<String> = answers
+            .iter()
+            .enumerate()
+            .map(|(i, (_, providers))| format!("answer {}: [{}]", i + 1, providers.join(", ")))
+            .chain(
+                errors
+                    .into_iter()
+                    .map(|error| format!("error from {error}")),
+            )
+            .collect();
+        Self(parts.join("; "))
+    }
+}
+
+impl std::fmt::Display for ProviderBreakdown {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+/// The provider, without the URL or headers of a custom endpoint, which can carry an API key.
+fn provider_name(source: &RpcSource) -> String {
+    match source {
+        RpcSource::Supported(provider) => format!("{provider:?}"),
+        RpcSource::Custom(_) => "Custom".to_string(),
+    }
+}
+
+fn truncated(message: &str) -> String {
+    match message.char_indices().nth(MAX_PROVIDER_ERROR_LEN) {
+        Some((end, _)) => format!("{}...", &message[..end]),
+        None => message.to_string(),
+    }
 }
