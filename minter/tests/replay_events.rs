@@ -12,19 +12,23 @@ use std::{
     fs::{self, create_dir_all},
     io::{Read, Write},
     path::PathBuf,
+    sync::LazyLock,
 };
+
+static MAINNET_STATE: LazyLock<State> = LazyLock::new(|| MinterDeployment::Mainnet.replay_events());
+static DEVNET_STATE: LazyLock<State> = LazyLock::new(|| MinterDeployment::Devnet.replay_events());
 
 /// The events are downloaded from [`MinterDeployment::Mainnet`]'s URL unless already cached.
 /// To refresh them, run
 /// `RETRIEVE_MINTER_EVENTS=true cargo test --locked --package cksol_minter --test replay_events should_replay_events_for_mainnet`,
 /// upload the written file under a new version suffix and update the URL and hash.
-#[tokio::test]
-async fn should_replay_events_for_mainnet() {
-    let state = MinterDeployment::Mainnet.replay_events().await;
+#[test]
+fn should_replay_events_for_mainnet() {
+    let state = &*MAINNET_STATE;
 
     assert_eq!(state.solana_network(), SolanaNetwork::Mainnet);
     assert_eq!(
-        minter_address(&state),
+        minter_address(state),
         address!("GXVewvv6HehcLFYCmwpqh5CrMjqN9zJ8rqzGq3HEt9Ax")
     );
     assert_eq!(state.balance(), 995_500);
@@ -38,13 +42,13 @@ async fn should_replay_events_for_mainnet() {
 /// To refresh them, run
 /// `RETRIEVE_MINTER_EVENTS=true cargo test --locked --package cksol_minter --test replay_events should_replay_events_for_devnet`,
 /// upload the written file under a new version suffix and update the URL and hash.
-#[tokio::test]
-async fn should_replay_events_for_devnet() {
-    let state = MinterDeployment::Devnet.replay_events().await;
+#[test]
+fn should_replay_events_for_devnet() {
+    let state = &*DEVNET_STATE;
 
     assert_eq!(state.solana_network(), SolanaNetwork::Devnet);
     assert_eq!(
-        minter_address(&state),
+        minter_address(state),
         address!("Br8eRkeya8hy3sHCYqtWqGeNNZ349aPSUKGVYFWKKer1")
     );
     assert_eq!(state.balance(), 55_982_500);
@@ -110,11 +114,13 @@ impl MinterDeployment {
             .join(file_name)
     }
 
-    async fn replay_events(self) -> State {
+    fn replay_events(self) -> State {
         let GetEventsResult {
             events,
             total_event_count,
-        } = self.events().await;
+        } = tokio::runtime::Runtime::new()
+            .expect("Failed to create runtime")
+            .block_on(self.events());
         assert_eq!(events.len() as u64, total_event_count);
         let events = events
             .into_iter()
