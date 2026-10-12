@@ -18,15 +18,19 @@ use cksol_types_internal::event::{
     VersionedTransactionMessage,
 };
 use ic_ed25519::PublicKey;
-use sol_rpc_types::Lamport;
+use sol_rpc_types::{
+    Hash as CandidHash, Lamport, Pubkey as CandidAddress, Signature as CandidSignature,
+};
 use solana_address::Address;
+use solana_hash::Hash;
+use solana_signature::Signature;
 use thiserror::Error;
 
 impl From<Event> for CandidEvent {
     fn from(event: Event) -> Self {
         CandidEvent {
             timestamp: event.timestamp,
-            payload: event.payload.into(),
+            payload: CandidEventType::from(event.payload),
         }
     }
 }
@@ -39,7 +43,7 @@ impl From<EventType> for CandidEventType {
             EventType::AcceptedWithdrawalRequest(request) => {
                 CandidEventType::AcceptedWithdrawalRequest {
                     account: request.account,
-                    solana_address: Address::from(request.solana_address).into(),
+                    solana_address: CandidAddress::from(Address::from(request.solana_address)),
                     burn_block_index: *request.burn_block_index.get(),
                     burned_amount: request.burned_amount,
                     amount_to_transfer: request.amount_to_transfer,
@@ -51,21 +55,21 @@ impl From<EventType> for CandidEventType {
                 signers,
                 purpose,
             } => CandidEventType::SubmittedTransaction {
-                signature: signature.into(),
-                transaction: message.into(),
+                signature: CandidSignature::from(signature),
+                transaction: VersionedTransactionMessage::from(message),
                 signers: signers.into_iter().map(CandidSigner::from).collect(),
-                purpose: purpose.into(),
+                purpose: CandidTransactionPurpose::from(purpose),
             },
             EventType::SucceededTransaction { signature } => {
                 CandidEventType::SucceededTransaction {
-                    signature: signature.into(),
+                    signature: CandidSignature::from(signature),
                 }
             }
             EventType::FailedTransaction { signature } => CandidEventType::FailedTransaction {
-                signature: signature.into(),
+                signature: CandidSignature::from(signature),
             },
             EventType::ExpiredTransaction { signature } => CandidEventType::ExpiredTransaction {
-                signature: signature.into(),
+                signature: CandidSignature::from(signature),
             },
             EventType::QueuedDeposit {
                 deposit_id,
@@ -75,20 +79,20 @@ impl From<EventType> for CandidEventType {
             } => CandidEventType::QueuedDeposit {
                 deposit_id,
                 account,
-                address: address.into(),
-                balance: balance.into(),
+                address: CandidAddress::from(address),
+                balance: Lamport::from(balance),
             },
             EventType::CreditedSweep {
                 signature,
                 amount_received,
                 mints,
             } => CandidEventType::CreditedSweep {
-                signature: signature.into(),
+                signature: CandidSignature::from(signature),
                 amount_received,
                 mints: mints.into_iter().map(CandidCreditedDeposit::from).collect(),
             },
             EventType::QuarantinedSweep { signature } => CandidEventType::QuarantinedSweep {
-                signature: signature.into(),
+                signature: CandidSignature::from(signature),
             },
             EventType::MinterPublicKeyFetched {
                 public_key,
@@ -113,8 +117,8 @@ impl From<EventType> for CandidEventType {
                 nonce_value,
             } => CandidEventType::CreatedWithdrawalTransaction {
                 burn_indices: burn_indices.iter().map(|idx| *idx.get()).collect(),
-                nonce_account: nonce_account.into(),
-                nonce_value: nonce_value.into(),
+                nonce_account: CandidAddress::from(nonce_account),
+                nonce_value: CandidHash::from(nonce_value),
             },
         }
     }
@@ -173,7 +177,7 @@ impl TryFrom<CandidEvent> for Event {
     fn try_from(event: CandidEvent) -> Result<Self, Self::Error> {
         Ok(Event {
             timestamp: event.timestamp,
-            payload: event.payload.try_into()?,
+            payload: EventType::try_from(event.payload)?,
         })
     }
 }
@@ -204,21 +208,21 @@ impl TryFrom<CandidEventType> for EventType {
                 signers,
                 purpose,
             } => EventType::SubmittedTransaction {
-                signature: signature.into(),
-                message: transaction.try_into()?,
+                signature: Signature::from(signature),
+                message: VersionedMessage::try_from(transaction)?,
                 signers: signers.into_iter().map(Signer::from).collect(),
-                purpose: purpose.into(),
+                purpose: TransactionPurpose::from(purpose),
             },
             CandidEventType::SucceededTransaction { signature } => {
                 EventType::SucceededTransaction {
-                    signature: signature.into(),
+                    signature: Signature::from(signature),
                 }
             }
             CandidEventType::FailedTransaction { signature } => EventType::FailedTransaction {
-                signature: signature.into(),
+                signature: Signature::from(signature),
             },
             CandidEventType::ExpiredTransaction { signature } => EventType::ExpiredTransaction {
-                signature: signature.into(),
+                signature: Signature::from(signature),
             },
             CandidEventType::QueuedDeposit {
                 deposit_id,
@@ -228,7 +232,7 @@ impl TryFrom<CandidEventType> for EventType {
             } => EventType::QueuedDeposit {
                 deposit_id,
                 account,
-                address: address.into(),
+                address: Address::from(address),
                 balance: DepositBalance::new(balance).ok_or(
                     InvalidCandidEvent::DepositBalanceBelowRentExemption(balance),
                 )?,
@@ -238,12 +242,12 @@ impl TryFrom<CandidEventType> for EventType {
                 amount_received,
                 mints,
             } => EventType::CreditedSweep {
-                signature: signature.into(),
+                signature: Signature::from(signature),
                 amount_received,
                 mints: mints.into_iter().map(CreditedDeposit::from).collect(),
             },
             CandidEventType::QuarantinedSweep { signature } => EventType::QuarantinedSweep {
-                signature: signature.into(),
+                signature: Signature::from(signature),
             },
             CandidEventType::MinterPublicKeyFetched {
                 public_key,
@@ -251,9 +255,8 @@ impl TryFrom<CandidEventType> for EventType {
             } => EventType::MinterPublicKeyFetched {
                 public_key: PublicKey::deserialize_raw(&public_key)
                     .map_err(|e| InvalidCandidEvent::InvalidPublicKey(e.to_string()))?,
-                chain_code: chain_code
-                    .try_into()
-                    .map_err(|bytes: Vec<u8>| InvalidCandidEvent::InvalidChainCode(bytes.len()))?,
+                chain_code: <[u8; 32]>::try_from(chain_code)
+                    .map_err(|bytes| InvalidCandidEvent::InvalidChainCode(bytes.len()))?,
             },
             CandidEventType::MintedSweptDeposit {
                 deposit_id,
@@ -271,8 +274,8 @@ impl TryFrom<CandidEventType> for EventType {
                 nonce_value,
             } => EventType::CreatedWithdrawalTransaction {
                 burn_indices: burn_indices.into_iter().map(LedgerBurnIndex::new).collect(),
-                nonce_account: nonce_account.into(),
-                nonce_value: nonce_value.into(),
+                nonce_account: Address::from(nonce_account),
+                nonce_value: Hash::from(nonce_value),
             },
         })
     }
