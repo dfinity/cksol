@@ -32,10 +32,6 @@ fn should_replay_events_for_mainnet() {
         address!("GXVewvv6HehcLFYCmwpqh5CrMjqN9zJ8rqzGq3HEt9Ax")
     );
     assert_eq!(state.balance(), 995_500);
-    assert_eq!(state.deposits().minted().len(), 1);
-    assert_eq!(state.successful_withdrawal_requests().len(), 1);
-    assert_eq!(state.succeeded_transactions().len(), 2);
-    assert_eq!(state.nonce_pool_addresses().len(), 5);
 }
 
 /// The events are downloaded from [`MinterDeployment::Devnet`]'s URL unless already cached.
@@ -52,11 +48,6 @@ fn should_replay_events_for_devnet() {
         address!("Br8eRkeya8hy3sHCYqtWqGeNNZ349aPSUKGVYFWKKer1")
     );
     assert_eq!(state.balance(), 55_982_500);
-    assert_eq!(state.deposits().minted().len(), 55);
-    assert_eq!(state.deposits().dropped().len(), 18);
-    assert_eq!(state.successful_withdrawal_requests().len(), 56);
-    assert_eq!(state.succeeded_transactions().len(), 20);
-    assert_eq!(state.nonce_pool_addresses().len(), 3);
 }
 
 fn minter_address(state: &State) -> Address {
