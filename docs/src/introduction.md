@@ -6,9 +6,6 @@ ckSOL is a [chain-key token](https://internetcomputer.org/how-it-works/chain-key
 
 Each ckSOL is backed by exactly 1 SOL held by the ckSOL minter canister. ckSOL can be converted to SOL at any time, and vice versa.
 
-> [!IMPORTANT]
-> The ckSOL minter is under active development and subject to change. Access to the repository has been opened to allow for early feedback. Check back regularly for updates.
-
 ## Deployment
 
 ### <img src="images/cksol-token.svg" width="20" valign="middle"> ckSOL (Solana Mainnet)
