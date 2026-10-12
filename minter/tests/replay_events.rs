@@ -7,8 +7,8 @@ use flate2::{Compression, read::GzDecoder, write::GzEncoder};
 use ic_agent::{Agent, identity::AnonymousIdentity};
 use sha2::{Digest, Sha256};
 use std::{
-    fs::{File, create_dir_all},
-    io::{BufWriter, Read, Write},
+    fs::{self, create_dir_all},
+    io::{Read, Write},
     path::PathBuf,
 };
 
@@ -94,49 +94,63 @@ impl MinterDeployment {
     }
 
     async fn events(self) -> GetEventsResult {
-        if retrieve_requested() {
-            self.retrieve_and_store_events().await;
-        } else if !self.events_file().exists() {
-            self.download_and_store_events().await;
-        }
-        self.read_stored_events()
+        let bytes = if retrieve_requested() {
+            self.retrieve_and_store_events().await
+        } else {
+            self.cached_or_downloaded_events().await
+        };
+        decode_events(&bytes)
     }
 
-    async fn download_and_store_events(self) {
+    async fn cached_or_downloaded_events(self) -> Vec<u8> {
+        let path = self.events_file();
+        let bytes = match fs::read(&path) {
+            Ok(bytes) => bytes,
+            Err(_) => self.download_and_store_events().await,
+        };
+        let sha256 = hex::encode(Sha256::digest(&bytes));
+        assert_eq!(
+            sha256,
+            self.events_sha256(),
+            "SHA-256 of {} does not match the pinned hash of {}",
+            path.display(),
+            self.events_url()
+        );
+        bytes
+    }
+
+    async fn download_and_store_events(self) -> Vec<u8> {
         let url = self.events_url();
         let bytes = reqwest::get(url)
             .await
             .unwrap_or_else(|e| panic!("Failed to fetch {url}: {e:?}"))
             .bytes()
             .await
-            .unwrap_or_else(|e| panic!("Failed to read bytes from {url}: {e:?}"));
-        let sha256 = hex::encode(Sha256::digest(&bytes));
-        assert_eq!(
-            sha256,
-            self.events_sha256(),
-            "SHA-256 of {url} does not match the pinned hash"
-        );
+            .unwrap_or_else(|e| panic!("Failed to read bytes from {url}: {e:?}"))
+            .to_vec();
         self.store(&bytes);
+        bytes
     }
 
-    async fn retrieve_and_store_events(self) {
+    async fn retrieve_and_store_events(self) -> Vec<u8> {
         let events = self.retrieve_all_events().await;
         let mut encoder = GzEncoder::new(Vec::new(), Compression::best());
         encoder.write_all(&Encode!(&events).unwrap()).unwrap();
-        let path = self.store(&encoder.finish().unwrap());
+        let bytes = encoder.finish().unwrap();
+        let path = self.store(&bytes);
         println!(
             "Stored {} events of {self:?} minter to {}",
             events.total_event_count,
             path.display()
         );
+        bytes
     }
 
     fn store(self, bytes: &[u8]) -> PathBuf {
         let path = self.events_file();
         create_dir_all(path.parent().unwrap()).unwrap();
-        let mut file = BufWriter::new(File::create(&path).unwrap());
-        file.write_all(bytes).unwrap();
-        file.flush().unwrap();
+        fs::write(&path, bytes)
+            .unwrap_or_else(|e| panic!("Failed to write {}: {e}", path.display()));
         path
     }
 
@@ -173,17 +187,14 @@ impl MinterDeployment {
             .expect("Failed to call get_events");
         Decode!(&raw_result, GetEventsResult).expect("Failed to decode events")
     }
+}
 
-    fn read_stored_events(self) -> GetEventsResult {
-        let path = self.events_file();
-        let file =
-            File::open(&path).unwrap_or_else(|e| panic!("Failed to open {}: {e}", path.display()));
-        let mut decoded = Vec::new();
-        GzDecoder::new(file)
-            .read_to_end(&mut decoded)
-            .expect("Failed to decompress events");
-        Decode!(&decoded, GetEventsResult).expect("Failed to decode events")
-    }
+fn decode_events(bytes: &[u8]) -> GetEventsResult {
+    let mut decoded = Vec::new();
+    GzDecoder::new(bytes)
+        .read_to_end(&mut decoded)
+        .expect("Failed to decompress events");
+    Decode!(&decoded, GetEventsResult).expect("Failed to decode events")
 }
 
 fn retrieve_requested() -> bool {
