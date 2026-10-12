@@ -1,11 +1,13 @@
 use candid::{Decode, Encode, Principal};
+use cksol_minter::state::{State, audit::replay_events, event::Event};
 use cksol_types_internal::{
     SolanaNetwork,
-    event::{Event, EventType, GetEventsArgs, GetEventsResult},
+    event::{GetEventsArgs, GetEventsResult},
 };
 use flate2::{Compression, read::GzDecoder, write::GzEncoder};
 use ic_agent::{Agent, identity::AnonymousIdentity};
 use sha2::{Digest, Sha256};
+use solana_address::{Address, address};
 use std::{
     fs::{self, create_dir_all},
     io::{Read, Write},
@@ -18,10 +20,18 @@ use std::{
 /// upload the written file under a new version suffix and update the URL and hash.
 #[tokio::test]
 async fn should_replay_events_for_mainnet() {
-    let events = MinterDeployment::Mainnet.events().await;
+    let state = MinterDeployment::Mainnet.replay_events().await;
 
-    assert_eq!(events.events.len() as u64, events.total_event_count);
-    assert_eq!(initial_network(&events), SolanaNetwork::Mainnet);
+    assert_eq!(state.solana_network(), SolanaNetwork::Mainnet);
+    assert_eq!(
+        minter_address(&state),
+        address!("GXVewvv6HehcLFYCmwpqh5CrMjqN9zJ8rqzGq3HEt9Ax")
+    );
+    assert_eq!(state.balance(), 995_500);
+    assert_eq!(state.deposits().minted().len(), 1);
+    assert_eq!(state.successful_withdrawal_requests().len(), 1);
+    assert_eq!(state.succeeded_transactions().len(), 2);
+    assert_eq!(state.nonce_pool_addresses().len(), 5);
 }
 
 /// The events are downloaded from [`MinterDeployment::Devnet`]'s URL unless already cached.
@@ -30,20 +40,27 @@ async fn should_replay_events_for_mainnet() {
 /// upload the written file under a new version suffix and update the URL and hash.
 #[tokio::test]
 async fn should_replay_events_for_devnet() {
-    let events = MinterDeployment::Devnet.events().await;
+    let state = MinterDeployment::Devnet.replay_events().await;
 
-    assert_eq!(events.events.len() as u64, events.total_event_count);
-    assert_eq!(initial_network(&events), SolanaNetwork::Devnet);
+    assert_eq!(state.solana_network(), SolanaNetwork::Devnet);
+    assert_eq!(
+        minter_address(&state),
+        address!("Br8eRkeya8hy3sHCYqtWqGeNNZ349aPSUKGVYFWKKer1")
+    );
+    assert_eq!(state.balance(), 55_982_500);
+    assert_eq!(state.deposits().minted().len(), 55);
+    assert_eq!(state.deposits().dropped().len(), 18);
+    assert_eq!(state.successful_withdrawal_requests().len(), 56);
+    assert_eq!(state.succeeded_transactions().len(), 20);
+    assert_eq!(state.nonce_pool_addresses().len(), 3);
 }
 
-fn initial_network(events: &GetEventsResult) -> SolanaNetwork {
-    match events.events.first() {
-        Some(Event {
-            payload: EventType::Init(init_args),
-            ..
-        }) => init_args.solana_network,
-        other => panic!("the first event must be an Init event, got: {other:?}"),
-    }
+fn minter_address(state: &State) -> Address {
+    cksol_minter::address::minter_address(
+        state
+            .minter_public_key()
+            .expect("the minter public key should have been fetched"),
+    )
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -91,6 +108,18 @@ impl MinterDeployment {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("test_resources")
             .join(file_name)
+    }
+
+    async fn replay_events(self) -> State {
+        let GetEventsResult {
+            events,
+            total_event_count,
+        } = self.events().await;
+        assert_eq!(events.len() as u64, total_event_count);
+        let events = events
+            .into_iter()
+            .map(|event| Event::try_from(event).expect("Failed to convert event"));
+        replay_events(events)
     }
 
     async fn events(self) -> GetEventsResult {
