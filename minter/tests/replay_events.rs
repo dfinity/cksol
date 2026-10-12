@@ -9,6 +9,7 @@ use ic_agent::{Agent, identity::AnonymousIdentity};
 use sha2::{Digest, Sha256};
 use solana_address::{Address, address};
 use std::{
+    fmt::Display,
     fs::{self, create_dir_all},
     io::{Read, Write},
     path::PathBuf,
@@ -130,32 +131,36 @@ impl MinterDeployment {
 
     async fn cached_or_downloaded_events(self) -> Vec<u8> {
         let path = self.events_file();
-        let bytes = match fs::read(&path) {
-            Ok(bytes) => bytes,
+        match fs::read(&path) {
+            Ok(bytes) => {
+                self.assert_pinned_sha256(&bytes, path.display());
+                bytes
+            }
             Err(_) => self.download_and_store_events().await,
-        };
-        let sha256 = hex::encode(Sha256::digest(&bytes));
-        assert_eq!(
-            sha256,
-            self.events_sha256(),
-            "SHA-256 of {} does not match the pinned hash of {}",
-            path.display(),
-            self.events_url()
-        );
-        bytes
+        }
     }
 
     async fn download_and_store_events(self) -> Vec<u8> {
         let url = self.events_url();
         let bytes = reqwest::get(url)
             .await
+            .and_then(|response| response.error_for_status())
             .unwrap_or_else(|e| panic!("Failed to fetch {url}: {e:?}"))
             .bytes()
             .await
             .unwrap_or_else(|e| panic!("Failed to read bytes from {url}: {e:?}"))
             .to_vec();
+        self.assert_pinned_sha256(&bytes, url);
         self.store(&bytes);
         bytes
+    }
+
+    fn assert_pinned_sha256(self, bytes: &[u8], source: impl Display) {
+        assert_eq!(
+            hex::encode(Sha256::digest(bytes)),
+            self.events_sha256(),
+            "SHA-256 of {source} does not match the pinned hash"
+        );
     }
 
     async fn retrieve_and_store_events(self) -> Vec<u8> {
