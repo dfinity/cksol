@@ -4,6 +4,11 @@
 
 ---
 
+# Usage
+
+- [How It Works](usage/how-it-works.md)
+- [Command Line Interface](usage/cli.md)
+
 # Development
 
 - [Design](development/design.md)
