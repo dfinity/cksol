@@ -13,6 +13,8 @@
 
 - [Design](development/design.md)
 - [Deployment](development/deployment.md)
+- [Repository Structure](development/repository-structure.md)
+- [Building and Testing](development/building-and-testing.md)
 
 # Reference
 
