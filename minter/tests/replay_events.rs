@@ -1,6 +1,3 @@
-//! To refresh the stored events, run
-//! `RETRIEVE_MINTER_EVENTS=true cargo test --package cksol_minter --test replay_events`.
-
 use candid::{Decode, Encode, Principal};
 use cksol_types_internal::{
     SolanaNetwork,
@@ -20,6 +17,8 @@ static MAINNET_EVENTS: LazyLock<GetEventsResult> =
 static DEVNET_EVENTS: LazyLock<GetEventsResult> =
     LazyLock::new(|| MinterDeployment::Devnet.read_stored_events());
 
+/// To refresh the stored events of the production minter, run
+/// `RETRIEVE_MINTER_EVENTS=true cargo test --locked --package cksol_minter --test replay_events should_replay_events_for_mainnet`.
 #[tokio::test]
 async fn should_replay_events_for_mainnet() {
     MinterDeployment::Mainnet
@@ -32,6 +31,8 @@ async fn should_replay_events_for_mainnet() {
     assert_eq!(initial_network(events), SolanaNetwork::Mainnet);
 }
 
+/// To refresh the stored events of the staging minter, run
+/// `RETRIEVE_MINTER_EVENTS=true cargo test --locked --package cksol_minter --test replay_events should_replay_events_for_devnet`.
 #[tokio::test]
 async fn should_replay_events_for_devnet() {
     MinterDeployment::Devnet
