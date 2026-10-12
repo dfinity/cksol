@@ -1038,6 +1038,7 @@ dependencies = [
  "num-traits",
  "phantom_newtype",
  "proptest",
+ "reqwest 0.13.2",
  "scopeguard",
  "scraper",
  "serde",

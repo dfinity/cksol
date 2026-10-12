@@ -5,44 +5,35 @@ use cksol_types_internal::{
 };
 use flate2::{Compression, read::GzDecoder, write::GzEncoder};
 use ic_agent::{Agent, identity::AnonymousIdentity};
+use sha2::{Digest, Sha256};
 use std::{
     fs::{File, create_dir_all},
     io::{BufWriter, Read, Write},
     path::PathBuf,
-    sync::LazyLock,
 };
 
-static MAINNET_EVENTS: LazyLock<GetEventsResult> =
-    LazyLock::new(|| MinterDeployment::Mainnet.read_stored_events());
-static DEVNET_EVENTS: LazyLock<GetEventsResult> =
-    LazyLock::new(|| MinterDeployment::Devnet.read_stored_events());
-
-/// To refresh the stored events of the production minter, run
-/// `RETRIEVE_MINTER_EVENTS=true cargo test --locked --package cksol_minter --test replay_events should_replay_events_for_mainnet`.
+/// The events are downloaded from [`MinterDeployment::Mainnet`]'s URL unless already cached.
+/// To refresh them, run
+/// `RETRIEVE_MINTER_EVENTS=true cargo test --locked --package cksol_minter --test replay_events should_replay_events_for_mainnet`,
+/// upload the written file under a new version suffix and update the URL and hash.
 #[tokio::test]
 async fn should_replay_events_for_mainnet() {
-    MinterDeployment::Mainnet
-        .retrieve_and_store_events_if_env()
-        .await;
-
-    let events = &MAINNET_EVENTS;
+    let events = MinterDeployment::Mainnet.events().await;
 
     assert_eq!(events.events.len() as u64, events.total_event_count);
-    assert_eq!(initial_network(events), SolanaNetwork::Mainnet);
+    assert_eq!(initial_network(&events), SolanaNetwork::Mainnet);
 }
 
-/// To refresh the stored events of the staging minter, run
-/// `RETRIEVE_MINTER_EVENTS=true cargo test --locked --package cksol_minter --test replay_events should_replay_events_for_devnet`.
+/// The events are downloaded from [`MinterDeployment::Devnet`]'s URL unless already cached.
+/// To refresh them, run
+/// `RETRIEVE_MINTER_EVENTS=true cargo test --locked --package cksol_minter --test replay_events should_replay_events_for_devnet`,
+/// upload the written file under a new version suffix and update the URL and hash.
 #[tokio::test]
 async fn should_replay_events_for_devnet() {
-    MinterDeployment::Devnet
-        .retrieve_and_store_events_if_env()
-        .await;
-
-    let events = &DEVNET_EVENTS;
+    let events = MinterDeployment::Devnet.events().await;
 
     assert_eq!(events.events.len() as u64, events.total_event_count);
-    assert_eq!(initial_network(events), SolanaNetwork::Devnet);
+    assert_eq!(initial_network(&events), SolanaNetwork::Devnet);
 }
 
 fn initial_network(events: &GetEventsResult) -> SolanaNetwork {
@@ -73,41 +64,80 @@ impl MinterDeployment {
         Principal::from_text(canister_id).unwrap()
     }
 
+    fn events_url(self) -> &'static str {
+        match self {
+            MinterDeployment::Mainnet => {
+                "https://download.dfinity.systems/testdata/cksol/mainnet_events_v1.gz"
+            }
+            MinterDeployment::Devnet => {
+                "https://download.dfinity.systems/testdata/cksol/devnet_events_v1.gz"
+            }
+        }
+    }
+
+    fn events_sha256(self) -> &'static str {
+        match self {
+            MinterDeployment::Mainnet => {
+                "4585d6a3ed633e7659936ae3e85cb23a9f966ce0240a586c8b0140f4af8385c0"
+            }
+            MinterDeployment::Devnet => {
+                "a20ab9e3a312889f10745169fa7370a9bc9d052bf74de13dfe532924a5a51bcf"
+            }
+        }
+    }
+
     fn events_file(self) -> PathBuf {
-        let file_name = match self {
-            MinterDeployment::Mainnet => "mainnet_events.gz",
-            MinterDeployment::Devnet => "devnet_events.gz",
-        };
+        let file_name = self.events_url().rsplit('/').next().unwrap();
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("test_resources")
             .join(file_name)
     }
 
-    async fn retrieve_and_store_events_if_env(self) {
-        let retrieve_requested = std::env::var("RETRIEVE_MINTER_EVENTS")
-            .ok()
-            .and_then(|value| value.parse::<bool>().ok())
-            .unwrap_or_default();
-        if retrieve_requested {
+    async fn events(self) -> GetEventsResult {
+        if retrieve_requested() {
             self.retrieve_and_store_events().await;
+        } else if !self.events_file().exists() {
+            self.download_and_store_events().await;
         }
+        self.read_stored_events()
+    }
+
+    async fn download_and_store_events(self) {
+        let url = self.events_url();
+        let bytes = reqwest::get(url)
+            .await
+            .unwrap_or_else(|e| panic!("Failed to fetch {url}: {e:?}"))
+            .bytes()
+            .await
+            .unwrap_or_else(|e| panic!("Failed to read bytes from {url}: {e:?}"));
+        let sha256 = hex::encode(Sha256::digest(&bytes));
+        assert_eq!(
+            sha256,
+            self.events_sha256(),
+            "SHA-256 of {url} does not match the pinned hash"
+        );
+        self.store(&bytes);
     }
 
     async fn retrieve_and_store_events(self) {
         let events = self.retrieve_all_events().await;
-        let path = self.events_file();
-        create_dir_all(path.parent().unwrap()).unwrap();
-        let mut encoder = GzEncoder::new(
-            BufWriter::new(File::create(&path).unwrap()),
-            Compression::best(),
-        );
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::best());
         encoder.write_all(&Encode!(&events).unwrap()).unwrap();
-        encoder.finish().unwrap().flush().unwrap();
+        let path = self.store(&encoder.finish().unwrap());
         println!(
             "Stored {} events of {self:?} minter to {}",
             events.total_event_count,
             path.display()
         );
+    }
+
+    fn store(self, bytes: &[u8]) -> PathBuf {
+        let path = self.events_file();
+        create_dir_all(path.parent().unwrap()).unwrap();
+        let mut file = BufWriter::new(File::create(&path).unwrap());
+        file.write_all(bytes).unwrap();
+        file.flush().unwrap();
+        path
     }
 
     async fn retrieve_all_events(self) -> GetEventsResult {
@@ -154,4 +184,11 @@ impl MinterDeployment {
             .expect("Failed to decompress events");
         Decode!(&decoded, GetEventsResult).expect("Failed to decode events")
     }
+}
+
+fn retrieve_requested() -> bool {
+    std::env::var("RETRIEVE_MINTER_EVENTS")
+        .ok()
+        .and_then(|value| value.parse::<bool>().ok())
+        .unwrap_or_default()
 }

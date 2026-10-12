@@ -79,3 +79,6 @@ proptest-regressions/
 
 # Claude Code settings
 .claude/settings.local.json
+
+# Downloaded minter event logs
+minter/test_resources/
