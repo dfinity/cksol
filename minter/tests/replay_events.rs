@@ -14,6 +14,7 @@ use std::{
     io::{Read, Write},
     path::PathBuf,
     sync::LazyLock,
+    time::Duration,
 };
 
 static MAINNET_STATE: LazyLock<State> = LazyLock::new(|| MinterDeployment::Mainnet.replay_events());
@@ -142,7 +143,12 @@ impl MinterDeployment {
 
     async fn download_and_store_events(self) -> Vec<u8> {
         let url = self.events_url();
-        let bytes = reqwest::get(url)
+        let bytes = reqwest::Client::builder()
+            .timeout(Duration::from_secs(60))
+            .build()
+            .expect("Failed to create HTTP client")
+            .get(url)
+            .send()
             .await
             .and_then(|response| response.error_for_status())
             .unwrap_or_else(|e| panic!("Failed to fetch {url}: {e:?}"))
