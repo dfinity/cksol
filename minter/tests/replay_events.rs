@@ -176,9 +176,10 @@ impl MinterDeployment {
         let bytes = encoder.finish().unwrap();
         let path = self.store(&bytes);
         println!(
-            "Stored {} events of {self:?} minter to {}",
+            "Stored {} events of {self:?} minter to {} (SHA-256: {})",
             events.total_event_count,
-            path.display()
+            path.display(),
+            hex::encode(Sha256::digest(&bytes))
         );
         bytes
     }
