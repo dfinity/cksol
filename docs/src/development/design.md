@@ -89,14 +89,6 @@ The automatic flow lets a user obtain ckSOL without calling the ckSOL minter aft
 
 Compared to the manual flow, the automatic flow differs in who triggers the balance read (a timer instead of the caller), in what the caller pays (nothing at call time, and a fixed fee in SOL deducted from the minted amount instead of cycles) and in the detection latency (a schedule of scans spread over about a day instead of an immediate read).
 
-**Registration.** The flow is triggered by calling `watch_deposit_address` with an optional subaccount. The account to credit is the caller's principal with that subaccount. Unlike `deposit_sol`, the endpoint does not accept another owner: the call is free and the owner pays the fee, so letting a caller name another owner would allow anyone to force sweeps of, and fees on, a victim's deposit address. The caller must not be the anonymous principal. The call derives the deposit address, adds the account to the *watchlist* for a window of about 24 hours (see the schedule below), and returns the deposit address, the minimum deposit amount, the fee that will be deducted, the end of the window and the time of the next scan. The fee is recorded with the registration, so a fee change by upgrade while the address is watched does not alter what the user was told.
-
-The call does not contact the SOL RPC canister and requires no cycles. It is rejected when the account already has a deposit in flight (`AlreadyDepositing`, carrying the deposit id, since the sweep flow already owns the address), when the latest deposit of the account is quarantined (`Quarantined`, as for `deposit_sol`), when the watchlist is full of live entries (`TooManyWatchedAddresses`), and with `TemporarilyUnavailable` when the minter's public key is not yet known, when the automatic deposit fee has not been configured, or when a `deposit_sol` call for the same account is in progress. Registering an account that is already watched is idempotent: the call returns the stored registration and does not extend its window. A registration is not recorded in the event log, see [Section 3.5](#35-events).
-
-The query `watch_deposit_address_status` reports, for a given account, whether it is being watched, with the end of the window, the number of scans so far and the times of the last and next scans, or not, together with the id of the latest deposit queued for the account, if any, so that a client coming back hours after the detection can follow the deposit with `deposit_sol_status`. `NotWatching` covers accounts that were never registered as well as expired registrations and accounts whose deposit was detected, minted or quarantined. An account whose automatically detected deposit was dropped is reported as `Watching` again when the re-arm described below has put it back on the watchlist, and as `NotWatching` only once its window has passed.
-
-The manual flow remains available while an address is watched: a `deposit_sol` call that queues a deposit removes the account from the watchlist, and since its caller paid in cycles, no SOL fee is deducted from that deposit.
-
 The flow is depicted in the following figure.
 
 ```mermaid
@@ -117,7 +109,7 @@ sequenceDiagram
     RPC->>+Solana: getMultipleAccounts([deposit_address, ...])
     Solana-->>-RPC: [balance, ...]
     RPC-->>-Minter: [balance, ...]
-    Note over Minter: balance < minimum deposit amount: advance the schedule
+    Note over Minter: balance below the minimum deposit amount, advance the schedule
     deactivate Minter
 
     User->>+Solana: transfer(deposit_address, amount)
@@ -129,16 +121,24 @@ sequenceDiagram
     RPC->>+Solana: getMultipleAccounts([deposit_address, ...])
     Solana-->>-RPC: [balance, ...]
     RPC-->>-Minter: [balance, ...]
-    Note over Minter: balance ≥ minimum deposit amount: queue the deposit<br/>with sweepable := balance - rent exemption threshold<br/>and remove the account from the watchlist
+    Note over Minter: balance at or above the minimum deposit amount, queue the deposit<br/>with sweepable := balance - rent exemption threshold<br/>and remove the account from the watchlist
     deactivate Minter
 
-    Note over Solana,Ledger: Sweep, finalization and mint as in Section 3.1.2;<br/>the mint is sweepable - fee share - automatic deposit fee
+    Note over Solana,Ledger: Sweep, finalization and mint as in Section 3.1.2<br/>the mint is sweepable - fee share - automatic deposit fee
 
     User->>+Minter: watch_deposit_address_status(account)
     Minter-->>-User: NotWatching { latest_deposit_id }
     User->>+Minter: deposit_sol_status(deposit id)
     Minter-->>-User: Minted { block index, amount }
 ```
+
+**Registration.** The flow is triggered by calling `watch_deposit_address` with an optional subaccount. The account to credit is the caller's principal with that subaccount. Unlike `deposit_sol`, the endpoint does not accept another owner: the call is free and the owner pays the fee, so letting a caller name another owner would allow anyone to force sweeps of, and fees on, a victim's deposit address. The caller must not be the anonymous principal. The call derives the deposit address, adds the account to the *watchlist* for a window of about 24 hours (see the schedule below), and returns the deposit address, the minimum deposit amount, the fee that will be deducted, the end of the window and the time of the next scan. The fee is recorded with the registration, so a fee change by upgrade while the address is watched does not alter what the user was told.
+
+The call does not contact the SOL RPC canister and requires no cycles. It is rejected when the account already has a deposit in flight (`AlreadyDepositing`, carrying the *deposit id* that identifies a sweep of the account for its whole life, as defined in [Section 3.1.2](#312-manual-flow), since the sweep flow already owns the address), when the latest deposit of the account is quarantined (`Quarantined`, as for `deposit_sol`), when the watchlist is full of live entries (`TooManyWatchedAddresses`), and with `TemporarilyUnavailable` when the minter's public key is not yet known, when the automatic deposit fee has not been configured, or when a `deposit_sol` call for the same account is in progress. Registering an account that is already watched is idempotent: the call returns the stored registration and does not extend its window. A registration is not recorded in the event log, see [Section 3.5](#35-events).
+
+The query `watch_deposit_address_status` reports, for a given account, whether it is being watched, with the end of the window, the number of scans so far and the times of the last and next scans, or not, together with the id of the latest deposit queued for the account, if any, so that a client coming back hours after the detection can follow the deposit with `deposit_sol_status`. `NotWatching` covers accounts that were never registered as well as expired registrations and accounts whose deposit was detected, minted or quarantined. An account whose automatically detected deposit was dropped is reported as `Watching` again when the re-arm described below has put it back on the watchlist, and as `NotWatching` only once its window has passed.
+
+The manual flow remains available while an address is watched: a `deposit_sol` call that queues a deposit removes the account from the watchlist, and since its caller paid in cycles, no SOL fee is deducted from that deposit.
 
 **Watchlist and schedule.** The watchlist holds at most `MAX_WATCHED_ADDRESSES = 1,000` live entries, each with the account, its deposit address, the fee recorded at registration, the end of its window and its scan progress, i.e. the number of scans and the time of the last one. A timer runs every minute and scans the entries that are *due*: an entry is due for its first scan at the first tick after registration, and afterwards once the gap following its previous scan has elapsed, where the gaps follow a schedule adapted from the ckETH minter: 60, 60, 120, 120 and 240 seconds, then four times 300 seconds, i.e. ten scans in the first 30 minutes, followed by 23 hourly scans. An entry is therefore scanned at most 33 times, the last time 23.5 hours after registration, and its window ends there: a transfer finalized after the last scan is not noticed, which the status reports by having no next scan. Each scan lands on the next tick, so every scan may be up to a minute late, which is accepted.
 
