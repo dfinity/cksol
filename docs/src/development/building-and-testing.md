@@ -50,7 +50,7 @@ cargo build
 
 ## Testing
 
-The test suite has two parts:
+The test suite has three parts:
 
 **Unit tests** — no external dependencies:
 
