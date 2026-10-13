@@ -52,3 +52,4 @@ futures = { workspace = true }
 icrc-ledger-types = { workspace = true }
 minicbor = { workspace = true }
 tar = { workspace = true }
+tempfile = { workspace = true }

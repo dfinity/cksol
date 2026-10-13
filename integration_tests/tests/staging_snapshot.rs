@@ -14,6 +14,7 @@ use std::{
     path::{Path, PathBuf},
 };
 use tar::Archive;
+use tempfile::TempDir;
 
 const STAGING_MINTER_ID: &str = "ljyxk-riaaa-aaaar-qb5mq-cai";
 const STAGING_MINTER_ADDRESS: &str = "Br8eRkeya8hy3sHCYqtWqGeNNZ349aPSUKGVYFWKKer1";
@@ -25,7 +26,7 @@ const SNAPSHOT: PinnedDownload = PinnedDownload {
 #[tokio::test]
 async fn should_load_staging_snapshot_and_upgrade_to_current_wasm() {
     let snapshot_dir = download_and_extract_snapshot().await;
-    let (env, canister_id) = load_snapshot_into_pocketic(snapshot_dir).await;
+    let (env, canister_id) = load_snapshot_into_pocketic(snapshot_dir.path()).await;
     let minter = CkSolMinter::new(&env, canister_id);
 
     let state_before = MinterState::query(&minter).await;
@@ -76,7 +77,7 @@ impl MinterState {
     }
 }
 
-async fn load_snapshot_into_pocketic(snapshot_dir: PathBuf) -> (PocketIc, Principal) {
+async fn load_snapshot_into_pocketic(snapshot_dir: &Path) -> (PocketIc, Principal) {
     let env = PocketIcBuilder::new()
         .with_fiduciary_subnet()
         .build_async()
@@ -96,9 +97,8 @@ async fn load_snapshot_into_pocketic(snapshot_dir: PathBuf) -> (PocketIc, Princi
     env.add_cycles(canister_id, u128::MAX).await;
 
     let snapshot_id = env
-        .canister_snapshot_upload(canister_id, controller, None, snapshot_dir.clone())
+        .canister_snapshot_upload(canister_id, controller, None, snapshot_dir.to_path_buf())
         .await;
-    let _ = fs::remove_dir_all(&snapshot_dir);
     env.stop_canister(canister_id, Some(controller))
         .await
         .expect("failed to stop canister before loading the snapshot");
@@ -112,15 +112,14 @@ async fn load_snapshot_into_pocketic(snapshot_dir: PathBuf) -> (PocketIc, Princi
     (env, canister_id)
 }
 
-async fn download_and_extract_snapshot() -> PathBuf {
-    let archive = SNAPSHOT.cached_or_downloaded(&snapshot_cache_dir()).await;
-    let snapshot_dir = snapshot_cache_dir().join(format!(
-        "staging_minter_snapshot_{}_{}",
-        std::process::id(),
-        unique_suffix()
-    ));
-    let _ = fs::remove_dir_all(&snapshot_dir);
-    extract_without_top_level_dir(&archive, &snapshot_dir);
+async fn download_and_extract_snapshot() -> TempDir {
+    let cache_dir = snapshot_cache_dir();
+    let archive = SNAPSHOT.cached_or_downloaded(&cache_dir).await;
+    let snapshot_dir = tempfile::Builder::new()
+        .prefix("staging_minter_snapshot_")
+        .tempdir_in(&cache_dir)
+        .expect("failed to create a temporary directory for the snapshot");
+    extract_without_top_level_dir(&archive, snapshot_dir.path());
     snapshot_dir
 }
 
@@ -155,10 +154,4 @@ fn is_apple_double_file(path: &Path) -> bool {
 
 fn snapshot_cache_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
-}
-
-fn unique_suffix() -> u64 {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    static COUNTER: AtomicU64 = AtomicU64::new(0);
-    COUNTER.fetch_add(1, Ordering::Relaxed)
 }
