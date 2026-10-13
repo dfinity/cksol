@@ -12,3 +12,4 @@ license.workspace = true
 hex = { workspace = true }
 reqwest = { workspace = true }
 sha2 = { workspace = true }
+tempfile = { workspace = true }

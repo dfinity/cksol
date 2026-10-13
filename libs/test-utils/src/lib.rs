@@ -5,6 +5,7 @@ use std::{
     path::{Path, PathBuf},
     time::Duration,
 };
+use tempfile::NamedTempFile;
 
 const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(60);
 
@@ -55,12 +56,7 @@ impl PinnedDownload {
             .unwrap_or_else(|e| panic!("failed to read bytes from {url}: {e:?}"))
             .to_vec();
         self.assert_pinned_sha256(&bytes, url);
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)
-                .unwrap_or_else(|e| panic!("failed to create {}: {e}", parent.display()));
-        }
-        fs::write(path, &bytes)
-            .unwrap_or_else(|e| panic!("failed to write {}: {e}", path.display()));
+        store_atomically(path, &bytes);
         bytes
     }
 
@@ -75,4 +71,21 @@ impl PinnedDownload {
 
 pub fn sha256_hex(bytes: &[u8]) -> String {
     hex::encode(Sha256::digest(bytes))
+}
+
+fn store_atomically(path: &Path, bytes: &[u8]) {
+    let dir = path
+        .parent()
+        .unwrap_or_else(|| panic!("{} has no parent directory", path.display()));
+    fs::create_dir_all(dir).unwrap_or_else(|e| panic!("failed to create {}: {e}", dir.display()));
+    let file = NamedTempFile::new_in(dir).unwrap_or_else(|e| {
+        panic!(
+            "failed to create a temporary file in {}: {e}",
+            dir.display()
+        )
+    });
+    fs::write(file.path(), bytes)
+        .unwrap_or_else(|e| panic!("failed to write {}: {e}", file.path().display()));
+    file.persist(path)
+        .unwrap_or_else(|e| panic!("failed to write {}: {e}", path.display()));
 }

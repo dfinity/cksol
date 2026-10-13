@@ -982,6 +982,7 @@ dependencies = [
  "hex",
  "reqwest 0.13.2",
  "sha2 0.10.9",
+ "tempfile",
 ]
 
 [[package]]
