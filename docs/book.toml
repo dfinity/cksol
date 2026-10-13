@@ -14,6 +14,9 @@ default-theme = "light"
 preferred-dark-theme = "navy"
 git-repository-url = "https://github.com/dfinity/cksol"
 edit-url-template = "https://github.com/dfinity/cksol/edit/main/docs/{path}"
+# The book is served from https://dfinity.github.io/cksol/, so the 404 page must
+# load its assets from /cksol/ rather than from the domain root.
+site-url = "/cksol/"
 no-section-label = true
 additional-js = ["mermaid-init.js"]
 
