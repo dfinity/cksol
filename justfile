@@ -45,3 +45,11 @@ bench:
 # Run canbench and persist results for regression checks
 bench-check:
     cd minter && MISE_ENV=bench mise exec -- canbench --persist
+
+# Build the documentation book
+book:
+    mise exec -- mdbook build docs
+
+# Serve the documentation book locally and open it in the browser
+book-serve:
+    mise exec -- mdbook serve docs --open
