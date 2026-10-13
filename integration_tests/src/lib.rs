@@ -35,6 +35,7 @@ use std::{default::Default, env::var, fs, ops::Deref, path::PathBuf, time::Durat
 pub mod events;
 pub mod fixtures;
 pub mod ledger_init_args;
+mod snapshot;
 pub mod validator;
 
 #[derive(Default)]
@@ -459,7 +460,49 @@ impl<'a> Deref for CkSolMinter<'a> {
     }
 }
 
-impl CkSolMinter<'_> {
+impl<'a> CkSolMinter<'a> {
+    pub fn new(env: &'a PocketIc, canister_id: CanisterId) -> Self {
+        CkSolMinter(Canister {
+            runtime: PocketIcRuntime::new(env, Setup::DEFAULT_CALLER),
+            id: canister_id,
+        })
+    }
+
+    /// Recreates the staging minter from a snapshot of its deployed state,
+    /// downloaded from a pinned URL unless already cached.
+    pub async fn load_from_snapshot(env: &'a PocketIc) -> Self {
+        let controller = Setup::DEFAULT_CONTROLLER;
+        let canister_id = snapshot::canister_id();
+        env.create_canister_with_id(
+            Some(controller),
+            Some(CanisterSettings {
+                controllers: Some(vec![controller]),
+                ..CanisterSettings::default()
+            }),
+            canister_id,
+        )
+        .await
+        .expect("failed to create canister at the staging minter id");
+        env.add_cycles(canister_id, u128::MAX).await;
+
+        let extraction_dir = snapshot::download_and_extract().await;
+        let snapshot_id = env
+            .canister_snapshot_upload(
+                canister_id,
+                controller,
+                None,
+                snapshot::dir(extraction_dir.path()),
+            )
+            .await;
+        let minter = Self::new(env, canister_id);
+        minter.stop().await;
+        env.load_canister_snapshot(canister_id, Some(controller), snapshot_id)
+            .await
+            .expect("failed to load the staging snapshot");
+        minter.start().await;
+        minter
+    }
+
     pub async fn get_deposit_address(&self, args: impl Into<GetDepositAddressArgs>) -> Address {
         self.try_get_deposit_address(args)
             .await
@@ -543,6 +586,13 @@ impl CkSolMinter<'_> {
         self.query_call("get_minter_info", ()).await
     }
 
+    pub async fn state(&self) -> MinterState {
+        MinterState {
+            info: self.get_minter_info().await,
+            events: self.get_all_events().await,
+        }
+    }
+
     pub async fn retrieve_logs(&self, priority: &Priority) -> Vec<LogEntry<Priority>> {
         let request = HttpRequest {
             method: "POST".to_string(),
@@ -617,6 +667,12 @@ impl CkSolMinter<'_> {
         self.0 = self.0.with_http_mocks(mocks);
         self
     }
+}
+
+#[derive(Debug)]
+pub struct MinterState {
+    pub info: MinterInfo,
+    pub events: Vec<Event>,
 }
 
 pub struct Ledger<'a>(Canister<'a>);

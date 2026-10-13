@@ -1,0 +1,15 @@
+[package]
+name = "cksol-test-utils"
+version = "0.1.0"
+description = "Helpers shared by the ckSOL test suites"
+authors.workspace = true
+edition.workspace = true
+repository.workspace = true
+homepage.workspace = true
+license.workspace = true
+
+[dependencies]
+hex = { workspace = true }
+reqwest = { workspace = true }
+sha2 = { workspace = true }
+tempfile = { workspace = true }

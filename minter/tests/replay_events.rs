@@ -1,20 +1,18 @@
 use candid::{Decode, Encode, Principal};
 use cksol_minter::state::{State, audit::replay_events, event::Event};
+use cksol_test_utils::{PinnedDownload, sha256_hex};
 use cksol_types_internal::{
     SolanaNetwork,
     event::{GetEventsArgs, GetEventsResult},
 };
 use flate2::{Compression, read::GzDecoder, write::GzEncoder};
 use ic_agent::{Agent, identity::AnonymousIdentity};
-use sha2::{Digest, Sha256};
 use solana_address::{Address, address};
 use std::{
-    fmt::Display,
     fs::{self, create_dir_all},
     io::{Read, Write},
     path::PathBuf,
     sync::LazyLock,
-    time::Duration,
 };
 
 static MAINNET_STATE: LazyLock<State> = LazyLock::new(|| MinterDeployment::Mainnet.replay_events());
@@ -78,33 +76,21 @@ impl MinterDeployment {
         Principal::from_text(canister_id).unwrap()
     }
 
-    fn events_url(self) -> &'static str {
+    fn events_download(self) -> PinnedDownload {
         match self {
-            MinterDeployment::Mainnet => {
-                "https://download.dfinity.systems/testdata/cksol/mainnet_events_v1.gz"
-            }
-            MinterDeployment::Devnet => {
-                "https://download.dfinity.systems/testdata/cksol/devnet_events_v1.gz"
-            }
+            MinterDeployment::Mainnet => PinnedDownload {
+                url: "https://download.dfinity.systems/testdata/cksol/mainnet_events_v1.gz",
+                sha256: "4585d6a3ed633e7659936ae3e85cb23a9f966ce0240a586c8b0140f4af8385c0",
+            },
+            MinterDeployment::Devnet => PinnedDownload {
+                url: "https://download.dfinity.systems/testdata/cksol/devnet_events_v1.gz",
+                sha256: "a20ab9e3a312889f10745169fa7370a9bc9d052bf74de13dfe532924a5a51bcf",
+            },
         }
     }
 
-    fn events_sha256(self) -> &'static str {
-        match self {
-            MinterDeployment::Mainnet => {
-                "4585d6a3ed633e7659936ae3e85cb23a9f966ce0240a586c8b0140f4af8385c0"
-            }
-            MinterDeployment::Devnet => {
-                "a20ab9e3a312889f10745169fa7370a9bc9d052bf74de13dfe532924a5a51bcf"
-            }
-        }
-    }
-
-    fn events_file(self) -> PathBuf {
-        let file_name = self.events_url().rsplit('/').next().unwrap();
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("test_resources")
-            .join(file_name)
+    fn events_cache_dir() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test_resources")
     }
 
     fn replay_events(self) -> State {
@@ -125,48 +111,11 @@ impl MinterDeployment {
         let bytes = if retrieve_requested() {
             self.retrieve_and_store_events().await
         } else {
-            self.cached_or_downloaded_events().await
+            self.events_download()
+                .cached_or_downloaded(&Self::events_cache_dir())
+                .await
         };
         decode_events(&bytes)
-    }
-
-    async fn cached_or_downloaded_events(self) -> Vec<u8> {
-        let path = self.events_file();
-        match fs::read(&path) {
-            Ok(bytes) => {
-                self.assert_pinned_sha256(&bytes, path.display());
-                bytes
-            }
-            Err(_) => self.download_and_store_events().await,
-        }
-    }
-
-    async fn download_and_store_events(self) -> Vec<u8> {
-        let url = self.events_url();
-        let bytes = reqwest::Client::builder()
-            .timeout(Duration::from_secs(60))
-            .build()
-            .expect("Failed to create HTTP client")
-            .get(url)
-            .send()
-            .await
-            .and_then(|response| response.error_for_status())
-            .unwrap_or_else(|e| panic!("Failed to fetch {url}: {e:?}"))
-            .bytes()
-            .await
-            .unwrap_or_else(|e| panic!("Failed to read bytes from {url}: {e:?}"))
-            .to_vec();
-        self.assert_pinned_sha256(&bytes, url);
-        self.store(&bytes);
-        bytes
-    }
-
-    fn assert_pinned_sha256(self, bytes: &[u8], source: impl Display) {
-        assert_eq!(
-            hex::encode(Sha256::digest(bytes)),
-            self.events_sha256(),
-            "SHA-256 of {source} does not match the pinned hash"
-        );
     }
 
     async fn retrieve_and_store_events(self) -> Vec<u8> {
@@ -179,13 +128,15 @@ impl MinterDeployment {
             "Stored {} events of {self:?} minter to {} (SHA-256: {})",
             events.total_event_count,
             path.display(),
-            hex::encode(Sha256::digest(&bytes))
+            sha256_hex(&bytes)
         );
         bytes
     }
 
     fn store(self, bytes: &[u8]) -> PathBuf {
-        let path = self.events_file();
+        let path = self
+            .events_download()
+            .cached_path(&Self::events_cache_dir());
         create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(&path, bytes)
             .unwrap_or_else(|e| panic!("Failed to write {}: {e}", path.display()));
