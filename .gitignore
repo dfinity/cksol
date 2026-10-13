@@ -85,3 +85,6 @@ docs/book/
 
 # Downloaded minter event logs
 minter/test_resources/*.gz
+
+# Downloaded minter snapshots
+integration_tests/test_resources/*.tar.gz

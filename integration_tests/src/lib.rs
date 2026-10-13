@@ -35,6 +35,7 @@ use std::{default::Default, env::var, fs, ops::Deref, path::PathBuf, time::Durat
 pub mod events;
 pub mod fixtures;
 pub mod ledger_init_args;
+mod staging_snapshot;
 pub mod validator;
 
 #[derive(Default)]
@@ -465,6 +466,41 @@ impl<'a> CkSolMinter<'a> {
             runtime: PocketIcRuntime::new(env, Setup::DEFAULT_CALLER),
             id: canister_id,
         })
+    }
+
+    /// Recreates the staging minter from a snapshot of its deployed state,
+    /// downloaded from a pinned URL unless already cached.
+    pub async fn load_from_snapshot(env: &'a PocketIc) -> Self {
+        let controller = Setup::DEFAULT_CONTROLLER;
+        let canister_id = staging_snapshot::canister_id();
+        env.create_canister_with_id(
+            Some(controller),
+            Some(CanisterSettings {
+                controllers: Some(vec![controller]),
+                ..CanisterSettings::default()
+            }),
+            canister_id,
+        )
+        .await
+        .expect("failed to create canister at the staging minter id");
+        env.add_cycles(canister_id, u128::MAX).await;
+
+        let snapshot_dir = staging_snapshot::download_and_extract().await;
+        let snapshot_id = env
+            .canister_snapshot_upload(
+                canister_id,
+                controller,
+                None,
+                snapshot_dir.path().to_path_buf(),
+            )
+            .await;
+        let minter = Self::new(env, canister_id);
+        minter.stop().await;
+        env.load_canister_snapshot(canister_id, Some(controller), snapshot_id)
+            .await
+            .expect("failed to load the staging snapshot");
+        minter.start().await;
+        minter
     }
 
     pub async fn get_deposit_address(&self, args: impl Into<GetDepositAddressArgs>) -> Address {
