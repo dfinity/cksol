@@ -62,12 +62,14 @@ RUN section='[tools."github:dfinity/ic-wasm"."platforms.linux-x64"]' && \
 # sure to `touch` the sources so that cargo knows to rebuild them.
 COPY Cargo.lock .
 COPY Cargo.toml .
+COPY libs/test-utils/Cargo.toml libs/test-utils/Cargo.toml
 COPY libs/types/Cargo.toml libs/types/Cargo.toml
 COPY libs/types-internal/Cargo.toml libs/types-internal/Cargo.toml
 COPY minter/Cargo.toml minter/Cargo.toml
 COPY integration_tests/Cargo.toml integration_tests/Cargo.toml
 COPY ./scripts/build ./scripts/build
-RUN mkdir -p libs/types/src && touch libs/types/src/lib.rs \
+RUN mkdir -p libs/test-utils/src && touch libs/test-utils/src/lib.rs \
+    && mkdir -p libs/types/src && touch libs/types/src/lib.rs \
     && mkdir -p libs/types-internal/src && touch libs/types-internal/src/lib.rs \
     && mkdir -p minter/src && echo "fn main() {}" > minter/src/main.rs && touch minter/src/lib.rs \
     && mkdir -p integration_tests/src && touch integration_tests/src/lib.rs \
