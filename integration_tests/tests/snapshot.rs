@@ -1,3 +1,4 @@
+use assert_matches::assert_matches;
 use cksol_int_tests::CkSolMinter;
 use cksol_types_internal::{
     UpgradeArgs,
@@ -35,13 +36,12 @@ async fn should_load_staging_snapshot_and_upgrade_to_current_wasm() {
 
     let state_after = minter.state().await;
     assert_eq!(state_after.info, state_before.info);
-    let mut expected_events = payloads(&state_before.events);
-    expected_events.push(EventType::Upgrade(upgrade_args));
-    assert_eq!(payloads(&state_after.events), expected_events);
+    let (replayed_events, new_events) = state_after.events.split_at(state_before.events.len());
+    assert_eq!(replayed_events, state_before.events);
+    assert_matches!(
+        new_events,
+        [Event { payload: EventType::Upgrade(args), .. }] if *args == upgrade_args
+    );
 
     env.drop().await;
-}
-
-fn payloads(events: &[Event]) -> Vec<EventType> {
-    events.iter().map(|event| event.payload.clone()).collect()
 }
