@@ -21,15 +21,19 @@ icp canister call -e prod cksol_minter get_deposit_address \
 
 ## Notify the minter of a deposit
 
-After sending SOL to your deposit address, call `deposit_sol` to queue the deposit address for a sweep to the minter's main account. Pass the same `owner`/`subaccount` used when calling `get_deposit_address` — when `owner` is `null`, it defaults to your calling identity's principal.
+After sending SOL to your deposit address, call `deposit_sol` to queue the deposit address for a sweep to the minter's main account. Pass the same `owner`/`subaccount` used when calling `get_deposit_address`.
 
-> [!NOTE]
-> This call requires attaching cycles — check the required amount via `get_minter_info` (`deposit_sol_required_cycles` field); unused cycles are refunded. If your identity does not hold cycles directly, you can [convert ICP to cycles](https://cli.internetcomputer.org/0.2/guides/tokens-and-cycles/#converting-icp-to-cycles) first, or route the call through a proxy canister using `--proxy <proxy-principal> --cycles <amount>`.
+This call requires attaching cycles — check the required amount via `get_minter_info` (`deposit_sol_required_cycles` field); unused cycles are refunded. Since only canisters can attach cycles to a call, route it through a [proxy canister](https://cli.internetcomputer.org/0.2/guides/proxy-canister/) that you control and that holds cycles (you can [convert ICP to cycles](https://cli.internetcomputer.org/0.2/guides/tokens-and-cycles/#converting-icp-to-cycles) to fund it). Replace `<PROXY_PRINCIPAL>` with the proxy canister and `<CYCLES>` with at least `deposit_sol_required_cycles`:
 
 ```sh
 icp canister call -e prod cksol_minter deposit_sol \
-  '(record { owner = null; subaccount = null })'
+  '(record { owner = opt principal "<YOUR_PRINCIPAL>"; subaccount = null })' \
+  --proxy <PROXY_PRINCIPAL> \
+  --cycles <CYCLES>
 ```
+
+> [!NOTE]
+> The minter sees the proxy canister as the caller, so `owner` must be set explicitly: replace `<YOUR_PRINCIPAL>` with the owner of your deposit address, which is your identity's principal (`icp identity principal`) if you called `get_deposit_address` with `owner = null`. With `owner = null`, the minter would check the deposit address of the proxy canister instead.
 
 A successful response returns the deposit id, which you can use to track the deposit:
 
