@@ -6,9 +6,10 @@ use crate::{
     storage::{FailedMintReason, failed_mint_attempt_count, reset_events},
     test_fixtures::{
         BLOCK_INDEX, DEPOSIT_SOL_REQUIRED_CYCLES, EventsAssert, MINIMUM_DEPOSIT_AMOUNT, account,
+        deposit_address,
         flow::deposit::{DepositFlow, PendingMintFlow, SweepFlow},
         init_schnorr_master_key, init_state,
-        runtime::TestCanisterRuntime,
+        runtime::{CallResponse, TestCanisterRuntime},
         signature,
     },
 };
@@ -16,7 +17,10 @@ use candid::Nat;
 use cksol_types::{DepositSolId, DepositSolStatus, Memo, MintMemo};
 use futures::FutureExt;
 use ic_canister_runtime::IcError;
-use icrc_ledger_types::icrc1::transfer::{BlockIndex, NumTokens, TransferArg, TransferError};
+use icrc_ledger_types::icrc1::{
+    account::Account,
+    transfer::{BlockIndex, NumTokens, TransferArg, TransferError},
+};
 use sol_rpc_types::{Lamport, MultiRpcResult};
 use std::panic::AssertUnwindSafe;
 
@@ -50,14 +54,13 @@ async fn should_return_early_if_task_already_active() {
     process_pending_mints(runtime.clone()).await;
 
     assert_eq!(events_before, EventsAssert::from_recorded());
-    assert!(runtime.sent_update_calls().is_empty());
 }
 
 #[tokio::test]
 async fn should_mint_pending_deposit_and_release_the_account() {
     setup();
     let pending = credited_pending_mint();
-    let runtime = mint_runtime([Ok(BLOCK_INDEX.into())]);
+    let runtime = mint_runtime([(pending, Ok(BLOCK_INDEX.into()))]);
 
     process_pending_mints(runtime.clone()).await;
 
@@ -72,13 +75,9 @@ async fn should_mint_pending_deposit_and_release_the_account() {
         deposit_id: pending.deposit_id,
         mint_block_index: BLOCK_INDEX.into(),
     });
-    assert_eq!(
-        transfer_args_sent_by(&runtime),
-        vec![expected_transfer_arg(&pending)]
-    );
     assert_eq!(runtime.set_timer_call_count(), 0);
 
-    let new_deposit_id = deposit_sol(&deposit_sol_runtime(), pending.account).await;
+    let new_deposit_id = deposit_sol(&deposit_sol_runtime(pending.account), pending.account).await;
     assert_eq!(new_deposit_id, Ok(pending.deposit_id + 1));
 }
 
@@ -86,9 +85,12 @@ async fn should_mint_pending_deposit_and_release_the_account() {
 async fn should_record_duplicate_reply_as_minted() {
     setup();
     let pending = credited_pending_mint();
-    let runtime = mint_runtime([Err(TransferError::Duplicate {
-        duplicate_of: BlockIndex::from(BLOCK_INDEX),
-    })]);
+    let runtime = mint_runtime([(
+        pending,
+        Err(TransferError::Duplicate {
+            duplicate_of: BlockIndex::from(BLOCK_INDEX),
+        }),
+    )]);
 
     process_pending_mints(runtime).await;
 
@@ -107,47 +109,40 @@ async fn should_record_duplicate_reply_as_minted() {
 
 #[tokio::test]
 async fn should_retry_after_transient_failure_with_exactly_the_same_arguments() {
-    type AddFailure = fn(TestCanisterRuntime) -> TestCanisterRuntime;
-    let transient_failures: [(&str, AddFailure, FailedMintReason); 4] = [
+    let transient_failures: [(&str, CallResponse<MintResult>, FailedMintReason); 4] = [
         (
             "the ledger is temporarily unavailable",
-            |runtime| {
-                runtime.add_stub_response::<MintResult>(Err(TransferError::TemporarilyUnavailable))
-            },
+            CallResponse::Reply(Err(TransferError::TemporarilyUnavailable)),
             FailedMintReason::LedgerError,
         ),
         (
             "the ledger returns a generic error",
-            |runtime| {
-                runtime.add_stub_response::<MintResult>(Err(TransferError::GenericError {
-                    error_code: Nat::from(42_u8),
-                    message: "out of luck".to_string(),
-                }))
-            },
+            CallResponse::Reply(Err(TransferError::GenericError {
+                error_code: Nat::from(42_u8),
+                message: "out of luck".to_string(),
+            })),
             FailedMintReason::LedgerError,
         ),
         (
             "the minter clock is ahead of the ledger",
-            |runtime| {
-                runtime.add_stub_response::<MintResult>(Err(TransferError::CreatedInFuture {
-                    ledger_time: 0,
-                }))
-            },
+            CallResponse::Reply(Err(TransferError::CreatedInFuture { ledger_time: 0 })),
             FailedMintReason::CreatedInFuture,
         ),
         (
             "the call to the ledger fails",
-            |runtime| runtime.add_stub_error(IcError::CallPerformFailed),
+            CallResponse::Failed(IcError::CallPerformFailed),
             FailedMintReason::CallError,
         ),
     ];
 
     let mut expected_attempts = std::collections::BTreeMap::new();
-    for (name, add_failure, expected_reason) in transient_failures {
+    for (name, failure, expected_reason) in transient_failures {
         setup();
         let pending = credited_pending_mint();
         let events_before = EventsAssert::from_recorded();
-        let failing_runtime = add_failure(TestCanisterRuntime::new().with_increasing_time());
+        let failing_runtime = TestCanisterRuntime::new()
+            .with_increasing_time()
+            .expect_icrc1_transfer(expected_transfer_arg(&pending), failure);
 
         process_pending_mints(failing_runtime.clone()).await;
 
@@ -166,7 +161,7 @@ async fn should_retry_after_transient_failure_with_exactly_the_same_arguments() 
         );
         assert_eq!(events_before, EventsAssert::from_recorded(), "{name}");
 
-        let retrying_runtime = mint_runtime([Ok(BLOCK_INDEX.into())]);
+        let retrying_runtime = mint_runtime([(pending, Ok(BLOCK_INDEX.into()))]);
 
         process_pending_mints(retrying_runtime.clone()).await;
 
@@ -178,14 +173,6 @@ async fn should_retry_after_transient_failure_with_exactly_the_same_arguments() 
             },
             "{name}"
         );
-        let first_attempt = transfer_args_sent_by(&failing_runtime);
-        let retry = transfer_args_sent_by(&retrying_runtime);
-        assert_eq!(
-            first_attempt,
-            vec![expected_transfer_arg(&pending)],
-            "{name}"
-        );
-        assert_eq!(first_attempt, retry, "{name}");
     }
 }
 
@@ -193,8 +180,7 @@ async fn should_retry_after_transient_failure_with_exactly_the_same_arguments() 
 async fn should_quarantine_pending_mint() {
     struct QuarantineCase {
         name: &'static str,
-        runtime: TestCanisterRuntime,
-        expected_ledger_calls: usize,
+        ledger_response: Option<CallResponse<MintResult>>,
         traps: bool,
         expected_reason: FailedMintReason,
     }
@@ -202,49 +188,43 @@ async fn should_quarantine_pending_mint() {
     let cases = [
         QuarantineCase {
             name: "the pending mint is older than the deduplication window of the ledger",
-            runtime: TestCanisterRuntime::new().add_times([stale_now; 3]),
-            expected_ledger_calls: 0,
+            ledger_response: None,
             traps: false,
             expected_reason: FailedMintReason::Expired,
         },
         QuarantineCase {
             name: "the ledger rejects the mint as too old",
-            runtime: mint_runtime([Err(TransferError::TooOld)]),
-            expected_ledger_calls: 1,
+            ledger_response: Some(CallResponse::Reply(Err(TransferError::TooOld))),
             traps: false,
             expected_reason: FailedMintReason::Expired,
         },
         QuarantineCase {
             name: "the ledger rejects the fee of the mint",
-            runtime: mint_runtime([Err(TransferError::BadFee {
+            ledger_response: Some(CallResponse::Reply(Err(TransferError::BadFee {
                 expected_fee: Nat::from(10_u8),
-            })]),
-            expected_ledger_calls: 1,
+            }))),
             traps: false,
             expected_reason: FailedMintReason::Rejected,
         },
         QuarantineCase {
             name: "the ledger takes the mint for a burn below the minimum",
-            runtime: mint_runtime([Err(TransferError::BadBurn {
+            ledger_response: Some(CallResponse::Reply(Err(TransferError::BadBurn {
                 min_burn_amount: Nat::from(10_u8),
-            })]),
-            expected_ledger_calls: 1,
+            }))),
             traps: false,
             expected_reason: FailedMintReason::Rejected,
         },
         QuarantineCase {
             name: "the ledger reports insufficient funds on the minting account",
-            runtime: mint_runtime([Err(TransferError::InsufficientFunds {
+            ledger_response: Some(CallResponse::Reply(Err(TransferError::InsufficientFunds {
                 balance: Nat::from(0_u8),
-            })]),
-            expected_ledger_calls: 1,
+            }))),
             traps: false,
             expected_reason: FailedMintReason::Rejected,
         },
         QuarantineCase {
             name: "the callback traps after the ledger minted because mint index is not u64",
-            runtime: mint_runtime([Ok(Nat::from(u128::MAX))]),
-            expected_ledger_calls: 1,
+            ledger_response: Some(CallResponse::Reply(Ok(Nat::from(u128::MAX)))),
             traps: true,
             expected_reason: FailedMintReason::UnknownOutcome,
         },
@@ -253,25 +233,25 @@ async fn should_quarantine_pending_mint() {
     let mut expected_attempts = std::collections::BTreeMap::new();
     for QuarantineCase {
         name,
-        runtime,
-        expected_ledger_calls,
+        ledger_response,
         traps,
         expected_reason,
     } in cases
     {
         setup();
         let pending = credited_pending_mint();
+        let runtime = match ledger_response {
+            None => TestCanisterRuntime::new().add_times([stale_now; 3]),
+            Some(response) => TestCanisterRuntime::new()
+                .with_increasing_time()
+                .expect_icrc1_transfer(expected_transfer_arg(&pending), response),
+        };
 
         let outcome = AssertUnwindSafe(process_pending_mints(runtime.clone()))
             .catch_unwind()
             .await;
 
         assert_eq!(outcome.is_err(), traps, "{name}");
-        assert_eq!(
-            transfer_args_sent_by(&runtime).len(),
-            expected_ledger_calls,
-            "{name}"
-        );
         assert_eq!(
             deposit_status(pending.deposit_id),
             DepositSolStatus::Quarantined {
@@ -298,9 +278,13 @@ async fn should_quarantine_pending_mint() {
 async fn should_reschedule_until_all_pending_mints_are_processed() {
     const NUM_DEPOSITS: usize = MAX_PENDING_MINTS_PER_ROUND + 1;
     setup();
-    credit_sweeps_of_deposits(NUM_DEPOSITS);
+    let pending_mints = credit_sweeps_of_deposits(NUM_DEPOSITS);
     let runtime = mint_runtime(
-        (0..MAX_PENDING_MINTS_PER_ROUND as u64).map(|block_index| Ok(block_index.into())),
+        pending_mints
+            .iter()
+            .take(MAX_PENDING_MINTS_PER_ROUND)
+            .enumerate()
+            .map(|(block_index, pending)| (*pending, Ok((block_index as u64).into()))),
     );
 
     process_pending_mints(runtime.clone()).await;
@@ -311,7 +295,10 @@ async fn should_reschedule_until_all_pending_mints_are_processed() {
     });
     assert_eq!(runtime.set_timer_call_count(), 1);
 
-    let runtime = mint_runtime([Ok((MAX_PENDING_MINTS_PER_ROUND as u64).into())]);
+    let runtime = mint_runtime([(
+        pending_mints[MAX_PENDING_MINTS_PER_ROUND],
+        Ok((MAX_PENDING_MINTS_PER_ROUND as u64).into()),
+    )]);
 
     process_pending_mints(runtime.clone()).await;
 
@@ -326,9 +313,12 @@ async fn should_reschedule_until_all_pending_mints_are_processed() {
 async fn should_not_reschedule_after_a_round_of_transient_failures() {
     const NUM_DEPOSITS: usize = MAX_PENDING_MINTS_PER_ROUND + 1;
     setup();
-    credit_sweeps_of_deposits(NUM_DEPOSITS);
+    let pending_mints = credit_sweeps_of_deposits(NUM_DEPOSITS);
     let runtime = mint_runtime(
-        (0..MAX_PENDING_MINTS_PER_ROUND).map(|_| Err(TransferError::TemporarilyUnavailable)),
+        pending_mints
+            .iter()
+            .take(MAX_PENDING_MINTS_PER_ROUND)
+            .map(|pending| (*pending, Err(TransferError::TemporarilyUnavailable))),
     );
 
     process_pending_mints(runtime.clone()).await;
@@ -337,10 +327,6 @@ async fn should_not_reschedule_after_a_round_of_transient_failures() {
         assert_eq!(s.deposits().pending_mints().len(), NUM_DEPOSITS);
         assert!(s.deposits().minted().is_empty());
     });
-    assert_eq!(
-        transfer_args_sent_by(&runtime).len(),
-        MAX_PENDING_MINTS_PER_ROUND
-    );
     assert_eq!(runtime.set_timer_call_count(), 0);
 }
 
@@ -376,23 +362,27 @@ fn credit_sweeps_of_deposits(num_deposits: usize) -> Vec<PendingMintFlow> {
         .collect()
 }
 
-fn mint_runtime<I: IntoIterator<Item = MintResult>>(results: I) -> TestCanisterRuntime {
+fn mint_runtime<I>(mints: I) -> TestCanisterRuntime
+where
+    I: IntoIterator<Item = (PendingMintFlow, MintResult)>,
+{
     let mut runtime = TestCanisterRuntime::new().with_increasing_time();
-    for result in results {
-        runtime = runtime.add_stub_response(result);
+    for (pending, result) in mints {
+        runtime = runtime.expect_icrc1_transfer(expected_transfer_arg(&pending), result);
     }
     runtime
 }
 
-fn deposit_sol_runtime() -> TestCanisterRuntime {
+fn deposit_sol_runtime(depositor: Account) -> TestCanisterRuntime {
     TestCanisterRuntime::new()
         .with_increasing_time()
         .expecting_charges()
         .add_msg_cycles_available(DEPOSIT_SOL_REQUIRED_CYCLES)
         .add_msg_cycles_refunded(GET_BALANCE_CYCLES / 2)
-        .add_stub_response(MultiRpcResult::<Lamport>::Consistent(Ok(
-            MINIMUM_DEPOSIT_AMOUNT,
-        )))
+        .expect_get_balance(
+            deposit_address(depositor),
+            MultiRpcResult::Consistent(Ok(MINIMUM_DEPOSIT_AMOUNT)),
+        )
 }
 
 fn expected_transfer_arg(pending: &PendingMintFlow) -> TransferArg {
@@ -404,17 +394,6 @@ fn expected_transfer_arg(pending: &PendingMintFlow) -> TransferArg {
         memo: Some(Memo::from(MintMemo::sweep(pending.sweep_signature, pending.deposit_id)).into()),
         amount: NumTokens::from(pending.amount_to_mint),
     }
-}
-
-fn transfer_args_sent_by(runtime: &TestCanisterRuntime) -> Vec<TransferArg> {
-    runtime
-        .sent_update_calls()
-        .iter()
-        .map(|call| {
-            assert_eq!(call.method, "icrc1_transfer");
-            call.single_arg()
-        })
-        .collect()
 }
 
 fn deposit_status(deposit_id: DepositSolId) -> DepositSolStatus {

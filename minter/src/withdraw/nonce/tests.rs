@@ -15,9 +15,10 @@ type GetAccountInfoResult = sol_rpc_types::MultiRpcResult<Option<sol_rpc_types::
 async fn should_return_the_nonce_value_of_an_account_with_the_minter_as_authority() {
     init_state();
 
-    let runtime = TestCanisterRuntime::new().add_stub_response(GetAccountInfoResult::Consistent(
-        Ok(Some(nonce_account_info(MINTER_ADDRESS, 1))),
-    ));
+    let runtime = TestCanisterRuntime::new().expect_get_account_info(
+        nonce_account_address(),
+        GetAccountInfoResult::Consistent(Ok(Some(nonce_account_info(MINTER_ADDRESS, 1)))),
+    );
 
     let result = read_verified_nonce(&runtime, nonce_account_address(), MINTER_ADDRESS).await;
 
@@ -33,9 +34,10 @@ async fn should_fail_if_the_account_is_not_a_non_executable_system_program_accou
         ..nonce_account_info(MINTER_ADDRESS, 1)
     };
 
-    let runtime = TestCanisterRuntime::new().add_stub_response(GetAccountInfoResult::Consistent(
-        Ok(Some(foreign_owner_account)),
-    ));
+    let runtime = TestCanisterRuntime::new().expect_get_account_info(
+        nonce_account_address(),
+        GetAccountInfoResult::Consistent(Ok(Some(foreign_owner_account))),
+    );
 
     let result = read_verified_nonce(&runtime, nonce_account_address(), MINTER_ADDRESS).await;
 
@@ -52,9 +54,10 @@ async fn should_fail_if_the_authority_is_not_the_minter_address() {
     init_state();
     let other_authority = Address::from([0x99; 32]);
 
-    let runtime = TestCanisterRuntime::new().add_stub_response(GetAccountInfoResult::Consistent(
-        Ok(Some(nonce_account_info(other_authority, 1))),
-    ));
+    let runtime = TestCanisterRuntime::new().expect_get_account_info(
+        nonce_account_address(),
+        GetAccountInfoResult::Consistent(Ok(Some(nonce_account_info(other_authority, 1)))),
+    );
 
     let result = read_verified_nonce(&runtime, nonce_account_address(), MINTER_ADDRESS).await;
 
