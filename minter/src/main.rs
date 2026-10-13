@@ -97,146 +97,14 @@ fn withdraw_sol_status(args: WithdrawSolStatusArgs) -> WithdrawSolStatus {
 fn get_events(
     args: cksol_types_internal::event::GetEventsArgs,
 ) -> cksol_types_internal::event::GetEventsResult {
-    use cksol_minter::state::event::{
-        Event, EventType, Signer, TransactionPurpose, VersionedMessage,
-    };
     use cksol_types_internal::event;
 
     const MAX_EVENTS_PER_RESPONSE: u64 = 2_000;
 
-    fn map_event(event: Event) -> event::Event {
-        event::Event {
-            timestamp: event.timestamp,
-            payload: map_event_type(event.payload),
-        }
-    }
-
-    fn map_event_type(event_type: EventType) -> event::EventType {
-        match event_type {
-            EventType::Init(args) => event::EventType::Init(args),
-            EventType::Upgrade(args) => event::EventType::Upgrade(args),
-            EventType::AcceptedWithdrawalRequest(request) => {
-                event::EventType::AcceptedWithdrawalRequest {
-                    account: request.account,
-                    solana_address: solana_address::Address::from(request.solana_address).into(),
-                    burn_block_index: *request.burn_block_index.get(),
-                    burned_amount: request.burned_amount,
-                    amount_to_transfer: request.amount_to_transfer,
-                }
-            }
-            EventType::SubmittedTransaction {
-                signature,
-                message,
-                signers,
-                purpose,
-            } => {
-                let purpose = match purpose {
-                    TransactionPurpose::SweepDeposit {
-                        deposit_ids,
-                        block_height,
-                    } => event::TransactionPurpose::SweepDeposit {
-                        deposit_ids,
-                        block_height: block_height.get(),
-                    },
-                    TransactionPurpose::Withdrawal { burn_indices } => {
-                        event::TransactionPurpose::Withdrawal {
-                            burn_indices: burn_indices.iter().map(|idx| *idx.get()).collect(),
-                        }
-                    }
-                };
-                event::EventType::SubmittedTransaction {
-                    signature: signature.into(),
-                    transaction: match message {
-                        VersionedMessage::Legacy(message) => {
-                            event::VersionedTransactionMessage::Legacy(
-                                bincode::serialize(&message)
-                                    .expect("serializing transaction should succeed"),
-                            )
-                        }
-                    },
-                    signers: signers
-                        .into_iter()
-                        .map(|signer| match signer {
-                            Signer::Minter => event::Signer::Minter,
-                            Signer::Account(account) => event::Signer::Account(account),
-                        })
-                        .collect(),
-                    purpose,
-                }
-            }
-            EventType::SucceededTransaction { signature } => {
-                event::EventType::SucceededTransaction {
-                    signature: signature.into(),
-                }
-            }
-            EventType::FailedTransaction { signature } => event::EventType::FailedTransaction {
-                signature: signature.into(),
-            },
-            EventType::ExpiredTransaction { signature } => event::EventType::ExpiredTransaction {
-                signature: signature.into(),
-            },
-            EventType::QueuedDeposit {
-                deposit_id,
-                account,
-                address,
-                balance,
-            } => event::EventType::QueuedDeposit {
-                deposit_id,
-                account,
-                address: address.into(),
-                balance: balance.into(),
-            },
-            EventType::CreditedSweep {
-                signature,
-                amount_received,
-                mints,
-            } => event::EventType::CreditedSweep {
-                signature: signature.into(),
-                amount_received,
-                mints: mints
-                    .into_iter()
-                    .map(|mint| event::CreditedDeposit {
-                        deposit_id: mint.deposit_id,
-                        amount_to_mint: mint.amount_to_mint,
-                    })
-                    .collect(),
-            },
-            EventType::QuarantinedSweep { signature } => event::EventType::QuarantinedSweep {
-                signature: signature.into(),
-            },
-            EventType::MinterPublicKeyFetched {
-                public_key,
-                chain_code,
-            } => event::EventType::MinterPublicKeyFetched {
-                public_key: public_key.serialize_raw().to_vec(),
-                chain_code: chain_code.to_vec(),
-            },
-            EventType::MintedSweptDeposit {
-                deposit_id,
-                mint_block_index,
-            } => event::EventType::MintedSweptDeposit {
-                deposit_id,
-                mint_block_index: *mint_block_index.get(),
-            },
-            EventType::QuarantinedPendingMint { deposit_id } => {
-                event::EventType::QuarantinedPendingMint { deposit_id }
-            }
-            EventType::CreatedWithdrawalTransaction {
-                burn_indices,
-                nonce_account,
-                nonce_value,
-            } => event::EventType::CreatedWithdrawalTransaction {
-                burn_indices: burn_indices.iter().map(|idx| *idx.get()).collect(),
-                nonce_account: nonce_account.into(),
-                nonce_value: nonce_value.into(),
-            },
-        }
-    }
-
     let events = cksol_minter::storage::with_event_iter(|it| {
         it.skip(args.start as usize)
             .take(args.length.min(MAX_EVENTS_PER_RESPONSE) as usize)
-            .map(map_event)
+            .map(event::Event::from)
             .collect()
     });
     event::GetEventsResult {

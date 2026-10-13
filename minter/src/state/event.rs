@@ -63,6 +63,7 @@ impl VersionedMessage {
     }
 }
 
+pub mod candid;
 mod cbor;
 
 #[derive(Eq, PartialEq, Debug, Decode, Encode)]

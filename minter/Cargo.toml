@@ -63,8 +63,11 @@ agave-reserved-account-keys = { workspace = true }
 async-trait = { workspace = true }
 base64 = { workspace = true }
 candid_parser = { workspace = true }
+flate2 = { workspace = true }
+ic-agent = { workspace = true }
 mockall = { workspace = true }
 proptest = { workspace = true }
+reqwest = { workspace = true }
 scraper = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
