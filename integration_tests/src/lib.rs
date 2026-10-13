@@ -485,13 +485,13 @@ impl<'a> CkSolMinter<'a> {
         .expect("failed to create canister at the staging minter id");
         env.add_cycles(canister_id, u128::MAX).await;
 
-        let snapshot_dir = staging_snapshot::download_and_extract().await;
+        let extraction_dir = staging_snapshot::download_and_extract().await;
         let snapshot_id = env
             .canister_snapshot_upload(
                 canister_id,
                 controller,
                 None,
-                snapshot_dir.path().to_path_buf(),
+                staging_snapshot::snapshot_dir(extraction_dir.path()),
             )
             .await;
         let minter = Self::new(env, canister_id);
