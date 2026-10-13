@@ -768,7 +768,7 @@ impl Canister<'_> {
     }
 }
 
-fn cksol_minter_wasm() -> Vec<u8> {
+pub fn cksol_minter_wasm() -> Vec<u8> {
     const WASM_PATH_ENV: &str = "CKSOL_MINTER_WASM_PATH";
     const DEFAULT_WASM_PATH: &str = "../wasms/cksol_minter.wasm.gz";
 
