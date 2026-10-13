@@ -46,10 +46,9 @@ tokio = { workspace = true }
 
 [dev-dependencies]
 assert2 = { workspace = true }
+cksol-test-utils = { version = "0.1.0", path = "../libs/test-utils" }
 flate2 = { workspace = true }
 futures = { workspace = true }
-hex = { workspace = true }
 icrc-ledger-types = { workspace = true }
 minicbor = { workspace = true }
-sha2 = { workspace = true }
 tar = { workspace = true }

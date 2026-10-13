@@ -53,3 +53,7 @@ release = false # internal types, not released
 [[package]]
 name = "cksol-int-tests"
 release = false # test crate, not released
+
+[[package]]
+name = "cksol-test-utils"
+release = false # test helpers, not released

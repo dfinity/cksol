@@ -1,5 +1,6 @@
 use candid::Principal;
 use cksol_int_tests::{CkSolMinter, Setup};
+use cksol_test_utils::PinnedDownload;
 use cksol_types::MinterInfo;
 use cksol_types_internal::{
     UpgradeArgs,
@@ -8,19 +9,18 @@ use cksol_types_internal::{
 use flate2::read::GzDecoder;
 use ic_management_canister_types::CanisterSettings;
 use pocket_ic::{PocketIcBuilder, nonblocking::PocketIc};
-use sha2::{Digest, Sha256};
 use std::{
     fs,
     path::{Path, PathBuf},
-    time::Duration,
 };
 use tar::Archive;
 
 const STAGING_MINTER_ID: &str = "ljyxk-riaaa-aaaar-qb5mq-cai";
 const STAGING_MINTER_ADDRESS: &str = "Br8eRkeya8hy3sHCYqtWqGeNNZ349aPSUKGVYFWKKer1";
-const SNAPSHOT_URL: &str = "https://dfinity-download-public.s3.eu-central-1.amazonaws.com/testdata/cksol/2026_10_13_cksol_staging_minter_snapshot_00000000000000000000000002300f590101.tar.gz";
-const SNAPSHOT_SHA256: &str = "5c9f9cb67bf331898f956bc85cd6cd5cb075e730b35e4658cf73fdae15878d04";
-const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(60);
+const SNAPSHOT: PinnedDownload = PinnedDownload {
+    url: "https://dfinity-download-public.s3.eu-central-1.amazonaws.com/testdata/cksol/2026_10_13_cksol_staging_minter_snapshot_00000000000000000000000002300f590101.tar.gz",
+    sha256: "5c9f9cb67bf331898f956bc85cd6cd5cb075e730b35e4658cf73fdae15878d04",
+};
 
 #[tokio::test]
 async fn should_load_staging_snapshot_and_upgrade_to_current_wasm() {
@@ -113,7 +113,7 @@ async fn load_snapshot_into_pocketic(snapshot_dir: PathBuf) -> (PocketIc, Princi
 }
 
 async fn download_and_extract_snapshot() -> PathBuf {
-    let archive = cached_or_downloaded_snapshot_archive().await;
+    let archive = SNAPSHOT.cached_or_downloaded(&snapshot_cache_dir()).await;
     let snapshot_dir = snapshot_cache_dir().join(format!(
         "staging_minter_snapshot_{}_{}",
         std::process::id(),
@@ -153,44 +153,8 @@ fn is_apple_double_file(path: &Path) -> bool {
         .is_some_and(|name| name.starts_with("._"))
 }
 
-async fn cached_or_downloaded_snapshot_archive() -> Vec<u8> {
-    let path = snapshot_cache_dir().join(SNAPSHOT_URL.rsplit('/').next().unwrap());
-    match fs::read(&path) {
-        Ok(bytes) if sha256_hex(&bytes) == SNAPSHOT_SHA256 => bytes,
-        _ => download_and_store_snapshot_archive(&path).await,
-    }
-}
-
-async fn download_and_store_snapshot_archive(path: &Path) -> Vec<u8> {
-    let bytes = reqwest::Client::builder()
-        .timeout(DOWNLOAD_TIMEOUT)
-        .build()
-        .expect("failed to create HTTP client")
-        .get(SNAPSHOT_URL)
-        .send()
-        .await
-        .and_then(|response| response.error_for_status())
-        .unwrap_or_else(|e| panic!("failed to fetch {SNAPSHOT_URL}: {e:?}"))
-        .bytes()
-        .await
-        .unwrap_or_else(|e| panic!("failed to read bytes from {SNAPSHOT_URL}: {e:?}"))
-        .to_vec();
-    assert_eq!(
-        sha256_hex(&bytes),
-        SNAPSHOT_SHA256,
-        "SHA-256 of {SNAPSHOT_URL} does not match the pinned hash"
-    );
-    fs::create_dir_all(path.parent().unwrap()).unwrap();
-    fs::write(path, &bytes).unwrap_or_else(|e| panic!("failed to write {}: {e}", path.display()));
-    bytes
-}
-
 fn snapshot_cache_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
-}
-
-fn sha256_hex(bytes: &[u8]) -> String {
-    hex::encode(Sha256::digest(bytes))
 }
 
 fn unique_suffix() -> u64 {

@@ -938,11 +938,11 @@ dependencies = [
  "bincode",
  "candid",
  "canlog",
+ "cksol-test-utils",
  "cksol-types",
  "cksol-types-internal",
  "flate2",
  "futures",
- "hex",
  "ic-canister-runtime",
  "ic-http-types",
  "ic-management-canister-types 0.5.0",
@@ -957,7 +957,6 @@ dependencies = [
  "scopeguard",
  "serde",
  "serde_json",
- "sha2 0.10.9",
  "sol_rpc_client",
  "sol_rpc_types",
  "solana-address 2.3.0",
@@ -973,6 +972,15 @@ dependencies = [
  "solana-transaction",
  "tar",
  "tokio",
+]
+
+[[package]]
+name = "cksol-test-utils"
+version = "0.1.0"
+dependencies = [
+ "hex",
+ "reqwest 0.13.2",
+ "sha2 0.10.9",
 ]
 
 [[package]]
@@ -1018,6 +1026,7 @@ dependencies = [
  "candid",
  "candid_parser",
  "canlog",
+ "cksol-test-utils",
  "cksol-types",
  "cksol-types-internal",
  "derive_more 2.1.1",
@@ -1042,7 +1051,6 @@ dependencies = [
  "num-traits",
  "phantom_newtype",
  "proptest",
- "reqwest 0.13.2",
  "scopeguard",
  "scraper",
  "serde",
