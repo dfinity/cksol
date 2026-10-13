@@ -1,11 +1,7 @@
 use candid::Principal;
 use cksol_int_tests::{CkSolMinter, Setup};
 use cksol_test_utils::PinnedDownload;
-use cksol_types::MinterInfo;
-use cksol_types_internal::{
-    UpgradeArgs,
-    event::{Event, EventType},
-};
+use cksol_types_internal::{UpgradeArgs, event::EventType};
 use flate2::read::GzDecoder;
 use ic_management_canister_types::CanisterSettings;
 use pocket_ic::{PocketIcBuilder, nonblocking::PocketIc};
@@ -29,7 +25,7 @@ async fn should_load_staging_snapshot_and_upgrade_to_current_wasm() {
     let (env, canister_id) = load_snapshot_into_pocketic(snapshot_dir.path()).await;
     let minter = CkSolMinter::new(&env, canister_id);
 
-    let state_before = MinterState::query(&minter).await;
+    let state_before = minter.state().await;
     assert_eq!(
         state_before.info.minter_address.as_deref(),
         Some(STAGING_MINTER_ADDRESS)
@@ -47,7 +43,7 @@ async fn should_load_staging_snapshot_and_upgrade_to_current_wasm() {
         .expect("failed to upgrade the staging snapshot to the current wasm");
     minter.start().await;
 
-    let state_after = MinterState::query(&minter).await;
+    let state_after = minter.state().await;
     assert_eq!(state_after.info, state_before.info);
     let (replayed_events, new_events) = state_after.events.split_at(state_before.events.len());
     assert_eq!(replayed_events, state_before.events);
@@ -60,21 +56,6 @@ async fn should_load_staging_snapshot_and_upgrade_to_current_wasm() {
     );
 
     env.drop().await;
-}
-
-#[derive(Debug)]
-struct MinterState {
-    info: MinterInfo,
-    events: Vec<Event>,
-}
-
-impl MinterState {
-    async fn query(minter: &CkSolMinter<'_>) -> Self {
-        Self {
-            info: minter.get_minter_info().await,
-            events: minter.get_all_events().await,
-        }
-    }
 }
 
 async fn load_snapshot_into_pocketic(snapshot_dir: &Path) -> (PocketIc, Principal) {

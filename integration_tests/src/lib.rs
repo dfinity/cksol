@@ -550,6 +550,13 @@ impl<'a> CkSolMinter<'a> {
         self.query_call("get_minter_info", ()).await
     }
 
+    pub async fn state(&self) -> MinterState {
+        MinterState {
+            info: self.get_minter_info().await,
+            events: self.get_all_events().await,
+        }
+    }
+
     pub async fn retrieve_logs(&self, priority: &Priority) -> Vec<LogEntry<Priority>> {
         let request = HttpRequest {
             method: "POST".to_string(),
@@ -624,6 +631,12 @@ impl<'a> CkSolMinter<'a> {
         self.0 = self.0.with_http_mocks(mocks);
         self
     }
+}
+
+#[derive(Debug)]
+pub struct MinterState {
+    pub info: MinterInfo,
+    pub events: Vec<Event>,
 }
 
 pub struct Ledger<'a>(Canister<'a>);
