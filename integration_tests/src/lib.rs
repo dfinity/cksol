@@ -459,7 +459,14 @@ impl<'a> Deref for CkSolMinter<'a> {
     }
 }
 
-impl CkSolMinter<'_> {
+impl<'a> CkSolMinter<'a> {
+    pub fn new(env: &'a PocketIc, canister_id: CanisterId) -> Self {
+        CkSolMinter(Canister {
+            runtime: PocketIcRuntime::new(env, Setup::DEFAULT_CALLER),
+            id: canister_id,
+        })
+    }
+
     pub async fn get_deposit_address(&self, args: impl Into<GetDepositAddressArgs>) -> Address {
         self.try_get_deposit_address(args)
             .await
@@ -768,7 +775,7 @@ impl Canister<'_> {
     }
 }
 
-pub fn cksol_minter_wasm() -> Vec<u8> {
+fn cksol_minter_wasm() -> Vec<u8> {
     const WASM_PATH_ENV: &str = "CKSOL_MINTER_WASM_PATH";
     const DEFAULT_WASM_PATH: &str = "../wasms/cksol_minter.wasm.gz";
 

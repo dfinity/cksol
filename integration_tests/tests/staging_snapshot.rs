@@ -1,9 +1,9 @@
-use candid::{Decode, Encode, Principal};
-use cksol_int_tests::{Setup, cksol_minter_wasm};
+use candid::Principal;
+use cksol_int_tests::{CkSolMinter, Setup};
 use cksol_types::MinterInfo;
 use cksol_types_internal::{
-    MinterArg, UpgradeArgs,
-    event::{Event, EventType, GetEventsArgs, GetEventsResult},
+    UpgradeArgs,
+    event::{Event, EventType},
 };
 use flate2::read::GzDecoder;
 use ic_management_canister_types::CanisterSettings;
@@ -21,14 +21,14 @@ const STAGING_MINTER_ADDRESS: &str = "Br8eRkeya8hy3sHCYqtWqGeNNZ349aPSUKGVYFWKKe
 const SNAPSHOT_URL: &str = "https://dfinity-download-public.s3.eu-central-1.amazonaws.com/testdata/cksol/2026_10_13_cksol_staging_minter_snapshot_00000000000000000000000002300f590101.tar.gz";
 const SNAPSHOT_SHA256: &str = "5c9f9cb67bf331898f956bc85cd6cd5cb075e730b35e4658cf73fdae15878d04";
 const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(60);
-const MAX_EVENTS_PER_QUERY: u64 = 2_000;
 
 #[tokio::test]
 async fn should_load_staging_snapshot_and_upgrade_to_current_wasm() {
     let snapshot_dir = download_and_extract_snapshot().await;
     let (env, canister_id) = load_snapshot_into_pocketic(snapshot_dir).await;
+    let minter = CkSolMinter::new(&env, canister_id);
 
-    let state_before = MinterState::query(&env, canister_id).await;
+    let state_before = MinterState::query(&minter).await;
     assert_eq!(
         state_before.info.minter_address.as_deref(),
         Some(STAGING_MINTER_ADDRESS)
@@ -39,22 +39,14 @@ async fn should_load_staging_snapshot_and_upgrade_to_current_wasm() {
     );
 
     let upgrade_args = UpgradeArgs::default();
-    env.stop_canister(canister_id, Some(Setup::DEFAULT_CONTROLLER))
+    minter.stop().await;
+    minter
+        .upgrade(upgrade_args.clone())
         .await
-        .expect("failed to stop canister before upgrade");
-    env.upgrade_canister(
-        canister_id,
-        cksol_minter_wasm(),
-        Encode!(&MinterArg::Upgrade(upgrade_args.clone())).unwrap(),
-        Some(Setup::DEFAULT_CONTROLLER),
-    )
-    .await
-    .expect("failed to upgrade the staging snapshot to the current wasm");
-    env.start_canister(canister_id, Some(Setup::DEFAULT_CONTROLLER))
-        .await
-        .expect("failed to start canister after upgrade");
+        .expect("failed to upgrade the staging snapshot to the current wasm");
+    minter.start().await;
 
-    let state_after = MinterState::query(&env, canister_id).await;
+    let state_after = MinterState::query(&minter).await;
     assert_eq!(state_after.info, state_before.info);
     let (replayed_events, new_events) = state_after.events.split_at(state_before.events.len());
     assert_eq!(replayed_events, state_before.events);
@@ -76,57 +68,12 @@ struct MinterState {
 }
 
 impl MinterState {
-    async fn query(env: &PocketIc, canister_id: Principal) -> Self {
+    async fn query(minter: &CkSolMinter<'_>) -> Self {
         Self {
-            info: get_minter_info(env, canister_id).await,
-            events: get_all_events(env, canister_id).await,
+            info: minter.get_minter_info().await,
+            events: minter.get_all_events().await,
         }
     }
-}
-
-async fn get_minter_info(env: &PocketIc, canister_id: Principal) -> MinterInfo {
-    let bytes = env
-        .query_call(
-            canister_id,
-            Principal::anonymous(),
-            "get_minter_info",
-            Encode!().unwrap(),
-        )
-        .await
-        .expect("get_minter_info query failed");
-    Decode!(&bytes, MinterInfo).unwrap()
-}
-
-async fn get_all_events(env: &PocketIc, canister_id: Principal) -> Vec<Event> {
-    let mut events = Vec::new();
-    loop {
-        let GetEventsResult {
-            events: batch,
-            total_event_count,
-        } = get_events(env, canister_id, events.len() as u64).await;
-        events.extend(batch);
-        if events.len() as u64 >= total_event_count {
-            break;
-        }
-    }
-    events
-}
-
-async fn get_events(env: &PocketIc, canister_id: Principal, start: u64) -> GetEventsResult {
-    let args = GetEventsArgs {
-        start,
-        length: MAX_EVENTS_PER_QUERY,
-    };
-    let bytes = env
-        .query_call(
-            canister_id,
-            Principal::anonymous(),
-            "get_events",
-            Encode!(&args).unwrap(),
-        )
-        .await
-        .expect("get_events query failed");
-    Decode!(&bytes, GetEventsResult).unwrap()
 }
 
 async fn load_snapshot_into_pocketic(snapshot_dir: PathBuf) -> (PocketIc, Principal) {
