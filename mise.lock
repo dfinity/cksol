@@ -86,6 +86,45 @@ checksum = "sha256:9bf63f9daaee8d812207807435a1bff23d7b7e50c573b7c2a36b8aa50974e
 url = "https://github.com/dfinity/ic-wasm/releases/download/0.11.1/ic-wasm-x86_64-apple-darwin.tar.xz"
 url_api = "https://api.github.com/repos/dfinity/ic-wasm/releases/assets/500087023"
 
+[[tools."github:rust-lang/mdBook"]]
+version = "0.5.3"
+backend = "github:rust-lang/mdBook"
+
+[tools."github:rust-lang/mdBook"."platforms.linux-arm64"]
+checksum = "sha256:428c91cf73fec7494cbefe6e170e12508c9d45d9d096104b7c62d47ff43911c2"
+url = "https://github.com/rust-lang/mdBook/releases/download/v0.5.3/mdbook-v0.5.3-aarch64-unknown-linux-musl.tar.gz"
+url_api = "https://api.github.com/repos/rust-lang/mdBook/releases/assets/424597935"
+
+[tools."github:rust-lang/mdBook"."platforms.linux-arm64-musl"]
+checksum = "sha256:428c91cf73fec7494cbefe6e170e12508c9d45d9d096104b7c62d47ff43911c2"
+url = "https://github.com/rust-lang/mdBook/releases/download/v0.5.3/mdbook-v0.5.3-aarch64-unknown-linux-musl.tar.gz"
+url_api = "https://api.github.com/repos/rust-lang/mdBook/releases/assets/424597935"
+
+[tools."github:rust-lang/mdBook"."platforms.linux-x64"]
+checksum = "sha256:e2fd508a4fac06cbaa9f88b97d27bdc3b55a08946304ca845879fe26a3699e11"
+url = "https://github.com/rust-lang/mdBook/releases/download/v0.5.3/mdbook-v0.5.3-x86_64-unknown-linux-gnu.tar.gz"
+url_api = "https://api.github.com/repos/rust-lang/mdBook/releases/assets/424597729"
+
+[tools."github:rust-lang/mdBook"."platforms.linux-x64-musl"]
+checksum = "sha256:dfb86d8e20a3fed91bf549aa450b9d7f46a275b700292e050cdfd3171732e7fd"
+url = "https://github.com/rust-lang/mdBook/releases/download/v0.5.3/mdbook-v0.5.3-x86_64-unknown-linux-musl.tar.gz"
+url_api = "https://api.github.com/repos/rust-lang/mdBook/releases/assets/424598164"
+
+[tools."github:rust-lang/mdBook"."platforms.macos-arm64"]
+checksum = "sha256:2aaa197d85eb8c44903f0aa9f571612662e2d5314471697f3adb353e9e2a0007"
+url = "https://github.com/rust-lang/mdBook/releases/download/v0.5.3/mdbook-v0.5.3-aarch64-apple-darwin.tar.gz"
+url_api = "https://api.github.com/repos/rust-lang/mdBook/releases/assets/424597794"
+
+[tools."github:rust-lang/mdBook"."platforms.macos-x64"]
+checksum = "sha256:9b74591168f8dbf19fcdf2386b68031fecc4b847b2e81e2de2d23ed502618875"
+url = "https://github.com/rust-lang/mdBook/releases/download/v0.5.3/mdbook-v0.5.3-x86_64-apple-darwin.tar.gz"
+url_api = "https://api.github.com/repos/rust-lang/mdBook/releases/assets/424597809"
+
+[tools."github:rust-lang/mdBook"."platforms.windows-x64"]
+checksum = "sha256:6bf1019d15e4cfa24d25d3a8571384ba1c703ca58029aac29b7c490f57e3ab85"
+url = "https://github.com/rust-lang/mdBook/releases/download/v0.5.3/mdbook-v0.5.3-x86_64-pc-windows-msvc.zip"
+url_api = "https://api.github.com/repos/rust-lang/mdBook/releases/assets/424598892"
+
 [[tools.just]]
 version = "1.38.0"
 backend = "aqua:casey/just"

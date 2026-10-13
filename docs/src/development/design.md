@@ -631,7 +631,7 @@ None of the entries in the list correspond to a Solana address. Therefore, imple
 
 ### 3.5. Events
 
-The ckETH minter captures all internal state changes in [events](https://github.com/dfinity/ic/blob/master/rs/ethereum/cketh/minter/src/state/event.rs). The ckSOL minter also follows this [event-based design](../minter/src/state/event.rs). Since Solana has a much shorter block time than Ethereum, the potentially faster growth of the event log must be considered. In particular, the following critical questions need to be addressed: Is there a risk that the ckSOL minter cannot be upgraded anymore because the full event log can no longer be replayed? Is there a risk that the event log will not fit into stable memory anymore?
+The ckETH minter captures all internal state changes in [events](https://github.com/dfinity/ic/blob/master/rs/ethereum/cketh/minter/src/state/event.rs). The ckSOL minter also follows this [event-based design](https://github.com/dfinity/cksol/blob/main/minter/src/state/event.rs). Since Solana has a much shorter block time than Ethereum, the potentially faster growth of the event log must be considered. In particular, the following critical questions need to be addressed: Is there a risk that the ckSOL minter cannot be upgraded anymore because the full event log can no longer be replayed? Is there a risk that the event log will not fit into stable memory anymore?
 
 The event types of ckETH and ckSOL are quite similar. Due to this similarity, and the lack of concrete numbers for ckSOL, we conjecture that the size of the events and the number of instructions required to process them is roughly the same. The ckETH minter was launched about 800 days ago and has since produced 49,263 recorded events, i.e., there were roughly **2.6 events per hour** since launch. The total size of the event log is 16 MiB, i.e., the average event size is **342 bytes**. On average, executing an event costs about **20,000 instructions**.
 
@@ -658,4 +658,4 @@ The ckSOL minter exposes the following endpoints:
 6. `get_minter_info`: Returns information about the ckSOL minter, specifically the various fees, the minimum deposit and withdrawal amounts, the current balance of the ckSOL minter, its main address, and the addresses of its durable nonce accounts.
 7. `get_events(start, length)`: Returns a page of the event log, at most 2000 events per call. This is a debug endpoint; backwards compatibility is not guaranteed for it.
 
-The authoritative interface is the Candid file [`minter/cksol_minter.did`](../minter/cksol_minter.did).
+The authoritative interface is the Candid file [`minter/cksol_minter.did`](https://github.com/dfinity/cksol/blob/main/minter/cksol_minter.did).
