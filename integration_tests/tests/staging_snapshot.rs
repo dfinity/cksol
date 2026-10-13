@@ -83,7 +83,8 @@ async fn load_snapshot_into_pocketic(snapshot_dir: &Path) -> (PocketIc, Principa
         .build_async()
         .await;
     let controller = Setup::DEFAULT_CONTROLLER;
-    let canister_id = Principal::from_text(STAGING_MINTER_ID).unwrap();
+    let canister_id = Principal::from_text(STAGING_MINTER_ID)
+        .expect("the staging minter id is a valid principal");
     env.create_canister_with_id(
         Some(controller),
         Some(CanisterSettings {
@@ -139,7 +140,11 @@ fn extract_without_top_level_dir(archive: &[u8], destination: &Path) {
             continue;
         }
         let target = destination.join(relative_path);
-        fs::create_dir_all(target.parent().unwrap()).unwrap();
+        let target_dir = target
+            .parent()
+            .expect("a snapshot archive entry always lives below the destination");
+        fs::create_dir_all(target_dir)
+            .unwrap_or_else(|e| panic!("failed to create {}: {e}", target_dir.display()));
         entry
             .unpack(&target)
             .unwrap_or_else(|e| panic!("failed to extract {}: {e}", target.display()));
