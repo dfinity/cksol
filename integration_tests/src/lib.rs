@@ -35,7 +35,7 @@ use std::{default::Default, env::var, fs, ops::Deref, path::PathBuf, time::Durat
 pub mod events;
 pub mod fixtures;
 pub mod ledger_init_args;
-mod staging_snapshot;
+mod snapshot;
 pub mod validator;
 
 #[derive(Default)]
@@ -472,7 +472,7 @@ impl<'a> CkSolMinter<'a> {
     /// downloaded from a pinned URL unless already cached.
     pub async fn load_from_snapshot(env: &'a PocketIc) -> Self {
         let controller = Setup::DEFAULT_CONTROLLER;
-        let canister_id = staging_snapshot::canister_id();
+        let canister_id = snapshot::canister_id();
         env.create_canister_with_id(
             Some(controller),
             Some(CanisterSettings {
@@ -485,13 +485,13 @@ impl<'a> CkSolMinter<'a> {
         .expect("failed to create canister at the staging minter id");
         env.add_cycles(canister_id, u128::MAX).await;
 
-        let extraction_dir = staging_snapshot::download_and_extract().await;
+        let extraction_dir = snapshot::download_and_extract().await;
         let snapshot_id = env
             .canister_snapshot_upload(
                 canister_id,
                 controller,
                 None,
-                staging_snapshot::snapshot_dir(extraction_dir.path()),
+                snapshot::dir(extraction_dir.path()),
             )
             .await;
         let minter = Self::new(env, canister_id);

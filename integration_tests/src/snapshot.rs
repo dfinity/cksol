@@ -32,7 +32,7 @@ pub async fn download_and_extract() -> TempDir {
     extraction_dir
 }
 
-pub fn snapshot_dir(extraction_dir: &Path) -> PathBuf {
+pub fn dir(extraction_dir: &Path) -> PathBuf {
     extraction_dir.join(SNAPSHOT_ARCHIVE_ROOT)
 }
 
