@@ -11,7 +11,7 @@ use tempfile::TempDir;
 const STAGING_MINTER_ID: &str = "ljyxk-riaaa-aaaar-qb5mq-cai";
 const SNAPSHOT_ARCHIVE_ROOT: &str = "ljyxk";
 const SNAPSHOT: PinnedDownload = PinnedDownload {
-    url: "https://dfinity-download-public.s3.eu-central-1.amazonaws.com/testdata/cksol/2026_10_13_cksol_staging_minter_snapshot_00000000000000000000000002300f590101.tar.gz",
+    url: "https://download.dfinity.systems/testdata/cksol/2026_10_13_cksol_staging_minter_snapshot_00000000000000000000000002300f590101.tar.gz",
     sha256: "5c9f9cb67bf331898f956bc85cd6cd5cb075e730b35e4658cf73fdae15878d04",
 };
 
