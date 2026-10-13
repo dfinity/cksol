@@ -49,6 +49,17 @@ After calling `deposit_sol`, track the deposit using the deposit id returned in 
 icp canister call -e prod cksol_minter deposit_sol_status '(42 : nat64)' --query
 ```
 
+## Approve the minter to burn your ckSOL
+
+`withdraw_sol` burns ckSOL from your ledger account through an [ICRC-2](https://github.com/dfinity/ICRC-1/blob/main/standards/ICRC-2/README.md) `icrc2_transfer_from`, so the minter needs an allowance on your account first. Grant one with `icrc2_approve` on the ckSOL ledger, using the minter's principal as the spender (see the [canister table](https://github.com/dfinity/cksol#readme) for each environment). The allowance must cover the withdrawal amount plus the ledger transfer fee, and a single larger allowance can cover several withdrawals:
+
+```sh
+icp canister call -e prod cksol_ledger icrc2_approve \
+  '(record { spender = record { owner = principal "lh22c-kyaaa-aaaar-qb5nq-cai"; subaccount = null }; amount = <ALLOWANCE> })'
+```
+
+Without an allowance, `withdraw_sol` returns `InsufficientAllowance`.
+
 ## Submit a withdrawal request
 
 Burns ckSOL from your ledger account and initiates a transfer of the equivalent SOL to the given Solana address. Replace `<SOLANA_ADDRESS>` with the destination address and `<AMOUNT>` with the amount in lamports. The optional `from_subaccount` field defaults to `null` (the default subaccount):
