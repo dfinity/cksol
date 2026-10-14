@@ -104,21 +104,12 @@ impl Watchlist {
         account: Account,
         address: Address,
     ) -> Result<WatchedAddress, WatchlistFull> {
-        let inserted = self
+        match self
             .entries
-            .insert(now, account, ScanProgress::unscanned(address));
-        self.admitted(now, &account, inserted)
-    }
-
-    fn admitted(
-        &self,
-        now: Timestamp,
-        account: &Account,
-        inserted: Result<Vec<(Account, ScanProgress)>, InsertError<Account, ScanProgress>>,
-    ) -> Result<WatchedAddress, WatchlistFull> {
-        match inserted {
+            .insert(now, account, ScanProgress::unscanned(address))
+        {
             Ok(_) | Err(InsertError::AlreadyPresent { .. }) => Ok(self
-                .get(now, account)
+                .get(now, &account)
                 .expect("BUG: a registration is live right after its insertion")),
             Err(InsertError::AtCapacity { .. }) => Err(WatchlistFull),
             Err(InsertError::Expired { .. }) => {
