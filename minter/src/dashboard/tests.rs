@@ -1,17 +1,18 @@
 use crate::dashboard::{DashboardPaginationParameters, DashboardTemplate, lamports_to_sol};
-use crate::state::read_state;
+use crate::state::{AutomaticDeposit, mutate_state, read_state};
 use crate::test_fixtures::{
-    MINIMUM_DEPOSIT_AMOUNT, MINIMUM_WITHDRAWAL_AMOUNT, WITHDRAWAL_FEE, account,
+    AUTOMATIC_DEPOSIT_FEE, MINIMUM_DEPOSIT_AMOUNT, MINIMUM_WITHDRAWAL_AMOUNT, REGISTERED_AT,
+    WATCH_WINDOW_NANOS, WITHDRAWAL_FEE, account, deposit_address,
     events::{
         accept_withdrawal, fail_transaction, quarantine_sweep, queue_deposit, submit_sweep,
         submit_withdrawal, succeed_transaction,
     },
     flow::deposit::DepositFlow,
     init_balance, init_schnorr_master_key, init_state, init_state_with_args, ledger_canister_id,
-    signature, sol_rpc_canister_id, valid_init_args,
+    signature, sol_rpc_canister_id, valid_init_args, watch,
 };
 use askama::Template;
-use cksol_types_internal::SolanaNetwork;
+use cksol_types_internal::{InitArgs, SolanaNetwork};
 
 fn dashboard() -> DashboardTemplate {
     dashboard_with_pagination(DashboardPaginationParameters::default())
@@ -56,7 +57,128 @@ fn should_display_metadata() {
             "#minimum-withdrawal-amount > td",
             &lamports_to_sol(MINIMUM_WITHDRAWAL_AMOUNT),
             "wrong minimum withdrawal amount",
+        )
+        .has_string_value(
+            "#automatic-deposit-fee > td",
+            &lamports_to_sol(AUTOMATIC_DEPOSIT_FEE),
+            "wrong automatic deposit fee",
+        )
+        .has_string_value(
+            "#collected-automatic-deposit-fees > td",
+            "0",
+            "wrong collected automatic deposit fees",
         );
+}
+
+#[test]
+fn should_display_an_unconfigured_automatic_deposit_fee_as_not_available() {
+    init_state_with_args(InitArgs {
+        automatic_deposit_fee: None,
+        ..valid_init_args()
+    });
+
+    DashboardAssert::assert_that(dashboard()).has_string_value(
+        "#automatic-deposit-fee > td",
+        "N/A",
+        "expected N/A when the automatic deposit fee is not configured",
+    );
+}
+
+#[test]
+fn should_display_the_collected_automatic_deposit_fees() {
+    init_state();
+    init_schnorr_master_key();
+    DepositFlow::queue_automatic(
+        account(1),
+        400_000_000,
+        AutomaticDeposit {
+            fee: AUTOMATIC_DEPOSIT_FEE,
+            valid_until: REGISTERED_AT + WATCH_WINDOW_NANOS,
+        },
+    )
+    .sweep(signature(0xAA))
+    .succeed()
+    .credit();
+
+    DashboardAssert::assert_that(dashboard()).has_string_value(
+        "#collected-automatic-deposit-fees > td",
+        &lamports_to_sol(AUTOMATIC_DEPOSIT_FEE),
+        "wrong collected automatic deposit fees",
+    );
+}
+
+#[test]
+fn should_display_watched_deposit_addresses_by_ascending_window_end() {
+    init_state();
+    init_schnorr_master_key();
+    watch(REGISTERED_AT + 1, account(1));
+    watch(REGISTERED_AT, account(2));
+    mutate_state(|s| {
+        s.watchlist_mut()
+            .record_scan(REGISTERED_AT + 60, &account(2));
+    });
+
+    DashboardAssert::assert_that(dashboard())
+        .has_table_row_value(
+            "#watched-deposit-addresses + table > tbody > tr:nth-child(1)",
+            &[
+                &account(2).to_string(),
+                &deposit_address(account(2)).to_string(),
+                &(REGISTERED_AT + WATCH_WINDOW_NANOS).to_string(),
+                "1",
+                &(REGISTERED_AT + 60).to_string(),
+            ],
+            "watched deposit addresses",
+        )
+        .has_table_row_value(
+            "#watched-deposit-addresses + table > tbody > tr:nth-child(2)",
+            &[
+                &account(1).to_string(),
+                &deposit_address(account(1)).to_string(),
+                &(REGISTERED_AT + 1 + WATCH_WINDOW_NANOS).to_string(),
+                "0",
+                "-",
+            ],
+            "watched deposit addresses",
+        )
+        .has_link_matching(
+            "#watched-deposit-addresses + table > tbody > tr:nth-child(1) a",
+            |href| href == format!("https://solscan.io/account/{}", deposit_address(account(2))),
+        );
+}
+
+#[test]
+fn should_paginate_watched_deposit_addresses_across_multiple_pages() {
+    use crate::dashboard::DEFAULT_PAGE_SIZE;
+
+    init_state();
+    init_schnorr_master_key();
+    for index in 0..DEFAULT_PAGE_SIZE + 1 {
+        watch(REGISTERED_AT, account(index));
+    }
+
+    let page1 = dashboard();
+    assert_eq!(
+        page1.watched_deposit_addresses_table.current_page.len(),
+        DEFAULT_PAGE_SIZE
+    );
+    assert_eq!(
+        page1.watched_deposit_addresses_table.pagination.pages.len(),
+        2
+    );
+
+    let page2 = dashboard_with_pagination(DashboardPaginationParameters {
+        watched_deposit_addresses_start: DEFAULT_PAGE_SIZE,
+        ..Default::default()
+    });
+    assert_eq!(page2.watched_deposit_addresses_table.current_page.len(), 1);
+    assert_eq!(
+        page2
+            .watched_deposit_addresses_table
+            .pagination
+            .current_page_index,
+        2
+    );
 }
 
 #[test]
@@ -65,7 +187,8 @@ fn should_display_empty_state() {
 
     DashboardAssert::assert_that(dashboard())
         .has_no_elements_matching("#minted-sweeps + table")
-        .has_no_elements_matching("#withdrawals + table");
+        .has_no_elements_matching("#withdrawals + table")
+        .has_no_elements_matching("#watched-deposit-addresses + table");
 }
 
 #[test]

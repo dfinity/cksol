@@ -1437,6 +1437,8 @@ mod automatic_deposit_sol_tests {
         setup
             .check_metrics()
             .await
+            .assert_contains_metric_matching(r#"watched_deposit_addresses 0 \d+"#)
+            .assert_contains_metric_matching(r#"automatic_deposits_queued 1 \d+"#)
             .assert_contains_metric_matching(r#"deposit_address_scans\{outcome="queued"\} 1 \d+"#)
             .into()
             .drop()
@@ -1547,6 +1549,15 @@ mod metrics_tests {
             .assert_contains_metric_matching(r#"minter_balance 0 \d+"#)
             .assert_contains_metric_matching(r#"oldest_in_flight_deposit_age_seconds 0 \d+"#)
             .assert_contains_metric_matching(r#"oldest_pending_mint_age_seconds 0 \d+"#)
+            .assert_contains_metric_matching(r#"watched_deposit_addresses 0 \d+"#)
+            .assert_contains_metric_matching(r#"oldest_watched_deposit_age_seconds 0 \d+"#)
+            .assert_contains_metric_matching(r#"automatic_deposits_queued 0 \d+"#)
+            .assert_contains_metric_matching(r#"collected_automatic_deposit_fees 0 \d+"#)
+            .assert_contains_metric_matching(r#"deposit_address_scans\{outcome="queued"\} 0 \d+"#)
+            .assert_contains_metric_matching(
+                r#"deposit_address_scans\{outcome="below_minimum"\} 0 \d+"#,
+            )
+            .assert_contains_metric_matching(r#"deposit_address_scans\{outcome="failed"\} 0 \d+"#)
             .assert_contains_metric_matching(
                 r#"failed_credit_attempts\{reason="not_found"\} 0 \d+"#,
             )
