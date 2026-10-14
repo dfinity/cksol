@@ -1,4 +1,4 @@
-use crate::utils::timed_sized_map::{Entry, InsertError, TimedSizedMap};
+use crate::utils::timed_sized_map::{Entry, InsertError, TimedSizedMap, Timestamp};
 use icrc_ledger_types::icrc1::account::Account;
 use solana_address::Address;
 use std::{num::NonZeroUsize, time::Duration};
@@ -93,9 +93,11 @@ impl Watchlist {
         account: Account,
         address: Address,
     ) -> Result<WatchedAddress, WatchlistFull> {
-        let inserted = self
-            .entries
-            .insert(now, account, ScanProgress::unscanned(address));
+        let inserted = self.entries.insert(
+            Timestamp::from_nanos(now),
+            account,
+            ScanProgress::unscanned(address),
+        );
         self.admitted(now, &account, inserted)
     }
 
@@ -120,7 +122,9 @@ impl Watchlist {
 
     /// The live registration of the account, if any.
     pub fn get(&self, now: u64, account: &Account) -> Option<WatchedAddress> {
-        let entry = self.entries.get_entry(now, account)?;
+        let entry = self
+            .entries
+            .get_entry(Timestamp::from_nanos(now), account)?;
         Some(self.watched(account, entry))
     }
 
@@ -138,7 +142,10 @@ impl Watchlist {
     /// Records a scan of the account's deposit address at `now`, which advances the account
     /// along the schedule, if the account is still watched.
     pub fn record_scan(&mut self, now: u64, account: &Account) {
-        if let Some(progress) = self.entries.get_value_mut(now, account) {
+        if let Some(progress) = self
+            .entries
+            .get_value_mut(Timestamp::from_nanos(now), account)
+        {
             progress.scan_count = progress.scan_count.saturating_add(1);
             progress.last_scanned_at = Some(now);
         }
@@ -146,7 +153,7 @@ impl Watchlist {
 
     /// Removes the registrations whose window has closed and returns how many there were.
     pub fn evict_expired(&mut self, now: u64) -> usize {
-        self.entries.evict_expired(now).len()
+        self.entries.evict_expired(Timestamp::from_nanos(now)).len()
     }
 
     /// Every registration, live or expired but not yet evicted, by ascending window end.
@@ -176,6 +183,7 @@ impl Watchlist {
     }
 
     fn live(&self, now: u64) -> impl Iterator<Item = WatchedAddress> {
+        let now = Timestamp::from_nanos(now);
         self.entries
             .iter_by_expiry()
             .filter(move |(_, entry)| entry.is_live(now))
@@ -184,7 +192,7 @@ impl Watchlist {
 
     fn watched(&self, account: &Account, entry: &Entry<ScanProgress>) -> WatchedAddress {
         let progress = &entry.value;
-        let valid_until = entry.expires_at;
+        let valid_until = entry.expires_at.as_nanos();
         WatchedAddress {
             account: *account,
             address: progress.address,
