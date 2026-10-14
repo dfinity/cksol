@@ -345,9 +345,6 @@ impl State {
         Ok(())
     }
 
-    /// The largest automatic deposit fee that leaves a positive mint for a deposit of
-    /// exactly the minimum deposit amount, after the rent exemption threshold and the
-    /// deposit's share of the sweep fee.
     fn max_automatic_deposit_fee(&self) -> Lamport {
         self.minimum_deposit_amount
             .saturating_sub(RENT_EXEMPTION_THRESHOLD)
