@@ -165,6 +165,11 @@ pub fn at(nanos: u64) -> Timestamp {
     Timestamp::from_nanos(nanos)
 }
 
+/// Registers the deposit address of the account on the watchlist of the state at `now`.
+pub fn watch(now: Timestamp, account: Account) -> WatchedAddress {
+    mutate_state(|state| register(state.watchlist_mut(), now, account))
+}
+
 /// Registers the deposit address of the account on the watchlist at `now`.
 pub fn register(watchlist: &mut Watchlist, now: Timestamp, account: Account) -> WatchedAddress {
     watchlist

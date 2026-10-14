@@ -1,7 +1,7 @@
 use crate::{
     deposit::automatic::watch_deposit_address,
     guard::deposit_sol_guard,
-    state::{mutate_state, read_state, watchlist::MAX_WATCHED_ADDRESSES},
+    state::{MAX_WATCHED_ADDRESSES, mutate_state, read_state},
     test_fixtures::{
         AUTOMATIC_DEPOSIT_FEE, EventsAssert, HOUR_NANOS, MINIMUM_DEPOSIT_AMOUNT, MINTER_ACCOUNT,
         MINUTE_NANOS, REGISTERED_AT, WATCH_WINDOW_NANOS, account, at, deposit_address,

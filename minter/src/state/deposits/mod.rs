@@ -220,6 +220,7 @@ impl Deposits {
             deposit.account
         );
         self.latest_ids.insert(deposit.account, deposit_id);
+        self.watchlist.remove(&deposit.account);
         self.queued.insert(deposit_id, deposit);
         self.queued_at_by_id.insert(deposit_id, queued_at);
         self.next_id += 1;
