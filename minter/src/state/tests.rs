@@ -619,9 +619,7 @@ mod state_validation {
             |e| {
                 e == &InvalidStateError::AutomaticDepositFeeTooHigh {
                     automatic_deposit_fee: maximum_automatic_deposit_fee + 1,
-                    minimum_deposit_amount: MINIMUM_DEPOSIT_AMOUNT,
-                    rent_exemption_threshold: RENT_EXEMPTION_THRESHOLD,
-                    fee_per_signature: FEE_PER_SIGNATURE,
+                    max_automatic_deposit_fee: maximum_automatic_deposit_fee,
                 }
             },
         );

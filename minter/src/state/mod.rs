@@ -335,22 +335,24 @@ impl State {
             });
         }
         if let Some(automatic_deposit_fee) = self.automatic_deposit_fee
-            && self.minimum_automatic_mint_before_fee() <= automatic_deposit_fee
+            && automatic_deposit_fee > self.max_automatic_deposit_fee()
         {
             return Err(InvalidStateError::AutomaticDepositFeeTooHigh {
                 automatic_deposit_fee,
-                minimum_deposit_amount: self.minimum_deposit_amount,
-                rent_exemption_threshold: RENT_EXEMPTION_THRESHOLD,
-                fee_per_signature: FEE_PER_SIGNATURE,
+                max_automatic_deposit_fee: self.max_automatic_deposit_fee(),
             });
         }
         Ok(())
     }
 
-    fn minimum_automatic_mint_before_fee(&self) -> Lamport {
+    /// The largest automatic deposit fee that leaves a positive mint for a deposit of
+    /// exactly the minimum deposit amount, after the rent exemption threshold and the
+    /// deposit's share of the sweep fee.
+    fn max_automatic_deposit_fee(&self) -> Lamport {
         self.minimum_deposit_amount
             .saturating_sub(RENT_EXEMPTION_THRESHOLD)
             .saturating_sub(FEE_PER_SIGNATURE)
+            .saturating_sub(1)
     }
 
     fn upgrade(
@@ -835,9 +837,7 @@ pub enum InvalidStateError {
     },
     AutomaticDepositFeeTooHigh {
         automatic_deposit_fee: Lamport,
-        minimum_deposit_amount: Lamport,
-        rent_exemption_threshold: Lamport,
-        fee_per_signature: Lamport,
+        max_automatic_deposit_fee: Lamport,
     },
     InvalidNonceAccount(String),
     DuplicateNonceAccount(Address),
