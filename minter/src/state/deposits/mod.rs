@@ -377,7 +377,9 @@ impl Deposits {
     }
 }
 
-/// A deposit of an account that has not been minted, dropped or quarantined yet.
+/// The deposit that reserves its account: no other deposit can be queued for the account
+/// until it is minted or dropped, and a quarantined one keeps the account reserved until
+/// a minter upgrade resolves it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum InFlightDeposit {
     /// The deposit is queued, swept or finalized.
