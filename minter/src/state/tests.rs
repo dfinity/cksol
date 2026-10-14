@@ -312,10 +312,7 @@ mod swept_deposits {
         };
         read_state(|s| {
             assert_eq!(s.deposits().dropped().len(), 3);
-            assert_eq!(
-                s.watchlist().iter(at(DROPPED_AT)).collect::<Vec<_>>(),
-                vec![rearmed]
-            );
+            assert_eq!(s.watchlist().iter().collect::<Vec<_>>(), vec![rearmed]);
             assert_eq!(s.watchlist().due(at(DROPPED_AT)), vec![rearmed]);
         });
         let replayed = replayed_recorded_log();
