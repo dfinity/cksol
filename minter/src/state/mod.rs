@@ -14,9 +14,10 @@ use crate::{
     utils::insertion_ordered_map::InsertionOrderedMap,
 };
 use candid::Principal;
+use canlog::log;
 use cksol_types::{DepositSolId, TxFinalizedStatus, WithdrawSolStatus};
 use cksol_types_internal::SolanaNetwork;
-use cksol_types_internal::{Ed25519KeyName, InitArgs, UpgradeArgs};
+use cksol_types_internal::{Ed25519KeyName, InitArgs, UpgradeArgs, log::Priority};
 use ic_canister_runtime::Runtime;
 use ic_ed25519::PublicKey;
 use icrc_ledger_types::icrc1::account::Account;
@@ -232,7 +233,7 @@ impl State {
         &self.created_withdrawal_txs
     }
 
-    pub fn process_transaction_expired(&mut self, signature: &Signature) {
+    pub fn process_transaction_expired(&mut self, signature: &Signature, timestamp: u64) {
         assert!(
             !self.succeeded_transactions.contains(signature),
             "BUG: cannot mark already succeeded transaction {signature} as expired"
@@ -248,10 +249,24 @@ impl State {
                 panic!("BUG: cannot mark non-submitted transaction {signature} as expired")
             });
         match transaction {
-            MinterTransaction::SweepDeposit { .. } => self.deposits.drop_swept(signature),
+            MinterTransaction::SweepDeposit { .. } => self.drop_sweep(signature, timestamp),
             MinterTransaction::Withdrawal { .. } => {
                 panic!("BUG: durable-nonce withdrawal transaction {signature} cannot expire")
             }
+        }
+    }
+
+    /// Drops the deposits of the sweep and puts the ones the automatic flow detected back on
+    /// the watchlist for the rest of their window, so that the funds still on their deposit
+    /// addresses are swept again without the user's intervention.
+    fn drop_sweep(&mut self, signature: &Signature, timestamp: u64) {
+        for deposit in self.deposits.drop_swept(signature) {
+            let rearmed = self.watchlist.rearm(timestamp, &deposit);
+            log!(
+                Priority::Debug,
+                "Re-arm of the watch of account {:?} after sweep {signature} was dropped: {rearmed:?}",
+                deposit.account
+            );
         }
     }
 
@@ -802,7 +817,7 @@ impl State {
             });
     }
 
-    fn process_transaction_failed(&mut self, signature: &Signature) {
+    fn process_transaction_failed(&mut self, signature: &Signature, timestamp: u64) {
         assert!(
             !self.succeeded_transactions.contains(signature),
             "Attempted to mark already succeeded transaction {signature:?} as failed"
@@ -814,7 +829,7 @@ impl State {
                 panic!("Attempted to mark unknown transaction {signature:?} as failed")
             });
         match &transaction {
-            MinterTransaction::SweepDeposit { .. } => self.deposits.drop_swept(signature),
+            MinterTransaction::SweepDeposit { .. } => self.drop_sweep(signature, timestamp),
             MinterTransaction::Withdrawal { nonce_account, .. } => {
                 self.nonce_pool.free(nonce_account)
             }

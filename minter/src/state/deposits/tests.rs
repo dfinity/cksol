@@ -270,8 +270,9 @@ mod drop_swept {
             &sweep_signature,
         );
 
-        deposits.drop_swept(&sweep_signature);
+        let dropped_deposits = deposits.drop_swept(&sweep_signature);
 
+        assert_eq!(dropped_deposits, vec![first, third]);
         assert!(deposits.swept().is_empty());
         let dropped = |deposit| SweptDeposit {
             deposit,

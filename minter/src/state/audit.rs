@@ -39,10 +39,10 @@ fn apply_state_transition(state: &mut State, payload: &EventType, timestamp: u64
             state.process_transaction_succeeded(signature);
         }
         EventType::FailedTransaction { signature } => {
-            state.process_transaction_failed(signature);
+            state.process_transaction_failed(signature, timestamp);
         }
         EventType::ExpiredTransaction { signature } => {
-            state.process_transaction_expired(signature);
+            state.process_transaction_expired(signature, timestamp);
         }
         EventType::QueuedDeposit {
             deposit_id,
