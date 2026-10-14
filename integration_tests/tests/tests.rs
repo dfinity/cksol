@@ -1222,7 +1222,7 @@ mod deposit_sol_tests {
     }
 }
 
-mod watch_deposit_address_tests {
+mod automatic_deposit_sol_tests {
     use super::*;
 
     #[tokio::test]
