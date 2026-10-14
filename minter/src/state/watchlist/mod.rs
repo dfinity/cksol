@@ -34,7 +34,7 @@ pub struct Watchlist {
 struct ScanProgress {
     address: Address,
     scan_count: u32,
-    last_scanned_at: Option<u64>,
+    last_scanned_at: Option<Timestamp>,
 }
 
 impl ScanProgress {
@@ -46,13 +46,17 @@ impl ScanProgress {
         }
     }
 
-    fn next_scan_at(&self, registered_at: u64, valid_until: u64) -> Option<u64> {
+    fn next_scan_at(&self, registered_at: Timestamp, valid_until: Timestamp) -> Option<Timestamp> {
         let due_at = match self.last_scanned_at {
             None => registered_at,
             Some(last_scanned_at) => {
                 let gap_index = usize::try_from(self.scan_count).ok()?.checked_sub(1)?;
                 let gap_secs = SCAN_GAPS_SECS.get(gap_index)?;
-                last_scanned_at.saturating_add(gap_secs.saturating_mul(NANOS_PER_SECOND))
+                Timestamp::from_nanos(
+                    last_scanned_at
+                        .as_nanos()
+                        .saturating_add(gap_secs.saturating_mul(NANOS_PER_SECOND)),
+                )
             }
         };
         (due_at <= valid_until).then_some(due_at)
@@ -64,12 +68,12 @@ impl ScanProgress {
 pub struct WatchedAddress {
     pub account: Account,
     pub address: Address,
-    pub valid_until: u64,
+    pub valid_until: Timestamp,
     pub scan_count: u32,
-    pub last_scanned_at: Option<u64>,
+    pub last_scanned_at: Option<Timestamp>,
     /// When the next scan is due, or `None` once the schedule leaves no scan before the
     /// window closes.
-    pub next_scan_at: Option<u64>,
+    pub next_scan_at: Option<Timestamp>,
 }
 
 /// The watchlist is full of live registrations.
@@ -89,21 +93,19 @@ impl Watchlist {
     /// live registration of the account as it is, without extending it.
     pub fn register(
         &mut self,
-        now: u64,
+        now: Timestamp,
         account: Account,
         address: Address,
     ) -> Result<WatchedAddress, WatchlistFull> {
-        let inserted = self.entries.insert(
-            Timestamp::from_nanos(now),
-            account,
-            ScanProgress::unscanned(address),
-        );
+        let inserted = self
+            .entries
+            .insert(now, account, ScanProgress::unscanned(address));
         self.admitted(now, &account, inserted)
     }
 
     fn admitted(
         &self,
-        now: u64,
+        now: Timestamp,
         account: &Account,
         inserted: Result<Vec<(Account, ScanProgress)>, InsertError<Account, ScanProgress>>,
     ) -> Result<WatchedAddress, WatchlistFull> {
@@ -121,10 +123,8 @@ impl Watchlist {
     }
 
     /// The live registration of the account, if any.
-    pub fn get(&self, now: u64, account: &Account) -> Option<WatchedAddress> {
-        let entry = self
-            .entries
-            .get_entry(Timestamp::from_nanos(now), account)?;
+    pub fn get(&self, now: Timestamp, account: &Account) -> Option<WatchedAddress> {
+        let entry = self.entries.get_entry(now, account)?;
         Some(self.watched(account, entry))
     }
 
@@ -133,7 +133,7 @@ impl Watchlist {
     }
 
     /// The live registrations whose next scan is due.
-    pub fn due(&self, now: u64) -> Vec<WatchedAddress> {
+    pub fn due(&self, now: Timestamp) -> Vec<WatchedAddress> {
         self.live(now)
             .filter(|watched| watched.next_scan_at.is_some_and(|due_at| due_at <= now))
             .collect()
@@ -141,19 +141,16 @@ impl Watchlist {
 
     /// Records a scan of the account's deposit address at `now`, which advances the account
     /// along the schedule, if the account is still watched.
-    pub fn record_scan(&mut self, now: u64, account: &Account) {
-        if let Some(progress) = self
-            .entries
-            .get_value_mut(Timestamp::from_nanos(now), account)
-        {
+    pub fn record_scan(&mut self, now: Timestamp, account: &Account) {
+        if let Some(progress) = self.entries.get_value_mut(now, account) {
             progress.scan_count = progress.scan_count.saturating_add(1);
             progress.last_scanned_at = Some(now);
         }
     }
 
     /// Removes the registrations whose window has closed and returns how many there were.
-    pub fn evict_expired(&mut self, now: u64) -> usize {
-        self.entries.evict_expired(Timestamp::from_nanos(now)).len()
+    pub fn evict_expired(&mut self, now: Timestamp) -> usize {
+        self.entries.evict_expired(now).len()
     }
 
     /// Every registration, live or expired but not yet evicted, by ascending window end.
@@ -171,19 +168,18 @@ impl Watchlist {
         self.entries.is_empty()
     }
 
-    pub fn live_len(&self, now: u64) -> usize {
+    pub fn live_len(&self, now: Timestamp) -> usize {
         self.live(now).count()
     }
 
     /// When the oldest live registration was made, if any.
-    pub fn oldest_registered_at(&self, now: u64) -> Option<u64> {
+    pub fn oldest_registered_at(&self, now: Timestamp) -> Option<Timestamp> {
         self.live(now)
             .map(|watched| self.registered_at(watched.valid_until))
             .min()
     }
 
-    fn live(&self, now: u64) -> impl Iterator<Item = WatchedAddress> {
-        let now = Timestamp::from_nanos(now);
+    fn live(&self, now: Timestamp) -> impl Iterator<Item = WatchedAddress> {
         self.entries
             .iter_by_expiry()
             .filter(move |(_, entry)| entry.is_live(now))
@@ -192,7 +188,7 @@ impl Watchlist {
 
     fn watched(&self, account: &Account, entry: &Entry<ScanProgress>) -> WatchedAddress {
         let progress = &entry.value;
-        let valid_until = entry.expires_at.as_nanos();
+        let valid_until = entry.expires_at;
         WatchedAddress {
             account: *account,
             address: progress.address,
@@ -203,8 +199,8 @@ impl Watchlist {
         }
     }
 
-    fn registered_at(&self, valid_until: u64) -> u64 {
-        valid_until.saturating_sub(self.window_nanos())
+    fn registered_at(&self, valid_until: Timestamp) -> Timestamp {
+        Timestamp::from_nanos(valid_until.as_nanos().saturating_sub(self.window_nanos()))
     }
 
     fn window_nanos(&self) -> u64 {

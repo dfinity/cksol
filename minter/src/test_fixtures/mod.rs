@@ -10,6 +10,7 @@ use crate::{
         watchlist::WATCH_WINDOW,
     },
     storage::with_event_iter,
+    utils::timed_sized_map::Timestamp,
 };
 use base64::{Engine, engine::general_purpose::STANDARD};
 use candid::Principal;
@@ -159,13 +160,18 @@ pub fn minter_public_key_fetched_event() -> EventType {
     }
 }
 
+/// The timestamp of `nanos` nanoseconds since the epoch.
+pub fn at(nanos: u64) -> Timestamp {
+    Timestamp::from_nanos(nanos)
+}
+
 /// Registers the deposit address of the account on the watchlist of the state at `now`.
-pub fn watch(now: u64, account: Account) -> WatchedAddress {
+pub fn watch(now: Timestamp, account: Account) -> WatchedAddress {
     mutate_state(|state| register(state.watchlist_mut(), now, account))
 }
 
 /// Registers the deposit address of the account on the watchlist at `now`.
-pub fn register(watchlist: &mut Watchlist, now: u64, account: Account) -> WatchedAddress {
+pub fn register(watchlist: &mut Watchlist, now: Timestamp, account: Account) -> WatchedAddress {
     watchlist
         .register(now, account, deposit_address(account))
         .expect("BUG: the watchlist has room for the registration")
