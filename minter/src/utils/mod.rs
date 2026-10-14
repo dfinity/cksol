@@ -2,6 +2,7 @@ use candid::Principal;
 use icrc_ledger_types::icrc1::account::Account;
 
 pub mod insertion_ordered_map;
+pub mod timed_sized_map;
 
 #[cfg(test)]
 mod tests;
