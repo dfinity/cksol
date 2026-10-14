@@ -7,17 +7,30 @@ use std::{
 #[cfg(test)]
 mod tests;
 
-/// A value of a [`TimedSizedMap`] together with the time, in nanoseconds since the epoch,
-/// after which it is expired.
+/// Nanoseconds since the Unix epoch, as returned by `ic_cdk::api::time()`.
+#[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
+pub struct Timestamp(u64);
+
+impl Timestamp {
+    pub const fn from_nanos(nanos: u64) -> Self {
+        Self(nanos)
+    }
+
+    pub const fn as_nanos(self) -> u64 {
+        self.0
+    }
+}
+
+/// A value of a [`TimedSizedMap`] together with the time after which it is expired.
 #[derive(Clone, Eq, PartialEq, Debug)]
 pub struct Entry<V> {
     pub value: V,
-    pub expires_at: u64,
+    pub expires_at: Timestamp,
 }
 
 impl<V> Entry<V> {
     /// Whether the entry is live at `now`, which it is through its expiry instant.
-    pub fn is_live(&self, now: u64) -> bool {
+    pub fn is_live(&self, now: Timestamp) -> bool {
         !is_expired(self.expires_at, now)
     }
 }
@@ -34,7 +47,7 @@ pub struct TimedSizedMap<K, V> {
     ttl: Duration,
     capacity: NonZeroUsize,
     entries: BTreeMap<K, Entry<V>>,
-    by_expiry: BTreeMap<u64, VecDeque<K>>,
+    by_expiry: BTreeMap<Timestamp, VecDeque<K>>,
 }
 
 /// Why [`TimedSizedMap::insert`] or [`TimedSizedMap::insert_entry`] did not admit a new
@@ -91,7 +104,12 @@ impl<K: Ord + Clone, V> TimedSizedMap<K, V> {
 
     /// Inserts `value` under `key` with a lifetime of `ttl` from `now` and returns the expired
     /// entries evicted to make room.
-    pub fn insert(&mut self, now: u64, key: K, value: V) -> Result<Vec<(K, V)>, InsertError<K, V>> {
+    pub fn insert(
+        &mut self,
+        now: Timestamp,
+        key: K,
+        value: V,
+    ) -> Result<Vec<(K, V)>, InsertError<K, V>> {
         let entry = Entry {
             value,
             expires_at: self.expiry(now),
@@ -103,7 +121,7 @@ impl<K: Ord + Clone, V> TimedSizedMap<K, V> {
     /// expired entries evicted to make room. An already expired entry is rejected.
     pub fn insert_entry(
         &mut self,
-        now: u64,
+        now: Timestamp,
         key: K,
         entry: Entry<V>,
     ) -> Result<Vec<(K, V)>, InsertError<K, V>> {
@@ -136,18 +154,18 @@ impl<K: Ord + Clone, V> TimedSizedMap<K, V> {
     }
 
     /// The live value under `key`, if any.
-    pub fn get(&self, now: u64, key: &K) -> Option<&V> {
+    pub fn get(&self, now: Timestamp, key: &K) -> Option<&V> {
         self.get_entry(now, key).map(|entry| &entry.value)
     }
 
     /// The live entry under `key`, if any.
-    pub fn get_entry(&self, now: u64, key: &K) -> Option<&Entry<V>> {
+    pub fn get_entry(&self, now: Timestamp, key: &K) -> Option<&Entry<V>> {
         self.entries.get(key).filter(|entry| entry.is_live(now))
     }
 
     /// The live value under `key` for modification, if any. The expiry stays out of reach, so
     /// that the expiry index cannot go out of sync.
-    pub fn get_value_mut(&mut self, now: u64, key: &K) -> Option<&mut V> {
+    pub fn get_value_mut(&mut self, now: Timestamp, key: &K) -> Option<&mut V> {
         self.entries
             .get_mut(key)
             .filter(|entry| entry.is_live(now))
@@ -155,7 +173,7 @@ impl<K: Ord + Clone, V> TimedSizedMap<K, V> {
     }
 
     /// Removes and returns every entry that has outlived its `ttl`.
-    pub fn evict_expired(&mut self, now: u64) -> Vec<(K, V)> {
+    pub fn evict_expired(&mut self, now: Timestamp) -> Vec<(K, V)> {
         let mut evicted = Vec::new();
         while let Some(expires_at) = self.earliest_expiry()
             && is_expired(expires_at, now)
@@ -222,16 +240,16 @@ impl<K: Ord + Clone, V> TimedSizedMap<K, V> {
         self.ttl
     }
 
-    fn expiry(&self, now: u64) -> u64 {
+    fn expiry(&self, now: Timestamp) -> Timestamp {
         let ttl_nanos = u64::try_from(self.ttl.as_nanos()).unwrap_or(u64::MAX);
-        now.saturating_add(ttl_nanos)
+        Timestamp::from_nanos(now.as_nanos().saturating_add(ttl_nanos))
     }
 
-    fn earliest_expiry(&self) -> Option<u64> {
+    fn earliest_expiry(&self) -> Option<Timestamp> {
         self.by_expiry.keys().next().copied()
     }
 
-    fn index(&mut self, key: &K, expires_at: u64) {
+    fn index(&mut self, key: &K, expires_at: Timestamp) {
         self.by_expiry
             .entry(expires_at)
             .or_default()
@@ -239,6 +257,6 @@ impl<K: Ord + Clone, V> TimedSizedMap<K, V> {
     }
 }
 
-fn is_expired(expires_at: u64, now: u64) -> bool {
+fn is_expired(expires_at: Timestamp, now: Timestamp) -> bool {
     now > expires_at
 }
