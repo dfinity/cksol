@@ -117,7 +117,6 @@ pub struct State {
     pending_deposit_sol_request_guards: BTreeSet<Account>,
     pending_withdrawal_request_guards: BTreeSet<Account>,
     deposits: Deposits,
-    watchlist: Watchlist,
     pending_withdrawal_requests: BTreeMap<LedgerBurnIndex, PendingWithdrawalRequest>,
     created_withdrawal_requests: BTreeMap<LedgerBurnIndex, PendingWithdrawalRequest>,
     sent_withdrawal_requests: BTreeMap<LedgerBurnIndex, SentWithdrawalRequest>,
@@ -199,13 +198,11 @@ impl State {
     }
 
     pub fn watchlist(&self) -> &Watchlist {
-        &self.watchlist
+        self.deposits.watchlist()
     }
 
-    /// The watchlist is transient state: registrations are not recorded as events, so it is
-    /// mutated directly and carried across upgrades by a snapshot taken before the upgrade.
     pub fn watchlist_mut(&mut self) -> &mut Watchlist {
-        &mut self.watchlist
+        self.deposits.watchlist_mut()
     }
 
     pub fn sent_withdrawal_requests(&self) -> &BTreeMap<LedgerBurnIndex, SentWithdrawalRequest> {
@@ -457,7 +454,6 @@ impl State {
             deposit.address,
             deposit.account,
         );
-        self.watchlist.remove(&deposit.account);
         self.deposits.queue(deposit_id, deposit, queued_at);
     }
 
@@ -912,7 +908,6 @@ impl TryFrom<InitArgs> for State {
             pending_deposit_sol_request_guards: BTreeSet::new(),
             pending_withdrawal_request_guards: BTreeSet::new(),
             deposits: Deposits::default(),
-            watchlist: Watchlist::default(),
             pending_withdrawal_requests: BTreeMap::new(),
             created_withdrawal_requests: BTreeMap::new(),
             sent_withdrawal_requests: BTreeMap::new(),
