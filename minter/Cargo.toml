@@ -44,6 +44,7 @@ num-traits = { workspace = true }
 phantom_newtype = { workspace = true }
 scopeguard = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 sol_rpc_client = { workspace = true }
 sol_rpc_types = { workspace = true }
 solana-account-decoder-client-types = { workspace = true }
@@ -69,6 +70,5 @@ ic-agent = { workspace = true }
 mockall = { workspace = true }
 proptest = { workspace = true }
 scraper = { workspace = true }
-serde_json = { workspace = true }
 sha2 = { workspace = true }
 tokio = { workspace = true, features = ["full"] }

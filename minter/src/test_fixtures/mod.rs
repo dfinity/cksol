@@ -20,6 +20,7 @@ use cksol_types_internal::{Ed25519KeyName, InitArgs, SolanaNetwork};
 use ic_cdk_management_canister::SchnorrPublicKeyResult;
 use ic_ed25519::{PocketIcMasterPublicKeyId, PublicKey};
 use icrc_ledger_types::icrc1::account::Account;
+use serde_json::json;
 use sol_rpc_types::{Lamport, MultiRpcResult};
 use solana_address::{Address, address};
 use solana_nonce::{
@@ -193,6 +194,30 @@ pub fn register(watchlist: &mut Watchlist, now: Timestamp, account: Account) -> 
     watchlist
         .register(now, account, deposit_address(account))
         .expect("BUG: the watchlist has room for the registration")
+}
+
+/// The `result` of a `getMultipleAccounts` response with the given balances in order, a
+/// missing account for `None`, as the SOL RPC canister hands it back.
+pub fn get_multiple_accounts_result(balances: &[Option<Lamport>]) -> String {
+    let accounts: Vec<serde_json::Value> = balances
+        .iter()
+        .map(|balance| match balance {
+            Some(lamports) => json!({
+                "data": ["", "base64"],
+                "executable": false,
+                "lamports": lamports,
+                "owner": "11111111111111111111111111111111",
+                "rentEpoch": 18446744073709551615_u64,
+                "space": 0
+            }),
+            None => serde_json::Value::Null,
+        })
+        .collect();
+    json!({
+        "context": { "apiVersion": "2.0.15", "slot": 341197053 },
+        "value": accounts
+    })
+    .to_string()
 }
 
 /// Returns a [`Signature`] unique for any `usize` index, derived from `i as u64` via le_bytes.
