@@ -11,7 +11,7 @@ use crate::{
     state::event::{
         CreditedDeposit, Signer, TransactionPurpose, VersionedMessage, WithdrawalRequest,
     },
-    utils::insertion_ordered_map::InsertionOrderedMap,
+    utils::{insertion_ordered_map::InsertionOrderedMap, timed_sized_map::Timestamp},
 };
 use candid::Principal;
 use canlog::log;
@@ -261,7 +261,9 @@ impl State {
     /// addresses are swept again without the user's intervention.
     fn drop_sweep(&mut self, signature: &Signature, timestamp: u64) {
         for deposit in self.deposits.drop_swept(signature) {
-            let rearmed = self.watchlist.rearm(timestamp, &deposit);
+            let rearmed = self
+                .watchlist
+                .rearm(Timestamp::from_nanos(timestamp), &deposit);
             log!(
                 Priority::Debug,
                 "Re-arm of the watch of account {:?} after sweep {signature} was dropped: {rearmed:?}",

@@ -243,7 +243,7 @@ fn should_not_rearm_an_account_whose_window_has_closed() {
 fn should_not_rearm_an_account_when_full_of_live_entries() {
     let mut watchlist = Watchlist::default();
     for index in 1..=MAX_WATCHED_ADDRESSES.get() {
-        register(&mut watchlist, REGISTERED_AT, account(index));
+        register(&mut watchlist, at(REGISTERED_AT), account(index));
     }
 
     let result = watchlist.rearm(
@@ -275,7 +275,7 @@ fn should_not_rearm_a_manual_deposit() {
 #[test]
 fn should_keep_the_registration_of_an_account_that_is_already_watched() {
     let mut watchlist = Watchlist::default();
-    let registered = register(&mut watchlist, REGISTERED_AT + HOUR_NANOS, account(1));
+    let registered = register(&mut watchlist, at(REGISTERED_AT + HOUR_NANOS), account(1));
 
     let rearmed = watchlist
         .rearm(

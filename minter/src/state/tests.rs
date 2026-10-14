@@ -169,7 +169,7 @@ mod swept_deposits {
         state::{audit::replay_events, reset_state, watchlist::MAX_WATCHED_ADDRESSES},
         storage::{reset_events, with_event_iter},
         test_fixtures::{
-            DEFAULT_BLOCK_HEIGHT,
+            DEFAULT_BLOCK_HEIGHT, REGISTERED_AT, WATCH_WINDOW_NANOS, at,
             events::{credit_sweep, quarantine_sweep, queue_deposits, submit_sweep},
             flow::deposit::{CreditedSweepFlow, DepositFlow, SweepFlow},
             replayed_recorded_log, sweep_message, watch,
@@ -305,15 +305,15 @@ mod swept_deposits {
         let rearmed = WatchedAddress {
             account: account(2),
             address: within_window.address,
-            valid_until: VALID_UNTIL,
+            valid_until: at(VALID_UNTIL),
             scan_count: 0,
             last_scanned_at: None,
-            next_scan_at: Some(REGISTERED_AT),
+            next_scan_at: Some(at(REGISTERED_AT)),
         };
         read_state(|s| {
             assert_eq!(s.deposits().dropped().len(), 3);
             assert_eq!(s.watchlist().iter().collect::<Vec<_>>(), vec![rearmed]);
-            assert_eq!(s.watchlist().due(DROPPED_AT), vec![rearmed]);
+            assert_eq!(s.watchlist().due(at(DROPPED_AT)), vec![rearmed]);
         });
         let replayed = replayed_recorded_log();
         read_state(|live_state| assert_eq!(&replayed, live_state));
@@ -333,13 +333,13 @@ mod swept_deposits {
         )
         .sweep(signature(SWEEP_SIGNATURE_INDEX));
         for index in 1..=MAX_WATCHED_ADDRESSES.get() {
-            watch(VALID_UNTIL - 1, account(index));
+            watch(at(VALID_UNTIL - 1), account(index));
         }
 
         fail_transaction(dropped.signature);
 
         read_state(|s| {
-            assert_eq!(s.watchlist().get(VALID_UNTIL - 1, &account(0)), None);
+            assert_eq!(s.watchlist().get(at(VALID_UNTIL - 1), &account(0)), None);
             assert_eq!(s.watchlist().len(), MAX_WATCHED_ADDRESSES.get());
             assert_eq!(s.deposits().in_flight_id(&account(0)), None);
         });
