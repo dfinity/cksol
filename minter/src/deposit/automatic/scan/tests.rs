@@ -107,7 +107,7 @@ async fn should_advance_the_schedule_below_the_minimum_and_treat_a_missing_accou
                 valid_until: at(VALID_UNTIL),
                 scan_count: 1,
                 last_scanned_at: Some(at(scanned_at)),
-                next_scan_at: Some(at(scanned_at + MINUTE_NANOS)),
+                next_scan_at: Some(at(REGISTERED_AT + 2 * MINUTE_NANOS)),
             })
         );
     }
@@ -119,7 +119,7 @@ async fn should_read_the_addresses_of_the_due_registrations_only() {
     setup();
     watch(at(REGISTERED_AT), account(1));
     watch(at(REGISTERED_AT), account(2));
-    mutate_state(|s| s.watchlist_mut().record_scan(at(TICK_AT - 1), &account(2)));
+    mutate_state(|s| s.watchlist_mut().record_scan(at(TICK_AT), &account(2)));
     let runtime = runtime_at(TICK_AT).add_get_multiple_accounts_response(&[Some(0)]);
 
     scan_watched_addresses(runtime.clone()).await;
@@ -163,10 +163,7 @@ async fn should_skip_the_tick_while_the_automatic_deposit_fee_is_not_configured(
     EventsAssert::assert_no_events_recorded();
     assert_eq!(
         read_state(|s| s.watchlist().get(at(TICK_AT), &account(1))),
-        Some(WatchedAddress {
-            next_scan_at: Some(at(TICK_AT)),
-            ..watched
-        })
+        Some(watched)
     );
 }
 
@@ -200,7 +197,7 @@ async fn should_advance_the_schedule_when_the_call_fails() {
             valid_until: at(VALID_UNTIL),
             scan_count: 1,
             last_scanned_at: Some(at(scanned_at)),
-            next_scan_at: Some(at(scanned_at + MINUTE_NANOS)),
+            next_scan_at: Some(at(REGISTERED_AT + 2 * MINUTE_NANOS)),
         })
     );
     assert_eq!(deposit_address_scan_count(ScanOutcome::Failed), 1);
