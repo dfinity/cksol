@@ -57,9 +57,8 @@ impl ScanProgress {
         let due_at = match self.last_scanned_at {
             None => now,
             Some(last_scanned_at) => {
-                let gap_index = usize::try_from(self.scan_count).ok()?.checked_sub(1)?;
                 let gap = BURST_SCAN_GAPS
-                    .get(gap_index)
+                    .get(self.scan_count as usize - 1)
                     .copied()
                     .unwrap_or(STEADY_SCAN_GAP);
                 last_scanned_at.saturating_add(gap)
