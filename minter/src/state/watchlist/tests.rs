@@ -1,7 +1,6 @@
 use crate::{
     state::watchlist::{
-        BURST_SCAN_GAPS, MAX_WATCHED_ADDRESSES, STEADY_SCAN_GAP, WatchedAddress, Watchlist,
-        WatchlistFull,
+        MAX_WATCHED_ADDRESSES, WatchedAddress, Watchlist, WatchlistFull, scan_slots,
     },
     test_fixtures::{
         HOUR_NANOS, MINUTE_NANOS, REGISTERED_AT, WATCH_WINDOW_NANOS, account, at, deposit_address,
@@ -9,9 +8,9 @@ use crate::{
     },
 };
 use icrc_ledger_types::icrc1::account::Account;
-use std::time::Duration;
 
 const VALID_UNTIL: u64 = REGISTERED_AT + WATCH_WINDOW_NANOS;
+const LAST_SLOT_AT: u64 = VALID_UNTIL - 30 * MINUTE_NANOS;
 
 #[test]
 fn should_register_an_account_for_the_window() {
@@ -21,13 +20,7 @@ fn should_register_an_account_for_the_window() {
 
     assert_eq!(watched, unscanned(account(1)));
     assert_eq!(watchlist.get(at(REGISTERED_AT), &account(1)), Some(watched));
-    assert_eq!(
-        watchlist.get(at(VALID_UNTIL), &account(1)),
-        Some(WatchedAddress {
-            next_scan_at: Some(at(VALID_UNTIL)),
-            ..watched
-        })
-    );
+    assert_eq!(watchlist.get(at(VALID_UNTIL), &account(1)), Some(watched));
     assert_eq!(watchlist.get(at(VALID_UNTIL + 1), &account(1)), None);
     assert_eq!(watchlist.len(), 1);
 }
@@ -73,65 +66,79 @@ fn should_be_due_for_the_first_scan_until_scanned() {
     );
     assert_eq!(
         watchlist.due(at(REGISTERED_AT + HOUR_NANOS)),
-        vec![WatchedAddress {
-            next_scan_at: Some(at(REGISTERED_AT + HOUR_NANOS)),
-            ..unscanned(account(1))
-        }]
+        vec![unscanned(account(1))]
     );
 }
 
 #[test]
-fn should_follow_the_scan_schedule_and_stop_before_the_window_closes() {
+fn should_follow_the_scan_slots_and_stop_after_the_last_one() {
     let mut watchlist = Watchlist::default();
     register(&mut watchlist, at(REGISTERED_AT), account(1));
-    let mut scanned_at = REGISTERED_AT;
+    let slots_at: Vec<u64> = scan_slots()
+        .map(|slot| REGISTERED_AT + slot.as_nanos() as u64)
+        .collect();
+    assert_eq!(slots_at.len(), 33);
+    assert_eq!(slots_at[9], REGISTERED_AT + 30 * MINUTE_NANOS);
+    assert_eq!(slots_at[32], LAST_SLOT_AT);
 
-    let gaps = BURST_SCAN_GAPS
-        .into_iter()
-        .chain(std::iter::repeat_n(STEADY_SCAN_GAP, 23));
-    for (scan_count, gap) in gaps.enumerate() {
-        watchlist.record_scan(at(scanned_at), &account(1));
-        let watched = watchlist.get(at(scanned_at), &account(1)).unwrap();
-        let next_scan_at = scanned_at + gap.as_nanos() as u64;
+    for (index, &slot_at) in slots_at.iter().enumerate() {
+        let watched = watchlist.get(at(slot_at), &account(1)).unwrap();
+        assert_eq!(watched.scan_count, index as u32);
+        assert_eq!(watched.next_scan_at, Some(at(slot_at)));
+        assert_eq!(watchlist.due(at(slot_at - 1)), vec![]);
+        assert_eq!(watchlist.due(at(slot_at)), vec![watched]);
 
-        assert_eq!(watched.scan_count, scan_count as u32 + 1);
-        assert_eq!(watched.last_scanned_at, Some(at(scanned_at)));
-        assert_eq!(watched.next_scan_at, Some(at(next_scan_at)));
-        assert_eq!(watchlist.due(at(next_scan_at - 1)), vec![]);
-        assert_eq!(watchlist.due(at(next_scan_at)), vec![watched]);
-        scanned_at = next_scan_at;
+        watchlist.record_scan(at(slot_at), &account(1));
     }
-    assert_eq!(
-        scanned_at,
-        REGISTERED_AT + Duration::from_mins(30 + 23 * 60).as_nanos() as u64
-    );
 
-    watchlist.record_scan(at(scanned_at), &account(1));
-    let watched = watchlist.get(at(scanned_at), &account(1)).unwrap();
-
+    let watched = watchlist.get(at(LAST_SLOT_AT), &account(1)).unwrap();
     assert_eq!(watched.scan_count, 33);
+    assert_eq!(watched.last_scanned_at, Some(at(LAST_SLOT_AT)));
     assert_eq!(watched.next_scan_at, None);
     assert_eq!(watchlist.due(at(VALID_UNTIL)), vec![]);
 }
 
 #[test]
-fn should_report_no_next_scan_when_the_gap_ends_after_the_window() {
+fn should_skip_the_slots_passed_before_a_late_scan() {
     let mut watchlist = Watchlist::default();
     register(&mut watchlist, at(REGISTERED_AT), account(1));
-    for scan in 0..9 {
-        watchlist.record_scan(at(REGISTERED_AT + scan * MINUTE_NANOS), &account(1));
-    }
 
-    watchlist.record_scan(at(VALID_UNTIL - HOUR_NANOS), &account(1));
+    watchlist.record_scan(at(REGISTERED_AT + 10 * MINUTE_NANOS), &account(1));
+    let watched = watchlist
+        .get(at(REGISTERED_AT + 10 * MINUTE_NANOS), &account(1))
+        .unwrap();
+    assert_eq!(watched.scan_count, 1);
+    assert_eq!(
+        watched.next_scan_at,
+        Some(at(REGISTERED_AT + 15 * MINUTE_NANOS))
+    );
+
+    watchlist.record_scan(at(REGISTERED_AT + 15 * MINUTE_NANOS + 1), &account(1));
+    let watched = watchlist
+        .get(at(REGISTERED_AT + 15 * MINUTE_NANOS + 1), &account(1))
+        .unwrap();
+    assert_eq!(watched.scan_count, 2);
+    assert_eq!(
+        watched.next_scan_at,
+        Some(at(REGISTERED_AT + 20 * MINUTE_NANOS))
+    );
+}
+
+#[test]
+fn should_report_no_next_scan_after_the_last_slot() {
+    let mut watchlist = Watchlist::default();
+    register(&mut watchlist, at(REGISTERED_AT), account(1));
+
+    watchlist.record_scan(at(LAST_SLOT_AT - 1), &account(1));
     assert_eq!(
         watchlist
             .get(at(VALID_UNTIL), &account(1))
             .unwrap()
             .next_scan_at,
-        Some(at(VALID_UNTIL))
+        Some(at(LAST_SLOT_AT))
     );
 
-    watchlist.record_scan(at(VALID_UNTIL - HOUR_NANOS + 1), &account(1));
+    watchlist.record_scan(at(LAST_SLOT_AT), &account(1));
     assert_eq!(
         watchlist
             .get(at(VALID_UNTIL), &account(1))
@@ -150,7 +157,7 @@ fn should_ignore_a_scan_of_an_account_that_is_not_watched() {
     watchlist.record_scan(at(VALID_UNTIL + 1), &account(1));
 
     assert_eq!(
-        watchlist.iter(at(REGISTERED_AT)).collect::<Vec<_>>(),
+        watchlist.iter().collect::<Vec<_>>(),
         vec![unscanned(account(1))]
     );
 }

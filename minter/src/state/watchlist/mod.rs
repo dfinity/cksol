@@ -13,25 +13,27 @@ pub const WATCH_WINDOW: Duration = Duration::from_hours(24);
 pub const MAX_WATCHED_ADDRESSES: NonZeroUsize =
     NonZeroUsize::new(1_000).expect("BUG: the watchlist capacity must be non-zero");
 
-/// The gaps between a scan and the next one for the first scans, indexed by the number of
-/// scans done so far minus one: a burst of ten scans within the first half hour.
-const BURST_SCAN_GAPS: [Duration; 9] = [
+/// The slots of the first scans, measured from the start of the schedule: a burst of ten
+/// scans within the first half hour.
+const BURST_SCAN_SLOTS: [Duration; 10] = [
+    Duration::ZERO,
     Duration::from_secs(60),
-    Duration::from_secs(60),
-    Duration::from_secs(120),
     Duration::from_secs(120),
     Duration::from_secs(240),
-    Duration::from_secs(300),
-    Duration::from_secs(300),
-    Duration::from_secs(300),
-    Duration::from_secs(300),
+    Duration::from_secs(360),
+    Duration::from_secs(600),
+    Duration::from_secs(900),
+    Duration::from_secs(1_200),
+    Duration::from_secs(1_500),
+    Duration::from_secs(1_800),
 ];
 
-/// The gap between a scan and the next one after the burst, until the window closes.
+/// The gap between two slots after the burst, until the window closes.
 const STEADY_SCAN_GAP: Duration = Duration::from_hours(1);
 
 /// The deposit addresses registered for the automatic deposit flow, each watched for
-/// [`WATCH_WINDOW`] and scanned on the schedule of [`BURST_SCAN_GAPS`] and [`STEADY_SCAN_GAP`].
+/// [`WATCH_WINDOW`] and scanned at the slots of [`BURST_SCAN_SLOTS`], then every
+/// [`STEADY_SCAN_GAP`].
 #[derive(Debug, PartialEq, Eq)]
 pub struct Watchlist {
     entries: TimedSizedMap<Account, ScanProgress>,
@@ -40,32 +42,43 @@ pub struct Watchlist {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct ScanProgress {
     address: Address,
+    scheduled_from: Timestamp,
     scan_count: u32,
     last_scanned_at: Option<Timestamp>,
 }
 
 impl ScanProgress {
-    fn unscanned(address: Address) -> Self {
+    fn unscanned(address: Address, scheduled_from: Timestamp) -> Self {
         Self {
             address,
+            scheduled_from,
             scan_count: 0,
             last_scanned_at: None,
         }
     }
 
-    fn next_scan_at(&self, now: Timestamp, valid_until: Timestamp) -> Option<Timestamp> {
-        let due_at = match self.last_scanned_at {
-            None => now,
-            Some(last_scanned_at) => {
-                let gap = BURST_SCAN_GAPS
-                    .get(self.scan_count as usize - 1)
-                    .copied()
-                    .unwrap_or(STEADY_SCAN_GAP);
-                last_scanned_at.saturating_add(gap)
-            }
-        };
-        (due_at <= valid_until).then_some(due_at)
+    /// The first slot of the schedule before any scan and the first slot after the last scan
+    /// otherwise, unless no slot is left before the end of the window: the slots are fixed, so
+    /// a late scan does not shift the ones that follow and the slots it skipped are not made up.
+    fn next_scan_at(&self, valid_until: Timestamp) -> Option<Timestamp> {
+        let mut slots = scan_slots()
+            .map(|slot| self.scheduled_from.saturating_add(slot))
+            .take_while(|slot_at| *slot_at <= valid_until);
+        match self.last_scanned_at {
+            None => slots.next(),
+            Some(last_scanned_at) => slots.find(|slot_at| *slot_at > last_scanned_at),
+        }
     }
+}
+
+/// The slots of the schedule in order, as offsets from its start, up to the length of a window.
+fn scan_slots() -> impl Iterator<Item = Duration> {
+    let last_burst_slot = BURST_SCAN_SLOTS[BURST_SCAN_SLOTS.len() - 1];
+    let steady_slots = (1..).map(move |gaps| last_burst_slot + STEADY_SCAN_GAP * gaps);
+    BURST_SCAN_SLOTS
+        .into_iter()
+        .chain(steady_slots)
+        .take_while(|slot| *slot <= WATCH_WINDOW)
 }
 
 /// A registration of the watchlist with its scan progress, as of the time it was read.
@@ -76,9 +89,9 @@ pub struct WatchedAddress {
     pub valid_until: Timestamp,
     pub scan_count: u32,
     pub last_scanned_at: Option<Timestamp>,
-    /// When the next scan is due: at once for an address not scanned yet, at the end of the
-    /// gap after its last scan otherwise, or `None` once the schedule leaves no scan before
-    /// the window closes.
+    /// When the next scan is due: the first slot of the schedule for an address not scanned
+    /// yet, the first slot after its last scan otherwise, or `None` once no slot is left
+    /// before the window closes.
     pub next_scan_at: Option<Timestamp>,
 }
 
@@ -95,8 +108,8 @@ impl Default for Watchlist {
 }
 
 impl Watchlist {
-    /// Registers the deposit address of the account for a window starting now, or returns the
-    /// live registration of the account as it is, without extending it.
+    /// Registers the deposit address of the account for a window and a schedule starting now,
+    /// or returns the live registration of the account as it is, without extending it.
     pub fn register(
         &mut self,
         now: Timestamp,
@@ -105,7 +118,7 @@ impl Watchlist {
     ) -> Result<WatchedAddress, WatchlistFull> {
         match self
             .entries
-            .insert(now, account, ScanProgress::unscanned(address))
+            .insert(now, account, ScanProgress::unscanned(address, now))
         {
             Ok(_) | Err(InsertError::AlreadyPresent { .. }) => Ok(self
                 .get(now, &account)
@@ -122,7 +135,7 @@ impl Watchlist {
     /// The live registration of the account, if any.
     pub fn get(&self, now: Timestamp, account: &Account) -> Option<WatchedAddress> {
         let entry = self.entries.get_entry(now, account)?;
-        Some(self.watched(now, account, entry))
+        Some(Self::watched(account, entry))
     }
 
     pub fn remove(&mut self, account: &Account) {
@@ -137,7 +150,7 @@ impl Watchlist {
     }
 
     /// Records a scan of the account's deposit address at `now`, which advances the account
-    /// along the schedule, if the account is still watched.
+    /// to the first slot of its schedule after `now`, if the account is still watched.
     pub fn record_scan(&mut self, now: Timestamp, account: &Account) {
         if let Some(progress) = self.entries.get_value_mut(now, account) {
             progress.scan_count = progress.scan_count.saturating_add(1);
@@ -151,10 +164,10 @@ impl Watchlist {
     }
 
     /// Every registration, live or expired but not yet evicted, by ascending window end.
-    pub fn iter(&self, now: Timestamp) -> impl Iterator<Item = WatchedAddress> {
+    pub fn iter(&self) -> impl Iterator<Item = WatchedAddress> {
         self.entries
             .iter_by_expiry()
-            .map(move |(account, entry)| self.watched(now, account, entry))
+            .map(|(account, entry)| Self::watched(account, entry))
     }
 
     pub fn len(&self) -> usize {
@@ -180,15 +193,10 @@ impl Watchlist {
         self.entries
             .iter_by_expiry()
             .filter(move |(_, entry)| entry.is_live(now))
-            .map(move |(account, entry)| self.watched(now, account, entry))
+            .map(|(account, entry)| Self::watched(account, entry))
     }
 
-    fn watched(
-        &self,
-        now: Timestamp,
-        account: &Account,
-        entry: &Entry<ScanProgress>,
-    ) -> WatchedAddress {
+    fn watched(account: &Account, entry: &Entry<ScanProgress>) -> WatchedAddress {
         let progress = &entry.value;
         WatchedAddress {
             account: *account,
@@ -196,7 +204,7 @@ impl Watchlist {
             valid_until: entry.expires_at,
             scan_count: progress.scan_count,
             last_scanned_at: progress.last_scanned_at,
-            next_scan_at: progress.next_scan_at(now, entry.expires_at),
+            next_scan_at: progress.next_scan_at(entry.expires_at),
         }
     }
 
