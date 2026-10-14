@@ -316,25 +316,47 @@ impl Sweep {
 
         Ok(SettledSweep {
             amount_received,
-            mints: self.mints(),
+            mints: self.mints()?,
         })
     }
 
     /// The mints crediting the deposits of the sweep: each sweepable amount minus the
     /// deposit's share of the fee, rounded up so that the total never exceeds the amount
-    /// the minter address receives.
-    pub fn mints(&self) -> Vec<CreditedDeposit> {
+    /// the minter address receives, minus the automatic deposit fee of an automatic deposit.
+    ///
+    /// The parameter constraints keep the fees below the sweepable amount of a deposit
+    /// queued under them, so a deposit they do not fit is a mismatch that quarantines the
+    /// sweep rather than a reason to trap.
+    pub fn mints(&self) -> Result<Vec<CreditedDeposit>, SweepMismatch> {
         let fee_share = self.fee.div_ceil(self.deposit_count() as Lamport);
         self.deposits
             .iter()
-            .map(|(deposit_id, deposit)| CreditedDeposit {
-                deposit_id: *deposit_id,
-                amount_to_mint: deposit
+            .map(|(deposit_id, deposit)| {
+                let amount_to_mint = deposit
                     .sweepable_amount()
                     .checked_sub(fee_share)
-                    .expect("BUG: the minimum deposit amount covers the fee share"),
+                    .and_then(|amount| amount.checked_sub(deposit.automatic_deposit_fee()))
+                    .ok_or(SweepMismatch::FeesExceedSweepableAmount {
+                        deposit_id: *deposit_id,
+                        sweepable_amount: deposit.sweepable_amount(),
+                        fee_share,
+                        automatic_deposit_fee: deposit.automatic_deposit_fee(),
+                    })?;
+                Ok(CreditedDeposit {
+                    deposit_id: *deposit_id,
+                    amount_to_mint,
+                })
             })
             .collect()
+    }
+
+    /// The automatic deposit fees the sweep collects: the sum of the fees recorded with its
+    /// automatic deposits, which stay on the main account on top of the minted amounts.
+    pub fn automatic_deposit_fees(&self) -> Lamport {
+        self.deposits
+            .values()
+            .map(QueuedDeposit::automatic_deposit_fee)
+            .sum()
     }
 }
 
@@ -398,6 +420,15 @@ pub enum SweepMismatch {
     MainAccountDebited { pre: Lamport, post: Lamport },
     #[error("the main account received {actual} lamports instead of the planned {expected}")]
     UnexpectedAmountReceived { expected: Lamport, actual: Lamport },
+    #[error(
+        "the fee share of {fee_share} lamports and the automatic deposit fee of {automatic_deposit_fee} lamports exceed the {sweepable_amount} lamports swept for deposit {deposit_id}"
+    )]
+    FeesExceedSweepableAmount {
+        deposit_id: DepositSolId,
+        sweepable_amount: Lamport,
+        fee_share: Lamport,
+        automatic_deposit_fee: Lamport,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Error)]

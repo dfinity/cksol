@@ -36,6 +36,32 @@ proptest! {
     }
 }
 
+/// The automatic part was added to the `QueuedDeposit` event after the minter was deployed,
+/// so the events recorded before must still decode, as this encoding recorded by the previous
+/// version checks.
+#[test]
+fn should_decode_a_queued_deposit_recorded_without_the_automatic_part() {
+    const RECORDED_BEFORE_THE_AUTOMATIC_FLOW: &str = "821a499602d28208840781581d08000000000000000000000000000000000000000000000000000000005820d8c8b6b0295ea41f91d2173a81503fcec3148f69e8e130813d228badbaaf28e41a0087aa00";
+    let bytes = hex::decode(RECORDED_BEFORE_THE_AUTOMATIC_FLOW).unwrap();
+    let deposit = queued_deposit(7);
+
+    let decoded = Event::from_bytes(Cow::Borrowed(&bytes));
+
+    assert_eq!(
+        decoded,
+        Event {
+            timestamp: 1_234_567_890,
+            payload: EventType::QueuedDeposit {
+                deposit_id: 7,
+                account: deposit.account,
+                address: deposit.address,
+                balance: deposit.balance,
+                automatic: None,
+            },
+        }
+    );
+}
+
 mod cache_minter_public_key {
     use super::*;
     use ic_ed25519::{PocketIcMasterPublicKeyId, PublicKey};
@@ -110,6 +136,7 @@ mod queued_deposits {
                 account: queued_deposit(deposit_id).account,
                 address: queued_deposit(deposit_id).address,
                 balance: queued_deposit(deposit_id).balance,
+                automatic: None,
             },
         };
         let init = Event {
@@ -168,12 +195,14 @@ mod swept_deposits {
         state::{audit::replay_events, reset_state},
         storage::{reset_events, with_event_iter},
         test_fixtures::{
-            DEFAULT_BLOCK_HEIGHT,
+            DEFAULT_BLOCK_HEIGHT, REGISTERED_AT, WATCH_WINDOW_NANOS,
             events::{credit_sweep, quarantine_sweep, queue_deposits, submit_sweep},
             flow::deposit::{CreditedSweepFlow, DepositFlow, SweepFlow},
-            sweep_message,
+            replayed_recorded_log, sweep_message,
         },
     };
+
+    const VALID_UNTIL: u64 = REGISTERED_AT + WATCH_WINDOW_NANOS;
 
     const SWEEP_SIGNATURE_INDEX: usize = 0xAA;
 
@@ -352,6 +381,57 @@ mod swept_deposits {
             replayed.deposits().pending_mints()[&sibling.deposit_id].created_at_time,
             CREDITED_AT
         );
+        read_state(|live_state| assert_eq!(&replayed, live_state));
+    }
+
+    #[test]
+    fn should_collect_the_automatic_deposit_fees_of_a_credited_sweep() {
+        init_state();
+        init_schnorr_master_key();
+        let manual = DepositFlow::queue(account(1), 10_000_000);
+        let first_automatic = DepositFlow::queue_automatic(
+            account(2),
+            20_000_000,
+            AutomaticDeposit {
+                fee: AUTOMATIC_DEPOSIT_FEE,
+                valid_until: VALID_UNTIL,
+            },
+        );
+        let second_automatic = DepositFlow::queue_automatic(
+            account(3),
+            30_000_000,
+            AutomaticDeposit {
+                fee: AUTOMATIC_DEPOSIT_FEE / 2,
+                valid_until: VALID_UNTIL,
+            },
+        );
+        let finalized = SweepFlow::of([manual, first_automatic, second_automatic])
+            .submit(signature(SWEEP_SIGNATURE_INDEX))
+            .succeed();
+        read_state(|s| assert_eq!(s.collected_automatic_deposit_fees(), 0));
+
+        let credited = finalized.credit();
+
+        let [manual_mint, first_mint, second_mint] = credited.pending_mints();
+        assert_eq!(manual_mint.amount_to_mint, 10_000_000 - FEE_PER_SIGNATURE);
+        assert_eq!(
+            first_mint.amount_to_mint,
+            20_000_000 - FEE_PER_SIGNATURE - AUTOMATIC_DEPOSIT_FEE
+        );
+        assert_eq!(
+            second_mint.amount_to_mint,
+            30_000_000 - FEE_PER_SIGNATURE - AUTOMATIC_DEPOSIT_FEE / 2
+        );
+        read_state(|s| {
+            assert_eq!(
+                s.collected_automatic_deposit_fees(),
+                AUTOMATIC_DEPOSIT_FEE + AUTOMATIC_DEPOSIT_FEE / 2
+            );
+            assert_eq!(s.balance(), credited.amount_received);
+            assert_eq!(s.deposits().automatic_deposit_count(), 2);
+        });
+
+        let replayed = replayed_recorded_log();
         read_state(|live_state| assert_eq!(&replayed, live_state));
     }
 
@@ -780,6 +860,7 @@ mod state_from_init_args {
                 minimum_deposit_amount: MINIMUM_DEPOSIT_AMOUNT,
                 deposit_sol_required_cycles: DEPOSIT_SOL_REQUIRED_CYCLES,
                 automatic_deposit_fee: Some(AUTOMATIC_DEPOSIT_FEE),
+                collected_automatic_deposit_fees: 0,
                 pending_deposit_sol_request_guards: BTreeSet::new(),
                 pending_withdrawal_request_guards: BTreeSet::new(),
                 deposits: Deposits::default(),
@@ -1602,6 +1683,7 @@ mod withdrawal_transactions {
                 account: funding_deposit.account,
                 address: funding_deposit.address,
                 balance: funding_deposit.balance,
+                automatic: None,
             },
             EventType::SubmittedTransaction {
                 signature: signature(9),

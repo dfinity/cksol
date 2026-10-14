@@ -109,12 +109,14 @@ fn queue_and_sweep(deposit_id: u64, account_index: usize, amount: u64, sig: Sign
         address: deposit_address(account_index),
         balance: DepositBalance::new(amount + RENT_EXEMPTION_THRESHOLD)
             .expect("BUG: the balance covers the rent exemption threshold"),
+        automatic: None,
     };
     record(EventType::QueuedDeposit {
         deposit_id,
         account,
         address: deposit.address,
         balance: deposit.balance,
+        automatic: None,
     });
     let sweep = Sweep::plan([(deposit_id, deposit)], minter_address(&master_key()));
     record(EventType::SubmittedTransaction {

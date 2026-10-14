@@ -65,7 +65,8 @@ pub enum EventType {
         /// The signature of the expired Solana transaction.
         signature: Signature,
     },
-    /// A user queued the deposit address of an account for a sweep via `deposit_sol`.
+    /// The deposit address of an account was queued for a sweep, by a user via `deposit_sol`
+    /// or by a balance scan of the automatic flow.
     QueuedDeposit {
         /// The identifier of the queued deposit.
         deposit_id: u64,
@@ -75,6 +76,9 @@ pub enum EventType {
         address: Address,
         /// The balance of the deposit address when the deposit was queued.
         balance: Lamport,
+        /// What the automatic flow recorded when it detected the deposit, absent for a
+        /// deposit queued via `deposit_sol`.
+        automatic: Option<AutomaticDeposit>,
     },
     /// The minter read the amount that the finalized sweep transaction moved to its
     /// main account and enqueued a pending mint for each deposit of that sweep.
@@ -146,8 +150,19 @@ pub enum EventType {
 pub struct CreditedDeposit {
     /// The identifier of the deposit.
     pub deposit_id: u64,
-    /// The sweepable amount minus the deposit's share of the transaction fee of the sweep.
+    /// The sweepable amount minus the deposit's share of the transaction fee of the sweep
+    /// and, for an automatic deposit, minus the automatic deposit fee.
     pub amount_to_mint: Lamport,
+}
+
+/// The part of a `QueuedDeposit` event that the automatic flow recorded when it detected
+/// the deposit.
+#[derive(Clone, Copy, Debug, PartialEq, CandidType, Deserialize)]
+pub struct AutomaticDeposit {
+    /// The automatic deposit fee in force at detection, deducted from the minted amount.
+    pub fee: Lamport,
+    /// The end of the registration window, in nanoseconds since the epoch.
+    pub valid_until: u64,
 }
 
 /// The key that produced one signature of a submitted Solana transaction.

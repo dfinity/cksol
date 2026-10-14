@@ -8,6 +8,7 @@ use crate::{
 };
 use cksol_types::{DepositSolId, DepositSolStatus};
 use icrc_ledger_types::icrc1::account::Account;
+use minicbor::{Decode, Encode};
 use sol_rpc_types::Lamport;
 use solana_address::Address;
 use solana_signature::Signature;
@@ -68,6 +69,7 @@ pub struct Deposits {
     in_flight_ids: BTreeMap<Account, DepositSolId>,
     latest_ids: BTreeMap<Account, DepositSolId>,
     queued_at_by_id: BTreeMap<DepositSolId, u64>,
+    automatic_deposit_count: u64,
     watchlist: Watchlist,
 }
 
@@ -145,6 +147,11 @@ impl Deposits {
         self.latest_ids.get(account).copied()
     }
 
+    /// How many deposits the automatic flow has queued so far.
+    pub fn automatic_deposit_count(&self) -> u64 {
+        self.automatic_deposit_count
+    }
+
     /// Returns the timestamp (in nanoseconds) at which the oldest in-flight deposit was queued.
     /// A deposit is in flight from the moment it is queued until it is minted, dropped or
     /// quarantined, whatever sweep stage it has reached in between.
@@ -220,6 +227,9 @@ impl Deposits {
             deposit.account
         );
         self.latest_ids.insert(deposit.account, deposit_id);
+        if deposit.automatic.is_some() {
+            self.automatic_deposit_count += 1;
+        }
         self.watchlist.remove(&deposit.account);
         self.queued.insert(deposit_id, deposit);
         self.queued_at_by_id.insert(deposit_id, queued_at);
@@ -316,13 +326,13 @@ impl Deposits {
     }
 
     /// Moves every deposit of the given finalized sweep to the pending mints, each with
-    /// the amount its mint carries.
+    /// the amount its mint carries, and returns the automatic deposit fees the sweep collects.
     pub(super) fn credit_sweep(
         &mut self,
         signature: &Signature,
         mints: &[CreditedDeposit],
         timestamp: u64,
-    ) {
+    ) -> Lamport {
         let sweep = self.finalized.remove(signature).unwrap_or_else(|| {
             panic!("Attempted to credit sweep {signature} that is not finalized")
         });
@@ -363,6 +373,7 @@ impl Deposits {
                 mint.deposit_id
             );
         }
+        sweep.automatic_deposit_fees()
     }
 
     pub(super) fn mint(&mut self, deposit_id: DepositSolId, mint_block_index: LedgerMintIndex) {
@@ -419,12 +430,31 @@ pub struct QueuedDeposit {
     pub address: Address,
     /// The balance of the deposit address when the deposit was queued.
     pub balance: DepositBalance,
+    /// What the automatic flow recorded when it detected the deposit, absent for a deposit
+    /// queued by `deposit_sol`.
+    pub automatic: Option<AutomaticDeposit>,
 }
 
 impl QueuedDeposit {
     pub fn sweepable_amount(&self) -> Lamport {
         self.balance.sweepable_amount()
     }
+
+    /// The automatic deposit fee deducted from the mint, zero for a manual deposit.
+    pub fn automatic_deposit_fee(&self) -> Lamport {
+        self.automatic.map_or(0, |automatic| automatic.fee)
+    }
+}
+
+/// The part of a queued deposit that the automatic flow detected: the fee in force at
+/// detection, which the mint is reduced by, and the end of the registration window, which
+/// bounds the re-arm of the deposit should its sweep be dropped.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Decode, Encode)]
+pub struct AutomaticDeposit {
+    #[n(0)]
+    pub fee: Lamport,
+    #[n(1)]
+    pub valid_until: u64,
 }
 
 impl From<DepositBalance> for Lamport {
@@ -463,7 +493,8 @@ pub struct SweptDeposit {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PendingMint {
     pub deposit: SweptDeposit,
-    /// The sweepable amount minus the deposit's share of the transaction fee of the sweep.
+    /// The sweepable amount minus the deposit's share of the transaction fee of the sweep
+    /// and, for an automatic deposit, minus the automatic deposit fee.
     pub amount_to_mint: Lamport,
     /// The timestamp of the `CreditedSweep` event that enqueued this pending mint.
     ///
@@ -527,7 +558,8 @@ pub enum QuarantineCause {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MintedSweep {
     pub deposit: SweptDeposit,
-    /// The sweepable amount minus the deposit's share of the transaction fee of the sweep.
+    /// The sweepable amount minus the deposit's share of the transaction fee of the sweep
+    /// and, for an automatic deposit, minus the automatic deposit fee.
     pub minted_amount: Lamport,
     pub mint_block_index: LedgerMintIndex,
 }
