@@ -20,7 +20,7 @@ use solana_nonce::{
     versions::Versions,
 };
 use solana_transaction::Transaction;
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 use tokio::sync::Mutex;
 
 pub const DEFAULT_CALLER_ACCOUNT: Account = Account {
@@ -36,6 +36,7 @@ pub const MINTER_ADDRESS: Address = address!("2YKPWqP51gUFEYo1FD2K3LoRE6Cd2f99E1
 pub const DEPOSIT_AMOUNT: Lamport = 500_000_000;
 /// Minimum balance left on a deposit address to keep it rent-exempt.
 pub const RENT_EXEMPTION_THRESHOLD: Lamport = 890_880;
+pub const WATCH_WINDOW: Duration = Duration::from_hours(24);
 
 /// The slot the mocked `getSlot` reports. A test says which block height the mocked
 /// `getBlock` then reports, since that is what the minter records and what it judges

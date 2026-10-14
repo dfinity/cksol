@@ -66,6 +66,7 @@ pub struct Deposits {
     dropped: BTreeMap<DepositSolId, SweptDeposit>,
     quarantined: BTreeMap<DepositSolId, QuarantinedDeposit>,
     in_flight_ids: BTreeMap<Account, DepositSolId>,
+    latest_ids: BTreeMap<Account, DepositSolId>,
     queued_at_by_id: BTreeMap<DepositSolId, u64>,
     watchlist: Watchlist,
 }
@@ -137,6 +138,11 @@ impl Deposits {
                 "BUG: in-flight deposit {deposit_id} of account {account:?} has status {status:?}"
             ),
         })
+    }
+
+    /// The id of the latest deposit queued for the account, whatever stage it reached since.
+    pub fn latest_id(&self, account: &Account) -> Option<DepositSolId> {
+        self.latest_ids.get(account).copied()
     }
 
     /// Returns the timestamp (in nanoseconds) at which the oldest in-flight deposit was queued.
@@ -213,6 +219,7 @@ impl Deposits {
             "Attempted to queue a deposit for account {:?} that already has one in flight",
             deposit.account
         );
+        self.latest_ids.insert(deposit.account, deposit_id);
         self.queued.insert(deposit_id, deposit);
         self.queued_at_by_id.insert(deposit_id, queued_at);
         self.next_id += 1;

@@ -153,6 +153,68 @@ pub enum DepositSolError {
     },
 }
 
+/// Arguments for a request to the `watch_deposit_address` ckSOL minter endpoint.
+#[derive(Clone, Eq, PartialEq, Debug, Default, CandidType, Deserialize, Serialize)]
+pub struct WatchDepositAddressArgs {
+    /// The subaccount of the caller to credit with the deposits detected on its deposit address.
+    pub subaccount: Option<Subaccount>,
+}
+
+/// The successful result of a `watch_deposit_address` call.
+#[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize, Serialize)]
+pub struct WatchDepositAddressOk {
+    /// The deposit address of the caller's account.
+    pub address: Address,
+    /// The minimum deposit amount in force at the time of the call.
+    pub minimum_deposit_amount: Lamport,
+    /// The automatic deposit fee in force at the time of the call.
+    pub automatic_deposit_fee: Lamport,
+    /// Whether the account is watched or has a deposit in flight.
+    pub status: WatchDepositAddressStatus,
+    /// The id of the latest deposit queued for the account, if any, whatever stage it reached.
+    pub latest_deposit_id: Option<DepositSolId>,
+}
+
+/// The status of an account registered with `watch_deposit_address`.
+#[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize, Serialize)]
+pub enum WatchDepositAddressStatus {
+    /// The deposit address is on the watchlist and scanned on the schedule.
+    Watching {
+        /// The end of the registration window, in nanoseconds since the epoch.
+        valid_until: u64,
+        /// The number of scans of the deposit address so far.
+        scan_count: u32,
+        /// The time of the last scan, in nanoseconds since the epoch, if any.
+        last_scanned_at: Option<u64>,
+        /// The time the next scan is due, in nanoseconds since the epoch, or `None` once the
+        /// schedule leaves no scan before the window closes.
+        next_scan_at: Option<u64>,
+    },
+    /// A deposit of the account is in flight: queued, swept, finalized or pending its mint.
+    Detected {
+        /// The identifier of the deposit in flight.
+        deposit_id: DepositSolId,
+    },
+}
+
+/// An error from the `watch_deposit_address` ckSOL minter endpoint.
+#[derive(Debug, Clone, PartialEq, CandidType, Deserialize, Error)]
+pub enum WatchDepositAddressError {
+    /// The latest deposit of the account is quarantined, see
+    /// [`DepositSolError::Quarantined`].
+    #[error("The latest deposit {deposit_id} of this account is quarantined")]
+    Quarantined {
+        /// The identifier of the quarantined deposit.
+        deposit_id: DepositSolId,
+    },
+    /// The watchlist is full of live registrations, try again later or use `deposit_sol`.
+    #[error("The watchlist is full, try again later or use `deposit_sol`")]
+    TooManyWatchedAddresses,
+    /// The minter experiences temporary issues, try the call again later.
+    #[error("Transient error, try the call again later: {0}")]
+    TemporarilyUnavailable(String),
+}
+
 /// Insufficient cycles attached by the caller to complete the call.
 #[derive(Debug, Clone, PartialEq, CandidType, Deserialize, Error)]
 #[error("Insufficient cycles attached, expected {expected} but got {received}")]

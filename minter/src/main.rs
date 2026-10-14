@@ -13,8 +13,9 @@ use cksol_minter::{
 };
 use cksol_types::{
     Address, DepositSolArgs, DepositSolError, DepositSolId, DepositSolStatus,
-    GetDepositAddressArgs, MinterInfo, WithdrawSolArgs, WithdrawSolError, WithdrawSolOk,
-    WithdrawSolStatus, WithdrawSolStatusArgs,
+    GetDepositAddressArgs, MinterInfo, WatchDepositAddressArgs, WatchDepositAddressError,
+    WatchDepositAddressOk, WithdrawSolArgs, WithdrawSolError, WithdrawSolOk, WithdrawSolStatus,
+    WithdrawSolStatusArgs,
 };
 use cksol_types_internal::{MinterArg, log::Priority};
 use ic_http_types::{HttpRequest, HttpResponse, HttpResponseBuilder};
@@ -73,6 +74,14 @@ async fn deposit_sol(args: DepositSolArgs) -> Result<DepositSolId, DepositSolErr
 #[ic_cdk::query]
 fn deposit_sol_status(deposit_id: DepositSolId) -> DepositSolStatus {
     cksol_minter::deposit::sweep::deposit_status(deposit_id)
+}
+
+#[ic_cdk::update]
+fn watch_deposit_address(
+    args: WatchDepositAddressArgs,
+) -> Result<WatchDepositAddressOk, WatchDepositAddressError> {
+    let account = resolve_account(None, args.subaccount);
+    cksol_minter::deposit::automatic::watch_deposit_address(&IcCanisterRuntime::new(), account)
 }
 
 #[ic_cdk::update]

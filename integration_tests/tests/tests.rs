@@ -5,13 +5,14 @@ use cksol_int_tests::{
     CkSolMinter, Setup, SetupBuilder,
     fixtures::{
         DEFAULT_CALLER_ACCOUNT, DEFAULT_CALLER_DEPOSIT_ADDRESS, DEPOSIT_AMOUNT, MINTER_ADDRESS,
-        MockBuilder, RENT_EXEMPTION_THRESHOLD, SharedMockHttpOutcalls,
+        MockBuilder, RENT_EXEMPTION_THRESHOLD, SharedMockHttpOutcalls, WATCH_WINDOW,
     },
     validator::FEE_PER_SIGNATURE,
 };
 use cksol_types::{
     DepositSolArgs, DepositSolError, DepositSolStatus, GetDepositAddressArgs, Lamport, MinterInfo,
-    TxFinalizedStatus, WithdrawSolArgs, WithdrawSolError, WithdrawSolStatus,
+    TxFinalizedStatus, WatchDepositAddressError, WatchDepositAddressStatus, WithdrawSolArgs,
+    WithdrawSolError, WithdrawSolStatus,
 };
 use cksol_types_internal::{
     UpgradeArgs,
@@ -1221,6 +1222,92 @@ mod deposit_sol_tests {
     }
 }
 
+mod watch_deposit_address_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn should_register_the_caller() {
+        let setup = SetupBuilder::new().build().await;
+        let subaccount = Some([7; 32]);
+
+        let registration = setup
+            .minter()
+            .watch_deposit_address(subaccount)
+            .await
+            .expect("watch_deposit_address should register the caller");
+
+        let deposit_address = setup
+            .minter()
+            .get_deposit_address(GetDepositAddressArgs {
+                owner: None,
+                subaccount,
+            })
+            .await;
+        assert_eq!(registration.address, deposit_address);
+        assert_eq!(
+            registration.minimum_deposit_amount,
+            Setup::DEFAULT_MINIMUM_DEPOSIT_AMOUNT
+        );
+        assert_eq!(
+            registration.automatic_deposit_fee,
+            Setup::DEFAULT_AUTOMATIC_DEPOSIT_FEE
+        );
+        assert_eq!(registration.latest_deposit_id, None);
+        let (valid_until, next_scan_at) = assert_matches!(
+            registration.status,
+            WatchDepositAddressStatus::Watching {
+                valid_until,
+                scan_count: 0,
+                last_scanned_at: None,
+                next_scan_at: Some(next_scan_at),
+            } => (valid_until, next_scan_at)
+        );
+        assert_eq!(valid_until - next_scan_at, WATCH_WINDOW.as_nanos() as u64);
+
+        setup.drop().await;
+    }
+
+    #[tokio::test]
+    async fn should_be_unavailable_until_the_fee_is_configured_by_an_upgrade() {
+        let setup = SetupBuilder::new()
+            .without_automatic_deposit_fee()
+            .build()
+            .await;
+        assert_eq!(
+            setup.minter().get_minter_info().await.automatic_deposit_fee,
+            None
+        );
+
+        let result = setup.minter().watch_deposit_address(None).await;
+
+        assert_matches!(
+            result,
+            Err(WatchDepositAddressError::TemporarilyUnavailable(e)) if e.contains("automatic deposit fee")
+        );
+
+        setup
+            .minter()
+            .upgrade(UpgradeArgs {
+                automatic_deposit_fee: Some(Setup::DEFAULT_AUTOMATIC_DEPOSIT_FEE),
+                ..UpgradeArgs::default()
+            })
+            .await
+            .expect("upgrade should configure the fee");
+
+        let registration = setup
+            .minter()
+            .watch_deposit_address(None)
+            .await
+            .expect("watch_deposit_address should register the caller");
+        assert_matches!(
+            registration.status,
+            WatchDepositAddressStatus::Watching { .. }
+        );
+
+        setup.drop().await;
+    }
+}
+
 mod anonymous_caller_tests {
     use super::*;
 
@@ -1263,6 +1350,9 @@ mod anonymous_caller_tests {
                 address: "E4MpwNnMWs2XtW5gVrxZvyS7fMq31QD5HvbxmwP45Tz3".to_string(),
             })
             .await;
+        assert_matches!(result, Err(s) if s.contains("the owner must be non-anonymous"));
+
+        let result = minter.try_watch_deposit_address(None).await;
         assert_matches!(result, Err(s) if s.contains("the owner must be non-anonymous"));
 
         setup.drop().await;
