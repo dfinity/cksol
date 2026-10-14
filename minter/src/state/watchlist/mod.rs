@@ -21,8 +21,6 @@ const SCAN_GAPS_SECS: [u64; 32] = [
     3600, 3600, 3600, 3600, 3600, 3600, 3600, 3600, 3600, 3600, 3600, 3600, 3600, 3600, 3600,
 ];
 
-const NANOS_PER_SECOND: u64 = 1_000_000_000;
-
 /// The deposit addresses registered for the automatic deposit flow, each watched for
 /// [`WATCH_WINDOW`] and scanned on the schedule of [`SCAN_GAPS_SECS`].
 #[derive(Debug, PartialEq, Eq)]
@@ -52,11 +50,7 @@ impl ScanProgress {
             Some(last_scanned_at) => {
                 let gap_index = usize::try_from(self.scan_count).ok()?.checked_sub(1)?;
                 let gap_secs = SCAN_GAPS_SECS.get(gap_index)?;
-                Timestamp::from_nanos(
-                    last_scanned_at
-                        .as_nanos()
-                        .saturating_add(gap_secs.saturating_mul(NANOS_PER_SECOND)),
-                )
+                last_scanned_at.saturating_add(Duration::from_secs(*gap_secs))
             }
         };
         (due_at <= valid_until).then_some(due_at)
@@ -200,10 +194,6 @@ impl Watchlist {
     }
 
     fn registered_at(&self, valid_until: Timestamp) -> Timestamp {
-        Timestamp::from_nanos(valid_until.as_nanos().saturating_sub(self.window_nanos()))
-    }
-
-    fn window_nanos(&self) -> u64 {
-        u64::try_from(self.entries.ttl().as_nanos()).unwrap_or(u64::MAX)
+        valid_until.saturating_sub(self.entries.ttl())
     }
 }
