@@ -171,7 +171,9 @@ pub struct WatchDepositAddressOk {
     pub automatic_deposit_fee: Lamport,
     /// Whether the account is watched or has a deposit in flight.
     pub status: WatchDepositAddressStatus,
-    /// The id of the latest deposit queued for the account, if any, whatever stage it reached.
+    /// The id of the latest deposit queued for the account, if any, whatever stage it reached,
+    /// to follow with `deposit_sol_status`. For a `Detected` status it is the id of the deposit
+    /// in flight.
     pub latest_deposit_id: Option<DepositSolId>,
 }
 
