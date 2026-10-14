@@ -16,7 +16,7 @@ use cksol_types::{
 };
 use cksol_types_internal::{
     UpgradeArgs,
-    event::{EventType, TransactionPurpose},
+    event::{AutomaticDeposit, EventType, TransactionPurpose},
     log::Priority,
 };
 use icrc_ledger_types::icrc1::account::{Account, Subaccount};
@@ -1229,6 +1229,9 @@ mod deposit_sol_tests {
 mod automatic_deposit_sol_tests {
     use super::*;
 
+    const SCAN_WATCHED_ADDRESSES_DELAY: Duration = Duration::from_mins(1);
+    const BALANCE_ABOVE_MINIMUM: Lamport = Setup::DEFAULT_MINIMUM_DEPOSIT_AMOUNT + 1;
+
     #[tokio::test]
     async fn should_register_the_caller() {
         let setup = SetupBuilder::new().build().await;
@@ -1310,6 +1313,72 @@ mod automatic_deposit_sol_tests {
         );
 
         setup.drop().await;
+    }
+
+    #[tokio::test]
+    async fn should_queue_the_deposit_detected_by_the_scan_timer() {
+        let setup = SetupBuilder::new().build().await;
+        let registration = setup
+            .minter()
+            .watch_deposit_address(None)
+            .await
+            .expect("watch_deposit_address should register the caller");
+        let valid_until = assert_matches!(
+            registration.status,
+            WatchDepositAddressStatus::Watching { valid_until, .. } => valid_until
+        );
+
+        setup.advance_time(SCAN_WATCHED_ADDRESSES_DELAY).await;
+        setup
+            .execute_http_mocks(
+                MockBuilder::new()
+                    .get_multiple_accounts(&[BALANCE_ABOVE_MINIMUM])
+                    .build(),
+            )
+            .await;
+
+        let detected = setup
+            .minter()
+            .watch_deposit_address(None)
+            .await
+            .expect("watch_deposit_address should report the detected deposit");
+        assert_eq!(
+            detected.status,
+            WatchDepositAddressStatus::Detected { deposit_id: 0 }
+        );
+        assert_eq!(detected.latest_deposit_id, Some(0));
+        assert_eq!(
+            setup.minter().deposit_sol_status(0).await,
+            DepositSolStatus::Queued {
+                sweepable_amount: BALANCE_ABOVE_MINIMUM - RENT_EXEMPTION_THRESHOLD
+            }
+        );
+        setup.minter().assert_that_events().await.satisfy(|events| {
+            let queued: Vec<&EventType> = events
+                .iter()
+                .filter(|e| matches!(e, EventType::QueuedDeposit { .. }))
+                .collect();
+            check!(
+                queued
+                    == [&EventType::QueuedDeposit {
+                        deposit_id: 0,
+                        account: DEFAULT_CALLER_ACCOUNT,
+                        address: DEFAULT_CALLER_DEPOSIT_ADDRESS.parse().unwrap(),
+                        balance: BALANCE_ABOVE_MINIMUM,
+                        automatic: Some(AutomaticDeposit {
+                            fee: Setup::DEFAULT_AUTOMATIC_DEPOSIT_FEE,
+                            valid_until,
+                        }),
+                    }]
+            );
+        });
+        setup
+            .check_metrics()
+            .await
+            .assert_contains_metric_matching(r#"deposit_address_scans\{outcome="queued"\} 1 \d+"#)
+            .into()
+            .drop()
+            .await;
     }
 }
 

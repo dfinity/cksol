@@ -146,6 +146,15 @@ impl MockBuilder {
         self.expect(get_balance_request(), get_balance_response(balance))
     }
 
+    /// Mock for the `getMultipleAccounts` call of the scan timer, returning the given
+    /// balances, in order, for the addresses it reads.
+    pub fn get_multiple_accounts(self, balances: &[Lamport]) -> Self {
+        self.expect(
+            get_multiple_accounts_request(),
+            get_multiple_accounts_response(balances),
+        )
+    }
+
     /// Mocks for a timer submitting a transaction built on the block at `block_height`:
     /// `getSlot` → `getBlock` → `sendTransaction`.
     pub fn submit_transaction(self, block_height: u64) -> Self {
@@ -363,6 +372,34 @@ fn nonce_account_data(nonce_seed: [u8; 32]) -> String {
 
 fn get_balance_request() -> JsonRpcRequestMatcher {
     JsonRpcRequestMatcher::with_method("getBalance")
+}
+
+fn get_multiple_accounts_request() -> JsonRpcRequestMatcher {
+    JsonRpcRequestMatcher::with_method("getMultipleAccounts")
+}
+
+fn get_multiple_accounts_response(balances: &[Lamport]) -> JsonRpcResponse {
+    let accounts: Vec<serde_json::Value> = balances
+        .iter()
+        .map(|lamports| {
+            json!({
+                "data": ["", "base64"],
+                "executable": false,
+                "lamports": lamports,
+                "owner": "11111111111111111111111111111111",
+                "rentEpoch": 18446744073709551615_u64,
+                "space": 0
+            })
+        })
+        .collect();
+    JsonRpcResponse::from(json!({
+        "jsonrpc": "2.0",
+        "result": {
+            "context": { "apiVersion": "2.0.15", "slot": 341_197_053 },
+            "value": accounts
+        },
+        "id": 1
+    }))
 }
 
 fn get_balance_response(balance: Lamport) -> JsonRpcResponse {
