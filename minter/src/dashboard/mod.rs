@@ -1,7 +1,6 @@
 use crate::{
     address::minter_address,
     state::{QuarantineCause, State},
-    utils::timed_sized_map::Timestamp,
 };
 use askama::Template;
 use candid::Principal;
@@ -278,11 +277,7 @@ pub struct DashboardTemplate {
 }
 
 impl DashboardTemplate {
-    pub fn from_state(
-        state: &State,
-        now: Timestamp,
-        pagination: DashboardPaginationParameters,
-    ) -> Self {
+    pub fn from_state(state: &State, pagination: DashboardPaginationParameters) -> Self {
         let minter_address = state
             .minter_public_key()
             .map(|key| minter_address(key).to_string())
@@ -410,7 +405,7 @@ impl DashboardTemplate {
 
         let watched_deposit_addresses: Vec<DashboardWatchedAddress> = state
             .watchlist()
-            .iter(now)
+            .iter()
             .map(|watched| DashboardWatchedAddress {
                 account: watched.account.to_string(),
                 address: watched.address.to_string(),
