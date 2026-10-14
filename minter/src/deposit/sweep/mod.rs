@@ -87,6 +87,11 @@ pub async fn deposit_sol<R: CanisterRuntime>(
 /// Queues the deposit under the next deposit id, which both `deposit_sol` and a balance
 /// scan of the automatic flow do once a deposit address holds at least the minimum
 /// deposit amount, and returns that id.
+///
+/// # Panics
+///
+/// If the account of the deposit already has a deposit in flight, which callers must
+/// rule out after their balance read.
 pub(crate) fn queue_deposit<R: CanisterRuntime>(
     runtime: &R,
     state: &mut State,
