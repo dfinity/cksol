@@ -42,6 +42,18 @@ sequenceDiagram
     Minter-->>User: Minted { block_index, minted_amount }
 ```
 
+### Automatic deposits
+
+If you cannot call the minter after the transfer, for example because the SOL comes straight from an exchange, register your deposit address with `watch_deposit_address` instead of calling `deposit_sol`:
+
+1. **Register the deposit address.** Call `watch_deposit_address` on the minter with the same optional subaccount as in step 1; the owner is always your principal. The call is free, requires no cycles and returns the deposit address, the current minimum deposit amount and automatic deposit fee, and the status of the registration, which is `Watching` for about 24 hours with the time of the next scan.
+
+2. **Send SOL.** Transfer SOL to the deposit address within that window, as in step 2.
+
+3. **Let the minter detect the deposit.** The minter reads the balance of every registered deposit address on a schedule, frequently right after the registration and then hourly. Once the balance reaches the minimum deposit amount, the minter queues the deposit as if `deposit_sol` had been called, and the sweep and mint of step 4 follow; the automatic deposit fee in force at detection is deducted from the minted amount instead of cycles.
+
+4. **Track the deposit.** Call `watch_deposit_address` again: once the deposit is detected, the status is `Detected` with the deposit id, which you can follow with `deposit_sol_status` as in step 5. The id of the latest deposit of your account is returned in every case. Once the deposit is minted, calling `watch_deposit_address` registers the address anew, so that the next deposit to the same address only needs another call.
+
 ## Withdrawal: ckSOL → SOL
 
 1. **Approve the minter.** Grant the minter an [ICRC-2](https://github.com/dfinity/ICRC-1/blob/main/standards/ICRC-2/README.md) allowance on your ckSOL ledger account.
