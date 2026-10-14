@@ -163,7 +163,10 @@ async fn should_skip_the_tick_while_the_automatic_deposit_fee_is_not_configured(
     EventsAssert::assert_no_events_recorded();
     assert_eq!(
         read_state(|s| s.watchlist().get(at(TICK_AT), &account(1))),
-        Some(watched)
+        Some(WatchedAddress {
+            next_scan_at: Some(at(TICK_AT)),
+            ..watched
+        })
     );
 }
 

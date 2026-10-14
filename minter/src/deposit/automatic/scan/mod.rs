@@ -5,8 +5,8 @@ use crate::{
     rpc::{GetMultipleAccountsError, get_balances},
     runtime::CanisterRuntime,
     state::{
-        AutomaticDeposit, DepositBalance, QueuedDeposit, State, TaskType, WatchedAddress,
-        mutate_state, read_state, watchlist::MAX_WATCHED_ADDRESSES,
+        AutomaticDeposit, DepositBalance, MAX_WATCHED_ADDRESSES, QueuedDeposit, State, TaskType,
+        WatchedAddress, mutate_state, read_state,
     },
     storage::{ScanOutcome, record_deposit_address_scans},
     utils::timed_sized_map::Timestamp,
