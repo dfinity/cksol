@@ -1,9 +1,9 @@
 use crate::{
     lifecycle::pre_upgrade,
     state::{
+        MAX_WATCHED_ADDRESSES,
         event::{EventType, WatchlistSnapshot},
         mutate_state, read_state,
-        watchlist::MAX_WATCHED_ADDRESSES,
     },
     test_fixtures::{
         EventsAssert, REGISTERED_AT, WATCH_WINDOW_NANOS, account, at, init_state,

@@ -203,14 +203,17 @@ mod watched_deposit_addresses {
 
         read_state(|live_state| assert_eq!(&replayed, live_state));
         assert_eq!(
-            replayed.watchlist().iter().collect::<Vec<_>>(),
+            replayed
+                .watchlist()
+                .iter(at(dropped_at))
+                .collect::<Vec<_>>(),
             vec![WatchedAddress {
                 account: account(1),
                 address: deposit_address(account(1)),
                 valid_until: at(REGISTERED_AT + WATCH_WINDOW_NANOS),
                 scan_count: 0,
                 last_scanned_at: None,
-                next_scan_at: Some(at(REGISTERED_AT)),
+                next_scan_at: Some(at(dropped_at)),
             }]
         );
     }

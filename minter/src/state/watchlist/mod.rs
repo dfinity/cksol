@@ -159,7 +159,7 @@ impl Watchlist {
     /// The snapshot [`Self::from_snapshot`] rebuilds this watchlist from.
     pub fn snapshot(&self) -> WatchlistSnapshot {
         WatchlistSnapshot {
-            window_nanos: self.window_nanos(),
+            window_nanos: u64::try_from(self.entries.ttl().as_nanos()).unwrap_or(u64::MAX),
             capacity: self.entries.capacity().get() as u64,
             entries: self
                 .entries

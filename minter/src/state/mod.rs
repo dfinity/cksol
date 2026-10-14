@@ -487,7 +487,7 @@ impl State {
     }
 
     fn restore_watchlist(&mut self, snapshot: &WatchlistSnapshot) {
-        self.watchlist = Watchlist::from_snapshot(snapshot);
+        *self.deposits.watchlist_mut() = Watchlist::from_snapshot(snapshot);
     }
 
     fn process_credited_sweep(
