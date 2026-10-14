@@ -21,7 +21,13 @@ fn should_register_an_account_for_the_window() {
 
     assert_eq!(watched, unscanned(account(1)));
     assert_eq!(watchlist.get(at(REGISTERED_AT), &account(1)), Some(watched));
-    assert_eq!(watchlist.get(at(VALID_UNTIL), &account(1)), Some(watched));
+    assert_eq!(
+        watchlist.get(at(VALID_UNTIL), &account(1)),
+        Some(WatchedAddress {
+            next_scan_at: Some(at(VALID_UNTIL)),
+            ..watched
+        })
+    );
     assert_eq!(watchlist.get(at(VALID_UNTIL + 1), &account(1)), None);
     assert_eq!(watchlist.len(), 1);
 }
@@ -82,7 +88,13 @@ fn should_keep_an_existing_registration_while_full() {
         deposit_address(account(0)),
     );
 
-    assert_eq!(result, Ok(unscanned(account(0))));
+    assert_eq!(
+        result,
+        Ok(WatchedAddress {
+            next_scan_at: Some(at(REGISTERED_AT + HOUR_NANOS)),
+            ..unscanned(account(0))
+        })
+    );
     assert_eq!(watchlist.len(), MAX_WATCHED_ADDRESSES.get());
 }
 
@@ -98,7 +110,7 @@ fn should_admit_a_registration_once_a_window_of_a_full_watchlist_has_passed() {
 }
 
 #[test]
-fn should_be_due_for_the_first_scan_right_after_registration() {
+fn should_be_due_for_the_first_scan_until_scanned() {
     let mut watchlist = Watchlist::default();
     register(&mut watchlist, at(REGISTERED_AT), account(1));
 
@@ -106,7 +118,13 @@ fn should_be_due_for_the_first_scan_right_after_registration() {
         watchlist.due(at(REGISTERED_AT)),
         vec![unscanned(account(1))]
     );
-    assert_eq!(watchlist.due(at(REGISTERED_AT - 1)), vec![]);
+    assert_eq!(
+        watchlist.due(at(REGISTERED_AT + HOUR_NANOS)),
+        vec![WatchedAddress {
+            next_scan_at: Some(at(REGISTERED_AT + HOUR_NANOS)),
+            ..unscanned(account(1))
+        }]
+    );
 }
 
 #[test]
@@ -179,7 +197,7 @@ fn should_ignore_a_scan_of_an_account_that_is_not_watched() {
     watchlist.record_scan(at(VALID_UNTIL + 1), &account(1));
 
     assert_eq!(
-        watchlist.iter().collect::<Vec<_>>(),
+        watchlist.iter(at(REGISTERED_AT)).collect::<Vec<_>>(),
         vec![unscanned(account(1))]
     );
 }
@@ -242,7 +260,10 @@ fn should_iterate_by_ascending_window_end() {
     register(&mut watchlist, at(REGISTERED_AT), account(3));
     register(&mut watchlist, at(REGISTERED_AT), account(2));
 
-    let accounts: Vec<Account> = watchlist.iter().map(|watched| watched.account).collect();
+    let accounts: Vec<Account> = watchlist
+        .iter(at(REGISTERED_AT))
+        .map(|watched| watched.account)
+        .collect();
 
     assert_eq!(accounts, vec![account(3), account(2), account(1)]);
 }

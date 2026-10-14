@@ -53,9 +53,9 @@ impl ScanProgress {
         }
     }
 
-    fn next_scan_at(&self, registered_at: Timestamp, valid_until: Timestamp) -> Option<Timestamp> {
+    fn next_scan_at(&self, now: Timestamp, valid_until: Timestamp) -> Option<Timestamp> {
         let due_at = match self.last_scanned_at {
-            None => registered_at,
+            None => now,
             Some(last_scanned_at) => {
                 let gap_index = usize::try_from(self.scan_count).ok()?.checked_sub(1)?;
                 let gap = BURST_SCAN_GAPS
@@ -77,8 +77,9 @@ pub struct WatchedAddress {
     pub valid_until: Timestamp,
     pub scan_count: u32,
     pub last_scanned_at: Option<Timestamp>,
-    /// When the next scan is due, or `None` once the schedule leaves no scan before the
-    /// window closes.
+    /// When the next scan is due: at once for an address not scanned yet, at the end of the
+    /// gap after its last scan otherwise, or `None` once the schedule leaves no scan before
+    /// the window closes.
     pub next_scan_at: Option<Timestamp>,
 }
 
@@ -131,7 +132,7 @@ impl Watchlist {
     /// The live registration of the account, if any.
     pub fn get(&self, now: Timestamp, account: &Account) -> Option<WatchedAddress> {
         let entry = self.entries.get_entry(now, account)?;
-        Some(self.watched(account, entry))
+        Some(self.watched(now, account, entry))
     }
 
     pub fn remove(&mut self, account: &Account) {
@@ -160,10 +161,10 @@ impl Watchlist {
     }
 
     /// Every registration, live or expired but not yet evicted, by ascending window end.
-    pub fn iter(&self) -> impl Iterator<Item = WatchedAddress> {
+    pub fn iter(&self, now: Timestamp) -> impl Iterator<Item = WatchedAddress> {
         self.entries
             .iter_by_expiry()
-            .map(|(account, entry)| self.watched(account, entry))
+            .map(move |(account, entry)| self.watched(now, account, entry))
     }
 
     pub fn len(&self) -> usize {
@@ -189,19 +190,23 @@ impl Watchlist {
         self.entries
             .iter_by_expiry()
             .filter(move |(_, entry)| entry.is_live(now))
-            .map(|(account, entry)| self.watched(account, entry))
+            .map(move |(account, entry)| self.watched(now, account, entry))
     }
 
-    fn watched(&self, account: &Account, entry: &Entry<ScanProgress>) -> WatchedAddress {
+    fn watched(
+        &self,
+        now: Timestamp,
+        account: &Account,
+        entry: &Entry<ScanProgress>,
+    ) -> WatchedAddress {
         let progress = &entry.value;
-        let valid_until = entry.expires_at;
         WatchedAddress {
             account: *account,
             address: progress.address,
-            valid_until,
+            valid_until: entry.expires_at,
             scan_count: progress.scan_count,
             last_scanned_at: progress.last_scanned_at,
-            next_scan_at: progress.next_scan_at(self.registered_at(valid_until), valid_until),
+            next_scan_at: progress.next_scan_at(now, entry.expires_at),
         }
     }
 
