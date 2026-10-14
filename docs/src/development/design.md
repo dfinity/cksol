@@ -100,7 +100,7 @@ sequenceDiagram
 
     User->>+Minter: watch_deposit_address(subaccount)
     Note over Minter: add the account to the watchlist (no event)
-    Minter-->>-User: Ok(deposit_address, minimum, fee, Watching { valid_until, next_scan_at }, latest_deposit_id)
+    Minter-->>-User: Ok(deposit_address, minimum, fee, Watching { valid_until, scan_count: 0, last_scanned_at: none, next_scan_at }, latest_deposit_id)
 
     Note over Minter: ⏱️ Scan timer
     activate Minter
@@ -159,7 +159,7 @@ stateDiagram-v2
 
 The status is `Watching`, with the end of the window, the number of scans so far and the times of the last and next scans, as long as the account is on the watchlist, and `Detected`, with the *deposit id* that identifies a sweep of the account for its whole life, as defined in [Section 3.1.2](#312-manual-flow), once a deposit is in flight for the account. As in the ckETH minter, there is no separate status endpoint: calling `watch_deposit_address` again is how a client follows a registration. Registering an account that is already watched is idempotent and returns the stored registration without extending its window; an account with a deposit in flight is not registered, since the sweep flow already owns its address, and the call returns `Detected`; and an account whose latest deposit is minted or dropped is registered anew, so that the next deposit to the same address needs nothing but another call. The id of the latest deposit is returned in every case, so that a client coming back hours after a detection can follow the deposit with `deposit_sol_status`. An account whose automatically detected deposit was dropped is reported as `Watching` again when the re-arm described below has put it back on the watchlist.
 
-The call does not contact the SOL RPC canister and requires no cycles. It is rejected when the latest deposit of the account is quarantined (`Quarantined`, as for `deposit_sol`), when the watchlist is full of live entries (`TooManyWatchedAddresses`), and with `TemporarilyUnavailable` when the minter's public key is not yet known or when the automatic deposit fee has not been configured. A `deposit_sol` call in progress for the same account does not prevent the registration: if that call queues a deposit, the registration is removed again, and otherwise it stays, which is what the caller wanted in either case. A registration is not recorded in the event log, see [Section 3.5](#35-events).
+The call does not contact the SOL RPC canister and requires no cycles. It is rejected when the latest deposit of the account is quarantined (`Quarantined`, as for `deposit_sol`), when the call would create a new registration while the watchlist is full of live entries (`TooManyWatchedAddresses`; an account already watched or with a deposit in flight needs no slot and gets its status), and with `TemporarilyUnavailable` when the minter's public key is not yet known or when the automatic deposit fee has not been configured. A `deposit_sol` call in progress for the same account does not prevent the registration: if that call queues a deposit, the registration is removed again, and otherwise it stays, which is what the caller wanted in either case. A registration is not recorded in the event log, see [Section 3.5](#35-events).
 
 The manual flow remains available while an address is watched: a `deposit_sol` call that queues a deposit removes the account from the watchlist, and since its caller paid in cycles, no SOL fee is deducted from that deposit.
 
