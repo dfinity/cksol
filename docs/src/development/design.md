@@ -100,7 +100,7 @@ sequenceDiagram
 
     User->>+Minter: watch_deposit_address(subaccount)
     Note over Minter: add the account to the watchlist (no event)
-    Minter-->>-User: Ok(deposit_address, fee, Watching { valid_until, next_scan_at })
+    Minter-->>-User: Ok(deposit_address, minimum, fee, Watching { valid_until, next_scan_at }, latest_deposit_id)
 
     Note over Minter: ⏱️ Scan timer
     activate Minter
@@ -126,7 +126,7 @@ sequenceDiagram
     Note over Solana,Ledger: Sweep, finalization and mint as in Section 3.1.2<br/>the mint is sweepable - fee share - automatic deposit fee
 
     User->>+Minter: watch_deposit_address(subaccount)
-    Minter-->>-User: Ok(deposit_address, fee, Detected { deposit id })
+    Minter-->>-User: Ok(deposit_address, minimum, fee, Detected { deposit id }, latest_deposit_id)
     User->>+Minter: deposit_sol_status(deposit id)
     Minter-->>-User: Minted { block index, amount }
 ```
@@ -396,7 +396,7 @@ Since Solana has a high block rate, the timer should execute more frequently com
 
 There is a **minimum withdrawal amount**, which is defined in [Section 3.3.3](#333-minimum-swap-amounts).
 
-The funds for each withdrawal are taken from the main account. Since ckSOL is only minted once the corresponding SOL has reached the main account (see [Section 3.1.2](#312-manual-flow)), the main account always covers the minted supply, and a withdrawal never waits for or triggers a sweep. The only delay a user can experience is between the queueing of their own deposit, by a `deposit_sol` call or by a balance scan of the automatic flow, and its mint.
+The funds for each withdrawal are taken from the main account. Since ckSOL is only minted once the corresponding SOL has reached the main account (see [Section 3.1.2](#312-manual-flow)), the main account always covers the minted supply, and a withdrawal never waits for or triggers a sweep. The only delays a user can experience concern their own deposit: in the automatic flow, between the transfer and the balance scan that detects it, which the schedule of [Section 3.1.1](#311-automatic-flow) bounds by the watch window, and in both flows, between the queueing of the deposit and its mint.
 
 Contrary to sweeps, a withdrawal transaction does not follow the transaction submission flow of [Section 3.1.3](#313-transaction-submission), since it must not reference a recent block hash. Instead, the ckSOL minter picks a free durable nonce account from the pool of [Section 3.2.1](#321-durable-nonce-accounts) and reads its current nonce value with `getAccountInfo` at the `finalized` commitment level; a response showing a nonce value already bound to an earlier transaction of that account is stale, and the batch waits for the next round. The transaction consists of an `AdvanceNonceAccount` instruction first, followed by one transfer per withdrawal request, and carries the nonce value in place of the recent block hash. The main address is the fee payer, the source of all transfers, and the nonce authority, so the transaction has a single signature. A single timer round processes withdrawals at a time, and it assigns distinct free nonce accounts to its batches synchronously, before the first await point, so that concurrently processed batches can never pick the same account. Before the threshold signature is requested, a `CreatedWithdrawalTransaction` event binds the nonce account and its nonce value to the burn indices of the withdrawals the transaction serves. Since each burn index identifies a withdrawal request, i.e., a destination and an amount, the binding fully determines the message to be signed. Threshold signing is treated as fallible: should it fail or be interrupted, the binding survives, and the ckSOL minter rebuilds the identical message from the binding, without reading the nonce account again, and signs it again, so that no two different messages are ever signed for the same nonce value. The signed transaction is recorded with a `SubmittedTransaction` event *before* it is sent, so that the identical transaction can later be re-broadcast. When processing this event, the ckSOL minter checks that the transaction advances a bound nonce account, serves the bound withdrawal requests, and carries exactly the message it rebuilds from the binding, signed by the main address only.
 
@@ -574,7 +574,7 @@ When the user withdraws x SOL, the user receives x SOL minus the withdrawal fee 
 - Minimum deposit amount: 0.02 SOL
 - Minimum withdrawal amount: 0.002 SOL
 
-The **minimum deposit amount** applies to the balance of a deposit address, so that a user who deposits exactly the minimum is served. Following the constraints of [Section 3.3.4](#334-parameter-constraints), it must cover the rent exemption threshold of 890,880 lamports twice, once left on the deposit address and once reaching the main account on the very first sweep, plus the fee of one signature, for a total of 1,786,760 lamports. The minimum deposit amount is set to **0.02 SOL**, more than 11 times that lower bound, so that a first deposit of exactly the minimum is credited 19,104,120 lamports, i.e., 95.5% of the amount deposited, and the cycles attached to `deposit_sol` remain small compared to the deposit.
+The **minimum deposit amount** applies to the balance of a deposit address, so that a user who deposits exactly the minimum is served. Following the constraints of [Section 3.3.4](#334-parameter-constraints), it must cover the rent exemption threshold of 890,880 lamports twice, once left on the deposit address and once reaching the main account on the very first sweep, plus the fee of one signature, for a total of 1,786,760 lamports. The minimum deposit amount is set to **0.02 SOL**, more than 11 times that lower bound, so that a first deposit of exactly the minimum is credited 19,104,120 lamports in the manual flow, i.e., 95.5% of the amount deposited, and 17,104,120 lamports in the automatic flow, i.e., 85.5%, after the automatic deposit fee of 2,000,000 lamports, which the constraint of [Section 3.3.4](#334-parameter-constraints) keeps well below the minimum, and the cycles attached to `deposit_sol` remain small compared to the deposit.
 
 A similar principle can be applied for the **minimum withdrawal amount**. Given the withdrawal fee of 0.001 SOL, the minimum withdrawal amount can be set to 0.002 SOL. The user will thus receive at least 0.001 SOL, which is strictly above the rent exemption threshold of 0.00089088 SOL (890,880 lamports).
 
