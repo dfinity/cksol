@@ -5,7 +5,7 @@ use cksol_int_tests::{
     CkSolMinter, Setup, SetupBuilder,
     fixtures::{
         DEFAULT_CALLER_ACCOUNT, DEFAULT_CALLER_DEPOSIT_ADDRESS, DEPOSIT_AMOUNT, MINTER_ADDRESS,
-        MockBuilder, RENT_EXEMPTION_THRESHOLD, SharedMockHttpOutcalls, WATCH_WINDOW,
+        MockBuilder, RENT_EXEMPTION_THRESHOLD, SharedMockHttpOutcalls, WATCH_WINDOW_NANOS,
     },
     validator::FEE_PER_SIGNATURE,
 };
@@ -1263,7 +1263,7 @@ mod automatic_deposit_sol_tests {
                 next_scan_at: Some(next_scan_at),
             } => (valid_until, next_scan_at)
         );
-        assert_eq!(valid_until - next_scan_at, WATCH_WINDOW.as_nanos() as u64);
+        assert_eq!(valid_until - next_scan_at, WATCH_WINDOW_NANOS);
 
         setup.drop().await;
     }

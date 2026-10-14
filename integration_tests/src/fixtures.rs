@@ -37,6 +37,7 @@ pub const DEPOSIT_AMOUNT: Lamport = 500_000_000;
 /// Minimum balance left on a deposit address to keep it rent-exempt.
 pub const RENT_EXEMPTION_THRESHOLD: Lamport = 890_880;
 pub const WATCH_WINDOW: Duration = Duration::from_hours(24);
+pub const WATCH_WINDOW_NANOS: u64 = WATCH_WINDOW.as_nanos() as u64;
 
 /// The slot the mocked `getSlot` reports. A test says which block height the mocked
 /// `getBlock` then reports, since that is what the minter records and what it judges
