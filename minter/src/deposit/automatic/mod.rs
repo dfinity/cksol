@@ -2,7 +2,7 @@ use crate::{
     address::{account_address, minter_public_key},
     runtime::CanisterRuntime,
     state::{InFlightDeposit, State, WatchedAddress, WatchlistFull, mutate_state},
-    utils::assert_valid_deposit_owner,
+    utils::{assert_valid_deposit_owner, timed_sized_map::Timestamp},
 };
 use cksol_types::{WatchDepositAddressError, WatchDepositAddressOk, WatchDepositAddressStatus};
 use icrc_ledger_types::icrc1::account::Account;
@@ -19,7 +19,7 @@ pub fn watch_deposit_address<R: CanisterRuntime>(
     let master_key = minter_public_key()
         .map_err(|e| WatchDepositAddressError::TemporarilyUnavailable(e.to_string()))?;
     let address = account_address(&master_key, &account);
-    let now = runtime.time();
+    let now = Timestamp::from_nanos(runtime.time());
 
     mutate_state(|state| {
         let automatic_deposit_fee = state.automatic_deposit_fee().ok_or_else(|| {
@@ -40,7 +40,7 @@ pub fn watch_deposit_address<R: CanisterRuntime>(
 
 fn status_after_registration(
     state: &mut State,
-    now: u64,
+    now: Timestamp,
     account: Account,
     address: Address,
 ) -> Result<WatchDepositAddressStatus, WatchDepositAddressError> {
@@ -62,9 +62,9 @@ fn status_after_registration(
 
 fn watching(watched: WatchedAddress) -> WatchDepositAddressStatus {
     WatchDepositAddressStatus::Watching {
-        valid_until: watched.valid_until,
+        valid_until: watched.valid_until.as_nanos(),
         scan_count: watched.scan_count,
-        last_scanned_at: watched.last_scanned_at,
-        next_scan_at: watched.next_scan_at,
+        last_scanned_at: watched.last_scanned_at.map(Timestamp::as_nanos),
+        next_scan_at: watched.next_scan_at.map(Timestamp::as_nanos),
     }
 }

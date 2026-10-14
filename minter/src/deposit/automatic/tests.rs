@@ -4,7 +4,7 @@ use crate::{
     state::{mutate_state, read_state, watchlist::MAX_WATCHED_ADDRESSES},
     test_fixtures::{
         AUTOMATIC_DEPOSIT_FEE, EventsAssert, HOUR_NANOS, MINIMUM_DEPOSIT_AMOUNT, MINTER_ACCOUNT,
-        MINUTE_NANOS, REGISTERED_AT, WATCH_WINDOW_NANOS, account, deposit_address,
+        MINUTE_NANOS, REGISTERED_AT, WATCH_WINDOW_NANOS, account, at, deposit_address,
         events::{
             fail_transaction, quarantine_sweep, queue_deposit, submit_sweep, succeed_transaction,
         },
@@ -81,7 +81,7 @@ fn should_report_the_stored_registration_without_extending_it() {
     let first = watch_deposit_address(&runtime(), account(1)).unwrap();
     mutate_state(|s| {
         s.watchlist_mut()
-            .record_scan(REGISTERED_AT + 1, &account(1))
+            .record_scan(at(REGISTERED_AT + 1), &account(1))
     });
 
     let second =
