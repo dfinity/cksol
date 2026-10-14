@@ -13,16 +13,25 @@ pub const WATCH_WINDOW: Duration = Duration::from_hours(24);
 pub const MAX_WATCHED_ADDRESSES: NonZeroUsize =
     NonZeroUsize::new(1_000).expect("BUG: the watchlist capacity must be non-zero");
 
-/// The gap, in seconds, between a scan and the next one, indexed by the number of scans done
-/// so far minus one: a burst of ten scans within the first half hour, then hourly scans until
-/// the window closes.
-const SCAN_GAPS_SECS: [u64; 32] = [
-    60, 60, 120, 120, 240, 300, 300, 300, 300, 3600, 3600, 3600, 3600, 3600, 3600, 3600, 3600,
-    3600, 3600, 3600, 3600, 3600, 3600, 3600, 3600, 3600, 3600, 3600, 3600, 3600, 3600, 3600,
+/// The gaps between a scan and the next one for the first scans, indexed by the number of
+/// scans done so far minus one: a burst of ten scans within the first half hour.
+const BURST_SCAN_GAPS: [Duration; 9] = [
+    Duration::from_secs(60),
+    Duration::from_secs(60),
+    Duration::from_secs(120),
+    Duration::from_secs(120),
+    Duration::from_secs(240),
+    Duration::from_secs(300),
+    Duration::from_secs(300),
+    Duration::from_secs(300),
+    Duration::from_secs(300),
 ];
 
+/// The gap between a scan and the next one after the burst, until the window closes.
+const STEADY_SCAN_GAP: Duration = Duration::from_hours(1);
+
 /// The deposit addresses registered for the automatic deposit flow, each watched for
-/// [`WATCH_WINDOW`] and scanned on the schedule of [`SCAN_GAPS_SECS`].
+/// [`WATCH_WINDOW`] and scanned on the schedule of [`BURST_SCAN_GAPS`] and [`STEADY_SCAN_GAP`].
 #[derive(Debug, PartialEq, Eq)]
 pub struct Watchlist {
     entries: TimedSizedMap<Account, ScanProgress>,
@@ -49,8 +58,11 @@ impl ScanProgress {
             None => registered_at,
             Some(last_scanned_at) => {
                 let gap_index = usize::try_from(self.scan_count).ok()?.checked_sub(1)?;
-                let gap_secs = SCAN_GAPS_SECS.get(gap_index)?;
-                last_scanned_at.saturating_add(Duration::from_secs(*gap_secs))
+                let gap = BURST_SCAN_GAPS
+                    .get(gap_index)
+                    .copied()
+                    .unwrap_or(STEADY_SCAN_GAP);
+                last_scanned_at.saturating_add(gap)
             }
         };
         (due_at <= valid_until).then_some(due_at)

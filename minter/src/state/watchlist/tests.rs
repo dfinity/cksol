@@ -1,6 +1,7 @@
 use crate::{
     state::watchlist::{
-        MAX_WATCHED_ADDRESSES, SCAN_GAPS_SECS, WatchedAddress, Watchlist, WatchlistFull,
+        BURST_SCAN_GAPS, MAX_WATCHED_ADDRESSES, STEADY_SCAN_GAP, WatchedAddress, Watchlist,
+        WatchlistFull,
     },
     test_fixtures::{
         HOUR_NANOS, MINUTE_NANOS, REGISTERED_AT, WATCH_WINDOW_NANOS, account, at, deposit_address,
@@ -114,10 +115,13 @@ fn should_follow_the_scan_schedule_and_stop_before_the_window_closes() {
     register(&mut watchlist, at(REGISTERED_AT), account(1));
     let mut scanned_at = REGISTERED_AT;
 
-    for (scan_count, gap_secs) in SCAN_GAPS_SECS.into_iter().enumerate() {
+    let gaps = BURST_SCAN_GAPS
+        .into_iter()
+        .chain(std::iter::repeat_n(STEADY_SCAN_GAP, 23));
+    for (scan_count, gap) in gaps.enumerate() {
         watchlist.record_scan(at(scanned_at), &account(1));
         let watched = watchlist.get(at(scanned_at), &account(1)).unwrap();
-        let next_scan_at = scanned_at + gap_secs * 1_000_000_000;
+        let next_scan_at = scanned_at + gap.as_nanos() as u64;
 
         assert_eq!(watched.scan_count, scan_count as u32 + 1);
         assert_eq!(watched.last_scanned_at, Some(at(scanned_at)));
