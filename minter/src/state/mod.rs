@@ -262,7 +262,8 @@ impl State {
     fn drop_sweep(&mut self, signature: &Signature, timestamp: u64) {
         for deposit in self.deposits.drop_swept(signature) {
             let rearmed = self
-                .watchlist
+                .deposits
+                .watchlist_mut()
                 .rearm(Timestamp::from_nanos(timestamp), &deposit);
             log!(
                 Priority::Debug,
