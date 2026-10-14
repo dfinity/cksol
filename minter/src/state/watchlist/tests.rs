@@ -50,7 +50,10 @@ fn should_keep_the_stored_registration_when_registering_again() {
 
 #[test]
 fn should_reject_a_registration_when_full_of_live_entries() {
-    let mut watchlist = full_watchlist();
+    let mut watchlist = Watchlist::default();
+    for index in 0..MAX_WATCHED_ADDRESSES.get() {
+        register(&mut watchlist, at(REGISTERED_AT), account(index));
+    }
     let extra = account(MAX_WATCHED_ADDRESSES.get());
 
     let result = watchlist.register(at(VALID_UNTIL), extra, deposit_address(extra));
@@ -154,7 +157,9 @@ fn should_ignore_a_scan_of_an_account_that_is_not_watched() {
 
 #[test]
 fn should_count_the_live_registrations_and_report_the_oldest() {
-    let watchlist = watchlist_of_two_registrations_an_hour_apart();
+    let mut watchlist = Watchlist::default();
+    register(&mut watchlist, at(REGISTERED_AT), account(1));
+    register(&mut watchlist, at(REGISTERED_AT + HOUR_NANOS), account(2));
 
     assert_eq!(watchlist.live_len(at(VALID_UNTIL)), 2);
     assert_eq!(
@@ -172,21 +177,6 @@ fn should_count_the_live_registrations_and_report_the_oldest() {
         None
     );
     assert_eq!(watchlist.len(), 2);
-}
-
-fn full_watchlist() -> Watchlist {
-    let mut watchlist = Watchlist::default();
-    for index in 0..MAX_WATCHED_ADDRESSES.get() {
-        register(&mut watchlist, at(REGISTERED_AT), account(index));
-    }
-    watchlist
-}
-
-fn watchlist_of_two_registrations_an_hour_apart() -> Watchlist {
-    let mut watchlist = Watchlist::default();
-    register(&mut watchlist, at(REGISTERED_AT), account(1));
-    register(&mut watchlist, at(REGISTERED_AT + HOUR_NANOS), account(2));
-    watchlist
 }
 
 fn unscanned(account: Account) -> WatchedAddress {
