@@ -123,12 +123,9 @@ mod queued_deposits {
         let mut expected = State::try_from(valid_init_args()).unwrap();
         expected.cache_minter_public_key(crate::test_fixtures::schnorr_master_key());
         for deposit_id in 0..2 {
-            let deposit = queued_deposit(deposit_id);
             expected.process_queued_deposit(
                 deposit_id,
-                &deposit.account,
-                &deposit.address,
-                deposit.balance,
+                queued_deposit(deposit_id),
                 queued_at(deposit_id),
             );
         }

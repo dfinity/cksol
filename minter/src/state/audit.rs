@@ -1,7 +1,7 @@
 use crate::{
     runtime::CanisterRuntime,
     state::{
-        SchnorrPublicKey, State,
+        QueuedDeposit, SchnorrPublicKey, State,
         event::{Event, EventType},
     },
     storage,
@@ -50,7 +50,15 @@ fn apply_state_transition(state: &mut State, payload: &EventType, timestamp: u64
             address,
             balance,
         } => {
-            state.process_queued_deposit(*deposit_id, account, address, *balance, timestamp);
+            state.process_queued_deposit(
+                *deposit_id,
+                QueuedDeposit {
+                    account: *account,
+                    address: *address,
+                    balance: *balance,
+                },
+                timestamp,
+            );
         }
         EventType::CreditedSweep {
             signature,
