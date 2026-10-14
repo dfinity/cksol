@@ -180,6 +180,9 @@ type InitArgs = record {
     deposit_sol_required_cycles : nat64;
     solana_network : SolanaNetwork;
     nonce_accounts : vec text;
+    // The fee in lamports deducted from the minted amount of a deposit detected
+    // by the automatic flow. The automatic flow stays unavailable until it is set.
+    automatic_deposit_fee : opt Lamport;
 };
 
 // Information about the ckSOL minter canister.
@@ -192,6 +195,9 @@ type MinterInfo = record {
     balance : Lamport;
     minter_address : opt text;
     nonce_accounts : vec text;
+    // The fee in lamports deducted from the minted amount of a deposit detected
+    // by the automatic flow, once configured.
+    automatic_deposit_fee : opt Lamport;
 };
 
 // The ckSOL minter service arguments.
@@ -215,6 +221,7 @@ type UpgradeArgs = record {
     withdrawal_fee : opt Lamport;
     deposit_sol_required_cycles : opt nat64;
     nonce_accounts_to_add : opt vec text;
+    automatic_deposit_fee : opt Lamport;
 };
 
 type WithdrawSolArgs = record {

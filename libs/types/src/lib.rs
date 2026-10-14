@@ -270,4 +270,7 @@ pub struct MinterInfo {
     pub minter_address: Option<String>,
     /// The base58 addresses of the durable nonce accounts reserved for withdrawal transactions.
     pub nonce_accounts: Vec<String>,
+    /// The fee in lamports deducted from the minted amount of a deposit detected by the
+    /// automatic flow, once configured.
+    pub automatic_deposit_fee: Option<Lamport>,
 }

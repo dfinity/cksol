@@ -109,6 +109,7 @@ pub struct State {
     minimum_deposit_amount: Lamport,
     deposit_sol_required_cycles: u128,
     deposit_sol_fee: u128,
+    automatic_deposit_fee: Option<Lamport>,
     pending_deposit_sol_request_guards: BTreeSet<Account>,
     pending_withdrawal_request_guards: BTreeSet<Account>,
     deposits: Deposits,
@@ -182,6 +183,10 @@ impl State {
 
     pub fn deposit_sol_required_cycles(&self) -> u128 {
         self.deposit_sol_required_cycles
+    }
+
+    pub fn automatic_deposit_fee(&self) -> Option<Lamport> {
+        self.automatic_deposit_fee
     }
 
     pub fn deposits(&self) -> &Deposits {
@@ -329,7 +334,23 @@ impl State {
                 deposit_sol_fee: self.deposit_sol_fee,
             });
         }
+        if let Some(automatic_deposit_fee) = self.automatic_deposit_fee
+            && self.minimum_automatic_mint_before_fee() <= automatic_deposit_fee
+        {
+            return Err(InvalidStateError::AutomaticDepositFeeTooHigh {
+                automatic_deposit_fee,
+                minimum_deposit_amount: self.minimum_deposit_amount,
+                rent_exemption_threshold: RENT_EXEMPTION_THRESHOLD,
+                fee_per_signature: FEE_PER_SIGNATURE,
+            });
+        }
         Ok(())
+    }
+
+    fn minimum_automatic_mint_before_fee(&self) -> Lamport {
+        self.minimum_deposit_amount
+            .saturating_sub(RENT_EXEMPTION_THRESHOLD)
+            .saturating_sub(FEE_PER_SIGNATURE)
     }
 
     fn upgrade(
@@ -342,6 +363,7 @@ impl State {
             deposit_sol_required_cycles,
             deposit_sol_fee,
             nonce_accounts_to_add,
+            automatic_deposit_fee,
         }: UpgradeArgs,
     ) -> Result<(), InvalidStateError> {
         if let Some(sol_rpc_canister_id) = sol_rpc_canister_id {
@@ -361,6 +383,9 @@ impl State {
         }
         if let Some(deposit_sol_fee) = deposit_sol_fee {
             self.deposit_sol_fee = deposit_sol_fee as u128;
+        }
+        if let Some(automatic_deposit_fee) = automatic_deposit_fee {
+            self.automatic_deposit_fee = Some(automatic_deposit_fee);
         }
         if let Some(nonce_accounts) = nonce_accounts_to_add {
             let nonce_accounts = parse_nonce_accounts(nonce_accounts)?;
@@ -808,6 +833,12 @@ pub enum InvalidStateError {
         get_balance_cycles: u128,
         deposit_sol_fee: u128,
     },
+    AutomaticDepositFeeTooHigh {
+        automatic_deposit_fee: Lamport,
+        minimum_deposit_amount: Lamport,
+        rent_exemption_threshold: Lamport,
+        fee_per_signature: Lamport,
+    },
     InvalidNonceAccount(String),
     DuplicateNonceAccount(Address),
     NonceAccountIsWithdrawalDestination(Address),
@@ -849,6 +880,7 @@ impl TryFrom<InitArgs> for State {
             solana_network,
             deposit_sol_fee,
             nonce_accounts,
+            automatic_deposit_fee,
         }: InitArgs,
     ) -> Result<Self, Self::Error> {
         let nonce_pool = DurableNoncePool::new(parse_nonce_accounts(nonce_accounts)?)?;
@@ -863,6 +895,7 @@ impl TryFrom<InitArgs> for State {
             minimum_deposit_amount,
             deposit_sol_required_cycles: deposit_sol_required_cycles as u128,
             deposit_sol_fee: deposit_sol_fee as u128,
+            automatic_deposit_fee,
             pending_deposit_sol_request_guards: BTreeSet::new(),
             pending_withdrawal_request_guards: BTreeSet::new(),
             deposits: Deposits::default(),
