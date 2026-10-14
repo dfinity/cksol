@@ -1,12 +1,11 @@
 use crate::{
     address::{account_address, minter_public_key},
     runtime::CanisterRuntime,
-    state::{InFlightDeposit, State, WatchedAddress, WatchlistFull, mutate_state},
+    state::{InFlightDeposit, WatchedAddress, WatchlistFull, mutate_state},
     utils::{assert_valid_deposit_owner, timed_sized_map::Timestamp},
 };
 use cksol_types::{WatchDepositAddressError, WatchDepositAddressOk, WatchDepositAddressStatus};
 use icrc_ledger_types::icrc1::account::Account;
-use solana_address::Address;
 
 #[cfg(test)]
 mod tests;
@@ -27,7 +26,19 @@ pub fn watch_deposit_address<R: CanisterRuntime>(
                 "the automatic deposit fee is not configured".to_string(),
             )
         })?;
-        let status = status_after_registration(state, now, account, address)?;
+        let status = match state.deposits().in_flight(&account) {
+            Some(InFlightDeposit::Processing(deposit_id)) => {
+                WatchDepositAddressStatus::Detected { deposit_id }
+            }
+            Some(InFlightDeposit::Quarantined(deposit_id)) => {
+                return Err(WatchDepositAddressError::Quarantined { deposit_id });
+            }
+            None => state
+                .watchlist_mut()
+                .register(now, account, address)
+                .map_err(|WatchlistFull| WatchDepositAddressError::TooManyWatchedAddresses)?
+                .into(),
+        };
         Ok(WatchDepositAddressOk {
             address: address.into(),
             minimum_deposit_amount: state.minimum_deposit_amount(),
@@ -38,33 +49,13 @@ pub fn watch_deposit_address<R: CanisterRuntime>(
     })
 }
 
-fn status_after_registration(
-    state: &mut State,
-    now: Timestamp,
-    account: Account,
-    address: Address,
-) -> Result<WatchDepositAddressStatus, WatchDepositAddressError> {
-    match state.deposits().in_flight(&account) {
-        Some(InFlightDeposit::Processing(deposit_id)) => {
-            return Ok(WatchDepositAddressStatus::Detected { deposit_id });
+impl From<WatchedAddress> for WatchDepositAddressStatus {
+    fn from(watched: WatchedAddress) -> Self {
+        WatchDepositAddressStatus::Watching {
+            valid_until: watched.valid_until.as_nanos(),
+            scan_count: watched.scan_count,
+            last_scanned_at: watched.last_scanned_at.map(Timestamp::as_nanos),
+            next_scan_at: watched.next_scan_at.map(Timestamp::as_nanos),
         }
-        Some(InFlightDeposit::Quarantined(deposit_id)) => {
-            return Err(WatchDepositAddressError::Quarantined { deposit_id });
-        }
-        None => {}
-    }
-    state
-        .watchlist_mut()
-        .register(now, account, address)
-        .map(watching)
-        .map_err(|WatchlistFull| WatchDepositAddressError::TooManyWatchedAddresses)
-}
-
-fn watching(watched: WatchedAddress) -> WatchDepositAddressStatus {
-    WatchDepositAddressStatus::Watching {
-        valid_until: watched.valid_until.as_nanos(),
-        scan_count: watched.scan_count,
-        last_scanned_at: watched.last_scanned_at.map(Timestamp::as_nanos),
-        next_scan_at: watched.next_scan_at.map(Timestamp::as_nanos),
     }
 }
