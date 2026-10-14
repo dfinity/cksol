@@ -9,6 +9,7 @@ use crate::{
         mutate_state, read_state, watchlist::MAX_WATCHED_ADDRESSES,
     },
     storage::{ScanOutcome, record_deposit_address_scans},
+    utils::timed_sized_map::Timestamp,
 };
 use canlog::log;
 use cksol_types::Lamport;
@@ -41,7 +42,7 @@ pub async fn scan_watched_addresses<R: CanisterRuntime>(runtime: R) {
         Err(_) => return,
     };
 
-    let now = runtime.time();
+    let now = Timestamp::from_nanos(runtime.time());
     let due = mutate_state(|state| {
         state.watchlist_mut().evict_expired(now);
         state
@@ -70,7 +71,7 @@ pub async fn scan_watched_addresses<R: CanisterRuntime>(runtime: R) {
         futures::future::join_all(chunks.iter().map(|chunk| read_balances(&runtime, chunk))).await;
 
     let scan = Scan {
-        scanned_at: runtime.time(),
+        scanned_at: Timestamp::from_nanos(runtime.time()),
         automatic_deposit_fee,
     };
     for (chunk, read) in chunks.into_iter().zip(reads) {
@@ -107,7 +108,7 @@ async fn read_balances<R: CanisterRuntime>(
 /// automatic deposit fee in force, which a deposit detected by the tick records.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Scan {
-    scanned_at: u64,
+    scanned_at: Timestamp,
     automatic_deposit_fee: Lamport,
 }
 
@@ -148,7 +149,7 @@ fn apply_balance_read<R: CanisterRuntime>(
                 balance,
                 automatic: Some(AutomaticDeposit {
                     fee: automatic_deposit_fee,
-                    valid_until: watched.valid_until,
+                    valid_until: watched.valid_until.as_nanos(),
                 }),
             },
         );
@@ -156,7 +157,7 @@ fn apply_balance_read<R: CanisterRuntime>(
     })
 }
 
-fn record_failed_read(scanned_at: u64, chunk: &[WatchedAddress]) {
+fn record_failed_read(scanned_at: Timestamp, chunk: &[WatchedAddress]) {
     mutate_state(|state| {
         for watched in chunk {
             if is_same_registration(state, scanned_at, watched) {
@@ -168,7 +169,7 @@ fn record_failed_read(scanned_at: u64, chunk: &[WatchedAddress]) {
     });
 }
 
-fn is_same_registration(state: &State, now: u64, watched: &WatchedAddress) -> bool {
+fn is_same_registration(state: &State, now: Timestamp, watched: &WatchedAddress) -> bool {
     state
         .watchlist()
         .get(now, &watched.account)

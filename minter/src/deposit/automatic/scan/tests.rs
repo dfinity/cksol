@@ -10,7 +10,7 @@ use crate::{
     storage::{ScanOutcome, deposit_address_scan_count},
     test_fixtures::{
         AUTOMATIC_DEPOSIT_FEE, EventsAssert, MINIMUM_DEPOSIT_AMOUNT, MINUTE_NANOS, REGISTERED_AT,
-        WATCH_WINDOW_NANOS, account, deposit_address, flow::deposit::DepositFlow,
+        WATCH_WINDOW_NANOS, account, at, deposit_address, flow::deposit::DepositFlow,
         init_schnorr_master_key, init_state, init_state_with_args, queued_deposit_of,
         runtime::TestCanisterRuntime, valid_init_args, watch,
     },
@@ -37,7 +37,7 @@ async fn should_return_early_without_due_addresses() {
 #[tokio::test]
 async fn should_return_early_if_task_already_active() {
     setup();
-    watch(REGISTERED_AT, account(1));
+    watch(at(REGISTERED_AT), account(1));
     mutate_state(|s| {
         s.active_tasks_mut().insert(TaskType::ScanWatchedAddresses);
     });
@@ -51,7 +51,7 @@ async fn should_return_early_if_task_already_active() {
 #[tokio::test]
 async fn should_queue_a_deposit_reaching_the_minimum_with_the_fee_in_force() {
     setup();
-    watch(REGISTERED_AT, account(1));
+    watch(at(REGISTERED_AT), account(1));
     let runtime =
         runtime_at(TICK_AT).add_get_multiple_accounts_response(&[Some(MINIMUM_DEPOSIT_AMOUNT)]);
 
@@ -89,8 +89,8 @@ async fn should_queue_a_deposit_reaching_the_minimum_with_the_fee_in_force() {
 #[tokio::test]
 async fn should_advance_the_schedule_below_the_minimum_and_treat_a_missing_account_as_empty() {
     setup();
-    watch(REGISTERED_AT, account(1));
-    watch(REGISTERED_AT, account(2));
+    watch(at(REGISTERED_AT), account(1));
+    watch(at(REGISTERED_AT), account(2));
     let runtime = runtime_at(TICK_AT)
         .add_get_multiple_accounts_response(&[Some(MINIMUM_DEPOSIT_AMOUNT - 1), None]);
 
@@ -100,14 +100,14 @@ async fn should_advance_the_schedule_below_the_minimum_and_treat_a_missing_accou
     let scanned_at = TICK_AT + 1;
     for account in [account(1), account(2)] {
         assert_eq!(
-            read_state(|s| s.watchlist().get(scanned_at, &account)),
+            read_state(|s| s.watchlist().get(at(scanned_at), &account)),
             Some(WatchedAddress {
                 account,
                 address: deposit_address(account),
-                valid_until: VALID_UNTIL,
+                valid_until: at(VALID_UNTIL),
                 scan_count: 1,
-                last_scanned_at: Some(scanned_at),
-                next_scan_at: Some(scanned_at + MINUTE_NANOS),
+                last_scanned_at: Some(at(scanned_at)),
+                next_scan_at: Some(at(scanned_at + MINUTE_NANOS)),
             })
         );
     }
@@ -117,9 +117,9 @@ async fn should_advance_the_schedule_below_the_minimum_and_treat_a_missing_accou
 #[tokio::test]
 async fn should_read_the_addresses_of_the_due_registrations_only() {
     setup();
-    watch(REGISTERED_AT, account(1));
-    watch(REGISTERED_AT, account(2));
-    mutate_state(|s| s.watchlist_mut().record_scan(TICK_AT - 1, &account(2)));
+    watch(at(REGISTERED_AT), account(1));
+    watch(at(REGISTERED_AT), account(2));
+    mutate_state(|s| s.watchlist_mut().record_scan(at(TICK_AT - 1), &account(2)));
     let runtime = runtime_at(TICK_AT).add_get_multiple_accounts_response(&[Some(0)]);
 
     scan_watched_addresses(runtime.clone()).await;
@@ -133,8 +133,8 @@ async fn should_read_the_addresses_of_the_due_registrations_only() {
 #[tokio::test]
 async fn should_skip_the_accounts_with_a_deposit_sol_call_in_progress() {
     setup();
-    watch(REGISTERED_AT, account(1));
-    watch(REGISTERED_AT, account(2));
+    watch(at(REGISTERED_AT), account(1));
+    watch(at(REGISTERED_AT), account(2));
     let _guard = deposit_sol_guard(account(1)).unwrap();
     let runtime = runtime_at(TICK_AT).add_get_multiple_accounts_response(&[Some(0)]);
 
@@ -153,7 +153,7 @@ async fn should_skip_the_tick_while_the_automatic_deposit_fee_is_not_configured(
         ..valid_init_args()
     });
     init_schnorr_master_key();
-    let watched = watch(REGISTERED_AT, account(1));
+    let watched = watch(at(REGISTERED_AT), account(1));
     let runtime =
         runtime_at(TICK_AT).add_get_multiple_accounts_response(&[Some(MINIMUM_DEPOSIT_AMOUNT)]);
 
@@ -162,7 +162,7 @@ async fn should_skip_the_tick_while_the_automatic_deposit_fee_is_not_configured(
     assert!(runtime.sent_update_calls().is_empty());
     EventsAssert::assert_no_events_recorded();
     assert_eq!(
-        read_state(|s| s.watchlist().get(TICK_AT, &account(1))),
+        read_state(|s| s.watchlist().get(at(TICK_AT), &account(1))),
         Some(watched)
     );
 }
@@ -170,7 +170,7 @@ async fn should_skip_the_tick_while_the_automatic_deposit_fee_is_not_configured(
 #[tokio::test]
 async fn should_evict_expired_registrations_at_each_tick() {
     setup();
-    watch(REGISTERED_AT, account(1));
+    watch(at(REGISTERED_AT), account(1));
     let runtime = runtime_at(VALID_UNTIL + 1);
 
     scan_watched_addresses(runtime.clone()).await;
@@ -182,7 +182,7 @@ async fn should_evict_expired_registrations_at_each_tick() {
 #[tokio::test]
 async fn should_advance_the_schedule_when_the_call_fails() {
     setup();
-    watch(REGISTERED_AT, account(1));
+    watch(at(REGISTERED_AT), account(1));
     let runtime = runtime_at(TICK_AT).add_stub_error(IcError::CallPerformFailed);
 
     scan_watched_addresses(runtime.clone()).await;
@@ -190,14 +190,14 @@ async fn should_advance_the_schedule_when_the_call_fails() {
     EventsAssert::assert_no_events_recorded();
     let scanned_at = TICK_AT + 1;
     assert_eq!(
-        read_state(|s| s.watchlist().get(scanned_at, &account(1))),
+        read_state(|s| s.watchlist().get(at(scanned_at), &account(1))),
         Some(WatchedAddress {
             account: account(1),
             address: deposit_address(account(1)),
-            valid_until: VALID_UNTIL,
+            valid_until: at(VALID_UNTIL),
             scan_count: 1,
-            last_scanned_at: Some(scanned_at),
-            next_scan_at: Some(scanned_at + MINUTE_NANOS),
+            last_scanned_at: Some(at(scanned_at)),
+            next_scan_at: Some(at(scanned_at + MINUTE_NANOS)),
         })
     );
     assert_eq!(deposit_address_scan_count(ScanOutcome::Failed), 1);
@@ -208,7 +208,7 @@ async fn should_read_at_most_a_full_watchlist_in_chunks_of_one_call_each() {
     setup();
     let total = MAX_ADDRESSES_PER_GET_MULTIPLE_ACCOUNTS * MAX_CONCURRENT_RPC_CALLS;
     for index in 0..total {
-        watch(REGISTERED_AT, account(index));
+        watch(at(REGISTERED_AT), account(index));
     }
     let mut runtime = runtime_at(TICK_AT);
     for _ in 0..MAX_CONCURRENT_RPC_CALLS {
@@ -235,16 +235,16 @@ async fn should_read_at_most_a_full_watchlist_in_chunks_of_one_call_each() {
 #[test]
 fn should_discard_a_read_of_a_registration_replaced_or_expired_meanwhile() {
     setup();
-    let stale = watch(REGISTERED_AT, account(1));
+    let stale = watch(at(REGISTERED_AT), account(1));
     mutate_state(|s| s.watchlist_mut().remove(&account(1)));
-    let renewed = watch(REGISTERED_AT + MINUTE_NANOS, account(1));
+    let renewed = watch(at(REGISTERED_AT + MINUTE_NANOS), account(1));
     let runtime = runtime_at(TICK_AT);
 
     let after_replacement =
         apply_balance_read(&runtime, scan_at(TICK_AT), &stale, MINIMUM_DEPOSIT_AMOUNT);
     let after_expiry = apply_balance_read(
         &runtime,
-        scan_at(renewed.valid_until + 1),
+        scan_at(renewed.valid_until.as_nanos() + 1),
         &renewed,
         MINIMUM_DEPOSIT_AMOUNT,
     );
@@ -253,7 +253,7 @@ fn should_discard_a_read_of_a_registration_replaced_or_expired_meanwhile() {
     assert_eq!(after_expiry, None);
     EventsAssert::assert_no_events_recorded();
     assert_eq!(
-        read_state(|s| s.watchlist().get(TICK_AT, &account(1))),
+        read_state(|s| s.watchlist().get(at(TICK_AT), &account(1))),
         Some(renewed)
     );
 }
@@ -261,11 +261,11 @@ fn should_discard_a_read_of_a_registration_replaced_or_expired_meanwhile() {
 #[test]
 fn should_discard_a_read_of_an_account_whose_deposit_is_in_flight() {
     setup();
-    let watched = watch(REGISTERED_AT, account(1));
+    let watched = watch(at(REGISTERED_AT), account(1));
     let deposit = DepositFlow::queue(account(1), MINIMUM_DEPOSIT_AMOUNT);
     mutate_state(|s| {
         s.watchlist_mut()
-            .register(REGISTERED_AT, account(1), deposit.address)
+            .register(at(REGISTERED_AT), account(1), deposit.address)
             .unwrap()
     });
     let events_before = EventsAssert::from_recorded();
@@ -292,7 +292,7 @@ fn setup() {
 
 fn scan_at(scanned_at: u64) -> Scan {
     Scan {
-        scanned_at,
+        scanned_at: at(scanned_at),
         automatic_deposit_fee: AUTOMATIC_DEPOSIT_FEE,
     }
 }
