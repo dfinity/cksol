@@ -409,11 +409,11 @@ impl DashboardTemplate {
             .map(|watched| DashboardWatchedAddress {
                 account: watched.account.to_string(),
                 address: watched.address.to_string(),
-                valid_until: watched.valid_until.to_string(),
+                valid_until: watched.valid_until.as_nanos().to_string(),
                 scan_count: watched.scan_count.to_string(),
                 last_scanned_at: watched
                     .last_scanned_at
-                    .map_or_else(|| "-".to_string(), |at| at.to_string()),
+                    .map_or_else(|| "-".to_string(), |at| at.as_nanos().to_string()),
             })
             .collect();
         let watched_deposit_addresses_table = DashboardPaginatedTable::from_items(

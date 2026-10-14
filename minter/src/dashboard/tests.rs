@@ -2,7 +2,7 @@ use crate::dashboard::{DashboardPaginationParameters, DashboardTemplate, lamport
 use crate::state::{AutomaticDeposit, mutate_state, read_state};
 use crate::test_fixtures::{
     AUTOMATIC_DEPOSIT_FEE, MINIMUM_DEPOSIT_AMOUNT, MINIMUM_WITHDRAWAL_AMOUNT, REGISTERED_AT,
-    WATCH_WINDOW_NANOS, WITHDRAWAL_FEE, account, deposit_address,
+    WATCH_WINDOW_NANOS, WITHDRAWAL_FEE, account, at, deposit_address,
     events::{
         accept_withdrawal, fail_transaction, quarantine_sweep, queue_deposit, submit_sweep,
         submit_withdrawal, succeed_transaction,
@@ -111,11 +111,11 @@ fn should_display_the_collected_automatic_deposit_fees() {
 fn should_display_watched_deposit_addresses_by_ascending_window_end() {
     init_state();
     init_schnorr_master_key();
-    watch(REGISTERED_AT + 1, account(1));
-    watch(REGISTERED_AT, account(2));
+    watch(at(REGISTERED_AT + 1), account(1));
+    watch(at(REGISTERED_AT), account(2));
     mutate_state(|s| {
         s.watchlist_mut()
-            .record_scan(REGISTERED_AT + 60, &account(2));
+            .record_scan(at(REGISTERED_AT + 60), &account(2));
     });
 
     DashboardAssert::assert_that(dashboard())
@@ -154,7 +154,7 @@ fn should_paginate_watched_deposit_addresses_across_multiple_pages() {
     init_state();
     init_schnorr_master_key();
     for index in 0..DEFAULT_PAGE_SIZE + 1 {
-        watch(REGISTERED_AT, account(index));
+        watch(at(REGISTERED_AT), account(index));
     }
 
     let page1 = dashboard();
