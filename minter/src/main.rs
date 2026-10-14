@@ -80,7 +80,7 @@ fn deposit_sol_status(deposit_id: DepositSolId) -> DepositSolStatus {
 fn watch_deposit_address(
     args: WatchDepositAddressArgs,
 ) -> Result<WatchDepositAddressOk, WatchDepositAddressError> {
-    let account = resolve_account(None, args.subaccount);
+    let account = assert_non_anonymous_account(None, args.subaccount);
     cksol_minter::deposit::automatic::watch_deposit_address(&IcCanisterRuntime::new(), account)
 }
 
