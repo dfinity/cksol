@@ -93,7 +93,7 @@ fn should_report_the_stored_registration_without_extending_it() {
             valid_until: REGISTERED_AT + WATCH_WINDOW_NANOS,
             scan_count: 1,
             last_scanned_at: Some(REGISTERED_AT + 1),
-            next_scan_at: Some(REGISTERED_AT + 1 + MINUTE_NANOS),
+            next_scan_at: Some(REGISTERED_AT + MINUTE_NANOS),
         }
     );
     assert_eq!(second.address, first.address);
