@@ -93,7 +93,7 @@ impl<K: Ord + Clone, V> TimedSizedMap<K, V> {
     ) -> Self {
         let mut map = Self::new(ttl, capacity);
         for (key, entry) in entries {
-            map.index(&key, entry.expires_at);
+            map.enqueue_by_expiry(&key, entry.expires_at);
             assert!(
                 map.entries.insert(key, entry).is_none(),
                 "BUG: from_ordered_entries received a duplicate key"
@@ -148,7 +148,7 @@ impl<K: Ord + Clone, V> TimedSizedMap<K, V> {
             value: entry.value,
             expires_at: entry.expires_at.min(self.expiry(now)),
         };
-        self.index(&key, entry.expires_at);
+        self.enqueue_by_expiry(&key, entry.expires_at);
         self.entries.insert(key, entry);
         Ok(evicted)
     }
@@ -249,7 +249,7 @@ impl<K: Ord + Clone, V> TimedSizedMap<K, V> {
         self.by_expiry.keys().next().copied()
     }
 
-    fn index(&mut self, key: &K, expires_at: Timestamp) {
+    fn enqueue_by_expiry(&mut self, key: &K, expires_at: Timestamp) {
         self.by_expiry
             .entry(expires_at)
             .or_default()
