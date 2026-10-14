@@ -761,6 +761,7 @@ mod state_from_init_args {
                 pending_deposit_sol_request_guards: BTreeSet::new(),
                 pending_withdrawal_request_guards: BTreeSet::new(),
                 deposits: Deposits::default(),
+                watchlist: Watchlist::default(),
                 pending_withdrawal_requests: BTreeMap::new(),
                 created_withdrawal_requests: BTreeMap::new(),
                 sent_withdrawal_requests: BTreeMap::new(),
