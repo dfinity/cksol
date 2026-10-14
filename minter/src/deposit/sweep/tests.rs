@@ -1,11 +1,12 @@
 use crate::{
     constants::{GET_BALANCE_CYCLES, RENT_EXEMPTION_THRESHOLD},
     deposit::sweep::{deposit_sol, deposit_status},
-    state::{event::EventType, read_state},
+    state::{AutomaticDeposit, event::EventType, read_state},
     storage::with_event_iter,
     test_fixtures::{
-        DEPOSIT_SOL_FEE, DEPOSIT_SOL_REQUIRED_CYCLES, EventsAssert, MINIMUM_DEPOSIT_AMOUNT,
-        MINTER_ACCOUNT, account, deposit::DEPOSITOR_ACCOUNT, events, init_schnorr_master_key,
+        AUTOMATIC_DEPOSIT_FEE, DEPOSIT_SOL_FEE, DEPOSIT_SOL_REQUIRED_CYCLES, EventsAssert,
+        MINIMUM_DEPOSIT_AMOUNT, MINTER_ACCOUNT, REGISTERED_AT, WATCH_WINDOW_NANOS, account,
+        deposit::DEPOSITOR_ACCOUNT, events, flow::deposit::DepositFlow, init_schnorr_master_key,
         init_state, queued_deposit_of, runtime::TestCanisterRuntime, signature,
     },
 };
@@ -16,6 +17,7 @@ use ic_canister_runtime::IcError;
 use ic_cdk::call::RejectCode;
 use icrc_ledger_types::icrc1::account::Account;
 use sol_rpc_types::MultiRpcResult;
+use tokio::join;
 
 const GET_BALANCE_REFUND: u128 = GET_BALANCE_CYCLES / 2;
 const EXPLICIT_DEFAULT_SUBACCOUNT: Account = Account {
@@ -149,6 +151,59 @@ async fn should_queue_deposits_from_minimum_with_sequential_ids() {
             MINIMUM_DEPOSIT_AMOUNT + 1 - RENT_EXEMPTION_THRESHOLD,
         ))
         .assert_no_more_events();
+}
+
+#[tokio::test]
+async fn should_return_the_deposit_a_scan_queued_during_the_balance_read_and_charge_the_read_only()
+{
+    let runtime = runtime().add_get_balance_response(MINIMUM_DEPOSIT_AMOUNT);
+
+    assert_yields_to_the_deposit_queued_by_a_scan_during_the_read(runtime).await;
+}
+
+#[tokio::test]
+async fn should_return_the_deposit_a_scan_queued_during_a_rejected_balance_read_and_charge_the_read_only()
+ {
+    let runtime = runtime().add_stub_error(IcError::CallRejected {
+        code: RejectCode::SysTransient,
+        message: "SOL RPC canister is stopped".to_string(),
+    });
+
+    assert_yields_to_the_deposit_queued_by_a_scan_during_the_read(runtime).await;
+}
+
+async fn assert_yields_to_the_deposit_queued_by_a_scan_during_the_read(
+    runtime: TestCanisterRuntime,
+) {
+    init_state();
+    init_schnorr_master_key();
+    let automatic = AutomaticDeposit {
+        fee: AUTOMATIC_DEPOSIT_FEE,
+        valid_until: REGISTERED_AT + WATCH_WINDOW_NANOS,
+    };
+
+    let (result, scanned) = join!(deposit_sol(&runtime, DEPOSITOR_ACCOUNT), async {
+        DepositFlow::queue_automatic(DEPOSITOR_ACCOUNT, MINIMUM_DEPOSIT_AMOUNT, automatic)
+    });
+
+    assert_eq!(result, Ok(scanned.deposit_id));
+    assert_eq!(
+        runtime.msg_cycles_accepted(),
+        [GET_BALANCE_CYCLES - GET_BALANCE_REFUND]
+    );
+    EventsAssert::from_recorded()
+        .expect_event_eq(EventType::QueuedDeposit {
+            deposit_id: scanned.deposit_id,
+            account: DEPOSITOR_ACCOUNT,
+            address: scanned.address,
+            balance: queued_deposit_of(DEPOSITOR_ACCOUNT, scanned.sweepable_amount).balance,
+            automatic: Some(automatic),
+        })
+        .assert_no_more_events();
+    assert_eq!(
+        read_state(|state| state.deposits().in_flight_id(&DEPOSITOR_ACCOUNT)),
+        Some(scanned.deposit_id)
+    );
 }
 
 #[tokio::test]
