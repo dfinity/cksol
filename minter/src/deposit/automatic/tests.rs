@@ -101,6 +101,17 @@ fn should_report_the_stored_registration_without_extending_it() {
 }
 
 #[test]
+fn should_report_the_same_registration_before_the_first_scan() {
+    setup();
+    let first = watch_deposit_address(&runtime(), account(1)).unwrap();
+
+    let second =
+        watch_deposit_address(&runtime_at(REGISTERED_AT + HOUR_NANOS), account(1)).unwrap();
+
+    assert_eq!(second, first);
+}
+
+#[test]
 fn should_register_anew_once_the_window_has_passed() {
     setup();
     watch_deposit_address(&runtime(), account(1)).unwrap();
