@@ -1244,13 +1244,14 @@ mod watch_deposit_address_tests {
             })
             .await;
         assert_eq!(registration.address, deposit_address);
+        let minter_info = setup.minter().get_minter_info().await;
         assert_eq!(
             registration.minimum_deposit_amount,
-            Setup::DEFAULT_MINIMUM_DEPOSIT_AMOUNT
+            minter_info.minimum_deposit_amount
         );
         assert_eq!(
-            registration.automatic_deposit_fee,
-            Setup::DEFAULT_AUTOMATIC_DEPOSIT_FEE
+            Some(registration.automatic_deposit_fee),
+            minter_info.automatic_deposit_fee
         );
         assert_eq!(registration.latest_deposit_id, None);
         let (valid_until, next_scan_at) = assert_matches!(
