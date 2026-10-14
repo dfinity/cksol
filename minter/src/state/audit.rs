@@ -97,6 +97,9 @@ fn apply_state_transition(state: &mut State, payload: &EventType, timestamp: u64
         } => {
             state.process_transaction_created(burn_indices, nonce_account, *nonce_value);
         }
+        EventType::WatchedDepositAddresses(snapshot) => {
+            state.restore_watchlist(snapshot);
+        }
     }
 }
 

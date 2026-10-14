@@ -8,14 +8,14 @@ use crate::{
         DepositBalance,
         event::{
             CreditedDeposit, Event, EventType, Signer, TransactionPurpose, VersionedMessage,
-            WithdrawalRequest,
+            WatchedDepositAddress, WatchlistSnapshot, WithdrawalRequest,
         },
     },
 };
 use cksol_types_internal::event::{
     CreditedDeposit as CandidCreditedDeposit, Event as CandidEvent, EventType as CandidEventType,
     Signer as CandidSigner, TransactionPurpose as CandidTransactionPurpose,
-    VersionedTransactionMessage,
+    VersionedTransactionMessage, WatchedDepositAddress as CandidWatchedDepositAddress,
 };
 use ic_ed25519::PublicKey;
 use sol_rpc_types::{
@@ -122,6 +122,17 @@ impl From<EventType> for CandidEventType {
                 nonce_account: CandidAddress::from(nonce_account),
                 nonce_value: CandidHash::from(nonce_value),
             },
+            EventType::WatchedDepositAddresses(snapshot) => {
+                CandidEventType::WatchedDepositAddresses {
+                    window_nanos: snapshot.window_nanos,
+                    capacity: snapshot.capacity,
+                    entries: snapshot
+                        .entries
+                        .into_iter()
+                        .map(CandidWatchedDepositAddress::from)
+                        .collect(),
+                }
+            }
         }
     }
 }
@@ -281,7 +292,43 @@ impl TryFrom<CandidEventType> for EventType {
                 nonce_account: Address::from(nonce_account),
                 nonce_value: Hash::from(nonce_value),
             },
+            CandidEventType::WatchedDepositAddresses {
+                window_nanos,
+                capacity,
+                entries,
+            } => EventType::WatchedDepositAddresses(WatchlistSnapshot {
+                window_nanos,
+                capacity,
+                entries: entries
+                    .into_iter()
+                    .map(WatchedDepositAddress::from)
+                    .collect(),
+            }),
         })
+    }
+}
+
+impl From<WatchedDepositAddress> for CandidWatchedDepositAddress {
+    fn from(entry: WatchedDepositAddress) -> Self {
+        CandidWatchedDepositAddress {
+            account: entry.account,
+            address: CandidAddress::from(entry.address),
+            valid_until: entry.valid_until,
+            scan_count: entry.scan_count,
+            last_scanned_at: entry.last_scanned_at,
+        }
+    }
+}
+
+impl From<CandidWatchedDepositAddress> for WatchedDepositAddress {
+    fn from(entry: CandidWatchedDepositAddress) -> Self {
+        WatchedDepositAddress {
+            account: entry.account,
+            address: Address::from(entry.address),
+            valid_until: entry.valid_until,
+            scan_count: entry.scan_count,
+            last_scanned_at: entry.last_scanned_at,
+        }
     }
 }
 

@@ -4,8 +4,9 @@ use candid::{Nat, Principal};
 use cksol_int_tests::{
     CkSolMinter, Setup, SetupBuilder,
     fixtures::{
-        DEFAULT_CALLER_ACCOUNT, DEFAULT_CALLER_DEPOSIT_ADDRESS, DEPOSIT_AMOUNT, MINTER_ADDRESS,
-        MockBuilder, RENT_EXEMPTION_THRESHOLD, SharedMockHttpOutcalls, WATCH_WINDOW_NANOS,
+        DEFAULT_CALLER_ACCOUNT, DEFAULT_CALLER_DEPOSIT_ADDRESS, DEPOSIT_AMOUNT,
+        MAX_WATCHED_ADDRESSES, MINTER_ADDRESS, MockBuilder, RENT_EXEMPTION_THRESHOLD,
+        SharedMockHttpOutcalls, WATCH_WINDOW_NANOS,
     },
     validator::FEE_PER_SIGNATURE,
 };
@@ -16,7 +17,7 @@ use cksol_types::{
 };
 use cksol_types_internal::{
     UpgradeArgs,
-    event::{EventType, TransactionPurpose},
+    event::{EventType, TransactionPurpose, WatchedDepositAddress},
     log::Priority,
 };
 use icrc_ledger_types::icrc1::account::{Account, Subaccount};
@@ -275,9 +276,18 @@ mod lifecycle {
                     .count()
                     <= 1
             );
+            check!(
+                events
+                    .iter()
+                    .filter(|e| matches!(e, EventType::WatchedDepositAddresses { .. }))
+                    .count()
+                    == 1
+            );
             check!(events[1..].iter().all(|e| matches!(
                 e,
-                EventType::Upgrade(_) | EventType::MinterPublicKeyFetched { .. }
+                EventType::Upgrade(_)
+                    | EventType::MinterPublicKeyFetched { .. }
+                    | EventType::WatchedDepositAddresses { .. }
             )));
         });
 
@@ -1311,6 +1321,55 @@ mod automatic_deposit_sol_tests {
             registration.status,
             WatchDepositAddressStatus::Watching { .. }
         );
+
+        setup.drop().await;
+    }
+
+    #[tokio::test]
+    async fn should_restore_the_watchlist_across_an_upgrade() {
+        let setup = SetupBuilder::new().build().await;
+        let registration = setup
+            .minter()
+            .watch_deposit_address(None)
+            .await
+            .expect("watch_deposit_address should register the caller");
+
+        setup
+            .minter()
+            .upgrade(UpgradeArgs::default())
+            .await
+            .expect("upgrade should succeed");
+
+        let restored = setup
+            .minter()
+            .watch_deposit_address(None)
+            .await
+            .expect("watch_deposit_address should report the restored registration");
+        assert_eq!(restored, registration);
+        let valid_until = assert_matches!(
+            registration.status,
+            WatchDepositAddressStatus::Watching { valid_until, .. } => valid_until
+        );
+        setup.minter().assert_that_events().await.satisfy(|events| {
+            let snapshots: Vec<&EventType> = events
+                .iter()
+                .filter(|e| matches!(e, EventType::WatchedDepositAddresses { .. }))
+                .collect();
+            check!(
+                snapshots
+                    == [&EventType::WatchedDepositAddresses {
+                        window_nanos: WATCH_WINDOW_NANOS,
+                        capacity: MAX_WATCHED_ADDRESSES,
+                        entries: vec![WatchedDepositAddress {
+                            account: DEFAULT_CALLER_ACCOUNT,
+                            address: DEFAULT_CALLER_DEPOSIT_ADDRESS.parse().unwrap(),
+                            valid_until,
+                            scan_count: 0,
+                            last_scanned_at: None,
+                        }],
+                    }]
+            );
+        });
 
         setup.drop().await;
     }
