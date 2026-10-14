@@ -4,10 +4,10 @@ use crate::{
     rpc::{BlockHeight, FetchedTransaction},
     sol_transfer::build_batch_withdrawal_message,
     state::{
-        DepositBalance, QueuedDeposit, SchnorrPublicKey, State, Sweep, WatchedAddress, Watchlist,
+        DepositBalance, QueuedDeposit, SchnorrPublicKey, State, Sweep, WATCH_WINDOW,
+        WatchedAddress, Watchlist,
         event::{Event, EventType, VersionedMessage},
         init_once_state, mutate_state,
-        watchlist::WATCH_WINDOW,
     },
     storage::with_event_iter,
     utils::timed_sized_map::Timestamp,

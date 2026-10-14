@@ -40,7 +40,7 @@ pub mod audit;
 mod deposits;
 pub mod event;
 mod nonce_pool;
-pub(crate) mod watchlist;
+mod watchlist;
 
 pub use deposits::{
     DepositBalance, Deposits, InFlightDeposit, MintedSweep, PendingMint, QuarantineCause,
@@ -48,7 +48,9 @@ pub use deposits::{
     SweepSettlementError, Sweeps, SweptDeposit, Transfer, UnreadableOutcome,
 };
 pub use nonce_pool::{DurableNoncePool, NoncePoolError, NonceRead};
-pub use watchlist::{WatchedAddress, Watchlist, WatchlistFull};
+pub use watchlist::{
+    MAX_WATCHED_ADDRESSES, WATCH_WINDOW, WatchedAddress, Watchlist, WatchlistFull,
+};
 
 thread_local! {
     static STATE: RefCell<Option<State>> = RefCell::default();
