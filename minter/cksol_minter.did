@@ -452,6 +452,8 @@ type WatchedDepositAddress = record {
     address: Address;
     // The end of the registration window, in nanoseconds since the epoch.
     valid_until: nat64;
+    // The start of the scan schedule, in nanoseconds since the epoch.
+    scheduled_from: nat64;
     // The number of scans of the deposit address so far.
     scan_count: nat32;
     // The time of the last scan, in nanoseconds since the epoch, if any.

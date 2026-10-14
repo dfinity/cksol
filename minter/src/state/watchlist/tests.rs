@@ -296,6 +296,7 @@ fn should_keep_expired_registrations_and_exceed_the_capacity_when_rebuilding() {
             account: account(index),
             address: deposit_address(account(index)),
             valid_until: VALID_UNTIL,
+            scheduled_from: REGISTERED_AT,
             scan_count: 3,
             last_scanned_at: Some(REGISTERED_AT + HOUR_NANOS),
         })
@@ -319,7 +320,7 @@ fn should_keep_expired_registrations_and_exceed_the_capacity_when_rebuilding() {
             valid_until: at(VALID_UNTIL),
             scan_count: 3,
             last_scanned_at: Some(at(REGISTERED_AT + HOUR_NANOS)),
-            next_scan_at: Some(at(REGISTERED_AT + HOUR_NANOS + 2 * MINUTE_NANOS)),
+            next_scan_at: Some(at(REGISTERED_AT + 90 * MINUTE_NANOS)),
         })
     );
 }

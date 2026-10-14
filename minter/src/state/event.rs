@@ -258,10 +258,13 @@ pub struct WatchedDepositAddress {
     /// The end of the registration window, in nanoseconds since the epoch.
     #[n(2)]
     pub valid_until: u64,
+    /// The start of the scan schedule, in nanoseconds since the epoch.
     #[n(3)]
+    pub scheduled_from: u64,
+    #[n(4)]
     pub scan_count: u32,
     /// The time of the last scan, in nanoseconds since the epoch, if any.
-    #[n(4)]
+    #[n(5)]
     pub last_scanned_at: Option<u64>,
 }
 

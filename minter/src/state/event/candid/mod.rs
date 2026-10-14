@@ -314,6 +314,7 @@ impl From<WatchedDepositAddress> for CandidWatchedDepositAddress {
             account: entry.account,
             address: CandidAddress::from(entry.address),
             valid_until: entry.valid_until,
+            scheduled_from: entry.scheduled_from,
             scan_count: entry.scan_count,
             last_scanned_at: entry.last_scanned_at,
         }
@@ -326,6 +327,7 @@ impl From<CandidWatchedDepositAddress> for WatchedDepositAddress {
             account: entry.account,
             address: Address::from(entry.address),
             valid_until: entry.valid_until,
+            scheduled_from: entry.scheduled_from,
             scan_count: entry.scan_count,
             last_scanned_at: entry.last_scanned_at,
         }

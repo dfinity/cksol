@@ -1698,15 +1698,17 @@ pub mod arb {
             arb_account(),
             arb_address(),
             any::<u64>(),
+            any::<u64>(),
             any::<u32>(),
             prop::option::of(any::<u64>()),
         )
             .prop_map(
-                |(account, address, valid_until, scan_count, last_scanned_at)| {
+                |(account, address, valid_until, scheduled_from, scan_count, last_scanned_at)| {
                     WatchedDepositAddress {
                         account,
                         address,
                         valid_until,
+                        scheduled_from,
                         scan_count,
                         last_scanned_at,
                     }

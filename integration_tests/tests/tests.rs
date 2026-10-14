@@ -12,8 +12,8 @@ use cksol_int_tests::{
 };
 use cksol_types::{
     DepositSolArgs, DepositSolError, DepositSolStatus, GetDepositAddressArgs, Lamport, MinterInfo,
-    TxFinalizedStatus, WatchDepositAddressError, WatchDepositAddressOk, WatchDepositAddressStatus,
-    WithdrawSolArgs, WithdrawSolError, WithdrawSolStatus,
+    TxFinalizedStatus, WatchDepositAddressError, WatchDepositAddressStatus, WithdrawSolArgs,
+    WithdrawSolError, WithdrawSolStatus,
 };
 use cksol_types_internal::{
     UpgradeArgs,
@@ -1345,33 +1345,15 @@ mod automatic_deposit_sol_tests {
             .watch_deposit_address(None)
             .await
             .expect("watch_deposit_address should report the restored registration");
-        assert_matches!(
-            (&registration.status, &restored.status),
-            (
-                WatchDepositAddressStatus::Watching {
-                    valid_until: registered_until,
-                    scan_count: 0,
-                    last_scanned_at: None,
-                    next_scan_at: Some(registered_at),
-                },
-                WatchDepositAddressStatus::Watching {
-                    valid_until: restored_until,
-                    scan_count: 0,
-                    last_scanned_at: None,
-                    next_scan_at: Some(read_at),
-                },
-            ) if registered_until == restored_until && read_at >= registered_at
-        );
-        assert_eq!(
-            WatchDepositAddressOk {
-                status: restored.status.clone(),
-                ..registration.clone()
-            },
-            restored
-        );
-        let valid_until = assert_matches!(
+        assert_eq!(restored, registration);
+        let (valid_until, registered_at) = assert_matches!(
             registration.status,
-            WatchDepositAddressStatus::Watching { valid_until, .. } => valid_until
+            WatchDepositAddressStatus::Watching {
+                valid_until,
+                scan_count: 0,
+                last_scanned_at: None,
+                next_scan_at: Some(registered_at),
+            } => (valid_until, registered_at)
         );
         setup.minter().assert_that_events().await.satisfy(|events| {
             let snapshots: Vec<&EventType> = events
@@ -1387,6 +1369,7 @@ mod automatic_deposit_sol_tests {
                             account: DEFAULT_CALLER_ACCOUNT,
                             address: DEFAULT_CALLER_DEPOSIT_ADDRESS.parse().unwrap(),
                             valid_until,
+                            scheduled_from: registered_at,
                             scan_count: 0,
                             last_scanned_at: None,
                         }],
