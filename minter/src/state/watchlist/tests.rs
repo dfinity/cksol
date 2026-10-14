@@ -268,10 +268,10 @@ fn should_keep_the_registration_of_an_account_that_is_already_watched() {
 #[test]
 fn should_rebuild_the_watchlist_verbatim_from_its_snapshot() {
     let mut watchlist = Watchlist::default();
-    register(&mut watchlist, REGISTERED_AT + HOUR_NANOS, account(1));
-    register(&mut watchlist, REGISTERED_AT, account(3));
-    register(&mut watchlist, REGISTERED_AT, account(2));
-    watchlist.record_scan(REGISTERED_AT + MINUTE_NANOS, &account(2));
+    register(&mut watchlist, at(REGISTERED_AT + HOUR_NANOS), account(1));
+    register(&mut watchlist, at(REGISTERED_AT), account(3));
+    register(&mut watchlist, at(REGISTERED_AT), account(2));
+    watchlist.record_scan(at(REGISTERED_AT + MINUTE_NANOS), &account(2));
     let snapshot = watchlist.snapshot();
 
     let rebuilt = Watchlist::from_snapshot(&snapshot);
@@ -310,16 +310,16 @@ fn should_keep_expired_registrations_and_exceed_the_capacity_when_rebuilding() {
 
     assert_eq!(rebuilt.len(), entries.len());
     assert_eq!(rebuilt.snapshot(), snapshot);
-    assert_eq!(rebuilt.live_len(VALID_UNTIL + 1), 0);
+    assert_eq!(rebuilt.live_len(at(VALID_UNTIL + 1)), 0);
     assert_eq!(
-        rebuilt.get(VALID_UNTIL, &account(0)),
+        rebuilt.get(at(VALID_UNTIL), &account(0)),
         Some(WatchedAddress {
             account: account(0),
             address: deposit_address(account(0)),
-            valid_until: VALID_UNTIL,
+            valid_until: at(VALID_UNTIL),
             scan_count: 3,
-            last_scanned_at: Some(REGISTERED_AT + HOUR_NANOS),
-            next_scan_at: Some(REGISTERED_AT + HOUR_NANOS + 2 * MINUTE_NANOS),
+            last_scanned_at: Some(at(REGISTERED_AT + HOUR_NANOS)),
+            next_scan_at: Some(at(REGISTERED_AT + HOUR_NANOS + 2 * MINUTE_NANOS)),
         })
     );
 }

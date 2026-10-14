@@ -170,8 +170,8 @@ mod watched_deposit_addresses {
     fn should_restore_the_latest_snapshot_and_apply_the_events_that_follow_it() {
         init_state();
         init_schnorr_master_key();
-        watch(REGISTERED_AT, account(1));
-        watch(REGISTERED_AT, account(2));
+        watch(at(REGISTERED_AT), account(1));
+        watch(at(REGISTERED_AT), account(2));
         let stale_snapshot = read_state(|s| s.watchlist().snapshot());
         mutate_state(|s| s.watchlist_mut().remove(&account(2)));
         let latest_snapshot = read_state(|s| s.watchlist().snapshot());
@@ -207,10 +207,10 @@ mod watched_deposit_addresses {
             vec![WatchedAddress {
                 account: account(1),
                 address: deposit_address(account(1)),
-                valid_until: REGISTERED_AT + WATCH_WINDOW_NANOS,
+                valid_until: at(REGISTERED_AT + WATCH_WINDOW_NANOS),
                 scan_count: 0,
                 last_scanned_at: None,
-                next_scan_at: Some(REGISTERED_AT),
+                next_scan_at: Some(at(REGISTERED_AT)),
             }]
         );
     }

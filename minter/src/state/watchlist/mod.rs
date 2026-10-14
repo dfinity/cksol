@@ -140,7 +140,7 @@ impl Watchlist {
                         address: entry.address,
                         scheduled_from: Timestamp::from_nanos(entry.scheduled_from),
                         scan_count: entry.scan_count,
-                        last_scanned_at: entry.last_scanned_at,
+                        last_scanned_at: entry.last_scanned_at.map(Timestamp::from_nanos),
                     },
                     expires_at: Timestamp::from_nanos(entry.valid_until),
                 },
@@ -170,7 +170,7 @@ impl Watchlist {
                     valid_until: entry.expires_at.as_nanos(),
                     scheduled_from: entry.value.scheduled_from.as_nanos(),
                     scan_count: entry.value.scan_count,
-                    last_scanned_at: entry.value.last_scanned_at,
+                    last_scanned_at: entry.value.last_scanned_at.map(Timestamp::as_nanos),
                 })
                 .collect(),
         }
