@@ -19,7 +19,7 @@ fn dashboard() -> DashboardTemplate {
 }
 
 fn dashboard_with_pagination(pagination: DashboardPaginationParameters) -> DashboardTemplate {
-    read_state(|state| DashboardTemplate::from_state(state, pagination))
+    read_state(|state| DashboardTemplate::from_state(state, at(REGISTERED_AT), pagination))
 }
 
 fn init_state_with_network(network: SolanaNetwork) {
