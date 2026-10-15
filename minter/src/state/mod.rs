@@ -298,6 +298,11 @@ impl State {
         &mut self.pending_deposit_sol_request_guards
     }
 
+    /// Whether a `deposit_sol` call for the account is waiting for its balance read.
+    pub fn is_deposit_sol_in_progress(&self, account: &Account) -> bool {
+        self.pending_deposit_sol_request_guards.contains(account)
+    }
+
     pub fn pending_withdrawal_request_guards_mut(&mut self) -> &mut BTreeSet<Account> {
         &mut self.pending_withdrawal_request_guards
     }
@@ -1013,6 +1018,7 @@ pub enum TaskType {
     Mint,
     FinalizeTransactions,
     WithdrawalProcessing,
+    ScanWatchedAddresses,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
