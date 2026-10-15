@@ -1,13 +1,13 @@
 use crate::{
     constants::{GET_BALANCE_CYCLES, RENT_EXEMPTION_THRESHOLD},
     deposit::sweep::{deposit_sol, deposit_status},
-    state::{AutomaticDeposit, event::EventType, read_state},
+    state::{event::EventType, read_state},
     storage::with_event_iter,
     test_fixtures::{
         AUTOMATIC_DEPOSIT_FEE, DEPOSIT_SOL_FEE, DEPOSIT_SOL_REQUIRED_CYCLES, EventsAssert,
-        MINIMUM_DEPOSIT_AMOUNT, MINTER_ACCOUNT, REGISTERED_AT, WATCH_WINDOW_NANOS, account,
-        deposit::DEPOSITOR_ACCOUNT, events, flow::deposit::DepositFlow, init_schnorr_master_key,
-        init_state, queued_deposit_of, runtime::TestCanisterRuntime, signature,
+        MINIMUM_DEPOSIT_AMOUNT, MINTER_ACCOUNT, account, deposit::DEPOSITOR_ACCOUNT, events,
+        flow::deposit::DepositFlow, init_schnorr_master_key, init_state, queued_deposit_of,
+        runtime::TestCanisterRuntime, signature,
     },
 };
 use assert_matches::assert_matches;
@@ -177,13 +177,13 @@ async fn assert_yields_to_the_deposit_queued_by_a_scan_during_the_read(
 ) {
     init_state();
     init_schnorr_master_key();
-    let automatic = AutomaticDeposit {
-        fee: AUTOMATIC_DEPOSIT_FEE,
-        valid_until: REGISTERED_AT + WATCH_WINDOW_NANOS,
-    };
 
     let (result, scanned) = join!(deposit_sol(&runtime, DEPOSITOR_ACCOUNT), async {
-        DepositFlow::queue_automatic(DEPOSITOR_ACCOUNT, MINIMUM_DEPOSIT_AMOUNT, automatic)
+        DepositFlow::queue_automatic(
+            DEPOSITOR_ACCOUNT,
+            MINIMUM_DEPOSIT_AMOUNT,
+            AUTOMATIC_DEPOSIT_FEE,
+        )
     });
 
     assert_eq!(result, Ok(scanned.deposit_id));
@@ -197,7 +197,7 @@ async fn assert_yields_to_the_deposit_queued_by_a_scan_during_the_read(
             account: DEPOSITOR_ACCOUNT,
             address: scanned.address,
             balance: queued_deposit_of(DEPOSITOR_ACCOUNT, scanned.sweepable_amount).balance,
-            automatic: Some(automatic),
+            automatic_deposit_fee: Some(AUTOMATIC_DEPOSIT_FEE),
         })
         .assert_no_more_events();
     assert_eq!(
