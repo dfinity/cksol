@@ -143,8 +143,12 @@ mod queued_deposits {
 
 mod watched_deposit_addresses {
     use super::*;
-    use crate::test_fixtures::{
-        MINIMUM_DEPOSIT_AMOUNT, REGISTERED_AT, at, flow::deposit::DepositFlow, watch,
+    use crate::{
+        state::WatchedAddress,
+        test_fixtures::{
+            MINIMUM_DEPOSIT_AMOUNT, REGISTERED_AT, WATCH_WINDOW_NANOS, at, deposit_address,
+            flow::deposit::DepositFlow, replayed_recorded_log_after, watch,
+        },
     };
 
     #[test]
@@ -160,6 +164,48 @@ mod watched_deposit_addresses {
             assert_eq!(s.watchlist().get(at(REGISTERED_AT), &account(1)), None);
             assert!(s.watchlist().get(at(REGISTERED_AT), &account(2)).is_some());
         });
+    }
+
+    #[test]
+    fn should_restore_the_latest_snapshot_and_apply_the_events_that_follow_it() {
+        init_state();
+        init_schnorr_master_key();
+        watch(at(REGISTERED_AT), account(1));
+        watch(at(REGISTERED_AT), account(2));
+        let stale_snapshot = read_state(|s| s.watchlist().snapshot());
+        mutate_state(|s| s.watchlist_mut().remove(&account(2)));
+        let latest_snapshot = read_state(|s| s.watchlist().snapshot());
+        let detected = DepositFlow::queue_automatic(account(1), 20_000_000, AUTOMATIC_DEPOSIT_FEE)
+            .sweep(signature(0xAA));
+        read_state(|s| assert!(s.watchlist().is_empty()));
+        let dropped_at = REGISTERED_AT + 1;
+        mutate_state(|state| {
+            process_event(
+                state,
+                EventType::FailedTransaction {
+                    signature: detected.signature,
+                },
+                &TestCanisterRuntime::new().add_times([dropped_at, dropped_at]),
+            )
+        });
+
+        let replayed = replayed_recorded_log_after([
+            EventType::WatchedDepositAddresses(stale_snapshot),
+            EventType::WatchedDepositAddresses(latest_snapshot),
+        ]);
+
+        read_state(|live_state| assert_eq!(&replayed, live_state));
+        assert_eq!(
+            replayed.watchlist().iter().collect::<Vec<_>>(),
+            vec![WatchedAddress {
+                account: account(1),
+                address: deposit_address(account(1)),
+                valid_until: at(dropped_at + WATCH_WINDOW_NANOS),
+                scan_count: 0,
+                last_scanned_at: None,
+                next_scan_at: Some(at(dropped_at)),
+            }]
+        );
     }
 }
 

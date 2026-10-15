@@ -227,6 +227,45 @@ pub enum EventType {
         #[cbor(n(2), with = "cbor::hash")]
         nonce_value: Hash,
     },
+    /// The snapshot of the watchlist of the automatic deposit flow taken before an upgrade,
+    /// which replay restores verbatim, since registrations are not recorded as events.
+    #[n(15)]
+    WatchedDepositAddresses(#[n(0)] WatchlistSnapshot),
+}
+
+/// Payload of the `WatchedDepositAddresses` event: the limits of the watchlist in force when
+/// the snapshot was taken and every registration, live or expired but not yet evicted, in
+/// the order the watchlist is rebuilt from.
+#[derive(Clone, Eq, PartialEq, Debug, Decode, Encode)]
+pub struct WatchlistSnapshot {
+    /// The window of a registration, in nanoseconds.
+    #[n(0)]
+    pub window_nanos: u64,
+    /// The number of live registrations the watchlist holds at most.
+    #[n(1)]
+    pub capacity: u64,
+    #[n(2)]
+    pub entries: Vec<WatchedDepositAddress>,
+}
+
+/// One registration of a `WatchedDepositAddresses` event with its scan progress.
+#[derive(Clone, Eq, PartialEq, Debug, Decode, Encode)]
+pub struct WatchedDepositAddress {
+    #[n(0)]
+    pub account: Account,
+    #[cbor(n(1), with = "cbor::address")]
+    pub address: Address,
+    /// The end of the registration window, in nanoseconds since the epoch.
+    #[n(2)]
+    pub valid_until: u64,
+    /// The start of the scan schedule, in nanoseconds since the epoch.
+    #[n(3)]
+    pub scheduled_from: u64,
+    #[n(4)]
+    pub scan_count: u32,
+    /// The time of the last scan, in nanoseconds since the epoch, if any.
+    #[n(5)]
+    pub last_scanned_at: Option<u64>,
 }
 
 /// The mint enqueued for one deposit of a `CreditedSweep` event.

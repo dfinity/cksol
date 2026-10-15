@@ -1,5 +1,8 @@
 use crate::{
-    state::QueuedDeposit,
+    state::{
+        QueuedDeposit,
+        event::{WatchedDepositAddress, WatchlistSnapshot},
+    },
     utils::timed_sized_map::{Entry, InsertError, TimedSizedMap, Timestamp},
 };
 use icrc_ledger_types::icrc1::account::Account;
@@ -119,6 +122,60 @@ impl Default for Watchlist {
 }
 
 impl Watchlist {
+    /// Rebuilds the watchlist verbatim from a snapshot: under the limits the snapshot records,
+    /// with the entries as stored, expired ones included, so that the state replayed from the
+    /// event log equals the state that recorded the snapshot.
+    ///
+    /// # Panics
+    ///
+    /// If the snapshot records no capacity or lists an account twice, since it was not
+    /// produced by [`Self::snapshot`] then.
+    pub fn from_snapshot(snapshot: &WatchlistSnapshot) -> Self {
+        let capacity = usize::try_from(snapshot.capacity).unwrap_or(usize::MAX);
+        let entries = snapshot.entries.iter().map(|entry| {
+            (
+                entry.account,
+                Entry {
+                    value: ScanProgress {
+                        address: entry.address,
+                        scheduled_from: Timestamp::from_nanos(entry.scheduled_from),
+                        scan_count: entry.scan_count,
+                        last_scanned_at: entry.last_scanned_at.map(Timestamp::from_nanos),
+                    },
+                    expires_at: Timestamp::from_nanos(entry.valid_until),
+                },
+            )
+        });
+        Self {
+            entries: TimedSizedMap::from_ordered_entries(
+                Duration::from_nanos(snapshot.window_nanos),
+                NonZeroUsize::new(capacity)
+                    .expect("BUG: a watchlist snapshot records a non-zero capacity"),
+                entries,
+            ),
+        }
+    }
+
+    /// The snapshot [`Self::from_snapshot`] rebuilds this watchlist from.
+    pub fn snapshot(&self) -> WatchlistSnapshot {
+        WatchlistSnapshot {
+            window_nanos: u64::try_from(self.entries.ttl().as_nanos()).unwrap_or(u64::MAX),
+            capacity: self.entries.capacity().get() as u64,
+            entries: self
+                .entries
+                .iter_by_expiry()
+                .map(|(account, entry)| WatchedDepositAddress {
+                    account: *account,
+                    address: entry.value.address,
+                    valid_until: entry.expires_at.as_nanos(),
+                    scheduled_from: entry.value.scheduled_from.as_nanos(),
+                    scan_count: entry.value.scan_count,
+                    last_scanned_at: entry.value.last_scanned_at.map(Timestamp::as_nanos),
+                })
+                .collect(),
+        }
+    }
+
     /// Registers the deposit address of the account for a window and a schedule starting now,
     /// or returns the live registration of the account as it is, without extending it.
     pub fn register(

@@ -36,6 +36,7 @@ pub const MINTER_ADDRESS: Address = address!("2YKPWqP51gUFEYo1FD2K3LoRE6Cd2f99E1
 pub const DEPOSIT_AMOUNT: Lamport = 500_000_000;
 /// Minimum balance left on a deposit address to keep it rent-exempt.
 pub const RENT_EXEMPTION_THRESHOLD: Lamport = 890_880;
+pub const MAX_WATCHED_ADDRESSES: u64 = 1_000;
 pub const WATCH_WINDOW: Duration = Duration::from_hours(24);
 pub const WATCH_WINDOW_NANOS: u64 = WATCH_WINDOW.as_nanos() as u64;
 

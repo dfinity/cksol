@@ -143,6 +143,33 @@ pub enum EventType {
         /// The nonce value the transaction carries in place of a recent blockhash.
         nonce_value: Hash,
     },
+    /// The snapshot of the watchlist of the automatic deposit flow taken before an upgrade,
+    /// which replay restores verbatim, since registrations are not recorded as events.
+    WatchedDepositAddresses {
+        /// The window of a registration, in nanoseconds.
+        window_nanos: u64,
+        /// The number of live registrations the watchlist holds at most.
+        capacity: u64,
+        /// Every registration, live or expired but not yet evicted.
+        entries: Vec<WatchedDepositAddress>,
+    },
+}
+
+/// One registration of a `WatchedDepositAddresses` event with its scan progress.
+#[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]
+pub struct WatchedDepositAddress {
+    /// The account credited with the deposits detected on the deposit address.
+    pub account: Account,
+    /// The deposit address derived from the account.
+    pub address: Address,
+    /// The end of the registration window, in nanoseconds since the epoch.
+    pub valid_until: u64,
+    /// The start of the scan schedule, in nanoseconds since the epoch.
+    pub scheduled_from: u64,
+    /// The number of scans of the deposit address so far.
+    pub scan_count: u32,
+    /// The time of the last scan, in nanoseconds since the epoch, if any.
+    pub last_scanned_at: Option<u64>,
 }
 
 /// The mint enqueued for one deposit of a `CreditedSweep` event.

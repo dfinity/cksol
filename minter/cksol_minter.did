@@ -441,6 +441,25 @@ type TransactionPurpose = variant {
     };
 };
 
+// One registration of a `WatchedDepositAddresses` event with its scan progress.
+//
+// *WARNING*: This type is used exclusively by the debug `get_events` endpoint.
+// Backwards-compatibility is not guaranteed.
+type WatchedDepositAddress = record {
+    // The account credited with the deposits detected on the deposit address.
+    account: Account;
+    // The deposit address derived from the account.
+    address: Address;
+    // The end of the registration window, in nanoseconds since the epoch.
+    valid_until: nat64;
+    // The start of the scan schedule, in nanoseconds since the epoch.
+    scheduled_from: nat64;
+    // The number of scans of the deposit address so far.
+    scan_count: nat32;
+    // The time of the last scan, in nanoseconds since the epoch, if any.
+    last_scanned_at: opt nat64;
+};
+
 // A minter event payload.
 //
 // *WARNING*: This type is used exclusively by the debug `get_events` endpoint.
@@ -562,6 +581,17 @@ type EventType = variant {
         nonce_account: Address;
         // The nonce value the transaction carries in place of a recent blockhash.
         nonce_value: Hash;
+    };
+    // The snapshot of the watchlist of the automatic deposit flow taken before
+    // an upgrade, which replay restores verbatim, since registrations are not
+    // recorded as events.
+    WatchedDepositAddresses : record {
+        // The window of a registration, in nanoseconds.
+        window_nanos: nat64;
+        // The number of live registrations the watchlist holds at most.
+        capacity: nat64;
+        // Every registration, live or expired but not yet evicted.
+        entries: vec WatchedDepositAddress;
     };
 };
 

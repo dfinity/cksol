@@ -166,12 +166,19 @@ pub fn minter_public_key_fetched_event() -> EventType {
 /// events that [`init_state`] and [`init_schnorr_master_key`] stand for, so that it can be
 /// compared with the live state.
 pub fn replayed_recorded_log() -> State {
+    replayed_recorded_log_after([])
+}
+
+/// Like [`replayed_recorded_log`], with `events` replayed between the init and key-fetched
+/// events and the recorded ones.
+pub fn replayed_recorded_log_after(events: impl IntoIterator<Item = EventType>) -> State {
     let recorded: Vec<Event> = with_event_iter(|events| events.collect());
     let prefix = [
         EventType::Init(init_args_with_nonce_account()),
         minter_public_key_fetched_event(),
     ]
     .into_iter()
+    .chain(events)
     .map(|payload| Event {
         timestamp: 0,
         payload,
@@ -1344,7 +1351,8 @@ pub mod arb {
         state::{
             DepositBalance, QueuedDeposit,
             event::{
-                CreditedDeposit, Event, EventType, Signer, TransactionPurpose, WithdrawalRequest,
+                CreditedDeposit, Event, EventType, Signer, TransactionPurpose,
+                WatchedDepositAddress, WatchlistSnapshot, WithdrawalRequest,
             },
         },
     };
@@ -1675,7 +1683,44 @@ pub mod arb {
                         nonce_value,
                     }
                 }),
+            arb_watchlist_snapshot().prop_map(EventType::WatchedDepositAddresses),
         ]
+    }
+
+    fn arb_watchlist_snapshot() -> impl Strategy<Value = WatchlistSnapshot> {
+        (
+            any::<u64>(),
+            1..=u64::MAX,
+            prop::collection::vec(arb_watched_deposit_address(), 0..5),
+        )
+            .prop_map(|(window_nanos, capacity, entries)| WatchlistSnapshot {
+                window_nanos,
+                capacity,
+                entries,
+            })
+    }
+
+    fn arb_watched_deposit_address() -> impl Strategy<Value = WatchedDepositAddress> {
+        (
+            arb_account(),
+            arb_address(),
+            any::<u64>(),
+            any::<u64>(),
+            any::<u32>(),
+            prop::option::of(any::<u64>()),
+        )
+            .prop_map(
+                |(account, address, valid_until, scheduled_from, scan_count, last_scanned_at)| {
+                    WatchedDepositAddress {
+                        account,
+                        address,
+                        valid_until,
+                        scheduled_from,
+                        scan_count,
+                        last_scanned_at,
+                    }
+                },
+            )
     }
 
     fn arb_credited_deposit() -> impl Strategy<Value = CreditedDeposit> {
