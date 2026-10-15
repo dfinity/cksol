@@ -150,7 +150,7 @@ impl Watchlist {
         now: Timestamp,
         dropped: &QueuedDeposit,
     ) -> Result<WatchedAddress, RearmError> {
-        if dropped.automatic_deposit_fee.is_none() {
+        if dropped.deposit_fee.is_none() {
             return Err(RearmError::ManualDeposit);
         }
         self.register(now, dropped.account, dropped.address)

@@ -241,7 +241,7 @@ fn should_not_rearm_an_account_when_full_of_live_entries() {
 fn should_not_rearm_a_manual_deposit() {
     let mut watchlist = Watchlist::default();
     let manual = QueuedDeposit {
-        automatic_deposit_fee: None,
+        deposit_fee: None,
         ..dropped(account(1))
     };
 
