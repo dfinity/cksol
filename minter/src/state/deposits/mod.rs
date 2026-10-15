@@ -55,7 +55,7 @@ mod tests;
 ///
 /// Every account has at most one deposit in flight, so that `deposit_sol` can report the
 /// deposit it is already tracking instead of queueing the same balance twice.
-#[derive(Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Deposits {
     next_id: DepositSolId,
     queued: BTreeMap<DepositSolId, QueuedDeposit>,
