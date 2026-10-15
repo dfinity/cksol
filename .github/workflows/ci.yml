@@ -240,9 +240,6 @@ jobs:
           echo "/home/runner/.local/share/solana/install/active_release/bin" >> $GITHUB_PATH
         shell: bash
 
-      - name: 'Build SOL RPC canister'
-        run: just sol-rpc-wasm
-
       - name: 'Run integration tests'
         run: just integration-tests
 

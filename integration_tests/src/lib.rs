@@ -178,7 +178,7 @@ impl Setup {
         env.add_cycles(sol_rpc_canister_id, u64::MAX as u128).await;
         env.install_canister(
             sol_rpc_canister_id,
-            sol_rpc_wasm(),
+            sol_rpc_wasm().await,
             Encode!(&sol_rpc_install_args).unwrap(),
             Some(Self::DEFAULT_CONTROLLER),
         )
@@ -903,18 +903,12 @@ fn cksol_minter_init_args(
     })
 }
 
-/// The SOL RPC canister built by `just sol-rpc-wasm` from the commit adding the typed
-/// `getMultipleAccounts` method, until a release of the SOL RPC canister carries it.
-fn sol_rpc_wasm() -> Vec<u8> {
-    const WASM_PATH: &str = "../wasms/sol_rpc_canister-92efe4ee.wasm.gz";
-
-    let path = PathBuf::from(var("CARGO_MANIFEST_DIR").unwrap()).join(WASM_PATH);
-    fs::read(&path).unwrap_or_else(|error| {
-        panic!(
-            "Failed to read the SOL RPC canister WASM at {}: {error}. Build it with `just sol-rpc-wasm`.",
-            path.display()
-        )
-    })
+/// The SOL RPC canister built from the commit adding the typed `getMultipleAccounts`
+/// method, until a release of the SOL RPC canister carries it.
+async fn sol_rpc_wasm() -> Vec<u8> {
+    const DOWNLOAD_PATH: &str = "../wasms/sol_rpc_canister_92efe4ee.wasm.gz";
+    const DOWNLOAD_URL: &str = "https://dfinity-download-public.s3.amazonaws.com/testdata/sol_rpc/sol_rpc_canister_92efe4eefc6b0209ee33440aa903383144016cf6.wasm.gz";
+    canister_wasm(DOWNLOAD_PATH, DOWNLOAD_URL).await
 }
 
 async fn ledger_wasm() -> Vec<u8> {
