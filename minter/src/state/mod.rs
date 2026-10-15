@@ -42,9 +42,9 @@ pub mod event;
 mod nonce_pool;
 
 pub use deposits::{
-    DepositBalance, Deposits, MintedSweep, PendingMint, QuarantineCause, QuarantinedDeposit,
-    QueuedDeposit, SettledSweep, Sweep, SweepMismatch, SweepRecoveryError, SweepSettlementError,
-    Sweeps, SweptDeposit, Transfer, UnreadableOutcome,
+    DepositBalance, Deposits, InFlightDeposit, MintedSweep, PendingMint, QuarantineCause,
+    QuarantinedDeposit, QueuedDeposit, SettledSweep, Sweep, SweepMismatch, SweepRecoveryError,
+    SweepSettlementError, Sweeps, SweptDeposit, Transfer, UnreadableOutcome,
 };
 pub use nonce_pool::{DurableNoncePool, NoncePoolError, NonceRead};
 
@@ -403,30 +403,22 @@ impl State {
     fn process_queued_deposit(
         &mut self,
         deposit_id: DepositSolId,
-        account: &Account,
-        address: &Address,
-        balance: DepositBalance,
+        deposit: QueuedDeposit,
         queued_at: u64,
     ) {
         debug_assert_eq!(
-            *address,
+            deposit.address,
             account_address(
                 self.minter_public_key
                     .as_ref()
                     .expect("BUG: a deposit was queued before the minter public key was recorded"),
-                account,
+                &deposit.account,
             ),
-            "Attempted to queue deposit {deposit_id} with address {address} not derived from account {account:?}",
+            "Attempted to queue deposit {deposit_id} with address {} not derived from account {:?}",
+            deposit.address,
+            deposit.account,
         );
-        self.deposits.queue(
-            deposit_id,
-            QueuedDeposit {
-                account: *account,
-                address: *address,
-                balance,
-            },
-            queued_at,
-        );
+        self.deposits.queue(deposit_id, deposit, queued_at);
     }
 
     fn process_credited_sweep(
