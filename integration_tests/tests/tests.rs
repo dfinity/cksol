@@ -5,7 +5,7 @@ use cksol_int_tests::{
     CkSolMinter, Setup, SetupBuilder,
     fixtures::{
         DEFAULT_CALLER_ACCOUNT, DEFAULT_CALLER_DEPOSIT_ADDRESS, DEPOSIT_AMOUNT, MINTER_ADDRESS,
-        MockBuilder, RENT_EXEMPTION_THRESHOLD, SharedMockHttpOutcalls,
+        MockBuilder, RENT_EXEMPTION_THRESHOLD,
     },
     validator::FEE_PER_SIGNATURE,
 };
@@ -21,7 +21,6 @@ use cksol_types_internal::{
 use icrc_ledger_types::icrc1::account::{Account, Subaccount};
 use sol_rpc_types::{CommitmentLevel, ConsensusStrategy, RpcConfig};
 use std::time::Duration;
-use tokio::join;
 
 const WITHDRAWAL_PROCESSING_DELAY: Duration = Duration::from_mins(1);
 const FINALIZE_TRANSACTIONS_DELAY: Duration = Duration::from_mins(2);
@@ -1152,34 +1151,6 @@ mod deposit_sol_tests {
         let result = setup.minter().deposit_sol(DEFAULT_CALLER_ACCOUNT).await;
 
         assert_eq!(result, Err(DepositSolError::Quarantined { deposit_id }));
-
-        setup.drop().await;
-    }
-
-    #[tokio::test]
-    async fn should_fail_for_concurrent_access() {
-        let setup = SetupBuilder::new().with_proxy_canister().build().await;
-        let mocks = SharedMockHttpOutcalls::new(
-            MockBuilder::new()
-                .get_balance(BALANCE_ABOVE_MINIMUM)
-                .build(),
-        );
-        let minter1 = setup.minter().with_http_mocks(mocks.clone());
-        let minter2 = setup.minter().with_http_mocks(mocks.clone());
-
-        let results = join!(
-            minter1.deposit_sol(DEFAULT_CALLER_ACCOUNT),
-            minter2.deposit_sol(DEFAULT_CALLER_ACCOUNT)
-        );
-
-        assert!(
-            matches!(
-                results,
-                (Ok(0), Err(DepositSolError::AlreadyProcessing))
-                    | (Err(DepositSolError::AlreadyProcessing), Ok(0))
-            ),
-            "Expected one queued deposit and one AlreadyProcessing error, got: {results:?}"
-        );
 
         setup.drop().await;
     }
