@@ -16,7 +16,7 @@ use crate::{
 use cksol_types::DepositSolStatus;
 use cksol_types_internal::InitArgs;
 use ic_canister_runtime::IcError;
-use sol_rpc_types::{RpcConfig, RpcSources};
+use sol_rpc_types::{GetMultipleAccountsParams, RpcConfig, RpcSources};
 
 const VALID_UNTIL: u64 = REGISTERED_AT + WATCH_WINDOW_NANOS;
 const TICK_AT: u64 = REGISTERED_AT + MINUTE_NANOS;
@@ -305,11 +305,16 @@ impl RequestedAddressesExt for TestCanisterRuntime {
         self.sent_update_calls()
             .iter()
             .map(|call| {
-                assert_eq!(call.method, "jsonRequest");
-                let (_sources, _config, request): (RpcSources, Option<RpcConfig>, String) =
-                    call.args();
-                let request: serde_json::Value = serde_json::from_str(&request).unwrap();
-                serde_json::from_value(request["params"][0].clone()).unwrap()
+                assert_eq!(call.method, "getMultipleAccounts");
+                let (_sources, _config, params): (
+                    RpcSources,
+                    Option<RpcConfig>,
+                    GetMultipleAccountsParams,
+                ) = call.args();
+                Vec::from(params.pubkeys)
+                    .into_iter()
+                    .map(String::from)
+                    .collect()
             })
             .collect()
     }
