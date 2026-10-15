@@ -20,6 +20,10 @@ build:
 docker-build:
     ./scripts/docker-build
 
+# Build the SOL RPC canister WASM of the unreleased commit the integration tests need
+sol-rpc-wasm:
+    ./scripts/build-sol-rpc
+
 # Run all tests
 test: unit-tests integration-tests
 
