@@ -783,6 +783,10 @@ impl Canister<'_> {
         Out: CandidType + DeserializeOwned,
     {
         let env = self.runtime.as_ref();
+        assert!(
+            !env.auto_progress_enabled().await,
+            "a live instance may execute a round between two submissions"
+        );
         let payload = candid::encode_args(args).expect("Failed to encode arguments");
         let message_id = env
             .submit_call(self.id, self.caller, method, payload)
