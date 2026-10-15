@@ -44,7 +44,7 @@ proptest! {
             account,
             address: address.into(),
             balance,
-            automatic: None,
+            automatic_deposit_fee: None,
         };
         prop_assert_eq!(
             EventType::try_from(payload).unwrap_err(),

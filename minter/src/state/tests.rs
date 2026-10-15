@@ -56,7 +56,7 @@ fn should_decode_a_queued_deposit_recorded_without_the_automatic_part() {
                 account: deposit.account,
                 address: deposit.address,
                 balance: deposit.balance,
-                automatic: None,
+                automatic_deposit_fee: None,
             },
         }
     );
@@ -136,7 +136,7 @@ mod queued_deposits {
                 account: queued_deposit(deposit_id).account,
                 address: queued_deposit(deposit_id).address,
                 balance: queued_deposit(deposit_id).balance,
-                automatic: None,
+                automatic_deposit_fee: None,
             },
         };
         let init = Event {
@@ -195,14 +195,12 @@ mod swept_deposits {
         state::{audit::replay_events, reset_state},
         storage::{reset_events, with_event_iter},
         test_fixtures::{
-            DEFAULT_BLOCK_HEIGHT, REGISTERED_AT, WATCH_WINDOW_NANOS,
+            DEFAULT_BLOCK_HEIGHT,
             events::{credit_sweep, quarantine_sweep, queue_deposits, submit_sweep},
             flow::deposit::{CreditedSweepFlow, DepositFlow, SweepFlow},
             replayed_recorded_log, sweep_message,
         },
     };
-
-    const VALID_UNTIL: u64 = REGISTERED_AT + WATCH_WINDOW_NANOS;
 
     const SWEEP_SIGNATURE_INDEX: usize = 0xAA;
 
@@ -389,22 +387,10 @@ mod swept_deposits {
         init_state();
         init_schnorr_master_key();
         let manual = DepositFlow::queue(account(1), 10_000_000);
-        let first_automatic = DepositFlow::queue_automatic(
-            account(2),
-            20_000_000,
-            AutomaticDeposit {
-                fee: AUTOMATIC_DEPOSIT_FEE,
-                valid_until: VALID_UNTIL,
-            },
-        );
-        let second_automatic = DepositFlow::queue_automatic(
-            account(3),
-            30_000_000,
-            AutomaticDeposit {
-                fee: AUTOMATIC_DEPOSIT_FEE / 2,
-                valid_until: VALID_UNTIL,
-            },
-        );
+        let first_automatic =
+            DepositFlow::queue_automatic(account(2), 20_000_000, AUTOMATIC_DEPOSIT_FEE);
+        let second_automatic =
+            DepositFlow::queue_automatic(account(3), 30_000_000, AUTOMATIC_DEPOSIT_FEE / 2);
         let finalized = SweepFlow::of([manual, first_automatic, second_automatic])
             .submit(signature(SWEEP_SIGNATURE_INDEX))
             .succeed();
@@ -1683,7 +1669,7 @@ mod withdrawal_transactions {
                 account: funding_deposit.account,
                 address: funding_deposit.address,
                 balance: funding_deposit.balance,
-                automatic: None,
+                automatic_deposit_fee: None,
             },
             EventType::SubmittedTransaction {
                 signature: signature(9),

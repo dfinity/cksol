@@ -43,9 +43,9 @@ mod nonce_pool;
 mod watchlist;
 
 pub use deposits::{
-    AutomaticDeposit, DepositBalance, Deposits, InFlightDeposit, MintedSweep, PendingMint,
-    QuarantineCause, QuarantinedDeposit, QueuedDeposit, SettledSweep, Sweep, SweepMismatch,
-    SweepRecoveryError, SweepSettlementError, Sweeps, SweptDeposit, Transfer, UnreadableOutcome,
+    DepositBalance, Deposits, InFlightDeposit, MintedSweep, PendingMint, QuarantineCause,
+    QuarantinedDeposit, QueuedDeposit, SettledSweep, Sweep, SweepMismatch, SweepRecoveryError,
+    SweepSettlementError, Sweeps, SweptDeposit, Transfer, UnreadableOutcome,
 };
 pub use nonce_pool::{DurableNoncePool, NoncePoolError, NonceRead};
 pub use watchlist::{

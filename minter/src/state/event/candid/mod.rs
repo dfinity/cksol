@@ -5,7 +5,7 @@ use crate::{
     numeric::{LedgerBurnIndex, LedgerMintIndex},
     rpc::BlockHeight,
     state::{
-        AutomaticDeposit, DepositBalance,
+        DepositBalance,
         event::{
             CreditedDeposit, Event, EventType, Signer, TransactionPurpose, VersionedMessage,
             WithdrawalRequest,
@@ -13,9 +13,9 @@ use crate::{
     },
 };
 use cksol_types_internal::event::{
-    AutomaticDeposit as CandidAutomaticDeposit, CreditedDeposit as CandidCreditedDeposit,
-    Event as CandidEvent, EventType as CandidEventType, Signer as CandidSigner,
-    TransactionPurpose as CandidTransactionPurpose, VersionedTransactionMessage,
+    CreditedDeposit as CandidCreditedDeposit, Event as CandidEvent, EventType as CandidEventType,
+    Signer as CandidSigner, TransactionPurpose as CandidTransactionPurpose,
+    VersionedTransactionMessage,
 };
 use ic_ed25519::PublicKey;
 use sol_rpc_types::{
@@ -76,13 +76,13 @@ impl From<EventType> for CandidEventType {
                 account,
                 address,
                 balance,
-                automatic,
+                automatic_deposit_fee,
             } => CandidEventType::QueuedDeposit {
                 deposit_id,
                 account,
                 address: CandidAddress::from(address),
                 balance: Lamport::from(balance),
-                automatic: automatic.map(CandidAutomaticDeposit::from),
+                automatic_deposit_fee,
             },
             EventType::CreditedSweep {
                 signature,
@@ -173,15 +173,6 @@ impl From<CreditedDeposit> for CandidCreditedDeposit {
     }
 }
 
-impl From<AutomaticDeposit> for CandidAutomaticDeposit {
-    fn from(automatic: AutomaticDeposit) -> Self {
-        CandidAutomaticDeposit {
-            fee: automatic.fee,
-            valid_until: automatic.valid_until,
-        }
-    }
-}
-
 impl TryFrom<CandidEvent> for Event {
     type Error = InvalidCandidEvent;
 
@@ -240,7 +231,7 @@ impl TryFrom<CandidEventType> for EventType {
                 account,
                 address,
                 balance,
-                automatic,
+                automatic_deposit_fee,
             } => EventType::QueuedDeposit {
                 deposit_id,
                 account,
@@ -248,7 +239,7 @@ impl TryFrom<CandidEventType> for EventType {
                 balance: DepositBalance::new(balance).ok_or(
                     InvalidCandidEvent::DepositBalanceBelowRentExemption(balance),
                 )?,
-                automatic: automatic.map(AutomaticDeposit::from),
+                automatic_deposit_fee,
             },
             CandidEventType::CreditedSweep {
                 signature,
@@ -339,15 +330,6 @@ impl From<CandidCreditedDeposit> for CreditedDeposit {
         CreditedDeposit {
             deposit_id: mint.deposit_id,
             amount_to_mint: mint.amount_to_mint,
-        }
-    }
-}
-
-impl From<CandidAutomaticDeposit> for AutomaticDeposit {
-    fn from(automatic: CandidAutomaticDeposit) -> Self {
-        AutomaticDeposit {
-            fee: automatic.fee,
-            valid_until: automatic.valid_until,
         }
     }
 }

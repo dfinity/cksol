@@ -8,7 +8,6 @@ use crate::{
 };
 use cksol_types::{DepositSolId, DepositSolStatus};
 use icrc_ledger_types::icrc1::account::Account;
-use minicbor::{Decode, Encode};
 use sol_rpc_types::Lamport;
 use solana_address::Address;
 use solana_signature::Signature;
@@ -227,7 +226,7 @@ impl Deposits {
             deposit.account
         );
         self.latest_ids.insert(deposit.account, deposit_id);
-        if deposit.automatic.is_some() {
+        if deposit.automatic_deposit_fee.is_some() {
             self.automatic_deposit_count += 1;
         }
         self.watchlist.remove(&deposit.account);
@@ -430,9 +429,9 @@ pub struct QueuedDeposit {
     pub address: Address,
     /// The balance of the deposit address when the deposit was queued.
     pub balance: DepositBalance,
-    /// What the automatic flow recorded when it detected the deposit, absent for a deposit
-    /// queued by `deposit_sol`.
-    pub automatic: Option<AutomaticDeposit>,
+    /// The automatic deposit fee in force when the automatic flow detected the deposit,
+    /// absent for a deposit queued by `deposit_sol`.
+    pub automatic_deposit_fee: Option<Lamport>,
 }
 
 impl QueuedDeposit {
@@ -441,20 +440,9 @@ impl QueuedDeposit {
     }
 
     /// The automatic deposit fee deducted from the mint, zero for a manual deposit.
-    pub fn automatic_deposit_fee(&self) -> Lamport {
-        self.automatic.map_or(0, |automatic| automatic.fee)
+    pub fn deducted_automatic_deposit_fee(&self) -> Lamport {
+        self.automatic_deposit_fee.unwrap_or(0)
     }
-}
-
-/// The part of a queued deposit that the automatic flow detected: the fee in force at
-/// detection, which the mint is reduced by, and the end of the registration window, which
-/// bounds the re-arm of the deposit should its sweep be dropped.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Decode, Encode)]
-pub struct AutomaticDeposit {
-    #[n(0)]
-    pub fee: Lamport,
-    #[n(1)]
-    pub valid_until: u64,
 }
 
 impl From<DepositBalance> for Lamport {

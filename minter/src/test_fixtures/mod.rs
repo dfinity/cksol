@@ -4,8 +4,8 @@ use crate::{
     rpc::{BlockHeight, FetchedTransaction},
     sol_transfer::build_batch_withdrawal_message,
     state::{
-        AutomaticDeposit, DepositBalance, QueuedDeposit, SchnorrPublicKey, State, Sweep,
-        WATCH_WINDOW, WatchedAddress, Watchlist,
+        DepositBalance, QueuedDeposit, SchnorrPublicKey, State, Sweep, WATCH_WINDOW,
+        WatchedAddress, Watchlist,
         audit::replay_events,
         event::{Event, EventType, VersionedMessage},
         init_once_state, mutate_state,
@@ -344,19 +344,19 @@ pub fn queued_deposit_of(account: Account, sweepable_amount: Lamport) -> QueuedD
         address: deposit_address(account),
         balance: DepositBalance::new(sweepable_amount + RENT_EXEMPTION_THRESHOLD)
             .expect("BUG: the balance covers the rent exemption threshold"),
-        automatic: None,
+        automatic_deposit_fee: None,
     }
 }
 
-/// The deposit of the given account detected by the automatic flow, whose address holds the
-/// sweepable amount on top of the rent exemption threshold.
+/// The deposit of the given account detected by the automatic flow under the given fee,
+/// whose address holds the sweepable amount on top of the rent exemption threshold.
 pub fn automatic_deposit_of(
     account: Account,
     sweepable_amount: Lamport,
-    automatic: AutomaticDeposit,
+    automatic_deposit_fee: Lamport,
 ) -> QueuedDeposit {
     QueuedDeposit {
-        automatic: Some(automatic),
+        automatic_deposit_fee: Some(automatic_deposit_fee),
         ..queued_deposit_of(account, sweepable_amount)
     }
 }
@@ -611,7 +611,7 @@ pub mod devnet_sweep {
                         address: crate::address::account_address(&master_key(), &account),
                         balance: DepositBalance::new(balance)
                             .expect("BUG: the balance covers the rent exemption threshold"),
-                        automatic: None,
+                        automatic_deposit_fee: None,
                     },
                 )
             })
@@ -628,7 +628,7 @@ pub mod devnet_sweep {
                 sweepable_amount + crate::constants::RENT_EXEMPTION_THRESHOLD,
             )
             .expect("BUG: the balance covers the rent exemption threshold"),
-            automatic: None,
+            automatic_deposit_fee: None,
         }
     }
 
@@ -734,7 +734,7 @@ pub mod devnet_sweep {
                         address,
                         balance: DepositBalance::new(balance)
                             .expect("BUG: the balance covers the rent exemption threshold"),
-                        automatic: None,
+                        automatic_deposit_fee: None,
                     },
                 )
             })
@@ -949,7 +949,7 @@ pub mod events {
                     account: deposit.account,
                     address: deposit.address,
                     balance: deposit.balance,
-                    automatic: deposit.automatic,
+                    automatic_deposit_fee: deposit.automatic_deposit_fee,
                 },
                 &runtime(),
             )
@@ -1330,7 +1330,7 @@ pub mod arb {
         rpc::BlockHeight,
         sol_transfer::MAX_SIGNATURES,
         state::{
-            AutomaticDeposit, DepositBalance, QueuedDeposit,
+            DepositBalance, QueuedDeposit,
             event::{
                 CreditedDeposit, Event, EventType, Signer, TransactionPurpose, WithdrawalRequest,
             },
@@ -1342,6 +1342,7 @@ pub mod arb {
     use ic_ed25519::{PrivateKey, PublicKey};
     use icrc_ledger_types::icrc1::account::Account;
     use proptest::prelude::{Just, Strategy, any, prop, prop_oneof};
+    use sol_rpc_types::Lamport;
     use solana_address::Address;
     use solana_message::{Hash, Instruction, Message};
     use solana_signature::Signature;
@@ -1395,22 +1396,23 @@ pub mod arb {
             arb_account(),
             arb_address(),
             MIN_BALANCE..=MAX_BALANCE,
-            prop::option::of(arb_automatic_deposit()),
+            prop::option::of(arb_automatic_deposit_fee()),
         )
-            .prop_map(|(account, address, balance, automatic)| QueuedDeposit {
-                account,
-                address,
-                balance: DepositBalance::new(balance)
-                    .expect("BUG: the balance covers the rent exemption threshold"),
-                automatic,
-            })
+            .prop_map(
+                |(account, address, balance, automatic_deposit_fee)| QueuedDeposit {
+                    account,
+                    address,
+                    balance: DepositBalance::new(balance)
+                        .expect("BUG: the balance covers the rent exemption threshold"),
+                    automatic_deposit_fee,
+                },
+            )
     }
 
-    /// The automatic part of a deposit whose fee fits in the sweepable amount of
-    /// [`arb_queued_deposit`] after the fee share of a full sweep.
-    pub fn arb_automatic_deposit() -> impl Strategy<Value = AutomaticDeposit> {
-        (0..FEE_PER_SIGNATURE * (MAX_SIGNATURES - 1), any::<u64>())
-            .prop_map(|(fee, valid_until)| AutomaticDeposit { fee, valid_until })
+    /// An automatic deposit fee that fits in the sweepable amount of [`arb_queued_deposit`]
+    /// after the fee share of a full sweep.
+    pub fn arb_automatic_deposit_fee() -> impl Strategy<Value = Lamport> {
+        0..FEE_PER_SIGNATURE * (MAX_SIGNATURES - 1)
     }
 
     /// The deposits of one sweep: at least one, at most one per signature.
@@ -1614,17 +1616,19 @@ pub mod arb {
                 arb_account(),
                 arb_address(),
                 arb_deposit_balance(),
-                prop::option::of(arb_automatic_deposit()),
+                prop::option::of(arb_automatic_deposit_fee()),
             )
-                .prop_map(|(deposit_id, account, address, balance, automatic)| {
-                    EventType::QueuedDeposit {
-                        deposit_id,
-                        account,
-                        address,
-                        balance,
-                        automatic,
-                    }
-                },),
+                .prop_map(
+                    |(deposit_id, account, address, balance, automatic_deposit_fee)| {
+                        EventType::QueuedDeposit {
+                            deposit_id,
+                            account,
+                            address,
+                            balance,
+                            automatic_deposit_fee,
+                        }
+                    },
+                ),
             (
                 arb_signature(),
                 any::<u64>(),

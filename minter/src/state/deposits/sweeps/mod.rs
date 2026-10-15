@@ -335,12 +335,12 @@ impl Sweep {
                 let amount_to_mint = deposit
                     .sweepable_amount()
                     .checked_sub(fee_share)
-                    .and_then(|amount| amount.checked_sub(deposit.automatic_deposit_fee()))
+                    .and_then(|amount| amount.checked_sub(deposit.deducted_automatic_deposit_fee()))
                     .ok_or(SweepMismatch::FeesExceedSweepableAmount {
                         deposit_id: *deposit_id,
                         sweepable_amount: deposit.sweepable_amount(),
                         fee_share,
-                        automatic_deposit_fee: deposit.automatic_deposit_fee(),
+                        automatic_deposit_fee: deposit.deducted_automatic_deposit_fee(),
                     })?;
                 Ok(CreditedDeposit {
                     deposit_id: *deposit_id,
@@ -355,7 +355,7 @@ impl Sweep {
     pub fn automatic_deposit_fees(&self) -> Lamport {
         self.deposits
             .values()
-            .map(QueuedDeposit::automatic_deposit_fee)
+            .map(QueuedDeposit::deducted_automatic_deposit_fee)
             .sum()
     }
 }

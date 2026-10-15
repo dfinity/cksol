@@ -882,7 +882,7 @@ mod deposit_sol_tests {
                         },
                         address: deposit_address.clone(),
                         balance: BALANCE_ABOVE_MINIMUM,
-                        automatic: None,
+                        automatic_deposit_fee: None,
                     }]
             );
         });
@@ -963,7 +963,7 @@ mod deposit_sol_tests {
                         account: DEFAULT_CALLER_ACCOUNT,
                         address: deposit_address.clone(),
                         balance: BALANCE_ABOVE_MINIMUM,
-                        automatic: None,
+                        automatic_deposit_fee: None,
                     }]
             );
         });

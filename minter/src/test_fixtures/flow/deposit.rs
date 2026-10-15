@@ -1,5 +1,5 @@
 use crate::{
-    state::{AutomaticDeposit, QueuedDeposit, read_state},
+    state::{QueuedDeposit, read_state},
     test_fixtures::{
         automatic_deposit_of,
         events::{
@@ -26,15 +26,19 @@ impl DepositFlow {
         Self::queue_deposit(queued_deposit_of(account, sweepable_amount))
     }
 
-    /// Queues a deposit of `account` detected by the automatic flow with the given fee and
-    /// window, whose deposit address holds `sweepable_amount` on top of the rent exemption
+    /// Queues a deposit of `account` detected by the automatic flow under the given fee,
+    /// whose deposit address holds `sweepable_amount` on top of the rent exemption
     /// threshold, under the next deposit id of the state.
     pub fn queue_automatic(
         account: Account,
         sweepable_amount: Lamport,
-        automatic: AutomaticDeposit,
+        automatic_deposit_fee: Lamport,
     ) -> QueuedDepositFlow {
-        Self::queue_deposit(automatic_deposit_of(account, sweepable_amount, automatic))
+        Self::queue_deposit(automatic_deposit_of(
+            account,
+            sweepable_amount,
+            automatic_deposit_fee,
+        ))
     }
 
     fn queue_deposit(deposit: QueuedDeposit) -> QueuedDepositFlow {
