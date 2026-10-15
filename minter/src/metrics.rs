@@ -131,11 +131,6 @@ pub fn encode_metrics(w: &mut MetricsEncoder<Vec<u8>>, s: &State) -> std::io::Re
         .metric_value(),
         "Age of the oldest open registration of the automatic deposit flow in seconds. Returns 0 if no deposit address is watched.",
     )?;
-    w.encode_counter(
-        "automatic_deposits_queued",
-        s.deposits().automatic_deposit_count().metric_value(),
-        "Number of deposits queued by the balance scans of the automatic deposit flow.",
-    )?;
     w.encode_gauge(
         "collected_automatic_deposit_fees",
         s.collected_automatic_deposit_fees().metric_value(),
