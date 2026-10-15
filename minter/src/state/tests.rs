@@ -175,15 +175,8 @@ mod watched_deposit_addresses {
         let stale_snapshot = read_state(|s| s.watchlist().snapshot());
         mutate_state(|s| s.watchlist_mut().remove(&account(2)));
         let latest_snapshot = read_state(|s| s.watchlist().snapshot());
-        let detected = DepositFlow::queue_automatic(
-            account(1),
-            20_000_000,
-            AutomaticDeposit {
-                fee: AUTOMATIC_DEPOSIT_FEE,
-                valid_until: REGISTERED_AT + WATCH_WINDOW_NANOS,
-            },
-        )
-        .sweep(signature(0xAA));
+        let detected = DepositFlow::queue_automatic(account(1), 20_000_000, AUTOMATIC_DEPOSIT_FEE)
+            .sweep(signature(0xAA));
         read_state(|s| assert!(s.watchlist().is_empty()));
         let dropped_at = REGISTERED_AT + 1;
         mutate_state(|state| {
@@ -207,7 +200,7 @@ mod watched_deposit_addresses {
             vec![WatchedAddress {
                 account: account(1),
                 address: deposit_address(account(1)),
-                valid_until: at(REGISTERED_AT + WATCH_WINDOW_NANOS),
+                valid_until: at(dropped_at + WATCH_WINDOW_NANOS),
                 scan_count: 0,
                 last_scanned_at: None,
                 next_scan_at: Some(at(dropped_at)),
