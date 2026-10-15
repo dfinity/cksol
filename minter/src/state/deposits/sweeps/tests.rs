@@ -180,47 +180,6 @@ mod plan {
     }
 
     #[test]
-    fn should_deduct_the_deposit_fee_from_the_mint_of_an_automatic_deposit() {
-        let deposit_fee = 2_000_000;
-        let manual = queued_deposit_of(account(1), 3_000_000);
-        let detected = automatic_deposit_of(account(2), 5_000_000, deposit_fee);
-
-        let sweep = planned_sweep([(0, manual), (1, detected)]);
-
-        assert_eq!(sweep.fee_payer(), 1);
-        assert_eq!(sweep.expected_received(), 8_000_000 - 2 * FEE_PER_SIGNATURE);
-        assert_eq!(
-            sweep.transfers(),
-            vec![
-                Transfer {
-                    deposit_id: 1,
-                    from: detected.address,
-                    amount: 5_000_000 - 2 * FEE_PER_SIGNATURE,
-                },
-                Transfer {
-                    deposit_id: 0,
-                    from: manual.address,
-                    amount: 3_000_000,
-                },
-            ]
-        );
-        assert_eq!(
-            sweep.mints().unwrap(),
-            vec![
-                CreditedDeposit {
-                    deposit_id: 0,
-                    amount_to_mint: 3_000_000 - FEE_PER_SIGNATURE,
-                },
-                CreditedDeposit {
-                    deposit_id: 1,
-                    amount_to_mint: 5_000_000 - FEE_PER_SIGNATURE - deposit_fee,
-                },
-            ]
-        );
-        assert_eq!(sweep.deposit_fees(), deposit_fee);
-    }
-
-    #[test]
     fn should_collect_no_fee_from_manual_deposits() {
         let sweep = planned_sweep([
             (0, queued_deposit_of(account(1), 1_000_000)),

@@ -8,7 +8,12 @@ use cksol_types_internal::event::{
     Event as CandidEvent, EventType as CandidEventType, Signer as CandidSigner,
     TransactionPurpose as CandidTransactionPurpose, VersionedTransactionMessage,
 };
-use proptest::{prelude::Strategy, prop_assert, prop_assert_eq, proptest};
+use proptest::{
+    option,
+    prelude::{Strategy, any},
+    prop_assert, prop_assert_eq, proptest,
+};
+use sol_rpc_types::Lamport;
 
 proptest! {
     #[test]
@@ -38,13 +43,14 @@ proptest! {
         account in arb_account(),
         address in arb_address(),
         balance in 0..RENT_EXEMPTION_THRESHOLD,
+        deposit_fee in option::of(any::<Lamport>()),
     ) {
         let payload = CandidEventType::QueuedDeposit {
             deposit_id: 0,
             account,
             address: address.into(),
             balance,
-            deposit_fee: None,
+            deposit_fee,
         };
         prop_assert_eq!(
             EventType::try_from(payload).unwrap_err(),

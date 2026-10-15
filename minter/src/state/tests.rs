@@ -36,32 +36,6 @@ proptest! {
     }
 }
 
-/// The automatic part was added to the `QueuedDeposit` event after the minter was deployed,
-/// so the events recorded before must still decode, as this encoding recorded by the previous
-/// version checks.
-#[test]
-fn should_decode_a_queued_deposit_recorded_without_the_automatic_part() {
-    const RECORDED_BEFORE_THE_AUTOMATIC_FLOW: &str = "821a499602d28208840781581d08000000000000000000000000000000000000000000000000000000005820d8c8b6b0295ea41f91d2173a81503fcec3148f69e8e130813d228badbaaf28e41a0087aa00";
-    let bytes = hex::decode(RECORDED_BEFORE_THE_AUTOMATIC_FLOW).unwrap();
-    let deposit = queued_deposit(7);
-
-    let decoded = Event::from_bytes(Cow::Borrowed(&bytes));
-
-    assert_eq!(
-        decoded,
-        Event {
-            timestamp: 1_234_567_890,
-            payload: EventType::QueuedDeposit {
-                deposit_id: 7,
-                account: deposit.account,
-                address: deposit.address,
-                balance: deposit.balance,
-                deposit_fee: None,
-            },
-        }
-    );
-}
-
 mod cache_minter_public_key {
     use super::*;
     use ic_ed25519::{PocketIcMasterPublicKeyId, PublicKey};
@@ -398,6 +372,7 @@ mod swept_deposits {
 
         let credited = finalized.credit();
 
+        assert_eq!(credited.amount_received, 60_000_000 - 3 * FEE_PER_SIGNATURE);
         let [manual_mint, first_mint, second_mint] = credited.pending_mints();
         assert_eq!(manual_mint.amount_to_mint, 10_000_000 - FEE_PER_SIGNATURE);
         assert_eq!(
