@@ -1,5 +1,5 @@
 use super::{
-    confirmed_block,
+    accounts_with_balances, confirmed_block,
     signer::{MockSchnorrSigner, SignerExpectation, sign_for},
     stubs::Stubs,
 };
@@ -17,7 +17,8 @@ use ic_cdk_management_canister::{SchnorrPublicKeyArgs, SchnorrPublicKeyResult};
 use icrc_ledger_types::icrc1::account::Account;
 use serde::de::DeserializeOwned;
 use sol_rpc_types::{
-    MultiRpcResult, RpcConfig, RpcResult, RpcSources, SendTransactionParams, Signature, Slot,
+    Lamport, MultiRpcResult, RpcConfig, RpcResult, RpcSources, SendTransactionParams, Signature,
+    Slot,
 };
 use std::{
     future::Future,
@@ -55,6 +56,14 @@ impl TestCanisterRuntime {
         transaction_signature: solana_signature::Signature,
     ) -> TransactionBuilder {
         TransactionBuilder::new(self, fee_payer, transaction_signature)
+    }
+
+    /// Stubs the `getMultipleAccounts` call of a scan with the given balances in order, a
+    /// missing account for `None`.
+    pub fn add_get_multiple_accounts_response(self, balances: &[Option<Lamport>]) -> Self {
+        self.add_stub_response(MultiRpcResult::Consistent(Ok(accounts_with_balances(
+            balances,
+        ))))
     }
 
     pub fn add_stub_response<Out: CandidType>(mut self, response: Out) -> Self {
@@ -252,6 +261,7 @@ struct RecordingStubRuntime {
 #[derive(Clone, Debug, PartialEq)]
 pub struct SentUpdateCall {
     pub method: String,
+    pub cycles: u128,
     args: Vec<u8>,
 }
 
@@ -283,6 +293,7 @@ impl Runtime for RecordingStubRuntime {
     {
         self.sent_update_calls.lock().unwrap().push(SentUpdateCall {
             method: method.to_string(),
+            cycles,
             args: encode_args(args).expect("Failed to encode the call arguments"),
         });
         self.stub.update_call(id, method, (), cycles).await

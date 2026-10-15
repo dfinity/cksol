@@ -1,10 +1,10 @@
 use crate::{
-    constants::GET_RECENT_BLOCK_MAX_TRIES,
+    constants::{GET_RECENT_BLOCK_MAX_TRIES, MAX_ADDRESSES_PER_GET_MULTIPLE_ACCOUNTS},
     rpc::{
-        Block, BlockHeight, GetBalanceError, GetNonceAccountError, GetRecentBlockError,
-        GetTransactionError, NonceAccount, SubmitTransactionError, get_balance, get_nonce_account,
-        get_recent_block, get_signature_statuses, get_transaction, submit_transaction,
-        submit_transaction_skipping_preflight,
+        Block, BlockHeight, GetBalanceError, GetMultipleAccountsError, GetNonceAccountError,
+        GetRecentBlockError, GetTransactionError, NonceAccount, SubmitTransactionError,
+        get_balance, get_balances, get_nonce_account, get_recent_block, get_signature_statuses,
+        get_transaction, submit_transaction, submit_transaction_skipping_preflight,
     },
     test_fixtures::{
         MINTER_ADDRESS, confirmed_block, confirmed_block_at_height,
@@ -70,6 +70,76 @@ mod get_balance_tests {
             ),
         ] {
             let result = get_balance(&runtime, DEPOSIT_ADDRESS).await;
+
+            assert_eq!(result, Err(expected));
+        }
+    }
+}
+
+mod get_balances_tests {
+    use super::*;
+    use crate::test_fixtures::address;
+    use sol_rpc_types::Lamport;
+
+    type MultiRpcResult = sol_rpc_types::MultiRpcResult<Vec<Option<sol_rpc_types::AccountInfo>>>;
+
+    #[tokio::test]
+    async fn should_read_the_balances_in_order_with_a_missing_account_as_zero() {
+        init_state();
+        let addresses: Vec<_> = (0..MAX_ADDRESSES_PER_GET_MULTIPLE_ACCOUNTS)
+            .map(address)
+            .collect();
+        let balances: Vec<Option<Lamport>> = (0..addresses.len() as Lamport)
+            .map(|index| (index % 3 != 0).then_some(index))
+            .collect();
+        let runtime = TestCanisterRuntime::new().add_get_multiple_accounts_response(&balances);
+
+        let result = get_balances(&runtime, &addresses).await;
+
+        let expected: Vec<Lamport> = balances
+            .iter()
+            .map(|balance| balance.unwrap_or(0))
+            .collect();
+        assert_eq!(result, Ok(expected));
+    }
+
+    #[tokio::test]
+    #[should_panic(expected = "BUG: a getMultipleAccounts call reads between 1 and 100 addresses")]
+    async fn should_panic_on_more_addresses_than_one_call_reads() {
+        init_state();
+        let addresses: Vec<_> = (0..=MAX_ADDRESSES_PER_GET_MULTIPLE_ACCOUNTS)
+            .map(address)
+            .collect();
+
+        let _ = get_balances(&TestCanisterRuntime::new(), &addresses).await;
+    }
+
+    #[tokio::test]
+    async fn should_fail_if_call_fails_or_results_are_wrong() {
+        init_state();
+        let rpc_error = RpcError::ValidationError("Error 1".to_string());
+        let inconsistent = vec![(
+            RpcSource::Supported(SupportedRpcProviderId::AnkrMainnet),
+            Err(rpc_error.clone()),
+        )];
+
+        for (runtime, expected) in [
+            (
+                TestCanisterRuntime::new().add_stub_error(IcError::CallPerformFailed),
+                GetMultipleAccountsError::IcError(IcError::CallPerformFailed),
+            ),
+            (
+                TestCanisterRuntime::new()
+                    .add_stub_response(MultiRpcResult::Consistent(Err(rpc_error.clone()))),
+                GetMultipleAccountsError::RpcError(rpc_error.clone()),
+            ),
+            (
+                TestCanisterRuntime::new()
+                    .add_stub_response(MultiRpcResult::Inconsistent(inconsistent.clone())),
+                GetMultipleAccountsError::InconsistentRpcResults,
+            ),
+        ] {
+            let result = get_balances(&runtime, &[address(1)]).await;
 
             assert_eq!(result, Err(expected));
         }
