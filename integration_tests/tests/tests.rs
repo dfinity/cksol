@@ -171,6 +171,7 @@ mod lifecycle {
         const NEW_WITHDRAWAL_FEE: Lamport = 100_000;
         const NEW_MINIMUM_WITHDRAWAL_AMOUNT: Lamport = 1_000_000;
         const NEW_DEPOSIT_SOL_REQUIRED_CYCLES: u128 = 500_000_000_000;
+        const NEW_AUTOMATIC_DEPOSIT_FEE: Lamport = 100_000;
 
         let setup = SetupBuilder::new().build().await;
         wait_for_initial_minter_address(&setup).await;
@@ -187,6 +188,7 @@ mod lifecycle {
                 balance: 0,
                 minter_address: Some(MINTER_ADDRESS.to_string()),
                 nonce_accounts: vec![Setup::DEFAULT_NONCE_ACCOUNT.to_string()],
+                automatic_deposit_fee: Some(Setup::DEFAULT_AUTOMATIC_DEPOSIT_FEE),
             }
         );
 
@@ -211,6 +213,7 @@ mod lifecycle {
                 deposit_sol_required_cycles: Some(NEW_DEPOSIT_SOL_REQUIRED_CYCLES as u64),
                 deposit_sol_fee: None,
                 nonce_accounts_to_add: None,
+                automatic_deposit_fee: Some(NEW_AUTOMATIC_DEPOSIT_FEE),
             })
             .await
             .expect("upgrade failed");
@@ -227,6 +230,7 @@ mod lifecycle {
                 balance: 0,
                 minter_address: Some(MINTER_ADDRESS.to_string()),
                 nonce_accounts: vec![Setup::DEFAULT_NONCE_ACCOUNT.to_string()],
+                automatic_deposit_fee: Some(NEW_AUTOMATIC_DEPOSIT_FEE),
             }
         );
 

@@ -41,6 +41,7 @@ fn init_args() -> InitArgs {
         solana_network: SolanaNetwork::Mainnet,
         deposit_sol_fee: 10_000_000_000,
         nonce_accounts: vec![nonce_account().to_string()],
+        automatic_deposit_fee: Some(2_000_000),
     }
 }
 
