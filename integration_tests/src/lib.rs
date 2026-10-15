@@ -40,7 +40,6 @@ use std::{
 pub mod events;
 pub mod fixtures;
 pub mod ledger_init_args;
-mod proxy;
 mod snapshot;
 pub mod validator;
 
@@ -307,8 +306,6 @@ impl Setup {
             runtime: self.runtime(caller),
             id,
             caller,
-            proxy_canister_id: self.proxy_canister_id,
-            http_mocks: HttpMocks::NotInstalled,
         }
     }
 
@@ -473,8 +470,6 @@ impl<'a> CkSolMinter<'a> {
             runtime: PocketIcRuntime::new(env, Setup::DEFAULT_CALLER),
             id: canister_id,
             caller: Setup::DEFAULT_CALLER,
-            proxy_canister_id: None,
-            http_mocks: HttpMocks::NotInstalled,
         })
     }
 
@@ -563,18 +558,6 @@ impl<'a> CkSolMinter<'a> {
             .await
     }
 
-    pub async fn submit_deposit_sol(
-        &self,
-        args: impl Into<DepositSolArgs>,
-    ) -> PendingCall<'_, Result<DepositSolId, DepositSolError>> {
-        self.submit_update_call(
-            "deposit_sol",
-            (args.into(),),
-            Setup::DEFAULT_DEPOSIT_SOL_REQUIRED_CYCLES,
-        )
-        .await
-    }
-
     pub async fn deposit_sol_status(&self, deposit_id: DepositSolId) -> DepositSolStatus {
         self.query_call("deposit_sol_status", (deposit_id,)).await
     }
@@ -599,7 +582,7 @@ impl<'a> CkSolMinter<'a> {
         &self,
         args: WithdrawSolArgs,
     ) -> PendingCall<'_, Result<WithdrawSolOk, WithdrawSolError>> {
-        self.submit_update_call("withdraw_sol", (args,), 0).await
+        self.submit_update_call("withdraw_sol", (args,)).await
     }
 
     pub async fn withdraw_sol_status(&self, block_index: u64) -> WithdrawSolStatus {
@@ -763,35 +746,20 @@ pub struct Canister<'a> {
     runtime: PocketIcRuntime<'a>,
     id: CanisterId,
     caller: Principal,
-    proxy_canister_id: Option<Principal>,
-    http_mocks: HttpMocks,
-}
-
-enum HttpMocks {
-    NotInstalled,
-    Installed,
 }
 
 /// An update call whose ingress message has been submitted but not yet executed.
 ///
-/// Submitting several calls before awaiting any of them puts all of their ingress
+/// Submitting several calls before executing a round puts all of their ingress
 /// messages into the same round, so they are guaranteed to execute concurrently.
 /// Their order within that round is unspecified.
 ///
-/// HTTP outcalls made by a pending call are not served automatically. Mocks installed with
-/// [`Canister::with_http_mocks`] are rejected at submission; instead, serve them explicitly
-/// with [`Setup::execute_http_mocks`] after submitting and before calling
-/// [`PendingCall::await_response`]. One mock set serves every call pending in that round.
+/// The message is submitted directly to the canister, so it carries no cycles, and
+/// HTTP outcalls it makes are not served: a call waiting on one stays pending.
 pub struct PendingCall<'a, Out> {
     env: &'a PocketIc,
     message_id: RawMessageId,
-    route: CallRoute,
     response: PhantomData<Out>,
-}
-
-enum CallRoute {
-    Direct,
-    ViaProxy,
 }
 
 impl<Out> PendingCall<'_, Out>
@@ -804,63 +772,26 @@ where
             .await_call(self.message_id)
             .await
             .unwrap_or_else(|e| panic!("Update call failed: {e:?}"));
-        let reply = match self.route {
-            CallRoute::Direct => reply,
-            CallRoute::ViaProxy => proxy::unwrap_reply(reply),
-        };
         Decode!(&reply, Out).unwrap_or_else(|e| panic!("Failed to decode response: {e}"))
     }
 }
 
 impl Canister<'_> {
-    async fn submit_update_call<In, Out>(
-        &self,
-        method: &str,
-        args: In,
-        cycles: u128,
-    ) -> PendingCall<'_, Out>
+    async fn submit_update_call<In, Out>(&self, method: &str, args: In) -> PendingCall<'_, Out>
     where
         In: ArgumentEncoder + Send,
         Out: CandidType + DeserializeOwned,
     {
-        self.reject_unserved_http_mocks();
-        let (target, method, payload, route) = match (self.proxy_canister_id, cycles) {
-            (Some(proxy_canister_id), _) => (
-                proxy_canister_id,
-                "proxy",
-                proxy::encode_call(self.id, method, args, cycles),
-                CallRoute::ViaProxy,
-            ),
-            (None, 0) => (
-                self.id,
-                method,
-                candid::encode_args(args).expect("Failed to encode arguments"),
-                CallRoute::Direct,
-            ),
-            (None, cycles) => panic!(
-                "Submitting `{method}` with {cycles} cycles requires a proxy canister: \
-                 build the setup with `SetupBuilder::with_proxy_canister()`"
-            ),
-        };
         let env = self.runtime.as_ref();
+        let payload = candid::encode_args(args).expect("Failed to encode arguments");
         let message_id = env
-            .submit_call(target, self.caller, method, payload)
+            .submit_call(self.id, self.caller, method, payload)
             .await
             .unwrap_or_else(|e| panic!("Failed to submit update call: {e:?}"));
         PendingCall {
             env,
             message_id,
-            route,
             response: PhantomData,
-        }
-    }
-
-    fn reject_unserved_http_mocks(&self) {
-        if let HttpMocks::Installed = self.http_mocks {
-            panic!(
-                "HTTP mocks installed with `with_http_mocks` are not served for submitted calls: \
-                 serve them with `Setup::execute_http_mocks` after submitting instead"
-            );
         }
     }
 }
@@ -946,7 +877,6 @@ impl Canister<'_> {
 
     pub fn with_http_mocks(mut self, mocks: impl ExecuteHttpOutcallMocks + 'static) -> Self {
         self.runtime = self.runtime.with_http_mocks(mocks);
-        self.http_mocks = HttpMocks::Installed;
         self
     }
 

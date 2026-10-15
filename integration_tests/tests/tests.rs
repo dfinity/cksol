@@ -5,7 +5,7 @@ use cksol_int_tests::{
     CkSolMinter, Setup, SetupBuilder,
     fixtures::{
         DEFAULT_CALLER_ACCOUNT, DEFAULT_CALLER_DEPOSIT_ADDRESS, DEPOSIT_AMOUNT, MINTER_ADDRESS,
-        MockBuilder, RENT_EXEMPTION_THRESHOLD,
+        MockBuilder, RENT_EXEMPTION_THRESHOLD, SharedMockHttpOutcalls,
     },
     validator::FEE_PER_SIGNATURE,
 };
@@ -21,6 +21,7 @@ use cksol_types_internal::{
 use icrc_ledger_types::icrc1::account::{Account, Subaccount};
 use sol_rpc_types::{CommitmentLevel, ConsensusStrategy, RpcConfig};
 use std::time::Duration;
+use tokio::join;
 
 const WITHDRAWAL_PROCESSING_DELAY: Duration = Duration::from_mins(1);
 const FINALIZE_TRANSACTIONS_DELAY: Duration = Duration::from_mins(2);
@@ -1158,26 +1159,26 @@ mod deposit_sol_tests {
     #[tokio::test]
     async fn should_fail_for_concurrent_access() {
         let setup = SetupBuilder::new().with_proxy_canister().build().await;
-        let minter = setup.minter();
-
-        let first_call = minter.submit_deposit_sol(DEFAULT_CALLER_ACCOUNT).await;
-        let second_call = minter.submit_deposit_sol(DEFAULT_CALLER_ACCOUNT).await;
-        setup
-            .execute_http_mocks(
-                MockBuilder::new()
-                    .get_balance(BALANCE_ABOVE_MINIMUM)
-                    .build(),
-            )
-            .await;
-
-        let outcomes = (
-            first_call.await_response().await,
-            second_call.await_response().await,
+        let mocks = SharedMockHttpOutcalls::new(
+            MockBuilder::new()
+                .get_balance(BALANCE_ABOVE_MINIMUM)
+                .build(),
         );
-        assert_matches!(
-            outcomes,
-            (Ok(0), Err(DepositSolError::AlreadyProcessing))
-                | (Err(DepositSolError::AlreadyProcessing), Ok(0))
+        let minter1 = setup.minter().with_http_mocks(mocks.clone());
+        let minter2 = setup.minter().with_http_mocks(mocks.clone());
+
+        let results = join!(
+            minter1.deposit_sol(DEFAULT_CALLER_ACCOUNT),
+            minter2.deposit_sol(DEFAULT_CALLER_ACCOUNT)
+        );
+
+        assert!(
+            matches!(
+                results,
+                (Ok(0), Err(DepositSolError::AlreadyProcessing))
+                    | (Err(DepositSolError::AlreadyProcessing), Ok(0))
+            ),
+            "Expected one queued deposit and one AlreadyProcessing error, got: {results:?}"
         );
 
         setup.drop().await;
@@ -1201,52 +1202,6 @@ mod deposit_sol_tests {
             .send()
             .await
             .expect("Failed to get cycles cost for `getBalance` request")
-    }
-}
-
-mod pending_call_tests {
-    use super::*;
-    use futures::FutureExt;
-    use std::{any::Any, panic::AssertUnwindSafe};
-
-    #[tokio::test]
-    async fn should_reject_submitting_deposit_sol_without_proxy_canister() {
-        let setup = SetupBuilder::new().build().await;
-        let minter = setup.minter();
-
-        let panic = AssertUnwindSafe(async {
-            minter.submit_deposit_sol(DEFAULT_CALLER_ACCOUNT).await;
-        })
-        .catch_unwind()
-        .await
-        .expect_err("submitting with cycles but without a proxy canister should panic");
-        assert!(panic_message(&*panic).contains("requires a proxy canister"));
-
-        setup.drop().await;
-    }
-
-    #[tokio::test]
-    async fn should_reject_submitting_with_installed_http_mocks() {
-        let setup = SetupBuilder::new().with_proxy_canister().build().await;
-        let minter = setup.minter().with_http_mocks(MockBuilder::new().build());
-
-        let panic = AssertUnwindSafe(async {
-            minter.submit_deposit_sol(DEFAULT_CALLER_ACCOUNT).await;
-        })
-        .catch_unwind()
-        .await
-        .expect_err("submitting with installed HTTP mocks should panic");
-        assert!(panic_message(&*panic).contains("not served for submitted calls"));
-
-        setup.drop().await;
-    }
-
-    fn panic_message(panic: &(dyn Any + Send)) -> &str {
-        panic
-            .downcast_ref::<String>()
-            .map(String::as_str)
-            .or_else(|| panic.downcast_ref::<&str>().copied())
-            .unwrap_or_default()
     }
 }
 
