@@ -256,8 +256,9 @@ impl Deposits {
         expected_received
     }
 
-    /// Drops every deposit of the given swept sweep and releases their accounts.
-    pub(super) fn drop_swept(&mut self, signature: &Signature) {
+    /// Drops every deposit of the given swept sweep, releases their accounts and returns
+    /// the dropped deposits in the order of their ids.
+    pub(super) fn drop_swept(&mut self, signature: &Signature) -> Vec<QueuedDeposit> {
         let sweep = self
             .swept
             .remove(signature)
@@ -273,6 +274,7 @@ impl Deposits {
                 },
             );
         }
+        sweep.deposits().values().copied().collect()
     }
 
     /// Moves every deposit of the given finalized sweep to the quarantine, keeping their

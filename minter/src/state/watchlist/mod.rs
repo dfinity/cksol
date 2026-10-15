@@ -1,4 +1,7 @@
-use crate::utils::timed_sized_map::{Entry, InsertError, TimedSizedMap, Timestamp};
+use crate::{
+    state::QueuedDeposit,
+    utils::timed_sized_map::{Entry, InsertError, TimedSizedMap, Timestamp},
+};
 use icrc_ledger_types::icrc1::account::Account;
 use solana_address::Address;
 use std::{num::NonZeroUsize, time::Duration};
@@ -99,6 +102,14 @@ pub struct WatchedAddress {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct WatchlistFull;
 
+/// Why a dropped deposit was not put back on the watchlist.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RearmError {
+    /// The deposit was queued by `deposit_sol`, whose caller registered nothing.
+    ManualDeposit,
+    WatchlistFull,
+}
+
 impl Default for Watchlist {
     fn default() -> Self {
         Self {
@@ -116,20 +127,34 @@ impl Watchlist {
         account: Account,
         address: Address,
     ) -> Result<WatchedAddress, WatchlistFull> {
-        match self
+        let inserted = self
             .entries
-            .insert(now, account, ScanProgress::unscanned(address, now))
-        {
+            .insert(now, account, ScanProgress::unscanned(address, now));
+        match inserted {
             Ok(_) | Err(InsertError::AlreadyPresent { .. }) => Ok(self
                 .get(now, &account)
                 .expect("BUG: a registration is live right after its insertion")),
             Err(InsertError::AtCapacity { .. }) => Err(WatchlistFull),
             Err(InsertError::Expired { .. }) => {
-                unreachable!(
-                    "BUG: a registration for the window starting now never expires on insertion"
-                )
+                unreachable!("BUG: a registration for the window starting now cannot have expired")
             }
         }
+    }
+
+    /// Puts the account of a dropped automatic deposit back on the watchlist for a fresh
+    /// window and schedule starting now, so that the funds still on its deposit address are
+    /// swept again without the user's intervention. An account that is already watched keeps
+    /// its registration.
+    pub fn rearm(
+        &mut self,
+        now: Timestamp,
+        dropped: &QueuedDeposit,
+    ) -> Result<WatchedAddress, RearmError> {
+        if dropped.deposit_fee.is_none() {
+            return Err(RearmError::ManualDeposit);
+        }
+        self.register(now, dropped.account, dropped.address)
+            .map_err(|WatchlistFull| RearmError::WatchlistFull)
     }
 
     /// The live registration of the account, if any.
