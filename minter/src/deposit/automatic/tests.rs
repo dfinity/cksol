@@ -16,7 +16,9 @@ use crate::{
 };
 use assert_matches::assert_matches;
 use candid::Principal;
-use cksol_types::{WatchDepositAddressError, WatchDepositAddressOk, WatchDepositAddressStatus};
+use cksol_types::{
+    DepositSolId, WatchDepositAddressError, WatchDepositAddressOk, WatchDepositAddressStatus,
+};
 use cksol_types_internal::InitArgs;
 use icrc_ledger_types::icrc1::account::Account;
 
@@ -125,54 +127,23 @@ fn should_register_anew_once_the_window_has_passed() {
 }
 
 #[test]
-fn should_report_a_queued_deposit_as_detected_without_registering() {
-    setup();
-    let deposit = DepositFlow::queue(account(1), MINIMUM_DEPOSIT_AMOUNT);
+fn should_report_an_in_flight_deposit_as_detected_without_registering() {
+    for reach_in_flight_stage in [queued as fn(Account) -> DepositSolId, swept, credited] {
+        in_fresh_state(|| {
+            setup();
+            let deposit_id = reach_in_flight_stage(account(1));
+            let state_before = current_state();
 
-    let result = watch_deposit_address(&runtime(), account(1)).unwrap();
+            let result = watch_deposit_address(&runtime(), account(1)).unwrap();
 
-    assert_eq!(
-        result.status,
-        WatchDepositAddressStatus::Detected {
-            deposit_id: deposit.deposit_id
-        }
-    );
-    assert_eq!(result.latest_deposit_id, Some(deposit.deposit_id));
-    assert!(read_state(|s| s.watchlist().is_empty()));
-}
-
-#[test]
-fn should_report_a_swept_deposit_as_detected_without_registering() {
-    setup();
-    let deposit = DepositFlow::queue(account(1), MINIMUM_DEPOSIT_AMOUNT);
-    deposit.sweep(signature(0xAA));
-
-    let result = watch_deposit_address(&runtime(), account(1)).unwrap();
-
-    assert_eq!(
-        result.status,
-        WatchDepositAddressStatus::Detected {
-            deposit_id: deposit.deposit_id
-        }
-    );
-    assert!(read_state(|s| s.watchlist().is_empty()));
-}
-
-#[test]
-fn should_report_a_credited_deposit_as_detected_without_registering() {
-    setup();
-    let deposit = DepositFlow::queue(account(1), MINIMUM_DEPOSIT_AMOUNT);
-    deposit.sweep(signature(0xAA)).succeed().credit();
-
-    let result = watch_deposit_address(&runtime(), account(1)).unwrap();
-
-    assert_eq!(
-        result.status,
-        WatchDepositAddressStatus::Detected {
-            deposit_id: deposit.deposit_id
-        }
-    );
-    assert!(read_state(|s| s.watchlist().is_empty()));
+            assert_eq!(
+                result.status,
+                WatchDepositAddressStatus::Detected { deposit_id }
+            );
+            assert_eq!(result.latest_deposit_id, Some(deposit_id));
+            assert_eq!(current_state(), state_before);
+        });
+    }
 }
 
 #[test]
@@ -287,6 +258,24 @@ fn setup_without_automatic_deposit_fee() {
 
 fn setup_without_minter_public_key() {
     init_state();
+}
+
+fn queued(account: Account) -> DepositSolId {
+    DepositFlow::queue(account, MINIMUM_DEPOSIT_AMOUNT).deposit_id
+}
+
+fn swept(account: Account) -> DepositSolId {
+    let deposit = DepositFlow::queue(account, MINIMUM_DEPOSIT_AMOUNT);
+    let deposit_id = deposit.deposit_id;
+    deposit.sweep(signature(0xAA));
+    deposit_id
+}
+
+fn credited(account: Account) -> DepositSolId {
+    let deposit = DepositFlow::queue(account, MINIMUM_DEPOSIT_AMOUNT);
+    let deposit_id = deposit.deposit_id;
+    deposit.sweep(signature(0xAA)).succeed().credit();
+    deposit_id
 }
 
 fn in_fresh_state(test: impl FnOnce() + Send) {
