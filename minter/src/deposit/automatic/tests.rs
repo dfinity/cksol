@@ -75,6 +75,10 @@ fn should_register_the_account_without_recording_an_event() {
 fn should_report_the_stored_registration_without_extending_it() {
     setup();
     let first = watch_deposit_address(&runtime(), account(1)).unwrap();
+    let first_valid_until = assert_matches!(
+        first.status,
+        WatchDepositAddressStatus::Watching { valid_until, .. } => valid_until
+    );
     mutate_state(|s| {
         s.watchlist_mut()
             .record_scan(at(REGISTERED_AT + 1), &account(1))
@@ -84,15 +88,17 @@ fn should_report_the_stored_registration_without_extending_it() {
         watch_deposit_address(&runtime_at(REGISTERED_AT + HOUR_NANOS), account(1)).unwrap();
 
     assert_eq!(
-        second.status,
-        WatchDepositAddressStatus::Watching {
-            valid_until: REGISTERED_AT + WATCH_WINDOW_NANOS,
-            scan_count: 1,
-            last_scanned_at: Some(REGISTERED_AT + 1),
-            next_scan_at: Some(REGISTERED_AT + MINUTE_NANOS),
+        second,
+        WatchDepositAddressOk {
+            status: WatchDepositAddressStatus::Watching {
+                valid_until: first_valid_until,
+                scan_count: 1,
+                last_scanned_at: Some(REGISTERED_AT + 1),
+                next_scan_at: Some(REGISTERED_AT + MINUTE_NANOS),
+            },
+            ..first
         }
     );
-    assert_eq!(second.address, first.address);
     assert_eq!(read_state(|s| s.watchlist().len()), 1);
 }
 
