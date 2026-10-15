@@ -197,7 +197,7 @@ async fn assert_yields_to_the_deposit_queued_by_a_scan_during_the_read(
             account: DEPOSITOR_ACCOUNT,
             address: scanned.address,
             balance: queued_deposit_of(DEPOSITOR_ACCOUNT, scanned.sweepable_amount).balance,
-            automatic_deposit_fee: Some(AUTOMATIC_DEPOSIT_FEE),
+            deposit_fee: Some(AUTOMATIC_DEPOSIT_FEE),
         })
         .assert_no_more_events();
     assert_eq!(
