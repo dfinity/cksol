@@ -1,7 +1,7 @@
 use crate::{
     deposit::automatic::watch_deposit_address,
     guard::deposit_sol_guard,
-    state::{MAX_WATCHED_ADDRESSES, mutate_state, read_state},
+    state::{MAX_WATCHED_ADDRESSES, State, mutate_state, read_state},
     test_fixtures::{
         AUTOMATIC_DEPOSIT_FEE, EventsAssert, HOUR_NANOS, MINIMUM_DEPOSIT_AMOUNT, MINTER_ACCOUNT,
         MINUTE_NANOS, REGISTERED_AT, WATCH_WINDOW_NANOS, account, at, deposit_address,
@@ -21,33 +21,27 @@ use cksol_types_internal::InitArgs;
 use icrc_ledger_types::icrc1::account::Account;
 
 #[test]
-fn should_fail_while_the_automatic_deposit_fee_is_not_configured() {
-    init_state_with_args(InitArgs {
-        automatic_deposit_fee: None,
-        ..valid_init_args()
-    });
-    init_schnorr_master_key();
+fn should_fail_without_registering_while_a_prerequisite_is_unavailable() {
+    for (setup_without_prerequisite, unavailable) in [
+        (
+            setup_without_automatic_deposit_fee as fn(),
+            "automatic deposit fee",
+        ),
+        (setup_without_minter_public_key, "minter public key"),
+    ] {
+        in_fresh_state(|| {
+            setup_without_prerequisite();
+            let state_before = current_state();
 
-    let result = watch_deposit_address(&runtime(), account(1));
+            let result = watch_deposit_address(&runtime(), account(1));
 
-    assert_matches!(
-        result,
-        Err(WatchDepositAddressError::TemporarilyUnavailable(e)) => assert!(e.contains("automatic deposit fee"))
-    );
-    assert!(read_state(|s| s.watchlist().is_empty()));
-}
-
-#[test]
-fn should_fail_while_the_minter_public_key_is_unavailable() {
-    init_state();
-
-    let result = watch_deposit_address(&runtime(), account(1));
-
-    assert_matches!(
-        result,
-        Err(WatchDepositAddressError::TemporarilyUnavailable(e)) => assert!(e.contains("minter public key"))
-    );
-    assert!(read_state(|s| s.watchlist().is_empty()));
+            assert_matches!(
+                result,
+                Err(WatchDepositAddressError::TemporarilyUnavailable(e)) => assert!(e.contains(unavailable))
+            );
+            assert_eq!(current_state(), state_before);
+        });
+    }
 }
 
 #[test]
@@ -223,6 +217,7 @@ fn should_reject_an_account_whose_latest_deposit_is_quarantined() {
     submit_sweep(signature(0xAA), vec![0]);
     succeed_transaction(signature(0xAA));
     quarantine_sweep(signature(0xAA));
+    let state_before = current_state();
 
     let result = watch_deposit_address(&runtime(), account(1));
 
@@ -230,7 +225,7 @@ fn should_reject_an_account_whose_latest_deposit_is_quarantined() {
         result,
         Err(WatchDepositAddressError::Quarantined { deposit_id: 0 })
     );
-    assert!(read_state(|s| s.watchlist().is_empty()));
+    assert_eq!(current_state(), state_before);
 }
 
 #[test]
@@ -239,6 +234,7 @@ fn should_reject_a_registration_when_the_watchlist_is_full() {
     for index in 0..MAX_WATCHED_ADDRESSES.get() {
         watch_deposit_address(&runtime(), account(index)).unwrap();
     }
+    let state_before = current_state();
 
     let result = watch_deposit_address(&runtime(), account(MAX_WATCHED_ADDRESSES.get()));
 
@@ -246,12 +242,7 @@ fn should_reject_a_registration_when_the_watchlist_is_full() {
         result,
         Err(WatchDepositAddressError::TooManyWatchedAddresses)
     );
-    assert_matches!(
-        watch_deposit_address(&runtime(), account(0))
-            .unwrap()
-            .status,
-        WatchDepositAddressStatus::Watching { .. }
-    );
+    assert_eq!(current_state(), state_before);
 }
 
 #[test]
@@ -284,6 +275,28 @@ fn should_reject_the_minter_as_owner() {
 fn setup() {
     init_state();
     init_schnorr_master_key();
+}
+
+fn setup_without_automatic_deposit_fee() {
+    init_state_with_args(InitArgs {
+        automatic_deposit_fee: None,
+        ..valid_init_args()
+    });
+    init_schnorr_master_key();
+}
+
+fn setup_without_minter_public_key() {
+    init_state();
+}
+
+fn in_fresh_state(test: impl FnOnce() + Send) {
+    std::thread::scope(|scope| {
+        scope.spawn(test);
+    });
+}
+
+fn current_state() -> State {
+    read_state(|s| s.clone())
 }
 
 fn runtime() -> TestCanisterRuntime {
