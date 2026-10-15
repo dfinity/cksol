@@ -3,8 +3,9 @@ use candid::{CandidType, Decode, Encode, Nat, Principal, utils::ArgumentEncoder}
 use canlog::{Log, LogEntry};
 use cksol_types::{
     Address, DepositSolArgs, DepositSolError, DepositSolId, DepositSolStatus,
-    GetDepositAddressArgs, MinterInfo, WithdrawSolArgs, WithdrawSolError, WithdrawSolOk,
-    WithdrawSolStatus, WithdrawSolStatusArgs,
+    GetDepositAddressArgs, MinterInfo, WatchDepositAddressArgs, WatchDepositAddressError,
+    WatchDepositAddressOk, WithdrawSolArgs, WithdrawSolError, WithdrawSolOk, WithdrawSolStatus,
+    WithdrawSolStatusArgs,
 };
 use cksol_types_internal::{
     MinterArg,
@@ -16,7 +17,7 @@ use ic_http_types::{HttpRequest, HttpResponse};
 use ic_management_canister_types::{CanisterId, CanisterSettings};
 use ic_pocket_canister_runtime::{ExecuteHttpOutcallMocks, PocketIcRuntime};
 use icrc_ledger_types::{
-    icrc1::account::Account,
+    icrc1::account::{Account, Subaccount},
     icrc2::approve::{ApproveArgs, ApproveError},
     icrc3::blocks::{GetBlocksRequest, GetBlocksResult, ICRC3GenericBlock},
 };
@@ -574,6 +575,27 @@ impl<'a> CkSolMinter<'a> {
 
     pub async fn deposit_sol_status(&self, deposit_id: DepositSolId) -> DepositSolStatus {
         self.query_call("deposit_sol_status", (deposit_id,)).await
+    }
+
+    pub async fn watch_deposit_address(
+        &self,
+        subaccount: Option<Subaccount>,
+    ) -> Result<WatchDepositAddressOk, WatchDepositAddressError> {
+        self.try_watch_deposit_address(subaccount)
+            .await
+            .expect("watch_deposit_address failed")
+    }
+
+    pub async fn try_watch_deposit_address(
+        &self,
+        subaccount: Option<Subaccount>,
+    ) -> Result<Result<WatchDepositAddressOk, WatchDepositAddressError>, String> {
+        self.try_update_call(
+            "watch_deposit_address",
+            (WatchDepositAddressArgs { subaccount },),
+            0,
+        )
+        .await
     }
 
     pub async fn withdraw_sol(
