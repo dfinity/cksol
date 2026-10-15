@@ -4,8 +4,8 @@ use canlog::{Log, LogEntry};
 use cksol_types::{
     Address, DepositSolArgs, DepositSolError, DepositSolId, DepositSolStatus,
     GetDepositAddressArgs, MinterInfo, WatchDepositAddressArgs, WatchDepositAddressError,
-    WatchDepositAddressOk, WithdrawSolArgs, WithdrawSolError, WithdrawSolOk, WithdrawSolStatus,
-    WithdrawSolStatusArgs,
+    WatchDepositAddressOk, WatchDepositAddressStatus, WithdrawSolArgs, WithdrawSolError,
+    WithdrawSolOk, WithdrawSolStatus, WithdrawSolStatusArgs,
 };
 use cksol_types_internal::{
     MinterArg,
@@ -596,6 +596,32 @@ impl<'a> CkSolMinter<'a> {
             0,
         )
         .await
+    }
+
+    /// Polls `watch_deposit_address` on a live instance until the scan tick the caller fired
+    /// has detected a deposit on the address of the caller's account and returns the id of
+    /// that deposit. The poll never advances time, since that would also fire the sweep
+    /// timer on whatever is queued by then.
+    ///
+    /// # Panics
+    ///
+    /// Panics if no deposit is detected within the timeout.
+    pub async fn wait_for_deposit_detected(&self, subaccount: Option<Subaccount>) -> DepositSolId {
+        const MAX_POLLS: usize = 45;
+        const POLL_INTERVAL: Duration = Duration::from_secs(1);
+        for _ in 0..MAX_POLLS {
+            let registration = self
+                .watch_deposit_address(subaccount)
+                .await
+                .expect("watch_deposit_address should succeed");
+            if let WatchDepositAddressStatus::Detected { deposit_id } = registration.status {
+                return deposit_id;
+            }
+            tokio::time::sleep(POLL_INTERVAL).await;
+        }
+        panic!(
+            "No deposit was detected on the deposit address of subaccount {subaccount:?} within timeout"
+        );
     }
 
     pub async fn withdraw_sol(
