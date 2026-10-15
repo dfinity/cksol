@@ -13,11 +13,9 @@ use cksol_types::DepositSolError;
 use derive_more::From;
 use ic_canister_runtime::IcError;
 use minicbor::{Decode, Encode};
-use serde::Deserialize;
-use serde_json::json;
 use sol_rpc_types::{
-    CommitmentLevel, GetAccountInfoEncoding, GetTransactionEncoding, Lamport, MultiRpcResult,
-    RpcError, Slot,
+    CommitmentLevel, DataSlice, GetAccountInfoEncoding, GetTransactionEncoding, Lamport,
+    MultiRpcResult, RpcError, Slot,
 };
 use solana_account_decoder_client_types::UiAccount;
 use solana_address::Address;
@@ -163,13 +161,8 @@ impl From<GetBalanceError> for DepositSolError {
 }
 
 /// Reads the balances of the given addresses, in their order, at the `finalized`
-/// commitment level with a single `getMultipleAccounts` call, treating a missing
-/// account as a zero balance.
-///
-/// The SOL RPC canister offers no typed `getMultipleAccounts` method yet, so the call goes
-/// through its generic `jsonRequest` endpoint, asking for no account data, and the
-/// `result` of the JSON-RPC response, which the SOL RPC canister hands back as it is,
-/// is parsed here.
+/// commitment level with a single `getMultipleAccounts` call asking for no account data,
+/// treating a missing account as a zero balance.
 ///
 /// # Panics
 ///
@@ -191,40 +184,31 @@ pub async fn get_balances<R: CanisterRuntime>(
         "BUG: a getMultipleAccounts call reads between 1 and {MAX_ADDRESSES_PER_GET_MULTIPLE_ACCOUNTS} addresses, not {}",
         addresses.len()
     );
-    let request = json!({
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": "getMultipleAccounts",
-        "params": [
-            addresses.iter().map(Address::to_string).collect::<Vec<_>>(),
-            {
-                "commitment": "finalized",
-                "encoding": "base64",
-                "dataSlice": { "offset": 0, "length": 0 }
-            }
-        ]
-    });
     let result = read_state(|state| state.sol_rpc_client(runtime.inter_canister_call_runtime()))
-        .json_request(request)
+        .get_multiple_accounts(addresses)
+        .expect("BUG: the SOL RPC client accepts up to 100 addresses, which the caller checks")
+        .with_commitment(CommitmentLevel::Finalized)
+        .with_encoding(GetAccountInfoEncoding::Base64)
+        .with_data_slice(DataSlice {
+            length: 0,
+            offset: 0,
+        })
         .with_response_size_estimate(get_multiple_accounts_response_bytes(addresses.len()))
         .with_cycles(get_multiple_accounts_cycles(addresses.len()))
         .try_send()
         .await;
-    let response = match result? {
-        MultiRpcResult::Consistent(Ok(response)) => response,
+    let accounts = match result? {
+        MultiRpcResult::Consistent(Ok(accounts)) => accounts,
         MultiRpcResult::Consistent(Err(e)) => return Err(GetMultipleAccountsError::RpcError(e)),
         MultiRpcResult::Inconsistent(_) => {
             return Err(GetMultipleAccountsError::InconsistentRpcResults);
         }
     };
-    let GetMultipleAccountsResult { value: accounts } = serde_json::from_str(&response)
-        .map_err(|e| GetMultipleAccountsError::UnexpectedResponse(e.to_string()))?;
     if accounts.len() != addresses.len() {
-        return Err(GetMultipleAccountsError::UnexpectedResponse(format!(
-            "expected {} accounts, got {}",
-            addresses.len(),
-            accounts.len()
-        )));
+        return Err(GetMultipleAccountsError::UnexpectedAccountCount {
+            expected: addresses.len(),
+            actual: accounts.len(),
+        });
     }
     Ok(accounts
         .into_iter()
@@ -246,16 +230,6 @@ fn get_multiple_accounts_response_bytes(num_addresses: usize) -> u64 {
         + GET_MULTIPLE_ACCOUNTS_RESPONSE_BYTES_PER_ADDRESS * num_addresses as u64
 }
 
-#[derive(Deserialize)]
-struct GetMultipleAccountsResult {
-    value: Vec<Option<AccountLamports>>,
-}
-
-#[derive(Deserialize)]
-struct AccountLamports {
-    lamports: Lamport,
-}
-
 #[derive(Debug, PartialEq, Error, From)]
 pub enum GetMultipleAccountsError {
     #[error("Error while calling SOL RPC canister: {0}")]
@@ -264,9 +238,8 @@ pub enum GetMultipleAccountsError {
     RpcError(RpcError),
     #[error("Inconsistent RPC results for getMultipleAccounts")]
     InconsistentRpcResults,
-    #[error("Unexpected getMultipleAccounts response: {0}")]
-    #[from(ignore)]
-    UnexpectedResponse(String),
+    #[error("Unexpected getMultipleAccounts response: expected {expected} accounts, got {actual}")]
+    UnexpectedAccountCount { expected: usize, actual: usize },
 }
 
 pub async fn submit_transaction<R: CanisterRuntime>(

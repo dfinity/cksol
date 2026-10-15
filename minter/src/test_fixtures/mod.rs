@@ -20,13 +20,13 @@ use cksol_types_internal::{Ed25519KeyName, InitArgs, SolanaNetwork};
 use ic_cdk_management_canister::SchnorrPublicKeyResult;
 use ic_ed25519::{PocketIcMasterPublicKeyId, PublicKey};
 use icrc_ledger_types::icrc1::account::Account;
-use serde_json::json;
-use sol_rpc_types::{Lamport, MultiRpcResult};
+use sol_rpc_types::{AccountData, AccountEncoding, AccountInfo, Lamport, MultiRpcResult};
 use solana_address::{Address, address};
 use solana_nonce::{
     state::{Data as NonceData, DurableNonce, State as NonceState},
     versions::Versions as NonceVersions,
 };
+use solana_sdk_ids::system_program;
 use solana_transaction_status_client_types::{
     EncodedConfirmedTransactionWithStatusMeta, EncodedTransaction,
     EncodedTransactionWithStatusMeta, TransactionBinaryEncoding, UiLoadedAddresses,
@@ -196,28 +196,22 @@ pub fn register(watchlist: &mut Watchlist, now: Timestamp, account: Account) -> 
         .expect("BUG: the watchlist has room for the registration")
 }
 
-/// The `result` of a `getMultipleAccounts` response with the given balances in order, a
-/// missing account for `None`, as the SOL RPC canister hands it back.
-pub fn get_multiple_accounts_result(balances: &[Option<Lamport>]) -> String {
-    let accounts: Vec<serde_json::Value> = balances
+/// The accounts of a `getMultipleAccounts` response with the given balances in order, a
+/// missing account for `None`, each without data as the scan asks for them.
+pub fn accounts_with_balances(balances: &[Option<Lamport>]) -> Vec<Option<AccountInfo>> {
+    balances
         .iter()
-        .map(|balance| match balance {
-            Some(lamports) => json!({
-                "data": ["", "base64"],
-                "executable": false,
-                "lamports": lamports,
-                "owner": "11111111111111111111111111111111",
-                "rentEpoch": 18446744073709551615_u64,
-                "space": 0
-            }),
-            None => serde_json::Value::Null,
+        .map(|balance| {
+            balance.map(|lamports| AccountInfo {
+                lamports,
+                data: AccountData::Binary(String::new(), AccountEncoding::Base64),
+                owner: system_program::ID.to_string(),
+                executable: false,
+                rent_epoch: u64::MAX,
+                space: 0,
+            })
         })
-        .collect();
-    json!({
-        "context": { "apiVersion": "2.0.15", "slot": 341197053 },
-        "value": accounts
-    })
-    .to_string()
+        .collect()
 }
 
 /// Returns a [`Signature`] unique for any `usize` index, derived from `i as u64` via le_bytes.

@@ -80,12 +80,12 @@ mod get_balance_tests {
 
 mod get_balances_tests {
     use super::*;
-    use crate::test_fixtures::{address, get_multiple_accounts_result};
-    use serde_json::json;
-    use sol_rpc_types::Lamport;
-    use solana_address::Address;
+    use crate::test_fixtures::address;
+    use sol_rpc_types::{
+        CommitmentLevel, DataSlice, GetAccountInfoEncoding, GetMultipleAccountsParams, Lamport,
+    };
 
-    type MultiRpcResult = sol_rpc_types::MultiRpcResult<String>;
+    type MultiRpcResult = sol_rpc_types::MultiRpcResult<Vec<Option<sol_rpc_types::AccountInfo>>>;
 
     #[tokio::test]
     async fn should_read_the_finalized_balances_in_order_with_one_sized_call() {
@@ -106,12 +106,13 @@ mod get_balances_tests {
             .collect();
         assert_eq!(result, Ok(expected));
         let [call] = runtime.sent_update_calls().try_into().unwrap();
-        assert_eq!(call.method, "jsonRequest");
+        assert_eq!(call.method, "getMultipleAccounts");
         assert_eq!(
             call.cycles,
             get_multiple_accounts_cycles(MAX_ADDRESSES_PER_GET_MULTIPLE_ACCOUNTS)
         );
-        let (_sources, config, request): (RpcSources, Option<RpcConfig>, String) = call.args();
+        let (_sources, config, params): (RpcSources, Option<RpcConfig>, GetMultipleAccountsParams) =
+            call.args();
         assert_eq!(
             config.and_then(|config| config.response_size_estimate),
             Some(get_multiple_accounts_response_bytes(
@@ -119,20 +120,17 @@ mod get_balances_tests {
             ))
         );
         assert_eq!(
-            serde_json::from_str::<serde_json::Value>(&request).unwrap(),
-            json!({
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "getMultipleAccounts",
-                "params": [
-                    addresses.iter().map(Address::to_string).collect::<Vec<_>>(),
-                    {
-                        "commitment": "finalized",
-                        "encoding": "base64",
-                        "dataSlice": { "offset": 0, "length": 0 }
-                    }
-                ]
-            })
+            params,
+            GetMultipleAccountsParams {
+                pubkeys: addresses.iter().collect::<Vec<_>>().try_into().unwrap(),
+                commitment: Some(CommitmentLevel::Finalized),
+                encoding: Some(GetAccountInfoEncoding::Base64),
+                data_slice: Some(DataSlice {
+                    length: 0,
+                    offset: 0
+                }),
+                min_context_slot: None,
+            }
         );
     }
 
@@ -172,27 +170,11 @@ mod get_balances_tests {
                 GetMultipleAccountsError::InconsistentRpcResults,
             ),
             (
-                TestCanisterRuntime::new()
-                    .add_stub_response(MultiRpcResult::Consistent(Ok("not json".to_string()))),
-                GetMultipleAccountsError::UnexpectedResponse(
-                    "expected ident at line 1 column 2".to_string(),
-                ),
-            ),
-            (
-                TestCanisterRuntime::new().add_stub_response(MultiRpcResult::Consistent(Ok(
-                    json!({ "context": { "slot": 1 } }).to_string(),
-                ))),
-                GetMultipleAccountsError::UnexpectedResponse(
-                    "missing field `value` at line 1 column 22".to_string(),
-                ),
-            ),
-            (
-                TestCanisterRuntime::new().add_stub_response(MultiRpcResult::Consistent(Ok(
-                    get_multiple_accounts_result(&[Some(1), Some(2)]),
-                ))),
-                GetMultipleAccountsError::UnexpectedResponse(
-                    "expected 1 accounts, got 2".to_string(),
-                ),
+                TestCanisterRuntime::new().add_get_multiple_accounts_response(&[Some(1), Some(2)]),
+                GetMultipleAccountsError::UnexpectedAccountCount {
+                    expected: 1,
+                    actual: 2,
+                },
             ),
         ] {
             let result = get_balances(&runtime, &[address(1)]).await;

@@ -1,5 +1,5 @@
 use super::{
-    confirmed_block, get_multiple_accounts_result,
+    accounts_with_balances, confirmed_block,
     signer::{MockSchnorrSigner, SignerExpectation, sign_for},
     stubs::Stubs,
 };
@@ -61,9 +61,9 @@ impl TestCanisterRuntime {
     /// Stubs the `getMultipleAccounts` call of a scan with the given balances in order, a
     /// missing account for `None`.
     pub fn add_get_multiple_accounts_response(self, balances: &[Option<Lamport>]) -> Self {
-        self.add_stub_response(MultiRpcResult::<String>::Consistent(Ok(
-            get_multiple_accounts_result(balances),
-        )))
+        self.add_stub_response(MultiRpcResult::Consistent(Ok(accounts_with_balances(
+            balances,
+        ))))
     }
 
     pub fn add_stub_response<Out: CandidType>(mut self, response: Out) -> Self {
