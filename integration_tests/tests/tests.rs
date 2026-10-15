@@ -16,7 +16,7 @@ use cksol_types::{
 };
 use cksol_types_internal::{
     UpgradeArgs,
-    event::{AutomaticDeposit, EventType, TransactionPurpose},
+    event::{EventType, TransactionPurpose},
     log::Priority,
 };
 use icrc_ledger_types::icrc1::account::{Account, Subaccount};
@@ -1323,9 +1323,9 @@ mod automatic_deposit_sol_tests {
             .watch_deposit_address(None)
             .await
             .expect("watch_deposit_address should register the caller");
-        let valid_until = assert_matches!(
+        assert_matches!(
             registration.status,
-            WatchDepositAddressStatus::Watching { valid_until, .. } => valid_until
+            WatchDepositAddressStatus::Watching { .. }
         );
 
         setup.advance_time(SCAN_WATCHED_ADDRESSES_DELAY).await;
@@ -1365,10 +1365,7 @@ mod automatic_deposit_sol_tests {
                         account: DEFAULT_CALLER_ACCOUNT,
                         address: DEFAULT_CALLER_DEPOSIT_ADDRESS.parse().unwrap(),
                         balance: BALANCE_ABOVE_MINIMUM,
-                        automatic: Some(AutomaticDeposit {
-                            fee: Setup::DEFAULT_AUTOMATIC_DEPOSIT_FEE,
-                            valid_until,
-                        }),
+                        automatic_deposit_fee: Some(Setup::DEFAULT_AUTOMATIC_DEPOSIT_FEE),
                     }]
             );
         });
