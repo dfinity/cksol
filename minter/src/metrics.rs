@@ -2,6 +2,7 @@ use crate::state::{QuarantineCause, State};
 use crate::storage::{
     self, FailedCreditReason, FailedMintReason, ScanOutcome, UndecidedWithdrawalReason,
 };
+use crate::utils::timed_sized_map::Timestamp;
 use ic_metrics_encoder::MetricsEncoder;
 
 const WASM_PAGE_SIZE_IN_BYTES: usize = 65536;
@@ -113,6 +114,27 @@ pub fn encode_metrics(w: &mut MetricsEncoder<Vec<u8>>, s: &State) -> std::io::Re
         "oldest_pending_mint_age_seconds",
         age_seconds(s.deposits().oldest_pending_mint_created_at()).metric_value(),
         "Age of the oldest pending ckSOL mint in seconds, from the created_at_time the ledger deduplicates it by. Returns 0 if there are no pending mints.",
+    )?;
+    let now = Timestamp::from_nanos(ic_cdk::api::time());
+    w.encode_gauge(
+        "watched_deposit_addresses",
+        s.watchlist().live_len(now).metric_value(),
+        "Number of deposit addresses registered for the automatic deposit flow whose window is still open.",
+    )?;
+    w.encode_gauge(
+        "oldest_watched_deposit_age_seconds",
+        age_seconds(
+            s.watchlist()
+                .oldest_registered_at(now)
+                .map(Timestamp::as_nanos),
+        )
+        .metric_value(),
+        "Age of the oldest open registration of the automatic deposit flow in seconds. Returns 0 if no deposit address is watched.",
+    )?;
+    w.encode_gauge(
+        "collected_automatic_deposit_fees",
+        s.collected_automatic_deposit_fees().metric_value(),
+        "Sum in Lamports of the automatic deposit fees deducted from the mints of credited sweeps.",
     )?;
     let mut failed_credit_attempts = w.counter_vec(
         "failed_credit_attempts",

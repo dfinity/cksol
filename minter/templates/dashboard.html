@@ -93,8 +93,43 @@
                         <th>Balance (SOL)</th>
                         <td>{{ balance }}</td>
                     </tr>
+                    <tr id="automatic-deposit-fee">
+                        <th>Automatic deposit fee (SOL)</th>
+                        <td>{{ automatic_deposit_fee }}</td>
+                    </tr>
+                    <tr id="collected-automatic-deposit-fees">
+                        <th>Collected automatic deposit fees (SOL)</th>
+                        <td>{{ collected_automatic_deposit_fees }}</td>
+                    </tr>
                 </tbody>
             </table>
+
+            {% if !watched_deposit_addresses_table.is_empty() %}
+            <h3 id="watched-deposit-addresses">Watched Deposit Addresses</h3>
+            <table>
+                <thead>
+                <tr>
+                    <th>Account</th>
+                    <th>Deposit Address</th>
+                    <th>Valid Until (ns)</th>
+                    <th>Scans</th>
+                    <th>Last Scanned At (ns)</th>
+                </tr>
+                </thead>
+                <tbody>
+                {% for watched in watched_deposit_addresses_table.current_page %}
+                <tr>
+                    <td><code>{{ watched.account }}</code></td>
+                    <td>{% call solscan_address_link(watched.address) %}</td>
+                    <td>{{ watched.valid_until }}</td>
+                    <td>{{ watched.scan_count }}</td>
+                    <td>{{ watched.last_scanned_at }}</td>
+                </tr>
+                {% endfor %}
+                {% if watched_deposit_addresses_table.has_more_than_one_page() %}{{ watched_deposit_addresses_table.pagination|safe }}{% endif %}
+                </tbody>
+            </table>
+            {% endif %}
 
             {% if !quarantined_swept_deposits_table.is_empty() %}
             <h3 id="quarantined-swept-deposits">Quarantined Swept Deposits</h3>

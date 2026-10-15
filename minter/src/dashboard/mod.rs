@@ -41,6 +41,7 @@ pub struct DashboardPaginationParameters {
     pub quarantined_swept_deposits_start: usize,
     pub minted_sweeps_start: usize,
     pub withdrawals_start: usize,
+    pub watched_deposit_addresses_start: usize,
 }
 
 impl DashboardPaginationParameters {
@@ -57,6 +58,7 @@ impl DashboardPaginationParameters {
             quarantined_swept_deposits_start: parse(req, "quarantined_swept_deposits_start")?,
             minted_sweeps_start: parse(req, "minted_sweeps_start")?,
             withdrawals_start: parse(req, "withdrawals_start")?,
+            watched_deposit_addresses_start: parse(req, "watched_deposit_addresses_start")?,
         })
     }
 
@@ -69,6 +71,10 @@ impl DashboardPaginationParameters {
             ),
             ("minted_sweeps_start", self.minted_sweeps_start),
             ("withdrawals_start", self.withdrawals_start),
+            (
+                "watched_deposit_addresses_start",
+                self.watched_deposit_addresses_start,
+            ),
         ]
         .into_iter()
         .filter(|(name, _)| *name != exclude)
@@ -229,6 +235,17 @@ pub struct DashboardQuarantinedDeposit {
     pub amount_to_mint: String,
 }
 
+/// A deposit address registered for the automatic deposit flow, with its scan progress.
+#[derive(Clone)]
+pub struct DashboardWatchedAddress {
+    pub account: String,
+    pub address: String,
+    pub valid_until: String,
+    pub scan_count: String,
+    /// The time of the last scan in nanoseconds since the epoch, or `-` before the first scan.
+    pub last_scanned_at: String,
+}
+
 /// A swept deposit whose ckSOL mint landed on the ledger.
 #[derive(Clone)]
 pub struct DashboardMintedSweep {
@@ -251,9 +268,12 @@ pub struct DashboardTemplate {
     pub minimum_deposit_amount: String,
     pub minimum_withdrawal_amount: String,
     pub balance: String,
+    pub automatic_deposit_fee: String,
+    pub collected_automatic_deposit_fees: String,
     pub quarantined_swept_deposits_table: DashboardPaginatedTable<DashboardQuarantinedDeposit>,
     pub minted_sweeps_table: DashboardPaginatedTable<DashboardMintedSweep>,
     pub withdrawals_table: DashboardPaginatedTable<DashboardWithdrawal>,
+    pub watched_deposit_addresses_table: DashboardPaginatedTable<DashboardWatchedAddress>,
 }
 
 impl DashboardTemplate {
@@ -383,6 +403,29 @@ impl DashboardTemplate {
             pagination.other_params("withdrawals_start"),
         );
 
+        let watched_deposit_addresses: Vec<DashboardWatchedAddress> = state
+            .watchlist()
+            .iter()
+            .map(|watched| DashboardWatchedAddress {
+                account: watched.account.to_string(),
+                address: watched.address.to_string(),
+                valid_until: watched.valid_until.as_nanos().to_string(),
+                scan_count: watched.scan_count.to_string(),
+                last_scanned_at: watched
+                    .last_scanned_at
+                    .map_or_else(|| "-".to_string(), |at| at.as_nanos().to_string()),
+            })
+            .collect();
+        let watched_deposit_addresses_table = DashboardPaginatedTable::from_items(
+            &watched_deposit_addresses,
+            pagination.watched_deposit_addresses_start,
+            DEFAULT_PAGE_SIZE,
+            5,
+            "watched-deposit-addresses",
+            "watched_deposit_addresses_start",
+            pagination.other_params("watched_deposit_addresses_start"),
+        );
+
         let network = state.solana_network();
         DashboardTemplate {
             solana_cluster: format!("{:?}", network),
@@ -395,9 +438,16 @@ impl DashboardTemplate {
             minimum_deposit_amount: lamports_to_sol(state.minimum_deposit_amount()),
             minimum_withdrawal_amount: lamports_to_sol(state.minimum_withdrawal_amount()),
             balance: lamports_to_sol(state.balance()),
+            automatic_deposit_fee: state
+                .automatic_deposit_fee()
+                .map_or_else(|| "N/A".to_string(), lamports_to_sol),
+            collected_automatic_deposit_fees: lamports_to_sol(
+                state.collected_automatic_deposit_fees(),
+            ),
             quarantined_swept_deposits_table,
             minted_sweeps_table,
             withdrawals_table,
+            watched_deposit_addresses_table,
         }
     }
 }
