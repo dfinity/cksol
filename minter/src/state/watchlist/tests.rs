@@ -1,6 +1,6 @@
 use crate::{
     state::{
-        AutomaticDeposit, QueuedDeposit,
+        QueuedDeposit,
         watchlist::{
             MAX_WATCHED_ADDRESSES, RearmError, WatchedAddress, Watchlist, WatchlistFull, scan_slots,
         },
@@ -190,17 +190,18 @@ fn should_count_the_live_registrations_and_report_the_oldest() {
 }
 
 #[test]
-fn should_rearm_an_account_for_the_rest_of_its_window_from_the_first_slot() {
+fn should_rearm_an_account_for_a_fresh_window_from_the_first_slot() {
     let mut watchlist = Watchlist::default();
     let rearmed_at = REGISTERED_AT + 2 * HOUR_NANOS;
 
     let rearmed = watchlist
-        .rearm(at(rearmed_at), &dropped(account(1), VALID_UNTIL))
+        .rearm(at(rearmed_at), &dropped(account(1)))
         .unwrap();
 
     assert_eq!(
         rearmed,
         WatchedAddress {
+            valid_until: at(rearmed_at + WATCH_WINDOW_NANOS),
             next_scan_at: Some(at(rearmed_at)),
             ..unscanned(account(1))
         }
@@ -214,29 +215,10 @@ fn should_rearm_an_account_for_the_rest_of_its_window_from_the_first_slot() {
             .next_scan_at,
         Some(at(rearmed_at + MINUTE_NANOS))
     );
-    assert_eq!(watchlist.get(at(VALID_UNTIL + 1), &account(1)), None);
-}
-
-#[test]
-fn should_rearm_at_the_very_end_of_the_window() {
-    let mut watchlist = Watchlist::default();
-
-    let rearmed = watchlist
-        .rearm(at(VALID_UNTIL), &dropped(account(1), VALID_UNTIL))
-        .unwrap();
-
-    assert_eq!(rearmed.valid_until, at(VALID_UNTIL));
-    assert_eq!(watchlist.due(at(VALID_UNTIL)), vec![rearmed]);
-}
-
-#[test]
-fn should_not_rearm_an_account_whose_window_has_closed() {
-    let mut watchlist = Watchlist::default();
-
-    let result = watchlist.rearm(at(VALID_UNTIL + 1), &dropped(account(1), VALID_UNTIL));
-
-    assert_eq!(result, Err(RearmError::WindowClosed));
-    assert!(watchlist.is_empty());
+    assert_eq!(
+        watchlist.get(at(rearmed_at + WATCH_WINDOW_NANOS + 1), &account(1)),
+        None
+    );
 }
 
 #[test]
@@ -246,10 +228,7 @@ fn should_not_rearm_an_account_when_full_of_live_entries() {
         register(&mut watchlist, at(REGISTERED_AT), account(index));
     }
 
-    let result = watchlist.rearm(
-        at(REGISTERED_AT + HOUR_NANOS),
-        &dropped(account(0), VALID_UNTIL),
-    );
+    let result = watchlist.rearm(at(REGISTERED_AT + HOUR_NANOS), &dropped(account(0)));
 
     assert_eq!(result, Err(RearmError::WatchlistFull));
     assert_eq!(
@@ -262,8 +241,8 @@ fn should_not_rearm_an_account_when_full_of_live_entries() {
 fn should_not_rearm_a_manual_deposit() {
     let mut watchlist = Watchlist::default();
     let manual = QueuedDeposit {
-        automatic: None,
-        ..dropped(account(1), VALID_UNTIL)
+        automatic_deposit_fee: None,
+        ..dropped(account(1))
     };
 
     let result = watchlist.rearm(at(REGISTERED_AT), &manual);
@@ -278,25 +257,15 @@ fn should_keep_the_registration_of_an_account_that_is_already_watched() {
     let registered = register(&mut watchlist, at(REGISTERED_AT + HOUR_NANOS), account(1));
 
     let rearmed = watchlist
-        .rearm(
-            at(REGISTERED_AT + 2 * HOUR_NANOS),
-            &dropped(account(1), VALID_UNTIL),
-        )
+        .rearm(at(REGISTERED_AT + 2 * HOUR_NANOS), &dropped(account(1)))
         .unwrap();
 
     assert_eq!(rearmed, registered);
     assert_eq!(watchlist.len(), 1);
 }
 
-fn dropped(account: Account, valid_until: u64) -> QueuedDeposit {
-    automatic_deposit_of(
-        account,
-        MINIMUM_DEPOSIT_AMOUNT,
-        AutomaticDeposit {
-            fee: AUTOMATIC_DEPOSIT_FEE,
-            valid_until,
-        },
-    )
+fn dropped(account: Account) -> QueuedDeposit {
+    automatic_deposit_of(account, MINIMUM_DEPOSIT_AMOUNT, AUTOMATIC_DEPOSIT_FEE)
 }
 
 fn unscanned(account: Account) -> WatchedAddress {

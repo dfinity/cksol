@@ -107,7 +107,6 @@ pub struct WatchlistFull;
 pub enum RearmError {
     /// The deposit was queued by `deposit_sol`, whose caller registered nothing.
     ManualDeposit,
-    WindowClosed,
     WatchlistFull,
 }
 
@@ -131,45 +130,31 @@ impl Watchlist {
         let inserted = self
             .entries
             .insert(now, account, ScanProgress::unscanned(address, now));
-        self.admitted(now, &account, inserted).map_err(|e| match e {
-            RearmError::WatchlistFull => WatchlistFull,
-            RearmError::WindowClosed | RearmError::ManualDeposit => {
-                unreachable!("BUG: a registration for the window starting now is admitted or full")
+        match inserted {
+            Ok(_) | Err(InsertError::AlreadyPresent { .. }) => Ok(self
+                .get(now, &account)
+                .expect("BUG: a registration is live right after its insertion")),
+            Err(InsertError::AtCapacity { .. }) => Err(WatchlistFull),
+            Err(InsertError::Expired { .. }) => {
+                unreachable!("BUG: a registration for the window starting now cannot have expired")
             }
-        })
+        }
     }
 
-    /// Puts the account of a dropped deposit back on the watchlist for the rest of the
-    /// window the automatic flow detected the deposit in, with a new schedule starting now. An
-    /// account that is already watched keeps its registration, and a window that has closed
-    /// admits nothing.
+    /// Puts the account of a dropped automatic deposit back on the watchlist for a fresh
+    /// window and schedule starting now, so that the funds still on its deposit address are
+    /// swept again without the user's intervention. An account that is already watched keeps
+    /// its registration.
     pub fn rearm(
         &mut self,
         now: Timestamp,
         dropped: &QueuedDeposit,
     ) -> Result<WatchedAddress, RearmError> {
-        let automatic = dropped.automatic.ok_or(RearmError::ManualDeposit)?;
-        let entry = Entry {
-            value: ScanProgress::unscanned(dropped.address, now),
-            expires_at: Timestamp::from_nanos(automatic.valid_until),
-        };
-        let inserted = self.entries.insert_entry(now, dropped.account, entry);
-        self.admitted(now, &dropped.account, inserted)
-    }
-
-    fn admitted(
-        &self,
-        now: Timestamp,
-        account: &Account,
-        inserted: Result<Vec<(Account, ScanProgress)>, InsertError<Account, ScanProgress>>,
-    ) -> Result<WatchedAddress, RearmError> {
-        match inserted {
-            Ok(_) | Err(InsertError::AlreadyPresent { .. }) => Ok(self
-                .get(now, account)
-                .expect("BUG: a registration is live right after its insertion")),
-            Err(InsertError::AtCapacity { .. }) => Err(RearmError::WatchlistFull),
-            Err(InsertError::Expired { .. }) => Err(RearmError::WindowClosed),
+        if dropped.automatic_deposit_fee.is_none() {
+            return Err(RearmError::ManualDeposit);
         }
+        self.register(now, dropped.account, dropped.address)
+            .map_err(|WatchlistFull| RearmError::WatchlistFull)
     }
 
     /// The live registration of the account, if any.

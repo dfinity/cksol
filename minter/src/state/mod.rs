@@ -257,8 +257,8 @@ impl State {
     }
 
     /// Drops the deposits of the sweep and puts the ones the automatic flow detected back on
-    /// the watchlist for the rest of their window, so that the funds still on their deposit
-    /// addresses are swept again without the user's intervention.
+    /// the watchlist for a fresh window, so that the funds still on their deposit addresses
+    /// are swept again without the user's intervention.
     fn drop_sweep(&mut self, signature: &Signature, timestamp: u64) {
         for deposit in self.deposits.drop_swept(signature) {
             let rearmed = self

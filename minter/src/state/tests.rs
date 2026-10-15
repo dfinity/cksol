@@ -250,49 +250,30 @@ mod swept_deposits {
     }
 
     #[test]
-    fn should_rearm_the_automatic_deposits_of_a_failed_sweep_within_their_window() {
+    fn should_rearm_the_automatic_deposits_of_a_failed_sweep() {
         let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
 
-        assert_rearms_the_automatic_deposits_within_their_window_when_dropped_by(
-            EventType::FailedTransaction {
-                signature: sweep_signature,
-            },
-        );
+        assert_rearms_the_automatic_deposits_when_dropped_by(EventType::FailedTransaction {
+            signature: sweep_signature,
+        });
     }
 
     #[test]
-    fn should_rearm_the_automatic_deposits_of_an_expired_sweep_within_their_window() {
+    fn should_rearm_the_automatic_deposits_of_an_expired_sweep() {
         let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
 
-        assert_rearms_the_automatic_deposits_within_their_window_when_dropped_by(
-            EventType::ExpiredTransaction {
-                signature: sweep_signature,
-            },
-        );
+        assert_rearms_the_automatic_deposits_when_dropped_by(EventType::ExpiredTransaction {
+            signature: sweep_signature,
+        });
     }
 
-    fn assert_rearms_the_automatic_deposits_within_their_window_when_dropped_by(
-        drop_event: EventType,
-    ) {
-        const DROPPED_AT: u64 = VALID_UNTIL - 1;
+    fn assert_rearms_the_automatic_deposits_when_dropped_by(drop_event: EventType) {
+        const DROPPED_AT: u64 = REGISTERED_AT + WATCH_WINDOW_NANOS + 1;
         init_state();
         init_schnorr_master_key();
-        let automatic = AutomaticDeposit {
-            fee: AUTOMATIC_DEPOSIT_FEE,
-            valid_until: VALID_UNTIL,
-        };
         let manual = DepositFlow::queue(account(1), 10_000_000);
-        let within_window = DepositFlow::queue_automatic(account(2), 20_000_000, automatic);
-        let after_window = DepositFlow::queue_automatic(
-            account(3),
-            30_000_000,
-            AutomaticDeposit {
-                valid_until: DROPPED_AT - 1,
-                ..automatic
-            },
-        );
-        SweepFlow::of([manual, within_window, after_window])
-            .submit(signature(SWEEP_SIGNATURE_INDEX));
+        let automatic = DepositFlow::queue_automatic(account(2), 20_000_000, AUTOMATIC_DEPOSIT_FEE);
+        SweepFlow::of([manual, automatic]).submit(signature(SWEEP_SIGNATURE_INDEX));
 
         mutate_state(|state| {
             process_event(
@@ -304,14 +285,14 @@ mod swept_deposits {
 
         let rearmed = WatchedAddress {
             account: account(2),
-            address: within_window.address,
-            valid_until: at(VALID_UNTIL),
+            address: automatic.address,
+            valid_until: at(DROPPED_AT + WATCH_WINDOW_NANOS),
             scan_count: 0,
             last_scanned_at: None,
             next_scan_at: Some(at(DROPPED_AT)),
         };
         read_state(|s| {
-            assert_eq!(s.deposits().dropped().len(), 3);
+            assert_eq!(s.deposits().dropped().len(), 2);
             assert_eq!(s.watchlist().iter().collect::<Vec<_>>(), vec![rearmed]);
             assert_eq!(s.watchlist().due(at(DROPPED_AT)), vec![rearmed]);
         });
@@ -323,23 +304,16 @@ mod swept_deposits {
     fn should_not_rearm_a_dropped_automatic_deposit_when_the_watchlist_is_full() {
         init_state();
         init_schnorr_master_key();
-        let dropped = DepositFlow::queue_automatic(
-            account(0),
-            20_000_000,
-            AutomaticDeposit {
-                fee: AUTOMATIC_DEPOSIT_FEE,
-                valid_until: VALID_UNTIL,
-            },
-        )
-        .sweep(signature(SWEEP_SIGNATURE_INDEX));
+        let dropped = DepositFlow::queue_automatic(account(0), 20_000_000, AUTOMATIC_DEPOSIT_FEE)
+            .sweep(signature(SWEEP_SIGNATURE_INDEX));
         for index in 1..=MAX_WATCHED_ADDRESSES.get() {
-            watch(at(VALID_UNTIL - 1), account(index));
+            watch(at(REGISTERED_AT), account(index));
         }
 
         fail_transaction(dropped.signature);
 
         read_state(|s| {
-            assert_eq!(s.watchlist().get(at(VALID_UNTIL - 1), &account(0)), None);
+            assert_eq!(s.watchlist().get(at(REGISTERED_AT), &account(0)), None);
             assert_eq!(s.watchlist().len(), MAX_WATCHED_ADDRESSES.get());
             assert_eq!(s.deposits().in_flight_id(&account(0)), None);
         });
