@@ -197,23 +197,14 @@ pub async fn get_balances<R: CanisterRuntime>(
         .with_cycles(get_multiple_accounts_cycles(addresses.len()))
         .try_send()
         .await;
-    let accounts = match result? {
-        MultiRpcResult::Consistent(Ok(accounts)) => accounts,
-        MultiRpcResult::Consistent(Err(e)) => return Err(GetMultipleAccountsError::RpcError(e)),
-        MultiRpcResult::Inconsistent(_) => {
-            return Err(GetMultipleAccountsError::InconsistentRpcResults);
-        }
-    };
-    if accounts.len() != addresses.len() {
-        return Err(GetMultipleAccountsError::UnexpectedAccountCount {
-            expected: addresses.len(),
-            actual: accounts.len(),
-        });
+    match result? {
+        MultiRpcResult::Consistent(Ok(accounts)) => Ok(accounts
+            .into_iter()
+            .map(|account| account.map_or(0, |account| account.lamports))
+            .collect()),
+        MultiRpcResult::Consistent(Err(e)) => Err(GetMultipleAccountsError::RpcError(e)),
+        MultiRpcResult::Inconsistent(_) => Err(GetMultipleAccountsError::InconsistentRpcResults),
     }
-    Ok(accounts
-        .into_iter()
-        .map(|account| account.map_or(0, |account| account.lamports))
-        .collect())
 }
 
 /// The cycles to attach to a `getMultipleAccounts` call reading `num_addresses` addresses.
@@ -238,8 +229,6 @@ pub enum GetMultipleAccountsError {
     RpcError(RpcError),
     #[error("Inconsistent RPC results for getMultipleAccounts")]
     InconsistentRpcResults,
-    #[error("Unexpected getMultipleAccounts response: expected {expected} accounts, got {actual}")]
-    UnexpectedAccountCount { expected: usize, actual: usize },
 }
 
 pub async fn submit_transaction<R: CanisterRuntime>(
