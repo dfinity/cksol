@@ -56,7 +56,7 @@ fn should_decode_a_queued_deposit_recorded_without_the_automatic_part() {
                 account: deposit.account,
                 address: deposit.address,
                 balance: deposit.balance,
-                automatic_deposit_fee: None,
+                deposit_fee: None,
             },
         }
     );
@@ -136,7 +136,7 @@ mod queued_deposits {
                 account: queued_deposit(deposit_id).account,
                 address: queued_deposit(deposit_id).address,
                 balance: queued_deposit(deposit_id).balance,
-                automatic_deposit_fee: None,
+                deposit_fee: None,
             },
         };
         let init = Event {
@@ -1669,7 +1669,7 @@ mod withdrawal_transactions {
                 account: funding_deposit.account,
                 address: funding_deposit.address,
                 balance: funding_deposit.balance,
-                automatic_deposit_fee: None,
+                deposit_fee: None,
             },
             EventType::SubmittedTransaction {
                 signature: signature(9),

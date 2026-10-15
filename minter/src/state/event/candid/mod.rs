@@ -76,13 +76,13 @@ impl From<EventType> for CandidEventType {
                 account,
                 address,
                 balance,
-                automatic_deposit_fee,
+                deposit_fee,
             } => CandidEventType::QueuedDeposit {
                 deposit_id,
                 account,
                 address: CandidAddress::from(address),
                 balance: Lamport::from(balance),
-                automatic_deposit_fee,
+                deposit_fee,
             },
             EventType::CreditedSweep {
                 signature,
@@ -231,7 +231,7 @@ impl TryFrom<CandidEventType> for EventType {
                 account,
                 address,
                 balance,
-                automatic_deposit_fee,
+                deposit_fee,
             } => EventType::QueuedDeposit {
                 deposit_id,
                 account,
@@ -239,7 +239,7 @@ impl TryFrom<CandidEventType> for EventType {
                 balance: DepositBalance::new(balance).ok_or(
                     InvalidCandidEvent::DepositBalanceBelowRentExemption(balance),
                 )?,
-                automatic_deposit_fee,
+                deposit_fee,
             },
             CandidEventType::CreditedSweep {
                 signature,

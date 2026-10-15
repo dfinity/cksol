@@ -335,12 +335,12 @@ impl Sweep {
                 let amount_to_mint = deposit
                     .sweepable_amount()
                     .checked_sub(fee_share)
-                    .and_then(|amount| amount.checked_sub(deposit.deducted_automatic_deposit_fee()))
+                    .and_then(|amount| amount.checked_sub(deposit.deducted_deposit_fee()))
                     .ok_or(SweepMismatch::FeesExceedSweepableAmount {
                         deposit_id: *deposit_id,
                         sweepable_amount: deposit.sweepable_amount(),
                         fee_share,
-                        automatic_deposit_fee: deposit.deducted_automatic_deposit_fee(),
+                        deposit_fee: deposit.deducted_deposit_fee(),
                     })?;
                 Ok(CreditedDeposit {
                     deposit_id: *deposit_id,
@@ -350,12 +350,12 @@ impl Sweep {
             .collect()
     }
 
-    /// The automatic deposit fees the sweep collects: the sum of the fees recorded with its
-    /// automatic deposits, which stay on the main account on top of the minted amounts.
-    pub fn automatic_deposit_fees(&self) -> Lamport {
+    /// The deposit fees the sweep collects: the sum of the fees recorded with its deposits,
+    /// which stay on the main account on top of the minted amounts.
+    pub fn deposit_fees(&self) -> Lamport {
         self.deposits
             .values()
-            .map(QueuedDeposit::deducted_automatic_deposit_fee)
+            .map(QueuedDeposit::deducted_deposit_fee)
             .sum()
     }
 }
@@ -421,13 +421,13 @@ pub enum SweepMismatch {
     #[error("the main account received {actual} lamports instead of the planned {expected}")]
     UnexpectedAmountReceived { expected: Lamport, actual: Lamport },
     #[error(
-        "the fee share of {fee_share} lamports and the automatic deposit fee of {automatic_deposit_fee} lamports exceed the {sweepable_amount} lamports swept for deposit {deposit_id}"
+        "the fee share of {fee_share} lamports and the deposit fee of {deposit_fee} lamports exceed the {sweepable_amount} lamports swept for deposit {deposit_id}"
     )]
     FeesExceedSweepableAmount {
         deposit_id: DepositSolId,
         sweepable_amount: Lamport,
         fee_share: Lamport,
-        automatic_deposit_fee: Lamport,
+        deposit_fee: Lamport,
     },
 }
 

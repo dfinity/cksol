@@ -226,7 +226,7 @@ impl Deposits {
             deposit.account
         );
         self.latest_ids.insert(deposit.account, deposit_id);
-        if deposit.automatic_deposit_fee.is_some() {
+        if deposit.deposit_fee.is_some() {
             self.automatic_deposit_count += 1;
         }
         self.watchlist.remove(&deposit.account);
@@ -372,7 +372,7 @@ impl Deposits {
                 mint.deposit_id
             );
         }
-        sweep.automatic_deposit_fees()
+        sweep.deposit_fees()
     }
 
     pub(super) fn mint(&mut self, deposit_id: DepositSolId, mint_block_index: LedgerMintIndex) {
@@ -429,9 +429,9 @@ pub struct QueuedDeposit {
     pub address: Address,
     /// The balance of the deposit address when the deposit was queued.
     pub balance: DepositBalance,
-    /// The automatic deposit fee in force when the automatic flow detected the deposit,
-    /// absent for a deposit queued by `deposit_sol`.
-    pub automatic_deposit_fee: Option<Lamport>,
+    /// The fee in lamports deducted from the minted amount, absent for a deposit queued by
+    /// `deposit_sol`.
+    pub deposit_fee: Option<Lamport>,
 }
 
 impl QueuedDeposit {
@@ -439,9 +439,9 @@ impl QueuedDeposit {
         self.balance.sweepable_amount()
     }
 
-    /// The automatic deposit fee deducted from the mint, zero for a manual deposit.
-    pub fn deducted_automatic_deposit_fee(&self) -> Lamport {
-        self.automatic_deposit_fee.unwrap_or(0)
+    /// The fee deducted from the mint, zero for a deposit queued by `deposit_sol`.
+    pub fn deducted_deposit_fee(&self) -> Lamport {
+        self.deposit_fee.unwrap_or(0)
     }
 }
 

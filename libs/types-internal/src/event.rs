@@ -76,9 +76,9 @@ pub enum EventType {
         address: Address,
         /// The balance of the deposit address when the deposit was queued.
         balance: Lamport,
-        /// The automatic deposit fee in force when the automatic flow detected the deposit,
-        /// deducted from the minted amount; absent for a deposit queued via `deposit_sol`.
-        automatic_deposit_fee: Option<Lamport>,
+        /// The fee in lamports deducted from the minted amount; absent for a deposit queued via
+        /// `deposit_sol`.
+        deposit_fee: Option<Lamport>,
     },
     /// The minter read the amount that the finalized sweep transaction moved to its
     /// main account and enqueued a pending mint for each deposit of that sweep.

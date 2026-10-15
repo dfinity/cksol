@@ -180,10 +180,10 @@ mod plan {
     }
 
     #[test]
-    fn should_deduct_the_automatic_deposit_fee_from_the_mint_of_an_automatic_deposit() {
-        let automatic_deposit_fee = 2_000_000;
+    fn should_deduct_the_deposit_fee_from_the_mint_of_an_automatic_deposit() {
+        let deposit_fee = 2_000_000;
         let manual = queued_deposit_of(account(1), 3_000_000);
-        let detected = automatic_deposit_of(account(2), 5_000_000, automatic_deposit_fee);
+        let detected = automatic_deposit_of(account(2), 5_000_000, deposit_fee);
 
         let sweep = planned_sweep([(0, manual), (1, detected)]);
 
@@ -213,11 +213,11 @@ mod plan {
                 },
                 CreditedDeposit {
                     deposit_id: 1,
-                    amount_to_mint: 5_000_000 - FEE_PER_SIGNATURE - automatic_deposit_fee,
+                    amount_to_mint: 5_000_000 - FEE_PER_SIGNATURE - deposit_fee,
                 },
             ]
         );
-        assert_eq!(sweep.automatic_deposit_fees(), automatic_deposit_fee);
+        assert_eq!(sweep.deposit_fees(), deposit_fee);
     }
 
     #[test]
@@ -227,17 +227,17 @@ mod plan {
             (1, queued_deposit_of(account(2), 2_000_000)),
         ]);
 
-        assert_eq!(sweep.automatic_deposit_fees(), 0);
+        assert_eq!(sweep.deposit_fees(), 0);
     }
 
     #[test]
     fn should_have_no_mints_when_the_fees_exceed_the_sweepable_amount() {
-        let automatic_deposit_fee = 1_000_000;
-        let sweepable_amount = automatic_deposit_fee + FEE_PER_SIGNATURE - 1;
+        let deposit_fee = 1_000_000;
+        let sweepable_amount = deposit_fee + FEE_PER_SIGNATURE - 1;
 
         let sweep = planned_sweep([(
             0,
-            automatic_deposit_of(account(1), sweepable_amount, automatic_deposit_fee),
+            automatic_deposit_of(account(1), sweepable_amount, deposit_fee),
         )]);
 
         assert_eq!(
@@ -246,7 +246,7 @@ mod plan {
                 deposit_id: 0,
                 sweepable_amount,
                 fee_share: FEE_PER_SIGNATURE,
-                automatic_deposit_fee,
+                deposit_fee,
             })
         );
     }
@@ -427,12 +427,12 @@ mod settle {
     #[test]
     fn should_reject_a_matching_outcome_whose_fees_exceed_a_sweepable_amount() {
         let deposits = devnet_sweep::deposits().into_iter().map(|(id, deposit)| {
-            let automatic_deposit_fee =
+            let deposit_fee =
                 (deposit.address == SECOND_DEPOSIT).then_some(SECOND_SWEEPABLE_AMOUNT);
             (
                 id,
                 QueuedDeposit {
-                    automatic_deposit_fee,
+                    deposit_fee,
                     ..deposit
                 },
             )
@@ -449,7 +449,7 @@ mod settle {
                     deposit_id: 1,
                     sweepable_amount: SECOND_SWEEPABLE_AMOUNT,
                     fee_share: devnet_sweep::FEE / devnet_sweep::DEPOSITS.len() as u64,
-                    automatic_deposit_fee: SECOND_SWEEPABLE_AMOUNT,
+                    deposit_fee: SECOND_SWEEPABLE_AMOUNT,
                 }
             ))
         );

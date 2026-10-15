@@ -78,7 +78,7 @@ pub async fn deposit_sol<R: CanisterRuntime>(
                 account,
                 address: deposit_address,
                 balance,
-                automatic_deposit_fee: None,
+                deposit_fee: None,
             },
         )
     });
@@ -106,7 +106,7 @@ pub(crate) fn queue_deposit<R: CanisterRuntime>(
             account: deposit.account,
             address: deposit.address,
             balance: deposit.balance,
-            automatic_deposit_fee: deposit.automatic_deposit_fee,
+            deposit_fee: deposit.deposit_fee,
         },
         runtime,
     );

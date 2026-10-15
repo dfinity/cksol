@@ -32,13 +32,9 @@ impl DepositFlow {
     pub fn queue_automatic(
         account: Account,
         sweepable_amount: Lamport,
-        automatic_deposit_fee: Lamport,
+        deposit_fee: Lamport,
     ) -> QueuedDepositFlow {
-        Self::queue_deposit(automatic_deposit_of(
-            account,
-            sweepable_amount,
-            automatic_deposit_fee,
-        ))
+        Self::queue_deposit(automatic_deposit_of(account, sweepable_amount, deposit_fee))
     }
 
     fn queue_deposit(deposit: QueuedDeposit) -> QueuedDepositFlow {
