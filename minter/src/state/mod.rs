@@ -114,6 +114,7 @@ pub struct State {
     deposit_sol_required_cycles: u128,
     deposit_sol_fee: u128,
     automatic_deposit_fee: Option<Lamport>,
+    collected_automatic_deposit_fees: Lamport,
     pending_deposit_sol_request_guards: BTreeSet<Account>,
     pending_withdrawal_request_guards: BTreeSet<Account>,
     deposits: Deposits,
@@ -191,6 +192,10 @@ impl State {
 
     pub fn automatic_deposit_fee(&self) -> Option<Lamport> {
         self.automatic_deposit_fee
+    }
+
+    pub fn collected_automatic_deposit_fees(&self) -> Lamport {
+        self.collected_automatic_deposit_fees
     }
 
     pub fn deposits(&self) -> &Deposits {
@@ -469,7 +474,8 @@ impl State {
             amount_to_mint <= amount_received,
             "Attempted to credit sweep {signature} with mints of {amount_to_mint} lamports exceeding the {amount_received} lamports received"
         );
-        self.deposits.credit_sweep(signature, mints, timestamp);
+        let sweep = self.deposits.credit_sweep(signature, mints, timestamp);
+        self.collected_automatic_deposit_fees += sweep.deposit_fees();
         self.balance += amount_received;
     }
 
@@ -905,6 +911,7 @@ impl TryFrom<InitArgs> for State {
             deposit_sol_required_cycles: deposit_sol_required_cycles as u128,
             deposit_sol_fee: deposit_sol_fee as u128,
             automatic_deposit_fee,
+            collected_automatic_deposit_fees: 0,
             pending_deposit_sol_request_guards: BTreeSet::new(),
             pending_withdrawal_request_guards: BTreeSet::new(),
             deposits: Deposits::default(),

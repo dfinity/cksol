@@ -316,13 +316,13 @@ impl Deposits {
     }
 
     /// Moves every deposit of the given finalized sweep to the pending mints, each with
-    /// the amount its mint carries.
+    /// the amount its mint carries, and returns the credited sweep.
     pub(super) fn credit_sweep(
         &mut self,
         signature: &Signature,
         mints: &[CreditedDeposit],
         timestamp: u64,
-    ) {
+    ) -> Sweep {
         let sweep = self.finalized.remove(signature).unwrap_or_else(|| {
             panic!("Attempted to credit sweep {signature} that is not finalized")
         });
@@ -363,6 +363,7 @@ impl Deposits {
                 mint.deposit_id
             );
         }
+        sweep
     }
 
     pub(super) fn mint(&mut self, deposit_id: DepositSolId, mint_block_index: LedgerMintIndex) {
@@ -419,11 +420,19 @@ pub struct QueuedDeposit {
     pub address: Address,
     /// The balance of the deposit address when the deposit was queued.
     pub balance: DepositBalance,
+    /// The fee in lamports deducted from the minted amount, absent for a deposit queued by
+    /// `deposit_sol`.
+    pub deposit_fee: Option<Lamport>,
 }
 
 impl QueuedDeposit {
     pub fn sweepable_amount(&self) -> Lamport {
         self.balance.sweepable_amount()
+    }
+
+    /// The fee deducted from the mint, zero for a deposit queued by `deposit_sol`.
+    pub fn deposit_fee(&self) -> Lamport {
+        self.deposit_fee.unwrap_or(0)
     }
 }
 
@@ -463,7 +472,8 @@ pub struct SweptDeposit {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PendingMint {
     pub deposit: SweptDeposit,
-    /// The sweepable amount minus the deposit's share of the transaction fee of the sweep.
+    /// The sweepable amount minus the deposit's share of the transaction fee of the sweep
+    /// and, for an automatic deposit, minus the automatic deposit fee.
     pub amount_to_mint: Lamport,
     /// The timestamp of the `CreditedSweep` event that enqueued this pending mint.
     ///
@@ -527,7 +537,8 @@ pub enum QuarantineCause {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MintedSweep {
     pub deposit: SweptDeposit,
-    /// The sweepable amount minus the deposit's share of the transaction fee of the sweep.
+    /// The sweepable amount minus the deposit's share of the transaction fee of the sweep
+    /// and, for an automatic deposit, minus the automatic deposit fee.
     pub minted_amount: Lamport,
     pub mint_block_index: LedgerMintIndex,
 }

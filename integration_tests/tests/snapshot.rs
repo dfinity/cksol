@@ -1,5 +1,6 @@
 use assert_matches::assert_matches;
 use cksol_int_tests::CkSolMinter;
+use cksol_types::MinterInfo;
 use cksol_types_internal::{
     UpgradeArgs,
     event::{Event, EventType},
@@ -35,7 +36,13 @@ async fn should_load_staging_snapshot_and_upgrade_to_current_wasm() {
     minter.start().await;
 
     let state_after = minter.state().await;
-    assert_eq!(state_after.info, state_before.info);
+    assert_eq!(
+        state_after.info,
+        MinterInfo {
+            collected_automatic_deposit_fees: Some(0),
+            ..state_before.info.clone()
+        }
+    );
     let (replayed_events, new_events) = state_after.events.split_at(state_before.events.len());
     assert_eq!(replayed_events, state_before.events);
     assert_matches!(
