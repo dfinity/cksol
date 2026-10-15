@@ -1365,7 +1365,7 @@ mod automatic_deposit_sol_tests {
                         account: DEFAULT_CALLER_ACCOUNT,
                         address: DEFAULT_CALLER_DEPOSIT_ADDRESS.parse().unwrap(),
                         balance: BALANCE_ABOVE_MINIMUM,
-                        automatic_deposit_fee: Some(Setup::DEFAULT_AUTOMATIC_DEPOSIT_FEE),
+                        deposit_fee: Some(Setup::DEFAULT_AUTOMATIC_DEPOSIT_FEE),
                     }]
             );
         });

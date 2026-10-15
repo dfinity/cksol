@@ -147,7 +147,7 @@ fn apply_balance_read<R: CanisterRuntime>(
                 account: watched.account,
                 address: watched.address,
                 balance,
-                automatic_deposit_fee: Some(automatic_deposit_fee),
+                deposit_fee: Some(automatic_deposit_fee),
             },
         );
         Some(ScanOutcome::Queued)

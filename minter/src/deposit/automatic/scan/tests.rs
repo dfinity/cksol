@@ -65,7 +65,7 @@ async fn should_queue_a_deposit_reaching_the_minimum_with_the_fee_in_force() {
             account: account(1),
             address: expected.address,
             balance: expected.balance,
-            automatic_deposit_fee: Some(AUTOMATIC_DEPOSIT_FEE),
+            deposit_fee: Some(AUTOMATIC_DEPOSIT_FEE),
         })
         .assert_no_more_events();
     read_state(|s| {
