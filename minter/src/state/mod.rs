@@ -474,8 +474,8 @@ impl State {
             amount_to_mint <= amount_received,
             "Attempted to credit sweep {signature} with mints of {amount_to_mint} lamports exceeding the {amount_received} lamports received"
         );
-        let collected_fees = self.deposits.credit_sweep(signature, mints, timestamp);
-        self.collected_automatic_deposit_fees += collected_fees;
+        let sweep = self.deposits.credit_sweep(signature, mints, timestamp);
+        self.collected_automatic_deposit_fees += sweep.deposit_fees();
         self.balance += amount_received;
     }
 

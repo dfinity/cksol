@@ -316,7 +316,7 @@ impl Sweep {
 
         Ok(SettledSweep {
             amount_received,
-            mints: self.mints()?,
+            mints: self.mints().map_err(SweepMismatch::from)?,
         })
     }
 
@@ -327,7 +327,7 @@ impl Sweep {
     /// The parameter constraints keep the fees below the sweepable amount of a deposit
     /// queued under them, so a deposit they do not fit is a mismatch that quarantines the
     /// sweep rather than a reason to trap.
-    pub fn mints(&self) -> Result<Vec<CreditedDeposit>, SweepMismatch> {
+    pub fn mints(&self) -> Result<Vec<CreditedDeposit>, SweepMintError> {
         let fee_share = self.fee.div_ceil(self.deposit_count() as Lamport);
         self.deposits
             .iter()
@@ -335,12 +335,12 @@ impl Sweep {
                 let amount_to_mint = deposit
                     .sweepable_amount()
                     .checked_sub(fee_share)
-                    .and_then(|amount| amount.checked_sub(deposit.deducted_deposit_fee()))
-                    .ok_or(SweepMismatch::FeesExceedSweepableAmount {
+                    .and_then(|amount| amount.checked_sub(deposit.deposit_fee()))
+                    .ok_or(SweepMintError::FeesExceedSweepableAmount {
                         deposit_id: *deposit_id,
                         sweepable_amount: deposit.sweepable_amount(),
                         fee_share,
-                        deposit_fee: deposit.deducted_deposit_fee(),
+                        deposit_fee: deposit.deposit_fee(),
                     })?;
                 Ok(CreditedDeposit {
                     deposit_id: *deposit_id,
@@ -353,10 +353,7 @@ impl Sweep {
     /// The deposit fees the sweep collects: the sum of the fees recorded with its deposits,
     /// which stay on the main account on top of the minted amounts.
     pub fn deposit_fees(&self) -> Lamport {
-        self.deposits
-            .values()
-            .map(QueuedDeposit::deducted_deposit_fee)
-            .sum()
+        self.deposits.values().map(QueuedDeposit::deposit_fee).sum()
     }
 }
 
@@ -420,6 +417,12 @@ pub enum SweepMismatch {
     MainAccountDebited { pre: Lamport, post: Lamport },
     #[error("the main account received {actual} lamports instead of the planned {expected}")]
     UnexpectedAmountReceived { expected: Lamport, actual: Lamport },
+    #[error(transparent)]
+    Mint(#[from] SweepMintError),
+}
+
+#[derive(Debug, PartialEq, Eq, Error)]
+pub enum SweepMintError {
     #[error(
         "the fee share of {fee_share} lamports and the deposit fee of {deposit_fee} lamports exceed the {sweepable_amount} lamports swept for deposit {deposit_id}"
     )]

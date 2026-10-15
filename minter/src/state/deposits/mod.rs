@@ -68,7 +68,6 @@ pub struct Deposits {
     in_flight_ids: BTreeMap<Account, DepositSolId>,
     latest_ids: BTreeMap<Account, DepositSolId>,
     queued_at_by_id: BTreeMap<DepositSolId, u64>,
-    automatic_deposit_count: u64,
     watchlist: Watchlist,
 }
 
@@ -146,11 +145,6 @@ impl Deposits {
         self.latest_ids.get(account).copied()
     }
 
-    /// How many deposits the automatic flow has queued so far.
-    pub fn automatic_deposit_count(&self) -> u64 {
-        self.automatic_deposit_count
-    }
-
     /// Returns the timestamp (in nanoseconds) at which the oldest in-flight deposit was queued.
     /// A deposit is in flight from the moment it is queued until it is minted, dropped or
     /// quarantined, whatever sweep stage it has reached in between.
@@ -226,9 +220,6 @@ impl Deposits {
             deposit.account
         );
         self.latest_ids.insert(deposit.account, deposit_id);
-        if deposit.deposit_fee.is_some() {
-            self.automatic_deposit_count += 1;
-        }
         self.watchlist.remove(&deposit.account);
         self.queued.insert(deposit_id, deposit);
         self.queued_at_by_id.insert(deposit_id, queued_at);
@@ -325,13 +316,13 @@ impl Deposits {
     }
 
     /// Moves every deposit of the given finalized sweep to the pending mints, each with
-    /// the amount its mint carries, and returns the automatic deposit fees the sweep collects.
+    /// the amount its mint carries, and returns the credited sweep.
     pub(super) fn credit_sweep(
         &mut self,
         signature: &Signature,
         mints: &[CreditedDeposit],
         timestamp: u64,
-    ) -> Lamport {
+    ) -> Sweep {
         let sweep = self.finalized.remove(signature).unwrap_or_else(|| {
             panic!("Attempted to credit sweep {signature} that is not finalized")
         });
@@ -372,7 +363,7 @@ impl Deposits {
                 mint.deposit_id
             );
         }
-        sweep.deposit_fees()
+        sweep
     }
 
     pub(super) fn mint(&mut self, deposit_id: DepositSolId, mint_block_index: LedgerMintIndex) {
@@ -440,7 +431,7 @@ impl QueuedDeposit {
     }
 
     /// The fee deducted from the mint, zero for a deposit queued by `deposit_sol`.
-    pub fn deducted_deposit_fee(&self) -> Lamport {
+    pub fn deposit_fee(&self) -> Lamport {
         self.deposit_fee.unwrap_or(0)
     }
 }

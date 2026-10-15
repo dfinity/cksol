@@ -414,7 +414,6 @@ mod swept_deposits {
                 AUTOMATIC_DEPOSIT_FEE + AUTOMATIC_DEPOSIT_FEE / 2
             );
             assert_eq!(s.balance(), credited.amount_received);
-            assert_eq!(s.deposits().automatic_deposit_count(), 2);
         });
 
         let replayed = replayed_recorded_log();

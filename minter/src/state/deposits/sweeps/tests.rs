@@ -1,6 +1,6 @@
 use super::{
-    Sweep, SweepMismatch, SweepRecoveryError, SweepSettlementError, Sweeps, Transfer,
-    UnreadableOutcome,
+    Sweep, SweepMintError, SweepMismatch, SweepRecoveryError, SweepSettlementError, Sweeps,
+    Transfer, UnreadableOutcome,
 };
 use crate::{
     constants::{FEE_PER_SIGNATURE, RENT_EXEMPTION_THRESHOLD},
@@ -98,7 +98,7 @@ fn should_panic_when_inserting_a_sweep_with_a_known_signature() {
 
 mod plan {
     use super::{
-        FEE_PER_SIGNATURE, Lamport, MINTER_ADDRESS, Sweep, SweepMismatch, Transfer, account,
+        FEE_PER_SIGNATURE, Lamport, MINTER_ADDRESS, Sweep, SweepMintError, Transfer, account,
         planned_sweep, queued_deposit_of,
     };
     use crate::{
@@ -242,7 +242,7 @@ mod plan {
 
         assert_eq!(
             sweep.mints(),
-            Err(SweepMismatch::FeesExceedSweepableAmount {
+            Err(SweepMintError::FeesExceedSweepableAmount {
                 deposit_id: 0,
                 sweepable_amount,
                 fee_share: FEE_PER_SIGNATURE,
@@ -371,9 +371,9 @@ mod message {
 
 mod settle {
     use super::{
-        EncodedConfirmedTransactionWithStatusMeta, RENT_EXEMPTION_THRESHOLD, Sweep, SweepMismatch,
-        SweepSettlementError, TransactionError, UiTransactionError, UnreadableOutcome, account,
-        devnet_sweep, planned_sweep, queued_deposit_of,
+        EncodedConfirmedTransactionWithStatusMeta, RENT_EXEMPTION_THRESHOLD, Sweep, SweepMintError,
+        SweepMismatch, SweepSettlementError, TransactionError, UiTransactionError,
+        UnreadableOutcome, account, devnet_sweep, planned_sweep, queued_deposit_of,
     };
     use crate::{state::QueuedDeposit, test_fixtures::fetched};
 
@@ -444,14 +444,14 @@ mod settle {
 
         assert_eq!(
             result,
-            Err(SweepSettlementError::Mismatch(
-                SweepMismatch::FeesExceedSweepableAmount {
+            Err(SweepSettlementError::Mismatch(SweepMismatch::Mint(
+                SweepMintError::FeesExceedSweepableAmount {
                     deposit_id: 1,
                     sweepable_amount: SECOND_SWEEPABLE_AMOUNT,
                     fee_share: devnet_sweep::FEE / devnet_sweep::DEPOSITS.len() as u64,
                     deposit_fee: SECOND_SWEEPABLE_AMOUNT,
                 }
-            ))
+            )))
         );
     }
 
