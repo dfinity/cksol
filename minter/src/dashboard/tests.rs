@@ -1,5 +1,5 @@
 use crate::dashboard::{DashboardPaginationParameters, DashboardTemplate, lamports_to_sol};
-use crate::state::{AutomaticDeposit, mutate_state, read_state};
+use crate::state::{mutate_state, read_state};
 use crate::test_fixtures::{
     AUTOMATIC_DEPOSIT_FEE, MINIMUM_DEPOSIT_AMOUNT, MINIMUM_WITHDRAWAL_AMOUNT, REGISTERED_AT,
     WATCH_WINDOW_NANOS, WITHDRAWAL_FEE, account, at, deposit_address,
@@ -88,17 +88,10 @@ fn should_display_an_unconfigured_automatic_deposit_fee_as_not_available() {
 fn should_display_the_collected_automatic_deposit_fees() {
     init_state();
     init_schnorr_master_key();
-    DepositFlow::queue_automatic(
-        account(1),
-        400_000_000,
-        AutomaticDeposit {
-            fee: AUTOMATIC_DEPOSIT_FEE,
-            valid_until: REGISTERED_AT + WATCH_WINDOW_NANOS,
-        },
-    )
-    .sweep(signature(0xAA))
-    .succeed()
-    .credit();
+    DepositFlow::queue_automatic(account(1), 400_000_000, AUTOMATIC_DEPOSIT_FEE)
+        .sweep(signature(0xAA))
+        .succeed()
+        .credit();
 
     DashboardAssert::assert_that(dashboard()).has_string_value(
         "#collected-automatic-deposit-fees > td",
