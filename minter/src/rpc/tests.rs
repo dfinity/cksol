@@ -2,8 +2,9 @@ use crate::{
     constants::GET_RECENT_BLOCK_MAX_TRIES,
     rpc::{
         Block, BlockHeight, GetBalanceError, GetNonceAccountError, GetRecentBlockError,
-        GetTransactionError, NonceAccount, SubmitTransactionError, get_balance, get_nonce_account,
-        get_recent_block, get_signature_statuses, get_transaction, submit_transaction,
+        GetSignatureStatusesError, GetTransactionError, NonceAccount, ProviderBreakdown,
+        SubmitTransactionError, get_balance, get_nonce_account, get_recent_block,
+        get_signature_statuses, get_transaction, submit_transaction,
         submit_transaction_skipping_preflight,
     },
     test_fixtures::{
@@ -11,8 +12,8 @@ use crate::{
         deposit::{
             DEPOSIT_ADDRESS, legacy_deposit_transaction, legacy_deposit_transaction_signature,
         },
-        durable_nonce, fetched, init_state, legacy_nonce_account_info, nonce_account_address,
-        nonce_account_info,
+        durable_nonce, fetched, finalized_status, init_state, legacy_nonce_account_info,
+        nonce_account_address, nonce_account_info,
         runtime::TestCanisterRuntime,
         uninitialized_nonce_account_info,
     },
@@ -66,7 +67,9 @@ mod get_balance_tests {
             (
                 TestCanisterRuntime::new()
                     .add_stub_response(MultiRpcResult::Inconsistent(inconsistent.clone())),
-                GetBalanceError::InconsistentRpcResults,
+                GetBalanceError::InconsistentRpcResults(ProviderBreakdown(
+                    "error from AnkrMainnet: Validation error: Error 1".to_string(),
+                )),
             ),
         ] {
             let result = get_balance(&runtime, DEPOSIT_ADDRESS).await;
@@ -136,7 +139,16 @@ mod get_transaction_tests {
 
         let result = get_transaction(&runtime, legacy_deposit_transaction_signature()).await;
 
-        assert_eq!(result, Err(GetTransactionError::InconsistentRpcResults));
+        assert_eq!(
+            result,
+            Err(GetTransactionError::InconsistentRpcResults(
+                ProviderBreakdown(
+                    "error from AnkrMainnet: Validation error: Error 1; \
+                 error from DrpcMainnet: Validation error: Error 2"
+                        .to_string()
+                )
+            ))
+        );
     }
 
     #[tokio::test]
@@ -293,6 +305,114 @@ mod get_signature_statuses_tests {
             None
         );
     }
+
+    #[tokio::test]
+    async fn should_fail_on_inconsistent_results_naming_the_providers_that_agree() {
+        init_state();
+        let finalized = Ok(vec![Some(finalized_status())]);
+        let results = vec![
+            (
+                RpcSource::Supported(SupportedRpcProviderId::AnkrMainnet),
+                finalized.clone(),
+            ),
+            (
+                RpcSource::Supported(SupportedRpcProviderId::DrpcMainnet),
+                Ok(vec![None]),
+            ),
+            (
+                RpcSource::Supported(SupportedRpcProviderId::AlchemyMainnet),
+                finalized,
+            ),
+            (
+                RpcSource::Supported(SupportedRpcProviderId::HeliusMainnet),
+                Err(RpcError::ValidationError("Error 1".to_string())),
+            ),
+        ];
+        let runtime =
+            TestCanisterRuntime::new().add_stub_response(MultiRpcResult::Inconsistent(results));
+
+        let result =
+            get_signature_statuses(&runtime, &[legacy_deposit_transaction_signature()]).await;
+
+        assert_eq!(
+            result,
+            Err(GetSignatureStatusesError::InconsistentRpcResults(
+                ProviderBreakdown(
+                    "answer 1: [AnkrMainnet, AlchemyMainnet]; answer 2: [DrpcMainnet]; \
+                     error from HeliusMainnet: Validation error: Error 1"
+                        .to_string()
+                )
+            ))
+        );
+    }
+}
+
+mod provider_breakdown_tests {
+    use super::*;
+    use crate::rpc::MAX_PROVIDER_ERROR_LEN;
+    use sol_rpc_types::{HttpHeader, RpcEndpoint, RpcResult};
+
+    #[test]
+    fn should_shorten_long_provider_errors() {
+        let body = "x".repeat(2 * MAX_PROVIDER_ERROR_LEN);
+        let results: Vec<(RpcSource, RpcResult<u64>)> = vec![(
+            RpcSource::Supported(SupportedRpcProviderId::AnkrMainnet),
+            Err(RpcError::ValidationError(body)),
+        )];
+
+        let breakdown = ProviderBreakdown::new(&results).to_string();
+
+        let error = breakdown
+            .strip_prefix("error from AnkrMainnet: ")
+            .expect("the breakdown names the provider");
+        assert_eq!(error.chars().count(), MAX_PROVIDER_ERROR_LEN + "...".len());
+        assert!(error.ends_with("..."));
+    }
+
+    #[test]
+    fn should_not_reveal_custom_endpoints() {
+        let results: Vec<(RpcSource, RpcResult<u64>)> = vec![
+            (
+                RpcSource::Custom(RpcEndpoint {
+                    url: "https://rpc.example.com/?api-key=secret-key".to_string(),
+                    headers: Some(vec![HttpHeader {
+                        name: "Authorization".to_string(),
+                        value: "Bearer secret-token".to_string(),
+                    }]),
+                }),
+                Ok(1),
+            ),
+            (
+                RpcSource::Supported(SupportedRpcProviderId::AnkrMainnet),
+                Ok(2),
+            ),
+        ];
+
+        let breakdown = ProviderBreakdown::new(&results).to_string();
+
+        assert_eq!(breakdown, "answer 1: [Custom]; answer 2: [AnkrMainnet]");
+    }
+
+    #[test]
+    fn should_appear_in_the_error_message() {
+        let results: Vec<(RpcSource, RpcResult<u64>)> = vec![
+            (
+                RpcSource::Supported(SupportedRpcProviderId::AnkrMainnet),
+                Ok(1),
+            ),
+            (
+                RpcSource::Supported(SupportedRpcProviderId::DrpcMainnet),
+                Ok(2),
+            ),
+        ];
+
+        let error = GetBalanceError::InconsistentRpcResults(ProviderBreakdown::new(&results));
+
+        assert_eq!(
+            error.to_string(),
+            "Inconsistent RPC results for balance (answer 1: [AnkrMainnet]; answer 2: [DrpcMainnet])"
+        );
+    }
 }
 
 mod submit_transaction_tests {
@@ -366,7 +486,12 @@ mod submit_transaction_tests {
 
         let result = submit_transaction(&runtime, transaction(), CommitmentLevel::Confirmed).await;
 
-        assert_eq!(result, Err(SubmitTransactionError::InconsistentRpcResults));
+        assert_eq!(
+            result,
+            Err(SubmitTransactionError::InconsistentRpcResults(
+                ProviderBreakdown("answer 1: [AnkrMainnet]; answer 2: [DrpcMainnet]".to_string())
+            ))
+        );
     }
 
     #[tokio::test]
@@ -487,7 +612,9 @@ mod get_nonce_account_tests {
             (
                 TestCanisterRuntime::new()
                     .add_stub_response(GetAccountInfoResult::Inconsistent(inconsistent.clone())),
-                GetNonceAccountError::InconsistentRpcResults,
+                GetNonceAccountError::InconsistentRpcResults(ProviderBreakdown(
+                    "error from AnkrMainnet: Validation error: Error 1".to_string(),
+                )),
             ),
         ] {
             let result = get_nonce_account(&runtime, nonce_account_address()).await;
