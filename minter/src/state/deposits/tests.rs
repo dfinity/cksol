@@ -1,6 +1,6 @@
 use super::{
-    DepositBalance, Deposits, MintedSweep, PendingMint, QuarantineCause, QuarantinedDeposit,
-    QueuedDeposit, SweptDeposit,
+    DepositBalance, Deposits, InFlightDeposit, MintedSweep, PendingMint, QuarantineCause,
+    QuarantinedDeposit, QueuedDeposit, SweptDeposit,
 };
 use crate::{
     constants::{FEE_PER_SIGNATURE, RENT_EXEMPTION_THRESHOLD},
@@ -48,7 +48,9 @@ mod deposit_balance {
 }
 
 mod queue {
-    use super::{BTreeMap, DepositSolStatus, Deposits, queued_deposit, queued_deposit_of};
+    use super::{
+        BTreeMap, DepositSolStatus, Deposits, InFlightDeposit, queued_deposit, queued_deposit_of,
+    };
 
     #[test]
     fn should_assign_sequential_ids_and_keep_accounts_in_flight() {
@@ -61,9 +63,15 @@ mod queue {
             deposits.queued(),
             &BTreeMap::from([(0, queued_deposit(0)), (1, queued_deposit(1))])
         );
-        assert_eq!(deposits.in_flight_id(&queued_deposit(0).account), Some(0));
-        assert_eq!(deposits.in_flight_id(&queued_deposit(1).account), Some(1));
-        assert_eq!(deposits.in_flight_id(&queued_deposit(2).account), None);
+        assert_eq!(
+            deposits.in_flight(&queued_deposit(0).account),
+            Some(InFlightDeposit::Processing(0))
+        );
+        assert_eq!(
+            deposits.in_flight(&queued_deposit(1).account),
+            Some(InFlightDeposit::Processing(1))
+        );
+        assert_eq!(deposits.in_flight(&queued_deposit(2).account), None);
     }
 
     #[test]
@@ -98,7 +106,7 @@ mod queue {
 
 mod sweep {
     use super::{
-        BTreeMap, DepositSolStatus, Deposits, FEE_PER_SIGNATURE, MINTER_ADDRESS,
+        BTreeMap, DepositSolStatus, Deposits, FEE_PER_SIGNATURE, InFlightDeposit, MINTER_ADDRESS,
         SWEEP_SIGNATURE_INDEX, planned_sweep, queued_deposit, signature, sweep_message,
     };
 
@@ -133,8 +141,8 @@ mod sweep {
         assert_eq!(deposits.queued(), &BTreeMap::from([(1, queued_deposit(1))]));
         for deposit_id in 0..3 {
             assert_eq!(
-                deposits.in_flight_id(&queued_deposit(deposit_id).account),
-                Some(deposit_id)
+                deposits.in_flight(&queued_deposit(deposit_id).account),
+                Some(InFlightDeposit::Processing(deposit_id))
             );
         }
         assert_eq!(
@@ -233,8 +241,8 @@ mod sweep {
 
 mod drop_swept {
     use super::{
-        BTreeMap, DepositSolStatus, Deposits, MINTER_ADDRESS, SWEEP_SIGNATURE_INDEX, SweptDeposit,
-        queue_deposits, signature, sweep_message,
+        BTreeMap, DepositSolStatus, Deposits, InFlightDeposit, MINTER_ADDRESS,
+        SWEEP_SIGNATURE_INDEX, SweptDeposit, queue_deposits, signature, sweep_message,
     };
 
     #[test]
@@ -261,7 +269,7 @@ mod drop_swept {
             &BTreeMap::from([(0, dropped(first)), (2, dropped(third))])
         );
         for (deposit_id, deposit) in [(0, first), (2, third)] {
-            assert_eq!(deposits.in_flight_id(&deposit.account), None);
+            assert_eq!(deposits.in_flight(&deposit.account), None);
             assert_eq!(
                 deposits.status(deposit_id),
                 DepositSolStatus::Dropped {
@@ -269,7 +277,10 @@ mod drop_swept {
                 }
             );
         }
-        assert_eq!(deposits.in_flight_id(&second.account), Some(1));
+        assert_eq!(
+            deposits.in_flight(&second.account),
+            Some(InFlightDeposit::Processing(1))
+        );
     }
 
     #[test]
@@ -281,8 +292,8 @@ mod drop_swept {
 
 mod finalize_swept {
     use super::{
-        BTreeMap, DepositSolStatus, Deposits, MINTER_ADDRESS, SWEEP_SIGNATURE_INDEX, planned_sweep,
-        queued_deposit, signature, sweep_message,
+        BTreeMap, DepositSolStatus, Deposits, InFlightDeposit, MINTER_ADDRESS,
+        SWEEP_SIGNATURE_INDEX, planned_sweep, queued_deposit, signature, sweep_message,
     };
 
     #[test]
@@ -312,8 +323,8 @@ mod finalize_swept {
         assert_eq!(deposits.queued(), &BTreeMap::from([(1, queued_deposit(1))]));
         for deposit_id in 0..3 {
             assert_eq!(
-                deposits.in_flight_id(&queued_deposit(deposit_id).account),
-                Some(deposit_id)
+                deposits.in_flight(&queued_deposit(deposit_id).account),
+                Some(InFlightDeposit::Processing(deposit_id))
             );
         }
         for deposit_id in [0, 2] {
@@ -341,9 +352,9 @@ mod finalize_swept {
 
 mod credit_sweep {
     use super::{
-        BTreeMap, CREDIT_TIMESTAMP, DepositSolStatus, Deposits, MINTER_ADDRESS, PendingMint,
-        SWEEP_SIGNATURE_INDEX, SweptDeposit, finalized_sweep, mint, queued_deposit, signature,
-        sweep_message,
+        BTreeMap, CREDIT_TIMESTAMP, DepositSolStatus, Deposits, InFlightDeposit, MINTER_ADDRESS,
+        PendingMint, SWEEP_SIGNATURE_INDEX, SweptDeposit, finalized_sweep, mint, queued_deposit,
+        signature, sweep_message,
     };
 
     #[test]
@@ -371,8 +382,8 @@ mod credit_sweep {
         );
         for deposit_id in 0..3 {
             assert_eq!(
-                deposits.in_flight_id(&queued_deposit(deposit_id).account),
-                Some(deposit_id)
+                deposits.in_flight(&queued_deposit(deposit_id).account),
+                Some(InFlightDeposit::Processing(deposit_id))
             );
         }
         assert_eq!(
@@ -446,8 +457,8 @@ mod credit_sweep {
 
 mod mint {
     use super::{
-        BTreeMap, DepositSolStatus, Deposits, LedgerMintIndex, MintedSweep, SweptDeposit,
-        credited_sweep, mint, queued_deposit,
+        BTreeMap, DepositSolStatus, Deposits, InFlightDeposit, LedgerMintIndex, MintedSweep,
+        SweptDeposit, credited_sweep, mint, queued_deposit,
     };
 
     #[test]
@@ -474,8 +485,11 @@ mod mint {
                 }
             )])
         );
-        assert_eq!(deposits.in_flight_id(&queued_deposit(0).account), None);
-        assert_eq!(deposits.in_flight_id(&queued_deposit(1).account), Some(1));
+        assert_eq!(deposits.in_flight(&queued_deposit(0).account), None);
+        assert_eq!(
+            deposits.in_flight(&queued_deposit(1).account),
+            Some(InFlightDeposit::Processing(1))
+        );
         assert_eq!(
             deposits.status(0),
             DepositSolStatus::Minted {
@@ -500,7 +514,7 @@ mod mint {
 
 mod quarantine_pending_mint {
     use super::{
-        BTreeMap, CREDIT_TIMESTAMP, DepositSolStatus, Deposits, QuarantineCause,
+        BTreeMap, CREDIT_TIMESTAMP, DepositSolStatus, Deposits, InFlightDeposit, QuarantineCause,
         QuarantinedDeposit, SweptDeposit, credited_sweep, mint, queued_deposit,
     };
 
@@ -531,12 +545,14 @@ mod quarantine_pending_mint {
                 },
             )])
         );
-        for deposit_id in 0..2 {
-            assert_eq!(
-                deposits.in_flight_id(&queued_deposit(deposit_id).account),
-                Some(deposit_id)
-            );
-        }
+        assert_eq!(
+            deposits.in_flight(&queued_deposit(0).account),
+            Some(InFlightDeposit::Quarantined(0))
+        );
+        assert_eq!(
+            deposits.in_flight(&queued_deposit(1).account),
+            Some(InFlightDeposit::Processing(1))
+        );
         assert_eq!(
             deposits.status(0),
             DepositSolStatus::Quarantined {
@@ -554,8 +570,9 @@ mod quarantine_pending_mint {
 
 mod quarantine_sweep {
     use super::{
-        BTreeMap, DepositSolStatus, Deposits, MINTER_ADDRESS, QuarantineCause, QuarantinedDeposit,
-        SWEEP_SIGNATURE_INDEX, SweptDeposit, queue_deposits, signature, sweep_message,
+        BTreeMap, DepositSolStatus, Deposits, InFlightDeposit, MINTER_ADDRESS, QuarantineCause,
+        QuarantinedDeposit, SWEEP_SIGNATURE_INDEX, SweptDeposit, queue_deposits, signature,
+        sweep_message,
     };
 
     #[test]
@@ -586,8 +603,12 @@ mod quarantine_sweep {
             deposits.quarantined(),
             &BTreeMap::from([(0, quarantined(first)), (2, quarantined(third))])
         );
-        for (deposit_id, deposit) in [(0, first), (1, second), (2, third)] {
-            assert_eq!(deposits.in_flight_id(&deposit.account), Some(deposit_id));
+        for (deposit, in_flight) in [
+            (first, InFlightDeposit::Quarantined(0)),
+            (second, InFlightDeposit::Processing(1)),
+            (third, InFlightDeposit::Quarantined(2)),
+        ] {
+            assert_eq!(deposits.in_flight(&deposit.account), Some(in_flight));
         }
         for deposit_id in [0, 2] {
             assert_eq!(

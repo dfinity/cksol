@@ -103,6 +103,28 @@ impl Deposits {
         self.in_flight_ids.get(account).copied()
     }
 
+    /// The deposit of the account that is in flight, with whether it is still processed
+    /// or quarantined.
+    ///
+    /// # Panics
+    ///
+    /// If the in-flight deposit is minted, dropped or unknown, since such a deposit must
+    /// have released its account.
+    pub fn in_flight(&self, account: &Account) -> Option<InFlightDeposit> {
+        let deposit_id = self.in_flight_id(account)?;
+        Some(match self.status(deposit_id) {
+            DepositSolStatus::Queued { .. }
+            | DepositSolStatus::Swept { .. }
+            | DepositSolStatus::Finalized { .. } => InFlightDeposit::Processing(deposit_id),
+            DepositSolStatus::Quarantined { .. } => InFlightDeposit::Quarantined(deposit_id),
+            status @ (DepositSolStatus::Dropped { .. }
+            | DepositSolStatus::Minted { .. }
+            | DepositSolStatus::NotFound) => panic!(
+                "BUG: in-flight deposit {deposit_id} of account {account:?} has status {status:?}"
+            ),
+        })
+    }
+
     /// Returns the timestamp (in nanoseconds) at which the oldest in-flight deposit was queued.
     /// A deposit is in flight from the moment it is queued until it is minted, dropped or
     /// quarantined, whatever sweep stage it has reached in between.
@@ -353,6 +375,17 @@ impl Deposits {
             },
         );
     }
+}
+
+/// The deposit that reserves its account: no other deposit can be queued for the account
+/// until it is minted or dropped, and a quarantined one keeps the account reserved until
+/// a minter upgrade resolves it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InFlightDeposit {
+    /// The deposit is queued, swept or finalized.
+    Processing(DepositSolId),
+    /// The deposit is quarantined and keeps its account rejected until a minter upgrade.
+    Quarantined(DepositSolId),
 }
 
 /// A deposit address queued for a sweep to the minter's main account.

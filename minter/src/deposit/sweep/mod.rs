@@ -5,7 +5,10 @@ use crate::{
     guard::deposit_sol_guard,
     rpc::get_balance,
     runtime::CanisterRuntime,
-    state::{DepositBalance, audit::process_event, event::EventType, mutate_state, read_state},
+    state::{
+        DepositBalance, InFlightDeposit, QueuedDeposit, State, audit::process_event,
+        event::EventType, mutate_state, read_state,
+    },
     utils::assert_valid_deposit_owner,
 };
 use canlog::log;
@@ -41,25 +44,12 @@ pub async fn deposit_sol<R: CanisterRuntime>(
     });
     check_caller_available_cycles(runtime, required_cycles)?;
 
-    if let Some((deposit_id, status)) = read_state(|state| {
-        state
-            .deposits()
-            .in_flight_id(&account)
-            .map(|deposit_id| (deposit_id, state.deposits().status(deposit_id)))
-    }) {
-        return match status {
-            DepositSolStatus::Queued { .. }
-            | DepositSolStatus::Swept { .. }
-            | DepositSolStatus::Finalized { .. } => Ok(deposit_id),
-            DepositSolStatus::Quarantined { .. } => {
-                Err(DepositSolError::Quarantined { deposit_id })
-            }
-            DepositSolStatus::Dropped { .. }
-            | DepositSolStatus::Minted { .. }
-            | DepositSolStatus::NotFound => panic!(
-                "BUG: in-flight deposit {deposit_id} of account {account:?} has status {status:?}"
-            ),
-        };
+    match read_state(|state| state.deposits().in_flight(&account)) {
+        Some(InFlightDeposit::Processing(deposit_id)) => return Ok(deposit_id),
+        Some(InFlightDeposit::Quarantined(deposit_id)) => {
+            return Err(DepositSolError::Quarantined { deposit_id });
+        }
+        None => {}
     }
 
     let master_key =
@@ -81,25 +71,51 @@ pub async fn deposit_sol<R: CanisterRuntime>(
         .expect("BUG: the minimum deposit amount covers the rent exemption threshold");
 
     let deposit_id = mutate_state(|state| {
-        let deposit_id = state.deposits().next_id();
-        process_event(
+        queue_deposit(
+            runtime,
             state,
-            EventType::QueuedDeposit {
-                deposit_id,
+            QueuedDeposit {
                 account,
                 address: deposit_address,
                 balance,
             },
-            runtime,
-        );
-        deposit_id
+        )
     });
+    Ok(deposit_id)
+}
+
+/// Queues the deposit under the next deposit id, which both `deposit_sol` and a balance
+/// scan of the automatic flow do once a deposit address holds at least the minimum
+/// deposit amount, and returns that id.
+///
+/// # Panics
+///
+/// If the account of the deposit already has a deposit in flight, which callers must
+/// rule out after their balance read.
+pub(crate) fn queue_deposit<R: CanisterRuntime>(
+    runtime: &R,
+    state: &mut State,
+    deposit: QueuedDeposit,
+) -> DepositSolId {
+    let deposit_id = state.deposits().next_id();
+    process_event(
+        state,
+        EventType::QueuedDeposit {
+            deposit_id,
+            account: deposit.account,
+            address: deposit.address,
+            balance: deposit.balance,
+        },
+        runtime,
+    );
     log!(
         Priority::Info,
-        "Queued deposit {deposit_id} for account {account:?}: {} lamports sweepable from {deposit_address}",
-        balance.sweepable_amount()
+        "Queued deposit {deposit_id} for account {:?}: {} lamports sweepable from {}",
+        deposit.account,
+        deposit.sweepable_amount(),
+        deposit.address
     );
-    Ok(deposit_id)
+    deposit_id
 }
 
 pub fn deposit_status(deposit_id: DepositSolId) -> DepositSolStatus {
