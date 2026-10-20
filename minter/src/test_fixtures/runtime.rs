@@ -285,6 +285,7 @@ impl Runtime for RecordingStubRuntime {
             method: method.to_string(),
             args: encode_args(args).expect("Failed to encode the call arguments"),
         });
+        suspend_like_an_inter_canister_call().await;
         self.stub.update_call(id, method, (), cycles).await
     }
 
