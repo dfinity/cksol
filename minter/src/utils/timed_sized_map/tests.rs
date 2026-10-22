@@ -181,20 +181,23 @@ fn should_keep_the_expiry_of_an_inserted_entry_shorter_than_the_ttl() {
 }
 
 #[test]
-fn should_reject_an_already_expired_entry() {
+fn should_ignore_an_already_expired_entry() {
     let mut map = TimedSizedMap::new(Duration::from_nanos(10), capacity(5));
 
-    let rejected = map.insert_entry(
-        at(20),
-        "a",
-        Entry {
-            value: 1,
-            expires_at: at(19),
-        },
-    );
+    let evicted = map
+        .insert_entry(
+            at(20),
+            "a",
+            Entry {
+                value: 1,
+                expires_at: at(19),
+            },
+        )
+        .unwrap();
 
-    assert_eq!(rejected, Err(InsertError::Expired { key: "a", value: 1 }));
+    assert!(evicted.is_empty());
     assert!(map.is_empty());
+    assert_eq!(map.get(at(20), &"a"), None);
     assert_consistent(&map);
 }
 
