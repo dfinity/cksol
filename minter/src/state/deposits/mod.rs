@@ -1,7 +1,10 @@
 use crate::{
     constants::RENT_EXEMPTION_THRESHOLD,
     numeric::LedgerMintIndex,
-    state::event::{CreditedDeposit, VersionedMessage},
+    state::{
+        Watchlist,
+        event::{CreditedDeposit, VersionedMessage},
+    },
 };
 use cksol_types::{DepositSolId, DepositSolStatus};
 use icrc_ledger_types::icrc1::account::Account;
@@ -64,6 +67,7 @@ pub struct Deposits {
     quarantined: BTreeMap<DepositSolId, QuarantinedDeposit>,
     in_flight_ids: BTreeMap<Account, DepositSolId>,
     queued_at_by_id: BTreeMap<DepositSolId, u64>,
+    watchlist: Watchlist,
 }
 
 impl Deposits {
@@ -97,6 +101,16 @@ impl Deposits {
 
     pub fn quarantined(&self) -> &BTreeMap<DepositSolId, QuarantinedDeposit> {
         &self.quarantined
+    }
+
+    pub fn watchlist(&self) -> &Watchlist {
+        &self.watchlist
+    }
+
+    /// The watchlist is transient state: registrations are not recorded as events, so it is
+    /// mutated directly and carried across upgrades by a snapshot taken before the upgrade.
+    pub fn watchlist_mut(&mut self) -> &mut Watchlist {
+        &mut self.watchlist
     }
 
     pub fn in_flight_id(&self, account: &Account) -> Option<DepositSolId> {

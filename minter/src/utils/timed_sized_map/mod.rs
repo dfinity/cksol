@@ -19,6 +19,18 @@ impl Timestamp {
     pub const fn as_nanos(self) -> u64 {
         self.0
     }
+
+    pub fn saturating_add(self, duration: Duration) -> Self {
+        Self(self.0.saturating_add(nanos(duration)))
+    }
+
+    pub fn saturating_sub(self, duration: Duration) -> Self {
+        Self(self.0.saturating_sub(nanos(duration)))
+    }
+}
+
+fn nanos(duration: Duration) -> u64 {
+    u64::try_from(duration.as_nanos()).unwrap_or(u64::MAX)
 }
 
 /// A value of a [`TimedSizedMap`] together with the time after which it is expired.
@@ -232,8 +244,7 @@ impl<K: Ord + Clone, V> TimedSizedMap<K, V> {
     }
 
     fn expiry(&self, now: Timestamp) -> Timestamp {
-        let ttl_nanos = u64::try_from(self.ttl.as_nanos()).unwrap_or(u64::MAX);
-        Timestamp::from_nanos(now.as_nanos().saturating_add(ttl_nanos))
+        now.saturating_add(self.ttl)
     }
 
     fn earliest_expiry(&self) -> Option<Timestamp> {

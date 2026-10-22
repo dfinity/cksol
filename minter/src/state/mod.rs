@@ -40,6 +40,7 @@ pub mod audit;
 mod deposits;
 pub mod event;
 mod nonce_pool;
+mod watchlist;
 
 pub use deposits::{
     DepositBalance, Deposits, InFlightDeposit, MintedSweep, PendingMint, QuarantineCause,
@@ -47,6 +48,9 @@ pub use deposits::{
     SweepSettlementError, Sweeps, SweptDeposit, Transfer, UnreadableOutcome,
 };
 pub use nonce_pool::{DurableNoncePool, NoncePoolError, NonceRead};
+pub use watchlist::{
+    MAX_WATCHED_ADDRESSES, WATCH_WINDOW, WatchedAddress, Watchlist, WatchlistFull,
+};
 
 thread_local! {
     static STATE: RefCell<Option<State>> = RefCell::default();
@@ -191,6 +195,14 @@ impl State {
 
     pub fn deposits(&self) -> &Deposits {
         &self.deposits
+    }
+
+    pub fn watchlist(&self) -> &Watchlist {
+        self.deposits.watchlist()
+    }
+
+    pub fn watchlist_mut(&mut self) -> &mut Watchlist {
+        self.deposits.watchlist_mut()
     }
 
     pub fn sent_withdrawal_requests(&self) -> &BTreeMap<LedgerBurnIndex, SentWithdrawalRequest> {
