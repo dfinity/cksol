@@ -250,14 +250,20 @@ fn should_remove_an_entry_from_both_indices() {
     assert!(map.iter_by_expiry().all(|(key, _)| *key != "a"));
     assert_consistent(&map);
 
-    map.remove(&"b");
+    // "c" sits in a later bucket than "b", so its removal must find its own bucket.
+    map.remove(&"c");
 
     assert_eq!(
         map.iter_by_expiry()
             .map(|(key, _)| *key)
             .collect::<Vec<_>>(),
-        vec!["c"]
+        vec!["b"]
     );
+    assert_consistent(&map);
+
+    map.remove(&"b");
+
+    assert!(map.is_empty());
     assert_consistent(&map);
 }
 
