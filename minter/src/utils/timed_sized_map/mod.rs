@@ -54,19 +54,14 @@ pub struct TimedSizedMap<K, V> {
 /// entry. The rejected key and value are handed back to the caller.
 #[derive(Clone, Eq, PartialEq, Debug)]
 pub enum InsertError<K, V> {
-    AlreadyPresent {
-        key: K,
-        value: V,
-    },
-    AtCapacity {
-        key: K,
-        value: V,
-    },
+    /// A live entry already exists under the key. Refreshing it is not allowed, so that a
+    /// caller cannot extend the lifetime of an entry by inserting it again.
+    AlreadyPresent { key: K, value: V },
+    /// The map is at capacity with live entries only. A live entry is never evicted to make
+    /// room, since a still-watched address may already have received funds.
+    AtCapacity { key: K, value: V },
     /// The entry has already expired, which only [`TimedSizedMap::insert_entry`] reports.
-    Expired {
-        key: K,
-        value: V,
-    },
+    Expired { key: K, value: V },
 }
 
 impl<K: Ord + Clone, V> TimedSizedMap<K, V> {
