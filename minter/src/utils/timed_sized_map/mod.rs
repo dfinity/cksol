@@ -111,7 +111,8 @@ impl<K: Ord + Clone, V> TimedSizedMap<K, V> {
     }
 
     /// Inserts an entry with its own expiry, clamped to `ttl` from `now`, and returns the
-    /// expired entries evicted to make room. Inserting an already expired entry is a no-op.
+    /// expired entries evicted to make room. Inserting an already expired entry is a no-op
+    /// that also returns `Ok`, so `Ok` alone does not mean that the entry was inserted.
     pub fn insert_entry(
         &mut self,
         now: Timestamp,
