@@ -400,25 +400,25 @@ fn capacity(n: usize) -> NonZeroUsize {
     NonZeroUsize::new(n).unwrap()
 }
 
-fn assert_consistent<K: Ord + Clone + std::fmt::Debug, V: PartialEq + std::fmt::Debug>(
-    map: &TimedSizedMap<K, V>,
-) {
-    let indexed: Vec<&K> = map.iter_by_expiry().map(|(key, _)| key).collect();
-    assert_eq!(indexed.len(), map.len(), "index and entry counts disagree");
-    for (key, entry) in map.iter() {
-        let indexed_entry = map
-            .iter_by_expiry()
-            .find(|(indexed_key, _)| *indexed_key == key)
-            .map(|(_, entry)| entry)
-            .unwrap_or_else(|| panic!("entry {key:?} missing from the expiry index"));
-        assert_eq!(indexed_entry, entry);
+fn assert_consistent<K: Ord + Clone + std::fmt::Debug, V>(map: &TimedSizedMap<K, V>) {
+    let indexed: Vec<&K> = map.by_expiry.values().flatten().collect();
+    assert_eq!(
+        indexed.len(),
+        map.entries.len(),
+        "index and entry counts disagree"
+    );
+    for (key, entry) in &map.entries {
+        let bucket = map
+            .by_expiry
+            .get(&entry.expires_at)
+            .unwrap_or_else(|| panic!("expiry of entry {key:?} missing from the expiry index"));
+        assert!(
+            bucket.contains(key),
+            "entry {key:?} missing from the bucket of its expiry"
+        );
     }
-    let expiries: Vec<Timestamp> = map
-        .iter_by_expiry()
-        .map(|(_, entry)| entry.expires_at)
-        .collect();
     assert!(
-        expiries.is_sorted(),
-        "expiry index out of order: {expiries:?}"
+        map.by_expiry.values().all(|bucket| !bucket.is_empty()),
+        "empty bucket left in the expiry index"
     );
 }
