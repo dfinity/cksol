@@ -933,7 +933,6 @@ version = "0.1.0"
 dependencies = [
  "assert2",
  "assert_matches",
- "async-trait",
  "base64 0.22.1",
  "bincode",
  "candid",
