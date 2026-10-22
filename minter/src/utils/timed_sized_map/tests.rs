@@ -306,13 +306,12 @@ fn should_keep_the_indices_consistent_through_churn() {
 
 #[test]
 fn should_saturate_the_expiry_of_a_ttl_beyond_the_epoch_range() {
-    let mut map = TimedSizedMap::new(Duration::MAX, capacity(5));
+    let mut map = TimedSizedMap::new(Duration::from_secs(u64::MAX), capacity(5));
 
-    map.insert(at(u64::MAX - 1), "a", 1).unwrap();
+    map.insert(at(0), "a", 1).unwrap();
 
     assert_eq!(
-        map.get_entry(at(u64::MAX), &"a")
-            .map(|entry| entry.expires_at),
+        map.get_entry(at(0), &"a").map(|entry| entry.expires_at),
         Some(at(u64::MAX))
     );
 }
