@@ -85,19 +85,23 @@ fn should_admit_a_new_key_once_expired_entries_free_room() {
 
 #[test]
 fn should_readmit_an_expired_key_as_a_fresh_entry() {
-    let mut map = TimedSizedMap::new(Duration::from_nanos(10), capacity(5));
-    map.insert(at(0), "a", 1).unwrap();
+    // A capacity of 1 also checks that the expired entry is evicted before the capacity
+    // check, since it is the one filling the map.
+    for capacity in [capacity(5), capacity(1)] {
+        let mut map = TimedSizedMap::new(Duration::from_nanos(10), capacity);
+        map.insert(at(0), "a", 1).unwrap();
 
-    let evicted = map.insert(at(20), "a", 2).unwrap();
+        let evicted = map.insert(at(20), "a", 2).unwrap();
 
-    assert_eq!(evicted, vec![("a", 1)]);
-    assert_eq!(map.get(at(20), &"a"), Some(&2));
-    assert_eq!(
-        map.get_entry(at(20), &"a").map(|entry| entry.expires_at),
-        Some(at(30))
-    );
-    assert_eq!(map.len(), 1);
-    assert_consistent(&map);
+        assert_eq!(evicted, vec![("a", 1)]);
+        assert_eq!(map.get(at(20), &"a"), Some(&2));
+        assert_eq!(
+            map.get_entry(at(20), &"a").map(|entry| entry.expires_at),
+            Some(at(30))
+        );
+        assert_eq!(map.len(), 1);
+        assert_consistent(&map);
+    }
 }
 
 #[test]
