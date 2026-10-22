@@ -124,11 +124,6 @@ impl Watchlist {
                 .get(now, &account)
                 .expect("BUG: a registration is live right after its insertion")),
             Err(InsertError::AtCapacity { .. }) => Err(WatchlistFull),
-            Err(InsertError::Expired { .. }) => {
-                unreachable!(
-                    "BUG: a registration for the window starting now never expires on insertion"
-                )
-            }
         }
     }
 
