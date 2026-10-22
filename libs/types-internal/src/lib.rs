@@ -60,6 +60,10 @@ pub struct InitArgs {
     /// The base58 addresses of the durable nonce accounts reserved for withdrawal transactions.
     #[cfg_attr(feature = "event", n(9))]
     pub nonce_accounts: Vec<String>,
+    /// The fee in lamports deducted from the minted amount of a deposit detected by the
+    /// automatic flow. The automatic flow stays unavailable until it is set.
+    #[cfg_attr(feature = "event", n(10))]
+    pub automatic_deposit_fee: Option<Lamport>,
 }
 
 /// The upgrade args for the ckSOL minter canister.
@@ -87,6 +91,10 @@ pub struct UpgradeArgs {
     /// The base58 addresses of durable nonce accounts to add to the withdrawal pool.
     #[cfg_attr(feature = "event", n(6))]
     pub nonce_accounts_to_add: Option<Vec<String>>,
+    /// The new fee in lamports deducted from the minted amount of a deposit detected by the
+    /// automatic flow.
+    #[cfg_attr(feature = "event", n(7))]
+    pub automatic_deposit_fee: Option<Lamport>,
 }
 
 /// The Solana network to connect to via the SOL RPC canister.

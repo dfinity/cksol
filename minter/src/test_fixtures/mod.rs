@@ -54,6 +54,7 @@ pub const MINTER_ADDRESS: Address = address!("Fkt68XQXBDDBGBNNjFh8GM27ffpZGmncUd
 pub const NONCE_ACCOUNT: Address = address!("US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx");
 pub const MINIMUM_DEPOSIT_AMOUNT: Lamport = 20_000_000; // 0.02 SOL
 pub const DEPOSIT_SOL_REQUIRED_CYCLES: u128 = 1_000_000_000_000;
+pub const AUTOMATIC_DEPOSIT_FEE: Lamport = 2_000_000; // 0.002 SOL
 
 pub fn sol_rpc_canister_id() -> Principal {
     Principal::from_slice(&[1_u8; 20])
@@ -75,6 +76,7 @@ pub fn valid_init_args() -> InitArgs {
         solana_network: SolanaNetwork::Mainnet,
         deposit_sol_fee: DEPOSIT_SOL_FEE as u64,
         nonce_accounts: vec![],
+        automatic_deposit_fee: Some(AUTOMATIC_DEPOSIT_FEE),
     }
 }
 
@@ -1408,7 +1410,11 @@ pub mod arb {
             any::<u64>(),
             any::<u64>(),
             arb_solana_network(),
-            (any::<u64>(), arb_nonce_accounts()),
+            (
+                any::<u64>(),
+                arb_nonce_accounts(),
+                prop::option::of(any::<u64>()),
+            ),
         )
             .prop_map(
                 |(
@@ -1420,7 +1426,7 @@ pub mod arb {
                     withdrawal_fee,
                     deposit_sol_required_cycles,
                     solana_network,
-                    (deposit_sol_fee, nonce_accounts),
+                    (deposit_sol_fee, nonce_accounts, automatic_deposit_fee),
                 )| {
                     InitArgs {
                         sol_rpc_canister_id,
@@ -1433,6 +1439,7 @@ pub mod arb {
                         solana_network,
                         deposit_sol_fee,
                         nonce_accounts,
+                        automatic_deposit_fee,
                     }
                 },
             )
@@ -1451,6 +1458,7 @@ pub mod arb {
             prop::option::of(any::<u64>()),
             prop::option::of(any::<u64>()),
             prop::option::of(arb_nonce_accounts()),
+            prop::option::of(any::<u64>()),
         )
             .prop_map(
                 |(
@@ -1461,6 +1469,7 @@ pub mod arb {
                     deposit_sol_required_cycles,
                     deposit_sol_fee,
                     nonce_accounts_to_add,
+                    automatic_deposit_fee,
                 )| UpgradeArgs {
                     sol_rpc_canister_id,
                     minimum_withdrawal_amount,
@@ -1469,6 +1478,7 @@ pub mod arb {
                     deposit_sol_required_cycles,
                     deposit_sol_fee,
                     nonce_accounts_to_add,
+                    automatic_deposit_fee,
                 },
             )
     }

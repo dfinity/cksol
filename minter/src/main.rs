@@ -130,6 +130,7 @@ fn get_minter_info() -> MinterInfo {
             .iter()
             .map(|address| address.to_string())
             .collect(),
+        automatic_deposit_fee: s.automatic_deposit_fee(),
     })
 }
 

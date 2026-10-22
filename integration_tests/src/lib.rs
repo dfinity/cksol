@@ -56,6 +56,7 @@ pub struct SetupBuilder {
     initial_ledger_balances: Option<Vec<(Account, Nat)>>,
     proxy_canister: bool,
     nonce_accounts: Vec<String>,
+    automatic_deposit_fee: Option<Lamport>,
 }
 
 impl Default for SetupBuilder {
@@ -66,6 +67,7 @@ impl Default for SetupBuilder {
             initial_ledger_balances: None,
             proxy_canister: false,
             nonce_accounts: vec![Setup::DEFAULT_NONCE_ACCOUNT.to_string()],
+            automatic_deposit_fee: Some(Setup::DEFAULT_AUTOMATIC_DEPOSIT_FEE),
         }
     }
 }
@@ -103,16 +105,32 @@ impl SetupBuilder {
         self
     }
 
+    /// Installs the minter without an automatic deposit fee, which keeps the automatic
+    /// deposit flow unavailable until an upgrade configures the fee.
+    pub fn without_automatic_deposit_fee(mut self) -> Self {
+        self.automatic_deposit_fee = None;
+        self
+    }
+
     pub async fn build(self) -> Setup {
         Setup::new(
             self.make_live.unwrap_or_default(),
             self.sol_rpc_install_args.unwrap_or_default(),
             self.initial_ledger_balances,
             self.proxy_canister,
-            self.nonce_accounts,
+            MinterInitArgs {
+                nonce_accounts: self.nonce_accounts,
+                automatic_deposit_fee: self.automatic_deposit_fee,
+            },
         )
         .await
     }
+}
+
+/// The installation arguments of the minter a test chooses.
+pub struct MinterInitArgs {
+    pub nonce_accounts: Vec<String>,
+    pub automatic_deposit_fee: Option<Lamport>,
 }
 
 pub struct Setup {
@@ -133,6 +151,7 @@ impl Setup {
     pub const DEFAULT_MINIMUM_DEPOSIT_AMOUNT: Lamport = 20_000_000; // 0.02 SOL
     pub const DEFAULT_DEPOSIT_SOL_REQUIRED_CYCLES: u128 = 1_000_000_000_000;
     pub const DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT: Lamport = 2_000_000; // 0.002 SOL
+    pub const DEFAULT_AUTOMATIC_DEPOSIT_FEE: Lamport = 2_000_000; // 0.002 SOL
     pub const DEFAULT_CALLER: Principal =
         Principal::from_slice(&[0xff, 0xff, 0xff, 0xff, 0xff, 0xe0, 0x0, 0x3, 0x1, 0x1]);
     pub const DEFAULT_NONCE_ACCOUNT: solana_address::Address =
@@ -143,7 +162,7 @@ impl Setup {
         sol_rpc_install_args: sol_rpc_types::InstallArgs,
         initial_ledger_balances: Option<Vec<(Account, Nat)>>,
         with_proxy_canister: bool,
-        nonce_accounts: Vec<String>,
+        minter_init_args: MinterInitArgs,
     ) -> Self {
         let env = PocketIcBuilder::new()
             .with_nns_subnet() //make_live requires NNS subnet.
@@ -187,7 +206,7 @@ impl Setup {
             Encode!(&cksol_minter_init_args(
                 sol_rpc_canister_id,
                 ledger_canister_id,
-                nonce_accounts,
+                minter_init_args,
             ))
             .unwrap(),
             Some(Self::DEFAULT_CONTROLLER),
@@ -909,7 +928,7 @@ fn cksol_minter_wasm() -> Vec<u8> {
 fn cksol_minter_init_args(
     sol_rpc_canister_id: Principal,
     ledger_canister_id: Principal,
-    nonce_accounts: Vec<String>,
+    minter_init_args: MinterInitArgs,
 ) -> MinterArg {
     use cksol_types_internal::{Ed25519KeyName, InitArgs, MinterArg, SolanaNetwork};
     MinterArg::Init(InitArgs {
@@ -922,7 +941,8 @@ fn cksol_minter_init_args(
         deposit_sol_required_cycles: Setup::DEFAULT_DEPOSIT_SOL_REQUIRED_CYCLES as u64,
         solana_network: SolanaNetwork::Mainnet,
         deposit_sol_fee: Setup::DEFAULT_DEPOSIT_SOL_FEE as u64,
-        nonce_accounts,
+        nonce_accounts: minter_init_args.nonce_accounts,
+        automatic_deposit_fee: minter_init_args.automatic_deposit_fee,
     })
 }
 
