@@ -187,6 +187,10 @@ fn should_keep_the_expiry_of_an_inserted_entry_shorter_than_the_ttl() {
 #[test]
 fn should_ignore_an_already_expired_entry() {
     let mut map = TimedSizedMap::new(Duration::from_nanos(10), capacity(5));
+    // An expired entry that an insertion would evict shows that the no-op leaves the map as
+    // it is.
+    map.insert(at(0), "x", 0).unwrap();
+    let before = map.clone();
 
     let evicted = map
         .insert_entry(
@@ -200,7 +204,7 @@ fn should_ignore_an_already_expired_entry() {
         .unwrap();
 
     assert!(evicted.is_empty());
-    assert!(map.is_empty());
+    assert_eq!(map, before);
     assert_eq!(map.get(at(20), &"a"), None);
     assert_consistent(&map);
 }
