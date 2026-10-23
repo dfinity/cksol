@@ -66,19 +66,12 @@ pub struct TimedSizedMap<K, V> {
 /// entry. The rejected key and value are handed back to the caller.
 #[derive(Clone, Eq, PartialEq, Debug)]
 pub enum InsertError<K, V> {
-    AlreadyPresent {
-        key: K,
-        value: V,
-    },
-    AtCapacity {
-        key: K,
-        value: V,
-    },
-    /// The entry has already expired, which only [`TimedSizedMap::insert_entry`] reports.
-    Expired {
-        key: K,
-        value: V,
-    },
+    /// A live entry already exists under the key. Refreshing it is not allowed, so that a
+    /// caller cannot extend the lifetime of an entry by inserting it again.
+    AlreadyPresent { key: K, value: V },
+    /// The map is at capacity with live entries only. A live entry is never evicted to make
+    /// room, since a still-watched address may already have received funds.
+    AtCapacity { key: K, value: V },
 }
 
 impl<K: Ord + Clone, V> TimedSizedMap<K, V> {
@@ -130,7 +123,8 @@ impl<K: Ord + Clone, V> TimedSizedMap<K, V> {
     }
 
     /// Inserts an entry with its own expiry, clamped to `ttl` from `now`, and returns the
-    /// expired entries evicted to make room. An already expired entry is rejected.
+    /// expired entries evicted to make room. Inserting an already expired entry is a no-op
+    /// that also returns `Ok`, so `Ok` alone does not mean that the entry was inserted.
     pub fn insert_entry(
         &mut self,
         now: Timestamp,
@@ -138,10 +132,7 @@ impl<K: Ord + Clone, V> TimedSizedMap<K, V> {
         entry: Entry<V>,
     ) -> Result<Vec<(K, V)>, InsertError<K, V>> {
         if !entry.is_live(now) {
-            return Err(InsertError::Expired {
-                key,
-                value: entry.value,
-            });
+            return Ok(vec![]);
         }
         if self.get(now, &key).is_some() {
             return Err(InsertError::AlreadyPresent {

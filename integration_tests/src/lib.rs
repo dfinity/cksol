@@ -25,13 +25,18 @@ use num_traits::cast::ToPrimitive;
 pub use pocket_ic::common::rest::{
     CanisterHttpReply, CanisterHttpRequest, CanisterHttpResponse, MockCanisterHttpResponse,
 };
-use pocket_ic::{PocketIcBuilder, RejectResponse, nonblocking::PocketIc};
+use pocket_ic::{
+    PocketIcBuilder, RejectResponse, common::rest::RawMessageId, nonblocking::PocketIc,
+};
 use serde::de::DeserializeOwned;
 use sol_rpc_client::SolRpcClient;
 use sol_rpc_types::{Lamport, RpcAccess};
 use solana_address::address;
 use solana_transaction::Transaction;
-use std::{default::Default, env::var, fs, ops::Deref, path::PathBuf, time::Duration, vec};
+use std::{
+    default::Default, env::var, fs, marker::PhantomData, ops::Deref, path::PathBuf, time::Duration,
+    vec,
+};
 
 pub mod events;
 pub mod fixtures;
@@ -313,10 +318,15 @@ impl Setup {
     }
 
     pub fn minter_with_caller(&self, caller: Principal) -> CkSolMinter<'_> {
-        CkSolMinter(Canister {
+        CkSolMinter(self.canister(self.minter_canister_id, caller))
+    }
+
+    fn canister(&self, id: CanisterId, caller: Principal) -> Canister<'_> {
+        Canister {
             runtime: self.runtime(caller),
-            id: self.minter_canister_id,
-        })
+            id,
+            caller,
+        }
     }
 
     pub fn minter_canister_id(&self) -> Principal {
@@ -331,17 +341,11 @@ impl Setup {
     }
 
     pub fn ledger(&self) -> Ledger<'_> {
-        Ledger(Canister {
-            runtime: self.runtime(Setup::DEFAULT_CALLER),
-            id: self.ledger_canister_id,
-        })
+        Ledger(self.canister(self.ledger_canister_id, Setup::DEFAULT_CALLER))
     }
 
     pub fn proxy(&self) -> Canister<'_> {
-        Canister {
-            runtime: self.runtime(Setup::DEFAULT_CALLER),
-            id: self.proxy_canister_id(),
-        }
+        self.canister(self.proxy_canister_id(), Setup::DEFAULT_CALLER)
     }
 
     pub fn proxy_canister_id(&self) -> Principal {
@@ -485,6 +489,7 @@ impl<'a> CkSolMinter<'a> {
         CkSolMinter(Canister {
             runtime: PocketIcRuntime::new(env, Setup::DEFAULT_CALLER),
             id: canister_id,
+            caller: Setup::DEFAULT_CALLER,
         })
     }
 
@@ -612,6 +617,13 @@ impl<'a> CkSolMinter<'a> {
         args: WithdrawSolArgs,
     ) -> Result<Result<WithdrawSolOk, WithdrawSolError>, String> {
         self.try_update_call("withdraw_sol", (args,), 0).await
+    }
+
+    pub async fn submit_withdraw_sol(
+        &self,
+        args: WithdrawSolArgs,
+    ) -> PendingCall<'_, Result<WithdrawSolOk, WithdrawSolError>> {
+        self.submit_update_call("withdraw_sol", (args,)).await
     }
 
     pub async fn withdraw_sol_status(&self, block_index: u64) -> WithdrawSolStatus {
@@ -774,6 +786,59 @@ impl Ledger<'_> {
 pub struct Canister<'a> {
     runtime: PocketIcRuntime<'a>,
     id: CanisterId,
+    caller: Principal,
+}
+
+/// An update call whose ingress message has been submitted but not yet executed.
+///
+/// Submitting several calls before executing a round puts all of their ingress
+/// messages into the same round, so they are guaranteed to execute concurrently.
+/// Their order within that round is unspecified.
+///
+/// The message is submitted directly to the canister, so it carries no cycles, and
+/// HTTP outcalls it makes are not served: a call waiting on one stays pending.
+pub struct PendingCall<'a, Out> {
+    env: &'a PocketIc,
+    message_id: RawMessageId,
+    response: PhantomData<Out>,
+}
+
+impl<Out> PendingCall<'_, Out>
+where
+    Out: CandidType + DeserializeOwned,
+{
+    pub async fn await_response(self) -> Out {
+        let reply = self
+            .env
+            .await_call(self.message_id)
+            .await
+            .unwrap_or_else(|e| panic!("Update call failed: {e:?}"));
+        Decode!(&reply, Out).unwrap_or_else(|e| panic!("Failed to decode response: {e}"))
+    }
+}
+
+impl Canister<'_> {
+    async fn submit_update_call<In, Out>(&self, method: &str, args: In) -> PendingCall<'_, Out>
+    where
+        In: ArgumentEncoder + Send,
+        Out: CandidType + DeserializeOwned,
+    {
+        let env = self.runtime.as_ref();
+        assert!(
+            !env.auto_progress_enabled().await,
+            "a live instance may execute a round between two submissions"
+        );
+        let payload = candid::encode_args(args).expect("Failed to encode arguments");
+        let message_id = env
+            .submit_call(self.id, self.caller, method, payload)
+            .await
+            .unwrap_or_else(|e| panic!("Failed to submit update call: {e:?}"));
+        PendingCall {
+            env,
+            message_id,
+            response: PhantomData,
+        }
+    }
 }
 
 impl Canister<'_> {
