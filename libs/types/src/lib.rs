@@ -216,8 +216,9 @@ pub enum WatchDepositAddressError {
     /// The watchlist is full of live registrations, try again later or use `deposit_sol`.
     #[error("The watchlist is full, try again later or use `deposit_sol`")]
     TooManyWatchedAddresses {
-        /// The id of the latest deposit queued for the account, if any, whatever stage it
-        /// reached, to follow with `deposit_sol_status`.
+        /// The id of the latest deposit queued for the account, if any, to follow with
+        /// `deposit_sol_status`. That deposit is minted or dropped, since an account with a
+        /// deposit in flight needs no slot.
         latest_deposit_id: Option<DepositSolId>,
     },
     /// The minter experiences temporary issues, try the call again later.
