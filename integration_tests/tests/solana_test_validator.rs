@@ -12,18 +12,26 @@ use cksol_types::{
 };
 use cksol_types_internal::{UpgradeArgs, event::EventType};
 use icrc_ledger_types::icrc1::account::Account;
-use sol_rpc_types::Lamport;
+use sol_rpc_types::{
+    CommitmentLevel, ConsensusStrategy, GetTransactionEncoding, Lamport, RpcConfig,
+};
 use solana_address::Address;
 use solana_keypair::{Keypair, Signer};
 use solana_native_token::LAMPORTS_PER_SOL;
+use solana_signature::Signature as SolanaSignature;
 use std::time::Duration;
 
 const DEPOSITOR: Principal = Setup::DEFAULT_CALLER;
+const MAX_HTTP_OUTCALL_RESPONSE_BYTES: u64 = 2_000_000;
+const MAX_RETRIED_OUTCALLS: u128 = 2;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn should_deposit_and_withdraw() {
     let validator = SolanaTestValidator::start().await;
     let setup = validator.setup().await;
+
+    let retried_outcalls_cycles_allowance =
+        MAX_RETRIED_OUTCALLS * get_transaction_cycles_cost(&setup).await;
 
     let withdrawal_destination = Keypair::new();
     let withdrawal_address = withdrawal_destination.pubkey();
@@ -112,8 +120,9 @@ async fn should_deposit_and_withdraw() {
 
         let minter_cycles_after = setup.minter().cycle_balance().await;
         assert!(
-            minter_cycles_after >= minter_cycles_before,
-            "Minter cycles balance decreased"
+            minter_cycles_after + retried_outcalls_cycles_allowance >= minter_cycles_before,
+            "Minter cycles balance decreased by {} cycles, more than the {retried_outcalls_cycles_allowance} cycles of {MAX_RETRIED_OUTCALLS} retried outcalls",
+            minter_cycles_before - minter_cycles_after
         );
 
         // Withdraw the full minted amount from each depositor account (in parallel)
@@ -576,4 +585,24 @@ async fn should_sweep_sub_rent_remainder_together_with_the_deposit() {
     );
 
     setup.drop().await;
+}
+
+async fn get_transaction_cycles_cost(setup: &Setup) -> u128 {
+    setup
+        .sol_rpc()
+        .get_transaction(SolanaSignature::default())
+        .with_rpc_config(RpcConfig {
+            response_size_estimate: Some(MAX_HTTP_OUTCALL_RESPONSE_BYTES),
+            response_consensus: Some(ConsensusStrategy::Threshold {
+                min: 3,
+                total: Some(4),
+            }),
+        })
+        .with_encoding(GetTransactionEncoding::Base64)
+        .with_commitment(CommitmentLevel::Finalized)
+        .with_max_supported_transaction_version(0)
+        .request_cost()
+        .send()
+        .await
+        .expect("Failed to get cycles cost for `getTransaction` request")
 }
