@@ -101,7 +101,7 @@ where
 ///   to ensure that the state is only mutating through events.
 /// * Having public methods mutating the state may be acceptable for transient data (e.g. guards)
 ///   that do not need to be preserved across canister upgrades.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct State {
     minter_public_key: Option<SchnorrPublicKey>,
     master_key_name: Ed25519KeyName,

@@ -34,7 +34,7 @@ const STEADY_SCAN_GAP: Duration = Duration::from_hours(1);
 /// The deposit addresses registered for the automatic deposit flow, each watched for
 /// [`WATCH_WINDOW`] and scanned at the slots of [`BURST_SCAN_SLOTS`], then every
 /// [`STEADY_SCAN_GAP`].
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Watchlist {
     entries: TimedSizedMap<Account, ScanProgress>,
 }

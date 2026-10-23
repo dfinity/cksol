@@ -11,7 +11,7 @@ mod tests;
 /// address as the nonce authority and enter the pool through the init and
 /// upgrade arguments; an account never leaves the pool. The pool may be empty,
 /// in which case no withdrawal transaction can be submitted.
-#[derive(Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct DurableNoncePool {
     accounts: BTreeMap<Address, NonceAccount>,
 }
@@ -135,7 +135,7 @@ impl DurableNoncePool {
 /// bound to transactions of this account, which classify every nonce read:
 /// a never-seen value is the account's new frontier, while a seen value is
 /// either the in-flight binding or a stale response.
-#[derive(Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 struct NonceAccount {
     state: NonceAccountState,
     seen_nonce_values: BTreeSet<Hash>,

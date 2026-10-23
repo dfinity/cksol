@@ -16,6 +16,7 @@ mod tests;
 /// [`iter`]: InsertionOrderedMap::iter
 /// [`keys`]: InsertionOrderedMap::keys
 /// [`values`]: InsertionOrderedMap::values
+#[derive(Clone)]
 pub struct InsertionOrderedMap<K, V> {
     entries: BTreeMap<K, (u64, V)>,
     order: BTreeMap<u64, K>,

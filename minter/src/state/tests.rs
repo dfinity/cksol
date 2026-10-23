@@ -140,6 +140,28 @@ mod queued_deposits {
     }
 }
 
+mod watched_deposit_addresses {
+    use super::*;
+    use crate::test_fixtures::{
+        MINIMUM_DEPOSIT_AMOUNT, REGISTERED_AT, at, flow::deposit::DepositFlow, watch,
+    };
+
+    #[test]
+    fn should_leave_the_watchlist_when_a_deposit_is_queued() {
+        init_state();
+        init_schnorr_master_key();
+        watch(at(REGISTERED_AT), account(1));
+        watch(at(REGISTERED_AT), account(2));
+
+        DepositFlow::queue(account(1), MINIMUM_DEPOSIT_AMOUNT);
+
+        read_state(|s| {
+            assert_eq!(s.watchlist().get(at(REGISTERED_AT), &account(1)), None);
+            assert!(s.watchlist().get(at(REGISTERED_AT), &account(2)).is_some());
+        });
+    }
+}
+
 mod swept_deposits {
     use super::*;
     use crate::{
