@@ -1,7 +1,10 @@
 use crate::{
     constants::{
-        GET_ACCOUNT_INFO_CYCLES, GET_BALANCE_CYCLES, GET_RECENT_BLOCK_MAX_TRIES,
+        GET_ACCOUNT_INFO_CYCLES, GET_BALANCE_CYCLES, GET_MULTIPLE_ACCOUNTS_BASE_CYCLES,
+        GET_MULTIPLE_ACCOUNTS_CYCLES_PER_ADDRESS, GET_MULTIPLE_ACCOUNTS_RESPONSE_BASE_BYTES,
+        GET_MULTIPLE_ACCOUNTS_RESPONSE_BYTES_PER_ADDRESS, GET_RECENT_BLOCK_MAX_TRIES,
         GET_SIGNATURE_STATUSES_CYCLES, GET_TRANSACTION_CYCLES,
+        MAX_ADDRESSES_PER_GET_MULTIPLE_ACCOUNTS,
     },
     runtime::CanisterRuntime,
     state::read_state,
@@ -11,8 +14,8 @@ use derive_more::From;
 use ic_canister_runtime::IcError;
 use minicbor::{Decode, Encode};
 use sol_rpc_types::{
-    CommitmentLevel, GetAccountInfoEncoding, GetTransactionEncoding, Lamport, MultiRpcResult,
-    RpcError, Slot,
+    CommitmentLevel, DataSlice, GetAccountInfoEncoding, GetTransactionEncoding, Lamport,
+    MultiRpcResult, RpcError, Slot,
 };
 use solana_account_decoder_client_types::UiAccount;
 use solana_address::Address;
@@ -155,6 +158,77 @@ impl From<GetBalanceError> for DepositSolError {
     fn from(error: GetBalanceError) -> Self {
         DepositSolError::TemporarilyUnavailable(error.to_string())
     }
+}
+
+/// Reads the balances of the given addresses, in their order, at the `finalized`
+/// commitment level with a single `getMultipleAccounts` call asking for no account data,
+/// treating a missing account as a zero balance.
+///
+/// # Panics
+///
+/// If there are no addresses or more than [`MAX_ADDRESSES_PER_GET_MULTIPLE_ACCOUNTS`],
+/// since the caller chunks the addresses it reads.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "called by the scan timer of the automatic deposit flow, which lands next"
+    )
+)]
+pub async fn get_balances<R: CanisterRuntime>(
+    runtime: &R,
+    addresses: &[Address],
+) -> Result<Vec<Lamport>, GetMultipleAccountsError> {
+    assert!(
+        (1..=MAX_ADDRESSES_PER_GET_MULTIPLE_ACCOUNTS).contains(&addresses.len()),
+        "BUG: a getMultipleAccounts call reads between 1 and {MAX_ADDRESSES_PER_GET_MULTIPLE_ACCOUNTS} addresses, not {}",
+        addresses.len()
+    );
+    let result = read_state(|state| state.sol_rpc_client(runtime.inter_canister_call_runtime()))
+        .get_multiple_accounts(addresses)
+        .expect("BUG: the SOL RPC client accepts up to 100 addresses, which the caller checks")
+        .with_commitment(CommitmentLevel::Finalized)
+        .with_encoding(GetAccountInfoEncoding::Base64)
+        .with_data_slice(DataSlice {
+            length: 0,
+            offset: 0,
+        })
+        .with_response_size_estimate(get_multiple_accounts_response_bytes(addresses.len()))
+        .with_cycles(get_multiple_accounts_cycles(addresses.len()))
+        .try_send()
+        .await;
+    match result? {
+        MultiRpcResult::Consistent(Ok(accounts)) => Ok(accounts
+            .into_iter()
+            .map(|account| account.map_or(0, |account| account.lamports))
+            .collect()),
+        MultiRpcResult::Consistent(Err(e)) => Err(GetMultipleAccountsError::RpcError(e)),
+        MultiRpcResult::Inconsistent(_) => Err(GetMultipleAccountsError::InconsistentRpcResults),
+    }
+}
+
+/// The cycles to attach to a `getMultipleAccounts` call reading `num_addresses` addresses.
+fn get_multiple_accounts_cycles(num_addresses: usize) -> u128 {
+    GET_MULTIPLE_ACCOUNTS_BASE_CYCLES
+        + GET_MULTIPLE_ACCOUNTS_CYCLES_PER_ADDRESS * num_addresses as u128
+}
+
+/// The size of the response to a `getMultipleAccounts` call reading `num_addresses`
+/// addresses without data, headers included, which the SOL RPC canister uses as the
+/// response size limit of the call.
+fn get_multiple_accounts_response_bytes(num_addresses: usize) -> u64 {
+    GET_MULTIPLE_ACCOUNTS_RESPONSE_BASE_BYTES
+        + GET_MULTIPLE_ACCOUNTS_RESPONSE_BYTES_PER_ADDRESS * num_addresses as u64
+}
+
+#[derive(Debug, PartialEq, Error, From)]
+pub enum GetMultipleAccountsError {
+    #[error("Error while calling SOL RPC canister: {0}")]
+    IcError(IcError),
+    #[error("RPC error while fetching balances: {0}")]
+    RpcError(RpcError),
+    #[error("Inconsistent RPC results for getMultipleAccounts")]
+    InconsistentRpcResults,
 }
 
 pub async fn submit_transaction<R: CanisterRuntime>(

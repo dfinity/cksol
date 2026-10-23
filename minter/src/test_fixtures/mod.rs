@@ -20,12 +20,13 @@ use cksol_types_internal::{Ed25519KeyName, InitArgs, SolanaNetwork};
 use ic_cdk_management_canister::SchnorrPublicKeyResult;
 use ic_ed25519::{PocketIcMasterPublicKeyId, PublicKey};
 use icrc_ledger_types::icrc1::account::Account;
-use sol_rpc_types::{Lamport, MultiRpcResult};
+use sol_rpc_types::{AccountData, AccountEncoding, AccountInfo, Lamport, MultiRpcResult};
 use solana_address::{Address, address};
 use solana_nonce::{
     state::{Data as NonceData, DurableNonce, State as NonceState},
     versions::Versions as NonceVersions,
 };
+use solana_sdk_ids::system_program;
 use solana_transaction_status_client_types::{
     EncodedConfirmedTransactionWithStatusMeta, EncodedTransaction,
     EncodedTransactionWithStatusMeta, TransactionBinaryEncoding, UiLoadedAddresses,
@@ -193,6 +194,24 @@ pub fn register(watchlist: &mut Watchlist, now: Timestamp, account: Account) -> 
     watchlist
         .register(now, account, deposit_address(account))
         .expect("BUG: the watchlist has room for the registration")
+}
+
+/// The accounts of a `getMultipleAccounts` response with the given balances in order, a
+/// missing account for `None`, each without data as the scan asks for them.
+pub fn accounts_with_balances(balances: &[Option<Lamport>]) -> Vec<Option<AccountInfo>> {
+    balances
+        .iter()
+        .map(|balance| {
+            balance.map(|lamports| AccountInfo {
+                lamports,
+                data: AccountData::Binary(String::new(), AccountEncoding::Base64),
+                owner: system_program::ID.to_string(),
+                executable: false,
+                rent_epoch: u64::MAX,
+                space: 0,
+            })
+        })
+        .collect()
 }
 
 /// Returns a [`Signature`] unique for any `usize` index, derived from `i as u64` via le_bytes.

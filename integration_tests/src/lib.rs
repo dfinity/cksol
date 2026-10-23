@@ -968,9 +968,11 @@ fn cksol_minter_init_args(
     })
 }
 
+/// The SOL RPC canister built from the commit adding the typed `getMultipleAccounts`
+/// method, until a release of the SOL RPC canister carries it.
 async fn sol_rpc_wasm() -> Vec<u8> {
-    const DOWNLOAD_PATH: &str = "../wasms/sol_rpc_canister.wasm.gz";
-    const DOWNLOAD_URL: &str = "https://github.com/dfinity/sol-rpc-canister/releases/latest/download/sol_rpc_canister.wasm.gz";
+    const DOWNLOAD_PATH: &str = "../wasms/sol_rpc_canister_92efe4ee.wasm.gz";
+    const DOWNLOAD_URL: &str = "https://dfinity-download-public.s3.amazonaws.com/testdata/sol_rpc/sol_rpc_canister_92efe4eefc6b0209ee33440aa903383144016cf6.wasm.gz";
     canister_wasm(DOWNLOAD_PATH, DOWNLOAD_URL).await
 }
 
