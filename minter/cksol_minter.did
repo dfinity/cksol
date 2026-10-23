@@ -175,8 +175,9 @@ type WatchDepositAddressStatus = variant {
         scan_count: nat32;
         // The time of the last scan, in nanoseconds since the epoch, if any.
         last_scanned_at: opt nat64;
-        // The time the next scan is due, in nanoseconds since the epoch, or
-        // absent once the schedule leaves no scan before the window closes.
+        // The time the next scan is due, in nanoseconds since the epoch, which
+        // may lie in the past until the tick that runs the scan, or absent once
+        // the schedule leaves no scan before the window closes.
         next_scan_at: opt nat64;
     };
     // A deposit of the account is in flight: queued, swept, finalized or
