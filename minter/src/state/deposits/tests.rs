@@ -75,6 +75,19 @@ mod queue {
     }
 
     #[test]
+    fn should_remember_the_latest_deposit_id_of_each_account() {
+        let mut deposits = Deposits::default();
+        assert_eq!(deposits.latest_id(&queued_deposit(0).account), None);
+
+        deposits.queue(0, queued_deposit(0), 0);
+        deposits.queue(1, queued_deposit(1), 0);
+
+        assert_eq!(deposits.latest_id(&queued_deposit(0).account), Some(0));
+        assert_eq!(deposits.latest_id(&queued_deposit(1).account), Some(1));
+        assert_eq!(deposits.latest_id(&queued_deposit(2).account), None);
+    }
+
+    #[test]
     fn should_report_the_status_of_queued_and_unknown_deposits() {
         let mut deposits = Deposits::default();
         deposits.queue(0, queued_deposit(0), 0);
@@ -284,6 +297,24 @@ mod drop_swept {
     }
 
     #[test]
+    fn should_keep_the_latest_id_of_a_dropped_deposit() {
+        let mut deposits = Deposits::default();
+        let [first] = queue_deposits(&mut deposits);
+        let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
+        deposits.sweep(
+            &[0],
+            MINTER_ADDRESS,
+            &sweep_message([(0, first)]),
+            &sweep_signature,
+        );
+
+        deposits.drop_swept(&sweep_signature);
+
+        assert_eq!(deposits.in_flight(&first.account), None);
+        assert_eq!(deposits.latest_id(&first.account), Some(0));
+    }
+
+    #[test]
     #[should_panic(expected = "Attempted to drop sweep")]
     fn should_panic_when_dropping_a_sweep_that_is_not_swept() {
         Deposits::default().drop_swept(&signature(SWEEP_SIGNATURE_INDEX));
@@ -458,7 +489,7 @@ mod credit_sweep {
 mod mint {
     use super::{
         BTreeMap, DepositSolStatus, Deposits, InFlightDeposit, LedgerMintIndex, MintedSweep,
-        SweptDeposit, credited_sweep, mint, queued_deposit,
+        SweptDeposit, credited_sweep, mint, queued_deposit, queued_deposit_of,
     };
 
     #[test]
@@ -503,6 +534,23 @@ mod mint {
                 signature: sweep_signature.into()
             }
         );
+    }
+
+    #[test]
+    fn should_keep_the_latest_id_of_a_minted_deposit_until_the_account_deposits_again() {
+        let (mut deposits, _) = credited_sweep(&[mint(0, 100)]);
+        let account = queued_deposit(0).account;
+        deposits.mint(0, LedgerMintIndex::from(42));
+        assert_eq!(deposits.in_flight(&account), None);
+        assert_eq!(deposits.latest_id(&account), Some(0));
+
+        deposits.queue(1, queued_deposit_of(account, 200), 0);
+
+        assert_eq!(
+            deposits.in_flight(&account),
+            Some(InFlightDeposit::Processing(1))
+        );
+        assert_eq!(deposits.latest_id(&account), Some(1));
     }
 
     #[test]

@@ -68,12 +68,14 @@ type DepositSolArgs = record {
     subaccount: opt blob;
 };
 
-// Identifies a deposit queued by the `deposit_sol` endpoint.
+// Identifies a deposit queued by the `deposit_sol` endpoint or by a balance
+// scan of the automatic flow, see `watch_deposit_address`.
 //
 // A sequence number assigned when the deposit is queued.
 type DepositSolId = nat64;
 
-// The status of a deposit queued by the `deposit_sol` endpoint.
+// The status of a deposit queued by the `deposit_sol` endpoint or by a balance
+// scan of the automatic flow, see `watch_deposit_address`.
 type DepositSolStatus = variant {
     // No deposit with this identifier was queued.
     NotFound;
@@ -117,8 +119,9 @@ type DepositSolStatus = variant {
     // expected to happen and resolving it requires a minter upgrade: before
     // minting by hand, search the ledger for a mint whose memo carries the
     // sweep signature and the deposit id, otherwise a double mint results.
-    // Meanwhile the account stays in flight, so `deposit_sol` keeps rejecting
-    // it and a new deposit has to use a different subaccount.
+    // Meanwhile the account stays in flight, so `deposit_sol` and
+    // `watch_deposit_address` keep rejecting it and a new deposit has to use a
+    // different subaccount.
     Quarantined : record {
         // The signature of the sweep transaction.
         signature: Signature;
@@ -157,6 +160,77 @@ type DepositSolError = variant {
 
 // Represents the result of a call to the `deposit_sol` endpoint.
 type DepositSolResult = variant { Ok : DepositSolId; Err : DepositSolError };
+
+// Arguments for a request to the `watch_deposit_address` endpoint.
+type WatchDepositAddressArgs = record {
+    // The subaccount of the caller to credit with the deposits detected on
+    // its deposit address.
+    subaccount: opt blob;
+};
+
+// The status of an account registered with `watch_deposit_address`.
+type WatchDepositAddressStatus = variant {
+    // The deposit address is on the watchlist and scanned on the schedule.
+    Watching : record {
+        // The end of the registration window, in nanoseconds since the epoch.
+        valid_until: nat64;
+        // The number of scans of the deposit address so far.
+        scan_count: nat32;
+        // The time of the last scan, in nanoseconds since the epoch, if any.
+        last_scanned_at: opt nat64;
+        // The time the next scan is due, in nanoseconds since the epoch, which
+        // may lie in the past until the tick that runs the scan, or absent once
+        // the schedule leaves no scan before the window closes.
+        next_scan_at: opt nat64;
+    };
+    // A deposit of the account is in flight: queued, swept, finalized or
+    // pending its mint.
+    Detected : record {
+        // The identifier of the deposit in flight.
+        deposit_id: DepositSolId;
+    };
+};
+
+// The successful result of a `watch_deposit_address` call.
+type WatchDepositAddressOk = record {
+    // The deposit address of the caller's account.
+    address: Address;
+    // The minimum deposit amount in force at the time of the call.
+    minimum_deposit_amount: Lamport;
+    // The automatic deposit fee in force at the time of the call.
+    automatic_deposit_fee: Lamport;
+    // Whether the account is watched or has a deposit in flight.
+    status: WatchDepositAddressStatus;
+    // The id of the latest deposit queued for the account, if any, whatever
+    // stage it reached, to follow with `deposit_sol_status`. For a `Detected`
+    // status it is the id of the deposit in flight.
+    latest_deposit_id: opt DepositSolId;
+};
+
+// An error from the `watch_deposit_address` endpoint.
+type WatchDepositAddressError = variant {
+    // The latest deposit of the account is quarantined, see `DepositSolError`.
+    Quarantined : record {
+        // The identifier of the quarantined deposit.
+        deposit_id: DepositSolId;
+    };
+    // The watchlist is full of live registrations, try again later or use
+    // `deposit_sol`.
+    TooManyWatchedAddresses : record {
+        // The id of the latest deposit queued for the account, if any, to
+        // follow with `deposit_sol_status`. That deposit is minted or dropped,
+        // since an account with a deposit in flight needs no slot.
+        latest_deposit_id: opt DepositSolId;
+    };
+    // The minter experiences temporary issues, try the call again later.
+    TemporarilyUnavailable : text;
+};
+
+// Represents the result of a call to the `watch_deposit_address` endpoint.
+type WatchDepositAddressResult = variant {
+    Ok : WatchDepositAddressOk;
+    Err : WatchDepositAddressError;
+};
 
 // The Solana network to connect to.
 type SolanaNetwork = variant {
@@ -537,6 +611,15 @@ service : (MinterArg) -> {
     // Returns the status of the deposit with the given identifier,
     // or `NotFound` if no deposit with this identifier was queued.
     deposit_sol_status: (DepositSolId) -> (DepositSolStatus) query;
+
+    // Registers the deposit address of the caller's account for the
+    // automatic deposit flow, for free, or reports on its registration:
+    // the minter reads the balance of the address on a schedule for about
+    // a day and queues a sweep once it reaches the minimum deposit amount,
+    // deducting the automatic deposit fee from the minted amount.
+    //
+    // The owner is always the caller, who must be a non-anonymous principal.
+    watch_deposit_address: (WatchDepositAddressArgs) -> (WatchDepositAddressResult);
 
     // Submits a request to convert ckSOL to Solana.
     withdraw_sol : (WithdrawSolArgs) -> (WithdrawSolResult);
