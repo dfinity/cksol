@@ -188,8 +188,9 @@ pub enum WatchDepositAddressStatus {
         scan_count: u32,
         /// The time of the last scan, in nanoseconds since the epoch, if any.
         last_scanned_at: Option<u64>,
-        /// The time the next scan is due, in nanoseconds since the epoch, or `None` once the
-        /// schedule leaves no scan before the window closes.
+        /// The time the next scan is due, in nanoseconds since the epoch, which may lie in the
+        /// past until the tick that runs the scan, or `None` once the schedule leaves no scan
+        /// before the window closes.
         next_scan_at: Option<u64>,
     },
     /// A deposit of the account is in flight: queued, swept, finalized or pending its mint.
