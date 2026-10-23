@@ -49,13 +49,17 @@ fn should_fail_without_registering_while_a_prerequisite_is_unavailable() {
 #[test]
 fn should_register_the_account_without_recording_an_event() {
     setup();
+    let with_subaccount = Account {
+        subaccount: Some([7; 32]),
+        ..account(1)
+    };
 
-    let result = watch_deposit_address(&runtime(), account(1));
+    let result = watch_deposit_address(&runtime(), with_subaccount);
 
     assert_eq!(
         result,
         Ok(WatchDepositAddressOk {
-            address: deposit_address(account(1)).into(),
+            address: deposit_address(with_subaccount).into(),
             minimum_deposit_amount: MINIMUM_DEPOSIT_AMOUNT,
             automatic_deposit_fee: AUTOMATIC_DEPOSIT_FEE,
             status: WatchDepositAddressStatus::Watching {
@@ -68,7 +72,14 @@ fn should_register_the_account_without_recording_an_event() {
         })
     );
     EventsAssert::assert_no_events_recorded();
-    assert_eq!(read_state(|s| s.watchlist().len()), 1);
+    assert_eq!(
+        read_state(|s| s
+            .watchlist()
+            .iter()
+            .map(|watched| watched.account)
+            .collect::<Vec<_>>()),
+        vec![with_subaccount]
+    );
 }
 
 #[test]
