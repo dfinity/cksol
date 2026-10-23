@@ -212,7 +212,11 @@ pub enum WatchDepositAddressError {
     },
     /// The watchlist is full of live registrations, try again later or use `deposit_sol`.
     #[error("The watchlist is full, try again later or use `deposit_sol`")]
-    TooManyWatchedAddresses,
+    TooManyWatchedAddresses {
+        /// The id of the latest deposit queued for the account, if any, whatever stage it
+        /// reached, to follow with `deposit_sol_status`.
+        latest_deposit_id: Option<DepositSolId>,
+    },
     /// The minter experiences temporary issues, try the call again later.
     #[error("Transient error, try the call again later: {0}")]
     TemporarilyUnavailable(String),

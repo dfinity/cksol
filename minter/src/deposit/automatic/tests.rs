@@ -174,9 +174,7 @@ fn should_register_anew_once_the_deposit_is_minted() {
 #[test]
 fn should_register_anew_once_the_deposit_is_dropped() {
     setup();
-    queue_deposit(0, account(1), MINIMUM_DEPOSIT_AMOUNT);
-    submit_sweep(signature(0xAA), vec![0]);
-    fail_transaction(signature(0xAA));
+    let deposit_id = dropped(account(1));
 
     let result = watch_deposit_address(&runtime(), account(1)).unwrap();
 
@@ -184,7 +182,7 @@ fn should_register_anew_once_the_deposit_is_dropped() {
         result.status,
         WatchDepositAddressStatus::Watching { scan_count: 0, .. }
     );
-    assert_eq!(result.latest_deposit_id, Some(0));
+    assert_eq!(result.latest_deposit_id, Some(deposit_id));
 }
 
 #[test]
@@ -207,17 +205,23 @@ fn should_reject_an_account_whose_latest_deposit_is_quarantined() {
 
 #[test]
 fn should_reject_a_registration_when_the_watchlist_is_full() {
-    setup();
-    fill_watchlist();
-    let state_before = current_state();
+    let unwatched = account(MAX_WATCHED_ADDRESSES.get());
+    for with_dropped_deposit in [false, true] {
+        in_fresh_state(|| {
+            setup();
+            let latest_deposit_id = with_dropped_deposit.then(|| dropped(unwatched));
+            fill_watchlist();
+            let state_before = current_state();
 
-    let result = watch_deposit_address(&runtime(), account(MAX_WATCHED_ADDRESSES.get()));
+            let result = watch_deposit_address(&runtime(), unwatched);
 
-    assert_eq!(
-        result,
-        Err(WatchDepositAddressError::TooManyWatchedAddresses)
-    );
-    assert_eq!(current_state(), state_before);
+            assert_eq!(
+                result,
+                Err(WatchDepositAddressError::TooManyWatchedAddresses { latest_deposit_id })
+            );
+            assert_eq!(current_state(), state_before);
+        });
+    }
 }
 
 #[test]
@@ -299,6 +303,12 @@ fn swept(account: Account) -> DepositSolId {
     let deposit = DepositFlow::queue(account, MINIMUM_DEPOSIT_AMOUNT);
     let deposit_id = deposit.deposit_id;
     deposit.sweep(signature(0xAA));
+    deposit_id
+}
+
+fn dropped(account: Account) -> DepositSolId {
+    let deposit_id = swept(account);
+    fail_transaction(signature(0xAA));
     deposit_id
 }
 

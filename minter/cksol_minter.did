@@ -213,7 +213,11 @@ type WatchDepositAddressError = variant {
     };
     // The watchlist is full of live registrations, try again later or use
     // `deposit_sol`.
-    TooManyWatchedAddresses;
+    TooManyWatchedAddresses : record {
+        // The id of the latest deposit queued for the account, if any,
+        // whatever stage it reached, to follow with `deposit_sol_status`.
+        latest_deposit_id: opt DepositSolId;
+    };
     // The minter experiences temporary issues, try the call again later.
     TemporarilyUnavailable : text;
 };
