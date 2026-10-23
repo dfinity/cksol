@@ -268,6 +268,7 @@ fn queued_deposit_event(deposit_id: u64, account: Account, sweepable_amount: Lam
         account,
         address: deposit.address,
         balance: deposit.balance,
+        deposit_fee: None,
     }
 }
 

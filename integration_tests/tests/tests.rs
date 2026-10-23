@@ -189,6 +189,7 @@ mod lifecycle {
                 minter_address: Some(MINTER_ADDRESS.to_string()),
                 nonce_accounts: vec![Setup::DEFAULT_NONCE_ACCOUNT.to_string()],
                 automatic_deposit_fee: Some(Setup::DEFAULT_AUTOMATIC_DEPOSIT_FEE),
+                collected_automatic_deposit_fees: Some(0),
             }
         );
 
@@ -231,6 +232,7 @@ mod lifecycle {
                 minter_address: Some(MINTER_ADDRESS.to_string()),
                 nonce_accounts: vec![Setup::DEFAULT_NONCE_ACCOUNT.to_string()],
                 automatic_deposit_fee: Some(NEW_AUTOMATIC_DEPOSIT_FEE),
+                collected_automatic_deposit_fees: Some(0),
             }
         );
 
@@ -867,6 +869,7 @@ mod deposit_sol_tests {
                         },
                         address: deposit_address.clone(),
                         balance: BALANCE_ABOVE_MINIMUM,
+                        deposit_fee: None,
                     }]
             );
         });
@@ -947,6 +950,7 @@ mod deposit_sol_tests {
                         account: DEFAULT_CALLER_ACCOUNT,
                         address: deposit_address.clone(),
                         balance: BALANCE_ABOVE_MINIMUM,
+                        deposit_fee: None,
                     }]
             );
         });

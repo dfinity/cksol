@@ -6,6 +6,7 @@ use crate::{
     state::{
         DepositBalance, QueuedDeposit, SchnorrPublicKey, State, Sweep, WATCH_WINDOW,
         WatchedAddress, Watchlist,
+        audit::replay_events,
         event::{Event, EventType, VersionedMessage},
         init_once_state, mutate_state,
     },
@@ -158,6 +159,23 @@ pub fn minter_public_key_fetched_event() -> EventType {
         public_key: master_key.public_key,
         chain_code: master_key.chain_code,
     }
+}
+
+/// The state replayed from the events recorded so far, preceded by the init and key-fetched
+/// events that [`init_state`] and [`init_schnorr_master_key`] stand for, so that it can be
+/// compared with the live state.
+pub fn replayed_recorded_log() -> State {
+    let recorded: Vec<Event> = with_event_iter(|events| events.collect());
+    let prefix = [
+        EventType::Init(init_args_with_nonce_account()),
+        minter_public_key_fetched_event(),
+    ]
+    .into_iter()
+    .map(|payload| Event {
+        timestamp: 0,
+        payload,
+    });
+    replay_events(prefix.chain(recorded))
 }
 
 /// The timestamp of `nanos` nanoseconds since the epoch.
@@ -319,6 +337,20 @@ pub fn queued_deposit_of(account: Account, sweepable_amount: Lamport) -> QueuedD
         address: deposit_address(account),
         balance: DepositBalance::new(sweepable_amount + RENT_EXEMPTION_THRESHOLD)
             .expect("BUG: the balance covers the rent exemption threshold"),
+        deposit_fee: None,
+    }
+}
+
+/// The deposit of the given account detected by the automatic flow under the given fee,
+/// whose address holds the sweepable amount on top of the rent exemption threshold.
+pub fn automatic_deposit_of(
+    account: Account,
+    sweepable_amount: Lamport,
+    deposit_fee: Lamport,
+) -> QueuedDeposit {
+    QueuedDeposit {
+        deposit_fee: Some(deposit_fee),
+        ..queued_deposit_of(account, sweepable_amount)
     }
 }
 
@@ -572,6 +604,7 @@ pub mod devnet_sweep {
                         address: crate::address::account_address(&master_key(), &account),
                         balance: DepositBalance::new(balance)
                             .expect("BUG: the balance covers the rent exemption threshold"),
+                        deposit_fee: None,
                     },
                 )
             })
@@ -588,6 +621,7 @@ pub mod devnet_sweep {
                 sweepable_amount + crate::constants::RENT_EXEMPTION_THRESHOLD,
             )
             .expect("BUG: the balance covers the rent exemption threshold"),
+            deposit_fee: None,
         }
     }
 
@@ -693,6 +727,7 @@ pub mod devnet_sweep {
                         address,
                         balance: DepositBalance::new(balance)
                             .expect("BUG: the balance covers the rent exemption threshold"),
+                        deposit_fee: None,
                     },
                 )
             })
@@ -907,6 +942,7 @@ pub mod events {
                     account: deposit.account,
                     address: deposit.address,
                     balance: deposit.balance,
+                    deposit_fee: deposit.deposit_fee,
                 },
                 &runtime(),
             )
@@ -986,6 +1022,7 @@ pub mod events {
                 .get(&signature)
                 .expect("BUG: no finalized sweep with the given signature")
                 .mints()
+                .expect("BUG: the fees fit the sweepable amounts of the finalized sweep")
         });
         mutate_state(|state| {
             process_event(
@@ -1298,6 +1335,7 @@ pub mod arb {
     use ic_ed25519::{PrivateKey, PublicKey};
     use icrc_ledger_types::icrc1::account::Account;
     use proptest::prelude::{Just, Strategy, any, prop, prop_oneof};
+    use sol_rpc_types::Lamport;
     use solana_address::Address;
     use solana_message::{Hash, Instruction, Message};
     use solana_signature::Signature;
@@ -1347,14 +1385,25 @@ pub mod arb {
     pub fn arb_queued_deposit() -> impl Strategy<Value = QueuedDeposit> {
         const MIN_BALANCE: u64 = RENT_EXEMPTION_THRESHOLD + FEE_PER_SIGNATURE * MAX_SIGNATURES;
         const MAX_BALANCE: u64 = u64::MAX / MAX_SIGNATURES;
-        (arb_account(), arb_address(), MIN_BALANCE..=MAX_BALANCE).prop_map(
-            |(account, address, balance)| QueuedDeposit {
+        (
+            arb_account(),
+            arb_address(),
+            MIN_BALANCE..=MAX_BALANCE,
+            prop::option::of(arb_deposit_fee()),
+        )
+            .prop_map(|(account, address, balance, deposit_fee)| QueuedDeposit {
                 account,
                 address,
                 balance: DepositBalance::new(balance)
                     .expect("BUG: the balance covers the rent exemption threshold"),
-            },
-        )
+                deposit_fee,
+            })
+    }
+
+    /// A deposit fee that fits in the sweepable amount of [`arb_queued_deposit`]
+    /// after the fee share of a full sweep.
+    pub fn arb_deposit_fee() -> impl Strategy<Value = Lamport> {
+        0..FEE_PER_SIGNATURE * (MAX_SIGNATURES - 1)
     }
 
     /// The deposits of one sweep: at least one, at most one per signature.
@@ -1558,13 +1607,15 @@ pub mod arb {
                 arb_account(),
                 arb_address(),
                 arb_deposit_balance(),
+                prop::option::of(arb_deposit_fee()),
             )
-                .prop_map(|(deposit_id, account, address, balance)| {
+                .prop_map(|(deposit_id, account, address, balance, deposit_fee)| {
                     EventType::QueuedDeposit {
                         deposit_id,
                         account,
                         address,
                         balance,
+                        deposit_fee,
                     }
                 },),
             (

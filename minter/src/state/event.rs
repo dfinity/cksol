@@ -128,7 +128,8 @@ pub enum EventType {
         #[cbor(n(0), with = "cbor::signature")]
         signature: Signature,
     },
-    /// A user queued the deposit address of an account for a sweep via `deposit_sol`.
+    /// The deposit address of an account was queued for a sweep, by a user via `deposit_sol`
+    /// or by a balance scan of the automatic flow.
     /// The deposit id is the next sequence number of the minter at the time of the event.
     #[n(8)]
     QueuedDeposit {
@@ -140,6 +141,9 @@ pub enum EventType {
         address: Address,
         #[cbor(n(3), with = "cbor::deposit_balance")]
         balance: DepositBalance,
+        /// The fee deducted from the minted amount, absent for a deposit queued via `deposit_sol`.
+        #[n(4)]
+        deposit_fee: Option<Lamport>,
     },
     /// The minter read the amount that the finalized sweep transaction moved to its
     /// main account and enqueued a pending mint for each deposit of that sweep.
@@ -230,7 +234,8 @@ pub enum EventType {
 pub struct CreditedDeposit {
     #[n(0)]
     pub deposit_id: DepositSolId,
-    /// The sweepable amount minus the deposit's share of the transaction fee of the sweep.
+    /// The sweepable amount minus the deposit's share of the transaction fee of the sweep
+    /// and, for an automatic deposit, minus the automatic deposit fee.
     #[n(1)]
     pub amount_to_mint: Lamport,
 }
