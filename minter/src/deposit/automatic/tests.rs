@@ -240,6 +240,11 @@ fn should_report_the_status_without_a_slot_when_the_watchlist_is_full() {
     setup();
     let in_flight = account(MAX_WATCHED_ADDRESSES.get());
     let deposit_id = queued(in_flight);
+    let detected = watch_deposit_address(&runtime(), in_flight).unwrap();
+    assert_eq!(
+        detected.status,
+        WatchDepositAddressStatus::Detected { deposit_id }
+    );
     let registrations = fill_watchlist();
     let state_before = current_state();
 
@@ -247,10 +252,7 @@ fn should_report_the_status_without_a_slot_when_the_watchlist_is_full() {
         watch_deposit_address(&runtime(), account(0)),
         Ok(registrations[0].clone())
     );
-    assert_eq!(
-        watch_deposit_address(&runtime(), in_flight).map(|ok| ok.status),
-        Ok(WatchDepositAddressStatus::Detected { deposit_id })
-    );
+    assert_eq!(watch_deposit_address(&runtime(), in_flight), Ok(detected));
     assert_eq!(current_state(), state_before);
 }
 
