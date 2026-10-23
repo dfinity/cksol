@@ -208,9 +208,7 @@ fn should_reject_an_account_whose_latest_deposit_is_quarantined() {
 #[test]
 fn should_reject_a_registration_when_the_watchlist_is_full() {
     setup();
-    for index in 0..MAX_WATCHED_ADDRESSES.get() {
-        watch_deposit_address(&runtime(), account(index)).unwrap();
-    }
+    fill_watchlist();
     let state_before = current_state();
 
     let result = watch_deposit_address(&runtime(), account(MAX_WATCHED_ADDRESSES.get()));
@@ -218,6 +216,25 @@ fn should_reject_a_registration_when_the_watchlist_is_full() {
     assert_eq!(
         result,
         Err(WatchDepositAddressError::TooManyWatchedAddresses)
+    );
+    assert_eq!(current_state(), state_before);
+}
+
+#[test]
+fn should_report_the_status_without_a_slot_when_the_watchlist_is_full() {
+    setup();
+    let in_flight = account(MAX_WATCHED_ADDRESSES.get());
+    let deposit_id = queued(in_flight);
+    let registrations = fill_watchlist();
+    let state_before = current_state();
+
+    assert_eq!(
+        watch_deposit_address(&runtime(), account(0)),
+        Ok(registrations[0].clone())
+    );
+    assert_eq!(
+        watch_deposit_address(&runtime(), in_flight).map(|ok| ok.status),
+        Ok(WatchDepositAddressStatus::Detected { deposit_id })
     );
     assert_eq!(current_state(), state_before);
 }
@@ -264,6 +281,14 @@ fn setup_without_automatic_deposit_fee() {
 
 fn setup_without_minter_public_key() {
     init_state();
+}
+
+/// Registers the accounts 0 to `MAX_WATCHED_ADDRESSES - 1`, which fills the watchlist, and
+/// returns their registrations in that order.
+fn fill_watchlist() -> Vec<WatchDepositAddressOk> {
+    (0..MAX_WATCHED_ADDRESSES.get())
+        .map(|index| watch_deposit_address(&runtime(), account(index)).unwrap())
+        .collect()
 }
 
 fn queued(account: Account) -> DepositSolId {
