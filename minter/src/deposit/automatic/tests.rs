@@ -5,10 +5,8 @@ use crate::{
     test_fixtures::{
         AUTOMATIC_DEPOSIT_FEE, EventsAssert, HOUR_NANOS, MINIMUM_DEPOSIT_AMOUNT, MINTER_ACCOUNT,
         MINUTE_NANOS, REGISTERED_AT, WATCH_WINDOW_NANOS, account, at, deposit_address,
-        events::{
-            fail_transaction, quarantine_sweep, queue_deposit, submit_sweep, succeed_transaction,
-        },
-        flow::deposit::DepositFlow,
+        events::{fail_transaction, quarantine_sweep},
+        flow::deposit::{CreditedSweepFlow, DepositFlow},
         init_schnorr_master_key, init_state, init_state_with_args,
         runtime::TestCanisterRuntime,
         signature, valid_init_args,
@@ -166,12 +164,7 @@ fn should_report_an_in_flight_deposit_as_detected_without_registering() {
 #[test]
 fn should_register_anew_once_the_deposit_is_minted() {
     setup();
-    let minted = DepositFlow::queue(account(1), MINIMUM_DEPOSIT_AMOUNT)
-        .sweep(signature(0xAA))
-        .succeed()
-        .credit()
-        .single_pending_mint()
-        .mint(7);
+    let deposit_id = minted(account(1));
 
     let result = watch_deposit_address(&runtime(), account(1)).unwrap();
 
@@ -179,7 +172,7 @@ fn should_register_anew_once_the_deposit_is_minted() {
         result.status,
         WatchDepositAddressStatus::Watching { scan_count: 0, .. }
     );
-    assert_eq!(result.latest_deposit_id, Some(minted.deposit_id));
+    assert_eq!(result.latest_deposit_id, Some(deposit_id));
 }
 
 #[test]
@@ -198,20 +191,24 @@ fn should_register_anew_once_the_deposit_is_dropped() {
 
 #[test]
 fn should_reject_an_account_whose_latest_deposit_is_quarantined() {
-    setup();
-    queue_deposit(0, account(1), MINIMUM_DEPOSIT_AMOUNT);
-    submit_sweep(signature(0xAA), vec![0]);
-    succeed_transaction(signature(0xAA));
-    quarantine_sweep(signature(0xAA));
-    let state_before = current_state();
+    for quarantine in [
+        quarantined_sweep as fn(Account) -> DepositSolId,
+        quarantined_mint,
+    ] {
+        in_fresh_state(|| {
+            setup();
+            let deposit_id = quarantine(account(1));
+            let state_before = current_state();
 
-    let result = watch_deposit_address(&runtime(), account(1));
+            let result = watch_deposit_address(&runtime(), account(1));
 
-    assert_eq!(
-        result,
-        Err(WatchDepositAddressError::Quarantined { deposit_id: 0 })
-    );
-    assert_eq!(current_state(), state_before);
+            assert_eq!(
+                result,
+                Err(WatchDepositAddressError::Quarantined { deposit_id })
+            );
+            assert_eq!(current_state(), state_before);
+        });
+    }
 }
 
 #[test]
@@ -308,28 +305,54 @@ fn fill_watchlist() -> Vec<WatchDepositAddressOk> {
         .collect()
 }
 
+// The helpers below take a deposit of the account to a stage of its life, sweeping it alone
+// under `SWEEP`, and return its id.
+
+const SWEEP: usize = 0xAA;
+
 fn queued(account: Account) -> DepositSolId {
     DepositFlow::queue(account, MINIMUM_DEPOSIT_AMOUNT).deposit_id
 }
 
 fn swept(account: Account) -> DepositSolId {
     let deposit = DepositFlow::queue(account, MINIMUM_DEPOSIT_AMOUNT);
-    let deposit_id = deposit.deposit_id;
-    deposit.sweep(signature(0xAA));
-    deposit_id
+    deposit.sweep(signature(SWEEP));
+    deposit.deposit_id
 }
 
 fn dropped(account: Account) -> DepositSolId {
     let deposit_id = swept(account);
-    fail_transaction(signature(0xAA));
+    fail_transaction(signature(SWEEP));
     deposit_id
 }
 
-fn credited(account: Account) -> DepositSolId {
+fn quarantined_sweep(account: Account) -> DepositSolId {
     let deposit = DepositFlow::queue(account, MINIMUM_DEPOSIT_AMOUNT);
-    let deposit_id = deposit.deposit_id;
-    deposit.sweep(signature(0xAA)).succeed().credit();
+    deposit.sweep(signature(SWEEP)).succeed();
+    quarantine_sweep(signature(SWEEP));
+    deposit.deposit_id
+}
+
+fn credited(account: Account) -> DepositSolId {
+    credit(account).0
+}
+
+fn minted(account: Account) -> DepositSolId {
+    let (deposit_id, sweep) = credit(account);
+    sweep.single_pending_mint().mint(7);
     deposit_id
+}
+
+fn quarantined_mint(account: Account) -> DepositSolId {
+    let (deposit_id, sweep) = credit(account);
+    sweep.single_pending_mint().quarantine();
+    deposit_id
+}
+
+fn credit(account: Account) -> (DepositSolId, CreditedSweepFlow) {
+    let deposit = DepositFlow::queue(account, MINIMUM_DEPOSIT_AMOUNT);
+    let sweep = deposit.sweep(signature(SWEEP)).succeed().credit();
+    (deposit.deposit_id, sweep)
 }
 
 fn in_fresh_state(test: impl FnOnce() + Send) {
