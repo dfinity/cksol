@@ -304,6 +304,52 @@ mod swept_deposits {
     }
 
     #[test]
+    #[should_panic(
+        expected = "and deposit fees of 2000000 lamports exceeding the 19000000 lamports received"
+    )]
+    fn should_panic_when_the_mints_and_deposit_fees_exceed_the_amount_received() {
+        init_state();
+        init_schnorr_master_key();
+        let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
+        DepositFlow::queue_automatic(account(1), 20_000_000, AUTOMATIC_DEPOSIT_FEE)
+            .sweep(sweep_signature)
+            .succeed();
+
+        // The mint of 20,000,000 - 5,000 - 2,000,000 lamports fits the amount received alone.
+        credit_sweep(sweep_signature, 19_000_000);
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "with mints of 18446744073708660735 lamports and deposit fees of 2000000 lamports"
+    )]
+    fn should_panic_when_the_mints_and_deposit_fees_overflow() {
+        init_state();
+        init_schnorr_master_key();
+        let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
+        let sweepable_amount = u64::MAX - RENT_EXEMPTION_THRESHOLD;
+        let deposit =
+            DepositFlow::queue_automatic(account(1), sweepable_amount, AUTOMATIC_DEPOSIT_FEE);
+        deposit.sweep(sweep_signature).succeed();
+
+        mutate_state(|s| {
+            process_event(
+                s,
+                EventType::CreditedSweep {
+                    signature: sweep_signature,
+                    amount_received: sweepable_amount,
+                    // The forged mint ignores the deposit fee, which overflows when added.
+                    mints: vec![CreditedDeposit {
+                        deposit_id: deposit.deposit_id,
+                        amount_to_mint: sweepable_amount,
+                    }],
+                },
+                &TestCanisterRuntime::new().add_times([0, 0]),
+            )
+        });
+    }
+
+    #[test]
     fn should_mint_pending_deposit_without_changing_the_balance() {
         init_state();
         let credited = credit_sweep_of_two_deposits(0);

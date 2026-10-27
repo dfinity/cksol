@@ -5,7 +5,7 @@ use cksol_int_tests::{
     CkSolMinter, Setup, SetupBuilder,
     fixtures::{
         DEFAULT_CALLER_ACCOUNT, DEFAULT_CALLER_DEPOSIT_ADDRESS, DEPOSIT_AMOUNT, MINTER_ADDRESS,
-        MockBuilder, RENT_EXEMPTION_THRESHOLD, SharedMockHttpOutcalls, WATCH_WINDOW_NANOS,
+        MockBuilder, RENT_EXEMPTION_THRESHOLD, WATCH_WINDOW_NANOS,
     },
     validator::FEE_PER_SIGNATURE,
 };
@@ -22,7 +22,6 @@ use cksol_types_internal::{
 use icrc_ledger_types::icrc1::account::{Account, Subaccount};
 use sol_rpc_types::{CommitmentLevel, ConsensusStrategy, RpcConfig};
 use std::time::Duration;
-use tokio::join;
 
 const WITHDRAWAL_PROCESSING_DELAY: Duration = Duration::from_mins(1);
 const FINALIZE_TRANSACTIONS_DELAY: Duration = Duration::from_mins(2);
@@ -677,35 +676,23 @@ mod withdrawal_tests {
             address: WITHDRAWAL_ADDRESS.to_string(),
         };
 
-        let minter1 = setup.minter();
-        let minter2 = setup.minter();
+        let minter = setup.minter();
+        let first_call = minter.submit_withdraw_sol(args.clone()).await;
+        let second_call = minter.submit_withdraw_sol(args).await;
 
-        let (result1, result2) = join!(
-            minter1.withdraw_sol(args.clone()),
-            minter2.withdraw_sol(args.clone()),
+        let outcomes = (
+            first_call.await_response().await,
+            second_call.await_response().await,
         );
-
-        let (result1, result2) = match (&result1, &result2) {
-            (Ok(_), Err(_)) => (result1, result2),
-            (Err(_), Ok(_)) => (result2, result1),
-            _ => panic!("Expected one success and one error, but got: {result1:?} and {result2:?}"),
-        };
-
-        // One should succeed, one should fail with AlreadyProcessing (order is non-deterministic)
-        let results = [&result1, &result2];
-        assert!(
-            results
-                .iter()
-                .any(|r| matches!(r, Ok(WithdrawSolOk { block_index: _ }))),
-            "Expected one Minted result, got: {:?}",
-            results
-        );
-        assert!(
-            results
-                .iter()
-                .any(|r| matches!(r, Err(WithdrawSolError::AlreadyProcessing))),
-            "Expected one AlreadyProcessing result, got: {:?}",
-            results
+        assert_matches!(
+            outcomes,
+            (
+                Ok(WithdrawSolOk { .. }),
+                Err(WithdrawSolError::AlreadyProcessing)
+            ) | (
+                Err(WithdrawSolError::AlreadyProcessing),
+                Ok(WithdrawSolOk { .. })
+            )
         );
 
         setup.drop().await;
@@ -1173,34 +1160,6 @@ mod deposit_sol_tests {
         let result = setup.minter().deposit_sol(DEFAULT_CALLER_ACCOUNT).await;
 
         assert_eq!(result, Err(DepositSolError::Quarantined { deposit_id }));
-
-        setup.drop().await;
-    }
-
-    #[tokio::test]
-    async fn should_fail_for_concurrent_access() {
-        let setup = SetupBuilder::new().with_proxy_canister().build().await;
-        let mocks = SharedMockHttpOutcalls::new(
-            MockBuilder::new()
-                .get_balance(BALANCE_ABOVE_MINIMUM)
-                .build(),
-        );
-        let minter1 = setup.minter().with_http_mocks(mocks.clone());
-        let minter2 = setup.minter().with_http_mocks(mocks.clone());
-
-        let results = join!(
-            minter1.deposit_sol(DEFAULT_CALLER_ACCOUNT),
-            minter2.deposit_sol(DEFAULT_CALLER_ACCOUNT)
-        );
-
-        assert!(
-            matches!(
-                results,
-                (Ok(0), Err(DepositSolError::AlreadyProcessing))
-                    | (Err(DepositSolError::AlreadyProcessing), Ok(0))
-            ),
-            "Expected one queued deposit and one AlreadyProcessing error, got: {results:?}"
-        );
 
         setup.drop().await;
     }

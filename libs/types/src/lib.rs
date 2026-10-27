@@ -60,12 +60,14 @@ impl From<Account> for DepositSolArgs {
     }
 }
 
-/// Identifies a deposit queued by the `deposit_sol` ckSOL minter endpoint.
+/// Identifies a deposit queued by the `deposit_sol` ckSOL minter endpoint or by a balance scan
+/// of the automatic flow, see `watch_deposit_address`.
 ///
 /// A sequence number assigned when the deposit is queued.
 pub type DepositSolId = u64;
 
-/// The status of a deposit queued by the `deposit_sol` ckSOL minter endpoint.
+/// The status of a deposit queued by the `deposit_sol` ckSOL minter endpoint or by a balance
+/// scan of the automatic flow, see `watch_deposit_address`.
 #[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize, Serialize)]
 pub enum DepositSolStatus {
     /// No deposit with this identifier was queued.
@@ -110,8 +112,9 @@ pub enum DepositSolStatus {
     /// have landed on the ledger. This is not expected to happen and resolving it
     /// requires a minter upgrade: before minting by hand, search the ledger for a mint
     /// whose memo carries the sweep signature and the deposit id, otherwise a double
-    /// mint results. Meanwhile the account stays in flight, so `deposit_sol` keeps
-    /// rejecting it and a new deposit has to use a different subaccount.
+    /// mint results. Meanwhile the account stays in flight, so `deposit_sol` and
+    /// `watch_deposit_address` keep rejecting it and a new deposit has to use a different
+    /// subaccount.
     Quarantined {
         /// The signature of the sweep transaction.
         signature: Signature,
@@ -189,8 +192,9 @@ pub enum WatchDepositAddressStatus {
         scan_count: u32,
         /// The time of the last scan, in nanoseconds since the epoch, if any.
         last_scanned_at: Option<u64>,
-        /// The time the next scan is due, in nanoseconds since the epoch, or `None` once the
-        /// schedule leaves no scan before the window closes.
+        /// The time the next scan is due, in nanoseconds since the epoch, which may lie in the
+        /// past until the tick that runs the scan, or `None` once the schedule leaves no scan
+        /// before the window closes.
         next_scan_at: Option<u64>,
     },
     /// A deposit of the account is in flight: queued, swept, finalized or pending its mint.
@@ -212,7 +216,12 @@ pub enum WatchDepositAddressError {
     },
     /// The watchlist is full of live registrations, try again later or use `deposit_sol`.
     #[error("The watchlist is full, try again later or use `deposit_sol`")]
-    TooManyWatchedAddresses,
+    TooManyWatchedAddresses {
+        /// The id of the latest deposit queued for the account, if any, to follow with
+        /// `deposit_sol_status`. That deposit is minted or dropped, since an account with a
+        /// deposit in flight needs no slot.
+        latest_deposit_id: Option<DepositSolId>,
+    },
     /// The minter experiences temporary issues, try the call again later.
     #[error("Transient error, try the call again later: {0}")]
     TemporarilyUnavailable(String),
