@@ -136,6 +136,7 @@ The fees and minimum amounts follow [Section 3.3 of the design](design.md#33-fee
 | `withdrawal_fee`              | 0.001 SOL (1,000,000) | Covers `getAccountInfo`, `sendTransaction`, `getTransaction` and the threshold signature.       |
 | `minimum_withdrawal_amount`   | 0.002 SOL (2,000,000) | Must be at least the withdrawal fee plus the rent exemption threshold.                          |
 | `nonce_accounts`              | empty                 | Replace with the addresses created in [Create nonce accounts](#create-nonce-accounts).          |
+| `automatic_deposit_fee`       | unset                 | Keeps the automatic flow disabled; to be set to 0.002 SOL (2,000,000) once it is complete.      |
 
 ## Ledger
 

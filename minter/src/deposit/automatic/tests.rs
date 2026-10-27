@@ -5,10 +5,8 @@ use crate::{
     test_fixtures::{
         AUTOMATIC_DEPOSIT_FEE, EventsAssert, HOUR_NANOS, MINIMUM_DEPOSIT_AMOUNT, MINTER_ACCOUNT,
         MINUTE_NANOS, REGISTERED_AT, WATCH_WINDOW_NANOS, account, at, deposit_address,
-        events::{
-            fail_transaction, quarantine_sweep, queue_deposit, submit_sweep, succeed_transaction,
-        },
-        flow::deposit::DepositFlow,
+        events::{fail_transaction, quarantine_sweep},
+        flow::deposit::{CreditedSweepFlow, DepositFlow},
         init_schnorr_master_key, init_state, init_state_with_args,
         runtime::TestCanisterRuntime,
         signature, valid_init_args,
@@ -49,13 +47,17 @@ fn should_fail_without_registering_while_a_prerequisite_is_unavailable() {
 #[test]
 fn should_register_the_account_without_recording_an_event() {
     setup();
+    let with_subaccount = Account {
+        subaccount: Some([7; 32]),
+        ..account(1)
+    };
 
-    let result = watch_deposit_address(&runtime(), account(1));
+    let result = watch_deposit_address(&runtime(), with_subaccount);
 
     assert_eq!(
         result,
         Ok(WatchDepositAddressOk {
-            address: deposit_address(account(1)).into(),
+            address: deposit_address(with_subaccount).into(),
             minimum_deposit_amount: MINIMUM_DEPOSIT_AMOUNT,
             automatic_deposit_fee: AUTOMATIC_DEPOSIT_FEE,
             status: WatchDepositAddressStatus::Watching {
@@ -68,7 +70,14 @@ fn should_register_the_account_without_recording_an_event() {
         })
     );
     EventsAssert::assert_no_events_recorded();
-    assert_eq!(read_state(|s| s.watchlist().len()), 1);
+    assert_eq!(
+        read_state(|s| s
+            .watchlist()
+            .iter()
+            .map(|watched| watched.account)
+            .collect::<Vec<_>>()),
+        vec![with_subaccount]
+    );
 }
 
 #[test]
@@ -155,12 +164,7 @@ fn should_report_an_in_flight_deposit_as_detected_without_registering() {
 #[test]
 fn should_register_anew_once_the_deposit_is_minted() {
     setup();
-    let minted = DepositFlow::queue(account(1), MINIMUM_DEPOSIT_AMOUNT)
-        .sweep(signature(0xAA))
-        .succeed()
-        .credit()
-        .single_pending_mint()
-        .mint(7);
+    let deposit_id = minted(account(1));
 
     let result = watch_deposit_address(&runtime(), account(1)).unwrap();
 
@@ -168,15 +172,13 @@ fn should_register_anew_once_the_deposit_is_minted() {
         result.status,
         WatchDepositAddressStatus::Watching { scan_count: 0, .. }
     );
-    assert_eq!(result.latest_deposit_id, Some(minted.deposit_id));
+    assert_eq!(result.latest_deposit_id, Some(deposit_id));
 }
 
 #[test]
 fn should_register_anew_once_the_deposit_is_dropped() {
     setup();
-    queue_deposit(0, account(1), MINIMUM_DEPOSIT_AMOUNT);
-    submit_sweep(signature(0xAA), vec![0]);
-    fail_transaction(signature(0xAA));
+    let deposit_id = dropped(account(1));
 
     let result = watch_deposit_address(&runtime(), account(1)).unwrap();
 
@@ -184,41 +186,70 @@ fn should_register_anew_once_the_deposit_is_dropped() {
         result.status,
         WatchDepositAddressStatus::Watching { scan_count: 0, .. }
     );
-    assert_eq!(result.latest_deposit_id, Some(0));
+    assert_eq!(result.latest_deposit_id, Some(deposit_id));
 }
 
 #[test]
 fn should_reject_an_account_whose_latest_deposit_is_quarantined() {
-    setup();
-    queue_deposit(0, account(1), MINIMUM_DEPOSIT_AMOUNT);
-    submit_sweep(signature(0xAA), vec![0]);
-    succeed_transaction(signature(0xAA));
-    quarantine_sweep(signature(0xAA));
-    let state_before = current_state();
+    for quarantine in [
+        quarantined_sweep as fn(Account) -> DepositSolId,
+        quarantined_mint,
+    ] {
+        in_fresh_state(|| {
+            setup();
+            let deposit_id = quarantine(account(1));
+            let state_before = current_state();
 
-    let result = watch_deposit_address(&runtime(), account(1));
+            let result = watch_deposit_address(&runtime(), account(1));
 
-    assert_eq!(
-        result,
-        Err(WatchDepositAddressError::Quarantined { deposit_id: 0 })
-    );
-    assert_eq!(current_state(), state_before);
+            assert_eq!(
+                result,
+                Err(WatchDepositAddressError::Quarantined { deposit_id })
+            );
+            assert_eq!(current_state(), state_before);
+        });
+    }
 }
 
 #[test]
 fn should_reject_a_registration_when_the_watchlist_is_full() {
-    setup();
-    for index in 0..MAX_WATCHED_ADDRESSES.get() {
-        watch_deposit_address(&runtime(), account(index)).unwrap();
+    let unwatched = account(MAX_WATCHED_ADDRESSES.get());
+    for with_dropped_deposit in [false, true] {
+        in_fresh_state(|| {
+            setup();
+            let latest_deposit_id = with_dropped_deposit.then(|| dropped(unwatched));
+            fill_watchlist();
+            let state_before = current_state();
+
+            let result = watch_deposit_address(&runtime(), unwatched);
+
+            assert_eq!(
+                result,
+                Err(WatchDepositAddressError::TooManyWatchedAddresses { latest_deposit_id })
+            );
+            assert_eq!(current_state(), state_before);
+        });
     }
+}
+
+#[test]
+fn should_report_the_status_without_a_slot_when_the_watchlist_is_full() {
+    setup();
+    let in_flight = account(MAX_WATCHED_ADDRESSES.get());
+    let deposit_id = queued(in_flight);
+    let detected = watch_deposit_address(&runtime(), in_flight).unwrap();
+    assert_eq!(
+        detected.status,
+        WatchDepositAddressStatus::Detected { deposit_id }
+    );
+    let registrations = fill_watchlist();
     let state_before = current_state();
 
-    let result = watch_deposit_address(&runtime(), account(MAX_WATCHED_ADDRESSES.get()));
-
     assert_eq!(
-        result,
-        Err(WatchDepositAddressError::TooManyWatchedAddresses)
+        watch_deposit_address(&runtime(), account(0)),
+        Ok(registrations[0].clone())
     );
+    assert_eq!(watch_deposit_address(&runtime(), in_flight), Ok(detected));
     assert_eq!(current_state(), state_before);
 }
 
@@ -266,22 +297,62 @@ fn setup_without_minter_public_key() {
     init_state();
 }
 
+/// Registers the accounts 0 to `MAX_WATCHED_ADDRESSES - 1`, which fills the watchlist, and
+/// returns their registrations in that order.
+fn fill_watchlist() -> Vec<WatchDepositAddressOk> {
+    (0..MAX_WATCHED_ADDRESSES.get())
+        .map(|index| watch_deposit_address(&runtime(), account(index)).unwrap())
+        .collect()
+}
+
+// The helpers below take a deposit of the account to a stage of its life, sweeping it alone
+// under `SWEEP`, and return its id.
+
+const SWEEP: usize = 0xAA;
+
 fn queued(account: Account) -> DepositSolId {
     DepositFlow::queue(account, MINIMUM_DEPOSIT_AMOUNT).deposit_id
 }
 
 fn swept(account: Account) -> DepositSolId {
     let deposit = DepositFlow::queue(account, MINIMUM_DEPOSIT_AMOUNT);
-    let deposit_id = deposit.deposit_id;
-    deposit.sweep(signature(0xAA));
+    deposit.sweep(signature(SWEEP));
+    deposit.deposit_id
+}
+
+fn dropped(account: Account) -> DepositSolId {
+    let deposit_id = swept(account);
+    fail_transaction(signature(SWEEP));
     deposit_id
 }
 
-fn credited(account: Account) -> DepositSolId {
+fn quarantined_sweep(account: Account) -> DepositSolId {
     let deposit = DepositFlow::queue(account, MINIMUM_DEPOSIT_AMOUNT);
-    let deposit_id = deposit.deposit_id;
-    deposit.sweep(signature(0xAA)).succeed().credit();
+    deposit.sweep(signature(SWEEP)).succeed();
+    quarantine_sweep(signature(SWEEP));
+    deposit.deposit_id
+}
+
+fn credited(account: Account) -> DepositSolId {
+    credit(account).0
+}
+
+fn minted(account: Account) -> DepositSolId {
+    let (deposit_id, sweep) = credit(account);
+    sweep.single_pending_mint().mint(7);
     deposit_id
+}
+
+fn quarantined_mint(account: Account) -> DepositSolId {
+    let (deposit_id, sweep) = credit(account);
+    sweep.single_pending_mint().quarantine();
+    deposit_id
+}
+
+fn credit(account: Account) -> (DepositSolId, CreditedSweepFlow) {
+    let deposit = DepositFlow::queue(account, MINIMUM_DEPOSIT_AMOUNT);
+    let sweep = deposit.sweep(signature(SWEEP)).succeed().credit();
+    (deposit.deposit_id, sweep)
 }
 
 fn in_fresh_state(test: impl FnOnce() + Send) {

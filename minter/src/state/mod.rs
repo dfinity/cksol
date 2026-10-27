@@ -475,12 +475,15 @@ impl State {
         timestamp: u64,
     ) {
         let amount_to_mint: Lamport = mints.iter().map(|mint| mint.amount_to_mint).sum();
-        assert!(
-            amount_to_mint <= amount_received,
-            "Attempted to credit sweep {signature} with mints of {amount_to_mint} lamports exceeding the {amount_received} lamports received"
-        );
         let sweep = self.deposits.credit_sweep(signature, mints, timestamp);
-        self.collected_automatic_deposit_fees += sweep.deposit_fees();
+        let deposit_fees = sweep.deposit_fees();
+        assert!(
+            amount_to_mint
+                .checked_add(deposit_fees)
+                .is_some_and(|total| total <= amount_received),
+            "Attempted to credit sweep {signature} with mints of {amount_to_mint} lamports and deposit fees of {deposit_fees} lamports exceeding the {amount_received} lamports received"
+        );
+        self.collected_automatic_deposit_fees += deposit_fees;
         self.balance += amount_received;
     }
 
