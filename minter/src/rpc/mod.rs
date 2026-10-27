@@ -168,13 +168,6 @@ impl From<GetBalanceError> for DepositSolError {
 ///
 /// If there are no addresses or more than [`MAX_ADDRESSES_PER_GET_MULTIPLE_ACCOUNTS`],
 /// since the caller chunks the addresses it reads.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "called by the scan timer of the automatic deposit flow, which lands next"
-    )
-)]
 pub async fn get_balances<R: CanisterRuntime>(
     runtime: &R,
     addresses: &[Address],

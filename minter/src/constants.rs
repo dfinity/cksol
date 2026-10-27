@@ -15,6 +15,12 @@ pub const GET_RECENT_BLOCK_MAX_TRIES: NonZeroUsize =
 /// Interval of the timer sweeping queued deposits, the same as withdrawal processing.
 pub const SWEEP_DEPOSITS_DELAY: Duration = Duration::from_mins(1);
 
+/// Interval of the timer scanning the balances of the watched deposit addresses that are
+/// due for a scan. Together with the scan schedule and the capacity of the watchlist, the
+/// tick rate bounds what the automatic deposit flow costs the minter (see section 3.1.1
+/// of the design).
+pub const SCAN_WATCHED_ADDRESSES_DELAY: Duration = Duration::from_mins(1);
+
 /// Delay before retrying the minter public key fetch after it trapped. Deposits and
 /// transfer creation stay unavailable until the key is recorded, so the retry is quick.
 pub const MINTER_PUBLIC_KEY_RETRY_DELAY: Duration = Duration::from_secs(5);
