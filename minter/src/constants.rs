@@ -53,6 +53,26 @@ pub const GET_TRANSACTION_CYCLES: u128 = 50_000_000_000;
 /// unused part is refunded and never charged to the caller of `deposit_sol`.
 pub const GET_BALANCE_CYCLES: u128 = 10_000_000_000;
 
+/// Maximum number of addresses per `getMultipleAccounts` RPC call.
+/// See <https://solana.com/docs/rpc/http/getmultipleaccounts>.
+pub const MAX_ADDRESSES_PER_GET_MULTIPLE_ACCOUNTS: usize = 100;
+
+/// Cycles to attach for a `getMultipleAccounts` RPC call reading one address,
+/// on top of [`GET_MULTIPLE_ACCOUNTS_CYCLES_PER_ADDRESS`] for every address.
+///
+/// The SOL RPC canister prices the call like `getBalance` for a single
+/// address: about 2.3B cycles with the default 3-out-of-4 provider consensus.
+/// The attached amount, which the SOL RPC client attaches by default too,
+/// leaves a wide margin for provider or price changes; the unused part is
+/// refunded.
+pub const GET_MULTIPLE_ACCOUNTS_BASE_CYCLES: u128 = 10_000_000_000;
+
+/// Cycles to attach per address of a `getMultipleAccounts` RPC call, covering
+/// the roughly 150 bytes of response an address without data adds, which
+/// the SOL RPC canister charges about 22M cycles for (see section 3.3.2 of
+/// the design); the unused part is refunded.
+pub const GET_MULTIPLE_ACCOUNTS_CYCLES_PER_ADDRESS: u128 = 100_000_000;
+
 /// Cycles to attach for `getSignatureStatuses` RPC calls.
 ///
 /// The SOL RPC canister charges about 2.3B cycles for a `getSignatureStatuses`

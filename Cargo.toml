@@ -83,3 +83,7 @@ debug = false
 lto = true
 strip = true
 opt-level = 's'
+
+[patch.crates-io]
+sol_rpc_client = { git = "https://github.com/dfinity/sol-rpc-canister", rev = "92efe4eefc6b0209ee33440aa903383144016cf6" }
+sol_rpc_types = { git = "https://github.com/dfinity/sol-rpc-canister", rev = "92efe4eefc6b0209ee33440aa903383144016cf6" }
