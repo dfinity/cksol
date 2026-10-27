@@ -190,8 +190,7 @@ async fn should_return_the_deposit_a_scan_queued_during_the_balance_read_and_cha
 }
 
 #[tokio::test]
-async fn should_return_the_deposit_a_scan_queued_during_a_rejected_balance_read_and_charge_the_read_only()
- {
+async fn should_return_the_deposit_a_scan_queued_during_a_rejected_read_and_charge_the_read_only() {
     let runtime = runtime().add_stub_error(IcError::CallRejected {
         code: RejectCode::SysTransient,
         message: "SOL RPC canister is stopped".to_string(),
