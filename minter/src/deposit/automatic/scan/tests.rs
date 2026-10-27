@@ -2,7 +2,9 @@ use crate::{
     constants::{
         MAX_ADDRESSES_PER_GET_MULTIPLE_ACCOUNTS, MAX_CONCURRENT_RPC_CALLS, RENT_EXEMPTION_THRESHOLD,
     },
-    deposit::automatic::scan::{Scan, apply_balance_read, scan_watched_addresses},
+    deposit::automatic::scan::{
+        Scan, apply_balance_read, record_failed_read, scan_watched_addresses,
+    },
     guard::deposit_sol_guard,
     state::{TaskType, WatchedAddress, event::EventType, mutate_state, read_state},
     storage::{ScanOutcome, deposit_address_scan_count},
@@ -47,6 +49,20 @@ async fn should_return_early_if_task_already_active() {
     scan_watched_addresses(runtime.clone()).await;
 
     assert!(runtime.sent_update_calls().is_empty());
+}
+
+#[tokio::test]
+async fn should_skip_a_tick_while_the_previous_one_waits_for_its_calls() {
+    setup();
+    watch(at(REGISTERED_AT), account(1));
+    let runtime = runtime_at(TICK_AT).add_get_multiple_accounts_response(&[Some(0)]);
+
+    tokio::join!(
+        scan_watched_addresses(runtime.clone()),
+        scan_watched_addresses(runtime.clone())
+    );
+
+    assert_eq!(runtime.requested_addresses().len(), 1);
 }
 
 #[tokio::test]
@@ -222,18 +238,21 @@ fn should_discard_a_read_of_a_registration_replaced_or_expired_meanwhile() {
     mutate_state(|s| s.watchlist_mut().remove(&account(1)));
     let renewed = watch(at(REGISTERED_AT + MINUTE_NANOS), account(1));
     let runtime = runtime_at(TICK_AT);
+    let read_after_expiry = Scan {
+        read_at: at(renewed.valid_until.as_nanos() + 1),
+        ..scan_at(TICK_AT)
+    };
 
     let after_replacement =
         apply_balance_read(&runtime, scan_at(TICK_AT), &stale, MINIMUM_DEPOSIT_AMOUNT);
     let after_expiry = apply_balance_read(
         &runtime,
-        Scan {
-            read_at: at(renewed.valid_until.as_nanos() + 1),
-            ..scan_at(TICK_AT)
-        },
+        read_after_expiry,
         &renewed,
         MINIMUM_DEPOSIT_AMOUNT,
     );
+    record_failed_read(scan_at(TICK_AT), &[stale]);
+    record_failed_read(read_after_expiry, &[renewed]);
 
     assert_eq!(after_replacement, None);
     assert_eq!(after_expiry, None);
