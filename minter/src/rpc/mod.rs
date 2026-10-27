@@ -1,8 +1,7 @@
 use crate::{
     constants::{
         GET_ACCOUNT_INFO_CYCLES, GET_BALANCE_CYCLES, GET_MULTIPLE_ACCOUNTS_BASE_CYCLES,
-        GET_MULTIPLE_ACCOUNTS_CYCLES_PER_ADDRESS, GET_MULTIPLE_ACCOUNTS_RESPONSE_BASE_BYTES,
-        GET_MULTIPLE_ACCOUNTS_RESPONSE_BYTES_PER_ADDRESS, GET_RECENT_BLOCK_MAX_TRIES,
+        GET_MULTIPLE_ACCOUNTS_CYCLES_PER_ADDRESS, GET_RECENT_BLOCK_MAX_TRIES,
         GET_SIGNATURE_STATUSES_CYCLES, GET_TRANSACTION_CYCLES,
         MAX_ADDRESSES_PER_GET_MULTIPLE_ACCOUNTS,
     },
@@ -194,7 +193,6 @@ pub async fn get_balances<R: CanisterRuntime>(
             length: 0,
             offset: 0,
         })
-        .with_response_size_estimate(get_multiple_accounts_response_bytes(addresses.len()))
         .with_cycles(get_multiple_accounts_cycles(addresses.len()))
         .try_send()
         .await;
@@ -221,14 +219,6 @@ pub async fn get_balances<R: CanisterRuntime>(
 fn get_multiple_accounts_cycles(num_addresses: usize) -> u128 {
     GET_MULTIPLE_ACCOUNTS_BASE_CYCLES
         + GET_MULTIPLE_ACCOUNTS_CYCLES_PER_ADDRESS * num_addresses as u128
-}
-
-/// The size of the response to a `getMultipleAccounts` call reading `num_addresses`
-/// addresses without data, headers included, which the SOL RPC canister uses as the
-/// response size limit of the call.
-fn get_multiple_accounts_response_bytes(num_addresses: usize) -> u64 {
-    GET_MULTIPLE_ACCOUNTS_RESPONSE_BASE_BYTES
-        + GET_MULTIPLE_ACCOUNTS_RESPONSE_BYTES_PER_ADDRESS * num_addresses as u64
 }
 
 #[derive(Debug, PartialEq, Error, From)]

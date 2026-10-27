@@ -106,13 +106,9 @@ mod get_balances_tests {
     #[tokio::test]
     async fn should_request_the_finalized_balances_without_account_data() {
         init_state();
-        for (num_addresses, expected_response_size_estimate, expected_cycles) in [
-            (1, 2_336, 10_100_000_000),
-            (
-                MAX_ADDRESSES_PER_GET_MULTIPLE_ACCOUNTS,
-                18_176,
-                20_000_000_000,
-            ),
+        for (num_addresses, expected_cycles) in [
+            (1, 10_100_000_000),
+            (MAX_ADDRESSES_PER_GET_MULTIPLE_ACCOUNTS, 20_000_000_000),
         ] {
             let addresses: Vec<_> = (0..num_addresses).map(address).collect();
             let runtime = TestCanisterRuntime::new()
@@ -131,7 +127,7 @@ mod get_balances_tests {
             ) = call.args();
             assert_eq!(
                 config.and_then(|config| config.response_size_estimate),
-                Some(expected_response_size_estimate)
+                None
             );
             assert_eq!(
                 params,
