@@ -304,6 +304,22 @@ mod swept_deposits {
     }
 
     #[test]
+    #[should_panic(
+        expected = "and deposit fees of 2000000 lamports exceeding the 19000000 lamports received"
+    )]
+    fn should_panic_when_the_mints_and_deposit_fees_exceed_the_amount_received() {
+        init_state();
+        init_schnorr_master_key();
+        let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
+        DepositFlow::queue_automatic(account(1), 20_000_000, AUTOMATIC_DEPOSIT_FEE)
+            .sweep(sweep_signature)
+            .succeed();
+
+        // The mint of 20,000,000 - 5,000 - 2,000,000 lamports fits the amount received alone.
+        credit_sweep(sweep_signature, 19_000_000);
+    }
+
+    #[test]
     fn should_mint_pending_deposit_without_changing_the_balance() {
         init_state();
         let credited = credit_sweep_of_two_deposits(0);
