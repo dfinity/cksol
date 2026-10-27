@@ -1,6 +1,6 @@
 use super::{
-    Sweep, SweepMismatch, SweepRecoveryError, SweepSettlementError, Sweeps, Transfer,
-    UnreadableOutcome,
+    Sweep, SweepMintError, SweepMismatch, SweepRecoveryError, SweepSettlementError, Sweeps,
+    Transfer, UnreadableOutcome,
 };
 use crate::{
     constants::{FEE_PER_SIGNATURE, RENT_EXEMPTION_THRESHOLD},
@@ -98,12 +98,15 @@ fn should_panic_when_inserting_a_sweep_with_a_known_signature() {
 
 mod plan {
     use super::{
-        FEE_PER_SIGNATURE, Lamport, MINTER_ADDRESS, Sweep, Transfer, account, planned_sweep,
-        queued_deposit_of,
+        FEE_PER_SIGNATURE, Lamport, MINTER_ADDRESS, Sweep, SweepMintError, Transfer, account,
+        planned_sweep, queued_deposit_of,
     };
     use crate::{
         state::event::CreditedDeposit,
-        test_fixtures::arb::{arb_address, arb_sweep_deposits},
+        test_fixtures::{
+            arb::{arb_address, arb_sweep_deposits},
+            automatic_deposit_of,
+        },
     };
     use proptest::{prop_assert, prop_assert_eq, proptest};
 
@@ -140,7 +143,7 @@ mod plan {
         );
         assert_eq!(sweep.expected_received(), 6_000_000 - 3 * FEE_PER_SIGNATURE);
         assert_eq!(
-            sweep.mints(),
+            sweep.mints().unwrap(),
             vec![
                 CreditedDeposit {
                     deposit_id: 0,
@@ -177,6 +180,37 @@ mod plan {
     }
 
     #[test]
+    fn should_collect_no_fee_from_manual_deposits() {
+        let sweep = planned_sweep([
+            (0, queued_deposit_of(account(1), 1_000_000)),
+            (1, queued_deposit_of(account(2), 2_000_000)),
+        ]);
+
+        assert_eq!(sweep.deposit_fees(), 0);
+    }
+
+    #[test]
+    fn should_have_no_mints_when_the_fees_exceed_the_sweepable_amount() {
+        let deposit_fee = 1_000_000;
+        let sweepable_amount = deposit_fee + FEE_PER_SIGNATURE - 1;
+
+        let sweep = planned_sweep([(
+            0,
+            automatic_deposit_of(account(1), sweepable_amount, deposit_fee),
+        )]);
+
+        assert_eq!(
+            sweep.mints(),
+            Err(SweepMintError::FeesExceedSweepableAmount {
+                deposit_id: 0,
+                sweepable_amount,
+                fee_share: FEE_PER_SIGNATURE,
+                deposit_fee,
+            })
+        );
+    }
+
+    #[test]
     fn should_charge_the_whole_fee_to_a_single_deposit() {
         let sweep = planned_sweep([(7, queued_deposit_of(account(1), 1_000_000))]);
 
@@ -184,7 +218,7 @@ mod plan {
         assert_eq!(sweep.fee(), FEE_PER_SIGNATURE);
         assert_eq!(sweep.expected_received(), 1_000_000 - FEE_PER_SIGNATURE);
         assert_eq!(
-            sweep.mints(),
+            sweep.mints().unwrap(),
             vec![CreditedDeposit {
                 deposit_id: 7,
                 amount_to_mint: 1_000_000 - FEE_PER_SIGNATURE,
@@ -200,7 +234,7 @@ mod plan {
         ) {
             let sweep = Sweep::plan(deposits.clone(), minter_address);
 
-            let mints = sweep.mints();
+            let mints = sweep.mints().unwrap();
 
             prop_assert_eq!(
                 mints.iter().map(|mint| mint.deposit_id).collect::<Vec<_>>(),
@@ -296,11 +330,11 @@ mod message {
 
 mod settle {
     use super::{
-        EncodedConfirmedTransactionWithStatusMeta, RENT_EXEMPTION_THRESHOLD, SweepMismatch,
-        SweepSettlementError, TransactionError, UiTransactionError, UnreadableOutcome, account,
-        devnet_sweep, planned_sweep, queued_deposit_of,
+        EncodedConfirmedTransactionWithStatusMeta, RENT_EXEMPTION_THRESHOLD, Sweep, SweepMintError,
+        SweepMismatch, SweepSettlementError, TransactionError, UiTransactionError,
+        UnreadableOutcome, account, devnet_sweep, planned_sweep, queued_deposit_of,
     };
-    use crate::test_fixtures::fetched;
+    use crate::{state::QueuedDeposit, test_fixtures::fetched};
 
     type Deviation = fn(&mut EncodedConfirmedTransactionWithStatusMeta);
 
@@ -347,6 +381,37 @@ mod settle {
             );
             assert_eq!(settled.into_mints(), devnet_sweep::mints(), "{name}");
         }
+    }
+
+    #[test]
+    fn should_reject_a_matching_outcome_whose_fees_exceed_a_sweepable_amount() {
+        let deposits = devnet_sweep::deposits().into_iter().map(|(id, deposit)| {
+            let deposit_fee =
+                (deposit.address == SECOND_DEPOSIT).then_some(SECOND_SWEEPABLE_AMOUNT);
+            (
+                id,
+                QueuedDeposit {
+                    deposit_fee,
+                    ..deposit
+                },
+            )
+        });
+        let fetched = fetched(devnet_sweep::outcome());
+
+        let result = Sweep::plan(deposits, devnet_sweep::MINTER_ADDRESS)
+            .settle(&fetched.transaction, fetched.meta.as_ref());
+
+        assert_eq!(
+            result,
+            Err(SweepSettlementError::Mismatch(SweepMismatch::Mint(
+                SweepMintError::FeesExceedSweepableAmount {
+                    deposit_id: 1,
+                    sweepable_amount: SECOND_SWEEPABLE_AMOUNT,
+                    fee_share: devnet_sweep::FEE / devnet_sweep::DEPOSITS.len() as u64,
+                    deposit_fee: SECOND_SWEEPABLE_AMOUNT,
+                }
+            )))
+        );
     }
 
     #[test]

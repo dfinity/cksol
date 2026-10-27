@@ -110,6 +110,7 @@ mod queued_deposits {
                 account: queued_deposit(deposit_id).account,
                 address: queued_deposit(deposit_id).address,
                 balance: queued_deposit(deposit_id).balance,
+                deposit_fee: None,
             },
         };
         let init = Event {
@@ -171,7 +172,7 @@ mod swept_deposits {
             DEFAULT_BLOCK_HEIGHT,
             events::{credit_sweep, quarantine_sweep, queue_deposits, submit_sweep},
             flow::deposit::{CreditedSweepFlow, DepositFlow, SweepFlow},
-            sweep_message,
+            replayed_recorded_log, sweep_message,
         },
     };
 
@@ -303,6 +304,52 @@ mod swept_deposits {
     }
 
     #[test]
+    #[should_panic(
+        expected = "and deposit fees of 2000000 lamports exceeding the 19000000 lamports received"
+    )]
+    fn should_panic_when_the_mints_and_deposit_fees_exceed_the_amount_received() {
+        init_state();
+        init_schnorr_master_key();
+        let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
+        DepositFlow::queue_automatic(account(1), 20_000_000, AUTOMATIC_DEPOSIT_FEE)
+            .sweep(sweep_signature)
+            .succeed();
+
+        // The mint of 20,000,000 - 5,000 - 2,000,000 lamports fits the amount received alone.
+        credit_sweep(sweep_signature, 19_000_000);
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "with mints of 18446744073708660735 lamports and deposit fees of 2000000 lamports"
+    )]
+    fn should_panic_when_the_mints_and_deposit_fees_overflow() {
+        init_state();
+        init_schnorr_master_key();
+        let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
+        let sweepable_amount = u64::MAX - RENT_EXEMPTION_THRESHOLD;
+        let deposit =
+            DepositFlow::queue_automatic(account(1), sweepable_amount, AUTOMATIC_DEPOSIT_FEE);
+        deposit.sweep(sweep_signature).succeed();
+
+        mutate_state(|s| {
+            process_event(
+                s,
+                EventType::CreditedSweep {
+                    signature: sweep_signature,
+                    amount_received: sweepable_amount,
+                    // The forged mint ignores the deposit fee, which overflows when added.
+                    mints: vec![CreditedDeposit {
+                        deposit_id: deposit.deposit_id,
+                        amount_to_mint: sweepable_amount,
+                    }],
+                },
+                &TestCanisterRuntime::new().add_times([0, 0]),
+            )
+        });
+    }
+
+    #[test]
     fn should_mint_pending_deposit_without_changing_the_balance() {
         init_state();
         let credited = credit_sweep_of_two_deposits(0);
@@ -352,6 +399,45 @@ mod swept_deposits {
             replayed.deposits().pending_mints()[&sibling.deposit_id].created_at_time,
             CREDITED_AT
         );
+        read_state(|live_state| assert_eq!(&replayed, live_state));
+    }
+
+    #[test]
+    fn should_collect_the_automatic_deposit_fees_of_a_credited_sweep() {
+        init_state();
+        init_schnorr_master_key();
+        let manual = DepositFlow::queue(account(1), 10_000_000);
+        let first_automatic =
+            DepositFlow::queue_automatic(account(2), 20_000_000, AUTOMATIC_DEPOSIT_FEE);
+        let second_automatic =
+            DepositFlow::queue_automatic(account(3), 30_000_000, AUTOMATIC_DEPOSIT_FEE / 2);
+        let finalized = SweepFlow::of([manual, first_automatic, second_automatic])
+            .submit(signature(SWEEP_SIGNATURE_INDEX))
+            .succeed();
+        read_state(|s| assert_eq!(s.collected_automatic_deposit_fees(), 0));
+
+        let credited = finalized.credit();
+
+        assert_eq!(credited.amount_received, 60_000_000 - 3 * FEE_PER_SIGNATURE);
+        let [manual_mint, first_mint, second_mint] = credited.pending_mints();
+        assert_eq!(manual_mint.amount_to_mint, 10_000_000 - FEE_PER_SIGNATURE);
+        assert_eq!(
+            first_mint.amount_to_mint,
+            20_000_000 - FEE_PER_SIGNATURE - AUTOMATIC_DEPOSIT_FEE
+        );
+        assert_eq!(
+            second_mint.amount_to_mint,
+            30_000_000 - FEE_PER_SIGNATURE - AUTOMATIC_DEPOSIT_FEE / 2
+        );
+        read_state(|s| {
+            assert_eq!(
+                s.collected_automatic_deposit_fees(),
+                AUTOMATIC_DEPOSIT_FEE + AUTOMATIC_DEPOSIT_FEE / 2
+            );
+            assert_eq!(s.balance(), credited.amount_received);
+        });
+
+        let replayed = replayed_recorded_log();
         read_state(|live_state| assert_eq!(&replayed, live_state));
     }
 
@@ -780,6 +866,7 @@ mod state_from_init_args {
                 minimum_deposit_amount: MINIMUM_DEPOSIT_AMOUNT,
                 deposit_sol_required_cycles: DEPOSIT_SOL_REQUIRED_CYCLES,
                 automatic_deposit_fee: Some(AUTOMATIC_DEPOSIT_FEE),
+                collected_automatic_deposit_fees: 0,
                 pending_deposit_sol_request_guards: BTreeSet::new(),
                 pending_withdrawal_request_guards: BTreeSet::new(),
                 deposits: Deposits::default(),
@@ -1602,6 +1689,7 @@ mod withdrawal_transactions {
                 account: funding_deposit.account,
                 address: funding_deposit.address,
                 balance: funding_deposit.balance,
+                deposit_fee: None,
             },
             EventType::SubmittedTransaction {
                 signature: signature(9),

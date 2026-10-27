@@ -94,7 +94,8 @@ pub enum DepositSolStatus {
         /// The mint transaction index on the ckSOL ledger.
         block_index: LedgerMintIndex,
         /// The minted amount: the swept amount minus the deposit's share of the
-        /// transaction fee of the sweep.
+        /// transaction fee of the sweep and, for a deposit detected by the automatic
+        /// flow, minus the automatic deposit fee.
         minted_amount: Lamport,
     },
     /// The sweep transaction failed, or expired without ever being seen on chain, so no
@@ -346,4 +347,6 @@ pub struct MinterInfo {
     /// The fee in lamports deducted from the minted amount of a deposit detected by the
     /// automatic flow, once configured.
     pub automatic_deposit_fee: Option<Lamport>,
+    /// The sum in lamports of the automatic deposit fees collected so far.
+    pub collected_automatic_deposit_fees: Option<Lamport>,
 }
