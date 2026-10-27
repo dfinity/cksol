@@ -473,7 +473,9 @@ impl State {
         let sweep = self.deposits.credit_sweep(signature, mints, timestamp);
         let deposit_fees = sweep.deposit_fees();
         assert!(
-            amount_to_mint + deposit_fees <= amount_received,
+            amount_to_mint
+                .checked_add(deposit_fees)
+                .is_some_and(|total| total <= amount_received),
             "Attempted to credit sweep {signature} with mints of {amount_to_mint} lamports and deposit fees of {deposit_fees} lamports exceeding the {amount_received} lamports received"
         );
         self.collected_automatic_deposit_fees += deposit_fees;
