@@ -138,6 +138,20 @@ mod get_balances_tests {
                     .add_stub_response(MultiRpcResult::Inconsistent(inconsistent.clone())),
                 GetMultipleAccountsError::InconsistentRpcResults,
             ),
+            (
+                TestCanisterRuntime::new().add_get_multiple_accounts_response(&[]),
+                GetMultipleAccountsError::UnexpectedAccountCount {
+                    expected: 1,
+                    actual: 0,
+                },
+            ),
+            (
+                TestCanisterRuntime::new().add_get_multiple_accounts_response(&[Some(1), None]),
+                GetMultipleAccountsError::UnexpectedAccountCount {
+                    expected: 1,
+                    actual: 2,
+                },
+            ),
         ] {
             let result = get_balances(&runtime, &[address(1)]).await;
 

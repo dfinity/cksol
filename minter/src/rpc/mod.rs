@@ -162,7 +162,8 @@ impl From<GetBalanceError> for DepositSolError {
 
 /// Reads the balances of the given addresses, in their order, at the `finalized`
 /// commitment level with a single `getMultipleAccounts` call asking for no account data,
-/// treating a missing account as a zero balance.
+/// treating a missing account as a zero balance. A response without exactly one account
+/// per address is an error, since the balances are paired with the addresses by position.
 ///
 /// # Panics
 ///
@@ -197,14 +198,23 @@ pub async fn get_balances<R: CanisterRuntime>(
         .with_cycles(get_multiple_accounts_cycles(addresses.len()))
         .try_send()
         .await;
-    match result? {
-        MultiRpcResult::Consistent(Ok(accounts)) => Ok(accounts
-            .into_iter()
-            .map(|account| account.map_or(0, |account| account.lamports))
-            .collect()),
-        MultiRpcResult::Consistent(Err(e)) => Err(GetMultipleAccountsError::RpcError(e)),
-        MultiRpcResult::Inconsistent(_) => Err(GetMultipleAccountsError::InconsistentRpcResults),
+    let accounts = match result? {
+        MultiRpcResult::Consistent(Ok(accounts)) => accounts,
+        MultiRpcResult::Consistent(Err(e)) => return Err(GetMultipleAccountsError::RpcError(e)),
+        MultiRpcResult::Inconsistent(_) => {
+            return Err(GetMultipleAccountsError::InconsistentRpcResults);
+        }
+    };
+    if accounts.len() != addresses.len() {
+        return Err(GetMultipleAccountsError::UnexpectedAccountCount {
+            expected: addresses.len(),
+            actual: accounts.len(),
+        });
     }
+    Ok(accounts
+        .into_iter()
+        .map(|account| account.map_or(0, |account| account.lamports))
+        .collect())
 }
 
 /// The cycles to attach to a `getMultipleAccounts` call reading `num_addresses` addresses.
@@ -229,6 +239,8 @@ pub enum GetMultipleAccountsError {
     RpcError(RpcError),
     #[error("Inconsistent RPC results for getMultipleAccounts")]
     InconsistentRpcResults,
+    #[error("Unexpected getMultipleAccounts response: expected {expected} accounts, got {actual}")]
+    UnexpectedAccountCount { expected: usize, actual: usize },
 }
 
 pub async fn submit_transaction<R: CanisterRuntime>(
