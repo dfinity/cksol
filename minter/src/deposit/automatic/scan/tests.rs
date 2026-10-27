@@ -16,10 +16,13 @@ use crate::{
 use cksol_types::DepositSolStatus;
 use cksol_types_internal::InitArgs;
 use ic_canister_runtime::IcError;
+use icrc_ledger_types::icrc1::account::Account;
 use sol_rpc_types::{GetMultipleAccountsParams, RpcConfig, RpcSources};
 
 const VALID_UNTIL: u64 = REGISTERED_AT + WATCH_WINDOW_NANOS;
 const TICK_AT: u64 = REGISTERED_AT + MINUTE_NANOS;
+/// When the reads of the tick at [`TICK_AT`] return, after the next slot of the schedule.
+const READ_AT: u64 = TICK_AT + MINUTE_NANOS + MINUTE_NANOS / 12;
 
 #[tokio::test]
 async fn should_return_early_without_due_addresses() {
@@ -86,24 +89,16 @@ async fn should_advance_the_schedule_below_the_minimum_and_treat_a_missing_accou
     setup();
     watch(at(REGISTERED_AT), account(1));
     watch(at(REGISTERED_AT), account(2));
-    let runtime = runtime_at(TICK_AT)
+    let runtime = runtime_with_reads_returning_after_the_next_slot()
         .add_get_multiple_accounts_response(&[Some(MINIMUM_DEPOSIT_AMOUNT - 1), None]);
 
     scan_watched_addresses(runtime.clone()).await;
 
     EventsAssert::assert_no_events_recorded();
-    let scanned_at = TICK_AT + 1;
     for account in [account(1), account(2)] {
         assert_eq!(
-            read_state(|s| s.watchlist().get(at(scanned_at), &account)),
-            Some(WatchedAddress {
-                account,
-                address: deposit_address(account),
-                valid_until: at(VALID_UNTIL),
-                scan_count: 1,
-                last_scanned_at: Some(at(scanned_at)),
-                next_scan_at: Some(at(REGISTERED_AT + 2 * MINUTE_NANOS)),
-            })
+            read_state(|s| s.watchlist().get(at(READ_AT), &account)),
+            Some(scanned_at_tick(account))
         );
     }
     assert_eq!(deposit_address_scan_count(ScanOutcome::BelowMinimum), 2);
@@ -178,22 +173,15 @@ async fn should_evict_expired_registrations_at_each_tick() {
 async fn should_advance_the_schedule_when_the_call_fails() {
     setup();
     watch(at(REGISTERED_AT), account(1));
-    let runtime = runtime_at(TICK_AT).add_stub_error(IcError::CallPerformFailed);
+    let runtime = runtime_with_reads_returning_after_the_next_slot()
+        .add_stub_error(IcError::CallPerformFailed);
 
     scan_watched_addresses(runtime.clone()).await;
 
     EventsAssert::assert_no_events_recorded();
-    let scanned_at = TICK_AT + 1;
     assert_eq!(
-        read_state(|s| s.watchlist().get(at(scanned_at), &account(1))),
-        Some(WatchedAddress {
-            account: account(1),
-            address: deposit_address(account(1)),
-            valid_until: at(VALID_UNTIL),
-            scan_count: 1,
-            last_scanned_at: Some(at(scanned_at)),
-            next_scan_at: Some(at(REGISTERED_AT + 2 * MINUTE_NANOS)),
-        })
+        read_state(|s| s.watchlist().get(at(READ_AT), &account(1))),
+        Some(scanned_at_tick(account(1)))
     );
     assert_eq!(deposit_address_scan_count(ScanOutcome::Failed), 1);
 }
@@ -239,7 +227,10 @@ fn should_discard_a_read_of_a_registration_replaced_or_expired_meanwhile() {
         apply_balance_read(&runtime, scan_at(TICK_AT), &stale, MINIMUM_DEPOSIT_AMOUNT);
     let after_expiry = apply_balance_read(
         &runtime,
-        scan_at(renewed.valid_until.as_nanos() + 1),
+        Scan {
+            read_at: at(renewed.valid_until.as_nanos() + 1),
+            ..scan_at(TICK_AT)
+        },
         &renewed,
         MINIMUM_DEPOSIT_AMOUNT,
     );
@@ -288,12 +279,32 @@ fn setup() {
 fn scan_at(scanned_at: u64) -> Scan {
     Scan {
         scanned_at: at(scanned_at),
+        read_at: at(scanned_at),
         automatic_deposit_fee: AUTOMATIC_DEPOSIT_FEE,
     }
 }
 
 fn runtime_at(now: u64) -> TestCanisterRuntime {
     TestCanisterRuntime::new().with_increasing_time_from(now)
+}
+
+/// A tick at [`TICK_AT`], the second slot of the schedule, whose reads return at [`READ_AT`],
+/// after the third slot.
+fn runtime_with_reads_returning_after_the_next_slot() -> TestCanisterRuntime {
+    TestCanisterRuntime::new().add_times([TICK_AT, READ_AT])
+}
+
+/// A registration scanned once by the tick at [`TICK_AT`], whose next scan is due at the
+/// following slot, even when the reads of the tick returned after it.
+fn scanned_at_tick(account: Account) -> WatchedAddress {
+    WatchedAddress {
+        account,
+        address: deposit_address(account),
+        valid_until: at(VALID_UNTIL),
+        scan_count: 1,
+        last_scanned_at: Some(at(TICK_AT)),
+        next_scan_at: Some(at(REGISTERED_AT + 2 * MINUTE_NANOS)),
+    }
 }
 
 trait RequestedAddressesExt {
