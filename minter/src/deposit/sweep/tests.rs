@@ -200,6 +200,28 @@ async fn should_return_the_deposit_a_scan_queued_during_a_rejected_balance_read_
     assert_yields_to_the_deposit_queued_by_a_scan_during_the_read(runtime).await;
 }
 
+#[tokio::test]
+async fn should_return_the_deposit_a_scan_queued_and_minted_during_the_balance_read() {
+    init_state();
+    init_schnorr_master_key();
+    let runtime = runtime().add_get_balance_response(MINIMUM_DEPOSIT_AMOUNT);
+
+    let (result, minted) = join!(deposit_sol(&runtime, DEPOSITOR_ACCOUNT), async {
+        DepositFlow::queue_automatic(
+            DEPOSITOR_ACCOUNT,
+            MINIMUM_DEPOSIT_AMOUNT,
+            AUTOMATIC_DEPOSIT_FEE,
+        )
+        .sweep(signature(1))
+        .succeed()
+        .credit()
+        .single_pending_mint()
+        .mint(1)
+    });
+
+    assert_eq!(result, Ok(minted.deposit_id));
+}
+
 async fn assert_yields_to_the_deposit_queued_by_a_scan_during_the_read(
     runtime: TestCanisterRuntime,
 ) {
