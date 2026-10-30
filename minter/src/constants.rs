@@ -79,24 +79,6 @@ pub const GET_MULTIPLE_ACCOUNTS_BASE_CYCLES: u128 = 10_000_000_000;
 /// the design); the unused part is refunded.
 pub const GET_MULTIPLE_ACCOUNTS_CYCLES_PER_ADDRESS: u128 = 100_000_000;
 
-/// The bytes of a `getMultipleAccounts` JSON-RPC response outside the account
-/// list: the JSON-RPC envelope, the response context and the allowance for the
-/// HTTP headers that the SOL RPC canister includes in its own estimates, since
-/// it uses an estimate passed with a request as the response size limit as is.
-pub const GET_MULTIPLE_ACCOUNTS_RESPONSE_BASE_BYTES: u64 = 128 + SOL_RPC_RESPONSE_HEADER_BYTES;
-
-/// The bytes one account without data adds to a `getMultipleAccounts` JSON-RPC
-/// response, at the largest lamport amount and rent epoch. The response size
-/// estimate passed to the SOL RPC canister is sized by the number of addresses
-/// so that the canister does not retry the call with doubled estimates, and
-/// stays below its own estimate, which allows 512 bytes per account for the
-/// account data the scan does not ask for.
-pub const GET_MULTIPLE_ACCOUNTS_RESPONSE_BYTES_PER_ADDRESS: u64 = 160;
-
-/// The allowance for the HTTP headers of a response that the SOL RPC canister
-/// includes in the response size estimates of its typed methods.
-const SOL_RPC_RESPONSE_HEADER_BYTES: u64 = 2 * 1024;
-
 /// Cycles to attach for `getSignatureStatuses` RPC calls.
 ///
 /// The SOL RPC canister charges about 2.3B cycles for a `getSignatureStatuses`

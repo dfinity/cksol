@@ -184,24 +184,22 @@ impl Watchlist {
         account: Account,
         address: Address,
     ) -> Result<WatchedAddress, WatchlistFull> {
-        let inserted = self
+        match self
             .entries
-            .insert(now, account, ScanProgress::unscanned(address, now));
-        match inserted {
+            .insert(now, account, ScanProgress::unscanned(address, now))
+        {
             Ok(_) | Err(InsertError::AlreadyPresent { .. }) => Ok(self
                 .get(now, &account)
                 .expect("BUG: a registration is live right after its insertion")),
             Err(InsertError::AtCapacity { .. }) => Err(WatchlistFull),
-            Err(InsertError::Expired { .. }) => {
-                unreachable!("BUG: a registration for the window starting now cannot have expired")
-            }
         }
     }
 
     /// Puts the account of a dropped automatic deposit back on the watchlist for a fresh
     /// window and schedule starting now, so that the funds still on its deposit address are
-    /// swept again without the user's intervention. An account that is already watched keeps
-    /// its registration.
+    /// swept again without the user's intervention. The account is not watched at that point:
+    /// queueing the deposit removed it from the watchlist, and an account with a deposit in
+    /// flight is not registered.
     pub fn rearm(
         &mut self,
         now: Timestamp,

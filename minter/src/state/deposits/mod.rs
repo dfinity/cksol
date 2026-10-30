@@ -39,7 +39,8 @@ mod tests;
 ///   transaction is what the finalization timer tracks from here on. A sweep is never
 ///   resubmitted: when it fails or expires, its deposits are dropped and their accounts
 ///   released, so that `deposit_sol` can queue a new sweep of the balance still on the
-///   deposit address.
+///   deposit address. The accounts of the automatic deposits are also put back on the
+///   watchlist when it has room, so that a balance scan queues that sweep without a call.
 /// * `finalized`: `getSignatureStatuses` reported the sweep as finalized without error. The
 ///   amount received by the main account is still unknown, because Solana may charge a
 ///   different transaction fee than the sweep was built with.
@@ -256,9 +257,8 @@ impl Deposits {
         expected_received
     }
 
-    /// Drops every deposit of the given swept sweep, releases their accounts and returns
-    /// the dropped deposits in the order of their ids.
-    pub(super) fn drop_swept(&mut self, signature: &Signature) -> Vec<QueuedDeposit> {
+    /// Drops every deposit of the given swept sweep and releases their accounts.
+    pub(super) fn drop_swept(&mut self, signature: &Signature) {
         let sweep = self
             .swept
             .remove(signature)
@@ -274,7 +274,6 @@ impl Deposits {
                 },
             );
         }
-        sweep.deposits().values().copied().collect()
     }
 
     /// Moves every deposit of the given finalized sweep to the quarantine, keeping their

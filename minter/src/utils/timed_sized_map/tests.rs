@@ -85,19 +85,23 @@ fn should_admit_a_new_key_once_expired_entries_free_room() {
 
 #[test]
 fn should_readmit_an_expired_key_as_a_fresh_entry() {
-    let mut map = TimedSizedMap::new(Duration::from_nanos(10), capacity(5));
-    map.insert(at(0), "a", 1).unwrap();
+    // A capacity of 1 also checks that the expired entry is evicted before the capacity
+    // check, since it is the one filling the map.
+    for cap in [capacity(5), capacity(1)] {
+        let mut map = TimedSizedMap::new(Duration::from_nanos(10), cap);
+        map.insert(at(0), "a", 1).unwrap();
 
-    let evicted = map.insert(at(20), "a", 2).unwrap();
+        let evicted = map.insert(at(20), "a", 2).unwrap();
 
-    assert_eq!(evicted, vec![("a", 1)]);
-    assert_eq!(map.get(at(20), &"a"), Some(&2));
-    assert_eq!(
-        map.get_entry(at(20), &"a").map(|entry| entry.expires_at),
-        Some(at(30))
-    );
-    assert_eq!(map.len(), 1);
-    assert_consistent(&map);
+        assert_eq!(evicted, vec![("a", 1)]);
+        assert_eq!(map.get(at(20), &"a"), Some(&2));
+        assert_eq!(
+            map.get_entry(at(20), &"a").map(|entry| entry.expires_at),
+            Some(at(30))
+        );
+        assert_eq!(map.len(), 1);
+        assert_consistent(&map);
+    }
 }
 
 #[test]
@@ -181,20 +185,27 @@ fn should_keep_the_expiry_of_an_inserted_entry_shorter_than_the_ttl() {
 }
 
 #[test]
-fn should_reject_an_already_expired_entry() {
+fn should_ignore_an_already_expired_entry() {
     let mut map = TimedSizedMap::new(Duration::from_nanos(10), capacity(5));
+    // An expired entry that an insertion would evict shows that the no-op leaves the map as
+    // it is.
+    map.insert(at(0), "x", 0).unwrap();
+    let before = map.clone();
 
-    let rejected = map.insert_entry(
-        at(20),
-        "a",
-        Entry {
-            value: 1,
-            expires_at: at(19),
-        },
-    );
+    let evicted = map
+        .insert_entry(
+            at(20),
+            "a",
+            Entry {
+                value: 1,
+                expires_at: at(19),
+            },
+        )
+        .unwrap();
 
-    assert_eq!(rejected, Err(InsertError::Expired { key: "a", value: 1 }));
-    assert!(map.is_empty());
+    assert!(evicted.is_empty());
+    assert_eq!(map, before);
+    assert_eq!(map.get(at(20), &"a"), None);
     assert_consistent(&map);
 }
 
@@ -243,14 +254,20 @@ fn should_remove_an_entry_from_both_indices() {
     assert!(map.iter_by_expiry().all(|(key, _)| *key != "a"));
     assert_consistent(&map);
 
-    map.remove(&"b");
+    // "c" sits in a later bucket than "b", so its removal must find its own bucket.
+    map.remove(&"c");
 
     assert_eq!(
         map.iter_by_expiry()
             .map(|(key, _)| *key)
             .collect::<Vec<_>>(),
-        vec!["c"]
+        vec!["b"]
     );
+    assert_consistent(&map);
+
+    map.remove(&"b");
+
+    assert!(map.is_empty());
     assert_consistent(&map);
 }
 
@@ -306,7 +323,18 @@ fn should_keep_the_indices_consistent_through_churn() {
 
 #[test]
 fn should_saturate_the_expiry_of_a_ttl_beyond_the_epoch_range() {
-    let mut map = TimedSizedMap::new(Duration::MAX, capacity(5));
+    // A ttl whose nanoseconds exceed u64::MAX pins the conversion of the ttl.
+    let mut map = TimedSizedMap::new(Duration::from_secs(u64::MAX), capacity(5));
+
+    map.insert(at(0), "a", 1).unwrap();
+
+    assert_eq!(
+        map.get_entry(at(0), &"a").map(|entry| entry.expires_at),
+        Some(at(u64::MAX))
+    );
+
+    // An insertion close to the end of the epoch range pins the addition of the ttl.
+    let mut map = TimedSizedMap::new(Duration::from_nanos(10), capacity(5));
 
     map.insert(at(u64::MAX - 1), "a", 1).unwrap();
 
@@ -400,25 +428,25 @@ fn capacity(n: usize) -> NonZeroUsize {
     NonZeroUsize::new(n).unwrap()
 }
 
-fn assert_consistent<K: Ord + Clone + std::fmt::Debug, V: PartialEq + std::fmt::Debug>(
-    map: &TimedSizedMap<K, V>,
-) {
-    let indexed: Vec<&K> = map.iter_by_expiry().map(|(key, _)| key).collect();
-    assert_eq!(indexed.len(), map.len(), "index and entry counts disagree");
-    for (key, entry) in map.iter() {
-        let indexed_entry = map
-            .iter_by_expiry()
-            .find(|(indexed_key, _)| *indexed_key == key)
-            .map(|(_, entry)| entry)
-            .unwrap_or_else(|| panic!("entry {key:?} missing from the expiry index"));
-        assert_eq!(indexed_entry, entry);
+fn assert_consistent<K: Ord + Clone + std::fmt::Debug, V>(map: &TimedSizedMap<K, V>) {
+    let indexed: Vec<&K> = map.by_expiry.values().flatten().collect();
+    assert_eq!(
+        indexed.len(),
+        map.entries.len(),
+        "index and entry counts disagree"
+    );
+    for (key, entry) in &map.entries {
+        let bucket = map
+            .by_expiry
+            .get(&entry.expires_at)
+            .unwrap_or_else(|| panic!("expiry of entry {key:?} missing from the expiry index"));
+        assert!(
+            bucket.contains(key),
+            "entry {key:?} missing from the bucket of its expiry"
+        );
     }
-    let expiries: Vec<Timestamp> = map
-        .iter_by_expiry()
-        .map(|(_, entry)| entry.expires_at)
-        .collect();
     assert!(
-        expiries.is_sorted(),
-        "expiry index out of order: {expiries:?}"
+        map.by_expiry.values().all(|bucket| !bucket.is_empty()),
+        "empty bucket left in the expiry index"
     );
 }
