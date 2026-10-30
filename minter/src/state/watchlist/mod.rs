@@ -140,8 +140,9 @@ impl Watchlist {
 
     /// Puts the account of a dropped automatic deposit back on the watchlist for a fresh
     /// window and schedule starting now, so that the funds still on its deposit address are
-    /// swept again without the user's intervention. An account that is already watched keeps
-    /// its registration.
+    /// swept again without the user's intervention. The account is not watched at that point:
+    /// queueing the deposit removed it from the watchlist, and an account with a deposit in
+    /// flight is not registered.
     pub fn rearm(
         &mut self,
         now: Timestamp,

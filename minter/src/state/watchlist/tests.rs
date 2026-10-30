@@ -251,19 +251,6 @@ fn should_not_rearm_a_manual_deposit() {
     assert!(watchlist.is_empty());
 }
 
-#[test]
-fn should_keep_the_registration_of_an_account_that_is_already_watched() {
-    let mut watchlist = Watchlist::default();
-    let registered = register(&mut watchlist, at(REGISTERED_AT + HOUR_NANOS), account(1));
-
-    let rearmed = watchlist
-        .rearm(at(REGISTERED_AT + 2 * HOUR_NANOS), &dropped(account(1)))
-        .unwrap();
-
-    assert_eq!(rearmed, registered);
-    assert_eq!(watchlist.len(), 1);
-}
-
 fn dropped(account: Account) -> QueuedDeposit {
     automatic_deposit_of(account, MINIMUM_DEPOSIT_AMOUNT, AUTOMATIC_DEPOSIT_FEE)
 }
