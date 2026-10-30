@@ -3,14 +3,64 @@ use crate::{
     state::{
         QueuedDeposit, SchnorrPublicKey, State,
         event::{Event, EventType},
+        watchlist::RearmError,
     },
     storage,
+    utils::timed_sized_map::Timestamp,
 };
+use canlog::log;
+use cksol_types_internal::log::Priority;
 
 /// Records the given event payload in the event log and updates the state to reflect the change.
 pub fn process_event<R: CanisterRuntime>(state: &mut State, payload: EventType, runtime: &R) {
     apply_state_transition(state, &payload, runtime.time());
     storage::record_event(payload, runtime);
+}
+
+/// Records the given `FailedTransaction` or `ExpiredTransaction` event of a sweep, which
+/// drops its deposits, then puts the accounts of its automatic deposits back on the
+/// watchlist for a fresh window, so that the funds still on their deposit addresses are
+/// swept again without the user's intervention. Every sweep drop of the minter goes through
+/// here; test fixtures and benchmarks that record these events directly skip the re-arm.
+///
+/// The re-arm is not part of the state transition of the event: the watchlist is transient,
+/// so replaying it from the event log would not see the registrations it was made against.
+pub fn process_dropped_sweep<R: CanisterRuntime>(
+    state: &mut State,
+    payload: EventType,
+    runtime: &R,
+) {
+    let signature = match &payload {
+        EventType::FailedTransaction { signature }
+        | EventType::ExpiredTransaction { signature } => *signature,
+        _ => panic!("BUG: {payload:?} does not drop a transaction"),
+    };
+    let deposits: Vec<_> = state
+        .deposits()
+        .swept()
+        .get(&signature)
+        .unwrap_or_else(|| panic!("BUG: cannot drop sweep {signature} that is not swept"))
+        .deposits()
+        .iter()
+        .map(|(deposit_id, deposit)| (*deposit_id, *deposit))
+        .collect();
+    process_event(state, payload, runtime);
+    let now = Timestamp::from_nanos(runtime.time());
+    for (deposit_id, deposit) in deposits {
+        match state.watchlist_mut().rearm(now, &deposit) {
+            Ok(_) => log!(
+                Priority::Info,
+                "Watching account {} again after its deposit {deposit_id} was dropped with sweep {signature}",
+                deposit.account
+            ),
+            Err(RearmError::ManualDeposit) => {}
+            Err(RearmError::WatchlistFull) => log!(
+                Priority::Info,
+                "Failed to watch account {} again after its deposit {deposit_id} was dropped with sweep {signature}: the watchlist is full",
+                deposit.account
+            ),
+        }
+    }
 }
 
 /// Updates the state to reflect the given state transition.
