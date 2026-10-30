@@ -13,11 +13,11 @@ use crate::{
     },
     storage::{UndecidedWithdrawalReason, reset_events, undecided_withdrawal_transaction_count},
     test_fixtures::{
-        EventsAssert, GetTransactionResult, MINIMUM_WITHDRAWAL_AMOUNT, NONCE_ACCOUNT, account,
-        confirmed_block_at_height, devnet_sweep, durable_nonce, events, failed_withdrawal_response,
-        finalized_status, init_balance, init_schnorr_master_key, init_state, nonce_account_info,
-        runtime::TestCanisterRuntime, signature, succeeded_transaction_response,
-        succeeded_withdrawal_response,
+        AUTOMATIC_DEPOSIT_FEE, EventsAssert, GetTransactionResult, MINIMUM_WITHDRAWAL_AMOUNT,
+        NONCE_ACCOUNT, account, automatic_deposit_of, confirmed_block_at_height, devnet_sweep,
+        durable_nonce, events, failed_withdrawal_response, finalized_status, init_balance,
+        init_schnorr_master_key, init_state, nonce_account_info, runtime::TestCanisterRuntime,
+        signature, succeeded_transaction_response, succeeded_withdrawal_response,
     },
 };
 use sol_rpc_types::{
@@ -391,6 +391,49 @@ mod finalization {
                     !case.should_expire,
                     "{}",
                     case.name
+                );
+            });
+        }
+    }
+
+    #[tokio::test]
+    async fn should_rearm_the_automatic_deposit_of_a_failed_or_expired_sweep() {
+        let failed_status = TransactionStatus {
+            slot: SUBMISSION_SLOT,
+            status: Err(TransactionError::InsufficientFundsForFee),
+            err: Some(TransactionError::InsufficientFundsForFee),
+            confirmation_status: Some(TransactionConfirmationStatus::Finalized),
+        };
+        let cases = [
+            ("failed", CURRENT_BLOCK_HEIGHT, Some(failed_status)),
+            ("expired", EXPIRED_BLOCK_HEIGHT, None),
+        ];
+
+        for (outcome, block_height, status) in cases {
+            reset_state();
+            reset_events();
+            setup();
+            let deposit_id = read_state(|state| state.deposits().next_id());
+            let deposit = automatic_deposit_of(account(1), 1_000_000, AUTOMATIC_DEPOSIT_FEE);
+            events::queue(deposit_id, deposit);
+            events::submit_sweep_at_height(signature(1), vec![deposit_id], block_height);
+            let runtime = TestCanisterRuntime::new()
+                .with_increasing_time()
+                .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
+                .add_stub_response(BlockResult::Consistent(Ok(current_block())))
+                .add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![status])));
+
+            finalize_transactions(runtime).await;
+
+            read_state(|s| {
+                assert_eq!(s.deposits().dropped().len(), 1, "{outcome}");
+                assert_eq!(
+                    s.watchlist()
+                        .iter()
+                        .map(|watched| watched.account)
+                        .collect::<Vec<_>>(),
+                    vec![account(1)],
+                    "{outcome}"
                 );
             });
         }

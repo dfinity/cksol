@@ -166,7 +166,11 @@ mod watched_deposit_addresses {
 mod swept_deposits {
     use super::*;
     use crate::{
-        state::{audit::replay_events, reset_state, watchlist::MAX_WATCHED_ADDRESSES},
+        state::{
+            audit::{process_dropped_sweep, replay_events},
+            reset_state,
+            watchlist::MAX_WATCHED_ADDRESSES,
+        },
         storage::{reset_events, with_event_iter},
         test_fixtures::{
             DEFAULT_BLOCK_HEIGHT, REGISTERED_AT, WATCH_WINDOW_NANOS, at,
@@ -250,54 +254,66 @@ mod swept_deposits {
     }
 
     #[test]
-    fn should_rearm_the_automatic_deposits_of_a_failed_sweep() {
-        let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
-
-        assert_rearms_the_automatic_deposits_when_dropped_by(EventType::FailedTransaction {
-            signature: sweep_signature,
-        });
-    }
-
-    #[test]
-    fn should_rearm_the_automatic_deposits_of_an_expired_sweep() {
-        let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
-
-        assert_rearms_the_automatic_deposits_when_dropped_by(EventType::ExpiredTransaction {
-            signature: sweep_signature,
-        });
-    }
-
-    fn assert_rearms_the_automatic_deposits_when_dropped_by(drop_event: EventType) {
+    fn should_rearm_the_automatic_deposits_of_a_dropped_sweep_without_replaying_the_rearm() {
         const DROPPED_AT: u64 = REGISTERED_AT + WATCH_WINDOW_NANOS + 1;
-        init_state();
-        init_schnorr_master_key();
-        let manual = DepositFlow::queue(account(1), 10_000_000);
-        let automatic = DepositFlow::queue_automatic(account(2), 20_000_000, AUTOMATIC_DEPOSIT_FEE);
-        SweepFlow::of([manual, automatic]).submit(signature(SWEEP_SIGNATURE_INDEX));
+        let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
+        let drop_events = [
+            EventType::FailedTransaction {
+                signature: sweep_signature,
+            },
+            EventType::ExpiredTransaction {
+                signature: sweep_signature,
+            },
+        ];
+        for drop_event in drop_events {
+            reset_state();
+            reset_events();
+            init_state();
+            init_schnorr_master_key();
+            let manual = DepositFlow::queue(account(1), 10_000_000);
+            let automatic =
+                DepositFlow::queue_automatic(account(2), 20_000_000, AUTOMATIC_DEPOSIT_FEE);
+            SweepFlow::of([manual, automatic]).submit(sweep_signature);
 
-        mutate_state(|state| {
-            process_event(
-                state,
-                drop_event,
-                &TestCanisterRuntime::new().add_times([DROPPED_AT, DROPPED_AT]),
-            )
-        });
+            mutate_state(|state| {
+                process_dropped_sweep(
+                    state,
+                    drop_event.clone(),
+                    &TestCanisterRuntime::new().add_times([DROPPED_AT; 3]),
+                )
+            });
 
-        let rearmed = WatchedAddress {
-            account: account(2),
-            address: automatic.address,
-            valid_until: at(DROPPED_AT + WATCH_WINDOW_NANOS),
-            scan_count: 0,
-            last_scanned_at: None,
-            next_scan_at: Some(at(DROPPED_AT)),
-        };
-        read_state(|s| {
-            assert_eq!(s.deposits().dropped().len(), 2);
-            assert_eq!(s.watchlist().iter().collect::<Vec<_>>(), vec![rearmed]);
-            assert_eq!(s.watchlist().due(at(DROPPED_AT)), vec![rearmed]);
-        });
-        let replayed = replayed_recorded_log();
-        read_state(|live_state| assert_eq!(&replayed, live_state));
+            let rearmed = WatchedAddress {
+                account: account(2),
+                address: automatic.address,
+                valid_until: at(DROPPED_AT + WATCH_WINDOW_NANOS),
+                scan_count: 0,
+                last_scanned_at: None,
+                next_scan_at: Some(at(DROPPED_AT)),
+            };
+            read_state(|s| {
+                assert_eq!(s.deposits().dropped().len(), 2, "{drop_event:?}");
+                assert_eq!(
+                    s.watchlist().iter().collect::<Vec<_>>(),
+                    vec![rearmed],
+                    "{drop_event:?}"
+                );
+                assert_eq!(
+                    s.watchlist().due(at(DROPPED_AT)),
+                    vec![rearmed],
+                    "{drop_event:?}"
+                );
+            });
+            let replayed = replayed_recorded_log();
+            assert!(replayed.watchlist().is_empty(), "{drop_event:?}");
+            read_state(|live_state| {
+                assert_eq!(
+                    replayed.deposits().dropped(),
+                    live_state.deposits().dropped(),
+                    "{drop_event:?}"
+                )
+            });
+        }
     }
 
     #[test]
@@ -310,7 +326,15 @@ mod swept_deposits {
             watch(at(REGISTERED_AT), account(index));
         }
 
-        fail_transaction(dropped.signature);
+        mutate_state(|state| {
+            process_dropped_sweep(
+                state,
+                EventType::FailedTransaction {
+                    signature: dropped.signature,
+                },
+                &TestCanisterRuntime::new().add_times([REGISTERED_AT; 3]),
+            )
+        });
 
         read_state(|s| {
             assert_eq!(s.watchlist().get(at(REGISTERED_AT), &account(0)), None);
