@@ -169,7 +169,7 @@ mod swept_deposits {
         state::{
             audit::{process_dropped_sweep, replay_events},
             reset_state,
-            watchlist::MAX_WATCHED_ADDRESSES,
+            watchlist::{MAX_WATCHED_ADDRESSES, Watchlist},
         },
         storage::{reset_events, with_event_iter},
         test_fixtures::{
@@ -304,15 +304,13 @@ mod swept_deposits {
                     "{drop_event:?}"
                 );
             });
-            let replayed = replayed_recorded_log();
-            assert!(replayed.watchlist().is_empty(), "{drop_event:?}");
-            read_state(|live_state| {
-                assert_eq!(
-                    replayed.deposits().dropped(),
-                    live_state.deposits().dropped(),
-                    "{drop_event:?}"
-                )
-            });
+            let mut live_without_rearm = read_state(State::clone);
+            *live_without_rearm.watchlist_mut() = Watchlist::default();
+            assert_eq!(
+                replayed_recorded_log(),
+                live_without_rearm,
+                "{drop_event:?}"
+            );
         }
     }
 
