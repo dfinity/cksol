@@ -146,10 +146,6 @@ pub enum EventType {
     /// The snapshot of the watchlist of the automatic deposit flow taken before an upgrade,
     /// which replay restores verbatim, since registrations are not recorded as events.
     WatchedDepositAddresses {
-        /// The window of a registration, in nanoseconds.
-        window_nanos: u64,
-        /// The number of live registrations the watchlist holds at most.
-        capacity: u64,
         /// Every registration, live or expired but not yet evicted.
         entries: Vec<WatchedDepositAddress>,
     },

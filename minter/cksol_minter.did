@@ -599,10 +599,6 @@ type EventType = variant {
     // an upgrade, which replay restores verbatim, since registrations are not
     // recorded as events.
     WatchedDepositAddresses : record {
-        // The window of a registration, in nanoseconds.
-        window_nanos: nat64;
-        // The number of live registrations the watchlist holds at most.
-        capacity: nat64;
         // Every registration, live or expired but not yet evicted.
         entries: vec WatchedDepositAddress;
     };

@@ -4,9 +4,8 @@ use candid::{Nat, Principal};
 use cksol_int_tests::{
     CkSolMinter, Setup, SetupBuilder,
     fixtures::{
-        DEFAULT_CALLER_ACCOUNT, DEFAULT_CALLER_DEPOSIT_ADDRESS, DEPOSIT_AMOUNT,
-        MAX_WATCHED_ADDRESSES, MINTER_ADDRESS, MockBuilder, RENT_EXEMPTION_THRESHOLD,
-        WATCH_WINDOW_NANOS,
+        DEFAULT_CALLER_ACCOUNT, DEFAULT_CALLER_DEPOSIT_ADDRESS, DEPOSIT_AMOUNT, MINTER_ADDRESS,
+        MockBuilder, RENT_EXEMPTION_THRESHOLD, WATCH_WINDOW_NANOS,
     },
     validator::FEE_PER_SIGNATURE,
 };
@@ -1322,8 +1321,6 @@ mod automatic_deposit_sol_tests {
             check!(
                 snapshots
                     == [&EventType::WatchedDepositAddresses {
-                        window_nanos: WATCH_WINDOW_NANOS,
-                        capacity: MAX_WATCHED_ADDRESSES,
                         entries: vec![WatchedDepositAddress {
                             account: DEFAULT_CALLER_ACCOUNT,
                             address: DEFAULT_CALLER_DEPOSIT_ADDRESS.parse().unwrap(),

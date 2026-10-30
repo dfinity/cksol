@@ -272,8 +272,6 @@ fn should_rebuild_the_watchlist_verbatim_from_its_snapshot() {
             .collect::<Vec<_>>(),
         vec![account(3), account(2), account(1)]
     );
-    assert_eq!(snapshot.window_nanos, WATCH_WINDOW_NANOS);
-    assert_eq!(snapshot.capacity, MAX_WATCHED_ADDRESSES.get() as u64);
 }
 
 #[test]
@@ -289,14 +287,20 @@ fn should_keep_expired_registrations_and_exceed_the_capacity_when_rebuilding() {
         })
         .collect();
     let snapshot = WatchlistSnapshot {
-        window_nanos: WATCH_WINDOW_NANOS,
-        capacity: MAX_WATCHED_ADDRESSES.get() as u64,
         entries: entries.clone(),
     };
 
-    let rebuilt = Watchlist::from_snapshot(&snapshot);
+    let mut rebuilt = Watchlist::from_snapshot(&snapshot);
 
     assert_eq!(rebuilt.len(), entries.len());
+    assert_eq!(
+        rebuilt.register(
+            at(REGISTERED_AT),
+            account(entries.len()),
+            deposit_address(account(entries.len()))
+        ),
+        Err(WatchlistFull)
+    );
     assert_eq!(rebuilt.snapshot(), snapshot);
     assert_eq!(rebuilt.live_len(at(VALID_UNTIL + 1)), 0);
     assert_eq!(
@@ -310,16 +314,6 @@ fn should_keep_expired_registrations_and_exceed_the_capacity_when_rebuilding() {
             next_scan_at: Some(at(REGISTERED_AT + 90 * MINUTE_NANOS)),
         })
     );
-}
-
-#[test]
-#[should_panic(expected = "non-zero capacity")]
-fn should_panic_when_rebuilding_from_a_snapshot_without_capacity() {
-    Watchlist::from_snapshot(&WatchlistSnapshot {
-        window_nanos: WATCH_WINDOW_NANOS,
-        capacity: 0,
-        entries: vec![],
-    });
 }
 
 fn dropped(account: Account) -> QueuedDeposit {

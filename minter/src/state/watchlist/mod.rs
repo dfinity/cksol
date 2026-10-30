@@ -122,16 +122,17 @@ impl Default for Watchlist {
 }
 
 impl Watchlist {
-    /// Rebuilds the watchlist verbatim from a snapshot: under the limits the snapshot records,
-    /// with the entries as stored, expired ones included, so that the state replayed from the
-    /// event log equals the state that recorded the snapshot.
+    /// Rebuilds the watchlist from a snapshot: with the entries as stored, expired ones
+    /// included and without a capacity check, so that the state replayed from the event log
+    /// equals the state that recorded the snapshot, but under the [`WATCH_WINDOW`] and
+    /// [`MAX_WATCHED_ADDRESSES`] of the running version, so that a change of either takes
+    /// effect at the upgrade that ships it.
     ///
     /// # Panics
     ///
-    /// If the snapshot records no capacity or lists an account twice, since it was not
-    /// produced by [`Self::snapshot`] then.
+    /// If the snapshot lists an account twice, since it was not produced by
+    /// [`Self::snapshot`] then.
     pub fn from_snapshot(snapshot: &WatchlistSnapshot) -> Self {
-        let capacity = usize::try_from(snapshot.capacity).unwrap_or(usize::MAX);
         let entries = snapshot.entries.iter().map(|entry| {
             (
                 entry.account,
@@ -148,9 +149,8 @@ impl Watchlist {
         });
         Self {
             entries: TimedSizedMap::from_ordered_entries(
-                Duration::from_nanos(snapshot.window_nanos),
-                NonZeroUsize::new(capacity)
-                    .expect("BUG: a watchlist snapshot records a non-zero capacity"),
+                WATCH_WINDOW,
+                MAX_WATCHED_ADDRESSES,
                 entries,
             ),
         }
@@ -159,8 +159,6 @@ impl Watchlist {
     /// The snapshot [`Self::from_snapshot`] rebuilds this watchlist from.
     pub fn snapshot(&self) -> WatchlistSnapshot {
         WatchlistSnapshot {
-            window_nanos: u64::try_from(self.entries.ttl().as_nanos()).unwrap_or(u64::MAX),
-            capacity: self.entries.capacity().get() as u64,
             entries: self
                 .entries
                 .iter_by_expiry()

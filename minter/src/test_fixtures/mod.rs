@@ -1688,16 +1688,8 @@ pub mod arb {
     }
 
     fn arb_watchlist_snapshot() -> impl Strategy<Value = WatchlistSnapshot> {
-        (
-            any::<u64>(),
-            1..=u64::MAX,
-            prop::collection::vec(arb_watched_deposit_address(), 0..5),
-        )
-            .prop_map(|(window_nanos, capacity, entries)| WatchlistSnapshot {
-                window_nanos,
-                capacity,
-                entries,
-            })
+        prop::collection::vec(arb_watched_deposit_address(), 0..5)
+            .prop_map(|entries| WatchlistSnapshot { entries })
     }
 
     fn arb_watched_deposit_address() -> impl Strategy<Value = WatchedDepositAddress> {

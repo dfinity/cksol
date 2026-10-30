@@ -240,18 +240,12 @@ pub enum EventType {
     WatchedDepositAddresses(#[n(0)] WatchlistSnapshot),
 }
 
-/// Payload of the `WatchedDepositAddresses` event: the limits of the watchlist in force when
-/// the snapshot was taken and every registration, live or expired but not yet evicted, in
-/// the order the watchlist is rebuilt from.
+/// Payload of the `WatchedDepositAddresses` event: every registration, live or expired but
+/// not yet evicted, in the order the watchlist is rebuilt from. The window and the capacity
+/// are not recorded, since the watchlist is rebuilt under those of the running version.
 #[derive(Clone, Eq, PartialEq, Debug, Decode, Encode)]
 pub struct WatchlistSnapshot {
-    /// The window of a registration, in nanoseconds.
     #[n(0)]
-    pub window_nanos: u64,
-    /// The number of live registrations the watchlist holds at most.
-    #[n(1)]
-    pub capacity: u64,
-    #[n(2)]
     pub entries: Vec<WatchedDepositAddress>,
 }
 

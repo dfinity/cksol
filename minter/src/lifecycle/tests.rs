@@ -1,7 +1,6 @@
 use crate::{
     lifecycle::pre_upgrade,
     state::{
-        MAX_WATCHED_ADDRESSES,
         event::{EventType, WatchlistSnapshot},
         mutate_state, read_state,
     },
@@ -19,8 +18,6 @@ fn should_record_an_empty_snapshot_on_every_upgrade() {
 
     EventsAssert::from_recorded()
         .expect_event_eq(EventType::WatchedDepositAddresses(WatchlistSnapshot {
-            window_nanos: WATCH_WINDOW_NANOS,
-            capacity: MAX_WATCHED_ADDRESSES.get() as u64,
             entries: vec![],
         }))
         .assert_no_more_events();
