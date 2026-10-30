@@ -20,7 +20,8 @@ pub fn process_event<R: CanisterRuntime>(state: &mut State, payload: EventType, 
 /// Records the given `FailedTransaction` or `ExpiredTransaction` event of a sweep, which
 /// drops its deposits, then puts the accounts of its automatic deposits back on the
 /// watchlist for a fresh window, so that the funds still on their deposit addresses are
-/// swept again without the user's intervention. Every sweep drop goes through here.
+/// swept again without the user's intervention. Every sweep drop of the minter goes through
+/// here; test fixtures and benchmarks that record these events directly skip the re-arm.
 ///
 /// The re-arm is not part of the state transition of the event: the watchlist is transient,
 /// so replaying it from the event log would not see the registrations it was made against.

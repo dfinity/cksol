@@ -113,8 +113,8 @@ pub enum EventType {
         signature: Signature,
     },
     /// A previously submitted Solana transaction has failed.
-    /// The deposits of a failed sweep transaction are dropped; the event is then recorded
-    /// through [`process_dropped_sweep`], which re-arms the automatic ones.
+    /// The deposits of a failed sweep transaction are dropped. For a sweep, the event is
+    /// recorded by [`process_dropped_sweep`], which also re-arms the automatic deposits.
     ///
     /// [`process_dropped_sweep`]: crate::state::audit::process_dropped_sweep
     #[n(6)]
@@ -125,8 +125,8 @@ pub enum EventType {
     },
     /// A previously submitted Solana transaction has an expired blockhash
     /// and a null on-chain status, meaning it will never be executed.
-    /// The deposits of the expired sweep transaction are dropped; the event is then recorded
-    /// through [`process_dropped_sweep`], which re-arms the automatic ones.
+    /// The deposits of the expired sweep transaction are dropped. The event is recorded by
+    /// [`process_dropped_sweep`], which also re-arms the automatic deposits.
     ///
     /// [`process_dropped_sweep`]: crate::state::audit::process_dropped_sweep
     #[n(7)]
