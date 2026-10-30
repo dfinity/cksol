@@ -1,6 +1,7 @@
 use crate::{
     constants::{GET_BALANCE_CYCLES, RENT_EXEMPTION_THRESHOLD},
     deposit::sweep::{deposit_sol, deposit_status},
+    guard::deposit_sol_guard,
     state::{event::EventType, read_state},
     storage::with_event_iter,
     test_fixtures::{
@@ -51,6 +52,33 @@ async fn should_fail_if_insufficient_cycles_attached() {
     );
     assert!(runtime.msg_cycles_accepted().is_empty());
     EventsAssert::assert_no_events_recorded();
+}
+
+#[tokio::test]
+async fn should_fail_for_concurrent_access() {
+    init_state();
+    init_schnorr_master_key();
+    let runtime = runtime().add_get_balance_response(MINIMUM_DEPOSIT_AMOUNT);
+
+    let (first, second) = tokio::join!(
+        deposit_sol(&runtime, DEPOSITOR_ACCOUNT),
+        deposit_sol(&runtime, DEPOSITOR_ACCOUNT),
+    );
+
+    assert_eq!(first, Ok(0));
+    assert_eq!(second, Err(DepositSolError::AlreadyProcessing));
+    assert_eq!(
+        runtime.msg_cycles_accepted(),
+        [GET_BALANCE_CYCLES - GET_BALANCE_REFUND + DEPOSIT_SOL_FEE]
+    );
+    assert!(deposit_sol_guard(DEPOSITOR_ACCOUNT).is_ok());
+    EventsAssert::from_recorded()
+        .expect_event_eq(queued_deposit_event(
+            0,
+            DEPOSITOR_ACCOUNT,
+            MINIMUM_DEPOSIT_AMOUNT - RENT_EXEMPTION_THRESHOLD,
+        ))
+        .assert_no_more_events();
 }
 
 #[tokio::test]
@@ -162,14 +190,35 @@ async fn should_return_the_deposit_a_scan_queued_during_the_balance_read_and_cha
 }
 
 #[tokio::test]
-async fn should_return_the_deposit_a_scan_queued_during_a_rejected_balance_read_and_charge_the_read_only()
- {
+async fn should_return_the_deposit_a_scan_queued_during_a_rejected_read_and_charge_the_read_only() {
     let runtime = runtime().add_stub_error(IcError::CallRejected {
         code: RejectCode::SysTransient,
         message: "SOL RPC canister is stopped".to_string(),
     });
 
     assert_yields_to_the_deposit_queued_by_a_scan_during_the_read(runtime).await;
+}
+
+#[tokio::test]
+async fn should_return_the_deposit_a_scan_queued_and_minted_during_the_balance_read() {
+    init_state();
+    init_schnorr_master_key();
+    let runtime = runtime().add_get_balance_response(MINIMUM_DEPOSIT_AMOUNT);
+
+    let (result, minted) = join!(deposit_sol(&runtime, DEPOSITOR_ACCOUNT), async {
+        DepositFlow::queue_automatic(
+            DEPOSITOR_ACCOUNT,
+            MINIMUM_DEPOSIT_AMOUNT,
+            AUTOMATIC_DEPOSIT_FEE,
+        )
+        .sweep(signature(1))
+        .succeed()
+        .credit()
+        .single_pending_mint()
+        .mint(1)
+    });
+
+    assert_eq!(result, Ok(minted.deposit_id));
 }
 
 async fn assert_yields_to_the_deposit_queued_by_a_scan_during_the_read(

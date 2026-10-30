@@ -127,17 +127,14 @@ impl Watchlist {
         account: Account,
         address: Address,
     ) -> Result<WatchedAddress, WatchlistFull> {
-        let inserted = self
+        match self
             .entries
-            .insert(now, account, ScanProgress::unscanned(address, now));
-        match inserted {
+            .insert(now, account, ScanProgress::unscanned(address, now))
+        {
             Ok(_) | Err(InsertError::AlreadyPresent { .. }) => Ok(self
                 .get(now, &account)
                 .expect("BUG: a registration is live right after its insertion")),
             Err(InsertError::AtCapacity { .. }) => Err(WatchlistFull),
-            Err(InsertError::Expired { .. }) => {
-                unreachable!("BUG: a registration for the window starting now cannot have expired")
-            }
         }
     }
 
