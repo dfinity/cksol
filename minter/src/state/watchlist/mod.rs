@@ -260,10 +260,13 @@ impl Watchlist {
         self.live(now).count()
     }
 
-    /// When the oldest live registration was made, if any.
+    /// When the oldest live registration was made, if any: the start of its schedule, which
+    /// does not depend on the window, unlike its end, after a change of [`WATCH_WINDOW`].
     pub fn oldest_registered_at(&self, now: Timestamp) -> Option<Timestamp> {
-        self.live(now)
-            .map(|watched| self.registered_at(watched.valid_until))
+        self.entries
+            .iter_by_expiry()
+            .filter(|(_, entry)| entry.is_live(now))
+            .map(|(_, entry)| entry.value.scheduled_from)
             .min()
     }
 
@@ -284,9 +287,5 @@ impl Watchlist {
             last_scanned_at: progress.last_scanned_at,
             next_scan_at: progress.next_scan_at(entry.expires_at),
         }
-    }
-
-    fn registered_at(&self, valid_until: Timestamp) -> Timestamp {
-        valid_until.saturating_sub(self.entries.ttl())
     }
 }

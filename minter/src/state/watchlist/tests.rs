@@ -316,6 +316,26 @@ fn should_keep_expired_registrations_and_exceed_the_capacity_when_rebuilding() {
     );
 }
 
+#[test]
+fn should_report_when_a_registration_restored_under_another_window_was_made() {
+    let registered_under_a_longer_window = WatchedDepositAddress {
+        account: account(1),
+        address: deposit_address(account(1)),
+        valid_until: REGISTERED_AT + 2 * WATCH_WINDOW_NANOS,
+        scheduled_from: REGISTERED_AT,
+        scan_count: 0,
+        last_scanned_at: None,
+    };
+    let rebuilt = Watchlist::from_snapshot(&WatchlistSnapshot {
+        entries: vec![registered_under_a_longer_window],
+    });
+
+    assert_eq!(
+        rebuilt.oldest_registered_at(at(VALID_UNTIL + 1)),
+        Some(at(REGISTERED_AT))
+    );
+}
+
 fn dropped(account: Account) -> QueuedDeposit {
     automatic_deposit_of(account, MINIMUM_DEPOSIT_AMOUNT, AUTOMATIC_DEPOSIT_FEE)
 }
