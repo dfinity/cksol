@@ -274,18 +274,9 @@ mod lifecycle {
                     .count()
                     <= 1
             );
-            check!(
-                events
-                    .iter()
-                    .filter(|e| matches!(e, EventType::WatchedDepositAddresses { .. }))
-                    .count()
-                    == 1
-            );
             check!(events[1..].iter().all(|e| matches!(
                 e,
-                EventType::Upgrade(_)
-                    | EventType::MinterPublicKeyFetched { .. }
-                    | EventType::WatchedDepositAddresses { .. }
+                EventType::Upgrade(_) | EventType::MinterPublicKeyFetched { .. }
             )));
         });
 
