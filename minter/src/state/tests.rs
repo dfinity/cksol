@@ -166,13 +166,17 @@ mod watched_deposit_addresses {
 mod swept_deposits {
     use super::*;
     use crate::{
-        state::{audit::replay_events, reset_state},
+        state::{
+            audit::{process_dropped_sweep, replay_events},
+            reset_state,
+            watchlist::{MAX_WATCHED_ADDRESSES, Watchlist},
+        },
         storage::{reset_events, with_event_iter},
         test_fixtures::{
-            DEFAULT_BLOCK_HEIGHT,
+            DEFAULT_BLOCK_HEIGHT, REGISTERED_AT, WATCH_WINDOW_NANOS, at,
             events::{credit_sweep, quarantine_sweep, queue_deposits, submit_sweep},
             flow::deposit::{CreditedSweepFlow, DepositFlow, SweepFlow},
-            replayed_recorded_log, sweep_message,
+            replayed_recorded_log, sweep_message, watch,
         },
     };
 
@@ -247,6 +251,94 @@ mod swept_deposits {
                 assert_eq!(s.balance(), 0, "{outcome}");
             });
         }
+    }
+
+    #[test]
+    fn should_rearm_the_automatic_deposits_of_a_dropped_sweep_without_replaying_the_rearm() {
+        const DROPPED_AT: u64 = REGISTERED_AT + WATCH_WINDOW_NANOS + 1;
+        let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
+        let drop_events = [
+            EventType::FailedTransaction {
+                signature: sweep_signature,
+            },
+            EventType::ExpiredTransaction {
+                signature: sweep_signature,
+            },
+        ];
+        for drop_event in drop_events {
+            reset_state();
+            reset_events();
+            init_state();
+            init_schnorr_master_key();
+            let manual = DepositFlow::queue(account(1), 10_000_000);
+            let automatic =
+                DepositFlow::queue_automatic(account(2), 20_000_000, AUTOMATIC_DEPOSIT_FEE);
+            SweepFlow::of([manual, automatic]).submit(sweep_signature);
+
+            mutate_state(|state| {
+                process_dropped_sweep(
+                    state,
+                    drop_event.clone(),
+                    &TestCanisterRuntime::new().add_times([DROPPED_AT; 3]),
+                )
+            });
+
+            let rearmed = WatchedAddress {
+                account: account(2),
+                address: automatic.address,
+                valid_until: at(DROPPED_AT + WATCH_WINDOW_NANOS),
+                scan_count: 0,
+                last_scanned_at: None,
+                next_scan_at: Some(at(DROPPED_AT)),
+            };
+            read_state(|s| {
+                assert_eq!(s.deposits().dropped().len(), 2, "{drop_event:?}");
+                assert_eq!(
+                    s.watchlist().iter().collect::<Vec<_>>(),
+                    vec![rearmed],
+                    "{drop_event:?}"
+                );
+                assert_eq!(
+                    s.watchlist().due(at(DROPPED_AT)),
+                    vec![rearmed],
+                    "{drop_event:?}"
+                );
+            });
+            let mut live_without_rearm = read_state(State::clone);
+            *live_without_rearm.watchlist_mut() = Watchlist::default();
+            assert_eq!(
+                replayed_recorded_log(),
+                live_without_rearm,
+                "{drop_event:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn should_not_rearm_a_dropped_automatic_deposit_when_the_watchlist_is_full() {
+        init_state();
+        init_schnorr_master_key();
+        let dropped = DepositFlow::queue_automatic(account(0), 20_000_000, AUTOMATIC_DEPOSIT_FEE)
+            .sweep(signature(SWEEP_SIGNATURE_INDEX));
+        for index in 1..=MAX_WATCHED_ADDRESSES.get() {
+            watch(at(REGISTERED_AT), account(index));
+        }
+
+        mutate_state(|state| {
+            process_dropped_sweep(
+                state,
+                EventType::FailedTransaction {
+                    signature: dropped.signature,
+                },
+                &TestCanisterRuntime::new().add_times([REGISTERED_AT; 3]),
+            )
+        });
+
+        read_state(|s| {
+            assert_eq!(s.watchlist().get(at(REGISTERED_AT), &account(0)), None);
+            assert_eq!(s.watchlist().len(), MAX_WATCHED_ADDRESSES.get());
+            assert_eq!(s.deposits().in_flight_id(&account(0)), None);
+        });
     }
 
     #[test]
