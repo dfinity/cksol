@@ -40,6 +40,7 @@ pub(crate) struct Metrics {
     pub failed_mint_attempts: BTreeMap<FailedMintReason, u64>,
     pub withdrawal_transaction_rebroadcasts: u64,
     pub undecided_withdrawal_transactions: BTreeMap<UndecidedWithdrawalReason, u64>,
+    pub deposit_address_scans: BTreeMap<ScanOutcome, u64>,
 }
 
 impl Metrics {
@@ -50,8 +51,37 @@ impl Metrics {
             failed_mint_attempts: BTreeMap::new(),
             withdrawal_transaction_rebroadcasts: 0,
             undecided_withdrawal_transactions: BTreeMap::new(),
+            deposit_address_scans: BTreeMap::new(),
         }
     }
+}
+
+/// What the balance scan of one watched deposit address led to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ScanOutcome {
+    Queued,
+    BelowMinimum,
+    Failed,
+}
+
+impl ScanOutcome {
+    pub const ALL: [Self; 3] = [Self::Queued, Self::BelowMinimum, Self::Failed];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Queued => "queued",
+            Self::BelowMinimum => "below_minimum",
+            Self::Failed => "failed",
+        }
+    }
+}
+
+pub(crate) fn record_deposit_address_scans(outcome: ScanOutcome, count: u64) {
+    with_unstable_metrics_mut(|m| *m.deposit_address_scans.entry(outcome).or_insert(0) += count);
+}
+
+pub(crate) fn deposit_address_scan_count(outcome: ScanOutcome) -> u64 {
+    with_unstable_metrics(|m| m.deposit_address_scans.get(&outcome).copied().unwrap_or(0))
 }
 
 /// Why an attempt to credit the deposits of a finalized sweep failed.

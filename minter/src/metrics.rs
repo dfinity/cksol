@@ -1,5 +1,7 @@
 use crate::state::{QuarantineCause, State};
-use crate::storage::{self, FailedCreditReason, FailedMintReason, UndecidedWithdrawalReason};
+use crate::storage::{
+    self, FailedCreditReason, FailedMintReason, ScanOutcome, UndecidedWithdrawalReason,
+};
 use ic_metrics_encoder::MetricsEncoder;
 
 const WASM_PAGE_SIZE_IN_BYTES: usize = 65536;
@@ -130,6 +132,16 @@ pub fn encode_metrics(w: &mut MetricsEncoder<Vec<u8>>, s: &State) -> std::io::Re
         failed_mint_attempts = failed_mint_attempts.value(
             &[("reason", reason.label())],
             storage::failed_mint_attempt_count(reason).metric_value(),
+        )?;
+    }
+    let mut deposit_address_scans = w.counter_vec(
+        "deposit_address_scans",
+        "Number of balance scans of watched deposit addresses since the last upgrade, by outcome: a deposit queued, a balance below the minimum deposit amount, or a failed read.",
+    )?;
+    for outcome in ScanOutcome::ALL {
+        deposit_address_scans = deposit_address_scans.value(
+            &[("outcome", outcome.label())],
+            storage::deposit_address_scan_count(outcome).metric_value(),
         )?;
     }
     w.encode_gauge(
