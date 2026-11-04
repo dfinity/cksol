@@ -128,6 +128,10 @@ impl Watchlist {
     /// [`MAX_WATCHED_ADDRESSES`] of the running version, so that a change of either takes
     /// effect at the upgrade that ships it.
     ///
+    /// The equality holds up to expired entries: when a later upgrade records no snapshot
+    /// because the watchlist is empty, replay keeps the entries of this snapshot that no
+    /// `QueuedDeposit` event removed, all of which have expired by then.
+    ///
     /// # Panics
     ///
     /// If the snapshot lists an account twice, since it was not produced by
