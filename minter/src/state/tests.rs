@@ -143,8 +143,13 @@ mod queued_deposits {
 
 mod watched_deposit_addresses {
     use super::*;
-    use crate::test_fixtures::{
-        MINIMUM_DEPOSIT_AMOUNT, REGISTERED_AT, at, flow::deposit::DepositFlow, watch,
+    use crate::{
+        lifecycle::pre_upgrade,
+        state::{audit::process_dropped_sweep, watchlist::Watchlist},
+        test_fixtures::{
+            HOUR_NANOS, MINIMUM_DEPOSIT_AMOUNT, MINUTE_NANOS, REGISTERED_AT, WATCH_WINDOW_NANOS,
+            at, flow::deposit::DepositFlow, register, replayed_recorded_log, watch,
+        },
     };
 
     #[test]
@@ -160,6 +165,73 @@ mod watched_deposit_addresses {
             assert_eq!(s.watchlist().get(at(REGISTERED_AT), &account(1)), None);
             assert!(s.watchlist().get(at(REGISTERED_AT), &account(2)).is_some());
         });
+    }
+
+    #[test]
+    fn should_restore_the_watchlist_recorded_before_the_upgrade() {
+        const DROPPED_AT: u64 = REGISTERED_AT + 2 * MINUTE_NANOS;
+        const UPGRADED_AT: u64 = REGISTERED_AT + HOUR_NANOS;
+        init_state();
+        init_schnorr_master_key();
+        watch(at(REGISTERED_AT), account(1));
+        mutate_state(|s| {
+            s.watchlist_mut()
+                .record_scan(at(REGISTERED_AT + MINUTE_NANOS), &account(1))
+        });
+        let dropped = DepositFlow::queue_automatic(account(2), 20_000_000, AUTOMATIC_DEPOSIT_FEE)
+            .sweep(signature(0xAA));
+        mutate_state(|state| {
+            process_dropped_sweep(
+                state,
+                EventType::FailedTransaction {
+                    signature: dropped.signature,
+                },
+                &TestCanisterRuntime::new().add_times([DROPPED_AT; 3]),
+            )
+        });
+        let watchlist_before = read_state(|s| s.watchlist().clone());
+        assert_eq!(watchlist_before.len(), 2);
+
+        pre_upgrade(TestCanisterRuntime::new().add_times([UPGRADED_AT; 2]));
+
+        let replayed = replayed_recorded_log();
+        assert_eq!(replayed.watchlist(), &watchlist_before);
+        read_state(|live_state| assert_eq!(&replayed, live_state));
+    }
+
+    #[test]
+    fn should_restore_nothing_but_expired_entries_when_no_snapshot_was_recorded() {
+        const UPGRADED_AGAIN_AT: u64 = REGISTERED_AT + WATCH_WINDOW_NANOS + 1;
+        init_state();
+        init_schnorr_master_key();
+        watch(at(REGISTERED_AT), account(1));
+        watch(at(REGISTERED_AT), account(2));
+        pre_upgrade(TestCanisterRuntime::new().add_times([REGISTERED_AT; 2]));
+        DepositFlow::queue(account(2), MINIMUM_DEPOSIT_AMOUNT);
+        mutate_state(|s| s.watchlist_mut().evict_expired(at(UPGRADED_AGAIN_AT)));
+        read_state(|s| assert!(s.watchlist().is_empty()));
+
+        pre_upgrade(TestCanisterRuntime::new().add_times([UPGRADED_AGAIN_AT; 2]));
+
+        let mut replayed = replayed_recorded_log();
+        assert_eq!(
+            replayed
+                .watchlist()
+                .iter()
+                .map(|watched| watched.account)
+                .collect::<Vec<_>>(),
+            vec![account(1)]
+        );
+        assert_eq!(replayed.watchlist().live_len(at(UPGRADED_AGAIN_AT)), 0);
+        assert_eq!(replayed.watchlist().due(at(UPGRADED_AGAIN_AT)), vec![]);
+        let registered_again =
+            register(replayed.watchlist_mut(), at(UPGRADED_AGAIN_AT), account(1));
+        assert_eq!(
+            (registered_again.valid_until, registered_again.scan_count),
+            (at(UPGRADED_AGAIN_AT + WATCH_WINDOW_NANOS), 0)
+        );
+        *replayed.watchlist_mut() = Watchlist::default();
+        read_state(|live_state| assert_eq!(&replayed, live_state));
     }
 }
 

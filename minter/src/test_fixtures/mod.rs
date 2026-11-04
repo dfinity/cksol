@@ -1344,7 +1344,8 @@ pub mod arb {
         state::{
             DepositBalance, QueuedDeposit,
             event::{
-                CreditedDeposit, Event, EventType, Signer, TransactionPurpose, WithdrawalRequest,
+                CreditedDeposit, Event, EventType, Signer, TransactionPurpose,
+                WatchedDepositAddress, WatchlistSnapshot, WithdrawalRequest,
             },
         },
     };
@@ -1675,7 +1676,36 @@ pub mod arb {
                         nonce_value,
                     }
                 }),
+            arb_watchlist_snapshot().prop_map(EventType::WatchedDepositAddresses),
         ]
+    }
+
+    fn arb_watchlist_snapshot() -> impl Strategy<Value = WatchlistSnapshot> {
+        prop::collection::vec(arb_watched_deposit_address(), 0..5)
+            .prop_map(|entries| WatchlistSnapshot { entries })
+    }
+
+    fn arb_watched_deposit_address() -> impl Strategy<Value = WatchedDepositAddress> {
+        (
+            arb_account(),
+            arb_address(),
+            any::<u64>(),
+            any::<u64>(),
+            any::<u32>(),
+            prop::option::of(any::<u64>()),
+        )
+            .prop_map(
+                |(account, address, valid_until, scheduled_from, scan_count, last_scanned_at)| {
+                    WatchedDepositAddress {
+                        account,
+                        address,
+                        valid_until,
+                        scheduled_from,
+                        scan_count,
+                        last_scanned_at,
+                    }
+                },
+            )
     }
 
     fn arb_credited_deposit() -> impl Strategy<Value = CreditedDeposit> {

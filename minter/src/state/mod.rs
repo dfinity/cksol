@@ -9,7 +9,8 @@ use crate::{
         build_batch_withdrawal_message,
     },
     state::event::{
-        CreditedDeposit, Signer, TransactionPurpose, VersionedMessage, WithdrawalRequest,
+        CreditedDeposit, Signer, TransactionPurpose, VersionedMessage, WatchlistSnapshot,
+        WithdrawalRequest,
     },
     utils::insertion_ordered_map::InsertionOrderedMap,
 };
@@ -465,6 +466,10 @@ impl State {
             deposit.account,
         );
         self.deposits.queue(deposit_id, deposit, queued_at);
+    }
+
+    fn restore_watchlist(&mut self, snapshot: &WatchlistSnapshot) {
+        *self.deposits.watchlist_mut() = Watchlist::from_snapshot(snapshot);
     }
 
     fn process_credited_sweep(
