@@ -148,7 +148,7 @@ mod watched_deposit_addresses {
         state::{audit::process_dropped_sweep, watchlist::Watchlist},
         test_fixtures::{
             HOUR_NANOS, MINIMUM_DEPOSIT_AMOUNT, MINUTE_NANOS, REGISTERED_AT, WATCH_WINDOW_NANOS,
-            at, flow::deposit::DepositFlow, replayed_recorded_log, watch,
+            at, flow::deposit::DepositFlow, register, replayed_recorded_log, watch,
         },
     };
 
@@ -223,6 +223,13 @@ mod watched_deposit_addresses {
             vec![account(1)]
         );
         assert_eq!(replayed.watchlist().live_len(at(UPGRADED_AGAIN_AT)), 0);
+        assert_eq!(replayed.watchlist().due(at(UPGRADED_AGAIN_AT)), vec![]);
+        let registered_again =
+            register(replayed.watchlist_mut(), at(UPGRADED_AGAIN_AT), account(1));
+        assert_eq!(
+            (registered_again.valid_until, registered_again.scan_count),
+            (at(UPGRADED_AGAIN_AT + WATCH_WINDOW_NANOS), 0)
+        );
         *replayed.watchlist_mut() = Watchlist::default();
         read_state(|live_state| assert_eq!(&replayed, live_state));
     }
