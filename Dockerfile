@@ -16,6 +16,13 @@ ENV TZ=UTC
 # so that the installed packages do not drift with the live mirrors.
 # Bump DEBIAN_SNAPSHOT together with the base image.
 ARG DEBIAN_SNAPSHOT=20260202T000000Z
+# snapshot.debian.org sometimes times out or stalls: retry each download and
+# give up on one that sends no data for 30 seconds. Retries cannot change the
+# installed packages, since apt verifies each download against the signed
+# snapshot. By default, `apt-get update` only warns about an index that fails
+# to download and goes on without it, which could install other versions:
+# `--error-on=any` fails the update instead.
+ARG APT_OPTIONS="-o Acquire::Retries=5 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30"
 # clang is needed to compile the C sources of zstd-sys for the wasm32 target.
 RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone && \
     sed -i \
@@ -24,8 +31,8 @@ RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone &
         /etc/apt/sources.list.d/debian.sources && \
     grep -q "snapshot.debian.org/archive/debian/" /etc/apt/sources.list.d/debian.sources && \
     grep -q "snapshot.debian.org/archive/debian-security/" /etc/apt/sources.list.d/debian.sources && \
-    apt-get -yq -o Acquire::Check-Valid-Until=false update && \
-    apt-get -yqq install --no-install-recommends clang && \
+    apt-get -yq ${APT_OPTIONS} -o Acquire::Check-Valid-Until=false update --error-on=any && \
+    apt-get -yqq ${APT_OPTIONS} install --no-install-recommends clang && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /cksol
