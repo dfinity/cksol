@@ -7,8 +7,8 @@ use cksol_int_tests::{
     validator::{FEE_PER_SIGNATURE, SolanaTestValidator, wait_for_withdrawal_finalized},
 };
 use cksol_types::{
-    DepositSolId, DepositSolStatus, Signature, TxFinalizedStatus, WithdrawSolArgs,
-    WithdrawSolError, WithdrawSolStatus,
+    DepositSolId, DepositSolStatus, Signature, TxFinalizedStatus, WatchDepositAddressStatus,
+    WithdrawSolArgs, WithdrawSolError, WithdrawSolStatus,
 };
 use cksol_types_internal::{UpgradeArgs, event::EventType};
 use icrc_ledger_types::icrc1::account::Account;
@@ -574,6 +574,149 @@ async fn should_sweep_sub_rent_remainder_together_with_the_deposit() {
         validator.get_balance(&deposit_address).await,
         RENT_EXEMPTION_THRESHOLD
     );
+
+    setup.drop().await;
+}
+
+/// The manual deposits are queued while the scan tick detects the watched ones, so that no
+/// sweep tick can fire in between and split the four deposits over two transactions.
+#[tokio::test(flavor = "multi_thread")]
+async fn should_sweep_watched_and_manual_deposits_in_one_transaction() {
+    const AUTOMATIC_DEPOSIT_FEE: Lamport = Setup::DEFAULT_AUTOMATIC_DEPOSIT_FEE;
+
+    let validator = SolanaTestValidator::start().await;
+    let setup = validator.setup().await;
+
+    let account = |subaccount: u8| Account {
+        owner: DEPOSITOR,
+        subaccount: Some([subaccount; 32]),
+    };
+    let watched_accounts = [account(0x11), account(0x12)];
+    let manual_accounts = [account(0x21), account(0x22)];
+    let deposits: [(Account, Lamport, Lamport); 4] = [
+        (
+            watched_accounts[0],
+            3 * LAMPORTS_PER_SOL / 10,
+            AUTOMATIC_DEPOSIT_FEE,
+        ),
+        (
+            watched_accounts[1],
+            4 * LAMPORTS_PER_SOL / 10,
+            AUTOMATIC_DEPOSIT_FEE,
+        ),
+        (manual_accounts[0], 5 * LAMPORTS_PER_SOL / 10, 0),
+        (manual_accounts[1], 6 * LAMPORTS_PER_SOL / 10, 0),
+    ];
+
+    let deposit_addresses: Vec<Address> =
+        futures::future::join_all(deposits.iter().map(async |(account, amount, _)| {
+            validator
+                .fund_deposit_address(&setup, *account, *amount)
+                .await
+        }))
+        .await;
+    let minter_sol_before = validator.get_balance(&MINTER_ADDRESS).await;
+
+    for account in &watched_accounts {
+        let registration = setup
+            .minter()
+            .watch_deposit_address(account.subaccount)
+            .await
+            .expect("watch_deposit_address should register the account");
+        assert_matches!(
+            registration.status,
+            WatchDepositAddressStatus::Watching {
+                scan_count: 0,
+                last_scanned_at: None,
+                ..
+            }
+        );
+        assert_eq!(registration.latest_deposit_id, None);
+    }
+
+    setup.advance_time(Duration::from_mins(1)).await;
+    let (watched_deposit_ids, manual_deposit_ids) = tokio::join!(
+        futures::future::join_all(watched_accounts.iter().map(async |account| {
+            setup
+                .minter()
+                .wait_for_deposit_detected(account.subaccount)
+                .await
+        })),
+        futures::future::join_all(manual_accounts.iter().map(async |&account| {
+            setup
+                .minter()
+                .deposit_sol(account)
+                .await
+                .expect("deposit_sol should queue a sweep")
+        }))
+    );
+    let deposit_ids: Vec<DepositSolId> = [watched_deposit_ids, manual_deposit_ids].concat();
+    for (&deposit_id, (_, amount, _)) in deposit_ids.iter().zip(&deposits) {
+        assert_eq!(
+            setup.minter().deposit_sol_status(deposit_id).await,
+            DepositSolStatus::Queued {
+                sweepable_amount: amount - RENT_EXEMPTION_THRESHOLD
+            }
+        );
+    }
+
+    let total_sweepable_amount: Lamport = deposits
+        .iter()
+        .map(|(_, amount, _)| amount - RENT_EXEMPTION_THRESHOLD)
+        .sum();
+    let sweep_fee = deposits.len() as Lamport * FEE_PER_SIGNATURE;
+    setup.advance_time(Duration::from_mins(1)).await;
+    validator
+        .wait_for_finalized_balance(
+            &MINTER_ADDRESS,
+            minter_sol_before + total_sweepable_amount - sweep_fee,
+        )
+        .await;
+
+    let minter_transactions = validator.get_signatures_for_address(&MINTER_ADDRESS).await;
+    let [swept_by] = minter_transactions.as_slice() else {
+        panic!("Expected a single sweep transaction, got {minter_transactions:?}");
+    };
+    let sweep_signature = Signature::from(*swept_by);
+    for deposit_address in &deposit_addresses {
+        assert_eq!(
+            validator.get_balance(deposit_address).await,
+            RENT_EXEMPTION_THRESHOLD
+        );
+    }
+    for (&deposit_id, account) in deposit_ids.iter().zip(&watched_accounts) {
+        assert_eq!(
+            setup.minter().deposit_sol_status(deposit_id).await,
+            DepositSolStatus::Swept {
+                signature: sweep_signature.clone()
+            }
+        );
+        let during_sweep = setup
+            .minter()
+            .watch_deposit_address(account.subaccount)
+            .await
+            .expect("watch_deposit_address should report the deposit in flight");
+        assert_eq!(
+            during_sweep.status,
+            WatchDepositAddressStatus::Detected { deposit_id }
+        );
+    }
+
+    for (&deposit_id, (account, amount, fee)) in deposit_ids.iter().zip(&deposits) {
+        let expected_minted_amount = amount - RENT_EXEMPTION_THRESHOLD - FEE_PER_SIGNATURE - fee;
+        let minted_amount = setup.wait_for_deposit_minted(deposit_id).await;
+        assert_eq!(minted_amount, expected_minted_amount);
+        assert_eq!(
+            setup.ledger().balance_of(*account).await,
+            expected_minted_amount
+        );
+    }
+    let minter_info = setup.minter().get_minter_info().await;
+    assert_eq!(
+        minter_info.collected_automatic_deposit_fees,
+        Some(watched_accounts.len() as Lamport * AUTOMATIC_DEPOSIT_FEE)
+    );
+    assert_eq!(minter_info.balance, total_sweepable_amount - sweep_fee);
 
     setup.drop().await;
 }

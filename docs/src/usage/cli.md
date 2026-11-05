@@ -41,9 +41,25 @@ A successful response returns the deposit id, which you can use to track the dep
 (variant { Ok = 42 : nat64 })
 ```
 
+## Register your deposit address for automatic deposits
+
+Instead of calling `deposit_sol` after each transfer, call `watch_deposit_address` to have the minter watch your deposit address for about 24 hours and queue the deposit itself once the balance reaches the minimum deposit amount. The call is free and needs no cycles, so no proxy canister is required; the automatic deposit fee reported by `get_minter_info` (`automatic_deposit_fee` field) is deducted from the minted amount instead. The owner is always your calling identity, so pass only the `subaccount` used when calling `get_deposit_address`:
+
+```sh
+icp canister call -e prod cksol_minter watch_deposit_address '(record { subaccount = null })'
+```
+
+A successful response returns the deposit address, the minimum deposit amount, the automatic deposit fee, the status of the registration and the id of the latest deposit of your account, if any:
+
+```
+(variant { Ok = record { status = variant { Watching = record { valid_until = ...; scan_count = 0; last_scanned_at = null; next_scan_at = opt ... } }; ... } })
+```
+
+Call `watch_deposit_address` again to follow the registration: the status becomes `Detected` with the deposit id once the minter has queued the deposit, which you can then track with `deposit_sol_status`. Calling it again after the deposit is minted registers the address anew.
+
 ## Check a deposit status
 
-After calling `deposit_sol`, track the deposit using the deposit id returned in the response. The status moves through `Queued` → `Swept` → `Finalized` → `Minted` as the minter sweeps the deposit address and mints ckSOL:
+After calling `deposit_sol`, or once `watch_deposit_address` reports a deposit as `Detected`, track the deposit using its deposit id. The status moves through `Queued` → `Swept` → `Finalized` → `Minted` as the minter sweeps the deposit address and mints ckSOL:
 
 ```sh
 icp canister call -e prod cksol_minter deposit_sol_status '(42 : nat64)' --query

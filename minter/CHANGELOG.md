@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Automatic deposits: `watch_deposit_address` registers the deposit address of the caller's account for free and reports on the registration, so that SOL sent straight from an exchange is credited without a further call. A timer scans the watched addresses with `getMultipleAccounts` on a schedule spread over a day and queues a deposit that reaches `minimum_deposit_amount` exactly as `deposit_sol` would, deducting the new `automatic_deposit_fee` init and upgrade parameter from the minted amount; `get_minter_info` reports the fee and the collected fees. The watchlist is snapshotted in a new event on every upgrade, and the watched addresses, the scans by outcome and the collected fees are reported in the metrics and on the dashboard ([#274](https://github.com/dfinity/cksol/pull/274))
+
 ## [0.1.0] - 2026-10-09
 
 First release of the ckSOL minter, which mints ckSOL on the ckSOL ledger for SOL deposited on Solana and sends SOL back when ckSOL is burned. It is deployed on staging against Solana Devnet as ckDevnetSOL.
