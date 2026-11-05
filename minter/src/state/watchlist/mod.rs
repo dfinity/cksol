@@ -280,7 +280,8 @@ impl Watchlist {
             .min()
     }
 
-    fn live(&self, now: Timestamp) -> impl Iterator<Item = WatchedAddress> {
+    /// The live registrations, by ascending window end.
+    pub fn live(&self, now: Timestamp) -> impl Iterator<Item = WatchedAddress> {
         self.entries
             .iter_by_expiry()
             .filter(move |(_, entry)| entry.is_live(now))

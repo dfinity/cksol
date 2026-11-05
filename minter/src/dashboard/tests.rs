@@ -1,8 +1,8 @@
 use crate::dashboard::{DashboardPaginationParameters, DashboardTemplate, lamports_to_sol};
 use crate::state::{mutate_state, read_state};
 use crate::test_fixtures::{
-    AUTOMATIC_DEPOSIT_FEE, MINIMUM_DEPOSIT_AMOUNT, MINIMUM_WITHDRAWAL_AMOUNT, REGISTERED_AT,
-    WATCH_WINDOW_NANOS, WITHDRAWAL_FEE, account, at, deposit_address,
+    AUTOMATIC_DEPOSIT_FEE, HOUR_NANOS, MINIMUM_DEPOSIT_AMOUNT, MINIMUM_WITHDRAWAL_AMOUNT,
+    REGISTERED_AT, WATCH_WINDOW_NANOS, WITHDRAWAL_FEE, account, at, deposit_address,
     events::{
         accept_withdrawal, fail_transaction, quarantine_sweep, queue_deposit, submit_sweep,
         submit_withdrawal, succeed_transaction,
@@ -11,6 +11,7 @@ use crate::test_fixtures::{
     init_balance, init_schnorr_master_key, init_state, init_state_with_args, ledger_canister_id,
     signature, sol_rpc_canister_id, valid_init_args, watch,
 };
+use crate::utils::timed_sized_map::Timestamp;
 use askama::Template;
 use cksol_types_internal::{InitArgs, SolanaNetwork};
 
@@ -19,7 +20,11 @@ fn dashboard() -> DashboardTemplate {
 }
 
 fn dashboard_with_pagination(pagination: DashboardPaginationParameters) -> DashboardTemplate {
-    read_state(|state| DashboardTemplate::from_state(state, pagination))
+    dashboard_at(at(REGISTERED_AT), pagination)
+}
+
+fn dashboard_at(now: Timestamp, pagination: DashboardPaginationParameters) -> DashboardTemplate {
+    read_state(|state| DashboardTemplate::from_state(state, now, pagination))
 }
 
 fn init_state_with_network(network: SolanaNetwork) {
@@ -138,6 +143,31 @@ fn should_display_watched_deposit_addresses_by_ascending_window_end() {
             "#watched-deposit-addresses + table > tbody > tr:nth-child(1) a",
             |href| href == format!("https://solscan.io/account/{}", deposit_address(account(2))),
         );
+}
+
+#[test]
+fn should_display_only_the_live_watched_deposit_addresses() {
+    init_state();
+    init_schnorr_master_key();
+    watch(at(REGISTERED_AT), account(1));
+    watch(at(REGISTERED_AT + HOUR_NANOS), account(2));
+    let expired_at = REGISTERED_AT + WATCH_WINDOW_NANOS + 1;
+
+    let page = dashboard_at(at(expired_at), DashboardPaginationParameters::default());
+
+    let listed: Vec<&str> = page
+        .watched_deposit_addresses_table
+        .current_page
+        .iter()
+        .map(|watched| watched.account.as_str())
+        .collect();
+    assert_eq!(listed, vec![account(2).to_string()]);
+    assert_eq!(read_state(|s| s.watchlist().len()), 2);
+    DashboardAssert::assert_that(dashboard_at(
+        at(expired_at + HOUR_NANOS),
+        DashboardPaginationParameters::default(),
+    ))
+    .has_no_elements_matching("#watched-deposit-addresses + table");
 }
 
 #[test]
