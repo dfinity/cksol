@@ -23,16 +23,29 @@ ARG DEBIAN_SNAPSHOT=20260202T000000Z
 # to download and goes on without it, which could install other versions:
 # `--error-on=any` fails the update instead.
 ARG APT_OPTIONS="-o Acquire::Retries=5 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30"
+# A download can also stall without apt noticing, so each step that downloads
+# runs at most 2 minutes and is tried up to 3 times. The packages are only
+# downloaded under that limit: installing them reads the local cache and is
+# never interrupted.
 # clang is needed to compile the C sources of zstd-sys for the wasm32 target.
-RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone && \
+RUN with_retries() { \
+        for attempt in 1 2 3; do \
+            timeout 120 "$@" && return 0; \
+            echo "Attempt ${attempt} of: $* failed" >&2; \
+            sleep 10; \
+        done; \
+        return 1; \
+    } && \
+    ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone && \
     sed -i \
         -e "s|^URIs: http://deb.debian.org/debian-security$|URIs: https://snapshot.debian.org/archive/debian-security/${DEBIAN_SNAPSHOT}|" \
         -e "s|^URIs: http://deb.debian.org/debian$|URIs: https://snapshot.debian.org/archive/debian/${DEBIAN_SNAPSHOT}|" \
         /etc/apt/sources.list.d/debian.sources && \
     grep -q "snapshot.debian.org/archive/debian/" /etc/apt/sources.list.d/debian.sources && \
     grep -q "snapshot.debian.org/archive/debian-security/" /etc/apt/sources.list.d/debian.sources && \
-    apt-get -yq ${APT_OPTIONS} -o Acquire::Check-Valid-Until=false update --error-on=any && \
-    apt-get -yqq ${APT_OPTIONS} install --no-install-recommends clang && \
+    with_retries apt-get -yq ${APT_OPTIONS} -o Acquire::Check-Valid-Until=false update --error-on=any && \
+    with_retries apt-get -yqq ${APT_OPTIONS} install --no-install-recommends --download-only clang && \
+    apt-get -yqq install --no-install-recommends --no-download clang && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /cksol
