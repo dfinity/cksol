@@ -264,13 +264,13 @@ impl Watchlist {
         self.live(now).count()
     }
 
-    /// When the oldest live registration was made, if any: the start of its schedule, which
-    /// does not depend on the window, unlike its end, after a change of [`WATCH_WINDOW`].
-    pub fn oldest_registered_at(&self, now: Timestamp) -> Option<Timestamp> {
-        self.entries
-            .iter_by_expiry()
-            .filter(|(_, entry)| entry.is_live(now))
-            .map(|(_, entry)| entry.value.scheduled_from)
+    /// When the earliest due scan was due, if any scan is due: since the due time of a
+    /// registration only moves when a scan is recorded, this falls behind `now` by more than a
+    /// tick only when the scan timer does not keep up.
+    pub fn oldest_due_scan_at(&self, now: Timestamp) -> Option<Timestamp> {
+        self.due(now)
+            .into_iter()
+            .filter_map(|watched| watched.next_scan_at)
             .min()
     }
 
