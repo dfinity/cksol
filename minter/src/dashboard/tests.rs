@@ -2,7 +2,7 @@ use crate::dashboard::{DashboardPaginationParameters, DashboardTemplate, lamport
 use crate::state::{mutate_state, read_state};
 use crate::test_fixtures::{
     AUTOMATIC_DEPOSIT_FEE, HOUR_NANOS, MINIMUM_DEPOSIT_AMOUNT, MINIMUM_WITHDRAWAL_AMOUNT,
-    REGISTERED_AT, WATCH_WINDOW_NANOS, WITHDRAWAL_FEE, account, at, deposit_address,
+    MINUTE_NANOS, REGISTERED_AT, WATCH_WINDOW_NANOS, WITHDRAWAL_FEE, account, at, deposit_address,
     events::{
         accept_withdrawal, fail_transaction, quarantine_sweep, queue_deposit, submit_sweep,
         submit_withdrawal, succeed_transaction,
@@ -111,9 +111,12 @@ fn should_display_watched_deposit_addresses_by_ascending_window_end() {
     init_schnorr_master_key();
     watch(at(REGISTERED_AT + 1), account(1));
     watch(at(REGISTERED_AT), account(2));
+    watch(at(REGISTERED_AT + 2), account(3));
     mutate_state(|s| {
         s.watchlist_mut()
-            .record_scan(at(REGISTERED_AT + 60), &account(2));
+            .record_scan(at(REGISTERED_AT + MINUTE_NANOS), &account(2));
+        s.watchlist_mut()
+            .record_scan(at(REGISTERED_AT + WATCH_WINDOW_NANOS), &account(3));
     });
 
     DashboardAssert::assert_that(dashboard())
@@ -122,9 +125,10 @@ fn should_display_watched_deposit_addresses_by_ascending_window_end() {
             &[
                 &account(2).to_string(),
                 &deposit_address(account(2)).to_string(),
-                &(REGISTERED_AT + WATCH_WINDOW_NANOS).to_string(),
+                "2023-11-15T22:13:20+00:00",
                 "1",
-                &(REGISTERED_AT + 60).to_string(),
+                "2023-11-14T22:14:20+00:00",
+                "2023-11-14T22:15:20+00:00",
             ],
             "watched deposit addresses",
         )
@@ -133,8 +137,21 @@ fn should_display_watched_deposit_addresses_by_ascending_window_end() {
             &[
                 &account(1).to_string(),
                 &deposit_address(account(1)).to_string(),
-                &(REGISTERED_AT + 1 + WATCH_WINDOW_NANOS).to_string(),
+                "2023-11-15T22:13:20+00:00",
                 "0",
+                "-",
+                "2023-11-14T22:13:20+00:00",
+            ],
+            "watched deposit addresses",
+        )
+        .has_table_row_value(
+            "#watched-deposit-addresses + table > tbody > tr:nth-child(3)",
+            &[
+                &account(3).to_string(),
+                &deposit_address(account(3)).to_string(),
+                "2023-11-15T22:13:20+00:00",
+                "1",
+                "2023-11-15T22:13:20+00:00",
                 "-",
             ],
             "watched deposit addresses",
