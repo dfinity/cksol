@@ -12,6 +12,7 @@ use cksol_minter::{
     monitor::{FINALIZE_TRANSACTIONS_DELAY, finalize_transactions},
     runtime::IcCanisterRuntime,
     state::read_state,
+    utils::timed_sized_map::Timestamp,
     withdraw::{WITHDRAWAL_PROCESSING_DELAY, process_pending_withdrawals},
 };
 use cksol_types::{
@@ -166,7 +167,9 @@ fn http_request(request: HttpRequest) -> HttpResponse {
                         .build();
                 }
             };
-            let dashboard = read_state(|state| DashboardTemplate::from_state(state, pagination));
+            let now = Timestamp::from_nanos(ic_cdk::api::time());
+            let dashboard =
+                read_state(|state| DashboardTemplate::from_state(state, now, pagination));
             HttpResponseBuilder::ok()
                 .header("Content-Type", "text/html; charset=utf-8")
                 .with_body_and_content_length(dashboard.render().unwrap())

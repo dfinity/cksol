@@ -1190,6 +1190,7 @@ mod automatic_deposit_sol_tests {
 
     const SCAN_WATCHED_ADDRESSES_DELAY: Duration = Duration::from_mins(1);
     const BALANCE_ABOVE_MINIMUM: Lamport = Setup::DEFAULT_MINIMUM_DEPOSIT_AMOUNT + 1;
+    const BALANCE_BELOW_MINIMUM: Lamport = Setup::DEFAULT_MINIMUM_DEPOSIT_AMOUNT - 1;
 
     #[tokio::test]
     async fn should_register_the_caller() {
@@ -1384,7 +1385,50 @@ mod automatic_deposit_sol_tests {
         setup
             .check_metrics()
             .await
+            .assert_contains_metric_matching(r#"watched_deposit_addresses 0 \d+"#)
             .assert_contains_metric_matching(r#"deposit_address_scans\{outcome="queued"\} 1 \d+"#)
+            .into()
+            .drop()
+            .await;
+    }
+
+    #[tokio::test]
+    async fn should_report_a_due_scan_in_the_metrics_until_it_runs() {
+        let setup = SetupBuilder::new().build().await;
+        setup
+            .minter()
+            .watch_deposit_address(None)
+            .await
+            .expect("watch_deposit_address should register the caller");
+
+        // The tick starts the scan, whose call stays pending until the mocks below answer it.
+        setup.advance_time(SCAN_WATCHED_ADDRESSES_DELAY).await;
+        setup.tick().await;
+        let setup = setup
+            .check_metrics()
+            .await
+            .assert_contains_metric_matching(r#"watched_deposit_addresses 1 \d+"#)
+            .assert_contains_metric_matching(
+                r#"oldest_due_deposit_address_scan_age_seconds 60 \d+"#,
+            )
+            .into();
+
+        setup
+            .execute_http_mocks(
+                MockBuilder::new()
+                    .get_multiple_accounts(&[BALANCE_BELOW_MINIMUM])
+                    .build(),
+            )
+            .await;
+
+        setup
+            .check_metrics()
+            .await
+            .assert_contains_metric_matching(r#"watched_deposit_addresses 1 \d+"#)
+            .assert_contains_metric_matching(r#"oldest_due_deposit_address_scan_age_seconds 0 \d+"#)
+            .assert_contains_metric_matching(
+                r#"deposit_address_scans\{outcome="below_minimum"\} 1 \d+"#,
+            )
             .into()
             .drop()
             .await;
@@ -1494,6 +1538,16 @@ mod metrics_tests {
             .assert_contains_metric_matching(r#"minter_balance 0 \d+"#)
             .assert_contains_metric_matching(r#"oldest_in_flight_deposit_age_seconds 0 \d+"#)
             .assert_contains_metric_matching(r#"oldest_pending_mint_age_seconds 0 \d+"#)
+            .assert_contains_metric_matching(r#"watched_deposit_addresses 0 \d+"#)
+            .assert_contains_metric_matching(r#"watched_deposit_address_capacity 1000 \d+"#)
+            .assert_contains_metric_matching(r#"oldest_due_deposit_address_scan_age_seconds 0 \d+"#)
+            .assert_contains_metric_matching(r#"collected_automatic_deposit_fees 0 \d+"#)
+            .assert_contains_metric_matching(r"# TYPE collected_automatic_deposit_fees counter")
+            .assert_contains_metric_matching(r#"deposit_address_scans\{outcome="queued"\} 0 \d+"#)
+            .assert_contains_metric_matching(
+                r#"deposit_address_scans\{outcome="below_minimum"\} 0 \d+"#,
+            )
+            .assert_contains_metric_matching(r#"deposit_address_scans\{outcome="failed"\} 0 \d+"#)
             .assert_contains_metric_matching(
                 r#"failed_credit_attempts\{reason="not_found"\} 0 \d+"#,
             )
