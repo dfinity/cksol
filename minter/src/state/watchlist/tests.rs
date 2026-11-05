@@ -253,19 +253,6 @@ fn should_not_rearm_a_manual_deposit() {
 }
 
 #[test]
-fn should_keep_the_registration_of_an_account_that_is_already_watched() {
-    let mut watchlist = Watchlist::default();
-    let registered = register(&mut watchlist, at(REGISTERED_AT + HOUR_NANOS), account(1));
-
-    let rearmed = watchlist
-        .rearm(at(REGISTERED_AT + 2 * HOUR_NANOS), &dropped(account(1)))
-        .unwrap();
-
-    assert_eq!(rearmed, registered);
-    assert_eq!(watchlist.len(), 1);
-}
-
-#[test]
 fn should_rebuild_the_watchlist_verbatim_from_its_snapshot() {
     let mut watchlist = Watchlist::default();
     register(&mut watchlist, at(REGISTERED_AT + HOUR_NANOS), account(1));
@@ -285,8 +272,6 @@ fn should_rebuild_the_watchlist_verbatim_from_its_snapshot() {
             .collect::<Vec<_>>(),
         vec![account(3), account(2), account(1)]
     );
-    assert_eq!(snapshot.window_nanos, WATCH_WINDOW_NANOS);
-    assert_eq!(snapshot.capacity, MAX_WATCHED_ADDRESSES.get() as u64);
 }
 
 #[test]
@@ -302,14 +287,20 @@ fn should_keep_expired_registrations_and_exceed_the_capacity_when_rebuilding() {
         })
         .collect();
     let snapshot = WatchlistSnapshot {
-        window_nanos: WATCH_WINDOW_NANOS,
-        capacity: MAX_WATCHED_ADDRESSES.get() as u64,
         entries: entries.clone(),
     };
 
-    let rebuilt = Watchlist::from_snapshot(&snapshot);
+    let mut rebuilt = Watchlist::from_snapshot(&snapshot);
 
     assert_eq!(rebuilt.len(), entries.len());
+    assert_eq!(
+        rebuilt.register(
+            at(REGISTERED_AT),
+            account(entries.len()),
+            deposit_address(account(entries.len()))
+        ),
+        Err(WatchlistFull)
+    );
     assert_eq!(rebuilt.snapshot(), snapshot);
     assert_eq!(rebuilt.live_len(at(VALID_UNTIL + 1)), 0);
     assert_eq!(
@@ -326,13 +317,23 @@ fn should_keep_expired_registrations_and_exceed_the_capacity_when_rebuilding() {
 }
 
 #[test]
-#[should_panic(expected = "non-zero capacity")]
-fn should_panic_when_rebuilding_from_a_snapshot_without_capacity() {
-    Watchlist::from_snapshot(&WatchlistSnapshot {
-        window_nanos: WATCH_WINDOW_NANOS,
-        capacity: 0,
-        entries: vec![],
+fn should_report_when_a_registration_restored_under_another_window_was_made() {
+    let registered_under_a_longer_window = WatchedDepositAddress {
+        account: account(1),
+        address: deposit_address(account(1)),
+        valid_until: REGISTERED_AT + 2 * WATCH_WINDOW_NANOS,
+        scheduled_from: REGISTERED_AT,
+        scan_count: 0,
+        last_scanned_at: None,
+    };
+    let rebuilt = Watchlist::from_snapshot(&WatchlistSnapshot {
+        entries: vec![registered_under_a_longer_window],
     });
+
+    assert_eq!(
+        rebuilt.oldest_registered_at(at(VALID_UNTIL + 1)),
+        Some(at(REGISTERED_AT))
+    );
 }
 
 fn dropped(account: Account) -> QueuedDeposit {

@@ -1,10 +1,6 @@
 use crate::{
     lifecycle::pre_upgrade,
-    state::{
-        MAX_WATCHED_ADDRESSES,
-        event::{EventType, WatchlistSnapshot},
-        mutate_state, read_state,
-    },
+    state::{event::EventType, mutate_state, read_state},
     test_fixtures::{
         EventsAssert, REGISTERED_AT, WATCH_WINDOW_NANOS, account, at, init_state,
         runtime::TestCanisterRuntime, watch,
@@ -12,18 +8,12 @@ use crate::{
 };
 
 #[test]
-fn should_record_an_empty_snapshot_on_every_upgrade() {
+fn should_record_no_snapshot_of_an_empty_watchlist() {
     init_state();
 
     pre_upgrade(TestCanisterRuntime::new().add_times([REGISTERED_AT, REGISTERED_AT]));
 
-    EventsAssert::from_recorded()
-        .expect_event_eq(EventType::WatchedDepositAddresses(WatchlistSnapshot {
-            window_nanos: WATCH_WINDOW_NANOS,
-            capacity: MAX_WATCHED_ADDRESSES.get() as u64,
-            entries: vec![],
-        }))
-        .assert_no_more_events();
+    EventsAssert::from_recorded().assert_no_more_events();
 }
 
 #[test]

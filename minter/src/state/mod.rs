@@ -12,13 +12,12 @@ use crate::{
         CreditedDeposit, Signer, TransactionPurpose, VersionedMessage, WatchlistSnapshot,
         WithdrawalRequest,
     },
-    utils::{insertion_ordered_map::InsertionOrderedMap, timed_sized_map::Timestamp},
+    utils::insertion_ordered_map::InsertionOrderedMap,
 };
 use candid::Principal;
-use canlog::log;
 use cksol_types::{DepositSolId, TxFinalizedStatus, WithdrawSolStatus};
 use cksol_types_internal::SolanaNetwork;
-use cksol_types_internal::{Ed25519KeyName, InitArgs, UpgradeArgs, log::Priority};
+use cksol_types_internal::{Ed25519KeyName, InitArgs, UpgradeArgs};
 use ic_canister_runtime::Runtime;
 use ic_ed25519::PublicKey;
 use icrc_ledger_types::icrc1::account::Account;
@@ -234,7 +233,7 @@ impl State {
         &self.created_withdrawal_txs
     }
 
-    pub fn process_transaction_expired(&mut self, signature: &Signature, timestamp: u64) {
+    pub fn process_transaction_expired(&mut self, signature: &Signature) {
         assert!(
             !self.succeeded_transactions.contains(signature),
             "BUG: cannot mark already succeeded transaction {signature} as expired"
@@ -250,27 +249,10 @@ impl State {
                 panic!("BUG: cannot mark non-submitted transaction {signature} as expired")
             });
         match transaction {
-            MinterTransaction::SweepDeposit { .. } => self.drop_sweep(signature, timestamp),
+            MinterTransaction::SweepDeposit { .. } => self.deposits.drop_swept(signature),
             MinterTransaction::Withdrawal { .. } => {
                 panic!("BUG: durable-nonce withdrawal transaction {signature} cannot expire")
             }
-        }
-    }
-
-    /// Drops the deposits of the sweep and puts the ones the automatic flow detected back on
-    /// the watchlist for a fresh window, so that the funds still on their deposit addresses
-    /// are swept again without the user's intervention.
-    fn drop_sweep(&mut self, signature: &Signature, timestamp: u64) {
-        for deposit in self.deposits.drop_swept(signature) {
-            let rearmed = self
-                .deposits
-                .watchlist_mut()
-                .rearm(Timestamp::from_nanos(timestamp), &deposit);
-            log!(
-                Priority::Debug,
-                "Re-arm of the watch of account {:?} after sweep {signature} was dropped: {rearmed:?}",
-                deposit.account
-            );
         }
     }
 
@@ -498,12 +480,15 @@ impl State {
         timestamp: u64,
     ) {
         let amount_to_mint: Lamport = mints.iter().map(|mint| mint.amount_to_mint).sum();
-        assert!(
-            amount_to_mint <= amount_received,
-            "Attempted to credit sweep {signature} with mints of {amount_to_mint} lamports exceeding the {amount_received} lamports received"
-        );
         let sweep = self.deposits.credit_sweep(signature, mints, timestamp);
-        self.collected_automatic_deposit_fees += sweep.deposit_fees();
+        let deposit_fees = sweep.deposit_fees();
+        assert!(
+            amount_to_mint
+                .checked_add(deposit_fees)
+                .is_some_and(|total| total <= amount_received),
+            "Attempted to credit sweep {signature} with mints of {amount_to_mint} lamports and deposit fees of {deposit_fees} lamports exceeding the {amount_received} lamports received"
+        );
+        self.collected_automatic_deposit_fees += deposit_fees;
         self.balance += amount_received;
     }
 
@@ -825,7 +810,7 @@ impl State {
             });
     }
 
-    fn process_transaction_failed(&mut self, signature: &Signature, timestamp: u64) {
+    fn process_transaction_failed(&mut self, signature: &Signature) {
         assert!(
             !self.succeeded_transactions.contains(signature),
             "Attempted to mark already succeeded transaction {signature:?} as failed"
@@ -837,7 +822,7 @@ impl State {
                 panic!("Attempted to mark unknown transaction {signature:?} as failed")
             });
         match &transaction {
-            MinterTransaction::SweepDeposit { .. } => self.drop_sweep(signature, timestamp),
+            MinterTransaction::SweepDeposit { .. } => self.deposits.drop_swept(signature),
             MinterTransaction::Withdrawal { nonce_account, .. } => {
                 self.nonce_pool.free(nonce_account)
             }

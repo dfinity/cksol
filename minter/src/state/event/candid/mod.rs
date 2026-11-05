@@ -124,8 +124,6 @@ impl From<EventType> for CandidEventType {
             },
             EventType::WatchedDepositAddresses(snapshot) => {
                 CandidEventType::WatchedDepositAddresses {
-                    window_nanos: snapshot.window_nanos,
-                    capacity: snapshot.capacity,
                     entries: snapshot
                         .entries
                         .into_iter()
@@ -292,18 +290,14 @@ impl TryFrom<CandidEventType> for EventType {
                 nonce_account: Address::from(nonce_account),
                 nonce_value: Hash::from(nonce_value),
             },
-            CandidEventType::WatchedDepositAddresses {
-                window_nanos,
-                capacity,
-                entries,
-            } => EventType::WatchedDepositAddresses(WatchlistSnapshot {
-                window_nanos,
-                capacity,
-                entries: entries
-                    .into_iter()
-                    .map(WatchedDepositAddress::from)
-                    .collect(),
-            }),
+            CandidEventType::WatchedDepositAddresses { entries } => {
+                EventType::WatchedDepositAddresses(WatchlistSnapshot {
+                    entries: entries
+                        .into_iter()
+                        .map(WatchedDepositAddress::from)
+                        .collect(),
+                })
+            }
         })
     }
 }

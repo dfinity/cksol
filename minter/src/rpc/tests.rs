@@ -79,7 +79,7 @@ mod get_balance_tests {
 mod get_balances_tests {
     use super::*;
     use crate::test_fixtures::address;
-    use sol_rpc_types::Lamport;
+    use sol_rpc_types::{DataSlice, GetAccountInfoEncoding, GetMultipleAccountsParams, Lamport};
 
     type MultiRpcResult = sol_rpc_types::MultiRpcResult<Vec<Option<sol_rpc_types::AccountInfo>>>;
 
@@ -101,6 +101,47 @@ mod get_balances_tests {
             .map(|balance| balance.unwrap_or(0))
             .collect();
         assert_eq!(result, Ok(expected));
+    }
+
+    #[tokio::test]
+    async fn should_request_the_finalized_balances_without_account_data() {
+        init_state();
+        for (num_addresses, expected_cycles) in [
+            (1, 10_100_000_000),
+            (MAX_ADDRESSES_PER_GET_MULTIPLE_ACCOUNTS, 20_000_000_000),
+        ] {
+            let addresses: Vec<_> = (0..num_addresses).map(address).collect();
+            let runtime = TestCanisterRuntime::new()
+                .add_get_multiple_accounts_response(&vec![None; num_addresses]);
+
+            let result = get_balances(&runtime, &addresses).await;
+
+            assert_eq!(result, Ok(vec![0; num_addresses]));
+            let [call] = runtime.sent_update_calls().try_into().unwrap();
+            assert_eq!(call.method, "getMultipleAccounts");
+            assert_eq!(call.cycles, expected_cycles);
+            let (_sources, config, params): (
+                RpcSources,
+                Option<RpcConfig>,
+                GetMultipleAccountsParams,
+            ) = call.args();
+            assert_eq!(
+                config.and_then(|config| config.response_size_estimate),
+                None
+            );
+            assert_eq!(
+                params,
+                GetMultipleAccountsParams {
+                    commitment: Some(CommitmentLevel::Finalized),
+                    encoding: Some(GetAccountInfoEncoding::Base64),
+                    data_slice: Some(DataSlice {
+                        length: 0,
+                        offset: 0,
+                    }),
+                    ..GetMultipleAccountsParams::try_from(addresses).unwrap()
+                }
+            );
+        }
     }
 
     #[tokio::test]
@@ -137,6 +178,20 @@ mod get_balances_tests {
                 TestCanisterRuntime::new()
                     .add_stub_response(MultiRpcResult::Inconsistent(inconsistent.clone())),
                 GetMultipleAccountsError::InconsistentRpcResults,
+            ),
+            (
+                TestCanisterRuntime::new().add_get_multiple_accounts_response(&[]),
+                GetMultipleAccountsError::UnexpectedAccountCount {
+                    expected: 1,
+                    actual: 0,
+                },
+            ),
+            (
+                TestCanisterRuntime::new().add_get_multiple_accounts_response(&[Some(1), None]),
+                GetMultipleAccountsError::UnexpectedAccountCount {
+                    expected: 1,
+                    actual: 2,
+                },
             ),
         ] {
             let result = get_balances(&runtime, &[address(1)]).await;
