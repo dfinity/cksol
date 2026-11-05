@@ -260,6 +260,12 @@ impl Watchlist {
         self.entries.is_empty()
     }
 
+    /// The number of live registrations the watchlist admits, which is
+    /// [`MAX_WATCHED_ADDRESSES`] after a rebuild too.
+    pub fn capacity(&self) -> usize {
+        self.entries.capacity().get()
+    }
+
     pub fn live_len(&self, now: Timestamp) -> usize {
         self.live(now).count()
     }

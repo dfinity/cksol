@@ -1496,6 +1496,7 @@ mod metrics_tests {
             .assert_contains_metric_matching(r#"oldest_in_flight_deposit_age_seconds 0 \d+"#)
             .assert_contains_metric_matching(r#"oldest_pending_mint_age_seconds 0 \d+"#)
             .assert_contains_metric_matching(r#"watched_deposit_addresses 0 \d+"#)
+            .assert_contains_metric_matching(r#"watched_deposit_address_capacity 1000 \d+"#)
             .assert_contains_metric_matching(r#"oldest_due_deposit_address_scan_age_seconds 0 \d+"#)
             .assert_contains_metric_matching(r#"collected_automatic_deposit_fees 0 \d+"#)
             .assert_contains_metric_matching(r"# TYPE collected_automatic_deposit_fees counter")

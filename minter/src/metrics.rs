@@ -122,6 +122,11 @@ pub fn encode_metrics(w: &mut MetricsEncoder<Vec<u8>>, s: &State) -> std::io::Re
         "Number of deposit addresses registered for the automatic deposit flow whose window is still open.",
     )?;
     w.encode_gauge(
+        "watched_deposit_address_capacity",
+        s.watchlist().capacity().metric_value(),
+        "Number of live registrations the watchlist of the automatic deposit flow admits at most.",
+    )?;
+    w.encode_gauge(
         "oldest_due_deposit_address_scan_age_seconds",
         age_seconds(
             s.watchlist()

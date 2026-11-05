@@ -57,6 +57,7 @@ fn should_reject_a_registration_when_full_of_live_entries() {
 
     assert_eq!(result, Err(WatchlistFull));
     assert_eq!(watchlist.len(), MAX_WATCHED_ADDRESSES.get());
+    assert_eq!(watchlist.capacity(), MAX_WATCHED_ADDRESSES.get());
 }
 
 #[test]
@@ -319,6 +320,7 @@ fn should_keep_expired_registrations_and_exceed_the_capacity_when_rebuilding() {
     let mut rebuilt = Watchlist::from_snapshot(&snapshot);
 
     assert_eq!(rebuilt.len(), entries.len());
+    assert_eq!(rebuilt.capacity(), MAX_WATCHED_ADDRESSES.get());
     assert_eq!(
         rebuilt.register(
             at(REGISTERED_AT),
