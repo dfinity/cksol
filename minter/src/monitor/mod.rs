@@ -8,8 +8,10 @@ use crate::{
     rpc::{BlockHeight, get_recent_block, get_signature_statuses},
     runtime::CanisterRuntime,
     state::{
-        MinterTransaction, TaskType, audit::process_event, event::EventType, mutate_state,
-        read_state,
+        MinterTransaction, TaskType,
+        audit::{process_dropped_sweep, process_event},
+        event::EventType,
+        mutate_state, read_state,
     },
 };
 use canlog::log;
@@ -105,7 +107,7 @@ async fn check_sweep_transactions<R: CanisterRuntime>(runtime: &R) -> bool {
             "Transaction {signature} finalized with on-chain error: {error}"
         );
         mutate_state(|state| {
-            process_event(
+            process_dropped_sweep(
                 state,
                 EventType::FailedTransaction {
                     signature: *signature,
@@ -168,7 +170,7 @@ fn expire_transactions<R: CanisterRuntime>(
         }
         log!(Priority::Info, "Transaction {signature} expired");
         mutate_state(|state| {
-            process_event(
+            process_dropped_sweep(
                 state,
                 EventType::ExpiredTransaction {
                     signature: *signature,

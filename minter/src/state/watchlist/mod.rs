@@ -1,4 +1,7 @@
-use crate::utils::timed_sized_map::{Entry, InsertError, TimedSizedMap, Timestamp};
+use crate::{
+    state::QueuedDeposit,
+    utils::timed_sized_map::{Entry, InsertError, TimedSizedMap, Timestamp},
+};
 use icrc_ledger_types::icrc1::account::Account;
 use solana_address::Address;
 use std::{num::NonZeroUsize, time::Duration};
@@ -99,6 +102,14 @@ pub struct WatchedAddress {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct WatchlistFull;
 
+/// Why a dropped deposit was not put back on the watchlist.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RearmError {
+    /// The deposit was queued by `deposit_sol`, whose caller registered nothing.
+    ManualDeposit,
+    WatchlistFull,
+}
+
 impl Default for Watchlist {
     fn default() -> Self {
         Self {
@@ -125,6 +136,23 @@ impl Watchlist {
                 .expect("BUG: a registration is live right after its insertion")),
             Err(InsertError::AtCapacity { .. }) => Err(WatchlistFull),
         }
+    }
+
+    /// Puts the account of a dropped automatic deposit back on the watchlist for a fresh
+    /// window and schedule starting now, so that the funds still on its deposit address are
+    /// swept again without the user's intervention. The account is not watched at that point:
+    /// queueing the deposit removed it from the watchlist, and an account with a deposit in
+    /// flight is not registered.
+    pub fn rearm(
+        &mut self,
+        now: Timestamp,
+        dropped: &QueuedDeposit,
+    ) -> Result<WatchedAddress, RearmError> {
+        if dropped.deposit_fee.is_none() {
+            return Err(RearmError::ManualDeposit);
+        }
+        self.register(now, dropped.account, dropped.address)
+            .map_err(|WatchlistFull| RearmError::WatchlistFull)
     }
 
     /// The live registration of the account, if any.

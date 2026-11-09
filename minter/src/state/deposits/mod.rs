@@ -39,7 +39,8 @@ mod tests;
 ///   transaction is what the finalization timer tracks from here on. A sweep is never
 ///   resubmitted: when it fails or expires, its deposits are dropped and their accounts
 ///   released, so that `deposit_sol` can queue a new sweep of the balance still on the
-///   deposit address.
+///   deposit address. The accounts of the automatic deposits are also put back on the
+///   watchlist when it has room, so that a balance scan queues that sweep without a call.
 /// * `finalized`: `getSignatureStatuses` reported the sweep as finalized without error. The
 ///   amount received by the main account is still unknown, because Solana may charge a
 ///   different transaction fee than the sweep was built with.

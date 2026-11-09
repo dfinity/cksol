@@ -100,7 +100,10 @@ pub enum DepositSolStatus {
     },
     /// The sweep transaction failed, or expired without ever being seen on chain, so no
     /// ckSOL is owed. Calling `deposit_sol` again queues a new sweep of whatever balance
-    /// the deposit address still holds.
+    /// the deposit address still holds. A deposit detected by the automatic flow also puts
+    /// its deposit address back on watch for a new window, unless too many addresses are
+    /// watched, so that `watch_deposit_address` reports it as `Watching` and the balance
+    /// is swept again without a call.
     Dropped {
         /// The signature of the sweep transaction.
         signature: Signature,
