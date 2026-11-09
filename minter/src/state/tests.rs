@@ -111,6 +111,7 @@ mod queued_deposits {
                 address: queued_deposit(deposit_id).address,
                 balance: queued_deposit(deposit_id).balance,
                 deposit_fee: None,
+                origin: DepositOrigin::Manual,
             },
         };
         let init = Event {
@@ -1782,6 +1783,7 @@ mod withdrawal_transactions {
                 address: funding_deposit.address,
                 balance: funding_deposit.balance,
                 deposit_fee: None,
+                origin: DepositOrigin::Manual,
             },
             EventType::SubmittedTransaction {
                 signature: signature(9),

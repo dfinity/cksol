@@ -6,7 +6,7 @@ use crate::{
     rpc::get_balance,
     runtime::CanisterRuntime,
     state::{
-        DepositBalance, InFlightDeposit, QueuedDeposit, State, audit::process_event,
+        DepositBalance, DepositOrigin, InFlightDeposit, QueuedDeposit, State, audit::process_event,
         event::EventType, mutate_state, read_state,
     },
     utils::assert_valid_deposit_owner,
@@ -90,6 +90,7 @@ pub async fn deposit_sol<R: CanisterRuntime>(
                 account,
                 address: deposit_address,
                 balance,
+                origin: DepositOrigin::Manual,
                 deposit_fee: None,
             },
         )
@@ -119,6 +120,7 @@ pub(crate) fn queue_deposit<R: CanisterRuntime>(
             address: deposit.address,
             balance: deposit.balance,
             deposit_fee: deposit.deposit_fee,
+            origin: deposit.origin,
         },
         runtime,
     );

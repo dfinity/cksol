@@ -334,7 +334,10 @@ mod settle {
         SweepMismatch, SweepSettlementError, TransactionError, UiTransactionError,
         UnreadableOutcome, account, devnet_sweep, planned_sweep, queued_deposit_of,
     };
-    use crate::{state::QueuedDeposit, test_fixtures::fetched};
+    use crate::{
+        state::{DepositOrigin, QueuedDeposit},
+        test_fixtures::fetched,
+    };
 
     type Deviation = fn(&mut EncodedConfirmedTransactionWithStatusMeta);
 
@@ -386,15 +389,16 @@ mod settle {
     #[test]
     fn should_reject_a_matching_outcome_whose_fees_exceed_a_sweepable_amount() {
         let deposits = devnet_sweep::deposits().into_iter().map(|(id, deposit)| {
-            let deposit_fee =
-                (deposit.address == SECOND_DEPOSIT).then_some(SECOND_SWEEPABLE_AMOUNT);
-            (
-                id,
+            let deposit = if deposit.address == SECOND_DEPOSIT {
                 QueuedDeposit {
-                    deposit_fee,
+                    origin: DepositOrigin::Automatic,
+                    deposit_fee: Some(SECOND_SWEEPABLE_AMOUNT),
                     ..deposit
-                },
-            )
+                }
+            } else {
+                deposit
+            };
+            (id, deposit)
         });
         let fetched = fetched(devnet_sweep::outcome());
 

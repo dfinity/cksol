@@ -1,5 +1,5 @@
 use crate::{
-    state::QueuedDeposit,
+    state::{DepositOrigin, QueuedDeposit},
     utils::timed_sized_map::{Entry, InsertError, TimedSizedMap, Timestamp},
 };
 use icrc_ledger_types::icrc1::account::Account;
@@ -148,7 +148,7 @@ impl Watchlist {
         now: Timestamp,
         dropped: &QueuedDeposit,
     ) -> Result<WatchedAddress, RearmError> {
-        if dropped.deposit_fee.is_none() {
+        if dropped.origin == DepositOrigin::Manual {
             return Err(RearmError::ManualDeposit);
         }
         self.register(now, dropped.account, dropped.address)

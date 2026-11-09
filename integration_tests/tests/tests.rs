@@ -16,7 +16,7 @@ use cksol_types::{
 };
 use cksol_types_internal::{
     UpgradeArgs,
-    event::{EventType, TransactionPurpose},
+    event::{DepositOrigin, EventType, TransactionPurpose},
     log::Priority,
 };
 use icrc_ledger_types::icrc1::account::{Account, Subaccount};
@@ -870,6 +870,7 @@ mod deposit_sol_tests {
                         address: deposit_address.clone(),
                         balance: BALANCE_ABOVE_MINIMUM,
                         deposit_fee: None,
+                        origin: Some(DepositOrigin::Manual),
                     }]
             );
         });
@@ -951,6 +952,7 @@ mod deposit_sol_tests {
                         address: deposit_address.clone(),
                         balance: BALANCE_ABOVE_MINIMUM,
                         deposit_fee: None,
+                        origin: Some(DepositOrigin::Manual),
                     }]
             );
         });
@@ -1325,6 +1327,7 @@ mod automatic_deposit_sol_tests {
                         address: DEFAULT_CALLER_DEPOSIT_ADDRESS.parse().unwrap(),
                         balance: BALANCE_ABOVE_MINIMUM,
                         deposit_fee: Some(Setup::DEFAULT_AUTOMATIC_DEPOSIT_FEE),
+                        origin: Some(DepositOrigin::Automatic),
                     }]
             );
         });

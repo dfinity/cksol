@@ -2,7 +2,7 @@ use crate::{
     constants::{GET_BALANCE_CYCLES, RENT_EXEMPTION_THRESHOLD},
     deposit::sweep::{deposit_sol, deposit_status},
     guard::deposit_sol_guard,
-    state::{event::EventType, read_state},
+    state::{DepositOrigin, event::EventType, read_state},
     storage::with_event_iter,
     test_fixtures::{
         AUTOMATIC_DEPOSIT_FEE, DEPOSIT_SOL_FEE, DEPOSIT_SOL_REQUIRED_CYCLES, EventsAssert,
@@ -247,6 +247,7 @@ async fn assert_yields_to_the_deposit_queued_by_a_scan_during_the_read(
             address: scanned.address,
             balance: queued_deposit_of(DEPOSITOR_ACCOUNT, scanned.sweepable_amount).balance,
             deposit_fee: Some(AUTOMATIC_DEPOSIT_FEE),
+            origin: DepositOrigin::Automatic,
         })
         .assert_no_more_events();
     assert_eq!(
@@ -345,6 +346,7 @@ fn queued_deposit_event(deposit_id: u64, account: Account, sweepable_amount: Lam
         address: deposit.address,
         balance: deposit.balance,
         deposit_fee: None,
+        origin: DepositOrigin::Manual,
     }
 }
 
