@@ -177,7 +177,7 @@ mod swept_deposits {
             DEFAULT_BLOCK_HEIGHT, REGISTERED_AT, WATCH_WINDOW_NANOS, at,
             events::{credit_sweep, quarantine_sweep, queue_deposits, submit_sweep},
             flow::deposit::{CreditedSweepFlow, DepositFlow, SweepFlow},
-            replayed_recorded_log, sweep_message, watch,
+            queued_deposit_of, replayed_recorded_log, sweep_message, watch,
         },
     };
 
@@ -526,6 +526,39 @@ mod swept_deposits {
             assert_eq!(
                 s.collected_automatic_deposit_fees(),
                 AUTOMATIC_DEPOSIT_FEE + AUTOMATIC_DEPOSIT_FEE / 2
+            );
+            assert_eq!(s.balance(), credited.amount_received);
+        });
+
+        let replayed = replayed_recorded_log();
+        read_state(|live_state| assert_eq!(&replayed, live_state));
+    }
+
+    #[test]
+    fn should_not_collect_the_fee_of_a_manual_deposit_as_an_automatic_deposit_fee() {
+        init_state();
+        init_schnorr_master_key();
+        let manual = DepositFlow::queue_deposit(QueuedDeposit {
+            deposit_fee: Some(AUTOMATIC_DEPOSIT_FEE),
+            ..queued_deposit_of(account(1), 10_000_000)
+        });
+        let automatic =
+            DepositFlow::queue_automatic(account(2), 20_000_000, AUTOMATIC_DEPOSIT_FEE / 2);
+
+        let credited = SweepFlow::of([manual, automatic])
+            .submit(signature(SWEEP_SIGNATURE_INDEX))
+            .succeed()
+            .credit();
+
+        let [manual_mint, _] = credited.pending_mints();
+        assert_eq!(
+            manual_mint.amount_to_mint,
+            10_000_000 - FEE_PER_SIGNATURE - AUTOMATIC_DEPOSIT_FEE
+        );
+        read_state(|s| {
+            assert_eq!(
+                s.collected_automatic_deposit_fees(),
+                AUTOMATIC_DEPOSIT_FEE / 2
             );
             assert_eq!(s.balance(), credited.amount_received);
         });

@@ -483,7 +483,7 @@ impl State {
                 .is_some_and(|total| total <= amount_received),
             "Attempted to credit sweep {signature} with mints of {amount_to_mint} lamports and deposit fees of {deposit_fees} lamports exceeding the {amount_received} lamports received"
         );
-        self.collected_automatic_deposit_fees += deposit_fees;
+        self.collected_automatic_deposit_fees += sweep.automatic_deposit_fees();
         self.balance += amount_received;
     }
 

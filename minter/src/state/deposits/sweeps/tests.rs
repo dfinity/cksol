@@ -102,7 +102,7 @@ mod plan {
         planned_sweep, queued_deposit_of,
     };
     use crate::{
-        state::event::CreditedDeposit,
+        state::{QueuedDeposit, event::CreditedDeposit},
         test_fixtures::{
             arb::{arb_address, arb_sweep_deposits},
             automatic_deposit_of,
@@ -187,6 +187,23 @@ mod plan {
         ]);
 
         assert_eq!(sweep.deposit_fees(), 0);
+    }
+
+    #[test]
+    fn should_count_only_the_fees_of_automatic_deposits_as_automatic() {
+        let sweep = planned_sweep([
+            (
+                0,
+                QueuedDeposit {
+                    deposit_fee: Some(1_000),
+                    ..queued_deposit_of(account(1), 1_000_000)
+                },
+            ),
+            (1, automatic_deposit_of(account(2), 2_000_000, 2_000)),
+        ]);
+
+        assert_eq!(sweep.deposit_fees(), 3_000);
+        assert_eq!(sweep.automatic_deposit_fees(), 2_000);
     }
 
     #[test]
