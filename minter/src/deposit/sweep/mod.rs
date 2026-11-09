@@ -55,10 +55,22 @@ pub async fn deposit_sol<R: CanisterRuntime>(
     let master_key =
         minter_public_key().map_err(|e| DepositSolError::TemporarilyUnavailable(e.to_string()))?;
     let deposit_address = account_address(&master_key, &account);
+    let latest_deposit_before_read = read_state(|state| state.deposits().latest_id(&account));
     let result = get_balance(runtime, deposit_address)
         .await
         .map_err(DepositSolError::from)
         .and_then(|balance| balance_above_minimum(balance, minimum_deposit_amount));
+    if let Some(deposit_id) = deposit_queued_meanwhile(&account, latest_deposit_before_read) {
+        charge_rpc_call(
+            runtime,
+            RpcCallCharge {
+                attached_cycles: GET_BALANCE_CYCLES,
+                fee_on_success: 0,
+            },
+            &result,
+        );
+        return Ok(deposit_id);
+    }
     charge_rpc_call(
         runtime,
         RpcCallCharge {
@@ -122,6 +134,17 @@ pub(crate) fn queue_deposit<R: CanisterRuntime>(
 
 pub fn deposit_status(deposit_id: DepositSolId) -> DepositSolStatus {
     read_state(|state| state.deposits().status(deposit_id))
+}
+
+/// The deposit a balance scan of the automatic flow queued for the account while the
+/// balance read of `deposit_sol` was in flight, whatever stage it reached since: the read
+/// must not queue a second deposit from the same balance.
+fn deposit_queued_meanwhile(
+    account: &Account,
+    latest_deposit_before_read: Option<DepositSolId>,
+) -> Option<DepositSolId> {
+    read_state(|state| state.deposits().latest_id(account))
+        .filter(|latest| Some(*latest) != latest_deposit_before_read)
 }
 
 fn balance_above_minimum(

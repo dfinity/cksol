@@ -2,9 +2,12 @@ use candid::Principal;
 use canlog::{Log, Sort};
 use cksol_minter::{
     address::{fetch_and_record_minter_public_key, minter_address},
-    deposit::sweep::{
-        PROCESS_PENDING_MINTS_DELAY, SWEEP_DEPOSITS_DELAY, process_pending_mints,
-        sweep_queued_deposits,
+    deposit::{
+        automatic::{SCAN_WATCHED_ADDRESSES_DELAY, scan_watched_addresses},
+        sweep::{
+            PROCESS_PENDING_MINTS_DELAY, SWEEP_DEPOSITS_DELAY, process_pending_mints,
+            sweep_queued_deposits,
+        },
     },
     monitor::{FINALIZE_TRANSACTIONS_DELAY, finalize_transactions},
     runtime::IcCanisterRuntime,
@@ -276,6 +279,9 @@ fn setup_timers() {
     });
     ic_cdk_timers::set_timer_interval(FINALIZE_TRANSACTIONS_DELAY, async || {
         finalize_transactions(IcCanisterRuntime::new()).await;
+    });
+    ic_cdk_timers::set_timer_interval(SCAN_WATCHED_ADDRESSES_DELAY, async || {
+        scan_watched_addresses(IcCanisterRuntime::new()).await;
     });
 }
 

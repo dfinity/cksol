@@ -7,8 +7,12 @@ use crate::{
 use cksol_types::{WatchDepositAddressError, WatchDepositAddressOk, WatchDepositAddressStatus};
 use icrc_ledger_types::icrc1::account::Account;
 
+mod scan;
 #[cfg(test)]
 mod tests;
+
+pub use crate::constants::SCAN_WATCHED_ADDRESSES_DELAY;
+pub use scan::scan_watched_addresses;
 
 pub fn watch_deposit_address<R: CanisterRuntime>(
     runtime: &R,
