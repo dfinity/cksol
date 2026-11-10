@@ -48,17 +48,23 @@ pub fn process_dropped_sweep<R: CanisterRuntime>(
     let now = Timestamp::from_nanos(runtime.time());
     for (deposit_id, deposit) in deposits {
         match state.watchlist_mut().rearm(now, &deposit) {
-            Ok(_) => log!(
-                Priority::Info,
-                "Watching account {} again after its deposit {deposit_id} was dropped with sweep {signature}",
-                deposit.account
-            ),
+            Ok(_) => {
+                storage::record_automatic_deposit_rearm(storage::RearmOutcome::Rearmed);
+                log!(
+                    Priority::Info,
+                    "Watching account {} again after its deposit {deposit_id} was dropped with sweep {signature}",
+                    deposit.account
+                )
+            }
             Err(RearmError::ManualDeposit) => {}
-            Err(RearmError::WatchlistFull) => log!(
-                Priority::Info,
-                "Failed to watch account {} again after its deposit {deposit_id} was dropped with sweep {signature}: the watchlist is full",
-                deposit.account
-            ),
+            Err(RearmError::WatchlistFull) => {
+                storage::record_automatic_deposit_rearm(storage::RearmOutcome::WatchlistFull);
+                log!(
+                    Priority::Info,
+                    "Failed to watch account {} again after its deposit {deposit_id} was dropped with sweep {signature}: the watchlist is full",
+                    deposit.account
+                )
+            }
         }
     }
 }

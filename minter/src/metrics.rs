@@ -1,6 +1,7 @@
 use crate::state::{QuarantineCause, State};
 use crate::storage::{
-    self, FailedCreditReason, FailedMintReason, ScanOutcome, UndecidedWithdrawalReason,
+    self, FailedCreditReason, FailedMintReason, RearmOutcome, ScanOutcome,
+    UndecidedWithdrawalReason,
 };
 use crate::utils::timed_sized_map::Timestamp;
 use ic_metrics_encoder::MetricsEncoder;
@@ -169,6 +170,16 @@ pub fn encode_metrics(w: &mut MetricsEncoder<Vec<u8>>, s: &State) -> std::io::Re
         deposit_address_scans = deposit_address_scans.value(
             &[("outcome", outcome.label())],
             storage::deposit_address_scan_count(outcome).metric_value(),
+        )?;
+    }
+    let mut automatic_deposit_rearms = w.counter_vec(
+        "automatic_deposit_rearms",
+        "Number of automatic deposits dropped with their sweep since the last upgrade, by outcome: their account put back on the watchlist for a fresh window, or not because the watchlist was full.",
+    )?;
+    for outcome in RearmOutcome::ALL {
+        automatic_deposit_rearms = automatic_deposit_rearms.value(
+            &[("outcome", outcome.label())],
+            storage::automatic_deposit_rearm_count(outcome).metric_value(),
         )?;
     }
     w.encode_gauge(
