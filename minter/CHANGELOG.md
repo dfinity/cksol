@@ -7,9 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+The automatic deposit flow is disabled until `automatic_deposit_fee` is set. Enable it with a second upgrade once the version with the flow runs as expected, as described under "Enable the automatic deposit flow" in the deployment guide: until then the upgrade can be rolled back, afterwards a faulty version has to be fixed forward.
+
 ### Added
 
-- Automatic deposits: `watch_deposit_address` registers the deposit address of the caller's account for free and reports on the registration, so that SOL sent straight from an exchange is credited without a further call. A timer scans the watched addresses with `getMultipleAccounts` on a schedule spread over a day and queues a deposit that reaches `minimum_deposit_amount` exactly as `deposit_sol` would, deducting the new `automatic_deposit_fee` init and upgrade parameter from the minted amount; `get_minter_info` reports the fee and the collected fees. The watchlist is snapshotted in a new event on every upgrade, and the watched addresses, the scans by outcome and the collected fees are reported in the metrics and on the dashboard ([#274](https://github.com/dfinity/cksol/pull/274))
+- Automatic deposits: `watch_deposit_address` registers the deposit address of the caller's account for free and reports on the registration, so that SOL sent straight from an exchange is credited without a further call. A timer scans the watched addresses with `getMultipleAccounts` on a schedule spread over a day and queues a deposit that reaches `minimum_deposit_amount` exactly as `deposit_sol` would, deducting the new `automatic_deposit_fee` init and upgrade parameter from the minted amount; `get_minter_info` reports the fee and the collected fees ([#277](https://github.com/dfinity/cksol/pull/277), [#279](https://github.com/dfinity/cksol/pull/279), [#280](https://github.com/dfinity/cksol/pull/280), [#281](https://github.com/dfinity/cksol/pull/281), [#282](https://github.com/dfinity/cksol/pull/282), [#283](https://github.com/dfinity/cksol/pull/283), [#291](https://github.com/dfinity/cksol/pull/291), [#274](https://github.com/dfinity/cksol/pull/274))
+- A sweep of automatic deposits that fails or expires puts their addresses back on the watchlist for a fresh window, if it has room, so that the funds are swept again under a new deposit id without any call ([#284](https://github.com/dfinity/cksol/pull/284))
+- The watchlist is recorded in a new event before every upgrade and restored on replay ([#285](https://github.com/dfinity/cksol/pull/285))
+- Observability: metrics for the watched addresses against the capacity of the watchlist, the age of the earliest due scan, the scans by outcome, the re-arms of dropped automatic deposits by outcome and the collected fees, and on the dashboard the fee, the collected fees and the watched addresses ([#287](https://github.com/dfinity/cksol/pull/287))
+
+### Changed
+
+- `deposit_sol` returns the deposit that a scan queued for the same account during its balance read, charging only the read, so that the same balance is never queued twice ([#286](https://github.com/dfinity/cksol/pull/286))
+- The `dropped_deposits` metric is split by the `origin` of the deposit, `manual` or `automatic` ([#287](https://github.com/dfinity/cksol/pull/287))
 
 ## [0.1.0] - 2026-10-09
 

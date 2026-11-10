@@ -57,6 +57,8 @@ A successful response returns the deposit address, the minimum deposit amount, t
 
 Call `watch_deposit_address` again to follow the registration: the status becomes `Detected` with the deposit id once the minter has queued the deposit, which you can then track with `deposit_sol_status`. Calling it again after the deposit is minted registers the address anew.
 
+The last scan runs about half an hour before the window ends (`valid_until`), so a transfer finalized after it is only detected once you register again, which is free and possible as soon as the window has closed.
+
 ## Check a deposit status
 
 After calling `deposit_sol`, or once `watch_deposit_address` reports a deposit as `Detected`, track the deposit using its deposit id. The status moves through `Queued` → `Swept` → `Finalized` → `Minted` as the minter sweeps the deposit address and mints ckSOL:
