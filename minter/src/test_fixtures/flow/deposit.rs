@@ -37,7 +37,8 @@ impl DepositFlow {
         Self::queue_deposit(automatic_deposit_of(account, sweepable_amount, deposit_fee))
     }
 
-    fn queue_deposit(deposit: QueuedDeposit) -> QueuedDepositFlow {
+    /// Queues `deposit` under the next deposit id of the state.
+    pub fn queue_deposit(deposit: QueuedDeposit) -> QueuedDepositFlow {
         let deposit_id = read_state(|state| state.deposits().next_id());
         queue(deposit_id, deposit);
         QueuedDepositFlow {

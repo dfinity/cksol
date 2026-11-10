@@ -5,8 +5,8 @@ use crate::{
     rpc::{GetMultipleAccountsError, get_balances},
     runtime::CanisterRuntime,
     state::{
-        DepositBalance, MAX_WATCHED_ADDRESSES, QueuedDeposit, State, TaskType, WatchedAddress,
-        mutate_state, read_state,
+        DepositBalance, DepositOrigin, MAX_WATCHED_ADDRESSES, QueuedDeposit, State, TaskType,
+        WatchedAddress, mutate_state, read_state,
     },
     storage::{ScanOutcome, record_deposit_address_scans},
     utils::timed_sized_map::Timestamp,
@@ -153,6 +153,7 @@ fn apply_balance_read<R: CanisterRuntime>(
                 account: watched.account,
                 address: watched.address,
                 balance,
+                origin: DepositOrigin::Automatic,
                 deposit_fee: Some(automatic_deposit_fee),
             },
         );

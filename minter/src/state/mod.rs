@@ -43,9 +43,9 @@ mod nonce_pool;
 mod watchlist;
 
 pub use deposits::{
-    DepositBalance, Deposits, InFlightDeposit, MintedSweep, PendingMint, QuarantineCause,
-    QuarantinedDeposit, QueuedDeposit, SettledSweep, Sweep, SweepMismatch, SweepRecoveryError,
-    SweepSettlementError, Sweeps, SweptDeposit, Transfer, UnreadableOutcome,
+    DepositBalance, DepositOrigin, Deposits, InFlightDeposit, MintedSweep, PendingMint,
+    QuarantineCause, QuarantinedDeposit, QueuedDeposit, SettledSweep, Sweep, SweepMismatch,
+    SweepRecoveryError, SweepSettlementError, Sweeps, SweptDeposit, Transfer, UnreadableOutcome,
 };
 pub use nonce_pool::{DurableNoncePool, NoncePoolError, NonceRead};
 pub use watchlist::{
@@ -483,7 +483,7 @@ impl State {
                 .is_some_and(|total| total <= amount_received),
             "Attempted to credit sweep {signature} with mints of {amount_to_mint} lamports and deposit fees of {deposit_fees} lamports exceeding the {amount_received} lamports received"
         );
-        self.collected_automatic_deposit_fees += deposit_fees;
+        self.collected_automatic_deposit_fees += sweep.automatic_deposit_fees();
         self.balance += amount_received;
     }
 
