@@ -1397,6 +1397,79 @@ mod automatic_deposit_sol_tests {
     }
 
     #[tokio::test]
+    async fn should_sweep_finalize_and_mint_the_detected_deposit_minus_the_automatic_fee() {
+        const SWEEPABLE_AMOUNT: Lamport = BALANCE_ABOVE_MINIMUM - RENT_EXEMPTION_THRESHOLD;
+        const FEE: Lamport = Setup::DEFAULT_AUTOMATIC_DEPOSIT_FEE;
+        let setup = SetupBuilder::new().build().await;
+        setup
+            .minter()
+            .watch_deposit_address(None)
+            .await
+            .expect("watch_deposit_address should register the caller");
+        setup.advance_time(SCAN_WATCHED_ADDRESSES_DELAY).await;
+        setup
+            .execute_http_mocks(
+                MockBuilder::new()
+                    .get_multiple_accounts(&[BALANCE_ABOVE_MINIMUM])
+                    .build(),
+            )
+            .await;
+
+        setup.advance_time(SWEEP_DEPOSITS_DELAY).await;
+        setup
+            .execute_http_mocks(
+                MockBuilder::with_start_id(4)
+                    .submit_transaction(SUBMISSION_BLOCK_HEIGHT)
+                    .build(),
+            )
+            .await;
+        let sweep_signature = assert_matches!(
+            setup.minter().deposit_sol_status(0).await,
+            DepositSolStatus::Swept { signature } => signature
+        );
+
+        setup.advance_time(FINALIZE_TRANSACTIONS_DELAY).await;
+        let sweep = setup.minter().signed_transaction(&sweep_signature).await;
+        setup
+            .execute_http_mocks(
+                MockBuilder::with_start_id(16)
+                    .finalize_transaction(&sweep_signature, SUBMISSION_BLOCK_HEIGHT)
+                    .get_sweep_transaction(&sweep, SWEEPABLE_AMOUNT)
+                    .build(),
+            )
+            .await;
+        setup.wait_for_deposit_minted(0).await;
+
+        let minted_amount = SWEEPABLE_AMOUNT - FEE_PER_SIGNATURE - FEE;
+        assert_eq!(
+            setup.minter().deposit_sol_status(0).await,
+            DepositSolStatus::Minted {
+                block_index: 0,
+                minted_amount,
+            }
+        );
+        assert_eq!(
+            setup.ledger().balance_of(DEFAULT_CALLER_ACCOUNT).await,
+            minted_amount
+        );
+        assert_eq!(
+            setup
+                .minter()
+                .get_minter_info()
+                .await
+                .collected_automatic_deposit_fees,
+            Some(FEE)
+        );
+        setup
+            .check_metrics()
+            .await
+            .assert_contains_metric_matching(format!(r"collected_automatic_deposit_fees {FEE} \d+"))
+            .into()
+            .drop()
+            .await;
+    }
+
+    #[tokio::test]
     async fn should_report_a_due_scan_in_the_metrics_until_it_runs() {
         let setup = SetupBuilder::new().build().await;
         setup
