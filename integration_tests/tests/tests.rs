@@ -10,9 +10,9 @@ use cksol_int_tests::{
     validator::FEE_PER_SIGNATURE,
 };
 use cksol_types::{
-    DepositSolArgs, DepositSolError, DepositSolStatus, GetDepositAddressArgs, Lamport, MinterInfo,
-    TxFinalizedStatus, WatchDepositAddressError, WatchDepositAddressStatus, WithdrawSolArgs,
-    WithdrawSolError, WithdrawSolStatus,
+    DepositSolArgs, DepositSolError, DepositSolId, DepositSolStatus, GetDepositAddressArgs,
+    Lamport, MinterInfo, Signature, TxFinalizedStatus, WatchDepositAddressError,
+    WatchDepositAddressStatus, WithdrawSolArgs, WithdrawSolError, WithdrawSolStatus,
 };
 use cksol_types_internal::{
     UpgradeArgs,
@@ -49,7 +49,14 @@ async fn deposit_and_credit_funds(setup: &Setup) {
         .await
         .expect("deposit_sol should queue a sweep");
 
-    // Sweep
+    let sweep_signature = sweep_deposit(setup, deposit_id).await;
+    finalize_and_credit_sweep(setup, &sweep_signature, SWEEPABLE_AMOUNT).await;
+}
+
+/// Runs the sweep timer on the deposit queued by the first batch of HTTP outcalls (IDs 0 to
+/// 3, a `getBalance` of `deposit_sol` or a `getMultipleAccounts` of the scan timer) and
+/// returns the signature of its sweep.
+async fn sweep_deposit(setup: &Setup, deposit_id: DepositSolId) -> Signature {
     setup.advance_time(SWEEP_DEPOSITS_DELAY).await;
     setup
         .execute_http_mocks(
@@ -58,19 +65,23 @@ async fn deposit_and_credit_funds(setup: &Setup) {
                 .build(),
         )
         .await;
-    let sweep_signature = assert_matches!(
+    assert_matches!(
         setup.minter().deposit_sol_status(deposit_id).await,
         DepositSolStatus::Swept { signature } => signature
-    );
+    )
+}
 
-    // Finalize and credit
+/// Runs the finalization timer on the sweep submitted by [`sweep_deposit`], reporting that
+/// the minter's main account received `received`, which credits the sweep if it matches
+/// its plan.
+async fn finalize_and_credit_sweep(setup: &Setup, sweep_signature: &Signature, received: Lamport) {
     setup.advance_time(FINALIZE_TRANSACTIONS_DELAY).await;
-    let sweep = setup.minter().signed_transaction(&sweep_signature).await;
+    let sweep = setup.minter().signed_transaction(sweep_signature).await;
     setup
         .execute_http_mocks(
             MockBuilder::with_start_id(16)
-                .finalize_transaction(&sweep_signature, SUBMISSION_BLOCK_HEIGHT)
-                .get_sweep_transaction(&sweep, SWEEPABLE_AMOUNT)
+                .finalize_transaction(sweep_signature, SUBMISSION_BLOCK_HEIGHT)
+                .get_sweep_transaction(&sweep, received)
                 .build(),
         )
         .await;
@@ -975,19 +986,7 @@ mod deposit_sol_tests {
             .await
             .expect("deposit_sol should queue a sweep");
 
-        setup.advance_time(SWEEP_DEPOSITS_DELAY).await;
-        setup
-            .execute_http_mocks(
-                MockBuilder::with_start_id(4)
-                    .submit_transaction(SUBMISSION_BLOCK_HEIGHT)
-                    .build(),
-            )
-            .await;
-
-        let sweep_signature = assert_matches!(
-            setup.minter().deposit_sol_status(deposit_id).await,
-            DepositSolStatus::Swept { signature } => signature
-        );
+        let sweep_signature = sweep_deposit(&setup, deposit_id).await;
         setup.minter().assert_that_events().await.satisfy(|events| {
             check!(events.iter().any(|e| matches!(
                 e,
@@ -999,16 +998,7 @@ mod deposit_sol_tests {
             )));
         });
 
-        setup.advance_time(FINALIZE_TRANSACTIONS_DELAY).await;
-        let sweep = setup.minter().signed_transaction(&sweep_signature).await;
-        setup
-            .execute_http_mocks(
-                MockBuilder::with_start_id(16)
-                    .finalize_transaction(&sweep_signature, SUBMISSION_BLOCK_HEIGHT)
-                    .get_sweep_transaction(&sweep, SWEEPABLE_AMOUNT)
-                    .build(),
-            )
-            .await;
+        finalize_and_credit_sweep(&setup, &sweep_signature, SWEEPABLE_AMOUNT).await;
 
         setup.wait_for_deposit_minted(deposit_id).await;
 
@@ -1041,18 +1031,7 @@ mod deposit_sol_tests {
             .deposit_sol(DEFAULT_CALLER_ACCOUNT)
             .await
             .expect("deposit_sol should queue a sweep");
-        setup.advance_time(SWEEP_DEPOSITS_DELAY).await;
-        setup
-            .execute_http_mocks(
-                MockBuilder::with_start_id(4)
-                    .submit_transaction(SUBMISSION_BLOCK_HEIGHT)
-                    .build(),
-            )
-            .await;
-        let sweep_signature = assert_matches!(
-            setup.minter().deposit_sol_status(deposit_id).await,
-            DepositSolStatus::Swept { signature } => signature
-        );
+        let sweep_signature = sweep_deposit(&setup, deposit_id).await;
 
         setup.advance_time(FINALIZE_TRANSACTIONS_DELAY).await;
         setup
@@ -1110,30 +1089,10 @@ mod deposit_sol_tests {
             .deposit_sol(DEFAULT_CALLER_ACCOUNT)
             .await
             .expect("deposit_sol should queue a sweep");
-        setup.advance_time(SWEEP_DEPOSITS_DELAY).await;
-        setup
-            .execute_http_mocks(
-                MockBuilder::with_start_id(4)
-                    .submit_transaction(SUBMISSION_BLOCK_HEIGHT)
-                    .build(),
-            )
-            .await;
-        let sweep_signature = assert_matches!(
-            setup.minter().deposit_sol_status(deposit_id).await,
-            DepositSolStatus::Swept { signature } => signature
-        );
+        let sweep_signature = sweep_deposit(&setup, deposit_id).await;
 
-        setup.advance_time(FINALIZE_TRANSACTIONS_DELAY).await;
         let amount_not_in_the_plan = BALANCE_ABOVE_MINIMUM - RENT_EXEMPTION_THRESHOLD + 1;
-        let sweep = setup.minter().signed_transaction(&sweep_signature).await;
-        setup
-            .execute_http_mocks(
-                MockBuilder::with_start_id(16)
-                    .finalize_transaction(&sweep_signature, SUBMISSION_BLOCK_HEIGHT)
-                    .get_sweep_transaction(&sweep, amount_not_in_the_plan)
-                    .build(),
-            )
-            .await;
+        finalize_and_credit_sweep(&setup, &sweep_signature, amount_not_in_the_plan).await;
 
         assert_eq!(
             setup.minter().deposit_sol_status(deposit_id).await,
@@ -1415,29 +1374,8 @@ mod automatic_deposit_sol_tests {
             )
             .await;
 
-        setup.advance_time(SWEEP_DEPOSITS_DELAY).await;
-        setup
-            .execute_http_mocks(
-                MockBuilder::with_start_id(4)
-                    .submit_transaction(SUBMISSION_BLOCK_HEIGHT)
-                    .build(),
-            )
-            .await;
-        let sweep_signature = assert_matches!(
-            setup.minter().deposit_sol_status(0).await,
-            DepositSolStatus::Swept { signature } => signature
-        );
-
-        setup.advance_time(FINALIZE_TRANSACTIONS_DELAY).await;
-        let sweep = setup.minter().signed_transaction(&sweep_signature).await;
-        setup
-            .execute_http_mocks(
-                MockBuilder::with_start_id(16)
-                    .finalize_transaction(&sweep_signature, SUBMISSION_BLOCK_HEIGHT)
-                    .get_sweep_transaction(&sweep, SWEEPABLE_AMOUNT)
-                    .build(),
-            )
-            .await;
+        let sweep_signature = sweep_deposit(&setup, 0).await;
+        finalize_and_credit_sweep(&setup, &sweep_signature, SWEEPABLE_AMOUNT).await;
         setup.wait_for_deposit_minted(0).await;
 
         let minted_amount = SWEEPABLE_AMOUNT - FEE_PER_SIGNATURE - FEE;
