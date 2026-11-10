@@ -448,7 +448,7 @@ impl DashboardTemplate {
             &watched_deposit_addresses,
             pagination.watched_deposit_addresses_start,
             DEFAULT_PAGE_SIZE,
-            5,
+            6,
             "watched-deposit-addresses",
             "watched_deposit_addresses_start",
             pagination.other_params("watched_deposit_addresses_start"),

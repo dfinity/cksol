@@ -206,6 +206,10 @@ fn should_paginate_watched_deposit_addresses_across_multiple_pages() {
         page1.watched_deposit_addresses_table.pagination.pages.len(),
         2
     );
+    assert_eq!(
+        page1.watched_deposit_addresses_table.pagination.table_width,
+        6
+    );
 
     let page2 = dashboard_with_pagination(DashboardPaginationParameters {
         watched_deposit_addresses_start: DEFAULT_PAGE_SIZE,
