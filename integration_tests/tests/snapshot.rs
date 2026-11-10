@@ -3,7 +3,7 @@ use cksol_int_tests::CkSolMinter;
 use cksol_types::MinterInfo;
 use cksol_types_internal::{
     UpgradeArgs,
-    event::{Event, EventType},
+    event::{DepositOrigin, Event, EventType},
 };
 use pocket_ic::PocketIcBuilder;
 
@@ -44,11 +44,25 @@ async fn should_load_staging_snapshot_and_upgrade_to_current_wasm() {
         }
     );
     let (replayed_events, new_events) = state_after.events.split_at(state_before.events.len());
-    assert_eq!(replayed_events, state_before.events);
+    let expected_events: Vec<_> = state_before
+        .events
+        .into_iter()
+        .map(with_recorded_origin)
+        .collect();
+    assert_eq!(replayed_events, expected_events);
     assert_matches!(
         new_events,
         [Event { payload: EventType::Upgrade(args), .. }] if *args == upgrade_args
     );
 
     env.drop().await;
+}
+
+/// The event as reported by the current wasm: a `QueuedDeposit` recorded without an origin
+/// predates the automatic flow, so it reports the deposit as queued by `deposit_sol`.
+fn with_recorded_origin(mut event: Event) -> Event {
+    if let EventType::QueuedDeposit { origin, .. } = &mut event.payload {
+        origin.get_or_insert(DepositOrigin::Manual);
+    }
+    event
 }

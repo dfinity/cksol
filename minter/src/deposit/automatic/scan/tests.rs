@@ -6,7 +6,7 @@ use crate::{
         Scan, apply_balance_read, record_failed_read, scan_watched_addresses,
     },
     guard::deposit_sol_guard,
-    state::{TaskType, WatchedAddress, event::EventType, mutate_state, read_state},
+    state::{DepositOrigin, TaskType, WatchedAddress, event::EventType, mutate_state, read_state},
     storage::{ScanOutcome, deposit_address_scan_count},
     test_fixtures::{
         AUTOMATIC_DEPOSIT_FEE, EventsAssert, MINIMUM_DEPOSIT_AMOUNT, MINUTE_NANOS, REGISTERED_AT,
@@ -85,6 +85,7 @@ async fn should_queue_a_deposit_reaching_the_minimum_with_the_fee_in_force() {
             address: expected.address,
             balance: expected.balance,
             deposit_fee: Some(AUTOMATIC_DEPOSIT_FEE),
+            origin: DepositOrigin::Automatic,
         })
         .assert_no_more_events();
     read_state(|s| {

@@ -8,6 +8,7 @@ use crate::{
 };
 use cksol_types::{DepositSolId, DepositSolStatus};
 use icrc_ledger_types::icrc1::account::Account;
+use minicbor::{Decode, Encode};
 use sol_rpc_types::Lamport;
 use solana_address::Address;
 use solana_signature::Signature;
@@ -421,8 +422,9 @@ pub struct QueuedDeposit {
     pub address: Address,
     /// The balance of the deposit address when the deposit was queued.
     pub balance: DepositBalance,
-    /// The fee in lamports deducted from the minted amount, absent for a deposit queued by
-    /// `deposit_sol`.
+    /// The flow that queued the deposit.
+    pub origin: DepositOrigin,
+    /// The fee in lamports deducted from the minted amount, absent if none is charged.
     pub deposit_fee: Option<Lamport>,
 }
 
@@ -431,10 +433,23 @@ impl QueuedDeposit {
         self.balance.sweepable_amount()
     }
 
-    /// The fee deducted from the mint, zero for a deposit queued by `deposit_sol`.
+    /// The fee deducted from the mint, zero if none is charged.
     pub fn deposit_fee(&self) -> Lamport {
         self.deposit_fee.unwrap_or(0)
     }
+}
+
+/// The flow that queued a deposit, recorded on its own rather than inferred from the
+/// deposit fee, so that a fee can be charged in either flow.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Decode, Encode)]
+#[cbor(index_only)]
+pub enum DepositOrigin {
+    /// Queued by a user via `deposit_sol`.
+    #[n(0)]
+    Manual,
+    /// Queued by a balance scan of the automatic flow.
+    #[n(1)]
+    Automatic,
 }
 
 impl From<DepositBalance> for Lamport {

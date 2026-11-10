@@ -1,6 +1,6 @@
 use crate::{
     state::{
-        QueuedDeposit,
+        DepositOrigin, QueuedDeposit,
         event::{WatchedDepositAddress, WatchlistSnapshot},
     },
     utils::timed_sized_map::{Entry, InsertError, TimedSizedMap, Timestamp},
@@ -207,7 +207,7 @@ impl Watchlist {
         now: Timestamp,
         dropped: &QueuedDeposit,
     ) -> Result<WatchedAddress, RearmError> {
-        if dropped.deposit_fee.is_none() {
+        if dropped.origin == DepositOrigin::Manual {
             return Err(RearmError::ManualDeposit);
         }
         self.register(now, dropped.account, dropped.address)

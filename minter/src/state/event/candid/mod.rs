@@ -5,7 +5,7 @@ use crate::{
     numeric::{LedgerBurnIndex, LedgerMintIndex},
     rpc::BlockHeight,
     state::{
-        DepositBalance,
+        DepositBalance, DepositOrigin,
         event::{
             CreditedDeposit, Event, EventType, Signer, TransactionPurpose, VersionedMessage,
             WatchedDepositAddress, WatchlistSnapshot, WithdrawalRequest,
@@ -13,9 +13,10 @@ use crate::{
     },
 };
 use cksol_types_internal::event::{
-    CreditedDeposit as CandidCreditedDeposit, Event as CandidEvent, EventType as CandidEventType,
-    Signer as CandidSigner, TransactionPurpose as CandidTransactionPurpose,
-    VersionedTransactionMessage, WatchedDepositAddress as CandidWatchedDepositAddress,
+    CreditedDeposit as CandidCreditedDeposit, DepositOrigin as CandidDepositOrigin,
+    Event as CandidEvent, EventType as CandidEventType, Signer as CandidSigner,
+    TransactionPurpose as CandidTransactionPurpose, VersionedTransactionMessage,
+    WatchedDepositAddress as CandidWatchedDepositAddress,
 };
 use ic_ed25519::PublicKey;
 use sol_rpc_types::{
@@ -77,12 +78,14 @@ impl From<EventType> for CandidEventType {
                 address,
                 balance,
                 deposit_fee,
+                origin,
             } => CandidEventType::QueuedDeposit {
                 deposit_id,
                 account,
                 address: CandidAddress::from(address),
                 balance: Lamport::from(balance),
                 deposit_fee,
+                origin: Some(CandidDepositOrigin::from(origin)),
             },
             EventType::CreditedSweep {
                 signature,
@@ -141,6 +144,15 @@ impl From<VersionedMessage> for VersionedTransactionMessage {
             VersionedMessage::Legacy(message) => VersionedTransactionMessage::Legacy(
                 bincode::serialize(&message).expect("serializing transaction should succeed"),
             ),
+        }
+    }
+}
+
+impl From<DepositOrigin> for CandidDepositOrigin {
+    fn from(origin: DepositOrigin) -> Self {
+        match origin {
+            DepositOrigin::Manual => CandidDepositOrigin::Manual,
+            DepositOrigin::Automatic => CandidDepositOrigin::Automatic,
         }
     }
 }
@@ -241,6 +253,7 @@ impl TryFrom<CandidEventType> for EventType {
                 address,
                 balance,
                 deposit_fee,
+                origin,
             } => EventType::QueuedDeposit {
                 deposit_id,
                 account,
@@ -249,6 +262,7 @@ impl TryFrom<CandidEventType> for EventType {
                     InvalidCandidEvent::DepositBalanceBelowRentExemption(balance),
                 )?,
                 deposit_fee,
+                origin: origin.map_or(DepositOrigin::Manual, DepositOrigin::from),
             },
             CandidEventType::CreditedSweep {
                 signature,
@@ -336,6 +350,15 @@ impl TryFrom<VersionedTransactionMessage> for VersionedMessage {
             VersionedTransactionMessage::Legacy(bytes) => bincode::deserialize(&bytes)
                 .map(VersionedMessage::Legacy)
                 .map_err(|e| InvalidCandidEvent::InvalidMessage(e.to_string())),
+        }
+    }
+}
+
+impl From<CandidDepositOrigin> for DepositOrigin {
+    fn from(origin: CandidDepositOrigin) -> Self {
+        match origin {
+            CandidDepositOrigin::Manual => DepositOrigin::Manual,
+            CandidDepositOrigin::Automatic => DepositOrigin::Automatic,
         }
     }
 }

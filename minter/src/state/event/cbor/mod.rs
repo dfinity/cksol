@@ -148,6 +148,40 @@ pub mod deposit_balance {
     }
 }
 
+/// Decodes a missing origin as [`DepositOrigin::Manual`]: the events recorded without one
+/// predate the automatic flow, so their deposits were all queued by `deposit_sol`.
+///
+/// [`DepositOrigin::Manual`]: crate::state::DepositOrigin::Manual
+pub mod deposit_origin {
+    use crate::state::DepositOrigin;
+    use minicbor::{
+        Decode, Encode,
+        decode::{Decoder, Error},
+        encode::{Encoder, Write},
+    };
+
+    pub fn decode<Ctx>(d: &mut Decoder<'_>, ctx: &mut Ctx) -> Result<DepositOrigin, Error> {
+        DepositOrigin::decode(d, ctx)
+    }
+
+    pub fn encode<Ctx, W: Write>(
+        v: &DepositOrigin,
+        e: &mut Encoder<W>,
+        ctx: &mut Ctx,
+    ) -> Result<(), minicbor::encode::Error<W::Error>> {
+        v.encode(e, ctx)
+    }
+
+    pub fn nil() -> Option<DepositOrigin> {
+        Some(DepositOrigin::Manual)
+    }
+
+    /// Never skips the origin, so that every new event records it, `Manual` included.
+    pub fn is_nil(_v: &DepositOrigin) -> bool {
+        false
+    }
+}
+
 pub mod id_vec {
     use minicbor::{
         decode::{Decoder, Error},

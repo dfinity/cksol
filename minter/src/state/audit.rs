@@ -100,6 +100,7 @@ fn apply_state_transition(state: &mut State, payload: &EventType, timestamp: u64
             address,
             balance,
             deposit_fee,
+            origin,
         } => {
             state.process_queued_deposit(
                 *deposit_id,
@@ -107,6 +108,7 @@ fn apply_state_transition(state: &mut State, payload: &EventType, timestamp: u64
                     account: *account,
                     address: *address,
                     balance: *balance,
+                    origin: *origin,
                     deposit_fee: *deposit_fee,
                 },
                 timestamp,

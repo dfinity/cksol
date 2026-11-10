@@ -418,6 +418,17 @@ type VersionedTransactionMessage = variant {
     Legacy : blob;
 };
 
+// The flow that queued a deposit.
+//
+// *WARNING*: This type is used exclusively by the debug `get_events` endpoint.
+// Backwards-compatibility is not guaranteed.
+type DepositOrigin = variant {
+    // Queued by a user via `deposit_sol`.
+    Manual;
+    // Queued by a balance scan of the automatic flow.
+    Automatic;
+};
+
 // The key that produced one signature of a submitted Solana transaction.
 //
 // *WARNING*: This type is used exclusively by the debug `get_events` endpoint.
@@ -527,9 +538,12 @@ type EventType = variant {
         address: Address;
         // The balance of the deposit address when the deposit was queued.
         balance: Lamport;
-        // The fee in lamports deducted from the minted amount; absent for a deposit
-        // queued via `deposit_sol`.
+        // The fee in lamports deducted from the minted amount; absent if none is
+        // charged.
         deposit_fee: opt Lamport;
+        // The flow that queued the deposit; absent in events recorded before the
+        // automatic flow, whose deposits were all queued via `deposit_sol`.
+        origin: opt DepositOrigin;
     };
     // The minter read the amount that the finalized sweep transaction moved to
     // its main account and enqueued a pending mint for each deposit of that sweep.
