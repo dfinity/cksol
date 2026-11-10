@@ -1,4 +1,4 @@
-use crate::state::{QuarantineCause, State};
+use crate::state::{DepositOrigin, QuarantineCause, State};
 use crate::storage::{
     self, FailedCreditReason, FailedMintReason, RearmOutcome, ScanOutcome,
     UndecidedWithdrawalReason,
@@ -50,11 +50,20 @@ pub fn encode_metrics(w: &mut MetricsEncoder<Vec<u8>>, s: &State) -> std::io::Re
         s.deposits().minted().len().metric_value(),
         "Number of swept deposits whose ckSOL mint landed on the ledger.",
     )?;
-    w.encode_gauge(
+    let mut dropped_manual: usize = 0;
+    let mut dropped_automatic: usize = 0;
+    for dropped in s.deposits().dropped().values() {
+        match dropped.deposit.origin {
+            DepositOrigin::Manual => dropped_manual += 1,
+            DepositOrigin::Automatic => dropped_automatic += 1,
+        }
+    }
+    w.gauge_vec(
         "dropped_deposits",
-        s.deposits().dropped().len().metric_value(),
-        "Number of deposits whose sweep transaction failed or expired.",
-    )?;
+        "Number of deposits whose sweep transaction failed or expired, by origin: queued by deposit_sol or by a balance scan of the automatic flow.",
+    )?
+    .value(&[("origin", "manual")], dropped_manual.metric_value())?
+    .value(&[("origin", "automatic")], dropped_automatic.metric_value())?;
     let mut sweep_unreadable: usize = 0;
     let mut mint_unresolved: usize = 0;
     for quarantined in s.deposits().quarantined().values() {

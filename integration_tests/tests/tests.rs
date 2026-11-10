@@ -1078,7 +1078,8 @@ mod deposit_sol_tests {
         let setup = setup
             .check_metrics()
             .await
-            .assert_contains_metric_matching(r"dropped_deposits 1 \d+")
+            .assert_contains_metric_matching(r#"dropped_deposits\{origin="manual"\} 1 \d+"#)
+            .assert_contains_metric_matching(r#"dropped_deposits\{origin="automatic"\} 0 \d+"#)
             .into();
 
         let deposit_id_after_drop = setup
@@ -1551,6 +1552,14 @@ mod metrics_tests {
                 r#"deposit_address_scans\{outcome="below_minimum"\} 0 \d+"#,
             )
             .assert_contains_metric_matching(r#"deposit_address_scans\{outcome="failed"\} 0 \d+"#)
+            .assert_contains_metric_matching(
+                r#"automatic_deposit_rearms\{outcome="rearmed"\} 0 \d+"#,
+            )
+            .assert_contains_metric_matching(
+                r#"automatic_deposit_rearms\{outcome="watchlist_full"\} 0 \d+"#,
+            )
+            .assert_contains_metric_matching(r#"dropped_deposits\{origin="manual"\} 0 \d+"#)
+            .assert_contains_metric_matching(r#"dropped_deposits\{origin="automatic"\} 0 \d+"#)
             .assert_contains_metric_matching(
                 r#"failed_credit_attempts\{reason="not_found"\} 0 \d+"#,
             )
