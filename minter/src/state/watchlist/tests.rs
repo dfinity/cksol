@@ -1,6 +1,6 @@
 use crate::{
     state::{
-        QueuedDeposit,
+        DepositOrigin, QueuedDeposit,
         event::{WatchedDepositAddress, WatchlistSnapshot},
         watchlist::{
             MAX_WATCHED_ADDRESSES, RearmError, WatchedAddress, Watchlist, WatchlistFull, scan_slots,
@@ -239,17 +239,31 @@ fn should_not_rearm_an_account_when_full_of_live_entries() {
 }
 
 #[test]
-fn should_not_rearm_a_manual_deposit() {
+fn should_not_rearm_a_manual_deposit_even_with_a_fee() {
     let mut watchlist = Watchlist::default();
     let manual = QueuedDeposit {
-        deposit_fee: None,
+        origin: DepositOrigin::Manual,
         ..dropped(account(1))
     };
+    assert_eq!(manual.deposit_fee, Some(AUTOMATIC_DEPOSIT_FEE));
 
     let result = watchlist.rearm(at(REGISTERED_AT), &manual);
 
     assert_eq!(result, Err(RearmError::ManualDeposit));
     assert!(watchlist.is_empty());
+}
+
+#[test]
+fn should_rearm_an_automatic_deposit_without_a_fee() {
+    let mut watchlist = Watchlist::default();
+    let automatic = QueuedDeposit {
+        deposit_fee: None,
+        ..dropped(account(1))
+    };
+
+    let result = watchlist.rearm(at(REGISTERED_AT), &automatic);
+
+    assert_eq!(result.map(|watched| watched.account), Ok(account(1)));
 }
 
 #[test]

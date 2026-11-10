@@ -3,7 +3,7 @@ use crate::{
     constants::FEE_PER_SIGNATURE,
     numeric::{LedgerBurnIndex, LedgerMintIndex},
     rpc::BlockHeight,
-    state::DepositBalance,
+    state::{DepositBalance, DepositOrigin},
 };
 use cksol_types::DepositSolId;
 use cksol_types_internal::{InitArgs, UpgradeArgs};
@@ -148,9 +148,14 @@ pub enum EventType {
         address: Address,
         #[cbor(n(3), with = "cbor::deposit_balance")]
         balance: DepositBalance,
-        /// The fee deducted from the minted amount, absent for a deposit queued via `deposit_sol`.
+        /// The fee deducted from the minted amount, absent if none is charged.
         #[n(4)]
         deposit_fee: Option<Lamport>,
+        /// The flow that queued the deposit. Always recorded, it decodes as
+        /// [`DepositOrigin::Manual`] when absent: every event recorded without it predates the
+        /// automatic flow.
+        #[cbor(n(5), with = "cbor::deposit_origin", has_nil)]
+        origin: DepositOrigin,
     },
     /// The minter read the amount that the finalized sweep transaction moved to its
     /// main account and enqueued a pending mint for each deposit of that sweep.

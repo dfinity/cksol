@@ -4,7 +4,7 @@ use crate::{
     rpc::{BlockHeight, FetchedTransaction},
     sol_transfer::build_batch_withdrawal_message,
     state::{
-        DepositBalance, QueuedDeposit, SchnorrPublicKey, State, Sweep, WATCH_WINDOW,
+        DepositBalance, DepositOrigin, QueuedDeposit, SchnorrPublicKey, State, Sweep, WATCH_WINDOW,
         WatchedAddress, Watchlist,
         audit::replay_events,
         event::{Event, EventType, VersionedMessage},
@@ -356,6 +356,7 @@ pub fn queued_deposit_of(account: Account, sweepable_amount: Lamport) -> QueuedD
         address: deposit_address(account),
         balance: DepositBalance::new(sweepable_amount + RENT_EXEMPTION_THRESHOLD)
             .expect("BUG: the balance covers the rent exemption threshold"),
+        origin: DepositOrigin::Manual,
         deposit_fee: None,
     }
 }
@@ -368,6 +369,7 @@ pub fn automatic_deposit_of(
     deposit_fee: Lamport,
 ) -> QueuedDeposit {
     QueuedDeposit {
+        origin: DepositOrigin::Automatic,
         deposit_fee: Some(deposit_fee),
         ..queued_deposit_of(account, sweepable_amount)
     }
@@ -537,7 +539,9 @@ pub fn fetched(outcome: EncodedConfirmedTransactionWithStatusMeta) -> FetchedTra
 /// from that response.
 pub mod devnet_sweep {
     use super::account;
-    use crate::state::{DepositBalance, QueuedDeposit, Sweep, event::CreditedDeposit};
+    use crate::state::{
+        DepositBalance, DepositOrigin, QueuedDeposit, Sweep, event::CreditedDeposit,
+    };
     use base64::{Engine, engine::general_purpose::STANDARD};
     use cksol_types::DepositSolId;
     use icrc_ledger_types::icrc1::account::Account;
@@ -623,6 +627,7 @@ pub mod devnet_sweep {
                         address: crate::address::account_address(&master_key(), &account),
                         balance: DepositBalance::new(balance)
                             .expect("BUG: the balance covers the rent exemption threshold"),
+                        origin: DepositOrigin::Manual,
                         deposit_fee: None,
                     },
                 )
@@ -640,6 +645,7 @@ pub mod devnet_sweep {
                 sweepable_amount + crate::constants::RENT_EXEMPTION_THRESHOLD,
             )
             .expect("BUG: the balance covers the rent exemption threshold"),
+            origin: DepositOrigin::Manual,
             deposit_fee: None,
         }
     }
@@ -746,6 +752,7 @@ pub mod devnet_sweep {
                         address,
                         balance: DepositBalance::new(balance)
                             .expect("BUG: the balance covers the rent exemption threshold"),
+                        origin: DepositOrigin::Manual,
                         deposit_fee: None,
                     },
                 )
@@ -962,6 +969,7 @@ pub mod events {
                     address: deposit.address,
                     balance: deposit.balance,
                     deposit_fee: deposit.deposit_fee,
+                    origin: deposit.origin,
                 },
                 &runtime(),
             )
@@ -1342,7 +1350,7 @@ pub mod arb {
         rpc::BlockHeight,
         sol_transfer::MAX_SIGNATURES,
         state::{
-            DepositBalance, QueuedDeposit,
+            DepositBalance, DepositOrigin, QueuedDeposit,
             event::{
                 CreditedDeposit, Event, EventType, Signer, TransactionPurpose,
                 WatchedDepositAddress, WatchlistSnapshot, WithdrawalRequest,
@@ -1409,15 +1417,23 @@ pub mod arb {
             arb_account(),
             arb_address(),
             MIN_BALANCE..=MAX_BALANCE,
+            arb_deposit_origin(),
             prop::option::of(arb_deposit_fee()),
         )
-            .prop_map(|(account, address, balance, deposit_fee)| QueuedDeposit {
-                account,
-                address,
-                balance: DepositBalance::new(balance)
-                    .expect("BUG: the balance covers the rent exemption threshold"),
-                deposit_fee,
-            })
+            .prop_map(
+                |(account, address, balance, origin, deposit_fee)| QueuedDeposit {
+                    account,
+                    address,
+                    balance: DepositBalance::new(balance)
+                        .expect("BUG: the balance covers the rent exemption threshold"),
+                    origin,
+                    deposit_fee,
+                },
+            )
+    }
+
+    pub fn arb_deposit_origin() -> impl Strategy<Value = DepositOrigin> {
+        prop_oneof![Just(DepositOrigin::Manual), Just(DepositOrigin::Automatic)]
     }
 
     /// A deposit fee that fits in the sweepable amount of [`arb_queued_deposit`]
@@ -1628,16 +1644,20 @@ pub mod arb {
                 arb_address(),
                 arb_deposit_balance(),
                 prop::option::of(arb_deposit_fee()),
+                arb_deposit_origin(),
             )
-                .prop_map(|(deposit_id, account, address, balance, deposit_fee)| {
-                    EventType::QueuedDeposit {
-                        deposit_id,
-                        account,
-                        address,
-                        balance,
-                        deposit_fee,
+                .prop_map(
+                    |(deposit_id, account, address, balance, deposit_fee, origin)| {
+                        EventType::QueuedDeposit {
+                            deposit_id,
+                            account,
+                            address,
+                            balance,
+                            deposit_fee,
+                            origin,
+                        }
                     }
-                },),
+                ),
             (
                 arb_signature(),
                 any::<u64>(),

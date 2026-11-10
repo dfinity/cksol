@@ -1,7 +1,7 @@
 use crate::{
     constants::{FEE_PER_SIGNATURE, RENT_EXEMPTION_THRESHOLD},
     state::{
-        QueuedDeposit,
+        DepositOrigin, QueuedDeposit,
         event::{CreditedDeposit, VersionedMessage},
     },
 };
@@ -354,6 +354,15 @@ impl Sweep {
     /// which stay on the main account on top of the minted amounts.
     pub fn deposit_fees(&self) -> Lamport {
         self.deposits.values().map(QueuedDeposit::deposit_fee).sum()
+    }
+
+    /// The part of [`Self::deposit_fees`] charged for deposits queued by the automatic flow.
+    pub fn automatic_deposit_fees(&self) -> Lamport {
+        self.deposits
+            .values()
+            .filter(|deposit| deposit.origin == DepositOrigin::Automatic)
+            .map(QueuedDeposit::deposit_fee)
+            .sum()
     }
 }
 

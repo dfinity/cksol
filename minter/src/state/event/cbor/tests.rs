@@ -215,3 +215,88 @@ mod versioned_message_tests {
         minicbor::decode(bytes).unwrap()
     }
 }
+
+mod deposit_origin_tests {
+    use super::*;
+    use crate::{
+        state::{DepositOrigin, event::EventType},
+        test_fixtures::{account, deposit_address},
+    };
+    use icrc_ledger_types::icrc1::account::Account;
+    use minicbor::Encode;
+    use sol_rpc_types::Lamport;
+    use solana_address::Address;
+
+    /// The `QueuedDeposit` event as recorded before it had an origin.
+    #[derive(Encode)]
+    enum LegacyEventType {
+        #[n(8)]
+        QueuedDeposit {
+            #[n(0)]
+            deposit_id: u64,
+            #[n(1)]
+            account: Account,
+            #[cbor(n(2), with = "cbor::address")]
+            address: Address,
+            #[cbor(n(3), with = "cbor::deposit_balance")]
+            balance: DepositBalance,
+            #[n(4)]
+            deposit_fee: Option<Lamport>,
+        },
+    }
+
+    #[test]
+    fn should_decode_a_queued_deposit_without_origin_as_manual() {
+        let balance = DepositBalance::new(RENT_EXEMPTION_THRESHOLD + 1_000_000).unwrap();
+        let legacy = encode(&LegacyEventType::QueuedDeposit {
+            deposit_id: 3,
+            account: account(1),
+            address: deposit_address(account(1)),
+            balance,
+            deposit_fee: None,
+        });
+
+        let decoded: EventType = minicbor::decode(&legacy).unwrap();
+
+        assert_eq!(
+            decoded,
+            EventType::QueuedDeposit {
+                deposit_id: 3,
+                account: account(1),
+                address: deposit_address(account(1)),
+                balance,
+                deposit_fee: None,
+                origin: DepositOrigin::Manual,
+            }
+        );
+    }
+
+    #[test]
+    fn should_record_the_origin_of_a_manual_deposit() {
+        let balance = DepositBalance::new(RENT_EXEMPTION_THRESHOLD + 1_000_000).unwrap();
+        let legacy = encode(&LegacyEventType::QueuedDeposit {
+            deposit_id: 3,
+            account: account(1),
+            address: deposit_address(account(1)),
+            balance,
+            deposit_fee: None,
+        });
+
+        let manual = encode(&EventType::QueuedDeposit {
+            deposit_id: 3,
+            account: account(1),
+            address: deposit_address(account(1)),
+            balance,
+            deposit_fee: None,
+            origin: DepositOrigin::Manual,
+        });
+
+        assert!(manual.len() > legacy.len());
+    }
+
+    fn encode<T: Encode<()>>(value: &T) -> Vec<u8> {
+        let mut buf = Vec::new();
+        minicbor::encode(value, &mut buf).unwrap();
+        buf
+    }
+}
