@@ -167,26 +167,14 @@ fn should_ignore_a_scan_of_an_account_that_is_not_watched() {
 }
 
 #[test]
-fn should_count_the_live_registrations_and_report_the_oldest() {
+fn should_count_the_live_registrations() {
     let mut watchlist = Watchlist::default();
     register(&mut watchlist, at(REGISTERED_AT), account(1));
     register(&mut watchlist, at(REGISTERED_AT + HOUR_NANOS), account(2));
 
     assert_eq!(watchlist.live_len(at(VALID_UNTIL)), 2);
-    assert_eq!(
-        watchlist.oldest_registered_at(at(VALID_UNTIL)),
-        Some(at(REGISTERED_AT))
-    );
     assert_eq!(watchlist.live_len(at(VALID_UNTIL + 1)), 1);
-    assert_eq!(
-        watchlist.oldest_registered_at(at(VALID_UNTIL + 1)),
-        Some(at(REGISTERED_AT + HOUR_NANOS))
-    );
     assert_eq!(watchlist.live_len(at(VALID_UNTIL + HOUR_NANOS + 1)), 0);
-    assert_eq!(
-        watchlist.oldest_registered_at(at(VALID_UNTIL + HOUR_NANOS + 1)),
-        None
-    );
     assert_eq!(watchlist.len(), 2);
 }
 
@@ -331,7 +319,7 @@ fn should_keep_expired_registrations_and_exceed_the_capacity_when_rebuilding() {
 }
 
 #[test]
-fn should_report_when_a_registration_restored_under_another_window_was_made() {
+fn should_schedule_a_registration_restored_under_another_window_from_its_start() {
     let registered_under_a_longer_window = WatchedDepositAddress {
         account: account(1),
         address: deposit_address(account(1)),
@@ -344,9 +332,12 @@ fn should_report_when_a_registration_restored_under_another_window_was_made() {
         entries: vec![registered_under_a_longer_window],
     });
 
+    let first_slot = scan_slots().next().unwrap();
     assert_eq!(
-        rebuilt.oldest_registered_at(at(VALID_UNTIL + 1)),
-        Some(at(REGISTERED_AT))
+        rebuilt
+            .get(at(VALID_UNTIL + 1), &account(1))
+            .and_then(|watched| watched.next_scan_at),
+        Some(at(REGISTERED_AT).saturating_add(first_slot))
     );
 }
 

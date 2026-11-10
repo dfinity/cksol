@@ -264,16 +264,6 @@ impl Watchlist {
         self.live(now).count()
     }
 
-    /// When the oldest live registration was made, if any: the start of its schedule, which
-    /// does not depend on the window, unlike its end, after a change of [`WATCH_WINDOW`].
-    pub fn oldest_registered_at(&self, now: Timestamp) -> Option<Timestamp> {
-        self.entries
-            .iter_by_expiry()
-            .filter(|(_, entry)| entry.is_live(now))
-            .map(|(_, entry)| entry.value.scheduled_from)
-            .min()
-    }
-
     fn live(&self, now: Timestamp) -> impl Iterator<Item = WatchedAddress> {
         self.entries
             .iter_by_expiry()
