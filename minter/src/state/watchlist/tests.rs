@@ -1,6 +1,7 @@
 use crate::{
     state::{
         DepositOrigin, QueuedDeposit,
+        event::{WatchedDepositAddress, WatchlistSnapshot},
         watchlist::{
             MAX_WATCHED_ADDRESSES, RearmError, WatchedAddress, Watchlist, WatchlistFull, scan_slots,
         },
@@ -166,26 +167,14 @@ fn should_ignore_a_scan_of_an_account_that_is_not_watched() {
 }
 
 #[test]
-fn should_count_the_live_registrations_and_report_the_oldest() {
+fn should_count_the_live_registrations() {
     let mut watchlist = Watchlist::default();
     register(&mut watchlist, at(REGISTERED_AT), account(1));
     register(&mut watchlist, at(REGISTERED_AT + HOUR_NANOS), account(2));
 
     assert_eq!(watchlist.live_len(at(VALID_UNTIL)), 2);
-    assert_eq!(
-        watchlist.oldest_registered_at(at(VALID_UNTIL)),
-        Some(at(REGISTERED_AT))
-    );
     assert_eq!(watchlist.live_len(at(VALID_UNTIL + 1)), 1);
-    assert_eq!(
-        watchlist.oldest_registered_at(at(VALID_UNTIL + 1)),
-        Some(at(REGISTERED_AT + HOUR_NANOS))
-    );
     assert_eq!(watchlist.live_len(at(VALID_UNTIL + HOUR_NANOS + 1)), 0);
-    assert_eq!(
-        watchlist.oldest_registered_at(at(VALID_UNTIL + HOUR_NANOS + 1)),
-        None
-    );
     assert_eq!(watchlist.len(), 2);
 }
 
@@ -263,6 +252,93 @@ fn should_rearm_an_automatic_deposit_without_a_fee() {
     let result = watchlist.rearm(at(REGISTERED_AT), &automatic);
 
     assert_eq!(result.map(|watched| watched.account), Ok(account(1)));
+}
+
+#[test]
+fn should_rebuild_the_watchlist_verbatim_from_its_snapshot() {
+    let mut watchlist = Watchlist::default();
+    register(&mut watchlist, at(REGISTERED_AT + HOUR_NANOS), account(1));
+    register(&mut watchlist, at(REGISTERED_AT), account(3));
+    register(&mut watchlist, at(REGISTERED_AT), account(2));
+    watchlist.record_scan(at(REGISTERED_AT + MINUTE_NANOS), &account(2));
+    let snapshot = watchlist.snapshot();
+
+    let rebuilt = Watchlist::from_snapshot(&snapshot);
+
+    assert_eq!(rebuilt, watchlist);
+    assert_eq!(
+        snapshot
+            .entries
+            .iter()
+            .map(|entry| entry.account)
+            .collect::<Vec<_>>(),
+        vec![account(3), account(2), account(1)]
+    );
+}
+
+#[test]
+fn should_keep_expired_registrations_and_exceed_the_capacity_when_rebuilding() {
+    let entries: Vec<WatchedDepositAddress> = (0..=MAX_WATCHED_ADDRESSES.get())
+        .map(|index| WatchedDepositAddress {
+            account: account(index),
+            address: deposit_address(account(index)),
+            valid_until: VALID_UNTIL,
+            scheduled_from: REGISTERED_AT,
+            scan_count: 3,
+            last_scanned_at: Some(REGISTERED_AT + HOUR_NANOS),
+        })
+        .collect();
+    let snapshot = WatchlistSnapshot {
+        entries: entries.clone(),
+    };
+
+    let mut rebuilt = Watchlist::from_snapshot(&snapshot);
+
+    assert_eq!(rebuilt.len(), entries.len());
+    assert_eq!(
+        rebuilt.register(
+            at(REGISTERED_AT),
+            account(entries.len()),
+            deposit_address(account(entries.len()))
+        ),
+        Err(WatchlistFull)
+    );
+    assert_eq!(rebuilt.snapshot(), snapshot);
+    assert_eq!(rebuilt.live_len(at(VALID_UNTIL + 1)), 0);
+    assert_eq!(
+        rebuilt.get(at(VALID_UNTIL), &account(0)),
+        Some(WatchedAddress {
+            account: account(0),
+            address: deposit_address(account(0)),
+            valid_until: at(VALID_UNTIL),
+            scan_count: 3,
+            last_scanned_at: Some(at(REGISTERED_AT + HOUR_NANOS)),
+            next_scan_at: Some(at(REGISTERED_AT + 90 * MINUTE_NANOS)),
+        })
+    );
+}
+
+#[test]
+fn should_schedule_a_registration_restored_under_another_window_from_its_start() {
+    let registered_under_a_longer_window = WatchedDepositAddress {
+        account: account(1),
+        address: deposit_address(account(1)),
+        valid_until: REGISTERED_AT + 2 * WATCH_WINDOW_NANOS,
+        scheduled_from: REGISTERED_AT,
+        scan_count: 0,
+        last_scanned_at: None,
+    };
+    let rebuilt = Watchlist::from_snapshot(&WatchlistSnapshot {
+        entries: vec![registered_under_a_longer_window],
+    });
+
+    let first_slot = scan_slots().next().unwrap();
+    assert_eq!(
+        rebuilt
+            .get(at(VALID_UNTIL + 1), &account(1))
+            .and_then(|watched| watched.next_scan_at),
+        Some(at(REGISTERED_AT).saturating_add(first_slot))
+    );
 }
 
 fn dropped(account: Account) -> QueuedDeposit {

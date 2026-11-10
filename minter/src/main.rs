@@ -46,6 +46,11 @@ fn init(args: MinterArg) {
 #[ic_cdk::init]
 fn init() {}
 
+#[ic_cdk::pre_upgrade]
+fn pre_upgrade() {
+    cksol_minter::lifecycle::pre_upgrade(IcCanisterRuntime::new());
+}
+
 #[ic_cdk::post_upgrade]
 fn post_upgrade(args: Option<MinterArg>) {
     match args {
