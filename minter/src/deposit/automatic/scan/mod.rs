@@ -90,8 +90,8 @@ pub async fn scan_watched_addresses<R: CanisterRuntime>(runtime: R) {
                     "Failed to read the balances of {} watched deposit addresses, which advance to their next scan: {e}",
                     chunk.len()
                 );
-                record_failed_read(scan, chunk);
-                record_deposit_address_scans(ScanOutcome::Failed, chunk.len() as u64);
+                let advanced = record_failed_read(scan, chunk);
+                record_deposit_address_scans(ScanOutcome::Failed, advanced);
             }
         }
     }
@@ -161,16 +161,22 @@ fn apply_balance_read<R: CanisterRuntime>(
     })
 }
 
-fn record_failed_read(scan: Scan, chunk: &[WatchedAddress]) {
+/// Advances the registrations of a chunk whose read failed and returns how many there were,
+/// leaving out those removed, replaced or expired while the read was in flight, as a
+/// successful read does.
+fn record_failed_read(scan: Scan, chunk: &[WatchedAddress]) -> u64 {
     mutate_state(|state| {
+        let mut advanced = 0;
         for watched in chunk {
             if is_same_registration(state, scan.read_at, watched) {
                 state
                     .watchlist_mut()
                     .record_scan(scan.scanned_at, &watched.account);
+                advanced += 1;
             }
         }
-    });
+        advanced
+    })
 }
 
 fn is_same_registration(state: &State, now: Timestamp, watched: &WatchedAddress) -> bool {
