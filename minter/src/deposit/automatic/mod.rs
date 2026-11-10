@@ -30,6 +30,7 @@ pub fn watch_deposit_address<R: CanisterRuntime>(
                 "the automatic deposit fee is not configured".to_string(),
             )
         })?;
+        let latest_deposit_id = state.deposits().latest_id(&account);
         let status = match state.deposits().in_flight(&account) {
             Some(InFlightDeposit::Processing(deposit_id)) => {
                 WatchDepositAddressStatus::Detected { deposit_id }
@@ -40,7 +41,11 @@ pub fn watch_deposit_address<R: CanisterRuntime>(
             None => state
                 .watchlist_mut()
                 .register(now, account, address)
-                .map_err(|WatchlistFull| WatchDepositAddressError::TooManyWatchedAddresses)?
+                .map_err(
+                    |WatchlistFull| WatchDepositAddressError::TooManyWatchedAddresses {
+                        latest_deposit_id,
+                    },
+                )?
                 .into(),
         };
         Ok(WatchDepositAddressOk {
@@ -48,7 +53,7 @@ pub fn watch_deposit_address<R: CanisterRuntime>(
             minimum_deposit_amount: state.minimum_deposit_amount(),
             automatic_deposit_fee,
             status,
-            latest_deposit_id: state.deposits().latest_id(&account),
+            latest_deposit_id,
         })
     })
 }

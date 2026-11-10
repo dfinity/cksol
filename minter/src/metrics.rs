@@ -122,16 +122,21 @@ pub fn encode_metrics(w: &mut MetricsEncoder<Vec<u8>>, s: &State) -> std::io::Re
         "Number of deposit addresses registered for the automatic deposit flow whose window is still open.",
     )?;
     w.encode_gauge(
-        "oldest_watched_deposit_age_seconds",
+        "watched_deposit_address_capacity",
+        s.watchlist().capacity().metric_value(),
+        "Number of live registrations the watchlist of the automatic deposit flow admits at most.",
+    )?;
+    w.encode_gauge(
+        "oldest_due_deposit_address_scan_age_seconds",
         age_seconds(
             s.watchlist()
-                .oldest_registered_at(now)
+                .oldest_due_scan_at(now)
                 .map(Timestamp::as_nanos),
         )
         .metric_value(),
-        "Age of the oldest open registration of the automatic deposit flow in seconds. Returns 0 if no deposit address is watched.",
+        "Time in seconds since the earliest due scan of a watched deposit address that has not run yet. Returns 0 if no scan is due.",
     )?;
-    w.encode_gauge(
+    w.encode_counter(
         "collected_automatic_deposit_fees",
         s.collected_automatic_deposit_fees().metric_value(),
         "Sum in Lamports of the automatic deposit fees deducted from the mints of credited sweeps.",

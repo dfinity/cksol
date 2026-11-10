@@ -1,6 +1,6 @@
 use crate::{
     state::{
-        QueuedDeposit,
+        DepositOrigin, QueuedDeposit,
         event::{WatchedDepositAddress, WatchlistSnapshot},
         watchlist::{
             MAX_WATCHED_ADDRESSES, RearmError, WatchedAddress, Watchlist, WatchlistFull, scan_slots,
@@ -57,6 +57,7 @@ fn should_reject_a_registration_when_full_of_live_entries() {
 
     assert_eq!(result, Err(WatchlistFull));
     assert_eq!(watchlist.len(), MAX_WATCHED_ADDRESSES.get());
+    assert_eq!(watchlist.capacity(), MAX_WATCHED_ADDRESSES.get());
 }
 
 #[test]
@@ -167,27 +168,53 @@ fn should_ignore_a_scan_of_an_account_that_is_not_watched() {
 }
 
 #[test]
-fn should_count_the_live_registrations_and_report_the_oldest() {
+fn should_count_the_live_registrations() {
     let mut watchlist = Watchlist::default();
     register(&mut watchlist, at(REGISTERED_AT), account(1));
     register(&mut watchlist, at(REGISTERED_AT + HOUR_NANOS), account(2));
 
     assert_eq!(watchlist.live_len(at(VALID_UNTIL)), 2);
+    assert_eq!(watchlist.live_len(at(VALID_UNTIL + 1)), 1);
+    assert_eq!(watchlist.live_len(at(VALID_UNTIL + HOUR_NANOS + 1)), 0);
+    assert_eq!(watchlist.len(), 2);
+}
+
+#[test]
+fn should_report_the_earliest_due_scan_until_it_is_recorded() {
+    let mut watchlist = Watchlist::default();
+    register(&mut watchlist, at(REGISTERED_AT), account(1));
+    register(&mut watchlist, at(REGISTERED_AT + MINUTE_NANOS), account(2));
+
     assert_eq!(
-        watchlist.oldest_registered_at(at(VALID_UNTIL)),
+        watchlist.oldest_due_scan_at(at(REGISTERED_AT + HOUR_NANOS)),
         Some(at(REGISTERED_AT))
     );
-    assert_eq!(watchlist.live_len(at(VALID_UNTIL + 1)), 1);
+
+    watchlist.record_scan(at(REGISTERED_AT + HOUR_NANOS), &account(1));
+
     assert_eq!(
-        watchlist.oldest_registered_at(at(VALID_UNTIL + 1)),
-        Some(at(REGISTERED_AT + HOUR_NANOS))
+        watchlist.oldest_due_scan_at(at(REGISTERED_AT + HOUR_NANOS)),
+        Some(at(REGISTERED_AT + MINUTE_NANOS))
     );
-    assert_eq!(watchlist.live_len(at(VALID_UNTIL + HOUR_NANOS + 1)), 0);
+
+    watchlist.record_scan(at(REGISTERED_AT + HOUR_NANOS), &account(2));
+
     assert_eq!(
-        watchlist.oldest_registered_at(at(VALID_UNTIL + HOUR_NANOS + 1)),
+        watchlist.oldest_due_scan_at(at(REGISTERED_AT + HOUR_NANOS)),
         None
     );
-    assert_eq!(watchlist.len(), 2);
+}
+
+#[test]
+fn should_report_no_due_scan_of_an_expired_registration() {
+    let mut watchlist = Watchlist::default();
+    register(&mut watchlist, at(REGISTERED_AT), account(1));
+
+    assert_eq!(
+        watchlist.oldest_due_scan_at(at(VALID_UNTIL)),
+        Some(at(REGISTERED_AT))
+    );
+    assert_eq!(watchlist.oldest_due_scan_at(at(VALID_UNTIL + 1)), None);
 }
 
 #[test]
@@ -239,12 +266,13 @@ fn should_not_rearm_an_account_when_full_of_live_entries() {
 }
 
 #[test]
-fn should_not_rearm_a_manual_deposit() {
+fn should_not_rearm_a_manual_deposit_even_with_a_fee() {
     let mut watchlist = Watchlist::default();
     let manual = QueuedDeposit {
-        deposit_fee: None,
+        origin: DepositOrigin::Manual,
         ..dropped(account(1))
     };
+    assert_eq!(manual.deposit_fee, Some(AUTOMATIC_DEPOSIT_FEE));
 
     let result = watchlist.rearm(at(REGISTERED_AT), &manual);
 
@@ -253,16 +281,16 @@ fn should_not_rearm_a_manual_deposit() {
 }
 
 #[test]
-fn should_keep_the_registration_of_an_account_that_is_already_watched() {
+fn should_rearm_an_automatic_deposit_without_a_fee() {
     let mut watchlist = Watchlist::default();
-    let registered = register(&mut watchlist, at(REGISTERED_AT + HOUR_NANOS), account(1));
+    let automatic = QueuedDeposit {
+        deposit_fee: None,
+        ..dropped(account(1))
+    };
 
-    let rearmed = watchlist
-        .rearm(at(REGISTERED_AT + 2 * HOUR_NANOS), &dropped(account(1)))
-        .unwrap();
+    let result = watchlist.rearm(at(REGISTERED_AT), &automatic);
 
-    assert_eq!(rearmed, registered);
-    assert_eq!(watchlist.len(), 1);
+    assert_eq!(result.map(|watched| watched.account), Ok(account(1)));
 }
 
 #[test]
@@ -285,8 +313,6 @@ fn should_rebuild_the_watchlist_verbatim_from_its_snapshot() {
             .collect::<Vec<_>>(),
         vec![account(3), account(2), account(1)]
     );
-    assert_eq!(snapshot.window_nanos, WATCH_WINDOW_NANOS);
-    assert_eq!(snapshot.capacity, MAX_WATCHED_ADDRESSES.get() as u64);
 }
 
 #[test]
@@ -302,14 +328,21 @@ fn should_keep_expired_registrations_and_exceed_the_capacity_when_rebuilding() {
         })
         .collect();
     let snapshot = WatchlistSnapshot {
-        window_nanos: WATCH_WINDOW_NANOS,
-        capacity: MAX_WATCHED_ADDRESSES.get() as u64,
         entries: entries.clone(),
     };
 
-    let rebuilt = Watchlist::from_snapshot(&snapshot);
+    let mut rebuilt = Watchlist::from_snapshot(&snapshot);
 
     assert_eq!(rebuilt.len(), entries.len());
+    assert_eq!(rebuilt.capacity(), MAX_WATCHED_ADDRESSES.get());
+    assert_eq!(
+        rebuilt.register(
+            at(REGISTERED_AT),
+            account(entries.len()),
+            deposit_address(account(entries.len()))
+        ),
+        Err(WatchlistFull)
+    );
     assert_eq!(rebuilt.snapshot(), snapshot);
     assert_eq!(rebuilt.live_len(at(VALID_UNTIL + 1)), 0);
     assert_eq!(
@@ -323,16 +356,6 @@ fn should_keep_expired_registrations_and_exceed_the_capacity_when_rebuilding() {
             next_scan_at: Some(at(REGISTERED_AT + 90 * MINUTE_NANOS)),
         })
     );
-}
-
-#[test]
-#[should_panic(expected = "non-zero capacity")]
-fn should_panic_when_rebuilding_from_a_snapshot_without_capacity() {
-    Watchlist::from_snapshot(&WatchlistSnapshot {
-        window_nanos: WATCH_WINDOW_NANOS,
-        capacity: 0,
-        entries: vec![],
-    });
 }
 
 fn dropped(account: Account) -> QueuedDeposit {

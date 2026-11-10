@@ -1,6 +1,6 @@
 use crate::{
     state::{
-        QueuedDeposit,
+        DepositOrigin, QueuedDeposit,
         event::{WatchedDepositAddress, WatchlistSnapshot},
     },
     utils::timed_sized_map::{Entry, InsertError, TimedSizedMap, Timestamp},
@@ -122,16 +122,21 @@ impl Default for Watchlist {
 }
 
 impl Watchlist {
-    /// Rebuilds the watchlist verbatim from a snapshot: under the limits the snapshot records,
-    /// with the entries as stored, expired ones included, so that the state replayed from the
-    /// event log equals the state that recorded the snapshot.
+    /// Rebuilds the watchlist from a snapshot: with the entries as stored, expired ones
+    /// included and without a capacity check, so that the state replayed from the event log
+    /// equals the state that recorded the snapshot, but under the [`WATCH_WINDOW`] and
+    /// [`MAX_WATCHED_ADDRESSES`] of the running version, so that a change of either takes
+    /// effect at the upgrade that ships it.
+    ///
+    /// The equality holds up to expired entries: when a later upgrade records no snapshot
+    /// because the watchlist is empty, replay keeps the entries of this snapshot that no
+    /// `QueuedDeposit` event removed, all of which have expired by then.
     ///
     /// # Panics
     ///
-    /// If the snapshot records no capacity or lists an account twice, since it was not
-    /// produced by [`Self::snapshot`] then.
+    /// If the snapshot lists an account twice, since it was not produced by
+    /// [`Self::snapshot`] then.
     pub fn from_snapshot(snapshot: &WatchlistSnapshot) -> Self {
-        let capacity = usize::try_from(snapshot.capacity).unwrap_or(usize::MAX);
         let entries = snapshot.entries.iter().map(|entry| {
             (
                 entry.account,
@@ -148,9 +153,8 @@ impl Watchlist {
         });
         Self {
             entries: TimedSizedMap::from_ordered_entries(
-                Duration::from_nanos(snapshot.window_nanos),
-                NonZeroUsize::new(capacity)
-                    .expect("BUG: a watchlist snapshot records a non-zero capacity"),
+                WATCH_WINDOW,
+                MAX_WATCHED_ADDRESSES,
                 entries,
             ),
         }
@@ -159,8 +163,6 @@ impl Watchlist {
     /// The snapshot [`Self::from_snapshot`] rebuilds this watchlist from.
     pub fn snapshot(&self) -> WatchlistSnapshot {
         WatchlistSnapshot {
-            window_nanos: u64::try_from(self.entries.ttl().as_nanos()).unwrap_or(u64::MAX),
-            capacity: self.entries.capacity().get() as u64,
             entries: self
                 .entries
                 .iter_by_expiry()
@@ -184,30 +186,28 @@ impl Watchlist {
         account: Account,
         address: Address,
     ) -> Result<WatchedAddress, WatchlistFull> {
-        let inserted = self
+        match self
             .entries
-            .insert(now, account, ScanProgress::unscanned(address, now));
-        match inserted {
+            .insert(now, account, ScanProgress::unscanned(address, now))
+        {
             Ok(_) | Err(InsertError::AlreadyPresent { .. }) => Ok(self
                 .get(now, &account)
                 .expect("BUG: a registration is live right after its insertion")),
             Err(InsertError::AtCapacity { .. }) => Err(WatchlistFull),
-            Err(InsertError::Expired { .. }) => {
-                unreachable!("BUG: a registration for the window starting now cannot have expired")
-            }
         }
     }
 
     /// Puts the account of a dropped automatic deposit back on the watchlist for a fresh
     /// window and schedule starting now, so that the funds still on its deposit address are
-    /// swept again without the user's intervention. An account that is already watched keeps
-    /// its registration.
+    /// swept again without the user's intervention. The account is not watched at that point:
+    /// queueing the deposit removed it from the watchlist, and an account with a deposit in
+    /// flight is not registered.
     pub fn rearm(
         &mut self,
         now: Timestamp,
         dropped: &QueuedDeposit,
     ) -> Result<WatchedAddress, RearmError> {
-        if dropped.deposit_fee.is_none() {
+        if dropped.origin == DepositOrigin::Manual {
             return Err(RearmError::ManualDeposit);
         }
         self.register(now, dropped.account, dropped.address)
@@ -260,18 +260,28 @@ impl Watchlist {
         self.entries.is_empty()
     }
 
+    /// The number of live registrations the watchlist admits, which is
+    /// [`MAX_WATCHED_ADDRESSES`] after a rebuild too.
+    pub fn capacity(&self) -> usize {
+        self.entries.capacity().get()
+    }
+
     pub fn live_len(&self, now: Timestamp) -> usize {
         self.live(now).count()
     }
 
-    /// When the oldest live registration was made, if any.
-    pub fn oldest_registered_at(&self, now: Timestamp) -> Option<Timestamp> {
-        self.live(now)
-            .map(|watched| self.registered_at(watched.valid_until))
+    /// When the earliest due scan was due, if any scan is due: since the due time of a
+    /// registration only moves when a scan is recorded, this falls behind `now` by more than a
+    /// tick only when the scan timer does not keep up.
+    pub fn oldest_due_scan_at(&self, now: Timestamp) -> Option<Timestamp> {
+        self.due(now)
+            .into_iter()
+            .filter_map(|watched| watched.next_scan_at)
             .min()
     }
 
-    fn live(&self, now: Timestamp) -> impl Iterator<Item = WatchedAddress> {
+    /// The live registrations, by ascending window end.
+    pub fn live(&self, now: Timestamp) -> impl Iterator<Item = WatchedAddress> {
         self.entries
             .iter_by_expiry()
             .filter(move |(_, entry)| entry.is_live(now))
@@ -288,9 +298,5 @@ impl Watchlist {
             last_scanned_at: progress.last_scanned_at,
             next_scan_at: progress.next_scan_at(entry.expires_at),
         }
-    }
-
-    fn registered_at(&self, valid_until: Timestamp) -> Timestamp {
-        valid_until.saturating_sub(self.entries.ttl())
     }
 }

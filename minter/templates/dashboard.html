@@ -111,9 +111,10 @@
                 <tr>
                     <th>Account</th>
                     <th>Deposit Address</th>
-                    <th>Valid Until (ns)</th>
+                    <th>Valid Until</th>
                     <th>Scans</th>
-                    <th>Last Scanned At (ns)</th>
+                    <th>Last Scanned At</th>
+                    <th>Next Scan At</th>
                 </tr>
                 </thead>
                 <tbody>
@@ -124,6 +125,7 @@
                     <td>{{ watched.valid_until }}</td>
                     <td>{{ watched.scan_count }}</td>
                     <td>{{ watched.last_scanned_at }}</td>
+                    <td>{{ watched.next_scan_at }}</td>
                 </tr>
                 {% endfor %}
                 {% if watched_deposit_addresses_table.has_more_than_one_page() %}{{ watched_deposit_addresses_table.pagination|safe }}{% endif %}

@@ -4,9 +4,8 @@ use candid::{Nat, Principal};
 use cksol_int_tests::{
     CkSolMinter, Setup, SetupBuilder,
     fixtures::{
-        DEFAULT_CALLER_ACCOUNT, DEFAULT_CALLER_DEPOSIT_ADDRESS, DEPOSIT_AMOUNT,
-        MAX_WATCHED_ADDRESSES, MINTER_ADDRESS, MockBuilder, RENT_EXEMPTION_THRESHOLD,
-        SharedMockHttpOutcalls, WATCH_WINDOW_NANOS,
+        DEFAULT_CALLER_ACCOUNT, DEFAULT_CALLER_DEPOSIT_ADDRESS, DEPOSIT_AMOUNT, MINTER_ADDRESS,
+        MockBuilder, RENT_EXEMPTION_THRESHOLD, WATCH_WINDOW_NANOS,
     },
     validator::FEE_PER_SIGNATURE,
 };
@@ -17,13 +16,12 @@ use cksol_types::{
 };
 use cksol_types_internal::{
     UpgradeArgs,
-    event::{EventType, TransactionPurpose, WatchedDepositAddress},
+    event::{DepositOrigin, EventType, TransactionPurpose, WatchedDepositAddress},
     log::Priority,
 };
 use icrc_ledger_types::icrc1::account::{Account, Subaccount};
 use sol_rpc_types::{CommitmentLevel, ConsensusStrategy, RpcConfig};
 use std::time::Duration;
-use tokio::join;
 
 const WITHDRAWAL_PROCESSING_DELAY: Duration = Duration::from_mins(1);
 const FINALIZE_TRANSACTIONS_DELAY: Duration = Duration::from_mins(2);
@@ -276,18 +274,9 @@ mod lifecycle {
                     .count()
                     <= 1
             );
-            check!(
-                events
-                    .iter()
-                    .filter(|e| matches!(e, EventType::WatchedDepositAddresses { .. }))
-                    .count()
-                    == 1
-            );
             check!(events[1..].iter().all(|e| matches!(
                 e,
-                EventType::Upgrade(_)
-                    | EventType::MinterPublicKeyFetched { .. }
-                    | EventType::WatchedDepositAddresses { .. }
+                EventType::Upgrade(_) | EventType::MinterPublicKeyFetched { .. }
             )));
         });
 
@@ -687,35 +676,23 @@ mod withdrawal_tests {
             address: WITHDRAWAL_ADDRESS.to_string(),
         };
 
-        let minter1 = setup.minter();
-        let minter2 = setup.minter();
+        let minter = setup.minter();
+        let first_call = minter.submit_withdraw_sol(args.clone()).await;
+        let second_call = minter.submit_withdraw_sol(args).await;
 
-        let (result1, result2) = join!(
-            minter1.withdraw_sol(args.clone()),
-            minter2.withdraw_sol(args.clone()),
+        let outcomes = (
+            first_call.await_response().await,
+            second_call.await_response().await,
         );
-
-        let (result1, result2) = match (&result1, &result2) {
-            (Ok(_), Err(_)) => (result1, result2),
-            (Err(_), Ok(_)) => (result2, result1),
-            _ => panic!("Expected one success and one error, but got: {result1:?} and {result2:?}"),
-        };
-
-        // One should succeed, one should fail with AlreadyProcessing (order is non-deterministic)
-        let results = [&result1, &result2];
-        assert!(
-            results
-                .iter()
-                .any(|r| matches!(r, Ok(WithdrawSolOk { block_index: _ }))),
-            "Expected one Minted result, got: {:?}",
-            results
-        );
-        assert!(
-            results
-                .iter()
-                .any(|r| matches!(r, Err(WithdrawSolError::AlreadyProcessing))),
-            "Expected one AlreadyProcessing result, got: {:?}",
-            results
+        assert_matches!(
+            outcomes,
+            (
+                Ok(WithdrawSolOk { .. }),
+                Err(WithdrawSolError::AlreadyProcessing)
+            ) | (
+                Err(WithdrawSolError::AlreadyProcessing),
+                Ok(WithdrawSolOk { .. })
+            )
         );
 
         setup.drop().await;
@@ -893,6 +870,7 @@ mod deposit_sol_tests {
                         address: deposit_address.clone(),
                         balance: BALANCE_ABOVE_MINIMUM,
                         deposit_fee: None,
+                        origin: Some(DepositOrigin::Manual),
                     }]
             );
         });
@@ -974,6 +952,7 @@ mod deposit_sol_tests {
                         address: deposit_address.clone(),
                         balance: BALANCE_ABOVE_MINIMUM,
                         deposit_fee: None,
+                        origin: Some(DepositOrigin::Manual),
                     }]
             );
         });
@@ -1187,34 +1166,6 @@ mod deposit_sol_tests {
         setup.drop().await;
     }
 
-    #[tokio::test]
-    async fn should_fail_for_concurrent_access() {
-        let setup = SetupBuilder::new().with_proxy_canister().build().await;
-        let mocks = SharedMockHttpOutcalls::new(
-            MockBuilder::new()
-                .get_balance(BALANCE_ABOVE_MINIMUM)
-                .build(),
-        );
-        let minter1 = setup.minter().with_http_mocks(mocks.clone());
-        let minter2 = setup.minter().with_http_mocks(mocks.clone());
-
-        let results = join!(
-            minter1.deposit_sol(DEFAULT_CALLER_ACCOUNT),
-            minter2.deposit_sol(DEFAULT_CALLER_ACCOUNT)
-        );
-
-        assert!(
-            matches!(
-                results,
-                (Ok(0), Err(DepositSolError::AlreadyProcessing))
-                    | (Err(DepositSolError::AlreadyProcessing), Ok(0))
-            ),
-            "Expected one queued deposit and one AlreadyProcessing error, got: {results:?}"
-        );
-
-        setup.drop().await;
-    }
-
     async fn get_balance_cycles_cost(setup: &Setup) -> u128 {
         let deposit_address: solana_address::Address =
             DEFAULT_CALLER_DEPOSIT_ADDRESS.parse().unwrap();
@@ -1241,6 +1192,7 @@ mod automatic_deposit_sol_tests {
 
     const SCAN_WATCHED_ADDRESSES_DELAY: Duration = Duration::from_mins(1);
     const BALANCE_ABOVE_MINIMUM: Lamport = Setup::DEFAULT_MINIMUM_DEPOSIT_AMOUNT + 1;
+    const BALANCE_BELOW_MINIMUM: Lamport = Setup::DEFAULT_MINIMUM_DEPOSIT_AMOUNT - 1;
 
     #[tokio::test]
     async fn should_register_the_caller() {
@@ -1363,8 +1315,6 @@ mod automatic_deposit_sol_tests {
             check!(
                 snapshots
                     == [&EventType::WatchedDepositAddresses {
-                        window_nanos: WATCH_WINDOW_NANOS,
-                        capacity: MAX_WATCHED_ADDRESSES,
                         entries: vec![WatchedDepositAddress {
                             account: DEFAULT_CALLER_ACCOUNT,
                             address: DEFAULT_CALLER_DEPOSIT_ADDRESS.parse().unwrap(),
@@ -1431,6 +1381,7 @@ mod automatic_deposit_sol_tests {
                         address: DEFAULT_CALLER_DEPOSIT_ADDRESS.parse().unwrap(),
                         balance: BALANCE_ABOVE_MINIMUM,
                         deposit_fee: Some(Setup::DEFAULT_AUTOMATIC_DEPOSIT_FEE),
+                        origin: Some(DepositOrigin::Automatic),
                     }]
             );
         });
@@ -1439,6 +1390,48 @@ mod automatic_deposit_sol_tests {
             .await
             .assert_contains_metric_matching(r#"watched_deposit_addresses 0 \d+"#)
             .assert_contains_metric_matching(r#"deposit_address_scans\{outcome="queued"\} 1 \d+"#)
+            .into()
+            .drop()
+            .await;
+    }
+
+    #[tokio::test]
+    async fn should_report_a_due_scan_in_the_metrics_until_it_runs() {
+        let setup = SetupBuilder::new().build().await;
+        setup
+            .minter()
+            .watch_deposit_address(None)
+            .await
+            .expect("watch_deposit_address should register the caller");
+
+        // The tick starts the scan, whose call stays pending until the mocks below answer it.
+        setup.advance_time(SCAN_WATCHED_ADDRESSES_DELAY).await;
+        setup.tick().await;
+        let setup = setup
+            .check_metrics()
+            .await
+            .assert_contains_metric_matching(r#"watched_deposit_addresses 1 \d+"#)
+            .assert_contains_metric_matching(
+                r#"oldest_due_deposit_address_scan_age_seconds 60 \d+"#,
+            )
+            .into();
+
+        setup
+            .execute_http_mocks(
+                MockBuilder::new()
+                    .get_multiple_accounts(&[BALANCE_BELOW_MINIMUM])
+                    .build(),
+            )
+            .await;
+
+        setup
+            .check_metrics()
+            .await
+            .assert_contains_metric_matching(r#"watched_deposit_addresses 1 \d+"#)
+            .assert_contains_metric_matching(r#"oldest_due_deposit_address_scan_age_seconds 0 \d+"#)
+            .assert_contains_metric_matching(
+                r#"deposit_address_scans\{outcome="below_minimum"\} 1 \d+"#,
+            )
             .into()
             .drop()
             .await;
@@ -1549,8 +1542,10 @@ mod metrics_tests {
             .assert_contains_metric_matching(r#"oldest_in_flight_deposit_age_seconds 0 \d+"#)
             .assert_contains_metric_matching(r#"oldest_pending_mint_age_seconds 0 \d+"#)
             .assert_contains_metric_matching(r#"watched_deposit_addresses 0 \d+"#)
-            .assert_contains_metric_matching(r#"oldest_watched_deposit_age_seconds 0 \d+"#)
+            .assert_contains_metric_matching(r#"watched_deposit_address_capacity 1000 \d+"#)
+            .assert_contains_metric_matching(r#"oldest_due_deposit_address_scan_age_seconds 0 \d+"#)
             .assert_contains_metric_matching(r#"collected_automatic_deposit_fees 0 \d+"#)
+            .assert_contains_metric_matching(r"# TYPE collected_automatic_deposit_fees counter")
             .assert_contains_metric_matching(r#"deposit_address_scans\{outcome="queued"\} 0 \d+"#)
             .assert_contains_metric_matching(
                 r#"deposit_address_scans\{outcome="below_minimum"\} 0 \d+"#,

@@ -5,8 +5,8 @@ use crate::{
     rpc::{GetMultipleAccountsError, get_balances},
     runtime::CanisterRuntime,
     state::{
-        DepositBalance, MAX_WATCHED_ADDRESSES, QueuedDeposit, State, TaskType, WatchedAddress,
-        mutate_state, read_state,
+        DepositBalance, DepositOrigin, MAX_WATCHED_ADDRESSES, QueuedDeposit, State, TaskType,
+        WatchedAddress, mutate_state, read_state,
     },
     storage::{ScanOutcome, record_deposit_address_scans},
     utils::timed_sized_map::Timestamp,
@@ -71,7 +71,8 @@ pub async fn scan_watched_addresses<R: CanisterRuntime>(runtime: R) {
         futures::future::join_all(chunks.iter().map(|chunk| read_balances(&runtime, chunk))).await;
 
     let scan = Scan {
-        scanned_at: Timestamp::from_nanos(runtime.time()),
+        scanned_at: now,
+        read_at: Timestamp::from_nanos(runtime.time()),
         automatic_deposit_fee,
     };
     for (chunk, read) in chunks.into_iter().zip(reads) {
@@ -89,7 +90,7 @@ pub async fn scan_watched_addresses<R: CanisterRuntime>(runtime: R) {
                     "Failed to read the balances of {} watched deposit addresses, which advance to their next scan: {e}",
                     chunk.len()
                 );
-                record_failed_read(scan.scanned_at, chunk);
+                record_failed_read(scan, chunk);
                 record_deposit_address_scans(ScanOutcome::Failed, chunk.len() as u64);
             }
         }
@@ -104,11 +105,15 @@ async fn read_balances<R: CanisterRuntime>(
     get_balances(runtime, &addresses).await
 }
 
-/// What one tick of the scan applies to every balance it read: the time of the reads and the
-/// automatic deposit fee in force, which a deposit detected by the tick records.
+/// What one tick of the scan applies to every balance it read: the time the reads were sent,
+/// which the scan is recorded at so that a slot passing while they are in flight is still
+/// scanned, the time their responses arrived, at which the registration they were made for
+/// must still be live, and the automatic deposit fee in force, which a deposit detected by
+/// the tick records.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Scan {
     scanned_at: Timestamp,
+    read_at: Timestamp,
     automatic_deposit_fee: Lamport,
 }
 
@@ -124,10 +129,11 @@ fn apply_balance_read<R: CanisterRuntime>(
 ) -> Option<ScanOutcome> {
     let Scan {
         scanned_at,
+        read_at,
         automatic_deposit_fee,
     } = scan;
     mutate_state(|state| {
-        if !is_same_registration(state, scanned_at, watched)
+        if !is_same_registration(state, read_at, watched)
             || state.deposits().in_flight_id(&watched.account).is_some()
         {
             return None;
@@ -147,6 +153,7 @@ fn apply_balance_read<R: CanisterRuntime>(
                 account: watched.account,
                 address: watched.address,
                 balance,
+                origin: DepositOrigin::Automatic,
                 deposit_fee: Some(automatic_deposit_fee),
             },
         );
@@ -154,13 +161,13 @@ fn apply_balance_read<R: CanisterRuntime>(
     })
 }
 
-fn record_failed_read(scanned_at: Timestamp, chunk: &[WatchedAddress]) {
+fn record_failed_read(scan: Scan, chunk: &[WatchedAddress]) {
     mutate_state(|state| {
         for watched in chunk {
-            if is_same_registration(state, scanned_at, watched) {
+            if is_same_registration(state, scan.read_at, watched) {
                 state
                     .watchlist_mut()
-                    .record_scan(scanned_at, &watched.account);
+                    .record_scan(scan.scanned_at, &watched.account);
             }
         }
     });

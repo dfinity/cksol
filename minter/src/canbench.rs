@@ -7,7 +7,7 @@ use crate::{
     runtime::IcCanisterRuntime,
     sol_transfer::build_batch_withdrawal_message,
     state::{
-        DepositBalance, QueuedDeposit, SchnorrPublicKey, Sweep,
+        DepositBalance, DepositOrigin, QueuedDeposit, SchnorrPublicKey, Sweep,
         audit::{process_event, replay_events},
         event::{
             CreditedDeposit, EventType, Signer, TransactionPurpose, VersionedMessage,
@@ -109,6 +109,7 @@ fn queue_and_sweep(deposit_id: u64, account_index: usize, amount: u64, sig: Sign
         address: deposit_address(account_index),
         balance: DepositBalance::new(amount + RENT_EXEMPTION_THRESHOLD)
             .expect("BUG: the balance covers the rent exemption threshold"),
+        origin: DepositOrigin::Manual,
         deposit_fee: None,
     };
     record(EventType::QueuedDeposit {
@@ -117,6 +118,7 @@ fn queue_and_sweep(deposit_id: u64, account_index: usize, amount: u64, sig: Sign
         address: deposit.address,
         balance: deposit.balance,
         deposit_fee: None,
+        origin: DepositOrigin::Manual,
     });
     let sweep = Sweep::plan([(deposit_id, deposit)], minter_address(&master_key()));
     record(EventType::SubmittedTransaction {

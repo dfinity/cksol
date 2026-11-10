@@ -1,6 +1,7 @@
 use crate::{
     address::minter_address,
     state::{QuarantineCause, State},
+    utils::timed_sized_map::Timestamp,
 };
 use askama::Template;
 use candid::Principal;
@@ -19,6 +20,23 @@ pub fn lamports_to_sol(lamports: u64) -> String {
         let frac_str = format!("{:09}", frac).trim_end_matches('0').to_string();
         format!("{whole}.{frac_str}")
     }
+}
+
+/// Formats a time as a UTC date and time to the second, e.g. `2023-11-14T22:13:20+00:00`, as
+/// on the dashboard of the ckETH minter.
+fn format_timestamp(timestamp: Timestamp) -> String {
+    let datetime =
+        time::OffsetDateTime::from_unix_timestamp_nanos(i128::from(timestamp.as_nanos()))
+            .expect("BUG: nanoseconds since the epoch that fit a u64 are a valid time");
+    format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}+00:00",
+        datetime.year(),
+        u8::from(datetime.month()),
+        datetime.day(),
+        datetime.hour(),
+        datetime.minute(),
+        datetime.second()
+    )
 }
 
 fn solscan_cluster_suffix(network: SolanaNetwork) -> &'static str {
@@ -242,8 +260,11 @@ pub struct DashboardWatchedAddress {
     pub address: String,
     pub valid_until: String,
     pub scan_count: String,
-    /// The time of the last scan in nanoseconds since the epoch, or `-` before the first scan.
+    /// The time of the last scan, or `-` before the first scan.
     pub last_scanned_at: String,
+    /// When the next scan is due, or `-` once no slot is left before the window closes: a
+    /// time well in the past shows that the scan timer is behind.
+    pub next_scan_at: String,
 }
 
 /// A swept deposit whose ckSOL mint landed on the ledger.
@@ -277,7 +298,11 @@ pub struct DashboardTemplate {
 }
 
 impl DashboardTemplate {
-    pub fn from_state(state: &State, pagination: DashboardPaginationParameters) -> Self {
+    pub fn from_state(
+        state: &State,
+        now: Timestamp,
+        pagination: DashboardPaginationParameters,
+    ) -> Self {
         let minter_address = state
             .minter_public_key()
             .map(|key| minter_address(key).to_string())
@@ -405,15 +430,18 @@ impl DashboardTemplate {
 
         let watched_deposit_addresses: Vec<DashboardWatchedAddress> = state
             .watchlist()
-            .iter()
+            .live(now)
             .map(|watched| DashboardWatchedAddress {
                 account: watched.account.to_string(),
                 address: watched.address.to_string(),
-                valid_until: watched.valid_until.as_nanos().to_string(),
+                valid_until: format_timestamp(watched.valid_until),
                 scan_count: watched.scan_count.to_string(),
                 last_scanned_at: watched
                     .last_scanned_at
-                    .map_or_else(|| "-".to_string(), |at| at.as_nanos().to_string()),
+                    .map_or_else(|| "-".to_string(), format_timestamp),
+                next_scan_at: watched
+                    .next_scan_at
+                    .map_or_else(|| "-".to_string(), format_timestamp),
             })
             .collect();
         let watched_deposit_addresses_table = DashboardPaginatedTable::from_items(

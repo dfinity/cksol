@@ -111,6 +111,7 @@ mod queued_deposits {
                 address: queued_deposit(deposit_id).address,
                 balance: queued_deposit(deposit_id).balance,
                 deposit_fee: None,
+                origin: DepositOrigin::Manual,
             },
         };
         let init = Event {
@@ -144,10 +145,11 @@ mod queued_deposits {
 mod watched_deposit_addresses {
     use super::*;
     use crate::{
-        state::WatchedAddress,
+        lifecycle::pre_upgrade,
+        state::{audit::process_dropped_sweep, watchlist::Watchlist},
         test_fixtures::{
-            MINIMUM_DEPOSIT_AMOUNT, REGISTERED_AT, WATCH_WINDOW_NANOS, at, deposit_address,
-            flow::deposit::DepositFlow, replayed_recorded_log_after, watch,
+            HOUR_NANOS, MINIMUM_DEPOSIT_AMOUNT, MINUTE_NANOS, REGISTERED_AT, WATCH_WINDOW_NANOS,
+            at, flow::deposit::DepositFlow, register, replayed_recorded_log, watch,
         },
     };
 
@@ -167,58 +169,87 @@ mod watched_deposit_addresses {
     }
 
     #[test]
-    fn should_restore_the_latest_snapshot_and_apply_the_events_that_follow_it() {
+    fn should_restore_the_watchlist_recorded_before_the_upgrade() {
+        const DROPPED_AT: u64 = REGISTERED_AT + 2 * MINUTE_NANOS;
+        const UPGRADED_AT: u64 = REGISTERED_AT + HOUR_NANOS;
+        init_state();
+        init_schnorr_master_key();
+        watch(at(REGISTERED_AT), account(1));
+        mutate_state(|s| {
+            s.watchlist_mut()
+                .record_scan(at(REGISTERED_AT + MINUTE_NANOS), &account(1))
+        });
+        let dropped = DepositFlow::queue_automatic(account(2), 20_000_000, AUTOMATIC_DEPOSIT_FEE)
+            .sweep(signature(0xAA));
+        mutate_state(|state| {
+            process_dropped_sweep(
+                state,
+                EventType::FailedTransaction {
+                    signature: dropped.signature,
+                },
+                &TestCanisterRuntime::new().add_times([DROPPED_AT; 3]),
+            )
+        });
+        let watchlist_before = read_state(|s| s.watchlist().clone());
+        assert_eq!(watchlist_before.len(), 2);
+
+        pre_upgrade(TestCanisterRuntime::new().add_times([UPGRADED_AT; 2]));
+
+        let replayed = replayed_recorded_log();
+        assert_eq!(replayed.watchlist(), &watchlist_before);
+        read_state(|live_state| assert_eq!(&replayed, live_state));
+    }
+
+    #[test]
+    fn should_restore_nothing_but_expired_entries_when_no_snapshot_was_recorded() {
+        const UPGRADED_AGAIN_AT: u64 = REGISTERED_AT + WATCH_WINDOW_NANOS + 1;
         init_state();
         init_schnorr_master_key();
         watch(at(REGISTERED_AT), account(1));
         watch(at(REGISTERED_AT), account(2));
-        let stale_snapshot = read_state(|s| s.watchlist().snapshot());
-        mutate_state(|s| s.watchlist_mut().remove(&account(2)));
-        let latest_snapshot = read_state(|s| s.watchlist().snapshot());
-        let detected = DepositFlow::queue_automatic(account(1), 20_000_000, AUTOMATIC_DEPOSIT_FEE)
-            .sweep(signature(0xAA));
+        pre_upgrade(TestCanisterRuntime::new().add_times([REGISTERED_AT; 2]));
+        DepositFlow::queue(account(2), MINIMUM_DEPOSIT_AMOUNT);
+        mutate_state(|s| s.watchlist_mut().evict_expired(at(UPGRADED_AGAIN_AT)));
         read_state(|s| assert!(s.watchlist().is_empty()));
-        let dropped_at = REGISTERED_AT + 1;
-        mutate_state(|state| {
-            process_event(
-                state,
-                EventType::FailedTransaction {
-                    signature: detected.signature,
-                },
-                &TestCanisterRuntime::new().add_times([dropped_at, dropped_at]),
-            )
-        });
 
-        let replayed = replayed_recorded_log_after([
-            EventType::WatchedDepositAddresses(stale_snapshot),
-            EventType::WatchedDepositAddresses(latest_snapshot),
-        ]);
+        pre_upgrade(TestCanisterRuntime::new().add_times([UPGRADED_AGAIN_AT; 2]));
 
-        read_state(|live_state| assert_eq!(&replayed, live_state));
+        let mut replayed = replayed_recorded_log();
         assert_eq!(
-            replayed.watchlist().iter().collect::<Vec<_>>(),
-            vec![WatchedAddress {
-                account: account(1),
-                address: deposit_address(account(1)),
-                valid_until: at(dropped_at + WATCH_WINDOW_NANOS),
-                scan_count: 0,
-                last_scanned_at: None,
-                next_scan_at: Some(at(dropped_at)),
-            }]
+            replayed
+                .watchlist()
+                .iter()
+                .map(|watched| watched.account)
+                .collect::<Vec<_>>(),
+            vec![account(1)]
         );
+        assert_eq!(replayed.watchlist().live_len(at(UPGRADED_AGAIN_AT)), 0);
+        assert_eq!(replayed.watchlist().due(at(UPGRADED_AGAIN_AT)), vec![]);
+        let registered_again =
+            register(replayed.watchlist_mut(), at(UPGRADED_AGAIN_AT), account(1));
+        assert_eq!(
+            (registered_again.valid_until, registered_again.scan_count),
+            (at(UPGRADED_AGAIN_AT + WATCH_WINDOW_NANOS), 0)
+        );
+        *replayed.watchlist_mut() = Watchlist::default();
+        read_state(|live_state| assert_eq!(&replayed, live_state));
     }
 }
 
 mod swept_deposits {
     use super::*;
     use crate::{
-        state::{audit::replay_events, reset_state, watchlist::MAX_WATCHED_ADDRESSES},
+        state::{
+            audit::{process_dropped_sweep, replay_events},
+            reset_state,
+            watchlist::{MAX_WATCHED_ADDRESSES, Watchlist},
+        },
         storage::{reset_events, with_event_iter},
         test_fixtures::{
             DEFAULT_BLOCK_HEIGHT, REGISTERED_AT, WATCH_WINDOW_NANOS, at,
             events::{credit_sweep, quarantine_sweep, queue_deposits, submit_sweep},
             flow::deposit::{CreditedSweepFlow, DepositFlow, SweepFlow},
-            replayed_recorded_log, sweep_message, watch,
+            queued_deposit_of, replayed_recorded_log, sweep_message, watch,
         },
     };
 
@@ -296,54 +327,64 @@ mod swept_deposits {
     }
 
     #[test]
-    fn should_rearm_the_automatic_deposits_of_a_failed_sweep() {
-        let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
-
-        assert_rearms_the_automatic_deposits_when_dropped_by(EventType::FailedTransaction {
-            signature: sweep_signature,
-        });
-    }
-
-    #[test]
-    fn should_rearm_the_automatic_deposits_of_an_expired_sweep() {
-        let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
-
-        assert_rearms_the_automatic_deposits_when_dropped_by(EventType::ExpiredTransaction {
-            signature: sweep_signature,
-        });
-    }
-
-    fn assert_rearms_the_automatic_deposits_when_dropped_by(drop_event: EventType) {
+    fn should_rearm_the_automatic_deposits_of_a_dropped_sweep_without_replaying_the_rearm() {
         const DROPPED_AT: u64 = REGISTERED_AT + WATCH_WINDOW_NANOS + 1;
-        init_state();
-        init_schnorr_master_key();
-        let manual = DepositFlow::queue(account(1), 10_000_000);
-        let automatic = DepositFlow::queue_automatic(account(2), 20_000_000, AUTOMATIC_DEPOSIT_FEE);
-        SweepFlow::of([manual, automatic]).submit(signature(SWEEP_SIGNATURE_INDEX));
+        let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
+        let drop_events = [
+            EventType::FailedTransaction {
+                signature: sweep_signature,
+            },
+            EventType::ExpiredTransaction {
+                signature: sweep_signature,
+            },
+        ];
+        for drop_event in drop_events {
+            reset_state();
+            reset_events();
+            init_state();
+            init_schnorr_master_key();
+            let manual = DepositFlow::queue(account(1), 10_000_000);
+            let automatic =
+                DepositFlow::queue_automatic(account(2), 20_000_000, AUTOMATIC_DEPOSIT_FEE);
+            SweepFlow::of([manual, automatic]).submit(sweep_signature);
 
-        mutate_state(|state| {
-            process_event(
-                state,
-                drop_event,
-                &TestCanisterRuntime::new().add_times([DROPPED_AT, DROPPED_AT]),
-            )
-        });
+            mutate_state(|state| {
+                process_dropped_sweep(
+                    state,
+                    drop_event.clone(),
+                    &TestCanisterRuntime::new().add_times([DROPPED_AT; 3]),
+                )
+            });
 
-        let rearmed = WatchedAddress {
-            account: account(2),
-            address: automatic.address,
-            valid_until: at(DROPPED_AT + WATCH_WINDOW_NANOS),
-            scan_count: 0,
-            last_scanned_at: None,
-            next_scan_at: Some(at(DROPPED_AT)),
-        };
-        read_state(|s| {
-            assert_eq!(s.deposits().dropped().len(), 2);
-            assert_eq!(s.watchlist().iter().collect::<Vec<_>>(), vec![rearmed]);
-            assert_eq!(s.watchlist().due(at(DROPPED_AT)), vec![rearmed]);
-        });
-        let replayed = replayed_recorded_log();
-        read_state(|live_state| assert_eq!(&replayed, live_state));
+            let rearmed = WatchedAddress {
+                account: account(2),
+                address: automatic.address,
+                valid_until: at(DROPPED_AT + WATCH_WINDOW_NANOS),
+                scan_count: 0,
+                last_scanned_at: None,
+                next_scan_at: Some(at(DROPPED_AT)),
+            };
+            read_state(|s| {
+                assert_eq!(s.deposits().dropped().len(), 2, "{drop_event:?}");
+                assert_eq!(
+                    s.watchlist().iter().collect::<Vec<_>>(),
+                    vec![rearmed],
+                    "{drop_event:?}"
+                );
+                assert_eq!(
+                    s.watchlist().due(at(DROPPED_AT)),
+                    vec![rearmed],
+                    "{drop_event:?}"
+                );
+            });
+            let mut live_without_rearm = read_state(State::clone);
+            *live_without_rearm.watchlist_mut() = Watchlist::default();
+            assert_eq!(
+                replayed_recorded_log(),
+                live_without_rearm,
+                "{drop_event:?}"
+            );
+        }
     }
 
     #[test]
@@ -356,7 +397,15 @@ mod swept_deposits {
             watch(at(REGISTERED_AT), account(index));
         }
 
-        fail_transaction(dropped.signature);
+        mutate_state(|state| {
+            process_dropped_sweep(
+                state,
+                EventType::FailedTransaction {
+                    signature: dropped.signature,
+                },
+                &TestCanisterRuntime::new().add_times([REGISTERED_AT; 3]),
+            )
+        });
 
         read_state(|s| {
             assert_eq!(s.watchlist().get(at(REGISTERED_AT), &account(0)), None);
@@ -413,6 +462,52 @@ mod swept_deposits {
                             amount_to_mint: 300,
                         },
                     ],
+                },
+                &TestCanisterRuntime::new().add_times([0, 0]),
+            )
+        });
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "and deposit fees of 2000000 lamports exceeding the 19000000 lamports received"
+    )]
+    fn should_panic_when_the_mints_and_deposit_fees_exceed_the_amount_received() {
+        init_state();
+        init_schnorr_master_key();
+        let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
+        DepositFlow::queue_automatic(account(1), 20_000_000, AUTOMATIC_DEPOSIT_FEE)
+            .sweep(sweep_signature)
+            .succeed();
+
+        // The mint of 20,000,000 - 5,000 - 2,000,000 lamports fits the amount received alone.
+        credit_sweep(sweep_signature, 19_000_000);
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "with mints of 18446744073708660735 lamports and deposit fees of 2000000 lamports"
+    )]
+    fn should_panic_when_the_mints_and_deposit_fees_overflow() {
+        init_state();
+        init_schnorr_master_key();
+        let sweep_signature = signature(SWEEP_SIGNATURE_INDEX);
+        let sweepable_amount = u64::MAX - RENT_EXEMPTION_THRESHOLD;
+        let deposit =
+            DepositFlow::queue_automatic(account(1), sweepable_amount, AUTOMATIC_DEPOSIT_FEE);
+        deposit.sweep(sweep_signature).succeed();
+
+        mutate_state(|s| {
+            process_event(
+                s,
+                EventType::CreditedSweep {
+                    signature: sweep_signature,
+                    amount_received: sweepable_amount,
+                    // The forged mint ignores the deposit fee, which overflows when added.
+                    mints: vec![CreditedDeposit {
+                        deposit_id: deposit.deposit_id,
+                        amount_to_mint: sweepable_amount,
+                    }],
                 },
                 &TestCanisterRuntime::new().add_times([0, 0]),
             )
@@ -503,6 +598,39 @@ mod swept_deposits {
             assert_eq!(
                 s.collected_automatic_deposit_fees(),
                 AUTOMATIC_DEPOSIT_FEE + AUTOMATIC_DEPOSIT_FEE / 2
+            );
+            assert_eq!(s.balance(), credited.amount_received);
+        });
+
+        let replayed = replayed_recorded_log();
+        read_state(|live_state| assert_eq!(&replayed, live_state));
+    }
+
+    #[test]
+    fn should_not_collect_the_fee_of_a_manual_deposit_as_an_automatic_deposit_fee() {
+        init_state();
+        init_schnorr_master_key();
+        let manual = DepositFlow::queue_deposit(QueuedDeposit {
+            deposit_fee: Some(AUTOMATIC_DEPOSIT_FEE),
+            ..queued_deposit_of(account(1), 10_000_000)
+        });
+        let automatic =
+            DepositFlow::queue_automatic(account(2), 20_000_000, AUTOMATIC_DEPOSIT_FEE / 2);
+
+        let credited = SweepFlow::of([manual, automatic])
+            .submit(signature(SWEEP_SIGNATURE_INDEX))
+            .succeed()
+            .credit();
+
+        let [manual_mint, _] = credited.pending_mints();
+        assert_eq!(
+            manual_mint.amount_to_mint,
+            10_000_000 - FEE_PER_SIGNATURE - AUTOMATIC_DEPOSIT_FEE
+        );
+        read_state(|s| {
+            assert_eq!(
+                s.collected_automatic_deposit_fees(),
+                AUTOMATIC_DEPOSIT_FEE / 2
             );
             assert_eq!(s.balance(), credited.amount_received);
         });
@@ -1760,6 +1888,7 @@ mod withdrawal_transactions {
                 address: funding_deposit.address,
                 balance: funding_deposit.balance,
                 deposit_fee: None,
+                origin: DepositOrigin::Manual,
             },
             EventType::SubmittedTransaction {
                 signature: signature(9),

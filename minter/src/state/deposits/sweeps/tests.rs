@@ -102,7 +102,7 @@ mod plan {
         planned_sweep, queued_deposit_of,
     };
     use crate::{
-        state::event::CreditedDeposit,
+        state::{QueuedDeposit, event::CreditedDeposit},
         test_fixtures::{
             arb::{arb_address, arb_sweep_deposits},
             automatic_deposit_of,
@@ -187,6 +187,23 @@ mod plan {
         ]);
 
         assert_eq!(sweep.deposit_fees(), 0);
+    }
+
+    #[test]
+    fn should_count_only_the_fees_of_automatic_deposits_as_automatic() {
+        let sweep = planned_sweep([
+            (
+                0,
+                QueuedDeposit {
+                    deposit_fee: Some(1_000),
+                    ..queued_deposit_of(account(1), 1_000_000)
+                },
+            ),
+            (1, automatic_deposit_of(account(2), 2_000_000, 2_000)),
+        ]);
+
+        assert_eq!(sweep.deposit_fees(), 3_000);
+        assert_eq!(sweep.automatic_deposit_fees(), 2_000);
     }
 
     #[test]
@@ -334,7 +351,10 @@ mod settle {
         SweepMismatch, SweepSettlementError, TransactionError, UiTransactionError,
         UnreadableOutcome, account, devnet_sweep, planned_sweep, queued_deposit_of,
     };
-    use crate::{state::QueuedDeposit, test_fixtures::fetched};
+    use crate::{
+        state::{DepositOrigin, QueuedDeposit},
+        test_fixtures::fetched,
+    };
 
     type Deviation = fn(&mut EncodedConfirmedTransactionWithStatusMeta);
 
@@ -386,15 +406,16 @@ mod settle {
     #[test]
     fn should_reject_a_matching_outcome_whose_fees_exceed_a_sweepable_amount() {
         let deposits = devnet_sweep::deposits().into_iter().map(|(id, deposit)| {
-            let deposit_fee =
-                (deposit.address == SECOND_DEPOSIT).then_some(SECOND_SWEEPABLE_AMOUNT);
-            (
-                id,
+            let deposit = if deposit.address == SECOND_DEPOSIT {
                 QueuedDeposit {
-                    deposit_fee,
+                    origin: DepositOrigin::Automatic,
+                    deposit_fee: Some(SECOND_SWEEPABLE_AMOUNT),
                     ..deposit
-                },
-            )
+                }
+            } else {
+                deposit
+            };
+            (id, deposit)
         });
         let fetched = fetched(devnet_sweep::outcome());
 

@@ -1,6 +1,9 @@
 use crate::{
     constants::RENT_EXEMPTION_THRESHOLD,
-    state::event::{Event, EventType, candid::InvalidCandidEvent},
+    state::{
+        DepositBalance, DepositOrigin,
+        event::{Event, EventType, candid::InvalidCandidEvent},
+    },
     test_fixtures::arb::{arb_account, arb_address, arb_event, arb_signature},
 };
 use assert_matches::assert_matches;
@@ -51,10 +54,39 @@ proptest! {
             address: address.into(),
             balance,
             deposit_fee,
+            origin: None,
         };
         prop_assert_eq!(
             EventType::try_from(payload).unwrap_err(),
             InvalidCandidEvent::DepositBalanceBelowRentExemption(balance)
+        );
+    }
+
+    #[test]
+    fn should_convert_a_queued_deposit_without_origin_to_a_manual_deposit(
+        account in arb_account(),
+        address in arb_address(),
+        deposit_fee in option::of(any::<Lamport>()),
+    ) {
+        let balance = RENT_EXEMPTION_THRESHOLD + 1;
+        let payload = CandidEventType::QueuedDeposit {
+            deposit_id: 0,
+            account,
+            address: address.into(),
+            balance,
+            deposit_fee,
+            origin: None,
+        };
+        prop_assert_eq!(
+            EventType::try_from(payload).unwrap(),
+            EventType::QueuedDeposit {
+                deposit_id: 0,
+                account,
+                address,
+                balance: DepositBalance::new(balance).unwrap(),
+                deposit_fee,
+                origin: DepositOrigin::Manual,
+            }
         );
     }
 

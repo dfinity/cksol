@@ -3,7 +3,7 @@ use crate::{
     constants::FEE_PER_SIGNATURE,
     numeric::{LedgerBurnIndex, LedgerMintIndex},
     rpc::BlockHeight,
-    state::DepositBalance,
+    state::{DepositBalance, DepositOrigin},
 };
 use cksol_types::DepositSolId;
 use cksol_types_internal::{InitArgs, UpgradeArgs};
@@ -113,6 +113,10 @@ pub enum EventType {
         signature: Signature,
     },
     /// A previously submitted Solana transaction has failed.
+    /// The deposits of a failed sweep transaction are dropped. For a sweep, the event is
+    /// recorded by [`process_dropped_sweep`], which also re-arms the automatic deposits.
+    ///
+    /// [`process_dropped_sweep`]: crate::state::audit::process_dropped_sweep
     #[n(6)]
     FailedTransaction {
         /// The signature of the failed Solana transaction.
@@ -121,7 +125,10 @@ pub enum EventType {
     },
     /// A previously submitted Solana transaction has an expired blockhash
     /// and a null on-chain status, meaning it will never be executed.
-    /// The deposits of the expired sweep transaction are dropped.
+    /// The deposits of the expired sweep transaction are dropped. The event is recorded by
+    /// [`process_dropped_sweep`], which also re-arms the automatic deposits.
+    ///
+    /// [`process_dropped_sweep`]: crate::state::audit::process_dropped_sweep
     #[n(7)]
     ExpiredTransaction {
         /// The signature of the expired Solana transaction.
@@ -141,9 +148,14 @@ pub enum EventType {
         address: Address,
         #[cbor(n(3), with = "cbor::deposit_balance")]
         balance: DepositBalance,
-        /// The fee deducted from the minted amount, absent for a deposit queued via `deposit_sol`.
+        /// The fee deducted from the minted amount, absent if none is charged.
         #[n(4)]
         deposit_fee: Option<Lamport>,
+        /// The flow that queued the deposit. Always recorded, it decodes as
+        /// [`DepositOrigin::Manual`] when absent: every event recorded without it predates the
+        /// automatic flow.
+        #[cbor(n(5), with = "cbor::deposit_origin", has_nil)]
+        origin: DepositOrigin,
     },
     /// The minter read the amount that the finalized sweep transaction moved to its
     /// main account and enqueued a pending mint for each deposit of that sweep.
@@ -233,18 +245,12 @@ pub enum EventType {
     WatchedDepositAddresses(#[n(0)] WatchlistSnapshot),
 }
 
-/// Payload of the `WatchedDepositAddresses` event: the limits of the watchlist in force when
-/// the snapshot was taken and every registration, live or expired but not yet evicted, in
-/// the order the watchlist is rebuilt from.
+/// Payload of the `WatchedDepositAddresses` event: every registration, live or expired but
+/// not yet evicted, in the order the watchlist is rebuilt from. The window and the capacity
+/// are not recorded, since the watchlist is rebuilt under those of the running version.
 #[derive(Clone, Eq, PartialEq, Debug, Decode, Encode)]
 pub struct WatchlistSnapshot {
-    /// The window of a registration, in nanoseconds.
     #[n(0)]
-    pub window_nanos: u64,
-    /// The number of live registrations the watchlist holds at most.
-    #[n(1)]
-    pub capacity: u64,
-    #[n(2)]
     pub entries: Vec<WatchedDepositAddress>,
 }
 

@@ -8,6 +8,7 @@ use crate::{
 };
 use cksol_types::{DepositSolId, DepositSolStatus};
 use icrc_ledger_types::icrc1::account::Account;
+use minicbor::{Decode, Encode};
 use sol_rpc_types::Lamport;
 use solana_address::Address;
 use solana_signature::Signature;
@@ -39,7 +40,8 @@ mod tests;
 ///   transaction is what the finalization timer tracks from here on. A sweep is never
 ///   resubmitted: when it fails or expires, its deposits are dropped and their accounts
 ///   released, so that `deposit_sol` can queue a new sweep of the balance still on the
-///   deposit address.
+///   deposit address. The accounts of the automatic deposits are also put back on the
+///   watchlist when it has room, so that a balance scan queues that sweep without a call.
 /// * `finalized`: `getSignatureStatuses` reported the sweep as finalized without error. The
 ///   amount received by the main account is still unknown, because Solana may charge a
 ///   different transaction fee than the sweep was built with.
@@ -256,9 +258,8 @@ impl Deposits {
         expected_received
     }
 
-    /// Drops every deposit of the given swept sweep, releases their accounts and returns
-    /// the dropped deposits in the order of their ids.
-    pub(super) fn drop_swept(&mut self, signature: &Signature) -> Vec<QueuedDeposit> {
+    /// Drops every deposit of the given swept sweep and releases their accounts.
+    pub(super) fn drop_swept(&mut self, signature: &Signature) {
         let sweep = self
             .swept
             .remove(signature)
@@ -274,7 +275,6 @@ impl Deposits {
                 },
             );
         }
-        sweep.deposits().values().copied().collect()
     }
 
     /// Moves every deposit of the given finalized sweep to the quarantine, keeping their
@@ -422,8 +422,9 @@ pub struct QueuedDeposit {
     pub address: Address,
     /// The balance of the deposit address when the deposit was queued.
     pub balance: DepositBalance,
-    /// The fee in lamports deducted from the minted amount, absent for a deposit queued by
-    /// `deposit_sol`.
+    /// The flow that queued the deposit.
+    pub origin: DepositOrigin,
+    /// The fee in lamports deducted from the minted amount, absent if none is charged.
     pub deposit_fee: Option<Lamport>,
 }
 
@@ -432,10 +433,23 @@ impl QueuedDeposit {
         self.balance.sweepable_amount()
     }
 
-    /// The fee deducted from the mint, zero for a deposit queued by `deposit_sol`.
+    /// The fee deducted from the mint, zero if none is charged.
     pub fn deposit_fee(&self) -> Lamport {
         self.deposit_fee.unwrap_or(0)
     }
+}
+
+/// The flow that queued a deposit, recorded on its own rather than inferred from the
+/// deposit fee, so that a fee can be charged in either flow.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Decode, Encode)]
+#[cbor(index_only)]
+pub enum DepositOrigin {
+    /// Queued by a user via `deposit_sol`.
+    #[n(0)]
+    Manual,
+    /// Queued by a balance scan of the automatic flow.
+    #[n(1)]
+    Automatic,
 }
 
 impl From<DepositBalance> for Lamport {
