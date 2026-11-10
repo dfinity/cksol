@@ -1,6 +1,7 @@
-use crate::state::{QuarantineCause, State};
+use crate::state::{DepositOrigin, QuarantineCause, State};
 use crate::storage::{
-    self, FailedCreditReason, FailedMintReason, ScanOutcome, UndecidedWithdrawalReason,
+    self, FailedCreditReason, FailedMintReason, RearmOutcome, ScanOutcome,
+    UndecidedWithdrawalReason,
 };
 use crate::utils::timed_sized_map::Timestamp;
 use ic_metrics_encoder::MetricsEncoder;
@@ -49,11 +50,20 @@ pub fn encode_metrics(w: &mut MetricsEncoder<Vec<u8>>, s: &State) -> std::io::Re
         s.deposits().minted().len().metric_value(),
         "Number of swept deposits whose ckSOL mint landed on the ledger.",
     )?;
-    w.encode_gauge(
+    let mut dropped_manual: usize = 0;
+    let mut dropped_automatic: usize = 0;
+    for dropped in s.deposits().dropped().values() {
+        match dropped.deposit.origin {
+            DepositOrigin::Manual => dropped_manual += 1,
+            DepositOrigin::Automatic => dropped_automatic += 1,
+        }
+    }
+    w.gauge_vec(
         "dropped_deposits",
-        s.deposits().dropped().len().metric_value(),
-        "Number of deposits whose sweep transaction failed or expired.",
-    )?;
+        "Number of deposits whose sweep transaction failed or expired, by origin: queued by deposit_sol or by a balance scan of the automatic flow.",
+    )?
+    .value(&[("origin", "manual")], dropped_manual.metric_value())?
+    .value(&[("origin", "automatic")], dropped_automatic.metric_value())?;
     let mut sweep_unreadable: usize = 0;
     let mut mint_unresolved: usize = 0;
     for quarantined in s.deposits().quarantined().values() {
@@ -169,6 +179,16 @@ pub fn encode_metrics(w: &mut MetricsEncoder<Vec<u8>>, s: &State) -> std::io::Re
         deposit_address_scans = deposit_address_scans.value(
             &[("outcome", outcome.label())],
             storage::deposit_address_scan_count(outcome).metric_value(),
+        )?;
+    }
+    let mut automatic_deposit_rearms = w.counter_vec(
+        "automatic_deposit_rearms",
+        "Number of automatic deposits dropped with their sweep since the last upgrade, by outcome: their account put back on the watchlist for a fresh window, or not because the watchlist was full.",
+    )?;
+    for outcome in RearmOutcome::ALL {
+        automatic_deposit_rearms = automatic_deposit_rearms.value(
+            &[("outcome", outcome.label())],
+            storage::automatic_deposit_rearm_count(outcome).metric_value(),
         )?;
     }
     w.encode_gauge(
