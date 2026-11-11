@@ -103,7 +103,8 @@ pub enum DepositSolStatus {
     /// the deposit address still holds. A deposit detected by the automatic flow also puts
     /// its deposit address back on watch for a new window, unless too many addresses are
     /// watched, so that `watch_deposit_address` reports it as `Watching` and the balance
-    /// is swept again without a call.
+    /// is swept again without a call; if too many addresses are watched, calling
+    /// `watch_deposit_address` later registers the address again for free.
     Dropped {
         /// The signature of the sweep transaction.
         signature: Signature,
