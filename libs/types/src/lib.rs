@@ -150,10 +150,11 @@ pub enum DepositSolError {
         /// The minimum deposit amount for the deposit to be queued.
         minimum_deposit_amount: Lamport,
     },
-    /// The latest deposit of the account is quarantined: its sweep was finalized, but the
-    /// outcome did not match the plan the minter submitted, so the deposit could not be
-    /// credited safely. The account stays rejected until a minter upgrade resolves the
-    /// quarantined deposit; a new deposit has to use a different subaccount.
+    /// The latest deposit of the account is quarantined: either its sweep was finalized
+    /// with an outcome that did not match the plan the minter submitted, so the deposit
+    /// could not be credited safely, or its ckSOL mint could not be completed, see
+    /// [`DepositSolStatus`]. The account stays rejected until a minter upgrade resolves
+    /// the quarantined deposit; a new deposit has to use a different subaccount.
     #[error("The latest deposit {deposit_id} of this account is quarantined")]
     Quarantined {
         /// The identifier of the quarantined deposit.
