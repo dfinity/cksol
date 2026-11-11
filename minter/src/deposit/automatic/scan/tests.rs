@@ -252,11 +252,13 @@ fn should_discard_a_read_of_a_registration_replaced_or_expired_meanwhile() {
         &renewed,
         MINIMUM_DEPOSIT_AMOUNT,
     );
-    record_failed_read(scan_at(TICK_AT), &[stale]);
-    record_failed_read(read_after_expiry, &[renewed]);
+    let failed_after_replacement = record_failed_read(scan_at(TICK_AT), &[stale]);
+    let failed_after_expiry = record_failed_read(read_after_expiry, &[renewed]);
 
     assert_eq!(after_replacement, None);
     assert_eq!(after_expiry, None);
+    assert_eq!(failed_after_replacement, 0);
+    assert_eq!(failed_after_expiry, 0);
     EventsAssert::assert_no_events_recorded();
     assert_eq!(
         read_state(|s| s.watchlist().get(at(TICK_AT), &account(1))),

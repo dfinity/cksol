@@ -138,6 +138,22 @@ The fees and minimum amounts follow [Section 3.3 of the design](design.md#33-fee
 | `nonce_accounts`              | empty                 | Replace with the addresses created in [Create nonce accounts](#create-nonce-accounts).          |
 | `automatic_deposit_fee`       | unset                 | Keeps the automatic flow disabled; to be set to 0.002 SOL (2,000,000) once it is complete.      |
 
+### Enable the automatic deposit flow
+
+The automatic deposit flow is disabled as long as `automatic_deposit_fee` is unset: `watch_deposit_address` returns `TemporarilyUnavailable` and the scan timer reads no balance. Enable it by setting the fee in the upgrade that installs the version with the flow:
+
+```candid
+(
+  variant {
+    Upgrade = record {
+      automatic_deposit_fee = opt (2_000_000 : nat64);
+    }
+  },
+)
+```
+
+Once the flow is enabled, the upgrade can no longer be rolled back to a version without it: a faulty version has to be fixed forward, as described in [Section 3.5 of the design](design.md#35-events).
+
 ## Ledger
 
 Initialization arguments:
