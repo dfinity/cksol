@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-The automatic deposit flow is disabled until `automatic_deposit_fee` is set. Enable it with a second upgrade once the version with the flow runs as expected, as described under "Enable the automatic deposit flow" in the deployment guide: until then the upgrade can be rolled back, afterwards a faulty version has to be fixed forward.
+The automatic deposit flow is disabled until `automatic_deposit_fee` is set, which the upgrade installing this version should do, as described under "Enable the automatic deposit flow" in the deployment guide. Once the flow is enabled, the upgrade can no longer be rolled back: a faulty version has to be fixed forward.
 
 ### Added
 

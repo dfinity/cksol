@@ -140,7 +140,7 @@ The fees and minimum amounts follow [Section 3.3 of the design](design.md#33-fee
 
 ### Enable the automatic deposit flow
 
-Enable the automatic deposit flow on a running minter in two upgrades. The first installs the version with the flow and leaves `automatic_deposit_fee` unset, so the flow stays disabled: `watch_deposit_address` returns `TemporarilyUnavailable` and the scan timer reads no balance. No automatic deposit is queued and no watchlist snapshot is recorded, so this upgrade can still be rolled back to the previous version. Once the minter runs as expected, a second upgrade sets the fee and enables the flow:
+The automatic deposit flow is disabled as long as `automatic_deposit_fee` is unset: `watch_deposit_address` returns `TemporarilyUnavailable` and the scan timer reads no balance. Enable it by setting the fee in the upgrade that installs the version with the flow:
 
 ```candid
 (
@@ -152,7 +152,7 @@ Enable the automatic deposit flow on a running minter in two upgrades. The first
 )
 ```
 
-From then on, a faulty version has to be fixed forward instead of rolled back, as described in [Section 3.5 of the design](design.md#35-events).
+Once the flow is enabled, the upgrade can no longer be rolled back to a version without it: a faulty version has to be fixed forward, as described in [Section 3.5 of the design](design.md#35-events).
 
 ## Ledger
 
