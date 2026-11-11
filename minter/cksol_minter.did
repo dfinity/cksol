@@ -449,9 +449,10 @@ type Signer = variant {
 // *WARNING*: This type is used exclusively by the debug `get_events` endpoint.
 // Backwards-compatibility is not guaranteed.
 type TransactionPurpose = variant {
-    // Sweep the deposit addresses of deposits queued by `deposit_sol` into the
-    // minter's main account. The transaction uses a recent blockhash and is
-    // dropped once the blockhash expires.
+    // Sweep the deposit addresses of queued deposits, whether queued by
+    // `deposit_sol` or by a balance scan, into the minter's main account. The
+    // transaction uses a recent blockhash and is dropped once the blockhash
+    // expires.
     SweepDeposit : record {
         // The ids of the swept deposits.
         deposit_ids: vec DepositSolId;

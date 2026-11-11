@@ -203,9 +203,10 @@ pub enum Signer {
 /// The purpose of a submitted Solana transaction.
 #[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]
 pub enum TransactionPurpose {
-    /// Sweep the deposit addresses of deposits queued by `deposit_sol` into
-    /// the minter's main account. The transaction uses a recent blockhash and
-    /// is dropped once the blockhash expires.
+    /// Sweep the deposit addresses of queued deposits, whether queued by
+    /// `deposit_sol` or by a balance scan, into the minter's main account. The
+    /// transaction uses a recent blockhash and is dropped once the blockhash
+    /// expires.
     SweepDeposit {
         /// The ids of the swept deposits.
         deposit_ids: Vec<u64>,
