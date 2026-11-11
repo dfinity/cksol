@@ -76,6 +76,7 @@ solana-transaction-status-client-types = "3.1.8"
 tar = "0.4.44"
 tempfile = "3.26.0"
 thiserror = "2.0.18"
+time = "0.3.47"
 tokio = "1.49.0"
 
 [profile.release]

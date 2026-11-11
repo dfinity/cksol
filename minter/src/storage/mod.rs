@@ -41,6 +41,7 @@ pub(crate) struct Metrics {
     pub withdrawal_transaction_rebroadcasts: u64,
     pub undecided_withdrawal_transactions: BTreeMap<UndecidedWithdrawalReason, u64>,
     pub deposit_address_scans: BTreeMap<ScanOutcome, u64>,
+    pub automatic_deposit_rearms: BTreeMap<RearmOutcome, u64>,
 }
 
 impl Metrics {
@@ -52,6 +53,7 @@ impl Metrics {
             withdrawal_transaction_rebroadcasts: 0,
             undecided_withdrawal_transactions: BTreeMap::new(),
             deposit_address_scans: BTreeMap::new(),
+            automatic_deposit_rearms: BTreeMap::new(),
         }
     }
 }
@@ -82,6 +84,38 @@ pub(crate) fn record_deposit_address_scans(outcome: ScanOutcome, count: u64) {
 
 pub(crate) fn deposit_address_scan_count(outcome: ScanOutcome) -> u64 {
     with_unstable_metrics(|m| m.deposit_address_scans.get(&outcome).copied().unwrap_or(0))
+}
+
+/// Whether the account of an automatic deposit dropped with its sweep was put back on the
+/// watchlist.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum RearmOutcome {
+    Rearmed,
+    WatchlistFull,
+}
+
+impl RearmOutcome {
+    pub const ALL: [Self; 2] = [Self::Rearmed, Self::WatchlistFull];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Rearmed => "rearmed",
+            Self::WatchlistFull => "watchlist_full",
+        }
+    }
+}
+
+pub(crate) fn record_automatic_deposit_rearm(outcome: RearmOutcome) {
+    with_unstable_metrics_mut(|m| *m.automatic_deposit_rearms.entry(outcome).or_insert(0) += 1);
+}
+
+pub(crate) fn automatic_deposit_rearm_count(outcome: RearmOutcome) -> u64 {
+    with_unstable_metrics(|m| {
+        m.automatic_deposit_rearms
+            .get(&outcome)
+            .copied()
+            .unwrap_or(0)
+    })
 }
 
 /// Why an attempt to credit the deposits of a finalized sweep failed.

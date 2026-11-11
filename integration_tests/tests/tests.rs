@@ -10,9 +10,9 @@ use cksol_int_tests::{
     validator::FEE_PER_SIGNATURE,
 };
 use cksol_types::{
-    DepositSolArgs, DepositSolError, DepositSolStatus, GetDepositAddressArgs, Lamport, MinterInfo,
-    TxFinalizedStatus, WatchDepositAddressError, WatchDepositAddressStatus, WithdrawSolArgs,
-    WithdrawSolError, WithdrawSolStatus,
+    DepositSolArgs, DepositSolError, DepositSolId, DepositSolStatus, GetDepositAddressArgs,
+    Lamport, MinterInfo, Signature, TxFinalizedStatus, WatchDepositAddressError,
+    WatchDepositAddressStatus, WithdrawSolArgs, WithdrawSolError, WithdrawSolStatus,
 };
 use cksol_types_internal::{
     UpgradeArgs,
@@ -49,7 +49,14 @@ async fn deposit_and_credit_funds(setup: &Setup) {
         .await
         .expect("deposit_sol should queue a sweep");
 
-    // Sweep
+    let sweep_signature = sweep_deposit(setup, deposit_id).await;
+    finalize_and_credit_sweep(setup, &sweep_signature, SWEEPABLE_AMOUNT).await;
+}
+
+/// Runs the sweep timer on the deposit queued by the first batch of HTTP outcalls (IDs 0 to
+/// 3, a `getBalance` of `deposit_sol` or a `getMultipleAccounts` of the scan timer) and
+/// returns the signature of its sweep.
+async fn sweep_deposit(setup: &Setup, deposit_id: DepositSolId) -> Signature {
     setup.advance_time(SWEEP_DEPOSITS_DELAY).await;
     setup
         .execute_http_mocks(
@@ -58,19 +65,23 @@ async fn deposit_and_credit_funds(setup: &Setup) {
                 .build(),
         )
         .await;
-    let sweep_signature = assert_matches!(
+    assert_matches!(
         setup.minter().deposit_sol_status(deposit_id).await,
         DepositSolStatus::Swept { signature } => signature
-    );
+    )
+}
 
-    // Finalize and credit
+/// Runs the finalization timer on the sweep submitted by [`sweep_deposit`], reporting that
+/// the minter's main account received `received`, which credits the sweep if it matches
+/// its plan.
+async fn finalize_and_credit_sweep(setup: &Setup, sweep_signature: &Signature, received: Lamport) {
     setup.advance_time(FINALIZE_TRANSACTIONS_DELAY).await;
-    let sweep = setup.minter().signed_transaction(&sweep_signature).await;
+    let sweep = setup.minter().signed_transaction(sweep_signature).await;
     setup
         .execute_http_mocks(
             MockBuilder::with_start_id(16)
-                .finalize_transaction(&sweep_signature, SUBMISSION_BLOCK_HEIGHT)
-                .get_sweep_transaction(&sweep, SWEEPABLE_AMOUNT)
+                .finalize_transaction(sweep_signature, SUBMISSION_BLOCK_HEIGHT)
+                .get_sweep_transaction(&sweep, received)
                 .build(),
         )
         .await;
@@ -975,19 +986,7 @@ mod deposit_sol_tests {
             .await
             .expect("deposit_sol should queue a sweep");
 
-        setup.advance_time(SWEEP_DEPOSITS_DELAY).await;
-        setup
-            .execute_http_mocks(
-                MockBuilder::with_start_id(4)
-                    .submit_transaction(SUBMISSION_BLOCK_HEIGHT)
-                    .build(),
-            )
-            .await;
-
-        let sweep_signature = assert_matches!(
-            setup.minter().deposit_sol_status(deposit_id).await,
-            DepositSolStatus::Swept { signature } => signature
-        );
+        let sweep_signature = sweep_deposit(&setup, deposit_id).await;
         setup.minter().assert_that_events().await.satisfy(|events| {
             check!(events.iter().any(|e| matches!(
                 e,
@@ -999,16 +998,7 @@ mod deposit_sol_tests {
             )));
         });
 
-        setup.advance_time(FINALIZE_TRANSACTIONS_DELAY).await;
-        let sweep = setup.minter().signed_transaction(&sweep_signature).await;
-        setup
-            .execute_http_mocks(
-                MockBuilder::with_start_id(16)
-                    .finalize_transaction(&sweep_signature, SUBMISSION_BLOCK_HEIGHT)
-                    .get_sweep_transaction(&sweep, SWEEPABLE_AMOUNT)
-                    .build(),
-            )
-            .await;
+        finalize_and_credit_sweep(&setup, &sweep_signature, SWEEPABLE_AMOUNT).await;
 
         setup.wait_for_deposit_minted(deposit_id).await;
 
@@ -1041,18 +1031,7 @@ mod deposit_sol_tests {
             .deposit_sol(DEFAULT_CALLER_ACCOUNT)
             .await
             .expect("deposit_sol should queue a sweep");
-        setup.advance_time(SWEEP_DEPOSITS_DELAY).await;
-        setup
-            .execute_http_mocks(
-                MockBuilder::with_start_id(4)
-                    .submit_transaction(SUBMISSION_BLOCK_HEIGHT)
-                    .build(),
-            )
-            .await;
-        let sweep_signature = assert_matches!(
-            setup.minter().deposit_sol_status(deposit_id).await,
-            DepositSolStatus::Swept { signature } => signature
-        );
+        let sweep_signature = sweep_deposit(&setup, deposit_id).await;
 
         setup.advance_time(FINALIZE_TRANSACTIONS_DELAY).await;
         setup
@@ -1078,7 +1057,8 @@ mod deposit_sol_tests {
         let setup = setup
             .check_metrics()
             .await
-            .assert_contains_metric_matching(r"dropped_deposits 1 \d+")
+            .assert_contains_metric_matching(r#"dropped_deposits\{origin="manual"\} 1 \d+"#)
+            .assert_contains_metric_matching(r#"dropped_deposits\{origin="automatic"\} 0 \d+"#)
             .into();
 
         let deposit_id_after_drop = setup
@@ -1109,30 +1089,10 @@ mod deposit_sol_tests {
             .deposit_sol(DEFAULT_CALLER_ACCOUNT)
             .await
             .expect("deposit_sol should queue a sweep");
-        setup.advance_time(SWEEP_DEPOSITS_DELAY).await;
-        setup
-            .execute_http_mocks(
-                MockBuilder::with_start_id(4)
-                    .submit_transaction(SUBMISSION_BLOCK_HEIGHT)
-                    .build(),
-            )
-            .await;
-        let sweep_signature = assert_matches!(
-            setup.minter().deposit_sol_status(deposit_id).await,
-            DepositSolStatus::Swept { signature } => signature
-        );
+        let sweep_signature = sweep_deposit(&setup, deposit_id).await;
 
-        setup.advance_time(FINALIZE_TRANSACTIONS_DELAY).await;
         let amount_not_in_the_plan = BALANCE_ABOVE_MINIMUM - RENT_EXEMPTION_THRESHOLD + 1;
-        let sweep = setup.minter().signed_transaction(&sweep_signature).await;
-        setup
-            .execute_http_mocks(
-                MockBuilder::with_start_id(16)
-                    .finalize_transaction(&sweep_signature, SUBMISSION_BLOCK_HEIGHT)
-                    .get_sweep_transaction(&sweep, amount_not_in_the_plan)
-                    .build(),
-            )
-            .await;
+        finalize_and_credit_sweep(&setup, &sweep_signature, amount_not_in_the_plan).await;
 
         assert_eq!(
             setup.minter().deposit_sol_status(deposit_id).await,
@@ -1192,6 +1152,7 @@ mod automatic_deposit_sol_tests {
 
     const SCAN_WATCHED_ADDRESSES_DELAY: Duration = Duration::from_mins(1);
     const BALANCE_ABOVE_MINIMUM: Lamport = Setup::DEFAULT_MINIMUM_DEPOSIT_AMOUNT + 1;
+    const BALANCE_BELOW_MINIMUM: Lamport = Setup::DEFAULT_MINIMUM_DEPOSIT_AMOUNT - 1;
 
     #[tokio::test]
     async fn should_register_the_caller() {
@@ -1387,7 +1348,102 @@ mod automatic_deposit_sol_tests {
         setup
             .check_metrics()
             .await
+            .assert_contains_metric_matching(r#"watched_deposit_addresses 0 \d+"#)
             .assert_contains_metric_matching(r#"deposit_address_scans\{outcome="queued"\} 1 \d+"#)
+            .into()
+            .drop()
+            .await;
+    }
+
+    #[tokio::test]
+    async fn should_sweep_finalize_and_mint_the_detected_deposit_minus_the_automatic_fee() {
+        const SWEEPABLE_AMOUNT: Lamport = BALANCE_ABOVE_MINIMUM - RENT_EXEMPTION_THRESHOLD;
+        const FEE: Lamport = Setup::DEFAULT_AUTOMATIC_DEPOSIT_FEE;
+        let setup = SetupBuilder::new().build().await;
+        setup
+            .minter()
+            .watch_deposit_address(None)
+            .await
+            .expect("watch_deposit_address should register the caller");
+        setup.advance_time(SCAN_WATCHED_ADDRESSES_DELAY).await;
+        setup
+            .execute_http_mocks(
+                MockBuilder::new()
+                    .get_multiple_accounts(&[BALANCE_ABOVE_MINIMUM])
+                    .build(),
+            )
+            .await;
+
+        let sweep_signature = sweep_deposit(&setup, 0).await;
+        finalize_and_credit_sweep(&setup, &sweep_signature, SWEEPABLE_AMOUNT).await;
+        setup.wait_for_deposit_minted(0).await;
+
+        let minted_amount = SWEEPABLE_AMOUNT - FEE_PER_SIGNATURE - FEE;
+        assert_eq!(
+            setup.minter().deposit_sol_status(0).await,
+            DepositSolStatus::Minted {
+                block_index: 0,
+                minted_amount,
+            }
+        );
+        assert_eq!(
+            setup.ledger().balance_of(DEFAULT_CALLER_ACCOUNT).await,
+            minted_amount
+        );
+        assert_eq!(
+            setup
+                .minter()
+                .get_minter_info()
+                .await
+                .collected_automatic_deposit_fees,
+            Some(FEE)
+        );
+        setup
+            .check_metrics()
+            .await
+            .assert_contains_metric_matching(format!(r"collected_automatic_deposit_fees {FEE} \d+"))
+            .into()
+            .drop()
+            .await;
+    }
+
+    #[tokio::test]
+    async fn should_report_a_due_scan_in_the_metrics_until_it_runs() {
+        let setup = SetupBuilder::new().build().await;
+        setup
+            .minter()
+            .watch_deposit_address(None)
+            .await
+            .expect("watch_deposit_address should register the caller");
+
+        // The tick starts the scan, whose call stays pending until the mocks below answer it.
+        setup.advance_time(SCAN_WATCHED_ADDRESSES_DELAY).await;
+        setup.tick().await;
+        let setup = setup
+            .check_metrics()
+            .await
+            .assert_contains_metric_matching(r#"watched_deposit_addresses 1 \d+"#)
+            .assert_contains_metric_matching(
+                r#"oldest_due_deposit_address_scan_age_seconds 60 \d+"#,
+            )
+            .into();
+
+        setup
+            .execute_http_mocks(
+                MockBuilder::new()
+                    .get_multiple_accounts(&[BALANCE_BELOW_MINIMUM])
+                    .build(),
+            )
+            .await;
+
+        setup
+            .check_metrics()
+            .await
+            .assert_contains_metric_matching(r#"watched_deposit_addresses 1 \d+"#)
+            .assert_contains_metric_matching(r#"oldest_due_deposit_address_scan_age_seconds 0 \d+"#)
+            .assert_contains_metric_matching(
+                r#"deposit_address_scans\{outcome="below_minimum"\} 1 \d+"#,
+            )
             .into()
             .drop()
             .await;
@@ -1497,6 +1553,24 @@ mod metrics_tests {
             .assert_contains_metric_matching(r#"minter_balance 0 \d+"#)
             .assert_contains_metric_matching(r#"oldest_in_flight_deposit_age_seconds 0 \d+"#)
             .assert_contains_metric_matching(r#"oldest_pending_mint_age_seconds 0 \d+"#)
+            .assert_contains_metric_matching(r#"watched_deposit_addresses 0 \d+"#)
+            .assert_contains_metric_matching(r#"watched_deposit_address_capacity 1000 \d+"#)
+            .assert_contains_metric_matching(r#"oldest_due_deposit_address_scan_age_seconds 0 \d+"#)
+            .assert_contains_metric_matching(r#"collected_automatic_deposit_fees 0 \d+"#)
+            .assert_contains_metric_matching(r"# TYPE collected_automatic_deposit_fees counter")
+            .assert_contains_metric_matching(r#"deposit_address_scans\{outcome="queued"\} 0 \d+"#)
+            .assert_contains_metric_matching(
+                r#"deposit_address_scans\{outcome="below_minimum"\} 0 \d+"#,
+            )
+            .assert_contains_metric_matching(r#"deposit_address_scans\{outcome="failed"\} 0 \d+"#)
+            .assert_contains_metric_matching(
+                r#"automatic_deposit_rearms\{outcome="rearmed"\} 0 \d+"#,
+            )
+            .assert_contains_metric_matching(
+                r#"automatic_deposit_rearms\{outcome="watchlist_full"\} 0 \d+"#,
+            )
+            .assert_contains_metric_matching(r#"dropped_deposits\{origin="manual"\} 0 \d+"#)
+            .assert_contains_metric_matching(r#"dropped_deposits\{origin="automatic"\} 0 \d+"#)
             .assert_contains_metric_matching(
                 r#"failed_credit_attempts\{reason="not_found"\} 0 \d+"#,
             )

@@ -260,11 +260,28 @@ impl Watchlist {
         self.entries.is_empty()
     }
 
+    /// The number of live registrations the watchlist admits, which is
+    /// [`MAX_WATCHED_ADDRESSES`] after a rebuild too.
+    pub fn capacity(&self) -> usize {
+        self.entries.capacity().get()
+    }
+
     pub fn live_len(&self, now: Timestamp) -> usize {
         self.live(now).count()
     }
 
-    fn live(&self, now: Timestamp) -> impl Iterator<Item = WatchedAddress> {
+    /// When the earliest due scan was due, if any scan is due: since the due time of a
+    /// registration only moves when a scan is recorded, this falls behind `now` by more than a
+    /// tick only when the scan timer does not keep up.
+    pub fn oldest_due_scan_at(&self, now: Timestamp) -> Option<Timestamp> {
+        self.due(now)
+            .into_iter()
+            .filter_map(|watched| watched.next_scan_at)
+            .min()
+    }
+
+    /// The live registrations, by ascending window end.
+    pub fn live(&self, now: Timestamp) -> impl Iterator<Item = WatchedAddress> {
         self.entries
             .iter_by_expiry()
             .filter(move |(_, entry)| entry.is_live(now))

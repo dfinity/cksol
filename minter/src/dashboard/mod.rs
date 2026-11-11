@@ -1,6 +1,7 @@
 use crate::{
     address::minter_address,
     state::{QuarantineCause, State},
+    utils::timed_sized_map::Timestamp,
 };
 use askama::Template;
 use candid::Principal;
@@ -19,6 +20,23 @@ pub fn lamports_to_sol(lamports: u64) -> String {
         let frac_str = format!("{:09}", frac).trim_end_matches('0').to_string();
         format!("{whole}.{frac_str}")
     }
+}
+
+/// Formats a time as a UTC date and time to the second, e.g. `2023-11-14T22:13:20+00:00`, as
+/// on the dashboard of the ckETH minter.
+fn format_timestamp(timestamp: Timestamp) -> String {
+    let datetime =
+        time::OffsetDateTime::from_unix_timestamp_nanos(i128::from(timestamp.as_nanos()))
+            .expect("BUG: nanoseconds since the epoch that fit a u64 are a valid time");
+    format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}+00:00",
+        datetime.year(),
+        u8::from(datetime.month()),
+        datetime.day(),
+        datetime.hour(),
+        datetime.minute(),
+        datetime.second()
+    )
 }
 
 fn solscan_cluster_suffix(network: SolanaNetwork) -> &'static str {
@@ -41,6 +59,7 @@ pub struct DashboardPaginationParameters {
     pub quarantined_swept_deposits_start: usize,
     pub minted_sweeps_start: usize,
     pub withdrawals_start: usize,
+    pub watched_deposit_addresses_start: usize,
 }
 
 impl DashboardPaginationParameters {
@@ -57,6 +76,7 @@ impl DashboardPaginationParameters {
             quarantined_swept_deposits_start: parse(req, "quarantined_swept_deposits_start")?,
             minted_sweeps_start: parse(req, "minted_sweeps_start")?,
             withdrawals_start: parse(req, "withdrawals_start")?,
+            watched_deposit_addresses_start: parse(req, "watched_deposit_addresses_start")?,
         })
     }
 
@@ -69,6 +89,10 @@ impl DashboardPaginationParameters {
             ),
             ("minted_sweeps_start", self.minted_sweeps_start),
             ("withdrawals_start", self.withdrawals_start),
+            (
+                "watched_deposit_addresses_start",
+                self.watched_deposit_addresses_start,
+            ),
         ]
         .into_iter()
         .filter(|(name, _)| *name != exclude)
@@ -229,6 +253,20 @@ pub struct DashboardQuarantinedDeposit {
     pub amount_to_mint: String,
 }
 
+/// A deposit address registered for the automatic deposit flow, with its scan progress.
+#[derive(Clone)]
+pub struct DashboardWatchedAddress {
+    pub account: String,
+    pub address: String,
+    pub valid_until: String,
+    pub scan_count: String,
+    /// The time of the last scan, or `-` before the first scan.
+    pub last_scanned_at: String,
+    /// When the next scan is due, or `-` once no slot is left before the window closes: a
+    /// time well in the past shows that the scan timer is behind.
+    pub next_scan_at: String,
+}
+
 /// A swept deposit whose ckSOL mint landed on the ledger.
 #[derive(Clone)]
 pub struct DashboardMintedSweep {
@@ -251,13 +289,20 @@ pub struct DashboardTemplate {
     pub minimum_deposit_amount: String,
     pub minimum_withdrawal_amount: String,
     pub balance: String,
+    pub automatic_deposit_fee: String,
+    pub collected_automatic_deposit_fees: String,
     pub quarantined_swept_deposits_table: DashboardPaginatedTable<DashboardQuarantinedDeposit>,
     pub minted_sweeps_table: DashboardPaginatedTable<DashboardMintedSweep>,
     pub withdrawals_table: DashboardPaginatedTable<DashboardWithdrawal>,
+    pub watched_deposit_addresses_table: DashboardPaginatedTable<DashboardWatchedAddress>,
 }
 
 impl DashboardTemplate {
-    pub fn from_state(state: &State, pagination: DashboardPaginationParameters) -> Self {
+    pub fn from_state(
+        state: &State,
+        now: Timestamp,
+        pagination: DashboardPaginationParameters,
+    ) -> Self {
         let minter_address = state
             .minter_public_key()
             .map(|key| minter_address(key).to_string())
@@ -383,6 +428,32 @@ impl DashboardTemplate {
             pagination.other_params("withdrawals_start"),
         );
 
+        let watched_deposit_addresses: Vec<DashboardWatchedAddress> = state
+            .watchlist()
+            .live(now)
+            .map(|watched| DashboardWatchedAddress {
+                account: watched.account.to_string(),
+                address: watched.address.to_string(),
+                valid_until: format_timestamp(watched.valid_until),
+                scan_count: watched.scan_count.to_string(),
+                last_scanned_at: watched
+                    .last_scanned_at
+                    .map_or_else(|| "-".to_string(), format_timestamp),
+                next_scan_at: watched
+                    .next_scan_at
+                    .map_or_else(|| "-".to_string(), format_timestamp),
+            })
+            .collect();
+        let watched_deposit_addresses_table = DashboardPaginatedTable::from_items(
+            &watched_deposit_addresses,
+            pagination.watched_deposit_addresses_start,
+            DEFAULT_PAGE_SIZE,
+            6,
+            "watched-deposit-addresses",
+            "watched_deposit_addresses_start",
+            pagination.other_params("watched_deposit_addresses_start"),
+        );
+
         let network = state.solana_network();
         DashboardTemplate {
             solana_cluster: format!("{:?}", network),
@@ -395,9 +466,16 @@ impl DashboardTemplate {
             minimum_deposit_amount: lamports_to_sol(state.minimum_deposit_amount()),
             minimum_withdrawal_amount: lamports_to_sol(state.minimum_withdrawal_amount()),
             balance: lamports_to_sol(state.balance()),
+            automatic_deposit_fee: state
+                .automatic_deposit_fee()
+                .map_or_else(|| "N/A".to_string(), lamports_to_sol),
+            collected_automatic_deposit_fees: lamports_to_sol(
+                state.collected_automatic_deposit_fees(),
+            ),
             quarantined_swept_deposits_table,
             minted_sweeps_table,
             withdrawals_table,
+            watched_deposit_addresses_table,
         }
     }
 }

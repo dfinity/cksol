@@ -4,6 +4,7 @@ use crate::{
     rpc::BlockHeight,
     sol_transfer::MAX_SIGNATURES,
     state::{audit::process_event, read_state},
+    storage::{RearmOutcome, automatic_deposit_rearm_count},
     test_fixtures::{
         AUTOMATIC_DEPOSIT_FEE, DEPOSIT_SOL_FEE, DEPOSIT_SOL_REQUIRED_CYCLES,
         MINIMUM_DEPOSIT_AMOUNT, MINIMUM_WITHDRAWAL_AMOUNT, WITHDRAWAL_FEE, account, address,
@@ -347,6 +348,7 @@ mod swept_deposits {
             let automatic =
                 DepositFlow::queue_automatic(account(2), 20_000_000, AUTOMATIC_DEPOSIT_FEE);
             SweepFlow::of([manual, automatic]).submit(sweep_signature);
+            let rearms_before = automatic_deposit_rearm_count(RearmOutcome::Rearmed);
 
             mutate_state(|state| {
                 process_dropped_sweep(
@@ -377,6 +379,16 @@ mod swept_deposits {
                     "{drop_event:?}"
                 );
             });
+            assert_eq!(
+                automatic_deposit_rearm_count(RearmOutcome::Rearmed),
+                rearms_before + 1,
+                "{drop_event:?}"
+            );
+            assert_eq!(
+                automatic_deposit_rearm_count(RearmOutcome::WatchlistFull),
+                0,
+                "{drop_event:?}"
+            );
             let mut live_without_rearm = read_state(State::clone);
             *live_without_rearm.watchlist_mut() = Watchlist::default();
             assert_eq!(
@@ -412,6 +424,11 @@ mod swept_deposits {
             assert_eq!(s.watchlist().len(), MAX_WATCHED_ADDRESSES.get());
             assert_eq!(s.deposits().in_flight_id(&account(0)), None);
         });
+        assert_eq!(
+            automatic_deposit_rearm_count(RearmOutcome::WatchlistFull),
+            1
+        );
+        assert_eq!(automatic_deposit_rearm_count(RearmOutcome::Rearmed), 0);
     }
 
     #[test]

@@ -1,7 +1,9 @@
-use crate::state::{QuarantineCause, State};
+use crate::state::{DepositOrigin, QuarantineCause, State};
 use crate::storage::{
-    self, FailedCreditReason, FailedMintReason, ScanOutcome, UndecidedWithdrawalReason,
+    self, FailedCreditReason, FailedMintReason, RearmOutcome, ScanOutcome,
+    UndecidedWithdrawalReason,
 };
+use crate::utils::timed_sized_map::Timestamp;
 use ic_metrics_encoder::MetricsEncoder;
 
 const WASM_PAGE_SIZE_IN_BYTES: usize = 65536;
@@ -48,11 +50,20 @@ pub fn encode_metrics(w: &mut MetricsEncoder<Vec<u8>>, s: &State) -> std::io::Re
         s.deposits().minted().len().metric_value(),
         "Number of swept deposits whose ckSOL mint landed on the ledger.",
     )?;
-    w.encode_gauge(
+    let mut dropped_manual: usize = 0;
+    let mut dropped_automatic: usize = 0;
+    for dropped in s.deposits().dropped().values() {
+        match dropped.deposit.origin {
+            DepositOrigin::Manual => dropped_manual += 1,
+            DepositOrigin::Automatic => dropped_automatic += 1,
+        }
+    }
+    w.gauge_vec(
         "dropped_deposits",
-        s.deposits().dropped().len().metric_value(),
-        "Number of deposits whose sweep transaction failed or expired.",
-    )?;
+        "Number of deposits whose sweep transaction failed or expired, by origin: queued by deposit_sol or by a balance scan of the automatic flow.",
+    )?
+    .value(&[("origin", "manual")], dropped_manual.metric_value())?
+    .value(&[("origin", "automatic")], dropped_automatic.metric_value())?;
     let mut sweep_unreadable: usize = 0;
     let mut mint_unresolved: usize = 0;
     for quarantined in s.deposits().quarantined().values() {
@@ -114,6 +125,32 @@ pub fn encode_metrics(w: &mut MetricsEncoder<Vec<u8>>, s: &State) -> std::io::Re
         age_seconds(s.deposits().oldest_pending_mint_created_at()).metric_value(),
         "Age of the oldest pending ckSOL mint in seconds, from the created_at_time the ledger deduplicates it by. Returns 0 if there are no pending mints.",
     )?;
+    let now = Timestamp::from_nanos(ic_cdk::api::time());
+    w.encode_gauge(
+        "watched_deposit_addresses",
+        s.watchlist().live_len(now).metric_value(),
+        "Number of deposit addresses registered for the automatic deposit flow whose window is still open.",
+    )?;
+    w.encode_gauge(
+        "watched_deposit_address_capacity",
+        s.watchlist().capacity().metric_value(),
+        "Number of live registrations the watchlist of the automatic deposit flow admits at most.",
+    )?;
+    w.encode_gauge(
+        "oldest_due_deposit_address_scan_age_seconds",
+        age_seconds(
+            s.watchlist()
+                .oldest_due_scan_at(now)
+                .map(Timestamp::as_nanos),
+        )
+        .metric_value(),
+        "Time in seconds since the earliest due scan of a watched deposit address that has not run yet. Returns 0 if no scan is due.",
+    )?;
+    w.encode_counter(
+        "collected_automatic_deposit_fees",
+        s.collected_automatic_deposit_fees().metric_value(),
+        "Sum in Lamports of the automatic deposit fees deducted from the mints of credited sweeps.",
+    )?;
     let mut failed_credit_attempts = w.counter_vec(
         "failed_credit_attempts",
         "Number of failed attempts to credit the deposits of a finalized sweep, by reason.",
@@ -142,6 +179,16 @@ pub fn encode_metrics(w: &mut MetricsEncoder<Vec<u8>>, s: &State) -> std::io::Re
         deposit_address_scans = deposit_address_scans.value(
             &[("outcome", outcome.label())],
             storage::deposit_address_scan_count(outcome).metric_value(),
+        )?;
+    }
+    let mut automatic_deposit_rearms = w.counter_vec(
+        "automatic_deposit_rearms",
+        "Number of automatic deposits dropped with their sweep since the last upgrade, by outcome: their account put back on the watchlist for a fresh window, or not because the watchlist was full.",
+    )?;
+    for outcome in RearmOutcome::ALL {
+        automatic_deposit_rearms = automatic_deposit_rearms.value(
+            &[("outcome", outcome.label())],
+            storage::automatic_deposit_rearm_count(outcome).metric_value(),
         )?;
     }
     w.encode_gauge(

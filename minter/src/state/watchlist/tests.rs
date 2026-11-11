@@ -57,6 +57,7 @@ fn should_reject_a_registration_when_full_of_live_entries() {
 
     assert_eq!(result, Err(WatchlistFull));
     assert_eq!(watchlist.len(), MAX_WATCHED_ADDRESSES.get());
+    assert_eq!(watchlist.capacity(), MAX_WATCHED_ADDRESSES.get());
 }
 
 #[test]
@@ -179,6 +180,44 @@ fn should_count_the_live_registrations() {
 }
 
 #[test]
+fn should_report_the_earliest_due_scan_until_it_is_recorded() {
+    let mut watchlist = Watchlist::default();
+    register(&mut watchlist, at(REGISTERED_AT), account(1));
+    register(&mut watchlist, at(REGISTERED_AT + MINUTE_NANOS), account(2));
+
+    assert_eq!(
+        watchlist.oldest_due_scan_at(at(REGISTERED_AT + HOUR_NANOS)),
+        Some(at(REGISTERED_AT))
+    );
+
+    watchlist.record_scan(at(REGISTERED_AT + HOUR_NANOS), &account(1));
+
+    assert_eq!(
+        watchlist.oldest_due_scan_at(at(REGISTERED_AT + HOUR_NANOS)),
+        Some(at(REGISTERED_AT + MINUTE_NANOS))
+    );
+
+    watchlist.record_scan(at(REGISTERED_AT + HOUR_NANOS), &account(2));
+
+    assert_eq!(
+        watchlist.oldest_due_scan_at(at(REGISTERED_AT + HOUR_NANOS)),
+        None
+    );
+}
+
+#[test]
+fn should_report_no_due_scan_of_an_expired_registration() {
+    let mut watchlist = Watchlist::default();
+    register(&mut watchlist, at(REGISTERED_AT), account(1));
+
+    assert_eq!(
+        watchlist.oldest_due_scan_at(at(VALID_UNTIL)),
+        Some(at(REGISTERED_AT))
+    );
+    assert_eq!(watchlist.oldest_due_scan_at(at(VALID_UNTIL + 1)), None);
+}
+
+#[test]
 fn should_rearm_an_account_for_a_fresh_window_from_the_first_slot() {
     let mut watchlist = Watchlist::default();
     let rearmed_at = REGISTERED_AT + 2 * HOUR_NANOS;
@@ -295,6 +334,7 @@ fn should_keep_expired_registrations_and_exceed_the_capacity_when_rebuilding() {
     let mut rebuilt = Watchlist::from_snapshot(&snapshot);
 
     assert_eq!(rebuilt.len(), entries.len());
+    assert_eq!(rebuilt.capacity(), MAX_WATCHED_ADDRESSES.get());
     assert_eq!(
         rebuilt.register(
             at(REGISTERED_AT),
