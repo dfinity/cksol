@@ -26,7 +26,7 @@ pub use pocket_ic::common::rest::{
     CanisterHttpReply, CanisterHttpRequest, CanisterHttpResponse, MockCanisterHttpResponse,
 };
 use pocket_ic::{
-    PocketIcBuilder, RejectResponse, common::rest::RawMessageId, nonblocking::PocketIc,
+    PocketIcBuilder, RejectResponse, Time, common::rest::RawMessageId, nonblocking::PocketIc,
 };
 use serde::de::DeserializeOwned;
 use sol_rpc_client::SolRpcClient;
@@ -140,6 +140,8 @@ pub struct Setup {
     /// [`Setup::advance_time_and_settle`] lets a timer round run.
     auto_progress: bool,
     minter_canister_id: CanisterId,
+    /// When the minter was installed, which is when its interval timers start counting.
+    minter_installed_at: Time,
     ledger_canister_id: CanisterId,
     sol_rpc_canister_id: CanisterId,
     proxy_canister_id: Option<CanisterId>,
@@ -213,6 +215,7 @@ impl Setup {
             Some(Self::DEFAULT_CONTROLLER),
         )
         .await;
+        let minter_installed_at = env.get_time().await;
 
         // Install ledger canister
         env.install_canister(
@@ -272,6 +275,7 @@ impl Setup {
             env: Some(env),
             auto_progress,
             minter_canister_id,
+            minter_installed_at,
             ledger_canister_id,
             sol_rpc_canister_id,
             proxy_canister_id,
@@ -367,6 +371,32 @@ impl Setup {
 
     pub async fn advance_time(&self, duration: Duration) -> () {
         self.env.as_ref().unwrap().advance_time(duration).await
+    }
+
+    /// Advances time by at least `duration`, up to the next multiple of `interval` since the
+    /// minter was installed, so that the interval timers of that period fire now and fire
+    /// next a whole `interval` later, even on an instance that produces blocks on its own.
+    ///
+    /// The minter's interval timers keep the schedule of its installation, so a plain
+    /// [`Self::advance_time`] leaves anywhere between zero and `interval` until their next
+    /// tick. An upgrade of the minter restarts its timers, which this does not account for.
+    pub async fn advance_time_to_timer_tick(&self, duration: Duration, interval: Duration) {
+        let env = self.env.as_ref().unwrap();
+        let since_install = Duration::from_nanos(
+            env.get_time().await.as_nanos_since_unix_epoch()
+                - self.minter_installed_at.as_nanos_since_unix_epoch(),
+        ) + duration;
+        let into_period = Duration::from_nanos(
+            (since_install.as_nanos() % interval.as_nanos())
+                .try_into()
+                .unwrap(),
+        );
+        let to_tick = if into_period.is_zero() {
+            Duration::ZERO
+        } else {
+            interval - into_period
+        };
+        env.advance_time(duration + to_tick).await
     }
 
     /// Stops the automatic progress of a live instance, so that its time and timers

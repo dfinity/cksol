@@ -578,11 +578,16 @@ async fn should_sweep_sub_rent_remainder_together_with_the_deposit() {
     setup.drop().await;
 }
 
-/// The manual deposits are queued while the scan tick detects the watched ones, so that no
-/// sweep tick can fire in between and split the four deposits over two transactions.
+/// The manual deposits are queued while the scan tick detects the watched ones. Time is
+/// advanced to a tick of the minter's timers, so that the next sweep tick comes a whole
+/// interval later, after all four deposits are queued, and cannot split them over two
+/// transactions.
 #[tokio::test(flavor = "multi_thread")]
 async fn should_sweep_watched_and_manual_deposits_in_one_transaction() {
     const AUTOMATIC_DEPOSIT_FEE: Lamport = Setup::DEFAULT_AUTOMATIC_DEPOSIT_FEE;
+    // The interval of both the sweep and the scan timers of the minter, which is longer than
+    // `wait_for_deposit_detected` waits for a detection.
+    const TIMER_INTERVAL: Duration = Duration::from_mins(1);
 
     let validator = SolanaTestValidator::start().await;
     let setup = validator.setup().await;
@@ -634,7 +639,9 @@ async fn should_sweep_watched_and_manual_deposits_in_one_transaction() {
         assert_eq!(registration.latest_deposit_id, None);
     }
 
-    setup.advance_time(Duration::from_mins(1)).await;
+    setup
+        .advance_time_to_timer_tick(Duration::from_mins(1), TIMER_INTERVAL)
+        .await;
     let (watched_deposit_ids, manual_deposit_ids) = tokio::join!(
         futures::future::join_all(watched_accounts.iter().map(async |account| {
             setup
