@@ -10,6 +10,7 @@
 │   │   ├── metrics.rs       # Prometheus metrics
 │   │   ├── monitor/         # Transaction monitoring
 │   │   ├── state/           # Minter state and event sourcing
+│   │   ├── deposit/automatic/ # Automatic deposits: watched addresses and balance scans
 │   │   ├── deposit/sweep/   # Deposit sweeping and minting
 │   │   ├── withdraw/        # Withdrawal processing
 │   │   └── ...

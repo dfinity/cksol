@@ -53,7 +53,7 @@ graph LR
     end
     Solana["Solana"]
 
-    User -- "get_deposit_address / deposit_sol / withdraw_sol" --> Minter
+    User -- "get_deposit_address / deposit_sol / watch_deposit_address / withdraw_sol" --> Minter
     User -- "icrc1_transfer / icrc2_approve" --> Ledger
     Minter -- "icrc1_transfer (mint)<br/>icrc2_transfer_from (burn)" --> Ledger
     Minter -- "JSON-RPC requests" --> RPC
@@ -68,7 +68,7 @@ The ckSOL minter interacts with the Solana blockchain via the [SOL RPC canister]
 - [getAccountInfo](https://solana.com/docs/rpc/http/getaccountinfo): Returns the account information for the given address. This function is used to read the state of a durable nonce account before building a withdrawal transaction and to determine whether an in-flight withdrawal transaction has landed (see [Section 3.2.1](#321-durable-nonce-accounts) and [Section 3.2.5](#325-finalization-and-re-broadcast)).
 - [getBalance](https://solana.com/docs/rpc/http/getbalance): Returns the balance of the given address. This function is used by `deposit_sol` to read the balance of a deposit address at the `finalized` commitment level and determine the sweepable amount.
 - [getBlock](https://solana.com/docs/rpc/http/getblock): Returns the block for the given slot. This function is used to get a recent block hash, which is contained in the response. Note that `transactionDetails` is set to `null` in the request. As a result, signatures and transactions are not returned.
-- [getMultipleAccounts](https://solana.com/docs/rpc/http/getmultipleaccounts): Returns the account information, in particular the balance, of up to 100 addresses in a single call. This function is used by the automatic deposit flow of [Section 3.1.1](#311-automatic-flow) to read the balances of the watched deposit addresses at the `finalized` commitment level. It is not yet offered as a typed method by the SOL RPC canister; adding it, with the response context stripped so that the providers' responses can reach consensus, is a prerequisite of that flow.
+- [getMultipleAccounts](https://solana.com/docs/rpc/http/getmultipleaccounts): Returns the account information, in particular the balance, of up to 100 addresses in a single call. This function is used by the automatic deposit flow of [Section 3.1.1](#311-automatic-flow) to read the balances of the watched deposit addresses at the `finalized` commitment level. The SOL RPC canister offers it as a typed method, with the response context stripped so that the providers' responses can reach consensus; a version of that canister offering the method is a prerequisite of that flow.
 - [getSignatureStatuses](https://solana.com/docs/rpc/http/getsignaturestatuses): Returns the status of each transaction specified through its identifier, i.e., the first signature in the transaction. This function is used to learn whether a sweep transaction has been finalized or has expired, as described in [Section 3.2.5](#325-finalization-and-re-broadcast). Withdrawal transactions are not checked with it.
 - [getSlot](https://solana.com/docs/rpc/http/getslot): Returns the current slot. Since the slot number changes rapidly, the SOL RPC canister merely obtains a rounded and therefore slightly outdated slot number. The slot number is required to obtain a recent block hash using `getBlock`, whose block height is persisted with the transaction and later compared against the current block height to check if an unconfirmed transaction has expired.
 - [getTransaction](https://solana.com/docs/rpc/http/gettransaction): Returns the whole transaction for the given signature. This function is used to read the outcome of a finalized sweep transaction and of a landed withdrawal transaction.
@@ -206,7 +206,7 @@ sequenceDiagram
     RPC->>+Solana: getBalance(deposit_address)
     Solana-->>-RPC: balance
     RPC-->>-Minter: balance
-    Note over Minter: sweepable := max(0, balance - rent exemption threshold)<br/>queue the deposit if sweepable ≥ minimum deposit amount
+    Note over Minter: sweepable := max(0, balance - rent exemption threshold)<br/>queue the deposit if balance ≥ minimum deposit amount
     Minter-->>-User: Ok(deposit id)
 
     Note over Minter: ⏱️ Sweep timer
@@ -495,7 +495,7 @@ stateDiagram-v2
 
 The withdrawal and sweep flows result in the submission of a transaction, which is then in the `Submitted` state and monitored on a timer as outlined above. Once a transaction is known to be finalized, there are two cases: If the transaction was finalized successfully, i.e., without errors, the transaction transitions to the state `Succeeded` and its ID is stored permanently. If there was an error, the transaction transitions to the state `Failed` and is stored in its entirety so that it can be analyzed what happened. Ideally, no transaction ever ends up in this state. However, it is possible for transactions to fail, for example by attempting to withdraw SOL to a program account, which is not allowed. As there is no reimbursement flow, the user's funds would be stuck in this case. Storing the whole failed transaction ensures that the funds are not lost and appropriate actions may be taken when such transactions are encountered.
 
-The states above describe the lifecycle of the transaction itself, not the crediting of the deposits it carries. When a sweep transaction of the manual flow reaches `Succeeded`, the ckSOL minter additionally records its deposits as finalized, fetches the transaction to read the fee that was charged, runs the sanity check on the pre- and post-balances, and enqueues the pending mints, as described in [Section 3.1.2](#312-manual-flow).
+The states above describe the lifecycle of the transaction itself, not the crediting of the deposits it carries. When a sweep transaction reaches `Succeeded`, the ckSOL minter additionally records its deposits as finalized, fetches the transaction to read the fee that was charged, runs the sanity check on the pre- and post-balances, and enqueues the pending mints, as described in [Section 3.1.2](#312-manual-flow).
 
 An expired sweep is never resubmitted but dropped, as described in [Section 3.1.2](#312-manual-flow), since nothing has been minted for it yet and the user can simply queue a new sweep. A withdrawal transaction with an unchanged nonce stays in the `Submitted` state, and the finalization timer re-broadcasts the persisted signed transaction as-is.
 
@@ -553,7 +553,7 @@ Using the [cost estimation endpoints](https://dashboard.internetcomputer.org/can
 - `getBlock`: 2.34B cycles
 - `getBalance`: 2.31B cycles
 - `getSignatureStatuses`: 2.3B (1 sig.), 10.7B (256 sig., the largest batch) cycles
-- `getMultipleAccounts`: about 2.3B (1 address) to 4.5B (100 addresses) cycles, assuming about 150 bytes of response per address and the same base cost as `getBalance`; to be measured once the SOL RPC canister offers the method
+- `getMultipleAccounts`: about 2.3B (1 address) to 4.5B (100 addresses) cycles, assuming about 150 bytes of response per address and the same base cost as `getBalance`; an estimate that has not yet been measured against the deployed SOL RPC canister
 
 The **automatic deposit fee** covers what the automatic flow of [Section 3.1.1](#311-automatic-flow) costs the ckSOL minter for one deposit, which is the cost of the manual flow, paid in cycles by the caller of `deposit_sol`, plus the balance scans, which nobody pays for at call time. In the worst case the watched address is alone on the watchlist and scanned 33 times before the deposit arrives, each scan being a `getMultipleAccounts` call with a single address, i.e. about 76B cycles, while an address sharing full 100-address calls costs about 1.5B cycles of scans. Added to the threshold signature of 26.2B cycles and the roughly 12.3B cycles of RPC calls of the sweep and its finalization, which the `deposit_sol` fee covers in the manual flow, the worst case comes to about 115B cycles, i.e. 0.115 XDR = 0.166 USD = 0.00166 SOL at 1 SOL = 100 USD. This is the cost of a single attempt, whether its scans succeed or fail, since a failed scan counts as one of the 33: a sweep that fails or expires and is re-armed, as described in [Section 3.1.1](#311-automatic-flow), costs another round of scans, another threshold signature and another submission and finalization, while the fee is collected once, when an attempt settles; the ckSOL minter absorbs that cost like the retries of the manual flow listed below. The fee is set to **0.002 SOL** (2,000,000 lamports), which covers the solo worst case of one attempt with a small margin and overcharges the batched case; the collected fees are reported by the minter, so that the value can be recalibrated by proposal once real scan sizes are known. The standing cost of the scan timer itself, which is dominated by the tick rate rather than by the number of watched addresses (see [Section 3.1.1](#311-automatic-flow)), is not covered by the fee and is borne by the ckSOL minter.
 

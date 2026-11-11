@@ -52,7 +52,7 @@ pub const GET_TRANSACTION_CYCLES: u128 = 50_000_000_000;
 
 /// Cycles to attach for `getBalance` RPC calls.
 ///
-/// The SOL RPC canister charges about 2.1B cycles for a `getBalance` request
+/// The SOL RPC canister charges about 2.3B cycles for a `getBalance` request
 /// with the default 3-out-of-4 provider consensus, comparable to `getSlot`
 /// given the similarly small response (see section 3.3.2 of the design). The
 /// attached amount leaves a wide margin for provider or price changes; the
@@ -94,7 +94,7 @@ pub const GET_SIGNATURE_STATUSES_CYCLES: u128 = 50_000_000_000;
 
 /// Cycles to attach for `getAccountInfo` RPC calls.
 ///
-/// The SOL RPC canister charges about 2.1B cycles for a `getAccountInfo`
+/// The SOL RPC canister charges about 2.3B cycles for a `getAccountInfo`
 /// request with the default 3-out-of-4 provider consensus, comparable to
 /// `getBalance` since a nonce account holds only 80 bytes of state. The
 /// attached amount leaves a wide margin for provider or price changes; the
