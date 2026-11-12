@@ -4,6 +4,7 @@ mod cycles;
 pub mod dashboard;
 pub mod deposit;
 mod guard;
+pub mod icrc21;
 mod ledger;
 pub mod lifecycle;
 pub mod metrics;

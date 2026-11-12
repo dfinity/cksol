@@ -355,3 +355,13 @@ pub struct MinterInfo {
     /// The sum in lamports of the automatic deposit fees collected so far.
     pub collected_automatic_deposit_fees: Option<Lamport>,
 }
+
+/// An entry of the list returned by the [ICRC-10](https://github.com/dfinity/ICRC/blob/main/ICRCs/ICRC-10/ICRC-10.md)
+/// `icrc10_supported_standards` endpoint.
+#[derive(Clone, Debug, Eq, PartialEq, CandidType, Deserialize, Serialize)]
+pub struct StandardRecord {
+    /// The name of the standard, e.g. "ICRC-21".
+    pub name: String,
+    /// The URL of the specification of the standard.
+    pub url: String,
+}

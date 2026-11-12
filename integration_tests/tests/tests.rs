@@ -827,6 +827,189 @@ mod withdrawal_tests {
     }
 }
 
+/// Smoke-tests the ICRC-21 / ICRC-10 endpoints exposed by the minter:
+///
+/// * `icrc10_supported_standards` advertises both standards with the canonical
+///   `dfinity/ICRC` URLs.
+/// * `icrc21_canister_call_consent_message` produces both a GenericDisplay
+///   markdown message and a FieldsDisplay structured message for
+///   `withdraw_sol`, with the configured network's token symbols and
+///   withdrawal fee threaded through.
+/// * Unsupported methods and malformed destination addresses return
+///   `Icrc21Error::UnsupportedCanisterCall`.
+mod icrc21_tests {
+    use super::*;
+    use candid::Encode;
+    use icrc_ledger_types::icrc21::{
+        errors::Icrc21Error,
+        requests::{
+            ConsentMessageMetadata, ConsentMessageRequest, ConsentMessageSpec, DisplayMessageType,
+        },
+        responses::{ConsentMessage, FieldsDisplay, Value},
+    };
+
+    const WITHDRAWAL_ADDRESS: &str = "E4MpwNnMWs2XtW5gVrxZvyS7fMq31QD5HvbxmwP45Tz3";
+
+    fn make_request(
+        method: &str,
+        arg: Vec<u8>,
+        device_spec: Option<DisplayMessageType>,
+    ) -> ConsentMessageRequest {
+        ConsentMessageRequest {
+            method: method.to_string(),
+            arg,
+            user_preferences: ConsentMessageSpec {
+                metadata: ConsentMessageMetadata {
+                    language: "en".to_string(),
+                    utc_offset_minutes: None,
+                },
+                device_spec,
+            },
+        }
+    }
+
+    #[tokio::test]
+    async fn should_serve_icrc21_endpoints() {
+        let setup = SetupBuilder::new().build().await; // Mainnet minter: "ckSOL" / "SOL" symbols.
+        let minter = setup.minter();
+
+        // 1. icrc10_supported_standards advertises ICRC-10 and ICRC-21.
+        let standards: Vec<_> = minter
+            .icrc10_supported_standards()
+            .await
+            .into_iter()
+            .map(|s| (s.name, s.url))
+            .collect();
+        assert_eq!(
+            standards,
+            vec![
+                (
+                    "ICRC-10".to_string(),
+                    "https://github.com/dfinity/ICRC/blob/main/ICRCs/ICRC-10/ICRC-10.md"
+                        .to_string()
+                ),
+                (
+                    "ICRC-21".to_string(),
+                    "https://github.com/dfinity/ICRC/blob/main/ICRCs/ICRC-21/ICRC-21.md"
+                        .to_string()
+                ),
+            ]
+        );
+
+        // 2a. withdraw_sol without a device spec, as OISY sends it, renders the
+        // GenericDisplay Markdown with the configured (Mainnet) token symbols
+        // and withdrawal fee. The assertion is a full-string equality so any
+        // wording change has to be updated here consciously.
+        let args = WithdrawSolArgs {
+            from_subaccount: None,
+            amount: 250_000_000,
+            address: WITHDRAWAL_ADDRESS.to_string(),
+        };
+        let info = minter
+            .icrc21_canister_call_consent_message(make_request(
+                "withdraw_sol",
+                Encode!(&args).unwrap(),
+                None,
+            ))
+            .await
+            .expect("consent message should be produced for withdraw_sol");
+        assert_eq!(info.metadata.language, "en");
+        assert_eq!(
+            info.consent_message,
+            ConsentMessage::GenericDisplayMessage(format!(
+                "# Convert ckSOL to SOL\n\n\
+                 Authorize the ckSOL minter to burn ckSOL from your account and \
+                 send the equivalent amount in SOL, minus the withdrawal fee in effect \
+                 when the withdrawal is executed, to the Solana address below.\n\n\
+                 **Amount to convert:** `0.25 ckSOL`\n\n\
+                 **Current withdrawal fee:** `0.001 ckSOL`\n\n\
+                 **Estimated amount to receive:** `0.249 SOL`\n\n\
+                 **Solana destination address:**\n`{WITHDRAWAL_ADDRESS}`"
+            ))
+        );
+
+        // 2b. withdraw_sol / FieldsDisplay renders the structured intent and fields.
+        let info = minter
+            .icrc21_canister_call_consent_message(make_request(
+                "withdraw_sol",
+                Encode!(&args).unwrap(),
+                Some(DisplayMessageType::FieldsDisplay),
+            ))
+            .await
+            .expect("consent message should be produced for withdraw_sol");
+        let token_amount = |amount: Lamport, symbol: &str| Value::TokenAmount {
+            decimals: 9,
+            amount,
+            symbol: symbol.to_string(),
+        };
+        assert_eq!(
+            info.consent_message,
+            ConsentMessage::FieldsDisplayMessage(FieldsDisplay {
+                intent: "ckSOL to SOL".to_string(),
+                fields: vec![
+                    ("Amount".to_string(), token_amount(250_000_000, "ckSOL")),
+                    (
+                        "Current fee".to_string(),
+                        token_amount(Setup::DEFAULT_WITHDRAWAL_FEE, "ckSOL")
+                    ),
+                    (
+                        "Est. amount received".to_string(),
+                        token_amount(250_000_000 - Setup::DEFAULT_WITHDRAWAL_FEE, "SOL")
+                    ),
+                    (
+                        "SOL address".to_string(),
+                        Value::Text {
+                            content: WITHDRAWAL_ADDRESS.to_string(),
+                        }
+                    ),
+                ],
+            })
+        );
+
+        // 3. A malformed destination address is rejected instead of being
+        // interpolated into the Markdown message, and so is a destination that
+        // `withdraw_sol` rejects, here the system program.
+        for address in [
+            format!("{WITHDRAWAL_ADDRESS}\n# You will receive 100 SOL"),
+            "11111111111111111111111111111111".to_string(),
+        ] {
+            let args = WithdrawSolArgs {
+                address,
+                ..args.clone()
+            };
+            let err = minter
+                .icrc21_canister_call_consent_message(make_request(
+                    "withdraw_sol",
+                    Encode!(&args).unwrap(),
+                    None,
+                ))
+                .await
+                .expect_err("expected UnsupportedCanisterCall");
+            assert_matches!(err, Icrc21Error::UnsupportedCanisterCall(_));
+        }
+
+        // 4. Unsupported methods return UnsupportedCanisterCall.
+        for method in [
+            "get_deposit_address",
+            "deposit_sol",
+            "watch_deposit_address",
+            "withdraw_sol_status",
+        ] {
+            let err = minter
+                .icrc21_canister_call_consent_message(make_request(method, vec![], None))
+                .await
+                .expect_err("expected UnsupportedCanisterCall");
+            assert_matches!(
+                err,
+                Icrc21Error::UnsupportedCanisterCall(_),
+                "method {method:?} should be rejected as unsupported"
+            );
+        }
+
+        setup.drop().await;
+    }
+}
+
 mod deposit_sol_tests {
     use super::*;
 
