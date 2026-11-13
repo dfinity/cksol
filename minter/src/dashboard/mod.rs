@@ -1,5 +1,6 @@
 use crate::{
     address::minter_address,
+    numeric::lamports_to_sol,
     state::{QuarantineCause, State},
     utils::timed_sized_map::Timestamp,
 };
@@ -8,19 +9,6 @@ use candid::Principal;
 use cksol_types_internal::SolanaNetwork;
 use ic_http_types::HttpRequest;
 use std::{collections::BTreeMap, str::FromStr};
-
-const LAMPORTS_PER_SOL: u64 = 1_000_000_000;
-
-pub fn lamports_to_sol(lamports: u64) -> String {
-    let whole = lamports / LAMPORTS_PER_SOL;
-    let frac = lamports % LAMPORTS_PER_SOL;
-    if frac == 0 {
-        format!("{whole}")
-    } else {
-        let frac_str = format!("{:09}", frac).trim_end_matches('0').to_string();
-        format!("{whole}.{frac_str}")
-    }
-}
 
 /// Formats a time as a UTC date and time to the second, e.g. `2023-11-14T22:13:20+00:00`, as
 /// on the dashboard of the ckETH minter.

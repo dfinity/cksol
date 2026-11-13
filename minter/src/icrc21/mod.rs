@@ -1,7 +1,11 @@
 //! Implementation of the [ICRC-21](https://github.com/dfinity/ICRC/blob/main/ICRCs/ICRC-21/ICRC-21.md)
 //! Canister Call Consent Message standard for the ckSOL minter.
 
-use crate::{dashboard::lamports_to_sol, state::read_state, withdraw::validate_withdrawal_request};
+use crate::{
+    numeric::{SOL_DECIMALS, lamports_to_sol},
+    state::read_state,
+    withdraw::validate_withdrawal_request,
+};
 use candid::{DecoderConfig, decode_one_with_config};
 use cksol_types::{StandardRecord, WithdrawSolArgs, WithdrawSolError};
 use cksol_types_internal::SolanaNetwork;
@@ -15,10 +19,6 @@ use solana_address::Address;
 
 #[cfg(test)]
 mod tests;
-
-/// The number of decimals used to display token amounts.
-/// Both ckSOL and SOL use 9 decimals (1 SOL = 10^9 lamports).
-const DECIMALS: u8 = 9;
 
 /// Token symbols used in consent messages. They depend on the configured
 /// Solana network so that test deployments use the test-token names.
@@ -172,7 +172,7 @@ fn build_withdraw_sol_message(
                 (
                     "Amount".to_string(),
                     Value::TokenAmount {
-                        decimals: DECIMALS,
+                        decimals: SOL_DECIMALS,
                         amount: args.amount,
                         symbol: cksol.to_string(),
                     },
@@ -180,7 +180,7 @@ fn build_withdraw_sol_message(
                 (
                     "Current fee".to_string(),
                     Value::TokenAmount {
-                        decimals: DECIMALS,
+                        decimals: SOL_DECIMALS,
                         amount: withdrawal_fee,
                         symbol: cksol.to_string(),
                     },
@@ -188,7 +188,7 @@ fn build_withdraw_sol_message(
                 (
                     "Est. amount received".to_string(),
                     Value::TokenAmount {
-                        decimals: DECIMALS,
+                        decimals: SOL_DECIMALS,
                         amount: estimated_amount_to_transfer,
                         symbol: sol.to_string(),
                     },

@@ -1,7 +1,6 @@
 use crate::{
-    icrc21::{
-        DECIMALS, TokenSymbols, icrc10_supported_standards, icrc21_canister_call_consent_message,
-    },
+    icrc21::{TokenSymbols, icrc10_supported_standards, icrc21_canister_call_consent_message},
+    numeric::SOL_DECIMALS,
     test_fixtures::{
         MINIMUM_WITHDRAWAL_AMOUNT, MINTER_ADDRESS, NONCE_ACCOUNT, WITHDRAWAL_FEE,
         init_args_with_nonce_account, init_schnorr_master_key, init_state_with_args,
@@ -66,7 +65,7 @@ fn fields_display_message(info: ConsentInfo) -> FieldsDisplay {
 
 fn token_amount(amount: u64, symbol: &str) -> Value {
     Value::TokenAmount {
-        decimals: DECIMALS,
+        decimals: SOL_DECIMALS,
         amount,
         symbol: symbol.to_string(),
     }
