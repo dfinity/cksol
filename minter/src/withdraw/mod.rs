@@ -47,17 +47,7 @@ pub async fn withdraw<R: CanisterRuntime>(
     amount_to_burn: u64,
     address: String,
 ) -> Result<WithdrawSolOk, WithdrawSolError> {
-    let minimum_withdrawal_amount = read_state(|s| s.minimum_withdrawal_amount());
-    if amount_to_burn < minimum_withdrawal_amount {
-        return Err(WithdrawSolError::ValueTooSmall {
-            minimum_withdrawal_amount,
-            withdrawal_amount: amount_to_burn,
-        });
-    }
-
-    let solana_address = Address::from_str(&address)
-        .map_err(|e| WithdrawSolError::MalformedAddress(e.to_string()))?;
-    validate_destination(&solana_address)?;
+    let solana_address = validate_withdrawal_request(amount_to_burn, &address)?;
     validate_nonce_pool_not_empty()?;
 
     let _guard = withdrawal_guard(from)?;
@@ -102,6 +92,26 @@ pub async fn withdraw<R: CanisterRuntime>(
     );
 
     Ok(WithdrawSolOk { block_index })
+}
+
+/// Checks the amount and the destination of a withdrawal request and returns the parsed
+/// destination. Also used to describe the request in an ICRC-21 consent message.
+pub(crate) fn validate_withdrawal_request(
+    amount: Lamport,
+    address: &str,
+) -> Result<Address, WithdrawSolError> {
+    let minimum_withdrawal_amount = read_state(|s| s.minimum_withdrawal_amount());
+    if amount < minimum_withdrawal_amount {
+        return Err(WithdrawSolError::ValueTooSmall {
+            minimum_withdrawal_amount,
+            withdrawal_amount: amount,
+        });
+    }
+
+    let solana_address = Address::from_str(address)
+        .map_err(|e| WithdrawSolError::MalformedAddress(e.to_string()))?;
+    validate_destination(&solana_address)?;
+    Ok(solana_address)
 }
 
 fn validate_destination(destination: &Address) -> Result<(), WithdrawSolError> {

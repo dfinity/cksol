@@ -17,14 +17,17 @@ use cksol_minter::{
 };
 use cksol_types::{
     Address, DepositSolArgs, DepositSolError, DepositSolId, DepositSolStatus,
-    GetDepositAddressArgs, MinterInfo, WatchDepositAddressArgs, WatchDepositAddressError,
-    WatchDepositAddressOk, WithdrawSolArgs, WithdrawSolError, WithdrawSolOk, WithdrawSolStatus,
-    WithdrawSolStatusArgs,
+    GetDepositAddressArgs, MinterInfo, StandardRecord, WatchDepositAddressArgs,
+    WatchDepositAddressError, WatchDepositAddressOk, WithdrawSolArgs, WithdrawSolError,
+    WithdrawSolOk, WithdrawSolStatus, WithdrawSolStatusArgs,
 };
 use cksol_types_internal::{MinterArg, log::Priority};
 use ic_http_types::{HttpRequest, HttpResponse, HttpResponseBuilder};
 use ic_metrics_encoder::MetricsEncoder;
-use icrc_ledger_types::icrc1::account::{Account, Subaccount};
+use icrc_ledger_types::{
+    icrc1::account::{Account, Subaccount},
+    icrc21::{errors::Icrc21Error, requests::ConsentMessageRequest, responses::ConsentInfo},
+};
 use std::{str::FromStr, time::Duration};
 
 #[cfg(not(feature = "canbench-rs"))]
@@ -109,6 +112,18 @@ async fn withdraw_sol(args: WithdrawSolArgs) -> Result<WithdrawSolOk, WithdrawSo
 #[ic_cdk::update]
 fn withdraw_sol_status(args: WithdrawSolStatusArgs) -> WithdrawSolStatus {
     cksol_minter::withdraw::withdrawal_status(args.block_index)
+}
+
+#[ic_cdk::update]
+fn icrc21_canister_call_consent_message(
+    consent_msg_request: ConsentMessageRequest,
+) -> Result<ConsentInfo, Icrc21Error> {
+    cksol_minter::icrc21::icrc21_canister_call_consent_message(consent_msg_request)
+}
+
+#[ic_cdk::query]
+fn icrc10_supported_standards() -> Vec<StandardRecord> {
+    cksol_minter::icrc21::icrc10_supported_standards()
 }
 
 #[ic_cdk::query]

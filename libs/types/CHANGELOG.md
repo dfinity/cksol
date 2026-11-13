@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Automatic deposit types: `WatchDepositAddressArgs`, `WatchDepositAddressOk`, `WatchDepositAddressStatus` and `WatchDepositAddressError` ([#280](https://github.com/dfinity/cksol/pull/280))
+- ICRC-10 type: `StandardRecord`, returned by the minter's `icrc10_supported_standards` ([#295](https://github.com/dfinity/cksol/pull/295))
 
 ### Changed
 

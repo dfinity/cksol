@@ -3,9 +3,9 @@ use candid::{CandidType, Decode, Encode, Nat, Principal, utils::ArgumentEncoder}
 use canlog::{Log, LogEntry};
 use cksol_types::{
     Address, DepositSolArgs, DepositSolError, DepositSolId, DepositSolStatus,
-    GetDepositAddressArgs, MinterInfo, WatchDepositAddressArgs, WatchDepositAddressError,
-    WatchDepositAddressOk, WatchDepositAddressStatus, WithdrawSolArgs, WithdrawSolError,
-    WithdrawSolOk, WithdrawSolStatus, WithdrawSolStatusArgs,
+    GetDepositAddressArgs, MinterInfo, StandardRecord, WatchDepositAddressArgs,
+    WatchDepositAddressError, WatchDepositAddressOk, WatchDepositAddressStatus, WithdrawSolArgs,
+    WithdrawSolError, WithdrawSolOk, WithdrawSolStatus, WithdrawSolStatusArgs,
 };
 use cksol_types_internal::{
     MinterArg,
@@ -20,6 +20,7 @@ use icrc_ledger_types::{
     icrc1::account::{Account, Subaccount},
     icrc2::approve::{ApproveArgs, ApproveError},
     icrc3::blocks::{GetBlocksRequest, GetBlocksResult, ICRC3GenericBlock},
+    icrc21::{errors::Icrc21Error, requests::ConsentMessageRequest, responses::ConsentInfo},
 };
 use num_traits::cast::ToPrimitive;
 pub use pocket_ic::common::rest::{
@@ -693,6 +694,18 @@ impl<'a> CkSolMinter<'a> {
 
     pub async fn get_minter_info(&self) -> MinterInfo {
         self.query_call("get_minter_info", ()).await
+    }
+
+    pub async fn icrc10_supported_standards(&self) -> Vec<StandardRecord> {
+        self.query_call("icrc10_supported_standards", ()).await
+    }
+
+    pub async fn icrc21_canister_call_consent_message(
+        &self,
+        request: ConsentMessageRequest,
+    ) -> Result<ConsentInfo, Icrc21Error> {
+        self.update_call("icrc21_canister_call_consent_message", (request,), 0)
+            .await
     }
 
     pub async fn state(&self) -> MinterState {

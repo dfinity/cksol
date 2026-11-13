@@ -1,4 +1,3 @@
-use crate::dashboard::{DashboardPaginationParameters, DashboardTemplate, lamports_to_sol};
 use crate::state::{mutate_state, read_state};
 use crate::test_fixtures::{
     AUTOMATIC_DEPOSIT_FEE, HOUR_NANOS, MINIMUM_DEPOSIT_AMOUNT, MINIMUM_WITHDRAWAL_AMOUNT,
@@ -12,6 +11,10 @@ use crate::test_fixtures::{
     signature, sol_rpc_canister_id, valid_init_args, watch,
 };
 use crate::utils::timed_sized_map::Timestamp;
+use crate::{
+    dashboard::{DashboardPaginationParameters, DashboardTemplate},
+    numeric::lamports_to_sol,
+};
 use askama::Template;
 use cksol_types_internal::{InitArgs, SolanaNetwork};
 
