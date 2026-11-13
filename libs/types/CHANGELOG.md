@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-13
+
 ### Added
 
 - Automatic deposit types: `WatchDepositAddressArgs`, `WatchDepositAddressOk`, `WatchDepositAddressStatus` and `WatchDepositAddressError` ([#280](https://github.com/dfinity/cksol/pull/280))
@@ -15,6 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **Breaking:** `MinterInfo` gains the optional `automatic_deposit_fee` and `collected_automatic_deposit_fees` fields, which a struct literal must now set ([#277](https://github.com/dfinity/cksol/pull/277), [#281](https://github.com/dfinity/cksol/pull/281))
+
+[0.2.0]: https://github.com/dfinity/cksol/releases/tag/cksol-types-v0.2.0
 
 ## [0.1.0] - 2026-10-09
 

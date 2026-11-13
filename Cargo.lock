@@ -992,7 +992,7 @@ dependencies = [
 
 [[package]]
 name = "cksol-types"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "candid",
  "derive_more 2.1.1",
@@ -1021,7 +1021,7 @@ dependencies = [
 
 [[package]]
 name = "cksol_minter"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "agave-reserved-account-keys",
  "askama",
