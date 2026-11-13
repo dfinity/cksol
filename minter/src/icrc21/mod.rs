@@ -247,6 +247,10 @@ fn withdrawal_request_error(error: WithdrawSolError) -> Icrc21Error {
                 description: reason,
             })
         }
-        error => unsupported(format!("Invalid withdrawal request: {error:?}")),
+        WithdrawSolError::AlreadyProcessing
+        | WithdrawSolError::InsufficientFunds { .. }
+        | WithdrawSolError::InsufficientAllowance { .. } => {
+            unsupported(format!("Invalid withdrawal request: {error:?}"))
+        }
     }
 }
