@@ -1,6 +1,6 @@
 [package]
 name = "cksol_minter"
-version = "0.1.0"
+version = "0.2.0"
 description = "Chain-key SOL minter for the Internet Computer."
 authors.workspace = true
 edition.workspace = true
@@ -22,7 +22,7 @@ bincode = { workspace = true }
 canbench-rs = { workspace = true, optional = true }
 candid = { workspace = true }
 canlog = { workspace = true, features = ["derive"] }
-cksol-types = { version = "0.1.0", path = "../libs/types" }
+cksol-types = { version = "0.2.0", path = "../libs/types" }
 cksol-types-internal = { version = "0.1.0", path = "../libs/types-internal", features = ["event", "log"] }
 derive_more = { workspace = true }
 futures = { workspace = true }

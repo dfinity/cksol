@@ -14,7 +14,7 @@ bincode = { workspace = true }
 candid = { workspace = true }
 canlog = { workspace = true }
 cksol-test-utils = { version = "0.1.0", path = "../libs/test-utils" }
-cksol-types = { version = "0.1.0", path = "../libs/types" }
+cksol-types = { version = "0.2.0", path = "../libs/types" }
 cksol-types-internal = { version = "0.1.0", path = "../libs/types-internal", features = ["log", "event"] }
 flate2 = { workspace = true }
 ic-canister-runtime = { workspace = true }

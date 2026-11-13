@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-13
+
+### Added
+
+- Support ICRC-21 consent messages ([#295](https://github.com/dfinity/cksol/pull/295))
+- Add the watch_deposit_address endpoint ([#280](https://github.com/dfinity/cksol/pull/280))
+- Add the watchlist of deposit addresses with its scan schedule ([#279](https://github.com/dfinity/cksol/pull/279))
+- Add a bounded map of expiring entries ([#278](https://github.com/dfinity/cksol/pull/278))
+- Add the automatic deposit fee parameter ([#277](https://github.com/dfinity/cksol/pull/277))
+
+### Changed
+
+- Align the automatic deposit flow documentation with the implementation ([#292](https://github.com/dfinity/cksol/pull/292))
+- Report the automatic deposit flow in the metrics and on the dashboard ([#287](https://github.com/dfinity/cksol/pull/287))
+- Snapshot the watchlist before an upgrade ([#285](https://github.com/dfinity/cksol/pull/285))
+- Record the origin of a queued deposit ([#291](https://github.com/dfinity/cksol/pull/291))
+- Re-arm the automatic deposits of a dropped sweep ([#284](https://github.com/dfinity/cksol/pull/284))
+- Scan the watched deposit addresses on a timer and queue the detected deposits ([#283](https://github.com/dfinity/cksol/pull/283))
+- Read deposit address balances in batches with the typed getMultipleAccounts ([#282](https://github.com/dfinity/cksol/pull/282))
+- Record the automatic part of a queued deposit and deduct its fee from the mint ([#281](https://github.com/dfinity/cksol/pull/281))
+- Extract the queueing of a deposit and the in-flight classification from deposit_sol ([#276](https://github.com/dfinity/cksol/pull/276))
+
+### Fixed
+
+- Cover the automatic deposit flow end to end and document it ([#274](https://github.com/dfinity/cksol/pull/274))
+- Make the concurrent-access guard tests deterministic ([#201](https://github.com/dfinity/cksol/pull/201))
+- Upgrade a snapshot of the staging minter to the current wasm ([#273](https://github.com/dfinity/cksol/pull/273))
+- Replay the event logs of the deployed minters ([#271](https://github.com/dfinity/cksol/pull/271))
+
+[0.2.0]: https://github.com/dfinity/cksol/compare/cksol_minter-v0.1.0..cksol_minter-v0.2.0
+
+
 The automatic deposit flow is disabled until `automatic_deposit_fee` is set, which the upgrade installing this version should do, as described under "Enable the automatic deposit flow" in the deployment guide. Once the flow is enabled, the upgrade can no longer be rolled back: a faulty version has to be fixed forward.
 
 ### Added
