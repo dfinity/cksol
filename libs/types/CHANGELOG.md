@@ -11,31 +11,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Support ICRC-21 consent messages ([#295](https://github.com/dfinity/cksol/pull/295))
-- Add the watch_deposit_address endpoint ([#280](https://github.com/dfinity/cksol/pull/280))
-- Add the automatic deposit fee parameter ([#277](https://github.com/dfinity/cksol/pull/277))
-
-### Changed
-
-- Align the automatic deposit flow documentation with the implementation ([#292](https://github.com/dfinity/cksol/pull/292))
-- Re-arm the automatic deposits of a dropped sweep ([#284](https://github.com/dfinity/cksol/pull/284))
-- Record the automatic part of a queued deposit and deduct its fee from the mint ([#281](https://github.com/dfinity/cksol/pull/281))
-
-### Fixed
-
-- Cover the automatic deposit flow end to end and document it ([#274](https://github.com/dfinity/cksol/pull/274))
-
-[0.2.0]: https://github.com/dfinity/cksol/compare/cksol-types-v0.1.0..cksol-types-v0.2.0
-
-
-### Added
-
 - Automatic deposit types: `WatchDepositAddressArgs`, `WatchDepositAddressOk`, `WatchDepositAddressStatus` and `WatchDepositAddressError` ([#280](https://github.com/dfinity/cksol/pull/280))
 - ICRC-10 type: `StandardRecord`, returned by the minter's `icrc10_supported_standards` ([#295](https://github.com/dfinity/cksol/pull/295))
 
 ### Changed
 
 - **Breaking:** `MinterInfo` gains the optional `automatic_deposit_fee` and `collected_automatic_deposit_fees` fields, which a struct literal must now set ([#277](https://github.com/dfinity/cksol/pull/277), [#281](https://github.com/dfinity/cksol/pull/281))
+
+[0.2.0]: https://github.com/dfinity/cksol/releases/tag/cksol-types-v0.2.0
 
 ## [0.1.0] - 2026-10-09
 
