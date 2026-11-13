@@ -920,7 +920,10 @@ mod icrc21_tests {
                 "# Convert ckSOL to SOL\n\n\
                  Authorize the ckSOL minter to burn ckSOL from your account and \
                  send the equivalent amount in SOL, minus the withdrawal fee in effect \
-                 when the withdrawal is executed, to the Solana address below.\n\n\
+                 when the withdrawal is executed, to the Solana address below. \
+                 If the transfer fails on Solana, for example because the destination \
+                 cannot receive SOL, the SOL stays with the ckSOL minter and the \
+                 burned ckSOL is not refunded automatically.\n\n\
                  **Amount to convert:** `0.25 ckSOL`\n\n\
                  **Current withdrawal fee:** `0.001 ckSOL`\n\n\
                  **Estimated amount to receive:** `0.249 SOL`\n\n\
