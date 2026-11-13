@@ -15,6 +15,7 @@ The automatic deposit flow is disabled until `automatic_deposit_fee` is set, whi
 - A sweep of automatic deposits that fails or expires puts their addresses back on the watchlist for a fresh window, if it has room, so that the funds are swept again under a new deposit id without any call ([#284](https://github.com/dfinity/cksol/pull/284))
 - The watchlist is recorded in a new event before an upgrade, unless it is empty, and restored on replay ([#285](https://github.com/dfinity/cksol/pull/285))
 - Observability: metrics for the watched addresses against the capacity of the watchlist, the age of the earliest due scan, the scans by outcome, the re-arms of dropped automatic deposits by outcome and the collected fees, and on the dashboard the fee, the collected fees and the watched addresses ([#287](https://github.com/dfinity/cksol/pull/287))
+- ICRC-21 consent messages: `icrc21_canister_call_consent_message` describes a `withdraw_sol` request, with the amount to burn, the current withdrawal fee, the estimated amount to receive, the destination address and the source subaccount, if any, so that ICRC-21-aware wallets can show it before the user signs. `icrc10_supported_standards` lists ICRC-10 and ICRC-21 ([#295](https://github.com/dfinity/cksol/pull/295))
 
 ### Changed
 

@@ -91,10 +91,14 @@ pub fn icrc21_canister_call_consent_message(
                     description: format!("Failed to decode WithdrawSolArgs: {e}"),
                 })
             })?;
-            // Run the same checks as `withdraw_sol` before the burn, so that the consent
-            // message only describes requests the minter accepts. Parsing the address
-            // also rules out Markdown injection in the GenericDisplay output (e.g. an
-            // "address" with newlines or backticks crafted to fake additional fields).
+            // Check the amount and the destination as `withdraw_sol` does, so that the
+            // consent message only describes requests the minter accepts. The other
+            // checks of `withdraw_sol` are skipped: the caller of this endpoint is not
+            // necessarily the principal that signs the withdrawal, so the anonymous
+            // caller check does not apply, and an empty nonce pool only makes the
+            // withdrawal temporarily unavailable. Parsing the address also rules out
+            // Markdown injection in the GenericDisplay output (e.g. an "address" with
+            // newlines or backticks crafted to fake additional fields).
             let address = validate_withdrawal_request(args.amount, &args.address)
                 .map_err(withdrawal_request_error)?;
             build_withdraw_sol_message(&args, address, &display_type)
