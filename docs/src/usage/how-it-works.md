@@ -64,6 +64,8 @@ If you cannot call the minter after the transfer, for example because the SOL co
 
    Wallets that support [ICRC-21](https://github.com/dfinity/ICRC/blob/main/ICRCs/ICRC-21/ICRC-21.md) can show the user what the request does before it is signed, by calling `icrc21_canister_call_consent_message` on the minter with the `withdraw_sol` arguments: the consent message lists the amount to burn, the current withdrawal fee, the estimated amount to receive, the destination address and the source subaccount, if any. The withdrawal fee in effect when the request is executed applies, which only differs if an upgrade changed it in between.
 
+   A withdrawal to an address that cannot receive SOL, such as a program account, fails on Solana. The SOL then stays with the minter, but the burned ckSOL is not refunded automatically. The consent message does not mention this case, which is rare, to keep the message short.
+
 3. **Transaction submission.** The minter constructs a Solana transaction, signs it using chain-key Ed25519, and submits it via the SOL RPC canister.
 
 4. **Monitor status.** Call `withdraw_sol_status` with the ledger burn index returned by `withdraw_sol` to track the status of your withdrawal request (`Pending` → `TxSent` → `TxFinalized`).

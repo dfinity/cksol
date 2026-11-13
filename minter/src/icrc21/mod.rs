@@ -134,6 +134,12 @@ fn build_withdraw_sol_message(
 ) -> ConsentMessage {
     let (solana_network, withdrawal_fee) = read_state(|s| (s.solana_network(), s.withdrawal_fee()));
     let TokenSymbols { cksol, sol } = TokenSymbols::for_network(solana_network);
+    // The message deliberately leaves out that the withdrawal can fail on Solana
+    // after the burn, without an automatic refund. The checks of
+    // `validate_withdrawal_request` leave essentially only destinations that cannot
+    // receive lamports, such as program accounts until SIMD-0162 activates, so the
+    // case is rare, and the caveat would crowd small displays. It is documented for
+    // users in `docs/src/usage/how-it-works.md` and in Section 3.2.4 of the design.
     // Same computation as in `withdraw`, with the current withdrawal fee: an
     // upgrade can change the fee before the call executes. The amount is at least
     // the minimum withdrawal amount, which the state ensures exceeds the fee.
