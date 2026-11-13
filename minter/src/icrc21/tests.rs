@@ -417,7 +417,7 @@ fn should_build_withdraw_sol_fields_display() {
                     token_amount(WITHDRAWAL_FEE, "ckSOL")
                 ),
                 (
-                    "Est. amount received".to_string(),
+                    "Estimated amount received".to_string(),
                     token_amount(250_000_000 - WITHDRAWAL_FEE, "SOL")
                 ),
                 ("SOL address".to_string(), text(VALID_ADDRESS)),
@@ -455,7 +455,7 @@ fn should_build_withdraw_sol_fields_display_without_subaccount() {
         vec![
             "Amount",
             "Current fee",
-            "Est. amount received",
+            "Estimated amount received",
             "SOL address"
         ]
     );
@@ -526,7 +526,7 @@ fn should_use_devnet_symbols_on_devnet() {
                 token_amount(WITHDRAWAL_FEE, "ckDevnetSOL")
             ),
             (
-                "Est. amount received".to_string(),
+                "Estimated amount received".to_string(),
                 token_amount(1_000_000_000 - WITHDRAWAL_FEE, "DevnetSOL")
             ),
             ("DevnetSOL address".to_string(), text(VALID_ADDRESS)),

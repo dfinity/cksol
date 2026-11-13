@@ -953,7 +953,7 @@ mod icrc21_tests {
                         token_amount(Setup::DEFAULT_WITHDRAWAL_FEE, "ckSOL")
                     ),
                     (
-                        "Est. amount received".to_string(),
+                        "Estimated amount received".to_string(),
                         token_amount(250_000_000 - Setup::DEFAULT_WITHDRAWAL_FEE, "SOL")
                     ),
                     (

@@ -186,7 +186,7 @@ fn build_withdraw_sol_message(
                     },
                 ),
                 (
-                    "Est. amount received".to_string(),
+                    "Estimated amount received".to_string(),
                     Value::TokenAmount {
                         decimals: SOL_DECIMALS,
                         amount: estimated_amount_to_transfer,
