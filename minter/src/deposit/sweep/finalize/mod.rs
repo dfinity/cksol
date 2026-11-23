@@ -1,5 +1,6 @@
 use crate::{
     constants::MAX_CONCURRENT_RPC_CALLS,
+    queue_cursor::QueueCursor,
     rpc::get_transaction,
     runtime::CanisterRuntime,
     state::{
@@ -11,6 +12,16 @@ use crate::{
 use canlog::log;
 use cksol_types_internal::log::Priority;
 use solana_signature::Signature;
+use std::cell::RefCell;
+
+thread_local! {
+    static CURSOR: RefCell<QueueCursor<Signature>> = const { RefCell::new(QueueCursor::new()) };
+}
+
+#[cfg(any(test, feature = "canbench-rs"))]
+pub(super) fn reset_cursor() {
+    CURSOR.with(|cursor| cursor.borrow_mut().clear());
+}
 
 #[cfg(test)]
 mod tests;
@@ -30,16 +41,23 @@ pub async fn credit_finalized_sweeps<R: CanisterRuntime>(runtime: &R) -> bool {
         let finalized = state.deposits().finalized();
         (
             finalized.len(),
-            finalized
-                .iter()
-                .take(MAX_CONCURRENT_RPC_CALLS)
+            CURSOR
+                .with(|cursor| {
+                    cursor
+                        .borrow()
+                        .round(finalized.by_signature(), MAX_CONCURRENT_RPC_CALLS)
+                })
+                .into_iter()
                 .map(|(signature, sweep)| (*signature, sweep.clone()))
                 .collect(),
         )
     });
-    if round.is_empty() {
+    let Some((last_signature, _)) = round.last() else {
+        CURSOR.with(|cursor| cursor.borrow_mut().clear());
         return false;
-    }
+    };
+    // Continue past this round even if all its RPC reads fail.
+    CURSOR.with(|cursor| cursor.borrow_mut().advance(*last_signature));
 
     let outcomes = futures::future::join_all(
         round
@@ -104,5 +122,8 @@ pub async fn credit_finalized_sweeps<R: CanisterRuntime>(runtime: &R) -> bool {
         settled_count += 1;
     }
 
+    if read_state(|state| state.deposits().finalized().is_empty()) {
+        CURSOR.with(|cursor| cursor.borrow_mut().clear());
+    }
     settled_count > 0 && settled_count < finalized_count
 }

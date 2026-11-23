@@ -72,6 +72,7 @@ pub fn init_once_state(state: State) {
 
 #[cfg(any(test, feature = "canbench-rs"))]
 pub fn reset_state() {
+    crate::deposit::sweep::reset_cursors();
     STATE.with(|s| {
         *s.borrow_mut() = None;
     });
