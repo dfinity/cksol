@@ -41,6 +41,7 @@ pub mod audit;
 mod deposits;
 pub mod event;
 mod nonce_pool;
+mod spl;
 mod watchlist;
 
 pub use deposits::{
@@ -132,6 +133,7 @@ pub struct State {
     nonce_pool: DurableNoncePool,
     active_tasks: BTreeSet<TaskType>,
     balance: Lamport,
+    supported_spl_tokens: BTreeMap<Address, spl::SupportedSplToken>,
 }
 
 impl State {
@@ -366,7 +368,11 @@ impl State {
                 max_automatic_deposit_fee: self.max_automatic_deposit_fee(),
             });
         }
-        Ok(())
+        spl::validate_tokens(
+            &self.supported_spl_tokens,
+            self.ledger_canister_id,
+            self.sol_rpc_canister_id,
+        )
     }
 
     fn max_automatic_deposit_fee(&self) -> Lamport {
@@ -387,6 +393,8 @@ impl State {
             deposit_sol_fee,
             nonce_accounts_to_add,
             automatic_deposit_fee,
+            add_spl_tokens,
+            update_spl_tokens,
         }: UpgradeArgs,
     ) -> Result<(), InvalidStateError> {
         if let Some(sol_rpc_canister_id) = sol_rpc_canister_id {
@@ -415,6 +423,7 @@ impl State {
             self.ensure_no_incomplete_withdrawal_to(&nonce_accounts)?;
             self.nonce_pool.add_accounts(nonce_accounts)?;
         }
+        self.supported_spl_tokens = self.updated_spl_tokens(add_spl_tokens, update_spl_tokens)?;
         self.validate()
     }
 
@@ -871,6 +880,7 @@ pub enum InvalidStateError {
     InvalidNonceAccount(String),
     DuplicateNonceAccount(Address),
     NonceAccountIsWithdrawalDestination(Address),
+    InvalidSplToken(String),
 }
 
 impl From<NoncePoolError> for InvalidStateError {
@@ -941,6 +951,7 @@ impl TryFrom<InitArgs> for State {
             nonce_pool,
             active_tasks: BTreeSet::new(),
             balance: 0,
+            supported_spl_tokens: BTreeMap::new(),
         };
         state.validate()?;
         Ok(state)

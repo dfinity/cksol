@@ -19,6 +19,9 @@ pub type LedgerMintIndex = u64;
 pub type LedgerBurnIndex = u64;
 
 /// Arguments for a request to the `get_deposit_address` ckSOL minter endpoint.
+/// The result is the derived Solana owner address shared by SOL and supported SPL
+/// deposits. SPL senders use a token transfer to this owner, whose associated token
+/// account is derived for the mint.
 #[derive(Clone, Eq, PartialEq, Debug, Default, CandidType, Deserialize, Serialize)]
 pub struct GetDepositAddressArgs {
     /// The principal to deposit funds to.
@@ -354,6 +357,9 @@ pub struct MinterInfo {
     pub automatic_deposit_fee: Option<Lamport>,
     /// The sum in lamports of the automatic deposit fees collected so far.
     pub collected_automatic_deposit_fees: Option<Lamport>,
+    /// Registered SPL tokens in mint-address order; empty when none are registered.
+    /// Absent in responses from older minter versions.
+    pub supported_spl_tokens: Option<Vec<SplTokenInfo>>,
 }
 
 /// An entry of the list returned by the [ICRC-10](https://github.com/dfinity/ICRC/blob/main/ICRCs/ICRC-10/ICRC-10.md)
@@ -364,4 +370,27 @@ pub struct StandardRecord {
     pub name: String,
     /// The URL of the specification of the standard.
     pub url: String,
+}
+
+/// Registry and deposit settings for one supported SPL token.
+#[derive(Clone, Debug, Eq, PartialEq, CandidType, Deserialize, Serialize)]
+pub struct SplTokenInfo {
+    /// Solana mint address.
+    pub mint: Address,
+    /// Classic SPL Token program address.
+    pub token_program: Address,
+    /// Token and ledger decimals.
+    pub decimals: u8,
+    /// The ckSPL ledger canister.
+    pub ledger_id: Principal,
+    /// Optional index canister.
+    pub index_id: Option<Principal>,
+    /// The ckSPL ledger symbol.
+    pub symbol: String,
+    /// Minimum net deposit in the token's smallest units.
+    pub minimum_deposit_amount: u64,
+    /// Fixed deposit fee in the token's smallest units.
+    pub deposit_fee: u64,
+    /// Whether new deposit requests are paused.
+    pub deposits_paused: bool,
 }
