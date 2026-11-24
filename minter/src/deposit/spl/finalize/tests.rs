@@ -145,6 +145,7 @@ fn upgrade() {
     let replayed = replayed();
     mutate_state(|state| *state = replayed);
     crate::deposit::sweep::reset_cursors();
+    crate::monitor::reset_cursor();
 }
 fn failed_spl_sweeps(reason: FailedSplTransferReason) -> u64 {
     failed_spl_sweep_count(fixture::mint(), reason)
@@ -627,6 +628,21 @@ async fn should_keep_an_observed_failure_reserved_across_missing_statuses_and_up
     finalize_transactions(idle.clone()).await;
     assert!(idle.sent_update_calls().is_empty());
     assert_eq!(failed_spl_sweeps(FailedSplTransferReason::Other), 1);
+}
+
+#[tokio::test]
+async fn should_ignore_a_status_reply_of_the_wrong_length() {
+    for statuses in [vec![Some(finalized_status())], vec![None; 3]] {
+        setup(2);
+        let before = read_state(Clone::clone);
+        let events = recorded().len();
+        // The sweeps are past the expiry window. A malformed reply proves nothing about them.
+        let runtime = observation_runtime(500, statuses);
+        finalize_transactions(runtime.clone()).await;
+        read_state(|state| assert_eq!(state, &before));
+        assert_eq!(recorded().len(), events);
+        assert_no_resubmission(&runtime);
+    }
 }
 
 #[tokio::test]

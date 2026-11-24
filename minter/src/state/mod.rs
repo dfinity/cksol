@@ -88,6 +88,7 @@ pub fn init_once_state(state: State) {
 pub fn reset_state() {
     crate::deposit::sweep::reset_cursors();
     crate::deposit::spl::reset_cursor();
+    crate::monitor::reset_cursor();
     STATE.with(|s| {
         *s.borrow_mut() = None;
     });

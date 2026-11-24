@@ -8,6 +8,7 @@ use crate::{
     monitor::withdrawals::{
         finalize_transactions_batch, read_in_flight_nonces, resubmit_transactions_batch,
     },
+    queue_cursor::QueueCursor,
     rpc::{BlockHeight, get_recent_block, get_signature_statuses},
     runtime::CanisterRuntime,
     state::{
@@ -23,6 +24,7 @@ use itertools::Itertools;
 use sol_rpc_types::CommitmentLevel;
 use solana_signature::Signature;
 use solana_transaction_status_client_types::TransactionConfirmationStatus;
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
@@ -52,6 +54,18 @@ const MAX_BLOCKHASH_AGE_IN_BLOCKS: BlockHeight = BlockHeight::new(150);
 /// Maximum number of signatures per `getSignatureStatuses` RPC call.
 /// See https://solana.com/docs/rpc/http/getsignaturestatuses
 const MAX_SIGNATURES_PER_STATUS_CHECK: usize = 256;
+/// Maximum number of sweep signatures whose status one round checks.
+const MAX_SIGNATURES_PER_ROUND: usize = MAX_CONCURRENT_RPC_CALLS * MAX_SIGNATURES_PER_STATUS_CHECK;
+
+thread_local! {
+    // Rotates the status checks only when the in-flight sweeps exceed one round.
+    static STATUS_CURSOR: RefCell<QueueCursor<Signature>> = const { RefCell::new(QueueCursor::new()) };
+}
+
+#[cfg(any(test, feature = "canbench-rs"))]
+pub(crate) fn reset_cursor() {
+    STATUS_CURSOR.with(|cursor| cursor.borrow_mut().clear());
+}
 
 /// Check the status of all submitted SOL and SPL sweeps, finalize succeeded/failed ones and
 /// drop expired ones, then finalize the withdrawals whose nonce advanced and re-broadcast
@@ -110,8 +124,7 @@ async fn check_sweep_transactions<R: CanisterRuntime>(runtime: &R) -> bool {
     let current_block_height = fetch_current_block_height(runtime).await;
 
     let num_transactions = blockhash_transactions.len();
-    let statuses =
-        check_transaction_statuses(runtime, blockhash_transactions.keys().copied().collect()).await;
+    let statuses = check_transaction_statuses(runtime, status_round(&blockhash_transactions)).await;
 
     for (signature, error) in &statuses.errored {
         log!(
@@ -146,7 +159,7 @@ async fn check_sweep_transactions<R: CanisterRuntime>(runtime: &R) -> bool {
         );
     }
 
-    num_transactions > MAX_CONCURRENT_RPC_CALLS * MAX_SIGNATURES_PER_STATUS_CHECK
+    num_transactions > MAX_SIGNATURES_PER_ROUND
 }
 
 async fn fetch_current_block_height<R: CanisterRuntime>(runtime: &R) -> Option<BlockHeight> {
@@ -197,6 +210,26 @@ fn record_unsuccessful_sweep<R: CanisterRuntime>(
     }
 }
 
+/// The signatures to check this round. All of them, in order, when one round covers them.
+fn status_round(transactions: &BTreeMap<Signature, BlockHeight>) -> Vec<Signature> {
+    STATUS_CURSOR.with(|cursor| {
+        let mut cursor = cursor.borrow_mut();
+        if transactions.len() <= MAX_SIGNATURES_PER_ROUND {
+            cursor.clear();
+            return transactions.keys().copied().collect();
+        }
+        let round: Vec<Signature> = cursor
+            .round(transactions, MAX_SIGNATURES_PER_ROUND)
+            .into_iter()
+            .map(|(signature, _)| *signature)
+            .collect();
+        if let Some(last) = round.last() {
+            cursor.advance(*last);
+        }
+        round
+    })
+}
+
 fn is_blockhash_expired(
     transaction_block_height: BlockHeight,
     current_block_height: BlockHeight,
@@ -236,7 +269,17 @@ async fn check_transaction_statuses<R: CanisterRuntime>(
 
     let batch_results: Vec<_> = futures::future::join_all(batches.into_iter().map(async |batch| {
         match get_signature_statuses(runtime, &batch).await {
-            Ok(statuses) => Some((batch, statuses)),
+            Ok(statuses) if statuses.len() == batch.len() => Some((batch, statuses)),
+            Ok(statuses) => {
+                // A malformed reply gives no status and no proof of expiry.
+                log!(
+                    Priority::Error,
+                    "Ignoring {} statuses returned for {} signatures",
+                    statuses.len(),
+                    batch.len()
+                );
+                None
+            }
             Err(e) => {
                 log!(Priority::Info, "Failed to check transaction statuses: {e}");
                 None

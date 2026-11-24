@@ -286,6 +286,81 @@ mod finalization {
     }
 
     #[tokio::test]
+    async fn should_rotate_status_checks_when_sweeps_exceed_one_round() {
+        setup();
+
+        let limit = MAX_CONCURRENT_RPC_CALLS * MAX_SIGNATURES_PER_STATUS_CHECK;
+        for i in 0..=limit {
+            submit_sweep_transaction_with_signature(i, CURRENT_BLOCK_HEIGHT);
+        }
+        let mut sorted: Vec<_> = read_state(|s| {
+            s.submitted_transactions()
+                .iter()
+                .map(|(signature, _)| *signature)
+                .collect()
+        });
+        sorted.sort();
+
+        // No sweep resolves, so the same prefix would otherwise be checked forever.
+        let mut first_checked = Vec::new();
+        for _ in 0..2 {
+            let mut runtime = TestCanisterRuntime::new()
+                .with_increasing_time()
+                .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
+                .add_stub_response(BlockResult::Consistent(Ok(current_block())));
+            for _ in 0..MAX_CONCURRENT_RPC_CALLS {
+                runtime = runtime.add_stub_response(SignatureStatusesResult::Consistent(Ok(vec![
+                    None;
+                    MAX_SIGNATURES_PER_STATUS_CHECK
+                ])));
+            }
+
+            finalize_transactions(runtime.clone()).await;
+
+            let calls = runtime.sent_update_calls();
+            let status_checks: Vec<_> = calls
+                .iter()
+                .filter(|call| call.method == "getSignatureStatuses")
+                .collect();
+            assert_eq!(status_checks.len(), MAX_CONCURRENT_RPC_CALLS);
+            let (_, _, params): (
+                RpcSources,
+                Option<RpcConfig>,
+                sol_rpc_types::GetSignatureStatusesParams,
+            ) = status_checks[0].args();
+            let signatures: Vec<sol_rpc_types::Signature> = params.signatures.into();
+            first_checked.push(signatures[0].clone());
+        }
+
+        assert_eq!(first_checked, vec![sorted[0].into(), sorted[limit].into()]);
+        read_state(|s| assert_eq!(s.submitted_transactions().len(), limit + 1));
+    }
+
+    #[tokio::test]
+    async fn should_ignore_statuses_of_the_wrong_length() {
+        for statuses in [vec![], vec![None, None]] {
+            reset_state();
+            reset_events();
+            setup();
+
+            // The sweep is past the expiry window, but a malformed reply proves nothing.
+            submit_sweep_transaction(EXPIRED_BLOCK_HEIGHT);
+            let events_before = EventsAssert::from_recorded();
+
+            let runtime = TestCanisterRuntime::new()
+                .with_increasing_time()
+                .add_stub_response(SlotResult::Consistent(Ok(CURRENT_SLOT)))
+                .add_stub_response(BlockResult::Consistent(Ok(current_block())))
+                .add_stub_response(SignatureStatusesResult::Consistent(Ok(statuses)));
+
+            finalize_transactions(runtime).await;
+
+            assert_eq!(events_before, EventsAssert::from_recorded());
+            read_state(|s| assert_eq!(s.submitted_transactions().len(), 1));
+        }
+    }
+
+    #[tokio::test]
     async fn should_not_expire_transaction_if_status_check_fails() {
         setup();
 
