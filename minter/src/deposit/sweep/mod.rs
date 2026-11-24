@@ -165,5 +165,5 @@ fn balance_above_minimum(
 #[cfg(any(test, feature = "canbench-rs"))]
 pub(crate) fn reset_cursors() {
     crate::deposit::finalize::reset_cursors();
-    mint::reset_cursor();
+    crate::deposit::mint::reset_cursors();
 }
