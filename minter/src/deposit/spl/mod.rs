@@ -20,6 +20,9 @@ use solana_address::Address;
 #[cfg(test)]
 mod tests;
 
+mod finalize;
+pub use finalize::{credit_finalized_spl_sweeps, settle_failed_spl_sweeps};
+
 mod timer;
 #[cfg(any(test, feature = "canbench-rs"))]
 pub(crate) use timer::reset_cursor;

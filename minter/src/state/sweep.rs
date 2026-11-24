@@ -1,11 +1,11 @@
-//! Validation of a fetched sweep transaction against its plan.
+//! Validation shared by SOL and SPL sweep settlement.
 use crate::state::{SweepMismatch, SweepSettlementError, UnreadableOutcome};
 use solana_hash::Hash;
 use solana_message::{Message, VersionedMessage};
 use solana_transaction::versioned::VersionedTransaction;
 use solana_transaction_status_client_types::UiTransactionStatusMeta;
 
-/// Checks that a transaction succeeded with the planned message and complete lamport balances.
+/// Validates a successful sweep, preserving the SOL path's check order.
 pub(crate) fn validate_sweep_transaction<'a>(
     transaction: &'a VersionedTransaction,
     meta: Option<&'a UiTransactionStatusMeta>,
@@ -18,6 +18,16 @@ pub(crate) fn validate_sweep_transaction<'a>(
         }
         .into());
     }
+    validate_sweep_message(transaction, Some(meta), planned_message)
+}
+
+/// Validates the exact message and complete SOL balances, including failed sweeps.
+pub(crate) fn validate_sweep_message<'a>(
+    transaction: &'a VersionedTransaction,
+    meta: Option<&'a UiTransactionStatusMeta>,
+    planned_message: impl FnOnce(Hash) -> Message,
+) -> Result<(&'a Message, &'a UiTransactionStatusMeta), SweepSettlementError> {
+    let meta = meta.ok_or(UnreadableOutcome::NoMetaField)?;
     let VersionedMessage::Legacy(message) = &transaction.message else {
         return Err(SweepMismatch::UnexpectedMessage.into());
     };

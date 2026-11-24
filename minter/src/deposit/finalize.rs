@@ -1,4 +1,4 @@
-//! Settlement rounds of observed sweeps: selection, fetching, retry classification and events.
+//! Settlement rounds shared by SOL and SPL sweeps: selection, fetching, retry classification and events.
 use crate::{
     constants::MAX_CONCURRENT_RPC_CALLS,
     queue_cursor::QueueCursor,
@@ -19,30 +19,44 @@ use std::{cell::RefCell, collections::BTreeMap};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum FinalizedQueue {
     Sol,
+    Spl,
+    FailedSpl,
 }
 
 thread_local! {
     static SOL_CURSOR: RefCell<QueueCursor<Signature>> = const { RefCell::new(QueueCursor::new()) };
+    static SPL_CURSOR: RefCell<QueueCursor<Signature>> = const { RefCell::new(QueueCursor::new()) };
+    static FAILED_SPL_CURSOR: RefCell<QueueCursor<Signature>> = const { RefCell::new(QueueCursor::new()) };
 }
 
 impl FinalizedQueue {
     fn with_cursor<T>(self, f: impl FnOnce(&mut QueueCursor<Signature>) -> T) -> T {
         let cursor = match self {
             Self::Sol => &SOL_CURSOR,
+            Self::Spl => &SPL_CURSOR,
+            Self::FailedSpl => &FAILED_SPL_CURSOR,
         };
         cursor.with(|cursor| f(&mut cursor.borrow_mut()))
     }
 
+    /// The failed-credit metrics count SOL sweeps only.
     fn record_failed_credit(self, reason: FailedCreditReason) {
         match self {
             Self::Sol => record_failed_credit_attempt(reason),
+            Self::Spl | Self::FailedSpl => {}
         }
     }
 }
 
 #[cfg(any(test, feature = "canbench-rs"))]
 pub(crate) fn reset_cursors() {
-    FinalizedQueue::Sol.with_cursor(QueueCursor::clear);
+    for queue in [
+        FinalizedQueue::Sol,
+        FinalizedQueue::Spl,
+        FinalizedQueue::FailedSpl,
+    ] {
+        queue.with_cursor(QueueCursor::clear);
+    }
 }
 
 /// Settles matching sweep outcomes and quarantines mismatches. Unreadable outcomes stay queued.

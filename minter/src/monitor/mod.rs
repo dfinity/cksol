@@ -1,6 +1,9 @@
 use crate::{
     constants::MAX_CONCURRENT_RPC_CALLS,
-    deposit::sweep::credit_finalized_sweeps,
+    deposit::{
+        spl::{credit_finalized_spl_sweeps, settle_failed_spl_sweeps},
+        sweep::credit_finalized_sweeps,
+    },
     guard::TimerGuard,
     monitor::withdrawals::{
         finalize_transactions_batch, read_in_flight_nonces, resubmit_transactions_batch,
@@ -68,8 +71,14 @@ pub async fn finalize_transactions<R: CanisterRuntime>(runtime: R) {
     resubmit_transactions_batch(&runtime, &nonces).await;
     finalize_transactions_batch(&runtime, &nonces).await;
     let more_sweeps_to_credit = credit_finalized_sweeps(&runtime).await;
+    let more_spl_sweeps_to_settle = settle_failed_spl_sweeps(&runtime).await;
+    let more_spl_sweeps_to_credit = credit_finalized_spl_sweeps(&runtime).await;
 
-    if !more_transactions_to_check && !more_sweeps_to_credit {
+    if !more_transactions_to_check
+        && !more_sweeps_to_credit
+        && !more_spl_sweeps_to_settle
+        && !more_spl_sweeps_to_credit
+    {
         scopeguard::ScopeGuard::into_inner(reschedule);
     }
 }

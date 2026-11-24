@@ -202,6 +202,29 @@ fn apply_state_transition(state: &mut State, payload: &EventType, timestamp: u64
                 timestamp,
             );
         }
+        EventType::CreditedSplSweep {
+            signature,
+            lamports_spent,
+            deposit_id,
+            amount_to_mint,
+        } => {
+            state.process_credited_spl_sweep(
+                signature,
+                *lamports_spent,
+                *deposit_id,
+                *amount_to_mint,
+                timestamp,
+            );
+        }
+        EventType::QuarantinedSplSweep { signature } => {
+            state.process_quarantined_spl_sweep(signature)
+        }
+        EventType::FailedSplSweep {
+            signature,
+            lamports_spent,
+        } => {
+            state.process_failed_spl_sweep(signature, *lamports_spent);
+        }
     }
 }
 

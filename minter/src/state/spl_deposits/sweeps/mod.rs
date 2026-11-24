@@ -3,8 +3,10 @@ use crate::{
     constants::FEE_PER_SIGNATURE,
     spl_transfer::transfer_checked_instruction,
     state::{
-        QueuedSplDeposit, SchnorrPublicKey, SupportedSplToken,
+        QueuedSplDeposit, SchnorrPublicKey, SupportedSplToken, SweepMismatch, SweepSettlementError,
+        UnreadableOutcome,
         event::{Signer, VersionedMessage},
+        sweep::validate_sweep_message,
     },
 };
 use cksol_types::DepositSplId;
@@ -12,7 +14,10 @@ use sol_rpc_types::Lamport;
 use solana_address::Address;
 use solana_hash::Hash;
 use solana_signature::Signature;
-use solana_transaction::Message;
+use solana_transaction::{Message, versioned::VersionedTransaction};
+use solana_transaction_status_client_types::{
+    UiTransactionStatusMeta, UiTransactionTokenBalance, option_serializer::OptionSerializer,
+};
 use std::collections::BTreeMap;
 use thiserror::Error;
 
@@ -170,6 +175,156 @@ impl SplSweep {
     fn treasury_address(&self) -> Address {
         associated_token_address(&self.minter_address, &self.deposit.mint)
     }
+
+    /// Checks the executed message and balance changes against the sweep plan, for a
+    /// successful and for a failed transaction. Returns the lamports the minter spent.
+    ///
+    /// A failed transaction moves no tokens, so only its message and SOL cost are checked.
+    pub fn settle(
+        &self,
+        transaction: &VersionedTransaction,
+        meta: Option<&UiTransactionStatusMeta>,
+    ) -> Result<SettledSplSweep, SweepSettlementError> {
+        let (message, meta) =
+            validate_sweep_message(transaction, meta, |hash| self.sweep_message(hash))?;
+        if meta.fee > SPL_SWEEP_TRANSACTION_FEE {
+            return Err(SweepMismatch::UnexpectedFee {
+                expected: SPL_SWEEP_TRANSACTION_FEE,
+                actual: meta.fee,
+            }
+            .into());
+        }
+        // The minter pays the fee and nothing else. No other account changes its lamports.
+        for (index, (pre, post)) in meta
+            .pre_balances
+            .iter()
+            .zip(&meta.post_balances)
+            .enumerate()
+        {
+            let expected_decrease = if index == 0 { meta.fee } else { 0 };
+            if pre.checked_sub(*post) != Some(expected_decrease) {
+                return Err(SweepMismatch::UnexpectedBalanceChange {
+                    address: message.account_keys[index],
+                    pre: *pre,
+                    post: *post,
+                    expected_decrease,
+                }
+                .into());
+            }
+        }
+        let failed = meta.err.is_some();
+        if !failed {
+            self.validate_token_balances(&message.account_keys, meta)?;
+        }
+        Ok(SettledSplSweep {
+            lamports_spent: meta.fee,
+            failed,
+        })
+    }
+
+    fn validate_token_balances(
+        &self,
+        keys: &[Address],
+        meta: &UiTransactionStatusMeta,
+    ) -> Result<(), SweepSettlementError> {
+        let pre = token_balances(&meta.pre_token_balances, keys)?;
+        let post = token_balances(&meta.post_token_balances, keys)?;
+        for (address, owner, expected_change) in [
+            (
+                self.deposit.address,
+                self.owner,
+                -i128::from(self.deposit.balance),
+            ),
+            (
+                self.treasury_address(),
+                self.minter_address,
+                i128::from(self.deposit.balance),
+            ),
+        ] {
+            // Both accounts exist before the sweep. A missing pre-balance is not read as zero.
+            let pre = pre
+                .get(&address)
+                .ok_or(UnreadableOutcome::IncompleteTokenBalances)?;
+            let post = post
+                .get(&address)
+                .ok_or(UnreadableOutcome::IncompleteTokenBalances)?;
+            let pre = self.token_amount(address, owner, pre)?;
+            let post = self.token_amount(address, owner, post)?;
+            if i128::from(post) - i128::from(pre) != expected_change {
+                return Err(SweepMismatch::UnexpectedTokenBalanceChange {
+                    address,
+                    pre,
+                    post,
+                    expected_change,
+                }
+                .into());
+            }
+        }
+        Ok(())
+    }
+
+    fn token_amount(
+        &self,
+        address: Address,
+        owner: Address,
+        balance: &UiTransactionTokenBalance,
+    ) -> Result<u64, SweepSettlementError> {
+        let (OptionSerializer::Some(actual_owner), OptionSerializer::Some(program)) =
+            (&balance.owner, &balance.program_id)
+        else {
+            return Err(UnreadableOutcome::IncompleteTokenBalances.into());
+        };
+        if balance.mint != self.deposit.mint.to_string()
+            || *actual_owner != owner.to_string()
+            || *program != spl_token_interface::id().to_string()
+            || balance.ui_token_amount.decimals != self.decimals
+        {
+            return Err(SweepMismatch::UnexpectedTokenAccount { address }.into());
+        }
+        balance
+            .ui_token_amount
+            .amount
+            .parse()
+            .map_err(|error: std::num::ParseIntError| {
+                UnreadableOutcome::InvalidTokenBalances {
+                    reason: error.to_string(),
+                }
+                .into()
+            })
+    }
+}
+
+fn token_balances<'a>(
+    balances: &'a OptionSerializer<Vec<UiTransactionTokenBalance>>,
+    keys: &[Address],
+) -> Result<BTreeMap<Address, &'a UiTransactionTokenBalance>, SweepSettlementError> {
+    let OptionSerializer::Some(balances) = balances else {
+        return Err(UnreadableOutcome::IncompleteTokenBalances.into());
+    };
+    let mut by_address = BTreeMap::new();
+    for balance in balances {
+        let address = *keys.get(balance.account_index as usize).ok_or_else(|| {
+            UnreadableOutcome::InvalidTokenBalances {
+                reason: "Token account index is out of bounds".to_string(),
+            }
+        })?;
+        if by_address.insert(address, balance).is_some() {
+            return Err(UnreadableOutcome::InvalidTokenBalances {
+                reason: "Duplicate token account balance".to_string(),
+            }
+            .into());
+        }
+    }
+    Ok(by_address)
+}
+
+/// The validated outcome of a sweep transaction.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SettledSplSweep {
+    /// The lamports the minter spent on the transaction fee.
+    pub lamports_spent: Lamport,
+    /// Whether the transaction failed on-chain, in which case no tokens moved.
+    pub failed: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Error)]

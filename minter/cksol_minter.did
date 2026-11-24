@@ -597,6 +597,7 @@ type EventType = variant {
         signature: Signature;
     };
     // A previously submitted Solana transaction has failed.
+    // An SPL sweep stays reserved until FailedSplSweep records its actual cost.
     FailedTransaction : record {
         // The signature of the failed Solana transaction.
         signature: Signature;
@@ -716,6 +717,31 @@ type EventType = variant {
         balance : nat64;
         // The fee deducted from the ledger mint, in the mint's smallest units.
         fee : nat64;
+    };
+    // A finalized SPL sweep was validated and its deposit queued for ledger minting.
+    CreditedSplSweep : record {
+        // The signature of the finalized sweep transaction.
+        signature : Signature;
+        // The main account's actual spend on the transaction fee.
+        lamports_spent : Lamport;
+        // The identifier of the swept SPL deposit.
+        deposit_id : DepositSplId;
+        // The amount to mint: the swept balance minus the fee, in the mint's smallest units.
+        amount_to_mint : nat64;
+    };
+    // The observed outcome of an SPL sweep did not match its plan, so its deposit stays
+    // locked and its SOL reservation stays withheld.
+    QuarantinedSplSweep : record {
+        // The signature of the sweep transaction.
+        signature : Signature;
+    };
+    // The actual cost of an SPL sweep recorded as failed by `FailedTransaction` was
+    // validated. The unspent reservation is returned and the deposit is dropped.
+    FailedSplSweep : record {
+        // The signature of the failed sweep transaction.
+        signature : Signature;
+        // The main account's actual spend on the transaction fee.
+        lamports_spent : Lamport;
     };
 };
 

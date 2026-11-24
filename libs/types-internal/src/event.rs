@@ -54,6 +54,7 @@ pub enum EventType {
         signature: Signature,
     },
     /// A previously submitted Solana transaction has failed.
+    /// An SPL sweep stays reserved until `FailedSplSweep` records its actual cost.
     FailedTransaction {
         /// The signature of the failed Solana transaction.
         signature: Signature,
@@ -181,6 +182,29 @@ pub enum EventType {
         balance: u64,
         /// Captured fee in token units.
         fee: u64,
+    },
+    /// A validated successful SPL sweep and its net token obligation.
+    CreditedSplSweep {
+        /// Sweep transaction signature.
+        signature: Signature,
+        /// Actual network cost in lamports.
+        lamports_spent: u64,
+        /// The accepted deposit.
+        deposit_id: u64,
+        /// Captured net token amount to mint.
+        amount_to_mint: u64,
+    },
+    /// A contradictory outcome retains the sweep's pair and SOL reservation.
+    QuarantinedSplSweep {
+        /// Sweep transaction signature.
+        signature: Signature,
+    },
+    /// The validated actual network cost of an SPL sweep recorded as failed by `FailedTransaction`.
+    FailedSplSweep {
+        /// Sweep transaction signature.
+        signature: Signature,
+        /// Actual network cost in lamports.
+        lamports_spent: u64,
     },
 }
 

@@ -39,6 +39,27 @@ impl From<Event> for CandidEvent {
 impl From<EventType> for CandidEventType {
     fn from(event_type: EventType) -> Self {
         match event_type {
+            EventType::CreditedSplSweep {
+                signature,
+                lamports_spent,
+                deposit_id,
+                amount_to_mint,
+            } => CandidEventType::CreditedSplSweep {
+                signature: CandidSignature::from(signature),
+                lamports_spent,
+                deposit_id,
+                amount_to_mint,
+            },
+            EventType::QuarantinedSplSweep { signature } => CandidEventType::QuarantinedSplSweep {
+                signature: CandidSignature::from(signature),
+            },
+            EventType::FailedSplSweep {
+                signature,
+                lamports_spent,
+            } => CandidEventType::FailedSplSweep {
+                signature: CandidSignature::from(signature),
+                lamports_spent,
+            },
             EventType::RequestedOperatingRefill {
                 refill_id,
                 amount,
@@ -254,6 +275,27 @@ impl TryFrom<CandidEventType> for EventType {
 
     fn try_from(event_type: CandidEventType) -> Result<Self, Self::Error> {
         Ok(match event_type {
+            CandidEventType::CreditedSplSweep {
+                signature,
+                lamports_spent,
+                deposit_id,
+                amount_to_mint,
+            } => EventType::CreditedSplSweep {
+                signature: Signature::from(signature),
+                lamports_spent,
+                deposit_id,
+                amount_to_mint,
+            },
+            CandidEventType::QuarantinedSplSweep { signature } => EventType::QuarantinedSplSweep {
+                signature: Signature::from(signature),
+            },
+            CandidEventType::FailedSplSweep {
+                signature,
+                lamports_spent,
+            } => EventType::FailedSplSweep {
+                signature: Signature::from(signature),
+                lamports_spent,
+            },
             CandidEventType::RequestedOperatingRefill {
                 refill_id,
                 amount,

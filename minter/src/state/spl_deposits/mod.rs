@@ -14,7 +14,8 @@ mod tests;
 
 mod sweeps;
 pub use sweeps::{
-    SPL_SWEEP_TRANSACTION_FEE, SplSweep, SplSweepRecoveryError, SplSweeps, SubmittedSplSweep,
+    SPL_SWEEP_TRANSACTION_FEE, SettledSplSweep, SplSweep, SplSweepRecoveryError, SplSweeps,
+    SubmittedSplSweep,
 };
 
 /// SPL deposits grouped by their progress towards a token mint.
@@ -29,10 +30,13 @@ pub struct SplDeposits {
     swept: SplSweeps,
     finalized: SplSweeps,
     failed: SplSweeps,
+    pending_mints: BTreeMap<DepositSplId, PendingSplMint>,
     dropped: BTreeMap<DepositSplId, SweptSplDeposit>,
+    quarantined: BTreeMap<DepositSplId, QuarantinedSplDeposit>,
     in_flight_ids: BTreeMap<(Account, Address), DepositSplId>,
     latest_ids: BTreeMap<(Account, Address), DepositSplId>,
     queued_at_by_id: BTreeMap<DepositSplId, u64>,
+    collected_deposit_fees: BTreeMap<Address, u128>,
 }
 
 impl SplDeposits {
@@ -59,6 +63,19 @@ impl SplDeposits {
 
     pub fn dropped(&self) -> &BTreeMap<DepositSplId, SweptSplDeposit> {
         &self.dropped
+    }
+
+    pub fn pending_mints(&self) -> &BTreeMap<DepositSplId, PendingSplMint> {
+        &self.pending_mints
+    }
+
+    pub fn quarantined(&self) -> &BTreeMap<DepositSplId, QuarantinedSplDeposit> {
+        &self.quarantined
+    }
+
+    /// The token fees retained in the treasury of the mint, in its smallest units.
+    pub fn collected_deposit_fees(&self, mint: &Address) -> u128 {
+        self.collected_deposit_fees.get(mint).copied().unwrap_or(0)
     }
 
     pub fn in_flight_id(&self, account: &Account, mint: &Address) -> Option<DepositSplId> {
@@ -163,6 +180,83 @@ impl SplDeposits {
         self.failed.insert(*signature, sweep);
     }
 
+    /// Moves the deposit of a finalized sweep to its pending token mint and counts its token
+    /// fee, which stays in the treasury. Returns the settled sweep for its reservation.
+    pub(super) fn credit_sweep(
+        &mut self,
+        signature: &Signature,
+        deposit_id: DepositSplId,
+        amount_to_mint: u64,
+        timestamp: u64,
+    ) -> SubmittedSplSweep {
+        let submitted = self.finalized.get(signature).unwrap_or_else(|| {
+            panic!("Attempted to credit SPL sweep {signature} that is not finalized")
+        });
+        let deposit = submitted.sweep.deposit();
+        assert_eq!(
+            deposit_id,
+            submitted.sweep.deposit_id(),
+            "Attempted to credit SPL deposit {deposit_id} that is not part of sweep {signature}"
+        );
+        assert_eq!(
+            amount_to_mint,
+            deposit.amount_to_mint(),
+            "Attempted to credit SPL deposit {deposit_id} with an amount different from its transferred balance minus the fee"
+        );
+        assert!(
+            !self.pending_mints.contains_key(&deposit_id),
+            "Attempted to credit SPL deposit {deposit_id} twice in sweep {signature}"
+        );
+        let collected = self
+            .collected_deposit_fees(&deposit.mint)
+            .checked_add(u128::from(deposit.fee))
+            .expect("BUG: collected SPL deposit fees overflow");
+        let submitted = self
+            .finalized
+            .remove(signature)
+            .expect("BUG: the finalized sweep was read above");
+        let deposit = submitted.sweep.deposit().clone();
+        self.collected_deposit_fees.insert(deposit.mint, collected);
+        self.pending_mints.insert(
+            deposit_id,
+            PendingSplMint {
+                deposit: SweptSplDeposit {
+                    deposit,
+                    signature: *signature,
+                },
+                amount_to_mint,
+                created_at_time: timestamp,
+            },
+        );
+        submitted
+    }
+
+    /// Quarantines the deposit of a sweep whose observed outcome contradicts its plan,
+    /// keeping its account and mint in flight and its SOL reserved.
+    pub(super) fn quarantine_sweep(&mut self, signature: &Signature) {
+        let submitted = self
+            .finalized
+            .remove(signature)
+            .or_else(|| self.failed.remove(signature))
+            .unwrap_or_else(|| {
+                panic!("Attempted to quarantine SPL sweep {signature} without an observed outcome")
+            });
+        let deposit_id = submitted.sweep.deposit_id();
+        self.queued_at_by_id.remove(&deposit_id);
+        self.quarantined.insert(
+            deposit_id,
+            QuarantinedSplDeposit {
+                deposit: SweptSplDeposit {
+                    deposit: submitted.sweep.deposit().clone(),
+                    signature: *signature,
+                },
+                cause: SplQuarantineCause::SweepUnreadable {
+                    reserved_lamports: submitted.reserved_lamports,
+                },
+            },
+        );
+    }
+
     /// Drops an expired sweep and releases its account and mint pair. Returns the sweep
     /// for its reservation.
     pub(super) fn drop_swept(&mut self, signature: &Signature) -> SubmittedSplSweep {
@@ -170,6 +264,16 @@ impl SplDeposits {
             .swept
             .remove(signature)
             .unwrap_or_else(|| panic!("Attempted to drop SPL sweep {signature} that is not swept"));
+        self.drop_deposit(&sweep.sweep, signature);
+        sweep
+    }
+
+    /// Drops a sweep whose failure was observed before and releases its account and mint
+    /// pair. Returns the sweep for its reservation.
+    pub(super) fn drop_failed(&mut self, signature: &Signature) -> SubmittedSplSweep {
+        let sweep = self.failed.remove(signature).unwrap_or_else(|| {
+            panic!("Attempted to settle SPL sweep {signature} whose failure was not recorded")
+        });
         self.drop_deposit(&sweep.sweep, signature);
         sweep
     }
@@ -221,4 +325,52 @@ impl QueuedSplDeposit {
 pub struct SweptSplDeposit {
     pub deposit: QueuedSplDeposit,
     pub signature: Signature,
+}
+
+/// A swept SPL deposit waiting for its token ledger mint.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PendingSplMint {
+    pub deposit: SweptSplDeposit,
+    pub amount_to_mint: u64,
+    /// The credit event's timestamp, reused by ledger retries for deduplication.
+    pub created_at_time: u64,
+}
+
+impl PendingSplMint {
+    pub fn account(&self) -> Account {
+        self.deposit.deposit.account
+    }
+
+    pub fn sweep_signature(&self) -> Signature {
+        self.deposit.signature
+    }
+}
+
+/// A swept SPL deposit the minter stopped processing, together with what resolving it takes.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct QuarantinedSplDeposit {
+    pub deposit: SweptSplDeposit,
+    pub cause: SplQuarantineCause,
+}
+
+impl QuarantinedSplDeposit {
+    pub fn account(&self) -> Account {
+        self.deposit.deposit.account
+    }
+
+    pub fn sweep_signature(&self) -> Signature {
+        self.deposit.signature
+    }
+}
+
+/// Why a swept SPL deposit was quarantined, and therefore what a manual resolution has to
+/// establish before crediting it by hand.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SplQuarantineCause {
+    /// The observed outcome of the sweep contradicted its plan: nothing was credited and
+    /// nothing was minted. The SOL reserved for the sweep stays withheld.
+    SweepUnreadable {
+        /// The SOL still withheld from both spendable balances.
+        reserved_lamports: Lamport,
+    },
 }

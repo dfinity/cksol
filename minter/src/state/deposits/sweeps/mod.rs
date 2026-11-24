@@ -388,6 +388,10 @@ pub enum UnreadableOutcome {
     NoMetaField,
     #[error("the balances in the metadata do not cover all account keys")]
     IncompleteBalances,
+    #[error("the token balances in the metadata do not cover the sweep accounts")]
+    IncompleteTokenBalances,
+    #[error("the token balances could not be read: {reason}")]
+    InvalidTokenBalances { reason: String },
 }
 
 #[derive(Debug, PartialEq, Eq, Error)]
@@ -417,6 +421,19 @@ pub enum SweepMismatch {
     UnexpectedAmountReceived { expected: Lamport, actual: Lamport },
     #[error(transparent)]
     Mint(#[from] SweepMintError),
+    #[error("the token balance metadata for {address} does not match the planned token account")]
+    UnexpectedTokenAccount { address: Address },
+    #[error(
+        "the token account {address} went from {pre} to {post} tokens instead of changing by {expected_change}"
+    )]
+    UnexpectedTokenBalanceChange {
+        address: Address,
+        pre: u64,
+        post: u64,
+        expected_change: i128,
+    },
+    #[error("the sweep transaction succeeded, but its status reported a failure")]
+    TransactionSucceeded,
 }
 
 #[derive(Debug, PartialEq, Eq, Error)]

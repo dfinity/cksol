@@ -55,8 +55,9 @@ pub use deposits::{
 pub use nonce_pool::{DurableNoncePool, NoncePoolError, NonceRead};
 pub use spl::SupportedSplToken;
 pub use spl_deposits::{
-    QueuedSplDeposit, SPL_SWEEP_TRANSACTION_FEE, SplDeposits, SplSweep, SplSweepRecoveryError,
-    SplSweeps, SubmittedSplSweep, SweptSplDeposit,
+    PendingSplMint, QuarantinedSplDeposit, QueuedSplDeposit, SPL_SWEEP_TRANSACTION_FEE,
+    SettledSplSweep, SplDeposits, SplQuarantineCause, SplSweep, SplSweepRecoveryError, SplSweeps,
+    SubmittedSplSweep, SweptSplDeposit,
 };
 pub use watchlist::{
     MAX_WATCHED_ADDRESSES, WATCH_WINDOW, WatchedAddress, Watchlist, WatchlistFull,
@@ -649,6 +650,45 @@ impl State {
         self.balance = balance;
     }
 
+    fn process_credited_spl_sweep(
+        &mut self,
+        signature: &Signature,
+        lamports_spent: Lamport,
+        deposit_id: DepositSplId,
+        amount_to_mint: u64,
+        timestamp: u64,
+    ) {
+        let sweep = self
+            .spl_deposits
+            .finalized()
+            .get(signature)
+            .unwrap_or_else(|| {
+                panic!("Attempted to credit SPL sweep {signature} that is not finalized")
+            });
+        let unspent = unspent_spl_sweep_cost(sweep, lamports_spent);
+        self.spl_deposits
+            .credit_sweep(signature, deposit_id, amount_to_mint, timestamp);
+        self.return_spl_sweep_cost(unspent);
+    }
+
+    /// Settles the validated cost of an SPL sweep whose failure was observed before.
+    fn process_failed_spl_sweep(&mut self, signature: &Signature, lamports_spent: Lamport) {
+        let sweep = self
+            .spl_deposits
+            .failed()
+            .get(signature)
+            .unwrap_or_else(|| {
+                panic!("Attempted to settle SPL sweep {signature} whose failure was not recorded")
+            });
+        let unspent = unspent_spl_sweep_cost(sweep, lamports_spent);
+        self.spl_deposits.drop_failed(signature);
+        self.return_spl_sweep_cost(unspent);
+    }
+
+    fn process_quarantined_spl_sweep(&mut self, signature: &Signature) {
+        self.spl_deposits.quarantine_sweep(signature);
+    }
+
     pub fn withdrawal_status(&self, block_index: u64) -> WithdrawSolStatus {
         let burn_index = LedgerBurnIndex::from(block_index);
         if self.pending_withdrawal_requests.contains_key(&burn_index)
@@ -1231,4 +1271,12 @@ pub enum MinterTransaction {
         /// The time, in nanoseconds since the epoch, at which the transaction was recorded as submitted.
         submitted_at: u64,
     },
+}
+
+/// The part of the reservation of a sweep that its actual cost leaves unspent.
+fn unspent_spl_sweep_cost(sweep: &SubmittedSplSweep, lamports_spent: Lamport) -> Lamport {
+    sweep
+        .reserved_lamports
+        .checked_sub(lamports_spent)
+        .expect("Attempted to settle an SPL sweep above its reserved cost")
 }

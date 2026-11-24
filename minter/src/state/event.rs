@@ -115,6 +115,7 @@ pub enum EventType {
     /// A previously submitted Solana transaction has failed.
     /// The deposits of a failed sweep transaction are dropped. For a sweep, the event is
     /// recorded by [`process_dropped_sweep`], which also re-arms the automatic deposits.
+    /// A failed SPL sweep keeps its deposit and reservation until `FailedSplSweep` settles it.
     ///
     /// [`process_dropped_sweep`]: crate::state::audit::process_dropped_sweep
     #[n(6)]
@@ -267,6 +268,31 @@ pub enum EventType {
         #[n(5)]
         fee: u64,
     },
+    /// A finalized SPL sweep was validated and its deposit queued for ledger minting.
+    /// The unspent part of its SOL reservation is returned and its token fee is counted.
+    #[n(17)]
+    CreditedSplSweep {
+        /// The signature of the finalized sweep transaction.
+        #[cbor(n(0), with = "cbor::signature")]
+        signature: Signature,
+        /// The main account's actual spend on the transaction fee.
+        #[n(1)]
+        lamports_spent: Lamport,
+        /// The identifier of the swept SPL deposit.
+        #[n(2)]
+        deposit_id: DepositSplId,
+        /// The amount to mint: the swept balance minus the fee, in the mint's smallest units.
+        #[n(3)]
+        amount_to_mint: u64,
+    },
+    /// The observed outcome of an SPL sweep did not match its plan, so its deposit stays
+    /// locked and its SOL reservation stays withheld.
+    #[n(18)]
+    QuarantinedSplSweep {
+        /// The signature of the sweep transaction.
+        #[cbor(n(0), with = "cbor::signature")]
+        signature: Signature,
+    },
     /// A refill intent recorded before the ckSOL burn. Its source is always the
     /// minter's 0xbeef subaccount; its memo is OperatingRefill { refill_id }.
     #[n(21)]
@@ -299,6 +325,17 @@ pub enum EventType {
     QuarantinedOperatingRefill {
         #[n(0)]
         refill_id: u64,
+    },
+    /// The actual cost of an SPL sweep recorded as failed by [`EventType::FailedTransaction`]
+    /// was validated. The unspent reservation is returned and the deposit is dropped.
+    #[n(35)]
+    FailedSplSweep {
+        /// The signature of the failed sweep transaction.
+        #[cbor(n(0), with = "cbor::signature")]
+        signature: Signature,
+        /// The main account's actual spend on the transaction fee.
+        #[n(1)]
+        lamports_spent: Lamport,
     },
 }
 
