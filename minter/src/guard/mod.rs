@@ -1,6 +1,7 @@
 use crate::state::{State, TaskType, mutate_state};
-use cksol_types::{DepositSolError, WithdrawSolError};
+use cksol_types::{DepositSolError, DepositSplError, WithdrawSolError};
 use icrc_ledger_types::icrc1::account::Account;
+use solana_address::Address;
 use std::{collections::BTreeSet, marker::PhantomData};
 
 #[cfg(test)]
@@ -15,6 +16,17 @@ pub enum GuardError {
 }
 
 impl From<GuardError> for DepositSolError {
+    fn from(e: GuardError) -> Self {
+        match e {
+            GuardError::AlreadyProcessing => Self::AlreadyProcessing,
+            GuardError::TooManyConcurrentRequests => {
+                Self::TemporarilyUnavailable("too many concurrent requests".to_string())
+            }
+        }
+    }
+}
+
+impl From<GuardError> for DepositSplError {
     fn from(e: GuardError) -> Self {
         match e {
             GuardError::AlreadyProcessing => Self::AlreadyProcessing,
@@ -87,6 +99,16 @@ impl PendingRequests for PendingDepositSolRequests {
     }
 }
 
+pub struct PendingDepositSplRequests;
+
+impl PendingRequests for PendingDepositSplRequests {
+    type Key = (Account, Address);
+
+    fn pending_requests(state: &mut State) -> &mut BTreeSet<Self::Key> {
+        state.pending_deposit_spl_request_guards_mut()
+    }
+}
+
 pub struct PendingWithdrawalRequests;
 
 impl PendingRequests for PendingWithdrawalRequests {
@@ -99,6 +121,13 @@ impl PendingRequests for PendingWithdrawalRequests {
 
 pub fn deposit_sol_guard(account: Account) -> Result<Guard<PendingDepositSolRequests>, GuardError> {
     Guard::new(account)
+}
+
+pub fn deposit_spl_guard(
+    account: Account,
+    mint: Address,
+) -> Result<Guard<PendingDepositSplRequests>, GuardError> {
+    Guard::new((account, mint))
 }
 
 pub fn withdrawal_guard(account: Account) -> Result<Guard<PendingWithdrawalRequests>, GuardError> {

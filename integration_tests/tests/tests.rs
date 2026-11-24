@@ -202,6 +202,8 @@ mod lifecycle {
                 automatic_deposit_fee: Some(Setup::DEFAULT_AUTOMATIC_DEPOSIT_FEE),
                 collected_automatic_deposit_fees: Some(0),
                 supported_spl_tokens: Some(vec![]),
+                deposit_spl_required_cycles: Some(80_000_000_000),
+                spl_deposit_consolidation_fee: Some(70_000_000_000),
             }
         );
 
@@ -247,6 +249,8 @@ mod lifecycle {
                 automatic_deposit_fee: Some(NEW_AUTOMATIC_DEPOSIT_FEE),
                 collected_automatic_deposit_fees: Some(0),
                 supported_spl_tokens: Some(vec![]),
+                deposit_spl_required_cycles: Some(80_000_000_000),
+                spl_deposit_consolidation_fee: Some(70_000_000_000),
             }
         );
 

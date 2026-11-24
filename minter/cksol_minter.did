@@ -283,6 +283,10 @@ type MinterInfo = record {
     collected_automatic_deposit_fees : opt Lamport;
     // Supported classic SPL tokens, with registry and deposit settings.
     supported_spl_tokens : opt vec SplTokenInfo;
+    // Source-account read budget plus the SPL consolidation fee, in cycles.
+    deposit_spl_required_cycles : opt nat;
+    // Cycle fee charged when a new manual SPL deposit is queued.
+    spl_deposit_consolidation_fee : opt nat;
 };
 
 // The ckSOL minter service arguments.
@@ -310,6 +314,7 @@ type UpgradeArgs = record {
     add_spl_tokens : opt vec SplTokenRegistration;
     update_spl_tokens : opt vec SplTokenUpdate;
     operating_balance_refill : opt OperatingRefillConfig;
+    spl_deposit_consolidation_fee : opt nat64;
 };
 
 type WithdrawSolArgs = record {
@@ -782,10 +787,30 @@ type OperatingBalance = record {
     top_up_account : Account;
 };
 
+type DepositSplArgs = record {
+    owner : opt principal;
+    subaccount : opt blob;
+    mint : Address;
+};
+
+type DepositSplError = variant {
+    AlreadyProcessing;
+    InsufficientCycles : InsufficientCyclesError;
+    ValueTooSmall : record { balance : nat64; minimum_balance : nat64 };
+    UnsupportedToken : record { mint : Address };
+    TokenPaused : record { mint : Address };
+    InvalidTokenAccount : text;
+    TemporarilyUnavailable : text;
+};
+
 service : (MinterArg) -> {
+    // Manually queue a classic SPL deposit; the caller may sponsor another owner.
+    deposit_spl : (DepositSplArgs) -> (variant { Ok : DepositSplId; Err : DepositSplError });
     // Unbacked operating SOL and the ckSOL account used to fund automatic refills.
     get_operating_balance : () -> (OperatingBalance) query;
-    // Returns the Solana address to which the owner should send SOL.
+    // Returns the Solana address to which the owner should send SOL, or the supported
+    // SPL tokens listed in `get_minter_info`. For an SPL token, the tokens go to the
+    // associated token account of this address.
     //
     // If the owner is not set, it defaults to the caller's principal.
     // The resolved owner must be a non-anonymous principal.
@@ -812,6 +837,7 @@ service : (MinterArg) -> {
     // the minter reads the balance of the address on a schedule for about
     // a day and queues a sweep once it reaches the minimum deposit amount,
     // deducting the automatic deposit fee from the minted amount.
+    // The automatic flow detects SOL only; an SPL deposit needs `deposit_spl`.
     //
     // The owner is always the caller, who must be a non-anonymous principal.
     watch_deposit_address: (WatchDepositAddressArgs) -> (WatchDepositAddressResult);

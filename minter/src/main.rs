@@ -19,10 +19,10 @@ use cksol_minter::{
     withdraw::{WITHDRAWAL_PROCESSING_DELAY, process_pending_withdrawals},
 };
 use cksol_types::{
-    Address, DepositSolArgs, DepositSolError, DepositSolId, DepositSolStatus,
-    GetDepositAddressArgs, MinterInfo, OperatingBalance, StandardRecord, WatchDepositAddressArgs,
-    WatchDepositAddressError, WatchDepositAddressOk, WithdrawSolArgs, WithdrawSolError,
-    WithdrawSolOk, WithdrawSolStatus, WithdrawSolStatusArgs,
+    Address, DepositSolArgs, DepositSolError, DepositSolId, DepositSolStatus, DepositSplArgs,
+    DepositSplError, DepositSplId, GetDepositAddressArgs, MinterInfo, OperatingBalance,
+    StandardRecord, WatchDepositAddressArgs, WatchDepositAddressError, WatchDepositAddressOk,
+    WithdrawSolArgs, WithdrawSolError, WithdrawSolOk, WithdrawSolStatus, WithdrawSolStatusArgs,
 };
 use cksol_types_internal::{MinterArg, log::Priority};
 use ic_http_types::{HttpRequest, HttpResponse, HttpResponseBuilder};
@@ -169,6 +169,8 @@ fn get_minter_info() -> MinterInfo {
         automatic_deposit_fee: s.automatic_deposit_fee(),
         collected_automatic_deposit_fees: Some(s.collected_automatic_deposit_fees()),
         supported_spl_tokens: Some(s.supported_spl_tokens()),
+        deposit_spl_required_cycles: Some(s.deposit_spl_required_cycles()),
+        spl_deposit_consolidation_fee: Some(s.spl_deposit_consolidation_fee()),
     })
 }
 
@@ -297,6 +299,12 @@ fn get_operating_balance() -> OperatingBalance {
         balance: read_state(|s| s.operating_balance().balance()),
         top_up_account: operating_top_up_account(ic_cdk::api::canister_self()),
     }
+}
+
+#[ic_cdk::update]
+async fn deposit_spl(args: DepositSplArgs) -> Result<DepositSplId, DepositSplError> {
+    let account = resolve_account(args.owner, args.subaccount);
+    cksol_minter::deposit::spl::deposit_spl(&IcCanisterRuntime::new(), account, args.mint).await
 }
 
 fn setup_timers() {

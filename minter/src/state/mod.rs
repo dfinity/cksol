@@ -53,6 +53,7 @@ pub use deposits::{
     SweepRecoveryError, SweepSettlementError, Sweeps, SweptDeposit, Transfer, UnreadableOutcome,
 };
 pub use nonce_pool::{DurableNoncePool, NoncePoolError, NonceRead};
+pub use spl::SupportedSplToken;
 pub use spl_deposits::{QueuedSplDeposit, SplDeposits};
 pub use watchlist::{
     MAX_WATCHED_ADDRESSES, WATCH_WINDOW, WatchedAddress, Watchlist, WatchlistFull,
@@ -140,6 +141,8 @@ pub struct State {
     supported_spl_tokens: BTreeMap<Address, spl::SupportedSplToken>,
     operating_balance: operating_balance::OperatingBalance,
     spl_deposits: SplDeposits,
+    spl_deposit_consolidation_fee: u128,
+    pending_deposit_spl_request_guards: BTreeSet<(Account, Address)>,
 }
 
 impl State {
@@ -214,6 +217,20 @@ impl State {
 
     pub fn spl_deposits(&self) -> &SplDeposits {
         &self.spl_deposits
+    }
+
+    pub fn spl_deposit_consolidation_fee(&self) -> u128 {
+        self.spl_deposit_consolidation_fee
+    }
+
+    pub fn deposit_spl_required_cycles(&self) -> u128 {
+        self.spl_deposit_consolidation_fee
+            .checked_add(crate::constants::GET_ACCOUNT_INFO_CYCLES)
+            .expect("BUG: SPL deposit cycle budget overflow")
+    }
+
+    pub fn pending_deposit_spl_request_guards_mut(&mut self) -> &mut BTreeSet<(Account, Address)> {
+        &mut self.pending_deposit_spl_request_guards
     }
 
     pub fn watchlist(&self) -> &Watchlist {
@@ -407,6 +424,7 @@ impl State {
             add_spl_tokens,
             update_spl_tokens,
             operating_balance_refill,
+            spl_deposit_consolidation_fee,
         }: UpgradeArgs,
     ) -> Result<(), InvalidStateError> {
         if let Some(sol_rpc_canister_id) = sol_rpc_canister_id {
@@ -438,6 +456,9 @@ impl State {
         self.supported_spl_tokens = self.updated_spl_tokens(add_spl_tokens, update_spl_tokens)?;
         if let Some(config) = operating_balance_refill {
             self.operating_balance.set_config(config);
+        }
+        if let Some(fee) = spl_deposit_consolidation_fee {
+            self.spl_deposit_consolidation_fee = u128::from(fee);
         }
         self.validate()
     }
@@ -992,6 +1013,8 @@ impl TryFrom<InitArgs> for State {
             supported_spl_tokens: BTreeMap::new(),
             operating_balance: operating_balance::OperatingBalance::default(),
             spl_deposits: SplDeposits::default(),
+            spl_deposit_consolidation_fee: crate::constants::DEFAULT_SPL_DEPOSIT_CONSOLIDATION_FEE,
+            pending_deposit_spl_request_guards: BTreeSet::new(),
         };
         state.validate()?;
         Ok(state)

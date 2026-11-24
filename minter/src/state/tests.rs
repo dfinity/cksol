@@ -1100,6 +1100,9 @@ mod state_from_init_args {
                 supported_spl_tokens: BTreeMap::new(),
                 operating_balance: super::operating_balance::OperatingBalance::default(),
                 spl_deposits: SplDeposits::default(),
+                spl_deposit_consolidation_fee:
+                    crate::constants::DEFAULT_SPL_DEPOSIT_CONSOLIDATION_FEE,
+                pending_deposit_spl_request_guards: BTreeSet::new(),
             }
         );
     }

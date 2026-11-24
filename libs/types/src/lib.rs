@@ -360,6 +360,10 @@ pub struct MinterInfo {
     /// Registered SPL tokens in mint-address order; empty when none are registered.
     /// Absent in responses from older minter versions.
     pub supported_spl_tokens: Option<Vec<SplTokenInfo>>,
+    /// Cycles to attach for a new manual SPL deposit: the source-read budget plus consolidation.
+    pub deposit_spl_required_cycles: Option<u128>,
+    /// Cycle fee charged only when a new SPL deposit is queued; excludes the source-read cost.
+    pub spl_deposit_consolidation_fee: Option<u128>,
 }
 
 /// An entry of the list returned by the [ICRC-10](https://github.com/dfinity/ICRC/blob/main/ICRCs/ICRC-10/ICRC-10.md)
@@ -406,3 +410,51 @@ pub struct OperatingBalance {
 
 /// Sequence number of a manually queued SPL deposit, independent of SOL deposit IDs.
 pub type DepositSplId = u64;
+
+/// Arguments for a manual SPL deposit. The caller may sponsor another owner's deposit.
+#[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize, Serialize)]
+pub struct DepositSplArgs {
+    /// Beneficiary principal; defaults to the caller.
+    pub owner: Option<Principal>,
+    /// Beneficiary subaccount; defaults to the all-zero subaccount.
+    pub subaccount: Option<Subaccount>,
+    /// Registered classic SPL mint.
+    pub mint: Address,
+}
+
+/// A manual SPL deposit could not be queued.
+#[derive(Debug, Clone, PartialEq, CandidType, Deserialize, Error)]
+pub enum DepositSplError {
+    /// Another request for the same account and mint is awaiting its balance read.
+    #[error("There is already a concurrent SPL deposit request for this account and mint")]
+    AlreadyProcessing,
+    /// Attach the reported cycle budget before making the source-account RPC call.
+    #[error(transparent)]
+    InsufficientCycles(#[from] InsufficientCyclesError),
+    /// Source tokens do not cover the minimum net deposit plus captured token fee.
+    #[error("Balance {balance} is below the minimum required balance {minimum_balance}")]
+    ValueTooSmall {
+        /// Gross source token balance.
+        balance: u64,
+        /// Required gross token balance, including the token fee.
+        minimum_balance: u64,
+    },
+    /// The mint has no registry entry.
+    #[error("Unsupported SPL token: {mint}")]
+    UnsupportedToken {
+        /// Requested mint address.
+        mint: Address,
+    },
+    /// New deposits are paused for this mint.
+    #[error("SPL deposits are paused for token {mint}")]
+    TokenPaused {
+        /// Requested mint address.
+        mint: Address,
+    },
+    /// Wrong program, token owner, mint, state or account encoding.
+    #[error("Invalid SPL token account: {0}")]
+    InvalidTokenAccount(String),
+    /// A key or RPC result is unavailable, or concurrent request capacity was reached.
+    #[error("SPL deposit is temporarily unavailable: {0}")]
+    TemporarilyUnavailable(String),
+}

@@ -1071,6 +1071,7 @@ dependencies = [
  "solana-instruction",
  "solana-message",
  "solana-nonce",
+ "solana-program-pack",
  "solana-sdk-ids",
  "solana-signature",
  "solana-system-interface 3.1.0",

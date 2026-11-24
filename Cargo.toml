@@ -68,6 +68,7 @@ solana-keypair = "3.1.2"
 solana-message = "3.1.0"
 solana-native-token = "3.0.0"
 solana-nonce = { version = "3.1.0", features = ["serde"] }
+solana-program-pack = "3.1.0"
 solana-sdk-ids = "3.1.0"
 solana-signature = "3.1.0"
 solana-system-interface = "3.1.0"

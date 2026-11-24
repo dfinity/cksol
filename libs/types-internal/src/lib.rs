@@ -104,6 +104,9 @@ pub struct UpgradeArgs {
     /// Automatic operating-SOL refill settings. Omitted values retain the configuration.
     #[cfg_attr(feature = "event", n(10))]
     pub operating_balance_refill: Option<OperatingRefillConfig>,
+    /// New cycle fee charged for a manually accepted SPL deposit, excluding its RPC cost.
+    #[cfg_attr(feature = "event", n(11))]
+    pub spl_deposit_consolidation_fee: Option<u64>,
 }
 
 /// The Solana network to connect to via the SOL RPC canister.

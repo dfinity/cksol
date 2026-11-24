@@ -8,7 +8,7 @@ use crate::{
     runtime::CanisterRuntime,
     state::read_state,
 };
-use cksol_types::DepositSolError;
+use cksol_types::{DepositSolError, DepositSplError};
 use derive_more::From;
 use ic_canister_runtime::IcError;
 use minicbor::{Decode, Encode};
@@ -20,12 +20,14 @@ use solana_account_decoder_client_types::UiAccount;
 use solana_address::Address;
 use solana_hash::Hash;
 use solana_nonce::{state::State as NonceState, versions::Versions as NonceVersions};
+use solana_program_pack::Pack;
 use solana_sdk_ids::system_program;
 use solana_signature::Signature;
 use solana_transaction::{Transaction, versioned::VersionedTransaction};
 use solana_transaction_status_client_types::{
     EncodedConfirmedTransactionWithStatusMeta, UiTransactionStatusMeta,
 };
+use spl_token_interface::state::Account as TokenAccount;
 use thiserror::Error;
 
 #[cfg(test)]
@@ -364,6 +366,112 @@ pub enum GetNonceAccountError {
     NotAnInitializedNonceAccount(String),
     #[error("Legacy nonce account, which cannot back a durable transaction")]
     LegacyNonceAccount,
+}
+
+/// Reads only the finalized source ATA, treating a missing or unallocated account as zero.
+pub async fn get_spl_token_balance<R: CanisterRuntime>(
+    runtime: &R,
+    address: Address,
+    owner: Address,
+    mint: Address,
+) -> Result<u64, GetSplTokenBalanceError> {
+    let result = read_state(|s| s.sol_rpc_client(runtime.inter_canister_call_runtime()))
+        .get_account_info(address)
+        .with_encoding(GetAccountInfoEncoding::Base64)
+        .with_commitment(CommitmentLevel::Finalized)
+        .with_response_size_estimate(2_048)
+        .with_cycles(GET_ACCOUNT_INFO_CYCLES)
+        .try_send()
+        .await;
+    match result? {
+        MultiRpcResult::Consistent(Ok(Some(account))) => token_balance(account, owner, mint),
+        MultiRpcResult::Consistent(Ok(None)) => Ok(0),
+        MultiRpcResult::Consistent(Err(error)) => Err(GetSplTokenBalanceError::RpcError(error)),
+        MultiRpcResult::Inconsistent(_) => Err(GetSplTokenBalanceError::InconsistentRpcResults),
+    }
+}
+
+fn token_balance(
+    account: UiAccount,
+    owner: Address,
+    mint: Address,
+) -> Result<u64, GetSplTokenBalanceError> {
+    let undecodable = || {
+        GetSplTokenBalanceError::NotAnInitializedTokenAccount(
+            "undecodable account data".to_string(),
+        )
+    };
+    if account.executable {
+        return Err(GetSplTokenBalanceError::UnexpectedAccountMetadata {
+            owner: account.owner,
+            executable: account.executable,
+        });
+    }
+    let data = account.data.decode().ok_or_else(undecodable)?;
+    // An address funded with SOL holds no tokens until its token account is created.
+    if account.owner == solana_sdk_ids::system_program::ID.to_string() && data.is_empty() {
+        return Ok(0);
+    }
+    if account.owner != spl_token_interface::id().to_string() {
+        return Err(GetSplTokenBalanceError::UnexpectedAccountMetadata {
+            owner: account.owner,
+            executable: account.executable,
+        });
+    }
+    let token = TokenAccount::unpack(&data).map_err(|error| {
+        GetSplTokenBalanceError::NotAnInitializedTokenAccount(error.to_string())
+    })?;
+    if token.owner.to_bytes() != owner.to_bytes() || token.mint.to_bytes() != mint.to_bytes() {
+        return Err(GetSplTokenBalanceError::UnexpectedTokenAccount {
+            owner: Address::from(token.owner.to_bytes()),
+            mint: Address::from(token.mint.to_bytes()),
+        });
+    }
+    if token.is_frozen() {
+        return Err(GetSplTokenBalanceError::FrozenTokenAccount);
+    }
+    Ok(token.amount)
+}
+
+#[derive(Debug, PartialEq, Error, From)]
+pub enum GetSplTokenBalanceError {
+    #[error("Error while calling SOL RPC canister: {0}")]
+    IcError(IcError),
+    #[error("RPC error while fetching SPL token balance: {0}")]
+    RpcError(RpcError),
+    #[error("Inconsistent RPC results for SPL token balance")]
+    InconsistentRpcResults,
+    #[error(
+        "Expected a non-executable account owned by the SPL Token program, got owner {owner} (executable: {executable})"
+    )]
+    #[from(ignore)]
+    UnexpectedAccountMetadata { owner: String, executable: bool },
+    #[error("Not an initialized token account: {0}")]
+    #[from(ignore)]
+    NotAnInitializedTokenAccount(String),
+    #[error("Token account of owner {owner} and mint {mint} is not the expected deposit account")]
+    #[from(ignore)]
+    UnexpectedTokenAccount { owner: Address, mint: Address },
+    #[error("Token account is frozen")]
+    FrozenTokenAccount,
+}
+
+impl From<GetSplTokenBalanceError> for DepositSplError {
+    fn from(error: GetSplTokenBalanceError) -> Self {
+        match error {
+            GetSplTokenBalanceError::IcError(_)
+            | GetSplTokenBalanceError::RpcError(_)
+            | GetSplTokenBalanceError::InconsistentRpcResults => {
+                Self::TemporarilyUnavailable(error.to_string())
+            }
+            GetSplTokenBalanceError::UnexpectedAccountMetadata { .. }
+            | GetSplTokenBalanceError::NotAnInitializedTokenAccount(_)
+            | GetSplTokenBalanceError::UnexpectedTokenAccount { .. }
+            | GetSplTokenBalanceError::FrozenTokenAccount => {
+                Self::InvalidTokenAccount(error.to_string())
+            }
+        }
+    }
 }
 
 pub async fn get_recent_block<R: CanisterRuntime>(

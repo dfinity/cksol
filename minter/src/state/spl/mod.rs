@@ -16,16 +16,16 @@ const MAX_SYMBOL_BYTES: usize = 20;
 
 /// Immutable token identity and mutable deposit settings, rebuilt from upgrade events.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) struct SupportedSplToken {
-    mint: Address,
-    token_program: Address,
-    decimals: u8,
-    ledger_id: Principal,
-    index_id: Option<Principal>,
-    symbol: String,
-    minimum_deposit_amount: u64,
-    deposit_fee: u64,
-    deposits_paused: bool,
+pub struct SupportedSplToken {
+    pub mint: Address,
+    pub token_program: Address,
+    pub decimals: u8,
+    pub ledger_id: Principal,
+    pub index_id: Option<Principal>,
+    pub symbol: String,
+    pub minimum_deposit_amount: u64,
+    pub deposit_fee: u64,
+    pub deposits_paused: bool,
 }
 
 fn invalid(message: impl Into<String>) -> InvalidStateError {
@@ -127,6 +127,11 @@ impl State {
             .values()
             .map(SupportedSplToken::info)
             .collect()
+    }
+
+    /// The registered identity and current deposit settings for one mint.
+    pub fn supported_spl_token(&self, mint: &Address) -> Option<&SupportedSplToken> {
+        self.supported_spl_tokens.get(mint)
     }
 
     /// Stages an entire registry update before changing the live registry.
