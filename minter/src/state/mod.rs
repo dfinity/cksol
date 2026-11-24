@@ -43,6 +43,7 @@ pub mod event;
 mod nonce_pool;
 pub mod operating_balance;
 mod spl;
+pub(crate) mod sweep;
 mod watchlist;
 
 pub use deposits::{
