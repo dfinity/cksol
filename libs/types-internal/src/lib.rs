@@ -101,6 +101,9 @@ pub struct UpgradeArgs {
     /// Updates deposit settings of registered SPL tokens.
     #[cfg_attr(feature = "event", n(9))]
     pub update_spl_tokens: Option<Vec<SplTokenUpdate>>,
+    /// Automatic operating-SOL refill settings. Omitted values retain the configuration.
+    #[cfg_attr(feature = "event", n(10))]
+    pub operating_balance_refill: Option<OperatingRefillConfig>,
 }
 
 /// The Solana network to connect to via the SOL RPC canister.
@@ -207,4 +210,31 @@ pub struct SplTokenUpdate {
     /// Whether new deposits are paused.
     #[cfg_attr(feature = "event", n(3))]
     pub deposits_paused: Option<bool>,
+}
+
+/// Automatic conversion of donated ckSOL into unbacked operating SOL.
+#[derive(Clone, Copy, Eq, PartialEq, Debug, CandidType, Deserialize)]
+#[cfg_attr(feature = "event", derive(minicbor::Encode, minicbor::Decode))]
+pub struct OperatingRefillConfig {
+    /// Stops new refills when false; an unresolved burn is still tracked.
+    #[cfg_attr(feature = "event", n(0))]
+    pub enabled: bool,
+    /// Refill when the operating balance is strictly below this many lamports.
+    #[cfg_attr(feature = "event", n(1))]
+    pub low_water_mark: u64,
+    /// Desired operating balance in lamports after a refill.
+    #[cfg_attr(feature = "event", n(2))]
+    pub target: u64,
+}
+
+// Initial defaults are part of event replay. Change live settings through UpgradeArgs,
+// rather than changing these values when tuning refills in a later release.
+impl Default for OperatingRefillConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            low_water_mark: 10_000_000, // 0.01 SOL
+            target: 100_000_000,        // 0.1 SOL
+        }
+    }
 }

@@ -10,6 +10,7 @@ pub mod lifecycle;
 pub mod metrics;
 pub mod monitor;
 mod numeric;
+pub mod operating_balance;
 mod queue_cursor;
 mod rpc;
 pub mod runtime;

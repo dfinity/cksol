@@ -243,6 +243,39 @@ pub enum EventType {
     /// which replay restores verbatim, since registrations are not recorded as events.
     #[n(15)]
     WatchedDepositAddresses(#[n(0)] WatchlistSnapshot),
+    /// A refill intent recorded before the ckSOL burn. Its source is always the
+    /// minter's 0xbeef subaccount; its memo is OperatingRefill { refill_id }.
+    #[n(21)]
+    RequestedOperatingRefill {
+        #[n(0)]
+        refill_id: u64,
+        #[n(1)]
+        amount: u64,
+        #[n(2)]
+        created_at_time: u64,
+    },
+    /// The ledger accepted or deduplicated the recorded burn.
+    #[n(22)]
+    CompletedOperatingRefill {
+        #[n(0)]
+        refill_id: u64,
+        #[n(1)]
+        burn_block_index: u64,
+    },
+    /// The first burn attempt was definitively rejected; no operating SOL is credited.
+    #[n(23)]
+    FailedOperatingRefill {
+        #[n(0)]
+        refill_id: u64,
+        #[n(1)]
+        reason: String,
+    },
+    /// The unresolved intent remains reserved for manual ledger reconciliation.
+    #[n(24)]
+    QuarantinedOperatingRefill {
+        #[n(0)]
+        refill_id: u64,
+    },
 }
 
 /// Payload of the `WatchedDepositAddresses` event: every registration, live or expired but

@@ -102,5 +102,8 @@ fn arb_signature() -> impl Strategy<Value = solana_signature::Signature> {
 }
 
 fn arb_burn_memo() -> impl Strategy<Value = BurnMemo> {
-    any::<[u8; 32]>().prop_map(|to_address| BurnMemo::Convert { to_address })
+    proptest::prop_oneof![
+        any::<[u8; 32]>().prop_map(|to_address| BurnMemo::Convert { to_address }),
+        any::<u64>().prop_map(|refill_id| BurnMemo::OperatingRefill { refill_id }),
+    ]
 }

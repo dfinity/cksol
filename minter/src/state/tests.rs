@@ -1098,6 +1098,7 @@ mod state_from_init_args {
                 active_tasks: BTreeSet::new(),
                 balance: 0,
                 supported_spl_tokens: BTreeMap::new(),
+                operating_balance: super::operating_balance::OperatingBalance::default(),
             }
         );
     }

@@ -1359,7 +1359,9 @@ pub mod arb {
     };
     use candid::Principal;
     use cksol_types::DepositSolId;
-    use cksol_types_internal::{Ed25519KeyName, InitArgs, SolanaNetwork, UpgradeArgs};
+    use cksol_types_internal::{
+        Ed25519KeyName, InitArgs, OperatingRefillConfig, SolanaNetwork, UpgradeArgs,
+    };
     use ic_ed25519::{PrivateKey, PublicKey};
     use icrc_ledger_types::icrc1::account::Account;
     use proptest::prelude::{Just, Strategy, any, prop, prop_oneof};
@@ -1567,6 +1569,7 @@ pub mod arb {
             prop::option::of(any::<u64>()),
             prop::option::of(arb_nonce_accounts()),
             prop::option::of(any::<u64>()),
+            prop::option::of(arb_operating_refill_config()),
         )
             .prop_map(
                 |(
@@ -1578,6 +1581,7 @@ pub mod arb {
                     deposit_sol_fee,
                     nonce_accounts_to_add,
                     automatic_deposit_fee,
+                    operating_balance_refill,
                 )| UpgradeArgs {
                     sol_rpc_canister_id,
                     minimum_withdrawal_amount,
@@ -1587,9 +1591,20 @@ pub mod arb {
                     deposit_sol_fee,
                     nonce_accounts_to_add,
                     automatic_deposit_fee,
+                    operating_balance_refill,
                     ..Default::default()
                 },
             )
+    }
+
+    fn arb_operating_refill_config() -> impl Strategy<Value = OperatingRefillConfig> {
+        (any::<bool>(), any::<u64>(), any::<u64>()).prop_map(|(enabled, low_water_mark, target)| {
+            OperatingRefillConfig {
+                enabled,
+                low_water_mark,
+                target,
+            }
+        })
     }
 
     pub fn arb_ledger_burn_index() -> impl Strategy<Value = LedgerBurnIndex> {
@@ -1698,6 +1713,24 @@ pub mod arb {
                     }
                 }),
             arb_watchlist_snapshot().prop_map(EventType::WatchedDepositAddresses),
+            (any::<u64>(), any::<u64>(), any::<u64>()).prop_map(
+                |(refill_id, amount, created_at_time)| EventType::RequestedOperatingRefill {
+                    refill_id,
+                    amount,
+                    created_at_time
+                }
+            ),
+            (any::<u64>(), any::<u64>()).prop_map(|(refill_id, burn_block_index)| {
+                EventType::CompletedOperatingRefill {
+                    refill_id,
+                    burn_block_index,
+                }
+            }),
+            (any::<u64>(), ".*").prop_map(|(refill_id, reason)| EventType::FailedOperatingRefill {
+                refill_id,
+                reason
+            }),
+            any::<u64>().prop_map(|refill_id| EventType::QuarantinedOperatingRefill { refill_id }),
         ]
     }
 

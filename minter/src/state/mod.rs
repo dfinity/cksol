@@ -41,6 +41,7 @@ pub mod audit;
 mod deposits;
 pub mod event;
 mod nonce_pool;
+pub mod operating_balance;
 mod spl;
 mod watchlist;
 
@@ -134,6 +135,7 @@ pub struct State {
     active_tasks: BTreeSet<TaskType>,
     balance: Lamport,
     supported_spl_tokens: BTreeMap<Address, spl::SupportedSplToken>,
+    operating_balance: operating_balance::OperatingBalance,
 }
 
 impl State {
@@ -372,7 +374,8 @@ impl State {
             &self.supported_spl_tokens,
             self.ledger_canister_id,
             self.sol_rpc_canister_id,
-        )
+        )?;
+        self.operating_balance.validate()
     }
 
     fn max_automatic_deposit_fee(&self) -> Lamport {
@@ -395,6 +398,7 @@ impl State {
             automatic_deposit_fee,
             add_spl_tokens,
             update_spl_tokens,
+            operating_balance_refill,
         }: UpgradeArgs,
     ) -> Result<(), InvalidStateError> {
         if let Some(sol_rpc_canister_id) = sol_rpc_canister_id {
@@ -424,6 +428,9 @@ impl State {
             self.nonce_pool.add_accounts(nonce_accounts)?;
         }
         self.supported_spl_tokens = self.updated_spl_tokens(add_spl_tokens, update_spl_tokens)?;
+        if let Some(config) = operating_balance_refill {
+            self.operating_balance.set_config(config);
+        }
         self.validate()
     }
 
@@ -881,6 +888,7 @@ pub enum InvalidStateError {
     DuplicateNonceAccount(Address),
     NonceAccountIsWithdrawalDestination(Address),
     InvalidSplToken(String),
+    InvalidOperatingRefillConfig,
 }
 
 impl From<NoncePoolError> for InvalidStateError {
@@ -952,6 +960,7 @@ impl TryFrom<InitArgs> for State {
             active_tasks: BTreeSet::new(),
             balance: 0,
             supported_spl_tokens: BTreeMap::new(),
+            operating_balance: operating_balance::OperatingBalance::default(),
         };
         state.validate()?;
         Ok(state)
@@ -1056,6 +1065,7 @@ pub enum TaskType {
     FinalizeTransactions,
     WithdrawalProcessing,
     ScanWatchedAddresses,
+    OperatingRefill,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

@@ -394,3 +394,12 @@ pub struct SplTokenInfo {
     /// Whether new deposit requests are paused.
     pub deposits_paused: bool,
 }
+
+/// Unbacked SOL available for minter operating costs and its ckSOL funding account.
+#[derive(Clone, Debug, Eq, PartialEq, CandidType, Deserialize, Serialize)]
+pub struct OperatingBalance {
+    /// Lamports credited by completed refill burns; excludes unresolved burns.
+    pub balance: u64,
+    /// Donate ckSOL here to fund automatic operating-SOL refills.
+    pub top_up_account: Account,
+}

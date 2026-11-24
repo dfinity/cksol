@@ -309,6 +309,7 @@ type UpgradeArgs = record {
     automatic_deposit_fee : opt Lamport;
     add_spl_tokens : opt vec SplTokenRegistration;
     update_spl_tokens : opt vec SplTokenUpdate;
+    operating_balance_refill : opt OperatingRefillConfig;
 };
 
 type WithdrawSolArgs = record {
@@ -686,6 +687,10 @@ type EventType = variant {
         // Every registration, live or expired but not yet evicted.
         entries: vec WatchedDepositAddress;
     };
+    RequestedOperatingRefill : record { refill_id : nat64; amount : nat64; created_at_time : nat64 };
+    CompletedOperatingRefill : record { refill_id : nat64; burn_block_index : nat64 };
+    FailedOperatingRefill : record { refill_id : nat64; reason : text };
+    QuarantinedOperatingRefill : record { refill_id : nat64 };
 };
 
 // A minter event.
@@ -747,7 +752,20 @@ type SplTokenInfo = record {
     deposits_paused : bool;
 };
 
+type OperatingRefillConfig = record {
+    enabled : bool;
+    low_water_mark : nat64;
+    target : nat64;
+};
+
+type OperatingBalance = record {
+    balance : nat64;
+    top_up_account : Account;
+};
+
 service : (MinterArg) -> {
+    // Unbacked operating SOL and the ckSOL account used to fund automatic refills.
+    get_operating_balance : () -> (OperatingBalance) query;
     // Returns the Solana address to which the owner should send SOL.
     //
     // If the owner is not set, it defaults to the caller's principal.

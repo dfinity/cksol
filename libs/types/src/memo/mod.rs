@@ -83,6 +83,13 @@ pub enum BurnMemo {
         #[cbor(n(0), with = "minicbor::bytes")]
         to_address: [u8; 32],
     },
+    /// Convert donated ckSOL to operating SOL. The identifier fixes retries to one burn.
+    #[n(1)]
+    OperatingRefill {
+        /// Monotonic refill identifier recorded before the ledger call.
+        #[n(0)]
+        refill_id: u64,
+    },
 }
 
 impl MintMemo {

@@ -39,6 +39,28 @@ impl From<Event> for CandidEvent {
 impl From<EventType> for CandidEventType {
     fn from(event_type: EventType) -> Self {
         match event_type {
+            EventType::RequestedOperatingRefill {
+                refill_id,
+                amount,
+                created_at_time,
+            } => CandidEventType::RequestedOperatingRefill {
+                refill_id,
+                amount,
+                created_at_time,
+            },
+            EventType::CompletedOperatingRefill {
+                refill_id,
+                burn_block_index,
+            } => CandidEventType::CompletedOperatingRefill {
+                refill_id,
+                burn_block_index,
+            },
+            EventType::FailedOperatingRefill { refill_id, reason } => {
+                CandidEventType::FailedOperatingRefill { refill_id, reason }
+            }
+            EventType::QuarantinedOperatingRefill { refill_id } => {
+                CandidEventType::QuarantinedOperatingRefill { refill_id }
+            }
             EventType::Init(args) => CandidEventType::Init(args),
             EventType::Upgrade(args) => CandidEventType::Upgrade(args),
             EventType::AcceptedWithdrawalRequest(request) => {
@@ -210,6 +232,28 @@ impl TryFrom<CandidEventType> for EventType {
 
     fn try_from(event_type: CandidEventType) -> Result<Self, Self::Error> {
         Ok(match event_type {
+            CandidEventType::RequestedOperatingRefill {
+                refill_id,
+                amount,
+                created_at_time,
+            } => EventType::RequestedOperatingRefill {
+                refill_id,
+                amount,
+                created_at_time,
+            },
+            CandidEventType::CompletedOperatingRefill {
+                refill_id,
+                burn_block_index,
+            } => EventType::CompletedOperatingRefill {
+                refill_id,
+                burn_block_index,
+            },
+            CandidEventType::FailedOperatingRefill { refill_id, reason } => {
+                EventType::FailedOperatingRefill { refill_id, reason }
+            }
+            CandidEventType::QuarantinedOperatingRefill { refill_id } => {
+                EventType::QuarantinedOperatingRefill { refill_id }
+            }
             CandidEventType::Init(args) => EventType::Init(args),
             CandidEventType::Upgrade(args) => EventType::Upgrade(args),
             CandidEventType::AcceptedWithdrawalRequest {
