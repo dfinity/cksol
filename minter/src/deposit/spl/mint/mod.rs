@@ -9,6 +9,9 @@ use cksol_types::{DepositSplId, Memo, MintMemo};
 use icrc_ledger_types::icrc1::transfer::{NumTokens, TransferArg};
 use std::time::Duration;
 
+#[cfg(test)]
+mod tests;
+
 /// Mints the net amounts of credited SPL deposits, each on the ledger of its token.
 /// The guard is separate from the ckSOL mints: a ledger that does not reply blocks only this task.
 pub async fn process_pending_spl_mints<R: CanisterRuntime>(runtime: R) {

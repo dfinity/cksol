@@ -1733,6 +1733,13 @@ pub mod arb {
                 }
             ),
             arb_signature().prop_map(|signature| EventType::QuarantinedSplSweep { signature }),
+            (any::<u64>(), arb_ledger_mint_index()).prop_map(|(deposit_id, mint_block_index)| {
+                EventType::MintedSweptSplDeposit {
+                    deposit_id,
+                    mint_block_index,
+                }
+            }),
+            any::<u64>().prop_map(|deposit_id| EventType::QuarantinedPendingSplMint { deposit_id }),
             (arb_signature(), any::<u64>()).prop_map(|(signature, lamports_spent)| {
                 EventType::FailedSplSweep {
                     signature,
