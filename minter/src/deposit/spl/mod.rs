@@ -17,6 +17,9 @@ use cksol_types_internal::log::Priority;
 use icrc_ledger_types::icrc1::account::Account;
 use solana_address::Address;
 
+#[cfg(test)]
+mod tests;
+
 /// Accepts one manual classic-SPL deposit. No treasury read, scan, sweep or mint is performed.
 pub async fn deposit_spl<R: CanisterRuntime>(
     runtime: &R,

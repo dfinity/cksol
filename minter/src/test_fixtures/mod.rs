@@ -1570,6 +1570,7 @@ pub mod arb {
             prop::option::of(arb_nonce_accounts()),
             prop::option::of(any::<u64>()),
             prop::option::of(arb_operating_refill_config()),
+            prop::option::of(any::<u64>()),
         )
             .prop_map(
                 |(
@@ -1582,6 +1583,7 @@ pub mod arb {
                     nonce_accounts_to_add,
                     automatic_deposit_fee,
                     operating_balance_refill,
+                    spl_deposit_consolidation_fee,
                 )| UpgradeArgs {
                     sol_rpc_canister_id,
                     minimum_withdrawal_amount,
@@ -1592,6 +1594,7 @@ pub mod arb {
                     nonce_accounts_to_add,
                     automatic_deposit_fee,
                     operating_balance_refill,
+                    spl_deposit_consolidation_fee,
                     ..Default::default()
                 },
             )
@@ -1926,5 +1929,35 @@ impl EventsAssert {
 
     pub fn assert_no_more_events(&self) {
         assert!(self.0.is_empty());
+    }
+}
+
+/// A classic SPL source account, packed as the token program's 165-byte account layout.
+pub fn spl_token_account_info(
+    owner: Address,
+    mint: Address,
+    amount: u64,
+) -> sol_rpc_types::AccountInfo {
+    use solana_program_pack::Pack;
+    use spl_token_interface::state::{Account as TokenAccount, AccountState};
+    let token = TokenAccount {
+        owner: owner.to_bytes().into(),
+        mint: mint.to_bytes().into(),
+        amount,
+        state: AccountState::Initialized,
+        ..Default::default()
+    };
+    let mut bytes = vec![0; TokenAccount::LEN];
+    TokenAccount::pack(token, &mut bytes).unwrap();
+    sol_rpc_types::AccountInfo {
+        lamports: 2_039_280,
+        data: sol_rpc_types::AccountData::Binary(
+            STANDARD.encode(bytes),
+            sol_rpc_types::AccountEncoding::Base64,
+        ),
+        owner: spl_token_interface::id().to_string(),
+        executable: false,
+        rent_epoch: u64::MAX,
+        space: TokenAccount::LEN as u64,
     }
 }

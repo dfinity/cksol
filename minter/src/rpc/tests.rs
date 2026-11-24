@@ -794,3 +794,199 @@ mod get_recent_block_tests {
         solana_hash::Hash::from([0x42; 32]).into()
     }
 }
+
+mod get_spl_token_balance_tests {
+    use super::*;
+    use crate::{
+        constants::GET_ACCOUNT_INFO_CYCLES,
+        rpc::{GetSplTokenBalanceError, get_spl_token_balance, token_balance},
+        test_fixtures::spl_token_account_info,
+    };
+    use base64::{Engine, engine::general_purpose::STANDARD};
+    use sol_rpc_types::{
+        AccountData, GetAccountInfoEncoding, GetAccountInfoParams, MultiRpcResult,
+    };
+    use solana_account_decoder_client_types::{UiAccount, UiAccountData, UiAccountEncoding};
+    use solana_address::Address;
+
+    fn owner() -> Address {
+        [1; 32].into()
+    }
+    fn mint() -> Address {
+        [2; 32].into()
+    }
+
+    fn ui_account() -> UiAccount {
+        let account = spl_token_account_info(owner(), mint(), u64::MAX);
+        let AccountData::Binary(data, _) = account.data else {
+            unreachable!()
+        };
+        UiAccount {
+            lamports: account.lamports,
+            data: UiAccountData::Binary(data, UiAccountEncoding::Base64),
+            owner: account.owner,
+            executable: false,
+            rent_epoch: account.rent_epoch,
+            space: Some(account.space),
+        }
+    }
+
+    #[test]
+    fn should_preserve_the_exact_source_token_amount() {
+        assert_eq!(token_balance(ui_account(), owner(), mint()), Ok(u64::MAX));
+    }
+
+    #[test]
+    fn should_reject_an_account_with_unexpected_metadata() {
+        let token_program = spl_token_interface::id().to_string();
+        let mut wrong_program = ui_account();
+        wrong_program.owner = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb".into();
+        let mut system_owned_with_data = ui_account();
+        system_owned_with_data.owner = solana_sdk_ids::system_program::ID.to_string();
+        let mut executable = ui_account();
+        executable.executable = true;
+        for (account, owner_program, is_executable) in [
+            (wrong_program.clone(), wrong_program.owner, false),
+            (
+                system_owned_with_data.clone(),
+                system_owned_with_data.owner,
+                false,
+            ),
+            (executable, token_program, true),
+        ] {
+            assert_eq!(
+                token_balance(account, owner(), mint()),
+                Err(GetSplTokenBalanceError::UnexpectedAccountMetadata {
+                    owner: owner_program,
+                    executable: is_executable,
+                })
+            );
+        }
+    }
+
+    #[test]
+    fn should_reject_a_token_account_of_another_owner_or_mint() {
+        for (expected_owner, expected_mint) in [([9; 32].into(), mint()), (owner(), [9; 32].into())]
+        {
+            assert_eq!(
+                token_balance(ui_account(), expected_owner, expected_mint),
+                Err(GetSplTokenBalanceError::UnexpectedTokenAccount {
+                    owner: owner(),
+                    mint: mint(),
+                })
+            );
+        }
+    }
+
+    fn with_account_state(state: u8) -> UiAccount {
+        let mut account = ui_account();
+        let mut data = account.data.decode().unwrap();
+        // The state byte of the classic token account layout.
+        data[108] = state;
+        account.data = UiAccountData::Binary(STANDARD.encode(data), UiAccountEncoding::Base64);
+        account
+    }
+
+    #[test]
+    fn should_reject_a_frozen_token_account() {
+        assert_eq!(
+            token_balance(with_account_state(2), owner(), mint()),
+            Err(GetSplTokenBalanceError::FrozenTokenAccount)
+        );
+    }
+
+    #[test]
+    fn should_reject_uninitialized_truncated_empty_and_undecodable_data() {
+        let mut truncated = ui_account();
+        truncated.data =
+            UiAccountData::Binary(STANDARD.encode([0u8; 164]), UiAccountEncoding::Base64);
+        let mut empty = ui_account();
+        empty.data = UiAccountData::Binary(String::new(), UiAccountEncoding::Base64);
+        empty.space = Some(0);
+        let mut undecodable = ui_account();
+        undecodable.data = UiAccountData::Binary("!".into(), UiAccountEncoding::Base64);
+        for account in [with_account_state(0), truncated, empty, undecodable] {
+            assert!(matches!(
+                token_balance(account, owner(), mint()),
+                Err(GetSplTokenBalanceError::NotAnInitializedTokenAccount(_))
+            ));
+        }
+    }
+
+    #[test]
+    fn should_treat_an_unallocated_prefunded_ata_as_holding_no_tokens() {
+        let mut account = ui_account();
+        account.owner = solana_sdk_ids::system_program::ID.to_string();
+        account.data = UiAccountData::Binary(String::new(), UiAccountEncoding::Base64);
+        assert_eq!(token_balance(account, owner(), mint()), Ok(0));
+    }
+
+    #[tokio::test]
+    async fn should_read_only_the_requested_source_at_finalized_commitment() {
+        init_state();
+        let source = [3; 32].into();
+        let runtime = TestCanisterRuntime::new().add_stub_response(MultiRpcResult::Consistent(Ok(
+            Some(spl_token_account_info(owner(), mint(), 42)),
+        )));
+        assert_eq!(
+            get_spl_token_balance(&runtime, source, owner(), mint()).await,
+            Ok(42)
+        );
+        let calls = runtime.sent_update_calls();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].method, "getAccountInfo");
+        let (_, _, params): (RpcSources, Option<RpcConfig>, GetAccountInfoParams) = calls[0].args();
+        let expected = GetAccountInfoParams {
+            encoding: Some(GetAccountInfoEncoding::Base64),
+            commitment: Some(CommitmentLevel::Finalized),
+            ..GetAccountInfoParams::from_pubkey(source)
+        };
+        assert_eq!(params, expected);
+        assert_eq!(calls[0].cycles, GET_ACCOUNT_INFO_CYCLES);
+    }
+
+    #[tokio::test]
+    async fn should_return_zero_for_a_missing_source() {
+        init_state();
+        let runtime =
+            TestCanisterRuntime::new().add_stub_response(MultiRpcResult::Consistent(Ok(None::<
+                sol_rpc_types::AccountInfo,
+            >)));
+        assert_eq!(
+            get_spl_token_balance(&runtime, [3; 32].into(), owner(), mint()).await,
+            Ok(0)
+        );
+    }
+
+    #[tokio::test]
+    async fn should_preserve_call_and_rpc_errors() {
+        init_state();
+        let runtime = TestCanisterRuntime::new().add_stub_error(IcError::CallPerformFailed);
+        assert_eq!(
+            get_spl_token_balance(&runtime, [3; 32].into(), owner(), mint()).await,
+            Err(GetSplTokenBalanceError::IcError(IcError::CallPerformFailed))
+        );
+        let error = RpcError::ValidationError("unavailable".into());
+        let runtime = TestCanisterRuntime::new().add_stub_response(MultiRpcResult::<
+            Option<sol_rpc_types::AccountInfo>,
+        >::Consistent(Err(
+            error.clone(),
+        )));
+        assert_eq!(
+            get_spl_token_balance(&runtime, [3; 32].into(), owner(), mint()).await,
+            Err(GetSplTokenBalanceError::RpcError(error))
+        );
+    }
+
+    #[tokio::test]
+    async fn should_reject_inconsistent_provider_results() {
+        init_state();
+        let runtime = TestCanisterRuntime::new().add_stub_response(MultiRpcResult::<
+            Option<sol_rpc_types::AccountInfo>,
+        >::Inconsistent(vec![]));
+        assert_eq!(
+            get_spl_token_balance(&runtime, [3; 32].into(), owner(), mint()).await,
+            Err(GetSplTokenBalanceError::InconsistentRpcResults)
+        );
+    }
+}
