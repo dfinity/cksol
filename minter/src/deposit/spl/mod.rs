@@ -21,6 +21,8 @@ use solana_address::Address;
 mod tests;
 
 mod timer;
+#[cfg(any(test, feature = "canbench-rs"))]
+pub(crate) use timer::reset_cursor;
 pub use timer::{SWEEP_SPL_DEPOSITS_DELAY, sweep_queued_spl_deposits};
 
 /// Accepts one manual classic-SPL deposit. No treasury read, scan, sweep or mint is performed.

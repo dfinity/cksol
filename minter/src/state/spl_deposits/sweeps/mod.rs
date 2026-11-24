@@ -16,6 +16,9 @@ use solana_transaction::Message;
 use std::collections::BTreeMap;
 use thiserror::Error;
 
+#[cfg(test)]
+mod tests;
+
 /// The network fee of one SPL sweep: the signatures of the minter and of the deposit owner.
 pub const SPL_SWEEP_TRANSACTION_FEE: Lamport = 2 * FEE_PER_SIGNATURE;
 

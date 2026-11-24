@@ -1792,6 +1792,12 @@ pub mod arb {
 
     fn arb_transaction_purpose() -> impl Strategy<Value = TransactionPurpose> {
         prop_oneof![
+            (any::<u64>(), arb_block_height()).prop_map(|(deposit_id, block_height)| {
+                TransactionPurpose::SweepSplDeposit {
+                    deposit_id,
+                    block_height,
+                }
+            }),
             (
                 prop::collection::vec(any::<u64>(), 1..10),
                 arb_block_height()

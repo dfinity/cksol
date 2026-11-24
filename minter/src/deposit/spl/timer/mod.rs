@@ -22,6 +22,9 @@ use solana_signature::Signature;
 use std::{cell::RefCell, time::Duration};
 use thiserror::Error;
 
+#[cfg(test)]
+mod tests;
+
 pub const SWEEP_SPL_DEPOSITS_DELAY: Duration = Duration::from_secs(60);
 const SWEEP_BLOCKHASH_COMMITMENT: CommitmentLevel = CommitmentLevel::Confirmed;
 // Each sweep requests two signatures concurrently: the minter and the deposit owner.
@@ -148,4 +151,9 @@ async fn submit_spl_sweep_transaction<R: CanisterRuntime>(
     });
     submit_transaction(runtime, transaction, SWEEP_BLOCKHASH_COMMITMENT).await?;
     Ok(signature)
+}
+
+#[cfg(any(test, feature = "canbench-rs"))]
+pub(crate) fn reset_cursor() {
+    CURSOR.with(|cursor| cursor.borrow_mut().clear());
 }
