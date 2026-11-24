@@ -4,6 +4,7 @@ use cksol_minter::{
     address::{fetch_and_record_minter_public_key, minter_address},
     deposit::{
         automatic::{SCAN_WATCHED_ADDRESSES_DELAY, scan_watched_addresses},
+        spl::{SWEEP_SPL_DEPOSITS_DELAY, sweep_queued_spl_deposits},
         sweep::{
             PROCESS_PENDING_MINTS_DELAY, SWEEP_DEPOSITS_DELAY, process_pending_mints,
             sweep_queued_deposits,
@@ -316,6 +317,9 @@ fn setup_timers() {
     });
     ic_cdk_timers::set_timer_interval(SWEEP_DEPOSITS_DELAY, async || {
         sweep_queued_deposits(IcCanisterRuntime::new()).await;
+    });
+    ic_cdk_timers::set_timer_interval(SWEEP_SPL_DEPOSITS_DELAY, async || {
+        sweep_queued_spl_deposits(IcCanisterRuntime::new()).await;
     });
     ic_cdk_timers::set_timer_interval(PROCESS_PENDING_MINTS_DELAY, async || {
         process_pending_mints(IcCanisterRuntime::new()).await;

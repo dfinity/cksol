@@ -251,6 +251,13 @@ pub enum TransactionPurpose {
         /// The burn transaction indices on the ckSOL ledger.
         burn_indices: Vec<u64>,
     },
+    /// Sweep one classic SPL deposit into its pre-created treasury ATA.
+    SweepSplDeposit {
+        /// The one queued SPL deposit served by the transaction.
+        deposit_id: u64,
+        /// Height of the block supplying the recent blockhash.
+        block_height: u64,
+    },
 }
 
 /// A versioned Solana transaction message.

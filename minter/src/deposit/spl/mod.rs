@@ -20,6 +20,9 @@ use solana_address::Address;
 #[cfg(test)]
 mod tests;
 
+mod timer;
+pub use timer::{SWEEP_SPL_DEPOSITS_DELAY, sweep_queued_spl_deposits};
+
 /// Accepts one manual classic-SPL deposit. No treasury read, scan, sweep or mint is performed.
 pub async fn deposit_spl<R: CanisterRuntime>(
     runtime: &R,

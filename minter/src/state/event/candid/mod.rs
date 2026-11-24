@@ -213,6 +213,13 @@ impl From<TransactionPurpose> for CandidTransactionPurpose {
                 deposit_ids,
                 block_height: block_height.get(),
             },
+            TransactionPurpose::SweepSplDeposit {
+                deposit_id,
+                block_height,
+            } => CandidTransactionPurpose::SweepSplDeposit {
+                deposit_id,
+                block_height: block_height.get(),
+            },
             TransactionPurpose::Withdrawal { burn_indices } => {
                 CandidTransactionPurpose::Withdrawal {
                     burn_indices: burn_indices.iter().map(|idx| *idx.get()).collect(),
@@ -454,6 +461,13 @@ impl From<CandidTransactionPurpose> for TransactionPurpose {
                 block_height,
             } => TransactionPurpose::SweepDeposit {
                 deposit_ids,
+                block_height: BlockHeight::new(block_height),
+            },
+            CandidTransactionPurpose::SweepSplDeposit {
+                deposit_id,
+                block_height,
+            } => TransactionPurpose::SweepSplDeposit {
+                deposit_id,
                 block_height: BlockHeight::new(block_height),
             },
             CandidTransactionPurpose::Withdrawal { burn_indices } => {

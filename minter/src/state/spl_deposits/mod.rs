@@ -1,18 +1,35 @@
+use crate::state::{
+    SchnorrPublicKey, SupportedSplToken,
+    event::{Signer, VersionedMessage},
+};
 use cksol_types::DepositSplId;
 use icrc_ledger_types::icrc1::account::Account;
+use sol_rpc_types::Lamport;
 use solana_address::Address;
+use solana_signature::Signature;
 use std::collections::BTreeMap;
 
 #[cfg(test)]
 mod tests;
 
+mod sweeps;
+pub use sweeps::{
+    SPL_SWEEP_TRANSACTION_FEE, SplSweep, SplSweepRecoveryError, SplSweeps, SubmittedSplSweep,
+};
+
 /// SPL deposits grouped by their progress towards a token mint.
 ///
-/// Each account and mint pair can have at most one deposit in flight.
+/// A submitted sweep is `swept` until its outcome is observed. An observed success is
+/// `finalized` until it is credited. An observed failure is `failed` until its actual cost
+/// is validated. Each account and mint pair can have at most one deposit in flight.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SplDeposits {
     next_id: DepositSplId,
     queued: BTreeMap<DepositSplId, QueuedSplDeposit>,
+    swept: SplSweeps,
+    finalized: SplSweeps,
+    failed: SplSweeps,
+    dropped: BTreeMap<DepositSplId, SweptSplDeposit>,
     in_flight_ids: BTreeMap<(Account, Address), DepositSplId>,
     latest_ids: BTreeMap<(Account, Address), DepositSplId>,
     queued_at_by_id: BTreeMap<DepositSplId, u64>,
@@ -25,6 +42,23 @@ impl SplDeposits {
 
     pub fn queued(&self) -> &BTreeMap<DepositSplId, QueuedSplDeposit> {
         &self.queued
+    }
+
+    pub fn swept(&self) -> &SplSweeps {
+        &self.swept
+    }
+
+    pub fn finalized(&self) -> &SplSweeps {
+        &self.finalized
+    }
+
+    /// Sweeps observed as failed on-chain. Each keeps its reservation until its cost is validated.
+    pub fn failed(&self) -> &SplSweeps {
+        &self.failed
+    }
+
+    pub fn dropped(&self) -> &BTreeMap<DepositSplId, SweptSplDeposit> {
+        &self.dropped
     }
 
     pub fn in_flight_id(&self, account: &Account, mint: &Address) -> Option<DepositSplId> {
@@ -73,6 +107,93 @@ impl SplDeposits {
         self.queued.insert(deposit_id, deposit);
         self.next_id = next_id;
     }
+
+    /// Moves the queued deposit to its submitted sweep. Its account and mint stay in flight
+    /// until the sweep and the ledger mint are resolved.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn sweep(
+        &mut self,
+        deposit_id: DepositSplId,
+        message: &VersionedMessage,
+        signers: &[Signer],
+        tokens: &BTreeMap<Address, SupportedSplToken>,
+        master_key: &SchnorrPublicKey,
+        signature: &Signature,
+        reserved_lamports: Lamport,
+    ) {
+        let deposit = self.queued.get(&deposit_id).unwrap_or_else(|| {
+            panic!("Attempted to sweep unknown or already swept SPL deposit {deposit_id}")
+        });
+        let token = tokens
+            .get(&deposit.mint)
+            .unwrap_or_else(|| panic!("BUG: SPL sweep mint {} must be registered", deposit.mint));
+        let sweep = SplSweep::recover(
+            deposit_id,
+            deposit.clone(),
+            token,
+            master_key,
+            message,
+            signers,
+        )
+        .unwrap_or_else(|error| panic!("Attempted to sweep with transaction {signature}: {error}"));
+        self.queued.remove(&deposit_id);
+        self.swept.insert(
+            *signature,
+            SubmittedSplSweep {
+                sweep,
+                reserved_lamports,
+            },
+        );
+    }
+
+    /// Records an observed success. The reservation stays until the credit step settles it.
+    pub(super) fn finalize_swept(&mut self, signature: &Signature) {
+        let sweep = self.swept.remove(signature).unwrap_or_else(|| {
+            panic!("Attempted to finalize SPL sweep {signature} that is not swept")
+        });
+        self.finalized.insert(*signature, sweep);
+    }
+
+    /// Records an observed failure. Its cost is unknown, so the reservation and the pair stay.
+    pub(super) fn fail_swept(&mut self, signature: &Signature) {
+        let sweep = self
+            .swept
+            .remove(signature)
+            .unwrap_or_else(|| panic!("Attempted to fail SPL sweep {signature} that is not swept"));
+        self.failed.insert(*signature, sweep);
+    }
+
+    /// Drops an expired sweep and releases its account and mint pair. Returns the sweep
+    /// for its reservation.
+    pub(super) fn drop_swept(&mut self, signature: &Signature) -> SubmittedSplSweep {
+        let sweep = self
+            .swept
+            .remove(signature)
+            .unwrap_or_else(|| panic!("Attempted to drop SPL sweep {signature} that is not swept"));
+        self.drop_deposit(&sweep.sweep, signature);
+        sweep
+    }
+
+    fn drop_deposit(&mut self, sweep: &SplSweep, signature: &Signature) {
+        let deposit_id = sweep.deposit_id();
+        self.release_in_flight(deposit_id, sweep.deposit());
+        self.dropped.insert(
+            deposit_id,
+            SweptSplDeposit {
+                deposit: sweep.deposit().clone(),
+                signature: *signature,
+            },
+        );
+    }
+
+    fn release_in_flight(&mut self, deposit_id: DepositSplId, deposit: &QueuedSplDeposit) {
+        assert_eq!(
+            self.in_flight_ids.remove(&(deposit.account, deposit.mint)),
+            Some(deposit_id),
+            "BUG: SPL deposit {deposit_id} is not in flight"
+        );
+        self.queued_at_by_id.remove(&deposit_id);
+    }
 }
 
 /// A finalized token-account balance accepted for a future sweep.
@@ -93,4 +214,11 @@ impl QueuedSplDeposit {
             .checked_sub(self.fee)
             .expect("BUG: a queued SPL deposit fee must not exceed its balance")
     }
+}
+
+/// A deposit together with the sweep transaction submitted to move its tokens.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SweptSplDeposit {
+    pub deposit: QueuedSplDeposit,
+    pub signature: Signature,
 }

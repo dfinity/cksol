@@ -15,7 +15,7 @@ use crate::{
     utils::insertion_ordered_map::InsertionOrderedMap,
 };
 use candid::Principal;
-use cksol_types::{DepositSolId, TxFinalizedStatus, WithdrawSolStatus};
+use cksol_types::{DepositSolId, DepositSplId, TxFinalizedStatus, WithdrawSolStatus};
 use cksol_types_internal::SolanaNetwork;
 use cksol_types_internal::{Ed25519KeyName, InitArgs, UpgradeArgs};
 use ic_canister_runtime::Runtime;
@@ -54,7 +54,10 @@ pub use deposits::{
 };
 pub use nonce_pool::{DurableNoncePool, NoncePoolError, NonceRead};
 pub use spl::SupportedSplToken;
-pub use spl_deposits::{QueuedSplDeposit, SplDeposits};
+pub use spl_deposits::{
+    QueuedSplDeposit, SPL_SWEEP_TRANSACTION_FEE, SplDeposits, SplSweep, SplSweepRecoveryError,
+    SplSweeps, SubmittedSplSweep, SweptSplDeposit,
+};
 pub use watchlist::{
     MAX_WATCHED_ADDRESSES, WATCH_WINDOW, WatchedAddress, Watchlist, WatchlistFull,
 };
@@ -280,6 +283,11 @@ impl State {
             });
         match transaction {
             MinterTransaction::SweepDeposit { .. } => self.deposits.drop_swept(signature),
+            MinterTransaction::SweepSplDeposit { .. } => {
+                // A proven expiry spent nothing, so the entire reservation returns.
+                let sweep = self.spl_deposits.drop_swept(signature);
+                self.return_spl_sweep_cost(sweep.reserved_lamports);
+            }
             MinterTransaction::Withdrawal { .. } => {
                 panic!("BUG: durable-nonce withdrawal transaction {signature} cannot expire")
             }
@@ -576,6 +584,70 @@ impl State {
         self.deposits.quarantine_sweep(signature);
     }
 
+    /// Funds available for SPL fees, excluding ckSOL backing and the main account's rent.
+    pub fn spl_sweep_allowance(&self) -> Lamport {
+        let operating_sol = self.operating_balance.balance();
+        let spendable_main_sol = self.balance.saturating_sub(RENT_EXEMPTION_THRESHOLD);
+        operating_sol.min(spendable_main_sol)
+    }
+
+    pub fn covers_spl_sweep(&self, sweep: &SplSweep) -> bool {
+        self.spl_sweep_allowance() >= SPL_SWEEP_TRANSACTION_FEE
+            && self.spl_deposits.queued().get(&sweep.deposit_id()) == Some(sweep.deposit())
+    }
+
+    fn sweep_spl_deposit(
+        &mut self,
+        signature: &Signature,
+        deposit_id: DepositSplId,
+        message: &VersionedMessage,
+        signers: &[Signer],
+    ) {
+        assert!(
+            !self.submitted_transactions.contains_key(signature),
+            "Attempted to submit transaction with signature {signature:?} twice"
+        );
+        assert!(
+            self.spl_sweep_allowance() >= SPL_SWEEP_TRANSACTION_FEE,
+            "Attempted to submit an unfunded SPL sweep"
+        );
+        let master_key = self
+            .minter_public_key
+            .as_ref()
+            .expect("BUG: an SPL sweep was submitted before the minter public key was recorded");
+        self.spl_deposits.sweep(
+            deposit_id,
+            message,
+            signers,
+            &self.supported_spl_tokens,
+            master_key,
+            signature,
+            SPL_SWEEP_TRANSACTION_FEE,
+        );
+        self.reserve_spl_sweep_cost();
+    }
+
+    /// Withholds the cost of an SPL sweep from both spendable balances until its outcome
+    /// is settled.
+    fn reserve_spl_sweep_cost(&mut self) {
+        let reserved = SPL_SWEEP_TRANSACTION_FEE;
+        self.balance = self
+            .balance
+            .checked_sub(reserved)
+            .expect("BUG: insufficient minter balance for an SPL sweep");
+        self.operating_balance.reserve(reserved);
+    }
+
+    /// Returns the given part of a reservation to both spendable balances.
+    fn return_spl_sweep_cost(&mut self, returned: Lamport) {
+        let balance = self
+            .balance
+            .checked_add(returned)
+            .expect("BUG: main SOL balance overflow while releasing an SPL reservation");
+        self.operating_balance.release(returned);
+        self.balance = balance;
+    }
+
     pub fn withdrawal_status(&self, block_index: u64) -> WithdrawSolStatus {
         let burn_index = LedgerBurnIndex::from(block_index);
         if self.pending_withdrawal_requests.contains_key(&burn_index)
@@ -675,6 +747,15 @@ impl State {
             "Attempted to submit already failed transaction {signature:?}"
         );
         let submitted_transaction = match purpose {
+            TransactionPurpose::SweepSplDeposit {
+                deposit_id,
+                block_height,
+            } => {
+                self.sweep_spl_deposit(signature, *deposit_id, transaction, signers);
+                MinterTransaction::SweepSplDeposit {
+                    block_height: *block_height,
+                }
+            }
             TransactionPurpose::Withdrawal { burn_indices } => self.send_nonce_withdrawal(
                 signature,
                 transaction.clone(),
@@ -863,6 +944,9 @@ impl State {
             });
         match transaction {
             MinterTransaction::SweepDeposit { .. } => self.deposits.finalize_swept(signature),
+            MinterTransaction::SweepSplDeposit { .. } => {
+                self.spl_deposits.finalize_swept(signature)
+            }
             MinterTransaction::Withdrawal { nonce_account, .. } => {
                 self.nonce_pool.free(&nonce_account)
             }
@@ -891,6 +975,8 @@ impl State {
             });
         match &transaction {
             MinterTransaction::SweepDeposit { .. } => self.deposits.drop_swept(signature),
+            // The cost of a failed SPL sweep is unknown here. `FailedSplSweep` settles it.
+            MinterTransaction::SweepSplDeposit { .. } => self.spl_deposits.fail_swept(signature),
             MinterTransaction::Withdrawal { nonce_account, .. } => {
                 self.nonce_pool.free(nonce_account)
             }
@@ -1120,11 +1206,16 @@ pub enum TaskType {
     WithdrawalProcessing,
     ScanWatchedAddresses,
     OperatingRefill,
+    SweepSplDeposits,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum MinterTransaction {
     SweepDeposit {
+        /// The block height of the block whose blockhash the transaction uses.
+        block_height: BlockHeight,
+    },
+    SweepSplDeposit {
         /// The block height of the block whose blockhash the transaction uses.
         block_height: BlockHeight,
     },

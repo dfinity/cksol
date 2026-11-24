@@ -66,6 +66,22 @@ impl OperatingBalance {
         self.config.target.saturating_sub(self.balance)
     }
 
+    /// Removes funds from the spendable operating counter while a sweep is unresolved.
+    pub(super) fn reserve(&mut self, amount: u64) {
+        self.balance = self
+            .balance
+            .checked_sub(amount)
+            .expect("BUG: insufficient operating SOL for reservation");
+    }
+
+    /// Returns a reservation's unspent portion after a recorded outcome.
+    pub(super) fn release(&mut self, amount: u64) {
+        self.balance = self
+            .balance
+            .checked_add(amount)
+            .expect("BUG: operating SOL overflow while releasing a reservation");
+    }
+
     pub(super) fn set_config(&mut self, config: OperatingRefillConfig) {
         self.config = config;
     }

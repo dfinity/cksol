@@ -532,6 +532,11 @@ type TransactionPurpose = variant {
         // The block height of the block whose blockhash the transaction uses.
         block_height: nat64;
     };
+    // Sweep one classic SPL deposit into its pre-created treasury ATA.
+    SweepSplDeposit : record {
+        deposit_id: DepositSplId;
+        block_height: nat64;
+    };
     // Withdraw SOL to users' Solana addresses. The transaction carries the
     // nonce value of a durable nonce account instead of a recent blockhash,
     // so it never expires.

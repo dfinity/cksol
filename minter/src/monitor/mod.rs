@@ -8,7 +8,7 @@ use crate::{
     rpc::{BlockHeight, get_recent_block, get_signature_statuses},
     runtime::CanisterRuntime,
     state::{
-        MinterTransaction, TaskType,
+        MinterTransaction, State, TaskType,
         audit::{process_dropped_sweep, process_event},
         event::EventType,
         mutate_state, read_state,
@@ -50,9 +50,9 @@ const MAX_BLOCKHASH_AGE_IN_BLOCKS: BlockHeight = BlockHeight::new(150);
 /// See https://solana.com/docs/rpc/http/getsignaturestatuses
 const MAX_SIGNATURES_PER_STATUS_CHECK: usize = 256;
 
-/// Check the status of all submitted sweeps, finalize succeeded/failed ones and drop
-/// expired ones, then finalize the withdrawals whose nonce advanced and re-broadcast
-/// the withdrawals whose nonce did not.
+/// Check the status of all submitted SOL and SPL sweeps, finalize succeeded/failed ones and
+/// drop expired ones, then finalize the withdrawals whose nonce advanced and re-broadcast
+/// the withdrawals whose nonce did not. Finalized sweeps settle in separate steps.
 pub async fn finalize_transactions<R: CanisterRuntime>(runtime: R) {
     let _guard = match TimerGuard::new(TaskType::FinalizeTransactions) {
         Ok(guard) => guard,
@@ -81,7 +81,8 @@ async fn check_sweep_transactions<R: CanisterRuntime>(runtime: &R) -> bool {
             .submitted_transactions()
             .iter()
             .filter_map(|(signature, transaction)| match transaction {
-                MinterTransaction::SweepDeposit { block_height } => {
+                MinterTransaction::SweepDeposit { block_height }
+                | MinterTransaction::SweepSplDeposit { block_height } => {
                     Some((*signature, *block_height))
                 }
                 MinterTransaction::Withdrawal { .. } => None,
@@ -106,15 +107,10 @@ async fn check_sweep_transactions<R: CanisterRuntime>(runtime: &R) -> bool {
             Priority::Error,
             "Transaction {signature} finalized with on-chain error: {error}"
         );
-        mutate_state(|state| {
-            process_dropped_sweep(
-                state,
-                EventType::FailedTransaction {
-                    signature: *signature,
-                },
-                runtime,
-            )
-        });
+        let event = EventType::FailedTransaction {
+            signature: *signature,
+        };
+        mutate_state(|state| record_unsuccessful_sweep(state, signature, event, runtime));
     }
 
     for signature in &statuses.succeeded {
@@ -169,15 +165,24 @@ fn expire_transactions<R: CanisterRuntime>(
             continue;
         }
         log!(Priority::Info, "Transaction {signature} expired");
-        mutate_state(|state| {
-            process_dropped_sweep(
-                state,
-                EventType::ExpiredTransaction {
-                    signature: *signature,
-                },
-                runtime,
-            )
-        });
+        let event = EventType::ExpiredTransaction {
+            signature: *signature,
+        };
+        mutate_state(|state| record_unsuccessful_sweep(state, signature, event, runtime));
+    }
+}
+
+/// Records a failed or expired sweep. Only a SOL sweep re-arms its automatic deposits.
+fn record_unsuccessful_sweep<R: CanisterRuntime>(
+    state: &mut State,
+    signature: &Signature,
+    event: EventType,
+    runtime: &R,
+) {
+    if state.deposits().swept().get(signature).is_some() {
+        process_dropped_sweep(state, event, runtime);
+    } else {
+        process_event(state, event, runtime);
     }
 }
 

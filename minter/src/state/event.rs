@@ -413,6 +413,14 @@ pub enum TransactionPurpose {
         #[cbor(n(0), with = "cbor::id_vec")]
         burn_indices: Vec<LedgerBurnIndex>,
     },
+    /// Sweep one classic SPL deposit into its pre-created treasury ATA.
+    #[n(5)]
+    SweepSplDeposit {
+        #[n(0)]
+        deposit_id: DepositSplId,
+        #[n(1)]
+        block_height: BlockHeight,
+    },
 }
 
 impl Storable for Event {
