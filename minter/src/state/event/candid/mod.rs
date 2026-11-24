@@ -156,6 +156,21 @@ impl From<EventType> for CandidEventType {
                         .collect(),
                 }
             }
+            EventType::QueuedSplDeposit {
+                deposit_id,
+                account,
+                mint,
+                address,
+                balance,
+                fee,
+            } => CandidEventType::QueuedSplDeposit {
+                deposit_id,
+                account,
+                mint: CandidAddress::from(mint),
+                address: CandidAddress::from(address),
+                balance,
+                fee,
+            },
         }
     }
 }
@@ -356,6 +371,21 @@ impl TryFrom<CandidEventType> for EventType {
                         .collect(),
                 })
             }
+            CandidEventType::QueuedSplDeposit {
+                deposit_id,
+                account,
+                mint,
+                address,
+                balance,
+                fee,
+            } => EventType::QueuedSplDeposit {
+                deposit_id,
+                account,
+                mint: Address::from(mint),
+                address: Address::from(address),
+                balance,
+                fee,
+            },
         })
     }
 }

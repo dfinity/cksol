@@ -1713,6 +1713,24 @@ pub mod arb {
                     }
                 }),
             arb_watchlist_snapshot().prop_map(EventType::WatchedDepositAddresses),
+            (
+                any::<u64>(),
+                arb_account(),
+                arb_address(),
+                arb_address(),
+                any::<u64>(),
+                any::<u64>()
+            )
+                .prop_map(|(deposit_id, account, mint, address, balance, fee)| {
+                    EventType::QueuedSplDeposit {
+                        deposit_id,
+                        account,
+                        mint,
+                        address,
+                        balance,
+                        fee,
+                    }
+                }),
             (any::<u64>(), any::<u64>(), any::<u64>()).prop_map(
                 |(refill_id, amount, created_at_time)| EventType::RequestedOperatingRefill {
                     refill_id,

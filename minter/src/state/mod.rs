@@ -43,6 +43,7 @@ pub mod event;
 mod nonce_pool;
 pub mod operating_balance;
 mod spl;
+mod spl_deposits;
 pub(crate) mod sweep;
 mod watchlist;
 
@@ -52,6 +53,7 @@ pub use deposits::{
     SweepRecoveryError, SweepSettlementError, Sweeps, SweptDeposit, Transfer, UnreadableOutcome,
 };
 pub use nonce_pool::{DurableNoncePool, NoncePoolError, NonceRead};
+pub use spl_deposits::{QueuedSplDeposit, SplDeposits};
 pub use watchlist::{
     MAX_WATCHED_ADDRESSES, WATCH_WINDOW, WatchedAddress, Watchlist, WatchlistFull,
 };
@@ -137,6 +139,7 @@ pub struct State {
     balance: Lamport,
     supported_spl_tokens: BTreeMap<Address, spl::SupportedSplToken>,
     operating_balance: operating_balance::OperatingBalance,
+    spl_deposits: SplDeposits,
 }
 
 impl State {
@@ -207,6 +210,10 @@ impl State {
 
     pub fn deposits(&self) -> &Deposits {
         &self.deposits
+    }
+
+    pub fn spl_deposits(&self) -> &SplDeposits {
+        &self.spl_deposits
     }
 
     pub fn watchlist(&self) -> &Watchlist {
@@ -463,6 +470,28 @@ impl State {
             )),
             None => Ok(()),
         }
+    }
+
+    fn process_queued_spl_deposit(
+        &mut self,
+        deposit_id: cksol_types::DepositSplId,
+        deposit: QueuedSplDeposit,
+        queued_at: u64,
+    ) {
+        debug_assert_eq!(
+            deposit.address,
+            crate::address::associated_token_address(
+                &account_address(
+                    self.minter_public_key.as_ref().expect(
+                        "BUG: an SPL deposit was queued before the minter public key was recorded"
+                    ),
+                    &deposit.account,
+                ),
+                &deposit.mint,
+            ),
+            "Attempted to queue SPL deposit {deposit_id} with an unexpected source ATA",
+        );
+        self.spl_deposits.queue(deposit_id, deposit, queued_at);
     }
 
     fn process_queued_deposit(
@@ -962,6 +991,7 @@ impl TryFrom<InitArgs> for State {
             balance: 0,
             supported_spl_tokens: BTreeMap::new(),
             operating_balance: operating_balance::OperatingBalance::default(),
+            spl_deposits: SplDeposits::default(),
         };
         state.validate()?;
         Ok(state)

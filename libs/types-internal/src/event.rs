@@ -167,6 +167,21 @@ pub enum EventType {
     FailedOperatingRefill { refill_id: u64, reason: String },
     /// The unresolved intent remains reserved for manual ledger reconciliation.
     QuarantinedOperatingRefill { refill_id: u64 },
+    /// Captured terms of one manually queued SPL deposit.
+    QueuedSplDeposit {
+        /// Sequence number independent of SOL deposit IDs.
+        deposit_id: u64,
+        /// The ledger account to receive the eventual net mint.
+        account: Account,
+        /// Classic SPL mint address.
+        mint: Address,
+        /// Source associated token account.
+        address: Address,
+        /// Gross source balance in token units.
+        balance: u64,
+        /// Captured fee in token units.
+        fee: u64,
+    },
 }
 
 /// One registration of a `WatchedDepositAddresses` event with its scan progress.

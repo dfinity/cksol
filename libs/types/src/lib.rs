@@ -403,3 +403,6 @@ pub struct OperatingBalance {
     /// Donate ckSOL here to fund automatic operating-SOL refills.
     pub top_up_account: Account,
 }
+
+/// Sequence number of a manually queued SPL deposit, independent of SOL deposit IDs.
+pub type DepositSplId = u64;

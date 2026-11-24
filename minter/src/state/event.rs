@@ -5,7 +5,7 @@ use crate::{
     rpc::BlockHeight,
     state::{DepositBalance, DepositOrigin},
 };
-use cksol_types::DepositSolId;
+use cksol_types::{DepositSolId, DepositSplId};
 use cksol_types_internal::{InitArgs, UpgradeArgs};
 use derive_more::From;
 use ic_ed25519::PublicKey;
@@ -243,6 +243,30 @@ pub enum EventType {
     /// which replay restores verbatim, since registrations are not recorded as events.
     #[n(15)]
     WatchedDepositAddresses(#[n(0)] WatchlistSnapshot),
+    /// An SPL token-account balance was accepted for a sweep, by a user via `deposit_spl`.
+    /// The account and mint pair is locked until the deposit is minted or dropped.
+    /// The deposit id is the next SPL sequence number of the minter at the time of the event.
+    #[n(16)]
+    QueuedSplDeposit {
+        /// The identifier of the queued SPL deposit.
+        #[n(0)]
+        deposit_id: DepositSplId,
+        /// The account to which the minter should mint ckSPL once the sweep is credited.
+        #[n(1)]
+        account: Account,
+        /// The classic SPL mint of the deposited token.
+        #[cbor(n(2), with = "cbor::address")]
+        mint: Address,
+        /// The associated token account of the deposit address for the mint.
+        #[cbor(n(3), with = "cbor::address")]
+        address: Address,
+        /// The token-account balance when the deposit was queued, in the mint's smallest units.
+        #[n(4)]
+        balance: u64,
+        /// The fee deducted from the ledger mint, in the mint's smallest units.
+        #[n(5)]
+        fee: u64,
+    },
     /// A refill intent recorded before the ckSOL burn. Its source is always the
     /// minter's 0xbeef subaccount; its memo is OperatingRefill { refill_id }.
     #[n(21)]

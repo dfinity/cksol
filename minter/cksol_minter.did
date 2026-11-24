@@ -691,6 +691,22 @@ type EventType = variant {
     CompletedOperatingRefill : record { refill_id : nat64; burn_block_index : nat64 };
     FailedOperatingRefill : record { refill_id : nat64; reason : text };
     QuarantinedOperatingRefill : record { refill_id : nat64 };
+    // An SPL token-account balance was accepted for a sweep, by a user via `deposit_spl`.
+    // The account and mint pair is locked until the deposit is minted or dropped.
+    QueuedSplDeposit : record {
+        // The identifier of the queued SPL deposit.
+        deposit_id : DepositSplId;
+        // The account to which the minter should mint ckSPL once the sweep is credited.
+        account : Account;
+        // The classic SPL mint of the deposited token.
+        mint : Address;
+        // The associated token account of the deposit address for the mint.
+        address : Address;
+        // The token-account balance when the deposit was queued, in the mint's smallest units.
+        balance : nat64;
+        // The fee deducted from the ledger mint, in the mint's smallest units.
+        fee : nat64;
+    };
 };
 
 // A minter event.
@@ -719,6 +735,9 @@ type GetEventsResult = record {
     events : vec Event;
     total_event_count : nat64;
 };
+
+// Sequence number of a manually queued SPL deposit, independent of SOL deposit IDs.
+type DepositSplId = nat64;
 
 // Proposal-supplied SPL registration; verified locally without RPC or ledger calls.
 type SplTokenRegistration = record {

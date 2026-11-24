@@ -1099,6 +1099,7 @@ mod state_from_init_args {
                 balance: 0,
                 supported_spl_tokens: BTreeMap::new(),
                 operating_balance: super::operating_balance::OperatingBalance::default(),
+                spl_deposits: SplDeposits::default(),
             }
         );
     }

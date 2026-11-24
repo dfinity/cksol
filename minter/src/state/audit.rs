@@ -182,6 +182,26 @@ fn apply_state_transition(state: &mut State, payload: &EventType, timestamp: u64
         EventType::WatchedDepositAddresses(snapshot) => {
             state.restore_watchlist(snapshot);
         }
+        EventType::QueuedSplDeposit {
+            deposit_id,
+            account,
+            mint,
+            address,
+            balance,
+            fee,
+        } => {
+            state.process_queued_spl_deposit(
+                *deposit_id,
+                crate::state::QueuedSplDeposit {
+                    account: *account,
+                    mint: *mint,
+                    address: *address,
+                    balance: *balance,
+                    fee: *fee,
+                },
+                timestamp,
+            );
+        }
     }
 }
 
