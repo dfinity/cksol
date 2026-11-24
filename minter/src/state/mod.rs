@@ -55,9 +55,9 @@ pub use deposits::{
 pub use nonce_pool::{DurableNoncePool, NoncePoolError, NonceRead};
 pub use spl::SupportedSplToken;
 pub use spl_deposits::{
-    PendingSplMint, QuarantinedSplDeposit, QueuedSplDeposit, SPL_SWEEP_TRANSACTION_FEE,
-    SettledSplSweep, SplDeposits, SplQuarantineCause, SplSweep, SplSweepRecoveryError, SplSweeps,
-    SubmittedSplSweep, SweptSplDeposit,
+    InFlightSplDeposit, MintedSplSweep, PendingSplMint, QuarantinedSplDeposit, QueuedSplDeposit,
+    SPL_SWEEP_TRANSACTION_FEE, SettledSplSweep, SplDeposits, SplQuarantineCause, SplSweep,
+    SplSweepRecoveryError, SplSweeps, SubmittedSplSweep, SweptSplDeposit,
 };
 pub use watchlist::{
     MAX_WATCHED_ADDRESSES, WATCH_WINDOW, WatchedAddress, Watchlist, WatchlistFull,
@@ -689,6 +689,18 @@ impl State {
         self.spl_deposits.quarantine_sweep(signature);
     }
 
+    fn process_minted_swept_spl_deposit(
+        &mut self,
+        deposit_id: DepositSplId,
+        mint_block_index: &LedgerMintIndex,
+    ) {
+        self.spl_deposits.mint(deposit_id, *mint_block_index);
+    }
+
+    fn process_quarantined_pending_spl_mint(&mut self, deposit_id: DepositSplId) {
+        self.spl_deposits.quarantine_pending_mint(deposit_id);
+    }
+
     pub fn withdrawal_status(&self, block_index: u64) -> WithdrawSolStatus {
         let burn_index = LedgerBurnIndex::from(block_index);
         if self.pending_withdrawal_requests.contains_key(&burn_index)
@@ -1248,6 +1260,7 @@ pub enum TaskType {
     ScanWatchedAddresses,
     OperatingRefill,
     SweepSplDeposits,
+    MintSpl,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

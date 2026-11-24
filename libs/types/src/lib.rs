@@ -422,6 +422,55 @@ pub struct DepositSplArgs {
     pub mint: Address,
 }
 
+/// The status of a deposit queued by the `deposit_spl` ckSOL minter endpoint.
+#[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize, Serialize)]
+pub enum DepositSplStatus {
+    /// No deposit with this identifier was queued.
+    NotFound,
+    /// The token account is queued for a sweep to the minter's treasury token account.
+    Queued {
+        /// The recorded balance that will be swept, in the mint's smallest units.
+        balance: u64,
+        /// The fee recorded at acceptance, in the mint's smallest units.
+        fee: u64,
+    },
+    /// A Solana transaction sweeping the token account to the treasury has been submitted
+    /// but its outcome is not settled yet.
+    Swept {
+        /// The signature of the sweep transaction.
+        signature: Signature,
+    },
+    /// The sweep transaction was finalized successfully, so the tokens reached the
+    /// treasury, but the ckSPL mint has not landed yet.
+    Finalized {
+        /// The signature of the sweep transaction.
+        signature: Signature,
+    },
+    /// The minter minted ckSPL for the deposit on its token ledger.
+    Minted {
+        /// The mint transaction index on the token ledger.
+        block_index: LedgerMintIndex,
+        /// The minted amount: the swept balance minus the fee, in the mint's smallest units.
+        minted_amount: u64,
+    },
+    /// The sweep transaction failed, or expired without ever being seen on chain, so no
+    /// ckSPL is owed. Calling `deposit_spl` again queues a new sweep of whatever balance
+    /// the token account holds.
+    Dropped {
+        /// The signature of the sweep transaction.
+        signature: Signature,
+    },
+    /// Either the outcome of the sweep did not match its plan, so no ckSPL was minted, or
+    /// the mint could not be retried safely, so the mint outcome requires manual
+    /// verification. Releasing or crediting the deposit requires a minter upgrade.
+    /// Meanwhile the account and mint pair stays in flight, so `deposit_spl` keeps
+    /// rejecting it and a new deposit has to use a different subaccount.
+    Quarantined {
+        /// The signature of the sweep transaction.
+        signature: Signature,
+    },
+}
+
 /// A manual SPL deposit could not be queued.
 #[derive(Debug, Clone, PartialEq, CandidType, Deserialize, Error)]
 pub enum DepositSplError {
@@ -454,6 +503,15 @@ pub enum DepositSplError {
     /// Wrong program, token owner, mint, state or account encoding.
     #[error("Invalid SPL token account: {0}")]
     InvalidTokenAccount(String),
+    /// The latest deposit of this account and mint is quarantined: the outcome of its sweep
+    /// did not match the plan, or its mint could not be retried safely. The pair stays
+    /// rejected until a minter upgrade resolves the deposit; a new deposit has to use a
+    /// different subaccount.
+    #[error("The latest deposit {deposit_id} of this account and mint is quarantined")]
+    Quarantined {
+        /// The identifier of the quarantined deposit.
+        deposit_id: DepositSplId,
+    },
     /// A key or RPC result is unavailable, or concurrent request capacity was reached.
     #[error("SPL deposit is temporarily unavailable: {0}")]
     TemporarilyUnavailable(String),

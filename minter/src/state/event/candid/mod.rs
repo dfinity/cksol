@@ -53,6 +53,16 @@ impl From<EventType> for CandidEventType {
             EventType::QuarantinedSplSweep { signature } => CandidEventType::QuarantinedSplSweep {
                 signature: CandidSignature::from(signature),
             },
+            EventType::MintedSweptSplDeposit {
+                deposit_id,
+                mint_block_index,
+            } => CandidEventType::MintedSweptSplDeposit {
+                deposit_id,
+                mint_block_index: *mint_block_index.get(),
+            },
+            EventType::QuarantinedPendingSplMint { deposit_id } => {
+                CandidEventType::QuarantinedPendingSplMint { deposit_id }
+            }
             EventType::FailedSplSweep {
                 signature,
                 lamports_spent,
@@ -289,6 +299,16 @@ impl TryFrom<CandidEventType> for EventType {
             CandidEventType::QuarantinedSplSweep { signature } => EventType::QuarantinedSplSweep {
                 signature: Signature::from(signature),
             },
+            CandidEventType::MintedSweptSplDeposit {
+                deposit_id,
+                mint_block_index,
+            } => EventType::MintedSweptSplDeposit {
+                deposit_id,
+                mint_block_index: LedgerMintIndex::new(mint_block_index),
+            },
+            CandidEventType::QuarantinedPendingSplMint { deposit_id } => {
+                EventType::QuarantinedPendingSplMint { deposit_id }
+            }
             CandidEventType::FailedSplSweep {
                 signature,
                 lamports_spent,

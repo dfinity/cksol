@@ -6,13 +6,13 @@ use crate::{
     rpc::get_spl_token_balance,
     runtime::CanisterRuntime,
     state::{
-        QueuedSplDeposit, SupportedSplToken, audit::process_event, event::EventType, mutate_state,
-        read_state,
+        InFlightSplDeposit, QueuedSplDeposit, SupportedSplToken, audit::process_event,
+        event::EventType, mutate_state, read_state,
     },
     utils::{assert_valid_deposit_owner, assert_valid_deposit_token},
 };
 use canlog::log;
-use cksol_types::{DepositSplError, DepositSplId};
+use cksol_types::{DepositSplError, DepositSplId, DepositSplStatus};
 use cksol_types_internal::log::Priority;
 use icrc_ledger_types::icrc1::account::Account;
 use solana_address::Address;
@@ -22,6 +22,9 @@ mod tests;
 
 mod finalize;
 pub use finalize::{credit_finalized_spl_sweeps, settle_failed_spl_sweeps};
+
+mod mint;
+pub use mint::process_pending_spl_mints;
 
 mod timer;
 #[cfg(any(test, feature = "canbench-rs"))]
@@ -38,9 +41,12 @@ pub async fn deposit_spl<R: CanisterRuntime>(
     let mint = Address::from(mint);
     let _guard = deposit_spl_guard(account, mint)?;
     // A pause stops new deposits only, so an in-flight deposit stays reachable.
-    if let Some(deposit_id) = read_state(|state| state.spl_deposits().in_flight_id(&account, &mint))
-    {
-        return Ok(deposit_id);
+    match read_state(|state| state.spl_deposits().in_flight(&account, &mint)) {
+        Some(InFlightSplDeposit::Processing(deposit_id)) => return Ok(deposit_id),
+        Some(InFlightSplDeposit::Quarantined(deposit_id)) => {
+            return Err(DepositSplError::Quarantined { deposit_id });
+        }
+        None => {}
     }
     assert_valid_deposit_token(&mint)?;
     let consolidation_fee = check_deposit_cycles(runtime)?;
@@ -131,6 +137,10 @@ fn validate_deposit_balance(
         });
     }
     Ok(token)
+}
+
+pub fn deposit_spl_status(deposit_id: DepositSplId) -> DepositSplStatus {
+    read_state(|state| state.spl_deposits().status(deposit_id))
 }
 
 /// Queues the deposit under the next deposit id and returns that id.

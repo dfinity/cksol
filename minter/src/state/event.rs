@@ -293,6 +293,25 @@ pub enum EventType {
         #[cbor(n(0), with = "cbor::signature")]
         signature: Signature,
     },
+    /// The token ledger minted a swept SPL deposit. The account and mint pair is released.
+    #[n(19)]
+    MintedSweptSplDeposit {
+        /// The identifier of the minted SPL deposit.
+        #[n(0)]
+        deposit_id: DepositSplId,
+        /// The mint transaction index on the ledger of the token.
+        #[cbor(n(1), with = "cbor::id")]
+        mint_block_index: LedgerMintIndex,
+    },
+    /// The pending mint of an SPL deposit cannot be retried safely, as for
+    /// [`EventType::QuarantinedPendingMint`]. The owed amount is retained and the pair stays
+    /// locked for manual resolution.
+    #[n(20)]
+    QuarantinedPendingSplMint {
+        /// The identifier of the SPL deposit whose pending mint was quarantined.
+        #[n(0)]
+        deposit_id: DepositSplId,
+    },
     /// A refill intent recorded before the ckSOL burn. Its source is always the
     /// minter's 0xbeef subaccount; its memo is OperatingRefill { refill_id }.
     #[n(21)]

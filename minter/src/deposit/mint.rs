@@ -1,4 +1,4 @@
-//! Mint rounds of credited deposits: selection, the ledger call and the classification of its reply.
+//! Mint rounds shared by SOL and SPL deposits: selection, the ledger call and the classification of its reply.
 use crate::{
     constants::{LEDGER_DEDUPLICATION_WINDOW, MAX_PENDING_MINTS_PER_ROUND},
     ledger::client::{LedgerClient, to_ledger_mint_index},
@@ -19,23 +19,28 @@ use std::{cell::RefCell, collections::BTreeMap, time::Duration};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum MintQueue {
     Sol,
+    Spl,
 }
 
 thread_local! {
     static SOL_CURSOR: RefCell<QueueCursor<u64>> = const { RefCell::new(QueueCursor::new()) };
+    static SPL_CURSOR: RefCell<QueueCursor<u64>> = const { RefCell::new(QueueCursor::new()) };
 }
 
 impl MintQueue {
     fn with_cursor<T>(self, f: impl FnOnce(&mut QueueCursor<u64>) -> T) -> T {
         let cursor = match self {
             Self::Sol => &SOL_CURSOR,
+            Self::Spl => &SPL_CURSOR,
         };
         cursor.with(|cursor| f(&mut cursor.borrow_mut()))
     }
 
+    /// The failed-mint metrics count ckSOL mints only.
     fn record_failed_mint(self, reason: FailedMintReason) {
         match self {
             Self::Sol => record_failed_mint_attempt(reason),
+            Self::Spl => {}
         }
     }
 
@@ -43,13 +48,16 @@ impl MintQueue {
     fn unit(self) -> &'static str {
         match self {
             Self::Sol => "lamports",
+            Self::Spl => "token units",
         }
     }
 }
 
 #[cfg(any(test, feature = "canbench-rs"))]
 pub(crate) fn reset_cursors() {
-    MintQueue::Sol.with_cursor(QueueCursor::clear);
+    for queue in [MintQueue::Sol, MintQueue::Spl] {
+        queue.with_cursor(QueueCursor::clear);
+    }
 }
 
 /// Runs one bounded round, continuing after the previous round and wrapping at the end.

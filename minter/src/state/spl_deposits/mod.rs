@@ -1,8 +1,9 @@
+use crate::numeric::LedgerMintIndex;
 use crate::state::{
     SchnorrPublicKey, SupportedSplToken,
     event::{Signer, VersionedMessage},
 };
-use cksol_types::DepositSplId;
+use cksol_types::{DepositSplId, DepositSplStatus};
 use icrc_ledger_types::icrc1::account::Account;
 use sol_rpc_types::Lamport;
 use solana_address::Address;
@@ -31,6 +32,7 @@ pub struct SplDeposits {
     finalized: SplSweeps,
     failed: SplSweeps,
     pending_mints: BTreeMap<DepositSplId, PendingSplMint>,
+    minted: BTreeMap<DepositSplId, MintedSplSweep>,
     dropped: BTreeMap<DepositSplId, SweptSplDeposit>,
     quarantined: BTreeMap<DepositSplId, QuarantinedSplDeposit>,
     in_flight_ids: BTreeMap<(Account, Address), DepositSplId>,
@@ -73,6 +75,10 @@ impl SplDeposits {
         &self.quarantined
     }
 
+    pub fn minted(&self) -> &BTreeMap<DepositSplId, MintedSplSweep> {
+        &self.minted
+    }
+
     /// The token fees retained in the treasury of the mint, in its smallest units.
     pub fn collected_deposit_fees(&self, mint: &Address) -> u128 {
         self.collected_deposit_fees.get(mint).copied().unwrap_or(0)
@@ -90,6 +96,63 @@ impl SplDeposits {
 
     pub fn oldest_in_flight_queued_at(&self) -> Option<u64> {
         self.queued_at_by_id.values().min().copied()
+    }
+
+    /// The deposit of the account and mint pair that is in flight, with whether it is still
+    /// processed or quarantined.
+    pub fn in_flight(&self, account: &Account, mint: &Address) -> Option<InFlightSplDeposit> {
+        let deposit_id = self.in_flight_id(account, mint)?;
+        Some(if self.quarantined.contains_key(&deposit_id) {
+            InFlightSplDeposit::Quarantined(deposit_id)
+        } else {
+            InFlightSplDeposit::Processing(deposit_id)
+        })
+    }
+
+    pub fn status(&self, deposit_id: DepositSplId) -> DepositSplStatus {
+        if let Some(deposit) = self.queued.get(&deposit_id) {
+            return DepositSplStatus::Queued {
+                balance: deposit.balance,
+                fee: deposit.fee,
+            };
+        }
+        // A sweep observed as failed is not settled yet, so its deposit is still swept.
+        if let Some((signature, _)) = self
+            .swept
+            .deposit(deposit_id)
+            .or_else(|| self.failed.deposit(deposit_id))
+        {
+            return DepositSplStatus::Swept {
+                signature: (*signature).into(),
+            };
+        }
+        if let Some((signature, _)) = self.finalized.deposit(deposit_id) {
+            return DepositSplStatus::Finalized {
+                signature: (*signature).into(),
+            };
+        }
+        if let Some(pending) = self.pending_mints.get(&deposit_id) {
+            return DepositSplStatus::Finalized {
+                signature: pending.sweep_signature().into(),
+            };
+        }
+        if let Some(minted) = self.minted.get(&deposit_id) {
+            return DepositSplStatus::Minted {
+                block_index: *minted.mint_block_index.get(),
+                minted_amount: minted.minted_amount,
+            };
+        }
+        if let Some(dropped) = self.dropped.get(&deposit_id) {
+            return DepositSplStatus::Dropped {
+                signature: dropped.signature.into(),
+            };
+        }
+        if let Some(quarantined) = self.quarantined.get(&deposit_id) {
+            return DepositSplStatus::Quarantined {
+                signature: quarantined.sweep_signature().into(),
+            };
+        }
+        DepositSplStatus::NotFound
     }
 
     pub(super) fn queue(
@@ -257,6 +320,39 @@ impl SplDeposits {
         );
     }
 
+    pub(super) fn mint(&mut self, deposit_id: DepositSplId, mint_block_index: LedgerMintIndex) {
+        let pending = self.pending_mints.remove(&deposit_id).unwrap_or_else(|| {
+            panic!("Attempted to mint SPL deposit {deposit_id} that has no pending mint")
+        });
+        self.release_in_flight(deposit_id, &pending.deposit.deposit);
+        self.minted.insert(
+            deposit_id,
+            MintedSplSweep {
+                deposit: pending.deposit,
+                minted_amount: pending.amount_to_mint,
+                mint_block_index,
+            },
+        );
+    }
+
+    /// Keeps the pair in flight: a new deposit could otherwise hide the unresolved mint.
+    pub(super) fn quarantine_pending_mint(&mut self, deposit_id: DepositSplId) {
+        let pending = self.pending_mints.remove(&deposit_id).unwrap_or_else(|| {
+            panic!("Attempted to quarantine SPL deposit {deposit_id} that has no pending mint")
+        });
+        self.queued_at_by_id.remove(&deposit_id);
+        self.quarantined.insert(
+            deposit_id,
+            QuarantinedSplDeposit {
+                deposit: pending.deposit,
+                cause: SplQuarantineCause::MintUnresolved {
+                    amount_to_mint: pending.amount_to_mint,
+                    created_at_time: pending.created_at_time,
+                },
+            },
+        );
+    }
+
     /// Drops an expired sweep and releases its account and mint pair. Returns the sweep
     /// for its reservation.
     pub(super) fn drop_swept(&mut self, signature: &Signature) -> SubmittedSplSweep {
@@ -298,6 +394,17 @@ impl SplDeposits {
         );
         self.queued_at_by_id.remove(&deposit_id);
     }
+}
+
+/// The deposit that reserves its account and mint pair: no other deposit can be queued for
+/// the pair until it is minted or dropped, and a quarantined one keeps the pair reserved
+/// until a minter upgrade resolves it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InFlightSplDeposit {
+    /// The deposit is queued, swept, finalized or waiting for its mint.
+    Processing(DepositSplId),
+    /// The deposit is quarantined and keeps its pair rejected until a minter upgrade.
+    Quarantined(DepositSplId),
 }
 
 /// A finalized token-account balance accepted for a future sweep.
@@ -346,6 +453,14 @@ impl PendingSplMint {
     }
 }
 
+/// A swept SPL deposit whose token ledger mint completed.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MintedSplSweep {
+    pub deposit: SweptSplDeposit,
+    pub minted_amount: u64,
+    pub mint_block_index: LedgerMintIndex,
+}
+
 /// A swept SPL deposit the minter stopped processing, together with what resolving it takes.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct QuarantinedSplDeposit {
@@ -372,5 +487,14 @@ pub enum SplQuarantineCause {
     SweepUnreadable {
         /// The SOL still withheld from both spendable balances.
         reserved_lamports: Lamport,
+    },
+    /// The sweep was credited and this mint is owed, but it may already have landed. The
+    /// token ledger has to be searched for a mint carrying the sweep signature in its memo
+    /// before minting again.
+    MintUnresolved {
+        /// The amount the pending mint was going to mint.
+        amount_to_mint: u64,
+        /// The `created_at_time` the pending mint was sent with.
+        created_at_time: u64,
     },
 }

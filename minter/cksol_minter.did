@@ -735,6 +735,19 @@ type EventType = variant {
         // The signature of the sweep transaction.
         signature : Signature;
     };
+    // The token ledger minted a swept SPL deposit. The account and mint pair is released.
+    MintedSweptSplDeposit : record {
+        // The identifier of the minted SPL deposit.
+        deposit_id : DepositSplId;
+        // The mint transaction index on the ledger of the token.
+        mint_block_index : LedgerMintIndex;
+    };
+    // The pending mint of an SPL deposit cannot be retried safely, as for
+    // `QuarantinedPendingMint`. The owed amount is retained and the pair stays locked.
+    QuarantinedPendingSplMint : record {
+        // The identifier of the SPL deposit whose pending mint was quarantined.
+        deposit_id : DepositSplId;
+    };
     // The actual cost of an SPL sweep recorded as failed by `FailedTransaction` was
     // validated. The unspent reservation is returned and the deposit is dropped.
     FailedSplSweep : record {
@@ -831,12 +844,69 @@ type DepositSplError = variant {
     UnsupportedToken : record { mint : Address };
     TokenPaused : record { mint : Address };
     InvalidTokenAccount : text;
+    // The latest deposit of this account and mint is quarantined. The pair stays
+    // rejected until a minter upgrade resolves the deposit.
+    Quarantined : record {
+        // The identifier of the quarantined deposit.
+        deposit_id : DepositSplId;
+    };
     TemporarilyUnavailable : text;
+};
+
+// The status of a deposit queued by `deposit_spl`.
+type DepositSplStatus = variant {
+    // No deposit with this identifier was queued.
+    NotFound;
+    // The token account is queued for a sweep to the minter's treasury token account.
+    Queued : record {
+        // The recorded balance that will be swept, in the mint's smallest units.
+        balance : nat64;
+        // The fee recorded at acceptance, in the mint's smallest units.
+        fee : nat64;
+    };
+    // A Solana transaction sweeping the token account to the treasury has been
+    // submitted but its outcome is not settled yet.
+    Swept : record {
+        // The signature of the sweep transaction.
+        signature : Signature;
+    };
+    // The sweep transaction was finalized successfully, so the tokens reached the
+    // treasury, but the ckSPL mint has not landed yet.
+    Finalized : record {
+        // The signature of the sweep transaction.
+        signature : Signature;
+    };
+    // The minter minted ckSPL for the deposit on its token ledger.
+    Minted : record {
+        // The mint transaction index on the token ledger.
+        block_index : LedgerMintIndex;
+        // The minted amount: the swept balance minus the fee, in the mint's smallest units.
+        minted_amount : nat64;
+    };
+    // The sweep transaction failed, or expired without ever being seen on chain, so no
+    // ckSPL is owed. Calling `deposit_spl` again queues a new sweep of whatever balance
+    // the token account holds.
+    Dropped : record {
+        // The signature of the sweep transaction.
+        signature : Signature;
+    };
+    // Either the outcome of the sweep did not match its plan, so no ckSPL was minted, or
+    // the mint could not be retried safely, so the mint outcome requires manual
+    // verification. Releasing or crediting the deposit requires a minter upgrade.
+    // Meanwhile the account and mint pair stays in flight, so `deposit_spl` keeps
+    // rejecting it and a new deposit has to use a different subaccount.
+    Quarantined : record {
+        // The signature of the sweep transaction.
+        signature : Signature;
+    };
 };
 
 service : (MinterArg) -> {
     // Manually queue a classic SPL deposit; the caller may sponsor another owner.
     deposit_spl : (DepositSplArgs) -> (variant { Ok : DepositSplId; Err : DepositSplError });
+    // Returns the status of the SPL deposit with the given identifier,
+    // or `NotFound` if no deposit with this identifier was queued.
+    deposit_spl_status : (DepositSplId) -> (DepositSplStatus) query;
     // Unbacked operating SOL and the ckSOL account used to fund automatic refills.
     get_operating_balance : () -> (OperatingBalance) query;
     // Returns the Solana address to which the owner should send SOL, or the supported

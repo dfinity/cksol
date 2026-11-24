@@ -219,6 +219,15 @@ fn apply_state_transition(state: &mut State, payload: &EventType, timestamp: u64
         EventType::QuarantinedSplSweep { signature } => {
             state.process_quarantined_spl_sweep(signature)
         }
+        EventType::MintedSweptSplDeposit {
+            deposit_id,
+            mint_block_index,
+        } => {
+            state.process_minted_swept_spl_deposit(*deposit_id, mint_block_index);
+        }
+        EventType::QuarantinedPendingSplMint { deposit_id } => {
+            state.process_quarantined_pending_spl_mint(*deposit_id);
+        }
         EventType::FailedSplSweep {
             signature,
             lamports_spent,
