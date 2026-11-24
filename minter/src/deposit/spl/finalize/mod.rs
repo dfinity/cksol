@@ -4,6 +4,9 @@ use crate::{
     state::{SubmittedSplSweep, SweepMismatch, event::EventType},
 };
 
+#[cfg(test)]
+mod tests;
+
 /// Settles finalized SPL sweeps, crediting matching outcomes and quarantining mismatches.
 /// Returns whether progress was made with more finalized sweeps left to process.
 pub async fn credit_finalized_spl_sweeps<R: CanisterRuntime>(runtime: &R) -> bool {

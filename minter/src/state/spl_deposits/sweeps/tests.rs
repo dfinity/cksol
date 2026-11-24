@@ -491,3 +491,236 @@ fn should_reject_a_sol_submission_reusing_a_pending_spl_signature() {
         Rejection::Trap,
     );
 }
+
+mod settlement {
+    use super::super::{SPL_SWEEP_TRANSACTION_FEE, SettledSplSweep};
+    use crate::state::{SweepMismatch, SweepSettlementError, UnreadableOutcome};
+    use crate::test_fixtures::spl_sweep as fixture;
+    use solana_transaction::TransactionError;
+    use solana_transaction_status_client_types::option_serializer::OptionSerializer;
+
+    #[test]
+    fn should_settle_only_the_captured_gross_transfer_and_actual_fee() {
+        let sweep = fixture::plan(0);
+        let transaction = fixture::transaction(&sweep);
+        assert!(transaction.verify_with_results().iter().all(|valid| *valid));
+        for fee in [0, 5_000, 10_000] {
+            let mut meta = fixture::meta(&sweep);
+            meta.fee = fee;
+            meta.post_balances[0] = meta.pre_balances[0] - fee;
+            assert_eq!(
+                sweep.settle(&transaction, Some(&meta)),
+                Ok(SettledSplSweep {
+                    lamports_spent: fee,
+                    failed: false
+                })
+            );
+        }
+    }
+
+    #[test]
+    fn should_validate_failed_transaction_cost_without_requiring_a_treasury_token_balance() {
+        let sweep = fixture::plan(0);
+        let transaction = fixture::transaction(&sweep);
+        let mut meta = fixture::meta(&sweep);
+        meta.err = Some(TransactionError::AccountNotFound.into());
+        meta.pre_token_balances = OptionSerializer::None;
+        meta.post_token_balances = OptionSerializer::None;
+        assert_eq!(
+            sweep.settle(&transaction, Some(&meta)),
+            Ok(SettledSplSweep {
+                lamports_spent: 10_000,
+                failed: true
+            })
+        );
+        meta.post_balances[1] -= 1;
+        assert!(matches!(
+            sweep.settle(&transaction, Some(&meta)),
+            Err(SweepSettlementError::Mismatch(
+                SweepMismatch::UnexpectedBalanceChange { .. }
+            ))
+        ));
+    }
+
+    #[test]
+    fn should_distinguish_incomplete_metadata_from_contradictory_results() {
+        let sweep = fixture::plan(0);
+        let transaction = fixture::transaction(&sweep);
+        let meta = fixture::meta(&sweep);
+        assert_eq!(
+            sweep.settle(&transaction, None),
+            Err(UnreadableOutcome::NoMetaField.into())
+        );
+        let mut incomplete = meta.clone();
+        incomplete.post_balances.pop();
+        assert_eq!(
+            sweep.settle(&transaction, Some(&incomplete)),
+            Err(UnreadableOutcome::IncompleteBalances.into())
+        );
+        let mut excessive_fee = meta.clone();
+        excessive_fee.fee = 10_001;
+        assert_eq!(
+            sweep.settle(&transaction, Some(&excessive_fee)),
+            Err(SweepMismatch::UnexpectedFee {
+                expected: SPL_SWEEP_TRANSACTION_FEE,
+                actual: 10_001,
+            }
+            .into())
+        );
+        for index in 0..meta.post_balances.len() {
+            let mut changed = meta.clone();
+            changed.post_balances[index] -= 1;
+            let keys = transaction.message.static_account_keys();
+            assert_eq!(
+                sweep.settle(&transaction, Some(&changed)),
+                Err(SweepMismatch::UnexpectedBalanceChange {
+                    address: keys[index],
+                    pre: meta.pre_balances[index],
+                    post: changed.post_balances[index],
+                    expected_decrease: if index == 0 { meta.fee } else { 0 },
+                }
+                .into())
+            );
+        }
+        let mut changed = transaction.clone();
+        let solana_message::VersionedMessage::Legacy(message) = &mut changed.message else {
+            unreachable!()
+        };
+        message.instructions[0].data[1] ^= 1;
+        assert_eq!(
+            sweep.settle(&changed, Some(&meta)),
+            Err(SweepMismatch::UnexpectedMessage.into())
+        );
+    }
+
+    #[test]
+    fn should_require_complete_unique_pre_and_post_token_balances() {
+        let sweep = fixture::plan(0);
+        let transaction = fixture::transaction(&sweep);
+        for pre in [true, false] {
+            for case in 0..5 {
+                let mut meta = fixture::meta(&sweep);
+                let balances = if pre {
+                    &mut meta.pre_token_balances
+                } else {
+                    &mut meta.post_token_balances
+                };
+                if case == 0 {
+                    *balances = OptionSerializer::None;
+                } else {
+                    let OptionSerializer::Some(entries) = balances else {
+                        unreachable!()
+                    };
+                    match case {
+                        1 => {
+                            entries.remove(0);
+                        }
+                        2 => {
+                            entries.pop();
+                        }
+                        3 => {
+                            entries.push(entries[0].clone());
+                        }
+                        4 => {
+                            entries[0].account_index = 255;
+                        }
+                        _ => unreachable!(),
+                    }
+                }
+                // Missing balances are incomplete. A duplicate or an unknown index is invalid.
+                let result = sweep.settle(&transaction, Some(&meta));
+                if case < 3 {
+                    assert_eq!(
+                        result,
+                        Err(UnreadableOutcome::IncompleteTokenBalances.into()),
+                        "pre={pre}, case={case}"
+                    );
+                } else {
+                    assert!(
+                        matches!(
+                            result,
+                            Err(SweepSettlementError::Unreadable(
+                                UnreadableOutcome::InvalidTokenBalances { .. }
+                            ))
+                        ),
+                        "pre={pre}, case={case}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn should_validate_identity_amount_and_deltas_on_both_sides_of_the_transfer() {
+        let sweep = fixture::plan(0);
+        let transaction = fixture::transaction(&sweep);
+        for pre in [true, false] {
+            for index in 0..2 {
+                for case in 0..8 {
+                    let mut meta = fixture::meta(&sweep);
+                    let balances = if pre {
+                        &mut meta.pre_token_balances
+                    } else {
+                        &mut meta.post_token_balances
+                    };
+                    let OptionSerializer::Some(entries) = balances else {
+                        unreachable!()
+                    };
+                    let entry = &mut entries[index];
+                    match case {
+                        0 => entry.mint = "wrong mint".into(),
+                        1 => entry.owner = OptionSerializer::Some("wrong owner".into()),
+                        2 => entry.program_id = OptionSerializer::Some("wrong program".into()),
+                        3 => entry.ui_token_amount.decimals += 1,
+                        4 => {
+                            entry.ui_token_amount.amount =
+                                (entry.ui_token_amount.amount.parse::<u64>().unwrap() + 1)
+                                    .to_string()
+                        }
+                        5 => entry.owner = OptionSerializer::None,
+                        6 => entry.program_id = OptionSerializer::Skip,
+                        7 => entry.ui_token_amount.amount = "18446744073709551616".into(),
+                        _ => unreachable!(),
+                    }
+                    let result = sweep.settle(&transaction, Some(&meta));
+                    let context = format!("pre={pre}, index={index}, case={case}");
+                    match case {
+                        0..=3 => assert!(
+                            matches!(
+                                result,
+                                Err(SweepSettlementError::Mismatch(
+                                    SweepMismatch::UnexpectedTokenAccount { .. }
+                                ))
+                            ),
+                            "{context}"
+                        ),
+                        4 => assert!(
+                            matches!(
+                                result,
+                                Err(SweepSettlementError::Mismatch(
+                                    SweepMismatch::UnexpectedTokenBalanceChange { .. }
+                                ))
+                            ),
+                            "{context}"
+                        ),
+                        5 | 6 => assert_eq!(
+                            result,
+                            Err(UnreadableOutcome::IncompleteTokenBalances.into()),
+                            "{context}"
+                        ),
+                        7 => assert!(
+                            matches!(
+                                result,
+                                Err(SweepSettlementError::Unreadable(
+                                    UnreadableOutcome::InvalidTokenBalances { .. }
+                                ))
+                            ),
+                            "{context}"
+                        ),
+                        _ => unreachable!(),
+                    }
+                }
+            }
+        }
+    }
+}

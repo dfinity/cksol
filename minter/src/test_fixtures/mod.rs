@@ -592,6 +592,13 @@ pub mod devnet_sweep {
         sign_on(crate::address::derivation_path(account), message)
     }
 
+    pub fn account_signature_of(
+        account: &Account,
+        message: &Message,
+    ) -> solana_signature::Signature {
+        sign_as(account, &message.serialize())
+    }
+
     pub fn minter_signature_of(message: &Message) -> solana_signature::Signature {
         sign_on(crate::address::MINTER_DERIVATION_PATH, &message.serialize())
     }
@@ -1715,6 +1722,23 @@ pub mod arb {
                         nonce_value,
                     }
                 }),
+            (arb_signature(), any::<u64>(), any::<u64>(), any::<u64>()).prop_map(
+                |(signature, lamports_spent, deposit_id, amount_to_mint)| {
+                    EventType::CreditedSplSweep {
+                        signature,
+                        lamports_spent,
+                        deposit_id,
+                        amount_to_mint,
+                    }
+                }
+            ),
+            arb_signature().prop_map(|signature| EventType::QuarantinedSplSweep { signature }),
+            (arb_signature(), any::<u64>()).prop_map(|(signature, lamports_spent)| {
+                EventType::FailedSplSweep {
+                    signature,
+                    lamports_spent,
+                }
+            }),
             arb_watchlist_snapshot().prop_map(EventType::WatchedDepositAddresses),
             (
                 any::<u64>(),
@@ -1967,3 +1991,5 @@ pub fn spl_token_account_info(
         space: TokenAccount::LEN as u64,
     }
 }
+
+pub mod spl_sweep;
