@@ -226,6 +226,110 @@ fn sweep_outcome_response(
     }))
 }
 
+/// The outcome that the mocked `getTransaction` reports for an SPL withdrawal.
+pub enum WithdrawalOutcome {
+    /// The transfer succeeded and created the destination token account.
+    CreatedAccount,
+    /// The transfer failed on-chain, so only the transaction fee was paid.
+    Failed,
+}
+
+/// Uses the submitted message of an SPL withdrawal of `amount` tokens to `destination`,
+/// from a treasury that holds [`BALANCE_ABOVE_MINIMUM`] tokens.
+pub fn withdrawal_transaction_response(
+    withdrawal: &Transaction,
+    destination: &Address,
+    amount: u64,
+    outcome: WithdrawalOutcome,
+) -> JsonRpcResponse {
+    let message = &withdrawal.message;
+    let index = |address: &Address| {
+        message
+            .account_keys
+            .iter()
+            .position(|key| key == address)
+            .unwrap()
+    };
+    let treasury_index = index(&associated_token_address(&MINTER_ADDRESS));
+    let destination_index = index(&associated_token_address(destination));
+    let rent = match outcome {
+        WithdrawalOutcome::CreatedAccount => RENT_EXEMPT_LAMPORTS,
+        WithdrawalOutcome::Failed => 0,
+    };
+    let mut pre_balances = vec![1; message.account_keys.len()];
+    pre_balances[0] = 5_000_000_000;
+    pre_balances[treasury_index] = RENT_EXEMPT_LAMPORTS;
+    pre_balances[destination_index] = 0;
+    let mut post_balances = pre_balances.clone();
+    post_balances[0] -= FEE_PER_SIGNATURE + rent;
+    post_balances[destination_index] += rent;
+    let token_balance = |account_index: usize, owner: &Address, amount: u64| {
+        json!({
+            "accountIndex": account_index,
+            "mint": MINT.to_string(),
+            "owner": owner.to_string(),
+            "programId": spl_token_interface::id().to_string(),
+            "uiTokenAmount": {
+                "amount": amount.to_string(),
+                "decimals": DECIMALS,
+                "uiAmount": null,
+                "uiAmountString": solana_account_decoder_client_types::token::real_number_string_trimmed(amount, DECIMALS)
+            }
+        })
+    };
+    let pre_token_balances = vec![token_balance(
+        treasury_index,
+        &MINTER_ADDRESS,
+        BALANCE_ABOVE_MINIMUM,
+    )];
+    let (error, status, post_token_balances) = match outcome {
+        WithdrawalOutcome::CreatedAccount => (
+            json!(null),
+            json!({"Ok": null}),
+            vec![
+                token_balance(
+                    treasury_index,
+                    &MINTER_ADDRESS,
+                    BALANCE_ABOVE_MINIMUM - amount,
+                ),
+                token_balance(destination_index, destination, amount),
+            ],
+        ),
+        WithdrawalOutcome::Failed => {
+            // The token transfer is the third instruction. Its destination is frozen.
+            let error = json!({ "InstructionError": [2, { "Custom": 17 }] });
+            (
+                error.clone(),
+                json!({ "Err": error }),
+                pre_token_balances.clone(),
+            )
+        }
+    };
+    let encoded = STANDARD.encode(bincode::serialize(withdrawal).unwrap());
+    JsonRpcResponse::from(json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "result": {
+            "slot": 350_000_000_u64,
+            "blockTime": 1700000000_i64,
+            "transaction": [encoded, "base64"],
+            "meta": {
+                "err": error,
+                "status": status,
+                "fee": FEE_PER_SIGNATURE,
+                "preBalances": pre_balances,
+                "postBalances": post_balances,
+                "preTokenBalances": pre_token_balances,
+                "postTokenBalances": post_token_balances,
+                "innerInstructions": [],
+                "logMessages": [],
+                "loadedAddresses": {"readonly": [], "writable": []},
+                "rewards": []
+            }
+        }
+    }))
+}
+
 /// Registers the mint on a fresh SPL ledger, then queues a deposit from the caller's
 /// associated token account and checks the recorded events.
 pub async fn queue_deposit_for_caller() {
