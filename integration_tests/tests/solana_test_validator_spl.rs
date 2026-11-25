@@ -159,7 +159,19 @@ async fn should_drop_an_spl_deposit_when_its_sweep_expires_on_the_validator() {
         Err(DepositSplError::InvalidTokenAccount(reason)) if reason.contains("frozen")
     );
 
-    setup.drop().await;
+    // The minter classified the text of the real preflight rejection.
+    setup
+        .check_metrics()
+        .await
+        .assert_contains_metric_matching(format!(
+            r#"failed_spl_sweeps\{{mint="{mint}",reason="frozen_account"\}} 1 \d+"#
+        ))
+        .assert_contains_metric_matching(format!(
+            r#"dropped_spl_deposits\{{mint="{mint}"\}} 1 \d+"#
+        ))
+        .into()
+        .drop()
+        .await;
 }
 
 /// Waits for the validator to pass the expiry window of the sweep, in real time.

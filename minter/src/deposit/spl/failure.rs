@@ -5,6 +5,9 @@ use solana_instruction::error::InstructionError;
 use solana_transaction::TransactionError;
 use spl_token_interface::error::TokenError;
 
+#[cfg(test)]
+mod tests;
+
 /// The JSON-RPC error code of a transaction that the preflight simulation rejected.
 const PREFLIGHT_FAILURE_CODE: i64 = -32002;
 const PREFLIGHT_FAILURE_PREFIX: &str = "Transaction simulation failed: ";

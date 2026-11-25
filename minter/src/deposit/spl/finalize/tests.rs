@@ -8,11 +8,15 @@ use crate::{
         event::{Event, EventType, TransactionPurpose},
         mutate_state, read_state, reset_state,
     },
-    storage::{FailedCreditReason, failed_credit_attempt_count, reset_events, with_event_iter},
+    storage::{
+        FailedCreditReason, FailedSplSweepReason, failed_credit_attempt_count,
+        failed_spl_sweep_count, reset_events, with_event_iter,
+    },
     test_fixtures::{
-        DEFAULT_BLOCK_HEIGHT, EventsAssert, account, confirmed_block_at_height, devnet_sweep,
-        events, finalized_status, init_args_with_nonce_account, init_state,
-        runtime::TestCanisterRuntime, spl_sweep as fixture,
+        DEFAULT_BLOCK_HEIGHT, EventsAssert, account, assert_spl_deposit_metrics,
+        confirmed_block_at_height, devnet_sweep, events, finalized_status,
+        init_args_with_nonce_account, init_state, runtime::TestCanisterRuntime,
+        spl_sweep as fixture,
     },
 };
 use cksol_types_internal::{UpgradeArgs, event::Event as CandidEvent};
@@ -142,6 +146,9 @@ fn upgrade() {
     mutate_state(|state| *state = replayed);
     crate::deposit::sweep::reset_cursors();
 }
+fn failed_spl_sweeps(reason: FailedSplSweepReason) -> u64 {
+    failed_spl_sweep_count(fixture::mint(), reason)
+}
 fn failed_status() -> sol_rpc_types::TransactionStatus {
     let mut status = finalized_status();
     status.status = Err(TransactionError::AccountNotFound.into());
@@ -260,7 +267,7 @@ async fn should_credit_captured_net_and_fee_only_after_validated_success() {
 
 #[tokio::test]
 async fn should_release_only_the_unspent_reservation_on_validated_failure() {
-    for fee in [0, 4_000, 10_000] {
+    for (count, fee) in [0, 4_000, 10_000].into_iter().enumerate() {
         let sweeps = setup(1);
         let sweep = &sweeps[0];
         let mut status = finalized_status();
@@ -317,7 +324,46 @@ async fn should_release_only_the_unspent_reservation_on_validated_failure() {
             });
         assert_no_resubmission(&runtime);
         assert_replay();
+        // The counter is not part of the state, so it continues across the three cases.
+        assert_eq!(
+            failed_spl_sweeps(FailedSplSweepReason::Other),
+            count as u64 + 1
+        );
+        let mint = fixture::mint();
+        assert_spl_deposit_metrics(&[&format!(r#"dropped_spl_deposits{{mint="{mint}"}} 1 "#)]);
     }
+    assert_eq!(failed_spl_sweeps(FailedSplSweepReason::FrozenAccount), 0);
+    assert_eq!(failed_spl_sweeps(FailedSplSweepReason::MissingAccount), 0);
+}
+
+#[tokio::test]
+async fn should_count_a_validated_failure_by_the_reason_in_its_metadata() {
+    use solana_instruction::error::InstructionError;
+    let sweeps = setup(2);
+    let frozen = TransactionError::InstructionError(0, InstructionError::Custom(17));
+    let missing = TransactionError::InstructionError(0, InstructionError::InvalidAccountData);
+    let mut runtime = observation_runtime(151, vec![Some(failed_status()); 2]);
+    for (sweep, error) in sweeps.iter().zip([&frozen, &missing]) {
+        let mut meta = failed_meta(sweep, 10_000);
+        meta.err = Some(error.clone().into());
+        meta.status = Err(error.clone().into());
+        runtime = outcome(runtime, Some(fixture::outcome(sweep, Some(meta))));
+    }
+    finalize_transactions(runtime.clone()).await;
+    read_state(|state| assert_eq!(state.spl_deposits().dropped().len(), 2));
+    assert_eq!(failed_spl_sweeps(FailedSplSweepReason::FrozenAccount), 1);
+    assert_eq!(failed_spl_sweeps(FailedSplSweepReason::MissingAccount), 1);
+    assert_eq!(failed_spl_sweeps(FailedSplSweepReason::Other), 0);
+    let mint = fixture::mint();
+    assert_spl_deposit_metrics(&[
+        &format!(r#"failed_spl_sweeps{{mint="{mint}",reason="frozen_account"}} 1 "#),
+        &format!(r#"failed_spl_sweeps{{mint="{mint}",reason="missing_account"}} 1 "#),
+        &format!(r#"failed_spl_sweeps{{mint="{mint}",reason="other"}} 0 "#),
+        &format!(r#"dropped_spl_deposits{{mint="{mint}"}} 2 "#),
+    ]);
+    // The dropped gauge comes from the state, so an upgrade keeps it.
+    upgrade();
+    assert_spl_deposit_metrics(&[&format!(r#"dropped_spl_deposits{{mint="{mint}"}} 2 "#)]);
 }
 
 #[tokio::test]
@@ -476,6 +522,11 @@ async fn should_quarantine_only_the_mismatched_pair_and_keep_its_reservation() {
             );
         }
     });
+    let mint = fixture::mint();
+    assert_spl_deposit_metrics(&[
+        &format!(r#"quarantined_spl_deposits{{mint="{mint}",cause="sweep_unreadable"}} 1 "#),
+        &format!(r#"quarantined_spl_deposits{{mint="{mint}",cause="mint_unresolved"}} 0 "#),
+    ]);
     assert_no_resubmission(&runtime);
     assert_replay();
     let idle = clock();
@@ -517,6 +568,8 @@ async fn should_keep_an_observed_failure_reserved_across_missing_statuses_and_up
     EventsAssert::from_recorded()
         .expect_contains_event_eq(EventType::FailedTransaction { signature: sig });
     assert_reserved();
+    // The failure is counted only when its cost is validated.
+    assert_eq!(failed_spl_sweeps(FailedSplSweepReason::Other), 0);
     assert_no_resubmission(&observed);
     assert_replay();
 
@@ -530,6 +583,7 @@ async fn should_keep_an_observed_failure_reserved_across_missing_statuses_and_up
     finalize_transactions(missing.clone()).await;
     assert_eq!(methods(&missing), vec!["getTransaction"]);
     assert_reserved();
+    assert_eq!(failed_spl_sweeps(FailedSplSweepReason::Other), 0);
     assert_rejected(
         EventType::ExpiredTransaction { signature: sig },
         "already failed transaction",
@@ -560,6 +614,12 @@ async fn should_keep_an_observed_failure_reserved_across_missing_statuses_and_up
     });
     assert_no_resubmission(&settled);
     assert_replay();
+    assert_eq!(failed_spl_sweeps(FailedSplSweepReason::Other), 1);
+    // The settled failure is not read again.
+    let idle = clock();
+    finalize_transactions(idle.clone()).await;
+    assert!(idle.sent_update_calls().is_empty());
+    assert_eq!(failed_spl_sweeps(FailedSplSweepReason::Other), 1);
 }
 
 #[tokio::test]

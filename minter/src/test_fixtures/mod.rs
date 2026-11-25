@@ -37,6 +37,7 @@ use std::{collections::VecDeque, str::FromStr, time::Duration};
 pub mod flow;
 pub mod runtime;
 pub mod signer;
+pub mod spl_sweep;
 mod stubs;
 #[cfg(test)]
 mod tests;
@@ -1999,4 +2000,12 @@ pub fn spl_token_account_info(
     }
 }
 
-pub mod spl_sweep;
+pub fn assert_spl_deposit_metrics(expected: &[&str]) {
+    let mut encoder = ic_metrics_encoder::MetricsEncoder::new(Vec::new(), 0);
+    crate::state::read_state(|s| crate::metrics::encode_spl_deposit_metrics(&mut encoder, s))
+        .unwrap();
+    let metrics = String::from_utf8(encoder.into_inner()).unwrap();
+    for line in expected {
+        assert!(metrics.contains(line), "missing {line} in {metrics}");
+    }
+}

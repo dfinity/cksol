@@ -12,9 +12,9 @@ use crate::{
     },
     storage::{FailedMintReason, failed_mint_attempt_count, reset_events, with_event_iter},
     test_fixtures::{
-        BLOCK_INDEX, DEFAULT_BLOCK_HEIGHT, EventsAssert, account, flow::deposit::DepositFlow,
-        init_balance_to, init_state, replayed_recorded_log, runtime::TestCanisterRuntime,
-        schnorr_master_key, signature,
+        BLOCK_INDEX, DEFAULT_BLOCK_HEIGHT, EventsAssert, account, assert_spl_deposit_metrics,
+        flow::deposit::DepositFlow, init_balance_to, init_state, replayed_recorded_log,
+        runtime::TestCanisterRuntime, schnorr_master_key, signature,
     },
 };
 use candid::{Nat, Principal};
@@ -495,6 +495,13 @@ async fn should_quarantine_a_mint_that_cannot_be_retried_safely_and_keep_the_pai
                 },
                 "{name}"
             );
+            let (a, b) = (mint_a(), mint_b());
+            assert_spl_deposit_metrics(&[
+                &format!(r#"quarantined_spl_deposits{{mint="{a}",cause="mint_unresolved"}} 1 "#),
+                &format!(r#"quarantined_spl_deposits{{mint="{a}",cause="sweep_unreadable"}} 0 "#),
+                &format!(r#"quarantined_spl_deposits{{mint="{b}",cause="mint_unresolved"}} 0 "#),
+                &format!(r#"quarantined_spl_deposits{{mint="{b}",cause="sweep_unreadable"}} 0 "#),
+            ]);
             assert_eq!(
                 quarantined.sweep_signature(),
                 sweep_signature(deposit_id),

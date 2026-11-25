@@ -3,8 +3,8 @@ use crate::{
     address::{account_address, associated_token_address},
     state::{MinterTransaction, QueuedSplDeposit},
     test_fixtures::{
-        DEFAULT_BLOCK_HEIGHT, account, init_balance_to, init_state, minter_signature,
-        minter_signature_nth, replayed_recorded_log,
+        DEFAULT_BLOCK_HEIGHT, account, assert_spl_deposit_metrics, init_balance_to, init_state,
+        minter_signature, minter_signature_nth, replayed_recorded_log,
         runtime::TestCanisterRuntime,
         schnorr_master_key,
         signer::{sign_as_minter, sign_for},
@@ -112,6 +112,37 @@ async fn should_leave_unfunded_deposits_queued_without_rpc_or_signing() {
     }
 }
 
+#[test]
+fn should_report_queued_deposits_blocked_by_funding_until_it_is_restored() {
+    setup(0, 1_000_000);
+    assert_spl_deposit_metrics(&["unfunded_queued_spl_deposits 0 "]);
+    queue(0, 2);
+    queue(1, 3);
+    assert_spl_deposit_metrics(&["unfunded_queued_spl_deposits 2 "]);
+
+    for (refill_id, unfunded) in [(0, 1), (1, 0)] {
+        record(EventType::RequestedOperatingRefill {
+            refill_id,
+            amount: SPL_SWEEP_TRANSACTION_FEE,
+            created_at_time: 100,
+        });
+        record(EventType::CompletedOperatingRefill {
+            refill_id,
+            burn_block_index: 42 + refill_id,
+        });
+        assert_spl_deposit_metrics(&[&format!("unfunded_queued_spl_deposits {unfunded} ")]);
+    }
+
+    // The rent of the main account is not available for sweep fees.
+    setup(
+        2 * SPL_SWEEP_TRANSACTION_FEE,
+        crate::constants::RENT_EXEMPTION_THRESHOLD + SPL_SWEEP_TRANSACTION_FEE,
+    );
+    queue(0, 2);
+    queue(1, 3);
+    assert_spl_deposit_metrics(&["unfunded_queued_spl_deposits 1 "]);
+}
+
 #[tokio::test]
 async fn should_submit_one_transaction_per_deposit_and_replay_reserved_fees() {
     setup(30_000, 2_000_000);
@@ -190,6 +221,65 @@ async fn should_submit_one_transaction_per_deposit_and_replay_reserved_fees() {
 }
 
 #[tokio::test]
+async fn should_count_a_preflight_rejection_once_for_its_mint_and_reason() {
+    use crate::storage::{FailedSplSweepReason, failed_spl_sweep_count};
+    setup(30_000, 2_000_000);
+    let first = queue(0, 2);
+    let second = queue(1, 3);
+    let third = queue(2, 3);
+    let blockhash = solana_hash::Hash::new_from_array([0x42; 32]);
+    let rejection = |cause: &str| -> MultiRpcResult<sol_rpc_types::Signature> {
+        MultiRpcResult::Consistent(Err(RpcError::JsonRpcError(sol_rpc_types::JsonRpcError {
+            code: -32002,
+            message: format!(
+                "Transaction simulation failed: Error processing Instruction 0: {cause}"
+            ),
+        })))
+    };
+    let mut runtime = test_runtime().add_recent_block(Ok(300_000_000));
+    for sweep in [&first, &second, &third] {
+        runtime = runtime
+            .add_signer(sign_as_minter().of_message(sweep.sweep_message(blockhash).serialize()));
+    }
+    for (owner, sweep) in [(1, &first), (2, &second), (3, &third)] {
+        runtime = runtime.add_signer(
+            sign_for(&account(owner)).of_message(sweep.sweep_message(blockhash).serialize()),
+        );
+    }
+    let runtime = runtime
+        .add_stub_response(rejection("custom program error: 0x11"))
+        .add_stub_response(rejection("invalid account data for instruction"))
+        .add_stub_response(send_result());
+    sweep_queued_spl_deposits(runtime.clone()).await;
+    assert_eq!(runtime.sent_transactions().len(), 3);
+
+    let count = |mint: u8, reason| failed_spl_sweep_count([mint; 32].into(), reason);
+    let assert_counts = || {
+        for (mint, reason, expected) in [
+            (2, FailedSplSweepReason::FrozenAccount, 1),
+            (2, FailedSplSweepReason::MissingAccount, 0),
+            (2, FailedSplSweepReason::Other, 0),
+            (3, FailedSplSweepReason::FrozenAccount, 0),
+            (3, FailedSplSweepReason::MissingAccount, 1),
+            (3, FailedSplSweepReason::Other, 0),
+        ] {
+            assert_eq!(count(mint, reason), expected, "{mint} {reason:?}");
+        }
+    };
+    assert_counts();
+    let mint = solana_address::Address::from([2; 32]);
+    assert_spl_deposit_metrics(&[&format!(
+        r#"failed_spl_sweeps{{mint="{mint}",reason="frozen_account"}} 1 "#
+    )]);
+    // A rejected sweep keeps its intent and is not submitted again, so it is not counted again.
+    read_state(|s| assert_eq!(s.spl_deposits().swept().len(), 3));
+    let no_retry = test_runtime();
+    sweep_queued_spl_deposits(no_retry.clone()).await;
+    assert!(no_retry.sent_update_calls().is_empty());
+    assert_counts();
+}
+
+#[tokio::test]
 async fn should_preserve_intent_and_reservation_when_submission_is_ambiguous() {
     setup(10_000, 2_000_000);
     queue(0, 2);
@@ -200,6 +290,12 @@ async fn should_preserve_intent_and_reservation_when_submission_is_ambiguous() {
         .add_stub_error(IcError::CallPerformFailed);
     sweep_queued_spl_deposits(runtime.clone()).await;
     assert_eq!(runtime.sent_transactions().len(), 1);
+    for reason in crate::storage::FailedSplSweepReason::ALL {
+        assert_eq!(
+            crate::storage::failed_spl_sweep_count([2; 32].into(), reason),
+            0
+        );
+    }
     read_state(|s| {
         assert!(s.spl_deposits().queued().is_empty());
         assert!(s.spl_deposits().swept().get(&minter_signature()).is_some());
