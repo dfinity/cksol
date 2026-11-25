@@ -1188,3 +1188,614 @@ mod event_encoding {
         }
     }
 }
+
+mod transactions {
+    use super::*;
+    use crate::{
+        address::account_address,
+        constants::{FEE_PER_SIGNATURE, RENT_EXEMPTION_THRESHOLD},
+        monitor::finalize_transactions,
+        spl_transfer::{build_spl_withdrawal_message, withdrawal::SplWithdrawalTransfer},
+        state::{
+            MinterTransaction, QueuedSplDeposit, SPL_SWEEP_TRANSACTION_FEE, SplSweep,
+            WithdrawalPlan,
+            event::{Signer, TransactionPurpose, WithdrawalRequest},
+        },
+        test_fixtures::{
+            DEFAULT_BLOCK_HEIGHT, durable_nonce, init_balance_to, minter_signature,
+            nonce_account_info, schnorr_master_key, signature, signer::sign_as_minter,
+        },
+        withdraw::process_pending_withdrawals,
+    };
+    use ic_cdk_management_canister::SignCallError;
+    use sol_rpc_types::MultiRpcResult;
+
+    type GetAccountInfoResult = MultiRpcResult<Option<sol_rpc_types::AccountInfo>>;
+    type SendTransactionResult = MultiRpcResult<sol_rpc_types::Signature>;
+
+    const BALANCE: Lamport = 500_000_000;
+    const TOKENS: u64 = 10_000_000;
+    /// The SOL that one SPL withdrawal transaction reserves: its fee and the rent.
+    const SOL_COST: Lamport = FEE_PER_SIGNATURE + RENT_RESERVE;
+    /// The part of the balance that the main address keeps for its own rent.
+    const HELD_BACK: Lamport = RENT_EXEMPTION_THRESHOLD;
+
+    /// Queues the sweep of an SPL deposit of `tokens` and returns its plan.
+    fn queue_sweep(deposit_id: u64, tokens: u64) -> SplSweep {
+        let account = account(100 + deposit_id as usize);
+        let deposit = QueuedSplDeposit {
+            account,
+            mint: mint(),
+            address: associated_token_address(
+                &account_address(&schnorr_master_key(), &account),
+                &mint(),
+            ),
+            balance: tokens,
+            fee: 10,
+        };
+        record(EventType::RequestedOperatingRefill {
+            refill_id: deposit_id,
+            amount: SPL_SWEEP_TRANSACTION_FEE,
+            created_at_time: 100,
+        });
+        record(EventType::CompletedOperatingRefill {
+            refill_id: deposit_id,
+            burn_block_index: 1_000 + deposit_id,
+        });
+        record(EventType::QueuedSplDeposit {
+            deposit_id,
+            account,
+            mint: deposit.mint,
+            address: deposit.address,
+            balance: deposit.balance,
+            fee: deposit.fee,
+        });
+        read_state(|state| {
+            SplSweep::plan(
+                deposit_id,
+                deposit,
+                state.supported_spl_token(&mint()).unwrap(),
+                &schnorr_master_key(),
+            )
+            .unwrap()
+        })
+    }
+
+    fn submit_sweep(sweep: &SplSweep) -> solana_signature::Signature {
+        let sweep_signature = signature(0x5B00 + sweep.deposit_id() as usize);
+        record(EventType::SubmittedTransaction {
+            signature: sweep_signature,
+            message: sweep.sweep_message(Hash::default()).into(),
+            signers: sweep.signers().to_vec(),
+            purpose: TransactionPurpose::SweepSplDeposit {
+                deposit_id: sweep.deposit_id(),
+                block_height: DEFAULT_BLOCK_HEIGHT,
+            },
+        });
+        sweep_signature
+    }
+
+    /// Sets the main balance to `balance` and the treasury of [`mint`] to `tokens`, with
+    /// a credited sweep of one deposit.
+    fn setup_funded(balance: Lamport, tokens: u64) -> SupportedSplToken {
+        let token = setup();
+        init_balance_to(balance + SPL_SWEEP_TRANSACTION_FEE);
+        let sweep = queue_sweep(0, tokens);
+        let sweep_signature = submit_sweep(&sweep);
+        record(EventType::SucceededTransaction {
+            signature: sweep_signature,
+        });
+        record(EventType::CreditedSplSweep {
+            signature: sweep_signature,
+            lamports_spent: SPL_SWEEP_TRANSACTION_FEE,
+            deposit_id: 0,
+            amount_to_mint: tokens - 10,
+        });
+        read_state(|state| {
+            assert_eq!(state.balance(), balance);
+            assert_eq!(state.spl_treasury_balance(&mint()), tokens);
+        });
+        token
+    }
+
+    fn queue_withdrawal(token: &SupportedSplToken, id: u64, amount: u64) -> SplWithdrawalRequest {
+        let request = SplWithdrawalRequest {
+            terms: SplWithdrawalRequestTerms {
+                amount,
+                ..withdrawal_terms(token)
+            },
+            cksol_burn_block_index: id.into(),
+            ckspl_burn_block_index: (1_000 + id).into(),
+        };
+        record(EventType::AcceptedSplWithdrawalRequest(request.clone()));
+        request
+    }
+
+    fn queue_sol_withdrawal(id: u64, amount_to_transfer: Lamport) {
+        record(EventType::AcceptedWithdrawalRequest(WithdrawalRequest {
+            account: account(1),
+            solana_address: [0; 32],
+            burn_block_index: id.into(),
+            burned_amount: amount_to_transfer + 1,
+            amount_to_transfer,
+        }));
+    }
+
+    fn nonce_read() -> GetAccountInfoResult {
+        MultiRpcResult::Consistent(Ok(Some(nonce_account_info(MINTER_ADDRESS, 1))))
+    }
+
+    fn sent() -> SendTransactionResult {
+        MultiRpcResult::Consistent(Ok(minter_signature().into()))
+    }
+
+    fn plans() -> Vec<WithdrawalPlan> {
+        read_state(|state| state.withdrawal_plans().collect())
+    }
+
+    fn sol_plan(ids: &[u64]) -> Vec<LedgerBurnIndex> {
+        ids.iter().copied().map(LedgerBurnIndex::new).collect()
+    }
+
+    /// The burn indices of each plan: one for an SPL plan, the batch for a SOL plan.
+    fn plan_ids(plans: &[WithdrawalPlan]) -> Vec<(&'static str, Vec<LedgerBurnIndex>)> {
+        plans
+            .iter()
+            .map(|plan| match plan {
+                WithdrawalPlan::Sol(requests) => {
+                    ("sol", requests.iter().map(|r| r.burn_block_index).collect())
+                }
+                WithdrawalPlan::Spl(request) => ("spl", vec![request.cksol_burn_block_index]),
+            })
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn should_create_sign_and_send_an_spl_withdrawal_in_one_round() {
+        let token = setup_funded(BALANCE, TOKENS);
+        let request = queue_withdrawal(&token, 42, 1_000);
+        let events_before = EventsAssert::from_recorded();
+        let runtime = TestCanisterRuntime::new()
+            .add_times([200; 20])
+            .add_stub_response(nonce_read())
+            .add_stub_response(sent())
+            .add_signer(sign_as_minter());
+
+        process_pending_withdrawals(runtime.clone()).await;
+
+        let expected_message = build_spl_withdrawal_message(
+            &MINTER_ADDRESS,
+            &NONCE_ACCOUNT,
+            durable_nonce(1),
+            &SplWithdrawalTransfer {
+                token: &token,
+                destination: &request.terms.address,
+                amount: 1_000,
+            },
+        )
+        .unwrap();
+        let events_after = EventsAssert::from_recorded();
+        assert_eq!(events_after.len(), events_before.len() + 2);
+        events_after
+            .expect_contains_event_eq(EventType::CreatedSplWithdrawalTransaction {
+                cksol_burn_block_index: 42.into(),
+                nonce_account: NONCE_ACCOUNT,
+                nonce_value: durable_nonce(1),
+            })
+            .expect_contains_event_eq(EventType::SubmittedTransaction {
+                signature: minter_signature(),
+                message: expected_message.clone().into(),
+                signers: vec![Signer::Minter],
+                purpose: TransactionPurpose::SplWithdrawal {
+                    cksol_burn_block_index: 42.into(),
+                },
+            });
+        assert_eq!(
+            runtime
+                .sent_update_calls()
+                .iter()
+                .map(|call| call.method.as_str())
+                .collect::<Vec<_>>(),
+            ["getAccountInfo", "sendTransaction"]
+        );
+        read_state(|state| {
+            assert_eq!(
+                state.submitted_transactions().get(&minter_signature()),
+                Some(&MinterTransaction::SplWithdrawal {
+                    message: expected_message.into(),
+                    nonce_account: NONCE_ACCOUNT,
+                    nonce_value: durable_nonce(1),
+                    submitted_at: 200,
+                })
+            );
+            assert!(state.pending_spl_withdrawal_requests().is_empty());
+            assert!(state.created_spl_withdrawal_requests().is_empty());
+            assert!(state.created_spl_withdrawal_txs().is_empty());
+            let sent = &state.sent_spl_withdrawal_requests()[&42.into()];
+            assert_eq!(sent.request, request);
+            assert_eq!(sent.signature, minter_signature());
+            // The fee and the rent, and the transferred tokens, are reserved.
+            assert_eq!(state.balance(), BALANCE - SOL_COST);
+            assert_eq!(state.spl_treasury_balance(&mint()), TOKENS - 1_000);
+            assert_eq!(state.nonce_pool().num_free_accounts(), 0);
+        });
+        assert_eq!(
+            withdrawal_status(42),
+            WithdrawSplStatus::TxSent {
+                transaction_id: minter_signature().into()
+            }
+        );
+        assert_replay();
+    }
+
+    #[tokio::test]
+    async fn should_transfer_the_amount_less_the_token_fee_and_keep_the_fee_in_the_treasury() {
+        let token = setup_funded(BALANCE, TOKENS);
+        let request = SplWithdrawalRequest {
+            terms: SplWithdrawalRequestTerms {
+                amount: 1_000,
+                token_fee: 25,
+                ..withdrawal_terms(&token)
+            },
+            cksol_burn_block_index: 42.into(),
+            ckspl_burn_block_index: 7.into(),
+        };
+        record(EventType::AcceptedSplWithdrawalRequest(request.clone()));
+        let runtime = TestCanisterRuntime::new()
+            .add_times([200; 20])
+            .add_stub_response(nonce_read())
+            .add_stub_response(sent())
+            .add_signer(sign_as_minter());
+
+        process_pending_withdrawals(runtime).await;
+
+        let expected_message = build_spl_withdrawal_message(
+            &MINTER_ADDRESS,
+            &NONCE_ACCOUNT,
+            durable_nonce(1),
+            &SplWithdrawalTransfer {
+                token: &token,
+                destination: &request.terms.address,
+                amount: 975,
+            },
+        )
+        .unwrap();
+        read_state(|state| {
+            assert!(matches!(
+                state.submitted_transactions().get(&minter_signature()),
+                Some(MinterTransaction::SplWithdrawal { message, .. })
+                    if *message == expected_message.clone().into()
+            ));
+            assert_eq!(state.spl_treasury_balance(&mint()), TOKENS - 975);
+        });
+        assert_replay();
+    }
+
+    #[test]
+    fn should_order_plans_by_burn_index_across_both_kinds() {
+        let token = setup_funded(BALANCE, TOKENS);
+        queue_withdrawal(&token, 100, 1_000);
+        queue_sol_withdrawal(101, 1_000_000);
+        queue_withdrawal(&token, 102, 1_000);
+        queue_sol_withdrawal(103, 1_000_000);
+        queue_sol_withdrawal(104, 1_000_000);
+        // A SOL batch never serves a request newer than an SPL request still waiting.
+        assert_eq!(
+            plan_ids(&plans()),
+            [
+                ("spl", sol_plan(&[100])),
+                ("sol", sol_plan(&[101])),
+                ("spl", sol_plan(&[102])),
+                ("sol", sol_plan(&[103, 104])),
+            ]
+        );
+    }
+
+    #[test]
+    fn should_skip_an_unfunded_spl_request_without_blocking_other_requests() {
+        let token = setup_funded(BALANCE, 1_500);
+        // The treasury covers the first and the third request, not the second.
+        queue_withdrawal(&token, 100, 1_000);
+        queue_withdrawal(&token, 101, 1_000);
+        queue_sol_withdrawal(102, 1_000_000);
+        queue_withdrawal(&token, 103, 500);
+        assert_eq!(
+            plan_ids(&plans()),
+            [
+                ("spl", sol_plan(&[100])),
+                ("sol", sol_plan(&[102])),
+                ("spl", sol_plan(&[103])),
+            ]
+        );
+    }
+
+    #[test]
+    fn should_not_block_spl_requests_behind_a_sol_request_without_funds() {
+        let small_sol_cost = 1 + FEE_PER_SIGNATURE;
+        let token = setup_funded(HELD_BACK + SOL_COST + small_sol_cost, TOKENS);
+        // The balance covers one SPL withdrawal and the small SOL withdrawal 102, and
+        // not the large SOL withdrawal 100.
+        queue_sol_withdrawal(100, BALANCE);
+        queue_withdrawal(&token, 101, 1_000);
+        queue_sol_withdrawal(102, 1);
+        queue_withdrawal(&token, 103, 1_000);
+        // Request 102 is affordable, but the SOL queue keeps its order behind request
+        // 100. The second SPL request has too little SOL left for its fee and rent.
+        assert_eq!(plan_ids(&plans()), [("spl", sol_plan(&[101]))]);
+    }
+
+    #[test]
+    fn should_share_the_sol_budget_between_both_kinds() {
+        let token = setup_funded(HELD_BACK + SOL_COST + 1_000 + FEE_PER_SIGNATURE, TOKENS);
+        queue_sol_withdrawal(100, 1_000);
+        queue_withdrawal(&token, 101, 1_000);
+        queue_withdrawal(&token, 102, 1_000);
+        assert_eq!(
+            plan_ids(&plans()),
+            [("sol", sol_plan(&[100])), ("spl", sol_plan(&[101]))]
+        );
+    }
+
+    #[tokio::test]
+    async fn should_leave_an_unfunded_spl_withdrawal_pending_without_a_nonce_read() {
+        for (balance, tokens) in [(BALANCE, 999), (HELD_BACK + SOL_COST - 1, TOKENS)] {
+            let token = setup_funded(balance, tokens);
+            queue_withdrawal(&token, 42, 1_000);
+            let events_before = EventsAssert::from_recorded();
+            let runtime = TestCanisterRuntime::new().add_times([200; 20]);
+
+            process_pending_withdrawals(runtime.clone()).await;
+
+            assert!(runtime.sent_update_calls().is_empty());
+            assert_eq!(EventsAssert::from_recorded(), events_before);
+            assert_eq!(withdrawal_status(42), WithdrawSplStatus::Pending);
+        }
+    }
+
+    #[tokio::test]
+    async fn should_recheck_the_funds_of_an_spl_withdrawal_after_the_nonce_read() {
+        let token = setup_funded(HELD_BACK + SOL_COST, TOKENS);
+        queue_withdrawal(&token, 42, 1_000);
+        let sweep = queue_sweep(1, 1_000);
+        let events_before = EventsAssert::from_recorded();
+        let runtime = TestCanisterRuntime::new()
+            .add_times([200; 20])
+            .add_stub_response(nonce_read());
+        let processing = process_pending_withdrawals(runtime.clone());
+        tokio::pin!(processing);
+        // The mocked RPC runtime suspends once per call. Reserve during the nonce read.
+        while runtime.sent_update_calls().is_empty() {
+            assert!(futures::poll!(&mut processing).is_pending());
+        }
+        submit_sweep(&sweep);
+        processing.await;
+
+        // Only the sweep submission is recorded. No transaction is created.
+        assert_eq!(EventsAssert::from_recorded().len(), events_before.len() + 1);
+        assert_eq!(withdrawal_status(42), WithdrawSplStatus::Pending);
+        read_state(|state| {
+            assert_eq!(state.nonce_pool().num_free_accounts(), 1);
+            assert_eq!(state.spl_treasury_balance(&mint()), TOKENS);
+        });
+    }
+
+    #[tokio::test]
+    async fn should_queue_requests_while_the_nonce_pool_is_busy() {
+        let token = setup_funded(BALANCE, TOKENS);
+        queue_withdrawal(&token, 42, 1_000);
+        queue_withdrawal(&token, 43, 1_000);
+        let runtime = TestCanisterRuntime::new()
+            .add_times([200; 20])
+            .add_stub_response(nonce_read())
+            .add_stub_response(sent())
+            .add_signer(sign_as_minter());
+
+        process_pending_withdrawals(runtime.clone()).await;
+
+        // The pool has one account, so the older request takes it and the other waits.
+        assert!(matches!(
+            withdrawal_status(42),
+            WithdrawSplStatus::TxSent { .. }
+        ));
+        assert_eq!(withdrawal_status(43), WithdrawSplStatus::Pending);
+        let idle = TestCanisterRuntime::new().add_times([300; 20]);
+        process_pending_withdrawals(idle.clone()).await;
+        assert!(idle.sent_update_calls().is_empty());
+        assert_eq!(withdrawal_status(43), WithdrawSplStatus::Pending);
+    }
+
+    #[tokio::test]
+    async fn should_re_sign_the_identical_spl_message_after_a_signing_failure() {
+        let token = setup_funded(BALANCE, TOKENS);
+        queue_withdrawal(&token, 42, 1_000);
+        let failing = TestCanisterRuntime::new()
+            .add_times([200; 20])
+            .add_stub_response(nonce_read())
+            .add_signer(sign_as_minter().expect([Err(SignCallError::CallFailed(
+                ic_cdk::call::CallPerformFailed.into(),
+            ))]));
+
+        process_pending_withdrawals(failing.clone()).await;
+
+        // The binding is recorded and the funds are reserved, but nothing is submitted.
+        assert_eq!(withdrawal_status(42), WithdrawSplStatus::Pending);
+        let bound = read_state(|state| {
+            assert!(state.submitted_transactions().is_empty());
+            assert_eq!(state.balance(), BALANCE - SOL_COST);
+            assert_eq!(state.spl_treasury_balance(&mint()), TOKENS - 1_000);
+            let created = state.created_spl_withdrawal_txs()[&NONCE_ACCOUNT].clone();
+            state
+                .bound_spl_withdrawal_message(&NONCE_ACCOUNT, &created)
+                .unwrap()
+        });
+        assert_replay();
+
+        let retry = TestCanisterRuntime::new()
+            .add_times([300; 20])
+            .add_stub_response(sent())
+            .add_signer(sign_as_minter());
+        process_pending_withdrawals(retry.clone()).await;
+
+        // The second round reads no nonce: it signs the message bound in the first round.
+        assert_eq!(
+            retry
+                .sent_update_calls()
+                .iter()
+                .map(|call| call.method.as_str())
+                .collect::<Vec<_>>(),
+            ["sendTransaction"]
+        );
+        read_state(|state| {
+            assert!(matches!(
+                state.submitted_transactions().get(&minter_signature()),
+                Some(MinterTransaction::SplWithdrawal { message, .. }) if *message == bound.clone().into()
+            ));
+            assert_eq!(state.balance(), BALANCE - SOL_COST);
+        });
+        assert_replay();
+    }
+
+    #[tokio::test]
+    async fn should_leave_a_sent_spl_withdrawal_to_its_own_settlement() {
+        let token = setup_funded(BALANCE, TOKENS);
+        queue_withdrawal(&token, 42, 1_000);
+        let runtime = TestCanisterRuntime::new()
+            .add_times([200; 20])
+            .add_stub_response(nonce_read())
+            .add_stub_response(sent())
+            .add_signer(sign_as_minter());
+        process_pending_withdrawals(runtime).await;
+        let events_before = EventsAssert::from_recorded();
+
+        // The monitor of the SOL withdrawals does not finalize an SPL withdrawal.
+        let monitor = TestCanisterRuntime::new().add_times([10_000_000_000_000; 20]);
+        finalize_transactions(monitor.clone()).await;
+
+        assert!(monitor.sent_update_calls().is_empty());
+        assert_eq!(EventsAssert::from_recorded(), events_before);
+    }
+
+    #[test]
+    #[should_panic(expected = "is settled by its own events")]
+    fn should_reject_the_sol_success_event_for_an_spl_withdrawal_transaction() {
+        let token = setup_funded(BALANCE, TOKENS);
+        let request = queue_withdrawal(&token, 42, 1_000);
+        record(EventType::CreatedSplWithdrawalTransaction {
+            cksol_burn_block_index: 42.into(),
+            nonce_account: NONCE_ACCOUNT,
+            nonce_value: durable_nonce(1),
+        });
+        let message = build_spl_withdrawal_message(
+            &MINTER_ADDRESS,
+            &NONCE_ACCOUNT,
+            durable_nonce(1),
+            &SplWithdrawalTransfer {
+                token: &token,
+                destination: &request.terms.address,
+                amount: 1_000,
+            },
+        )
+        .unwrap();
+        record(EventType::SubmittedTransaction {
+            signature: signature(1),
+            message: message.into(),
+            signers: vec![Signer::Minter],
+            purpose: TransactionPurpose::SplWithdrawal {
+                cksol_burn_block_index: 42.into(),
+            },
+        });
+        record(EventType::SucceededTransaction {
+            signature: signature(1),
+        });
+    }
+
+    #[test]
+    #[should_panic(expected = "is settled by its own events")]
+    fn should_reject_the_sol_failure_event_for_an_spl_withdrawal_transaction() {
+        let token = setup_funded(BALANCE, TOKENS);
+        let request = queue_withdrawal(&token, 42, 1_000);
+        record(EventType::CreatedSplWithdrawalTransaction {
+            cksol_burn_block_index: 42.into(),
+            nonce_account: NONCE_ACCOUNT,
+            nonce_value: durable_nonce(1),
+        });
+        let message = build_spl_withdrawal_message(
+            &MINTER_ADDRESS,
+            &NONCE_ACCOUNT,
+            durable_nonce(1),
+            &SplWithdrawalTransfer {
+                token: &token,
+                destination: &request.terms.address,
+                amount: 1_000,
+            },
+        )
+        .unwrap();
+        record(EventType::SubmittedTransaction {
+            signature: signature(1),
+            message: message.into(),
+            signers: vec![Signer::Minter],
+            purpose: TransactionPurpose::SplWithdrawal {
+                cksol_burn_block_index: 42.into(),
+            },
+        });
+        record(EventType::FailedTransaction {
+            signature: signature(1),
+        });
+    }
+
+    #[test]
+    #[should_panic(expected = "does not carry the message bound to nonce account")]
+    fn should_reject_a_submission_with_another_message_than_the_bound_one() {
+        let token = setup_funded(BALANCE, TOKENS);
+        let request = queue_withdrawal(&token, 42, 1_000);
+        record(EventType::CreatedSplWithdrawalTransaction {
+            cksol_burn_block_index: 42.into(),
+            nonce_account: NONCE_ACCOUNT,
+            nonce_value: durable_nonce(1),
+        });
+        let other_amount = build_spl_withdrawal_message(
+            &MINTER_ADDRESS,
+            &NONCE_ACCOUNT,
+            durable_nonce(1),
+            &SplWithdrawalTransfer {
+                token: &token,
+                destination: &request.terms.address,
+                amount: 1_001,
+            },
+        )
+        .unwrap();
+        record(EventType::SubmittedTransaction {
+            signature: signature(1),
+            message: other_amount.into(),
+            signers: vec![Signer::Minter],
+            purpose: TransactionPurpose::SplWithdrawal {
+                cksol_burn_block_index: 42.into(),
+            },
+        });
+    }
+
+    #[test]
+    fn should_preserve_the_tags_of_the_creation_event_and_the_purpose() {
+        let encoded = minicbor::to_vec(EventType::CreatedSplWithdrawalTransaction {
+            cksol_burn_block_index: 42.into(),
+            nonce_account: NONCE_ACCOUNT,
+            nonce_value: durable_nonce(1),
+        })
+        .unwrap();
+        let mut decoder = minicbor::Decoder::new(&encoded);
+        assert_eq!(decoder.array().unwrap(), Some(2));
+        assert_eq!(decoder.u32().unwrap(), 27);
+        assert_eq!(decoder.array().unwrap(), Some(3));
+        assert_eq!(decoder.u64().unwrap(), 42);
+
+        let encoded = minicbor::to_vec(TransactionPurpose::SplWithdrawal {
+            cksol_burn_block_index: 42.into(),
+        })
+        .unwrap();
+        let mut decoder = minicbor::Decoder::new(&encoded);
+        assert_eq!(decoder.array().unwrap(), Some(2));
+        assert_eq!(decoder.u32().unwrap(), 6);
+        assert_eq!(decoder.array().unwrap(), Some(1));
+        assert_eq!(decoder.u64().unwrap(), 42);
+    }
+}
