@@ -2912,4 +2912,228 @@ mod settlement {
             assert_eq!(decoder.u32().unwrap(), expected);
         }
     }
+
+    mod metrics {
+        use super::*;
+        use crate::test_fixtures::assert_spl_withdrawal_metrics;
+
+        const SECOND: u64 = 1_000_000_000;
+
+        fn failed_withdrawals(frozen_account: u64) -> [String; 3] {
+            let mint = mint();
+            [
+                format!(
+                    r#"failed_spl_withdrawals{{mint="{mint}",reason="frozen_account"}} {frozen_account} "#
+                ),
+                format!(r#"failed_spl_withdrawals{{mint="{mint}",reason="missing_account"}} 0 "#),
+                format!(r#"failed_spl_withdrawals{{mint="{mint}",reason="other"}} 0 "#),
+            ]
+        }
+
+        fn assert_metrics(now: u64, expected: &[String]) {
+            let expected: Vec<&str> = expected.iter().map(String::as_str).collect();
+            assert_spl_withdrawal_metrics(now, &expected);
+        }
+
+        #[tokio::test]
+        async fn should_count_a_failed_withdrawal_once_across_observation_rounds() {
+            let signature = setup_sent_withdrawal();
+
+            // The transaction is not readable yet, so the withdrawal stays in flight.
+            finalize(MultiRpcResult::Consistent(Ok(None))).await;
+            assert_metrics(0, &failed_withdrawals(0));
+            assert!(matches!(
+                withdrawal_status(42),
+                WithdrawSplStatus::TxSent { .. }
+            ));
+
+            finalize(outcome(&signature, None, true)).await;
+            assert_metrics(0, &failed_withdrawals(1));
+
+            // No transaction is in flight, so a later round reads and counts nothing.
+            let idle = TestCanisterRuntime::new().add_times([3_000; 30]);
+            finalize_transactions(idle.clone()).await;
+            assert!(idle.sent_update_calls().is_empty());
+            assert_metrics(0, &failed_withdrawals(1));
+        }
+
+        #[tokio::test]
+        async fn should_keep_the_failure_totals_of_two_mints_independent() {
+            use crate::storage::{FailedSplTransferReason, record_failed_spl_withdrawal};
+
+            let signature = setup_sent_withdrawal();
+            let other_mint: Address = [7; 32].into();
+            record_at(
+                1,
+                EventType::Upgrade(UpgradeArgs {
+                    add_spl_tokens: Some(vec![SplTokenRegistration {
+                        mint: other_mint.to_string(),
+                        ledger_id: Principal::from_slice(&[99, 2]),
+                        symbol: "ckOther".into(),
+                        ..fixture::registration()
+                    }]),
+                    ..Default::default()
+                }),
+            );
+            let totals = |mint: Address, [frozen_account, missing_account, other]: [u64; 3]| {
+                [
+                    format!(
+                        r#"failed_spl_withdrawals{{mint="{mint}",reason="frozen_account"}} {frozen_account} "#
+                    ),
+                    format!(
+                        r#"failed_spl_withdrawals{{mint="{mint}",reason="missing_account"}} {missing_account} "#
+                    ),
+                    format!(r#"failed_spl_withdrawals{{mint="{mint}",reason="other"}} {other} "#),
+                ]
+            };
+
+            // The monitor counts the failed withdrawal for the mint of its request only.
+            finalize(outcome(&signature, None, true)).await;
+            assert_metrics(0, &totals(mint(), [1, 0, 0]));
+            assert_metrics(0, &totals(other_mint, [0, 0, 0]));
+
+            // Failures of the other mint do not change the totals of the first mint.
+            record_failed_spl_withdrawal(other_mint, FailedSplTransferReason::Other);
+            record_failed_spl_withdrawal(other_mint, FailedSplTransferReason::Other);
+            record_failed_spl_withdrawal(other_mint, FailedSplTransferReason::MissingAccount);
+            assert_metrics(0, &totals(mint(), [1, 0, 0]));
+            assert_metrics(0, &totals(other_mint, [0, 1, 2]));
+        }
+
+        #[tokio::test]
+        async fn should_count_only_the_rent_above_the_reserve() {
+            for (rent, count, lamports) in [
+                (0, 0, 0),
+                (RENT_RESERVE, 0, 0),
+                (RENT_RESERVE + 160_720, 1, 160_720),
+            ] {
+                let signature = setup_sent_withdrawal();
+
+                finalize(outcome(&signature, Some(rent), true)).await;
+
+                let mut expected = failed_withdrawals(0).to_vec();
+                expected.push(format!("spl_withdrawals_above_rent_reserve {count} "));
+                expected.push(format!("spl_rent_above_reserve {lamports} "));
+                assert_metrics(0, &expected);
+                assert_replay();
+            }
+        }
+
+        #[tokio::test]
+        async fn should_not_count_rent_above_the_reserve_for_a_failed_withdrawal() {
+            let signature = setup_sent_withdrawal();
+
+            finalize(outcome(&signature, None, true)).await;
+
+            assert_metrics(
+                0,
+                &[
+                    "spl_withdrawals_above_rent_reserve 0 ".to_string(),
+                    "spl_rent_above_reserve 0 ".to_string(),
+                ],
+            );
+        }
+
+        #[tokio::test]
+        async fn should_report_the_oldest_withdrawal_and_the_free_nonce_accounts() {
+            let age =
+                |seconds: u64| format!("oldest_incomplete_spl_withdrawal_age_seconds {seconds} ");
+            let free = |accounts: u64| format!("free_nonce_accounts {accounts} ");
+
+            // Withdrawal 42 is accepted at 1 ns and sent. It uses the one nonce account.
+            let signature = setup_sent_withdrawal();
+            assert_metrics(90 * SECOND + 1, &[age(90), free(0)]);
+
+            // Withdrawal 43 is accepted later and waits for a nonce account.
+            record_at(
+                20 * SECOND,
+                EventType::AcceptedSplWithdrawalRequest(SplWithdrawalRequest {
+                    terms: SplWithdrawalRequestTerms {
+                        amount: 100,
+                        ..terms()
+                    },
+                    cksol_burn_block_index: 43.into(),
+                    ckspl_burn_block_index: 8.into(),
+                }),
+            );
+            assert_metrics(90 * SECOND + 1, &[age(90), free(0)]);
+
+            // The settlement of 42 leaves the pending withdrawal 43 as the oldest.
+            finalize(outcome(&signature, Some(RENT_RESERVE), true)).await;
+            assert_metrics(50 * SECOND, &[age(30), free(1)]);
+
+            // A withdrawal with a created transaction is still incomplete.
+            record_at(
+                40 * SECOND,
+                EventType::CreatedSplWithdrawalTransaction {
+                    cksol_burn_block_index: 43.into(),
+                    nonce_account: NONCE_ACCOUNT,
+                    nonce_value: durable_nonce(2),
+                },
+            );
+            assert_metrics(50 * SECOND, &[age(30), free(0)]);
+        }
+
+        #[tokio::test]
+        async fn should_report_no_age_when_every_withdrawal_is_settled() {
+            let signature = setup_sent_withdrawal();
+
+            finalize(outcome(&signature, None, true)).await;
+
+            assert_metrics(
+                90 * SECOND,
+                &[
+                    "oldest_incomplete_spl_withdrawal_age_seconds 0 ".to_string(),
+                    "free_nonce_accounts 1 ".to_string(),
+                ],
+            );
+        }
+
+        #[tokio::test]
+        async fn should_report_quarantined_rent_refunds_and_token_remints() {
+            let mint = mint();
+            let expected = |quarantined: u64| {
+                [
+                    format!(
+                        r#"quarantined_spl_withdrawal_reimbursements{{mint="{mint}"}} {quarantined} "#
+                    ),
+                    format!(
+                        r#"quarantined_spl_cksol_refunds{{kind="failed_transfer_rent"}} {quarantined} "#
+                    ),
+                    r#"quarantined_spl_cksol_refunds{kind="unused_rent"} 0 "#.to_string(),
+                    r#"quarantined_spl_cksol_refunds{kind="failed_token_burn"} 0 "#.to_string(),
+                ]
+            };
+            let signature = setup_sent_withdrawal();
+            finalize(outcome(&signature, None, true)).await;
+            // A pending remint and a pending refund are not quarantined.
+            assert_metrics(0, &expected(0));
+
+            process_pending_reimbursements(reimbursement_runtime([Err(TransferError::TooOld)]))
+                .await;
+            process_pending_cksol_refunds(reimbursement_runtime([Err(TransferError::TooOld)]))
+                .await;
+
+            assert_metrics(0, &expected(1));
+        }
+
+        #[tokio::test]
+        async fn should_report_the_shortfall_of_the_operating_balance() {
+            let signature = setup_sent_withdrawal();
+            // The fee less the transaction fee absorbs the rent above the reserve.
+            let rent = RENT_RESERVE + FEE - FEE_PER_SIGNATURE + 7;
+
+            finalize(outcome(&signature, Some(rent), true)).await;
+
+            let mut encoder = ic_metrics_encoder::MetricsEncoder::new(Vec::new(), 0);
+            read_state(|state| {
+                crate::metrics::encode_operating_balance_metrics(&mut encoder, state)
+            })
+            .unwrap();
+            let metrics = String::from_utf8(encoder.into_inner()).unwrap();
+            for line in ["operating_balance 0 ", "operating_balance_shortfall 7 "] {
+                assert!(metrics.contains(line), "missing {line} in {metrics}");
+            }
+        }
+    }
 }

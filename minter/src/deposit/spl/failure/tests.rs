@@ -14,6 +14,42 @@ fn json_rpc_error(code: i64, message: &str) -> SubmitTransactionError {
 }
 
 #[test]
+fn should_classify_on_chain_errors_of_a_withdrawal_by_its_transfer_instruction() {
+    use FailedSplTransferReason::*;
+    for (error, expected) in [
+        (
+            TransactionError::InstructionError(2, InstructionError::Custom(17)),
+            FrozenAccount,
+        ),
+        (
+            TransactionError::InstructionError(2, InstructionError::InvalidAccountData),
+            MissingAccount,
+        ),
+        // Another token error of the transfer, for example insufficient funds.
+        (
+            TransactionError::InstructionError(2, InstructionError::Custom(1)),
+            Other,
+        ),
+        // The nonce advance and the account creation are not the token transfer.
+        (
+            TransactionError::InstructionError(0, InstructionError::Custom(17)),
+            Other,
+        ),
+        (
+            TransactionError::InstructionError(1, InstructionError::Custom(17)),
+            Other,
+        ),
+        (
+            TransactionError::InstructionError(1, InstructionError::InvalidAccountData),
+            Other,
+        ),
+        (TransactionError::AccountNotFound, Other),
+    ] {
+        assert_eq!(failed_withdrawal_reason(&error), expected, "{error:?}");
+    }
+}
+
+#[test]
 fn should_classify_on_chain_errors_of_the_transfer_instruction() {
     use FailedSplTransferReason::*;
     for (error, expected) in [

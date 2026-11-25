@@ -2000,6 +2000,18 @@ pub fn spl_token_account_info(
     }
 }
 
+pub fn assert_spl_withdrawal_metrics(now: u64, expected: &[&str]) {
+    let mut encoder = ic_metrics_encoder::MetricsEncoder::new(Vec::new(), 0);
+    crate::state::read_state(|s| {
+        crate::metrics::encode_spl_withdrawal_metrics(&mut encoder, s, now)
+    })
+    .unwrap();
+    let metrics = String::from_utf8(encoder.into_inner()).unwrap();
+    for line in expected {
+        assert!(metrics.contains(line), "missing {line} in {metrics}");
+    }
+}
+
 pub fn assert_spl_deposit_metrics(expected: &[&str]) {
     let mut encoder = ic_metrics_encoder::MetricsEncoder::new(Vec::new(), 0);
     crate::state::read_state(|s| crate::metrics::encode_spl_deposit_metrics(&mut encoder, s))
