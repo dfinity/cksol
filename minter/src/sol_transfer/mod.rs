@@ -11,6 +11,7 @@ use icrc_ledger_types::icrc1::account::Account;
 use sol_rpc_types::Lamport;
 use solana_address::Address;
 use solana_hash::Hash;
+use solana_instruction::Instruction;
 use solana_system_interface::instruction;
 use solana_transaction::{Message, Transaction};
 use std::collections::BTreeMap;
@@ -86,15 +87,31 @@ pub fn build_batch_withdrawal_message(
     nonce_value: Hash,
     transfers: &[(Address, Lamport)],
 ) -> Result<Message, CreateTransferError> {
-    let mut instructions = vec![instruction::advance_nonce_account(
-        nonce_account,
+    build_nonce_message(
         minter_address,
-    )];
-    instructions.extend(
+        nonce_account,
+        nonce_value,
         transfers
             .iter()
             .map(|(target, amount)| instruction::transfer(minter_address, target, *amount)),
-    );
+    )
+}
+
+/// Builds an unsigned durable-nonce message: `AdvanceNonceAccount` first, then the
+/// given instructions, with the nonce value in place of a recent blockhash. The
+/// minter's main address is the fee payer and the nonce authority.
+pub fn build_nonce_message(
+    minter_address: &Address,
+    nonce_account: &Address,
+    nonce_value: Hash,
+    instructions: impl IntoIterator<Item = Instruction>,
+) -> Result<Message, CreateTransferError> {
+    let instructions: Vec<Instruction> = std::iter::once(instruction::advance_nonce_account(
+        nonce_account,
+        minter_address,
+    ))
+    .chain(instructions)
+    .collect();
     let message = Message::new_with_blockhash(&instructions, Some(minter_address), &nonce_value);
     ensure_within_transaction_size(&message)?;
     Ok(message)
@@ -115,6 +132,12 @@ pub async fn sign_batch_withdrawal_message<R: CanisterRuntime>(
     Ok(transaction)
 }
 
+/// The wire size of the transaction of the given message, with every required signature.
+pub fn transaction_size(message: &Message) -> usize {
+    let signatures = message.header.num_required_signatures as usize;
+    1 + message.serialize().len() + signatures * BYTES_PER_SIGNATURE
+}
+
 /// Signs the transaction, unless it exceeds the maximum transaction size.
 pub(crate) async fn sign_transaction(
     transaction: &mut Transaction,
@@ -128,9 +151,7 @@ pub(crate) async fn sign_transaction(
 }
 
 fn ensure_within_transaction_size(message: &Message) -> Result<(), CreateTransferError> {
-    let tx_size = 1
-        + message.serialize().len()
-        + message.header.num_required_signatures as usize * BYTES_PER_SIGNATURE;
+    let tx_size = transaction_size(message);
     if tx_size > MAX_TX_SIZE {
         return Err(CreateTransferError::TransactionTooLarge {
             max: MAX_TX_SIZE,

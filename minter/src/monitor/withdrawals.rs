@@ -233,17 +233,8 @@ async fn finalize_landed_withdrawal<R: CanisterRuntime>(
         Ok(Some(FetchedTransaction {
             meta: Some(meta), ..
         })) => match meta.err {
-            None => {
-                log!(Priority::Info, "Transaction {signature} finalized");
-                EventType::SucceededTransaction { signature }
-            }
-            Some(error) => {
-                log!(
-                    Priority::Error,
-                    "Transaction {signature} finalized with on-chain error: {error:?}"
-                );
-                EventType::FailedTransaction { signature }
-            }
+            None => successful_withdrawal_event(withdrawal),
+            Some(error) => failed_withdrawal_event(withdrawal, &error),
         },
         Ok(Some(FetchedTransaction { meta: None, .. })) => {
             log!(
@@ -274,6 +265,24 @@ async fn finalize_landed_withdrawal<R: CanisterRuntime>(
     };
     mutate_state(|state| process_event(state, event, runtime));
     Finalization::Finalized
+}
+
+fn successful_withdrawal_event(withdrawal: &InFlightWithdrawal) -> EventType {
+    let signature = withdrawal.signature;
+    log!(Priority::Info, "Transaction {signature} finalized");
+    EventType::SucceededTransaction { signature }
+}
+
+fn failed_withdrawal_event(
+    withdrawal: &InFlightWithdrawal,
+    error: &impl std::fmt::Debug,
+) -> EventType {
+    let signature = withdrawal.signature;
+    log!(
+        Priority::Error,
+        "Transaction {signature} finalized with on-chain error: {error:?}"
+    );
+    EventType::FailedTransaction { signature }
 }
 
 async fn rebroadcast<R: CanisterRuntime>(runtime: &R, withdrawal: &InFlightWithdrawal) {

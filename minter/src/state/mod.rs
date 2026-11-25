@@ -589,8 +589,7 @@ impl State {
     /// Funds available for SPL fees, excluding ckSOL backing and the main account's rent.
     pub fn spl_sweep_allowance(&self) -> Lamport {
         let operating_sol = self.operating_balance.balance();
-        let spendable_main_sol = self.balance.saturating_sub(RENT_EXEMPTION_THRESHOLD);
-        operating_sol.min(spendable_main_sol)
+        operating_sol.min(self.spendable_balance())
     }
 
     /// The queued SPL deposits whose sweep the allowance does not cover.
@@ -744,10 +743,15 @@ impl State {
         &self.created_withdrawal_requests
     }
 
+    /// The balance less the rent exemption threshold that the main address must keep.
+    pub fn spendable_balance(&self) -> Lamport {
+        self.balance.saturating_sub(RENT_EXEMPTION_THRESHOLD)
+    }
+
     pub fn withdrawal_plans(&self) -> WithdrawalPlans<'_> {
         WithdrawalPlans {
             pending_requests: self.pending_withdrawal_requests.values().peekable(),
-            available_balance: self.balance.saturating_sub(RENT_EXEMPTION_THRESHOLD),
+            available_balance: self.spendable_balance(),
         }
     }
 

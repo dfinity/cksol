@@ -1,7 +1,7 @@
 use std::str::FromStr;
 use std::time::Duration;
 
-use cksol_types::{WithdrawSolError, WithdrawSolOk, WithdrawSolStatus};
+use cksol_types::{BurnMemo, Memo, WithdrawSolError, WithdrawSolOk, WithdrawSolStatus};
 use icrc_ledger_types::icrc1::account::Account;
 use sol_rpc_types::Lamport;
 use solana_address::Address;
@@ -59,7 +59,7 @@ pub async fn withdraw<R: CanisterRuntime>(
         minter_account,
         from,
         amount_to_burn,
-        solana_address,
+        Memo::from(BurnMemo::convert(solana_address)),
     )
     .await
     .map_err(|e| match e {
@@ -115,30 +115,46 @@ pub(crate) fn validate_withdrawal_request(
     Ok(solana_address)
 }
 
-fn validate_destination(destination: &Address) -> Result<(), WithdrawSolError> {
+enum DestinationError {
+    InvalidDestination(String),
+    TemporarilyUnavailable(String),
+}
+
+impl From<DestinationError> for WithdrawSolError {
+    fn from(error: DestinationError) -> Self {
+        match error {
+            DestinationError::InvalidDestination(message) => Self::InvalidDestination(message),
+            DestinationError::TemporarilyUnavailable(message) => {
+                Self::TemporarilyUnavailable(message)
+            }
+        }
+    }
+}
+
+fn validate_destination(destination: &Address) -> Result<(), DestinationError> {
     if reserved_account_keys::is_reserved_account_key(destination) {
-        return Err(WithdrawSolError::InvalidDestination(format!(
+        return Err(DestinationError::InvalidDestination(format!(
             "{destination} is an account key reserved by the Solana runtime"
         )));
     }
     if read_state(|s| s.nonce_pool().contains(destination)) {
-        return Err(WithdrawSolError::InvalidDestination(format!(
+        return Err(DestinationError::InvalidDestination(format!(
             "{destination} is a durable nonce account of the ckSOL minter"
         )));
     }
     let master_key =
-        minter_public_key().map_err(|e| WithdrawSolError::TemporarilyUnavailable(e.to_string()))?;
+        minter_public_key().map_err(|e| DestinationError::TemporarilyUnavailable(e.to_string()))?;
     if destination == &minter_address(&master_key) {
-        return Err(WithdrawSolError::InvalidDestination(format!(
+        return Err(DestinationError::InvalidDestination(format!(
             "{destination} is the ckSOL minter's main address"
         )));
     }
     Ok(())
 }
 
-fn validate_nonce_pool_not_empty() -> Result<(), WithdrawSolError> {
+fn validate_nonce_pool_not_empty() -> Result<(), DestinationError> {
     if read_state(|s| s.nonce_pool().is_empty()) {
-        return Err(WithdrawSolError::TemporarilyUnavailable(
+        return Err(DestinationError::TemporarilyUnavailable(
             "The durable nonce account pool is empty, no withdrawal can be processed".to_string(),
         ));
     }
