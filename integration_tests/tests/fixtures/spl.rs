@@ -102,6 +102,7 @@ pub fn spl_token_registration(ledger_id: Principal) -> SplTokenRegistration {
         minimum_deposit_amount: MINIMUM_DEPOSIT_AMOUNT,
         deposit_fee: DEPOSIT_FEE,
         deposits_paused: false,
+        withdrawal_fee_token: None,
     }
 }
 

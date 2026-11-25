@@ -317,6 +317,9 @@ type UpgradeArgs = record {
     update_spl_tokens : opt vec SplTokenUpdate;
     operating_balance_refill : opt OperatingRefillConfig;
     spl_deposit_consolidation_fee : opt nat64;
+    // The fee in lamports of ckSOL charged for an SPL withdrawal, excluding the rent
+    // reserve of the destination token account.
+    spl_withdrawal_fee : opt Lamport;
 };
 
 type WithdrawSolArgs = record {
@@ -801,6 +804,8 @@ type SplTokenRegistration = record {
     minimum_deposit_amount : nat64;
     deposit_fee : nat64;
     deposits_paused : bool;
+    // Withdrawal fee in the token's smallest units. Omitted means no fee.
+    withdrawal_fee_token : opt nat64;
 };
 
 type SplTokenUpdate = record {
@@ -808,6 +813,7 @@ type SplTokenUpdate = record {
     minimum_deposit_amount : opt nat64;
     deposit_fee : opt nat64;
     deposits_paused : opt bool;
+    withdrawal_fee_token : opt nat64;
 };
 
 // The deposit fees collected so far for one supported SPL token.
@@ -828,6 +834,20 @@ type SplTokenInfo = record {
     minimum_deposit_amount : nat64;
     deposit_fee : nat64;
     deposits_paused : bool;
+    // Withdrawal fee in the token's smallest units, deducted from the withdrawn amount.
+    withdrawal_fee_token : nat64;
+    // The smallest amount that a withdrawal request can have, in the token's smallest
+    // units: `withdrawal_fee_token + 1`. It is derived, not a setting. The token ledger
+    // can reject a burn below its own minimum.
+    minimum_withdrawal_amount : nat64;
+    // The fee in lamports of ckSOL that a withdrawal of this token burns and keeps.
+    withdrawal_fee_cksol : Lamport;
+    // The lamports of ckSOL that a withdrawal burns for the rent of the destination token
+    // account. The part that is not spent is refunded in ckSOL.
+    refundable_rent : Lamport;
+    // The ckSOL that a withdrawal burns: `withdrawal_fee_cksol + refundable_rent`. The
+    // allowance on the ckSOL ledger must cover it.
+    total_withdrawal_fee_cksol : Lamport;
 };
 
 type OperatingRefillConfig = record {

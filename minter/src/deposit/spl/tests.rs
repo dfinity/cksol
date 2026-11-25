@@ -43,6 +43,7 @@ fn registration(mint: Address, ledger_id: u8) -> SplTokenRegistration {
         minimum_deposit_amount: MINIMUM_NET,
         deposit_fee: FEE,
         deposits_paused: false,
+        withdrawal_fee_token: None,
     }
 }
 
@@ -79,6 +80,7 @@ fn update(minimum: Option<u64>, fee: Option<u64>, paused: Option<bool>) -> Upgra
             minimum_deposit_amount: minimum,
             deposit_fee: fee,
             deposits_paused: paused,
+            withdrawal_fee_token: None,
         }]),
         ..Default::default()
     }

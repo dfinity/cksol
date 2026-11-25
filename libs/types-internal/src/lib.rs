@@ -107,6 +107,10 @@ pub struct UpgradeArgs {
     /// New cycle fee charged for a manually accepted SPL deposit, excluding its RPC cost.
     #[cfg_attr(feature = "event", n(11))]
     pub spl_deposit_consolidation_fee: Option<u64>,
+    /// New fee in lamports of ckSOL charged for an SPL withdrawal, excluding the rent reserve
+    /// of the destination token account.
+    #[cfg_attr(feature = "event", n(12))]
+    pub spl_withdrawal_fee: Option<Lamport>,
 }
 
 /// The Solana network to connect to via the SOL RPC canister.
@@ -195,9 +199,13 @@ pub struct SplTokenRegistration {
     /// Whether new deposits are paused.
     #[cfg_attr(feature = "event", n(8))]
     pub deposits_paused: bool,
+    /// Withdrawal fee in the token's smallest units, deducted from the withdrawn amount.
+    /// Omitted means no fee.
+    #[cfg_attr(feature = "event", n(9))]
+    pub withdrawal_fee_token: Option<u64>,
 }
 
-/// Changes to deposit settings. Omitted fields retain their existing values.
+/// Changes to token settings. Omitted fields retain their existing values.
 #[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize)]
 #[cfg_attr(feature = "event", derive(minicbor::Encode, minicbor::Decode))]
 pub struct SplTokenUpdate {
@@ -213,6 +221,9 @@ pub struct SplTokenUpdate {
     /// Whether new deposits are paused.
     #[cfg_attr(feature = "event", n(3))]
     pub deposits_paused: Option<bool>,
+    /// New withdrawal fee; zero disables the fee.
+    #[cfg_attr(feature = "event", n(4))]
+    pub withdrawal_fee_token: Option<u64>,
 }
 
 /// Automatic conversion of donated ckSOL into unbacked operating SOL.

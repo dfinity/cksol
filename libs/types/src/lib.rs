@@ -400,6 +400,21 @@ pub struct SplTokenInfo {
     pub deposit_fee: u64,
     /// Whether new deposit requests are paused.
     pub deposits_paused: bool,
+    /// Withdrawal fee in the token's smallest units. A withdrawal of `amount` burns `amount`
+    /// and transfers `amount - withdrawal_fee_token`. The minter enforces no minimum amount; the
+    /// token ledger rejects a burn below its own minimum.
+    pub withdrawal_fee_token: u64,
+    /// The smallest amount that a withdrawal request can have, in the token's smallest
+    /// units: `withdrawal_fee_token + 1`. It is derived, not a setting.
+    pub minimum_withdrawal_amount: u64,
+    /// The fee in lamports of ckSOL that a withdrawal of this token burns and keeps.
+    pub withdrawal_fee_cksol: Lamport,
+    /// The lamports of ckSOL that a withdrawal burns for the rent of the destination token
+    /// account. The part that is not spent is refunded in ckSOL.
+    pub refundable_rent: Lamport,
+    /// The ckSOL that a withdrawal burns: `withdrawal_fee_cksol + refundable_rent`. The
+    /// allowance on the ckSOL ledger must cover it.
+    pub total_withdrawal_fee_cksol: Lamport,
 }
 
 /// The deposit fees collected so far for one supported SPL token.

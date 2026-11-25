@@ -220,6 +220,7 @@ async fn register_mint<'a>(
                 minimum_deposit_amount: 1_000_000,
                 deposit_fee: DEPOSIT_FEE,
                 deposits_paused: false,
+                withdrawal_fee_token: None,
             }]),
             ..UpgradeArgs::default()
         })

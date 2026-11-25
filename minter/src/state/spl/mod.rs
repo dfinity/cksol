@@ -1,6 +1,6 @@
 use super::{InvalidStateError, State};
 use candid::Principal;
-use cksol_types::{CollectedSplDepositFees, SplTokenInfo};
+use cksol_types::{CollectedSplDepositFees, Lamport, SplTokenInfo};
 use cksol_types_internal::{SplTokenRegistration, SplTokenUpdate};
 use solana_address::{Address, address};
 use std::{
@@ -14,7 +14,7 @@ mod tests;
 const CLASSIC_TOKEN_PROGRAM: Address = address!("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
 const MAX_SYMBOL_BYTES: usize = 20;
 
-/// Immutable token identity and mutable deposit settings, rebuilt from upgrade events.
+/// Immutable token identity and mutable token settings, rebuilt from upgrade events.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SupportedSplToken {
     pub mint: Address,
@@ -26,6 +26,7 @@ pub struct SupportedSplToken {
     pub minimum_deposit_amount: u64,
     pub deposit_fee: u64,
     pub deposits_paused: bool,
+    pub withdrawal_fee_token: u64,
 }
 
 fn invalid(message: impl Into<String>) -> InvalidStateError {
@@ -58,6 +59,7 @@ impl SupportedSplToken {
             minimum_deposit_amount: args.minimum_deposit_amount,
             deposit_fee: args.deposit_fee,
             deposits_paused: args.deposits_paused,
+            withdrawal_fee_token: args.withdrawal_fee_token.unwrap_or(0),
         })
     }
 
@@ -83,7 +85,7 @@ impl SupportedSplToken {
         self.validate_amounts()
     }
 
-    fn update_deposit_settings(&mut self, update: SplTokenUpdate) {
+    fn update_settings(&mut self, update: SplTokenUpdate) {
         if let Some(minimum) = update.minimum_deposit_amount {
             self.minimum_deposit_amount = minimum;
         }
@@ -92,6 +94,9 @@ impl SupportedSplToken {
         }
         if let Some(paused) = update.deposits_paused {
             self.deposits_paused = paused;
+        }
+        if let Some(fee) = update.withdrawal_fee_token {
+            self.withdrawal_fee_token = fee;
         }
     }
 
@@ -105,7 +110,7 @@ impl SupportedSplToken {
         Ok(())
     }
 
-    fn info(&self) -> SplTokenInfo {
+    fn info(&self, withdrawal_fee_cksol: Lamport, refundable_rent: Lamport) -> SplTokenInfo {
         SplTokenInfo {
             mint: self.mint.into(),
             token_program: self.token_program.into(),
@@ -116,6 +121,12 @@ impl SupportedSplToken {
             minimum_deposit_amount: self.minimum_deposit_amount,
             deposit_fee: self.deposit_fee,
             deposits_paused: self.deposits_paused,
+            withdrawal_fee_token: self.withdrawal_fee_token,
+            minimum_withdrawal_amount: self.withdrawal_fee_token.saturating_add(1),
+            withdrawal_fee_cksol,
+            refundable_rent,
+            // A query must not trap on a fee setting near the maximum.
+            total_withdrawal_fee_cksol: withdrawal_fee_cksol.saturating_add(refundable_rent),
         }
     }
 }
@@ -125,7 +136,12 @@ impl State {
     pub fn supported_spl_tokens(&self) -> Vec<SplTokenInfo> {
         self.supported_spl_tokens
             .values()
-            .map(SupportedSplToken::info)
+            .map(|token| {
+                token.info(
+                    self.spl_withdrawal_fee(),
+                    self.spl_withdrawal_rent_reserve(),
+                )
+            })
             .collect()
     }
 
@@ -145,7 +161,7 @@ impl State {
             .collect()
     }
 
-    /// The registered identity and current deposit settings for one mint.
+    /// The registered identity and current settings for one mint.
     pub fn supported_spl_token(&self, mint: &Address) -> Option<&SupportedSplToken> {
         self.supported_spl_tokens.get(mint)
     }
@@ -160,7 +176,7 @@ impl State {
         // Only this copy is mutated. State::upgrade assigns it before validating the complete state.
         let mut tokens = self.supported_spl_tokens.clone();
         let added_mints = register_tokens(&mut tokens, additions.unwrap_or_default())?;
-        update_deposit_settings(&mut tokens, updates.unwrap_or_default(), &added_mints)?;
+        update_settings(&mut tokens, updates.unwrap_or_default(), &added_mints)?;
 
         Ok(tokens)
     }
@@ -187,7 +203,7 @@ fn register_tokens(
 }
 
 /// Updates each existing mint at most once. New registrations cannot also be updated.
-fn update_deposit_settings(
+fn update_settings(
     tokens: &mut BTreeMap<Address, SupportedSplToken>,
     updates: Vec<SplTokenUpdate>,
     added_mints: &BTreeSet<Address>,
@@ -207,7 +223,7 @@ fn update_deposit_settings(
         let token = tokens
             .get_mut(&mint)
             .ok_or_else(|| invalid(format!("SPL mint {mint} is not registered")))?;
-        token.update_deposit_settings(args);
+        token.update_settings(args);
     }
     Ok(())
 }

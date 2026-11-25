@@ -208,6 +208,7 @@ async fn should_credit_captured_net_and_fee_only_after_validated_success() {
             minimum_deposit_amount: Some(20_000),
             deposit_fee: Some(200),
             deposits_paused: Some(true),
+            withdrawal_fee_token: None,
         }]),
         ..Default::default()
     }));

@@ -41,6 +41,7 @@ fn sweep() -> SplSweep {
         minimum_deposit_amount: 1,
         deposit_fee: 34,
         deposits_paused: false,
+        withdrawal_fee_token: 0,
     };
     SplSweep::plan(42, deposit, &token, &schnorr_master_key()).unwrap()
 }
@@ -101,6 +102,7 @@ fn should_recover_only_the_captured_single_deposit_message_and_ordered_signers()
         minimum_deposit_amount: 9_999,
         deposit_fee: 5_000,
         deposits_paused: true,
+        withdrawal_fee_token: 0,
     };
     let message = sweep.sweep_message(Hash::default());
     let recover = |message: Message, signers: &[Signer]| {
@@ -220,6 +222,7 @@ fn should_reject_invalid_submission_events_before_reserving_or_removing_the_depo
                 minimum_deposit_amount: 1,
                 deposit_fee: 34,
                 deposits_paused: false,
+                withdrawal_fee_token: None,
             }]),
             ..Default::default()
         })
@@ -303,6 +306,7 @@ fn submission_log(main_lamports: u64, operating_lamports: u64) -> (SplSweep, Vec
                 minimum_deposit_amount: 1,
                 deposit_fee: 34,
                 deposits_paused: false,
+                withdrawal_fee_token: None,
             }]),
             ..Default::default()
         }),

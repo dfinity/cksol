@@ -42,6 +42,7 @@ fn setup(operating: u64, main: u64) {
                     minimum_deposit_amount: 1,
                     deposit_fee: 10,
                     deposits_paused: false,
+                    withdrawal_fee_token: None,
                 })
                 .collect(),
         ),

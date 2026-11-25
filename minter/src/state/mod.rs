@@ -147,6 +147,7 @@ pub struct State {
     operating_balance: operating_balance::OperatingBalance,
     spl_deposits: SplDeposits,
     spl_deposit_consolidation_fee: u128,
+    spl_withdrawal_fee: Lamport,
     pending_deposit_spl_request_guards: BTreeSet<(Account, Address)>,
 }
 
@@ -226,6 +227,16 @@ impl State {
 
     pub fn spl_deposit_consolidation_fee(&self) -> u128 {
         self.spl_deposit_consolidation_fee
+    }
+
+    /// The ckSOL fee of an SPL withdrawal, excluding the rent reserve of the destination.
+    pub fn spl_withdrawal_fee(&self) -> Lamport {
+        self.spl_withdrawal_fee
+    }
+
+    /// The ckSOL burned with the fee for the rent of the destination token account.
+    pub fn spl_withdrawal_rent_reserve(&self) -> Lamport {
+        crate::constants::CLASSIC_TOKEN_ACCOUNT_RENT_EXEMPTION
     }
 
     pub fn deposit_spl_required_cycles(&self) -> u128 {
@@ -405,6 +416,13 @@ impl State {
                 max_automatic_deposit_fee: self.max_automatic_deposit_fee(),
             });
         }
+        // The minter pays the transaction fee of an SPL withdrawal from this fee.
+        if self.spl_withdrawal_fee < BATCH_WITHDRAWAL_TX_FEE {
+            return Err(InvalidStateError::SplWithdrawalFeeTooLow {
+                spl_withdrawal_fee: self.spl_withdrawal_fee,
+                transaction_fee: BATCH_WITHDRAWAL_TX_FEE,
+            });
+        }
         spl::validate_tokens(
             &self.supported_spl_tokens,
             self.ledger_canister_id,
@@ -435,6 +453,7 @@ impl State {
             update_spl_tokens,
             operating_balance_refill,
             spl_deposit_consolidation_fee,
+            spl_withdrawal_fee,
         }: UpgradeArgs,
     ) -> Result<(), InvalidStateError> {
         if let Some(sol_rpc_canister_id) = sol_rpc_canister_id {
@@ -469,6 +488,9 @@ impl State {
         }
         if let Some(fee) = spl_deposit_consolidation_fee {
             self.spl_deposit_consolidation_fee = u128::from(fee);
+        }
+        if let Some(fee) = spl_withdrawal_fee {
+            self.spl_withdrawal_fee = fee;
         }
         self.validate()
     }
@@ -1098,6 +1120,10 @@ pub enum InvalidStateError {
     NonceAccountIsWithdrawalDestination(Address),
     InvalidSplToken(String),
     InvalidOperatingRefillConfig,
+    SplWithdrawalFeeTooLow {
+        spl_withdrawal_fee: Lamport,
+        transaction_fee: Lamport,
+    },
 }
 
 impl From<NoncePoolError> for InvalidStateError {
@@ -1172,6 +1198,7 @@ impl TryFrom<InitArgs> for State {
             operating_balance: operating_balance::OperatingBalance::default(),
             spl_deposits: SplDeposits::default(),
             spl_deposit_consolidation_fee: crate::constants::DEFAULT_SPL_DEPOSIT_CONSOLIDATION_FEE,
+            spl_withdrawal_fee: crate::constants::DEFAULT_SPL_WITHDRAWAL_FEE,
             pending_deposit_spl_request_guards: BTreeSet::new(),
         };
         state.validate()?;

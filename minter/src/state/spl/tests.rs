@@ -25,6 +25,7 @@ fn registration() -> SplTokenRegistration {
         minimum_deposit_amount: 100,
         deposit_fee: 10,
         deposits_paused: false,
+        withdrawal_fee_token: None,
     }
 }
 
@@ -41,6 +42,7 @@ fn update(token: &SplTokenRegistration) -> SplTokenUpdate {
         minimum_deposit_amount: None,
         deposit_fee: None,
         deposits_paused: None,
+        withdrawal_fee_token: None,
     }
 }
 
@@ -73,6 +75,11 @@ fn should_register_and_discover_tokens_without_changing_sol_configuration() {
             minimum_deposit_amount: token.minimum_deposit_amount,
             deposit_fee: token.deposit_fee,
             deposits_paused: token.deposits_paused,
+            withdrawal_fee_token: 0,
+            minimum_withdrawal_amount: 1,
+            withdrawal_fee_cksol: 1_000_000,
+            refundable_rent: 2_039_280,
+            total_withdrawal_fee_cksol: 3_039_280,
         }
     );
     state.supported_spl_tokens.clear();

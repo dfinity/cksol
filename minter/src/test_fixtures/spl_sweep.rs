@@ -29,6 +29,7 @@ pub fn registration() -> SplTokenRegistration {
         minimum_deposit_amount: 1,
         deposit_fee: 10,
         deposits_paused: false,
+        withdrawal_fee_token: None,
     }
 }
 
@@ -43,6 +44,7 @@ pub fn plan(id: u64) -> SplSweep {
         minimum_deposit_amount: 1,
         deposit_fee: 10,
         deposits_paused: false,
+        withdrawal_fee_token: 0,
     };
     let account = account(id as usize + 1);
     let owner = account_address(&devnet_sweep::master_key(), &account);

@@ -73,6 +73,7 @@ fn setup() {
                         minimum_deposit_amount: 1,
                         deposit_fee: TOKEN_FEE,
                         deposits_paused: false,
+                        withdrawal_fee_token: None,
                     })
                     .collect(),
             ),
@@ -544,6 +545,7 @@ async fn should_mint_each_deposit_on_the_ledger_of_its_token_even_when_paused() 
                 minimum_deposit_amount: None,
                 deposit_fee: Some(500),
                 deposits_paused: Some(true),
+                withdrawal_fee_token: None,
             }]),
             ..Default::default()
         }),

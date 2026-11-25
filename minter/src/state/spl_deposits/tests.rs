@@ -193,6 +193,7 @@ fn should_replay_captured_terms_without_changing_sol_or_operating_state() {
                 minimum_deposit_amount: 1,
                 deposit_fee: 100,
                 deposits_paused: false,
+                withdrawal_fee_token: None,
             }]),
             ..Default::default()
         }),
@@ -223,6 +224,7 @@ fn should_replay_captured_terms_without_changing_sol_or_operating_state() {
             minimum_deposit_amount: None,
             deposit_fee: Some(200),
             deposits_paused: None,
+            withdrawal_fee_token: None,
         }]),
         ..Default::default()
     };
