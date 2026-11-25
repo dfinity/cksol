@@ -305,3 +305,29 @@ fn should_reject_a_request_above_the_refill_amount() {
     funds.set_config(config());
     funds.request_refill(0, 1_001, 10);
 }
+
+#[test]
+fn should_repair_a_shortfall_from_every_source_of_operating_sol_before_it_is_spendable() {
+    let mut operating = OperatingBalance::default();
+    operating.credit(5);
+    operating.reserve(5);
+
+    // The balance is empty, so the complete cost becomes a shortfall.
+    operating.debit(3);
+    assert_eq!((operating.balance(), operating.shortfall()), (0, 3));
+
+    // A returned reservation, a fee surplus and a refill each repay the shortfall first.
+    operating.release(1);
+    assert_eq!((operating.balance(), operating.shortfall()), (0, 2));
+    operating.credit(1);
+    assert_eq!((operating.balance(), operating.shortfall()), (0, 1));
+    operating.request_refill(0, 10, 100);
+    operating.complete_refill(0);
+    assert_eq!((operating.balance(), operating.shortfall()), (9, 0));
+
+    // A cost that the balance covers leaves no shortfall.
+    operating.debit(4);
+    assert_eq!((operating.balance(), operating.shortfall()), (5, 0));
+    operating.debit(7);
+    assert_eq!((operating.balance(), operating.shortfall()), (0, 2));
+}

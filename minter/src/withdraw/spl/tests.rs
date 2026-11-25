@@ -839,6 +839,44 @@ mod fee_reimbursements {
         });
     }
 
+    fn record_fee_refund_after_failed_request(to: Account, amount: Lamport) {
+        setup();
+        record(EventType::FailedSplWithdrawalRequest {
+            cksol_burn_block_index: 42.into(),
+            to: account(1),
+            reimbursed_amount: 100,
+        });
+        record(EventType::QueuedSplCkSolRefund {
+            cksol_burn_block_index: 42.into(),
+            kind: SplRefundKind::FailedTokenBurn,
+            to,
+            amount,
+            created_at_time: 999,
+        });
+    }
+
+    #[test]
+    fn should_queue_the_fee_refund_that_the_failed_request_recorded() {
+        record_fee_refund_after_failed_request(account(1), 100);
+
+        read_state(|state| {
+            let pending = &state.pending_spl_cksol_refunds()[&42];
+            assert_eq!((pending.to, pending.amount), (account(1), 100));
+        });
+    }
+
+    #[test]
+    #[should_panic(expected = "another account or amount than recorded")]
+    fn should_reject_a_fee_refund_to_another_account_than_the_failed_request() {
+        record_fee_refund_after_failed_request(account(2), 100);
+    }
+
+    #[test]
+    #[should_panic(expected = "another account or amount than recorded")]
+    fn should_reject_a_fee_refund_of_another_amount_than_the_failed_request() {
+        record_fee_refund_after_failed_request(account(1), 99);
+    }
+
     #[test]
     #[should_panic(expected = "second ckSOL refund")]
     fn should_reject_a_second_refund_for_the_same_withdrawal() {
@@ -1776,5 +1814,1102 @@ mod transactions {
         assert_eq!(decoder.u32().unwrap(), 6);
         assert_eq!(decoder.array().unwrap(), Some(1));
         assert_eq!(decoder.u64().unwrap(), 42);
+    }
+}
+
+mod settlement {
+    use super::*;
+    use crate::{
+        constants::FEE_PER_SIGNATURE,
+        monitor::{MIN_REBROADCAST_AGE, finalize_transactions},
+        state::{
+            SPL_SWEEP_TRANSACTION_FEE,
+            event::{Signer, TransactionPurpose},
+        },
+        test_fixtures::{
+            DEFAULT_BLOCK_HEIGHT, GetTransactionResult, devnet_sweep, durable_nonce,
+            nonce_account_info, spl_sweep as fixture,
+        },
+    };
+    use base64::{Engine, engine::general_purpose::STANDARD};
+    use cksol_types::{SplRentRefundStatus, TxFinalizedStatus};
+    use sol_rpc_types::MultiRpcResult;
+    use solana_signature::Signature;
+    use solana_transaction_status_client_types::EncodedConfirmedTransactionWithStatusMeta;
+
+    type GetAccountInfoResult = MultiRpcResult<Option<sol_rpc_types::AccountInfo>>;
+
+    const BALANCE: Lamport = 500_000_000;
+    /// The treasury tokens after the credited sweep of the fixture deposit.
+    const TOKENS: u64 = 1_000;
+    const AMOUNT: u64 = 600;
+    const TOKEN_FEE: u64 = 25;
+    const TRANSFERRED: u64 = AMOUNT - TOKEN_FEE;
+    const SOL_COST: Lamport = FEE_PER_SIGNATURE + RENT_RESERVE;
+    const SENT_AT: u64 = 1_000;
+
+    fn mint() -> Address {
+        fixture::mint()
+    }
+
+    fn account_of_request() -> Account {
+        account(1)
+    }
+
+    fn terms() -> SplWithdrawalRequestTerms {
+        SplWithdrawalRequestTerms {
+            account: account_of_request(),
+            mint: mint(),
+            ledger_id: fixture::registration().ledger_id,
+            address: DESTINATION.parse().unwrap(),
+            amount: AMOUNT,
+            token_fee: TOKEN_FEE,
+            fee: FEE,
+            rent_reserve: RENT_RESERVE,
+        }
+    }
+
+    fn record_at(time: u64, event: EventType) {
+        mutate_state(|state| {
+            process_event(
+                state,
+                event,
+                &TestCanisterRuntime::new().add_times([time; 2]),
+            )
+        });
+    }
+
+    /// Funds the minter and the treasury, then accepts, binds and submits withdrawal 42
+    /// with a signature of the minter key. Returns that signature.
+    fn setup_sent_withdrawal() -> Signature {
+        reset_state();
+        reset_events();
+        init_state();
+        fixture::init_balance(BALANCE + SPL_SWEEP_TRANSACTION_FEE);
+        record_at(
+            1,
+            EventType::Upgrade(UpgradeArgs {
+                add_spl_tokens: Some(vec![fixture::registration()]),
+                ..Default::default()
+            }),
+        );
+        record_at(
+            1,
+            EventType::RequestedOperatingRefill {
+                refill_id: 0,
+                amount: SPL_SWEEP_TRANSACTION_FEE,
+                created_at_time: 1,
+            },
+        );
+        record_at(
+            1,
+            EventType::CompletedOperatingRefill {
+                refill_id: 0,
+                burn_block_index: 7,
+            },
+        );
+        let sweep = fixture::plan(0);
+        let deposit = sweep.deposit();
+        let sweep_signature = fixture::transaction(&sweep).signatures[0];
+        record_at(
+            1,
+            EventType::QueuedSplDeposit {
+                deposit_id: 0,
+                account: deposit.account,
+                mint: deposit.mint,
+                address: deposit.address,
+                balance: deposit.balance,
+                fee: deposit.fee,
+            },
+        );
+        record_at(
+            1,
+            EventType::SubmittedTransaction {
+                signature: sweep_signature,
+                message: sweep.sweep_message(Hash::new_from_array([0x42; 32])).into(),
+                signers: sweep.signers().to_vec(),
+                purpose: TransactionPurpose::SweepSplDeposit {
+                    deposit_id: 0,
+                    block_height: DEFAULT_BLOCK_HEIGHT,
+                },
+            },
+        );
+        record_at(
+            1,
+            EventType::SucceededTransaction {
+                signature: sweep_signature,
+            },
+        );
+        record_at(
+            1,
+            EventType::CreditedSplSweep {
+                signature: sweep_signature,
+                lamports_spent: SPL_SWEEP_TRANSACTION_FEE,
+                deposit_id: 0,
+                amount_to_mint: deposit.amount_to_mint(),
+            },
+        );
+        read_state(|state| {
+            assert_eq!(state.balance(), BALANCE);
+            assert_eq!(state.operating_balance().balance(), 0);
+            assert_eq!(state.spl_treasury_balance(&mint()), TOKENS);
+        });
+
+        record_at(
+            1,
+            EventType::AcceptedSplWithdrawalRequest(SplWithdrawalRequest {
+                terms: terms(),
+                cksol_burn_block_index: 42.into(),
+                ckspl_burn_block_index: 7.into(),
+            }),
+        );
+        record_at(
+            1,
+            EventType::CreatedSplWithdrawalTransaction {
+                cksol_burn_block_index: 42.into(),
+                nonce_account: NONCE_ACCOUNT,
+                nonce_value: durable_nonce(1),
+            },
+        );
+        let message = read_state(|state| {
+            let created = state.created_spl_withdrawal_txs()[&NONCE_ACCOUNT].clone();
+            state
+                .bound_spl_withdrawal_message(&NONCE_ACCOUNT, &created)
+                .unwrap()
+        });
+        let signature = devnet_sweep::minter_signature_of(&message);
+        record_at(
+            SENT_AT,
+            EventType::SubmittedTransaction {
+                signature,
+                message: message.into(),
+                signers: vec![Signer::Minter],
+                purpose: TransactionPurpose::SplWithdrawal {
+                    cksol_burn_block_index: 42.into(),
+                },
+            },
+        );
+        read_state(|state| {
+            assert_eq!(state.balance(), BALANCE - SOL_COST);
+            assert_eq!(state.spl_treasury_balance(&mint()), TOKENS - TRANSFERRED);
+        });
+        signature
+    }
+
+    fn sent_message(signature: &Signature) -> solana_message::Message {
+        read_state(
+            |state| match state.submitted_transactions().get(signature) {
+                Some(crate::state::MinterTransaction::SplWithdrawal {
+                    message: crate::state::event::VersionedMessage::Legacy(message),
+                    ..
+                }) => message.clone(),
+                other => panic!("expected a submitted SPL withdrawal, got {other:?}"),
+            },
+        )
+    }
+
+    fn advanced_nonce() -> GetAccountInfoResult {
+        MultiRpcResult::Consistent(Ok(Some(nonce_account_info(
+            devnet_sweep::minter_main_address(),
+            3,
+        ))))
+    }
+
+    fn unchanged_nonce() -> GetAccountInfoResult {
+        MultiRpcResult::Consistent(Ok(Some(nonce_account_info(
+            devnet_sweep::minter_main_address(),
+            1,
+        ))))
+    }
+
+    /// The `getTransaction` reply for the sent withdrawal. `rent` is the lamports that
+    /// created the destination token account; `None` is a transaction that failed.
+    fn outcome(
+        signature: &Signature,
+        rent: Option<Lamport>,
+        with_token_balances: bool,
+    ) -> GetTransactionResult {
+        let message = sent_message(signature);
+        let minter = devnet_sweep::minter_main_address();
+        let index = |address: Address| {
+            message
+                .account_keys
+                .iter()
+                .position(|key| *key == address)
+                .unwrap()
+        };
+        let treasury = index(associated_token_address(&minter, &mint()));
+        let destination = index(associated_token_address(&terms().address, &mint()));
+        let failed = rent.is_none();
+        let rent = rent.unwrap_or(0);
+        let mut pre = vec![1_000_000_u64; message.account_keys.len()];
+        pre[0] = 10_000_000_000;
+        pre[destination] = if rent == 0 && !failed {
+            RENT_RESERVE
+        } else {
+            0
+        };
+        let mut post = pre.clone();
+        post[0] -= FEE_PER_SIGNATURE + rent;
+        post[destination] += rent;
+        let token_balance = |index: usize, amount: u64| {
+            let owner = if index == treasury {
+                minter
+            } else {
+                terms().address
+            };
+            serde_json::json!({
+                "accountIndex": index, "mint": mint().to_string(),
+                "owner": owner.to_string(),
+                "programId": spl_token_interface::id().to_string(),
+                "uiTokenAmount": {"amount": amount.to_string(), "decimals": 6, "uiAmount": null, "uiAmountString": "0"}
+            })
+        };
+        let (pre_tokens, post_tokens) = if !with_token_balances {
+            (vec![], vec![])
+        } else if failed {
+            (
+                vec![token_balance(treasury, TOKENS)],
+                vec![token_balance(treasury, TOKENS)],
+            )
+        } else {
+            // An existing destination token account has a balance before the transfer.
+            let existing = if rent == 0 { Some(40) } else { None };
+            (
+                std::iter::once(token_balance(treasury, TOKENS))
+                    .chain(existing.map(|amount| token_balance(destination, amount)))
+                    .collect(),
+                vec![
+                    token_balance(treasury, TOKENS - TRANSFERRED),
+                    token_balance(destination, existing.unwrap_or(0) + TRANSFERRED),
+                ],
+            )
+        };
+        let error = if failed {
+            serde_json::json!({"InstructionError": [2, {"Custom": 17}]})
+        } else {
+            serde_json::Value::Null
+        };
+        let status = if failed {
+            serde_json::json!({"Err": error.clone()})
+        } else {
+            serde_json::json!({"Ok": null})
+        };
+        let transaction = solana_transaction::Transaction {
+            signatures: vec![*signature],
+            message,
+        };
+        let encoded = STANDARD.encode(bincode::serialize(&transaction).unwrap());
+        let outcome: EncodedConfirmedTransactionWithStatusMeta =
+            serde_json::from_value(serde_json::json!({
+                "slot": 350_000_000_u64,
+                "blockTime": 1_700_000_000_i64,
+                "meta": {
+                    "err": error, "status": status, "fee": FEE_PER_SIGNATURE,
+                    "preBalances": pre, "postBalances": post,
+                    "innerInstructions": [], "logMessages": [],
+                    "preTokenBalances": pre_tokens, "postTokenBalances": post_tokens,
+                    "rewards": [], "loadedAddresses": {"readonly": [], "writable": []},
+                    "computeUnitsConsumed": 450
+                },
+                "transaction": [encoded, "base64"],
+                "version": "legacy"
+            }))
+            .unwrap();
+        MultiRpcResult::Consistent(Ok(Some(outcome.try_into().unwrap())))
+    }
+
+    /// Runs the finalization timer with an advanced nonce and the given transaction.
+    async fn finalize(reply: GetTransactionResult) -> TestCanisterRuntime {
+        let runtime = TestCanisterRuntime::new()
+            .add_times([2_000; 30])
+            .add_stub_response(advanced_nonce())
+            .add_stub_response(reply);
+        finalize_transactions(runtime.clone()).await;
+        runtime
+    }
+
+    /// Replays the recorded log with the signing key of this module as the minter key.
+    fn assert_replay() {
+        use crate::{
+            state::{audit::replay_events, event::Event},
+            test_fixtures::init_args_with_nonce_account,
+        };
+        use ic_stable_structures::Storable;
+        let key = devnet_sweep::master_key();
+        let prefix = [
+            EventType::Init(init_args_with_nonce_account()),
+            EventType::MinterPublicKeyFetched {
+                public_key: key.public_key,
+                chain_code: key.chain_code,
+            },
+        ]
+        .into_iter()
+        .map(|payload| Event {
+            timestamp: 0,
+            payload,
+        });
+        let recorded = crate::storage::with_event_iter(|events| events.collect::<Vec<Event>>());
+        let events = recorded.into_iter().map(|event| {
+            let decoded = Event::from_bytes(std::borrow::Cow::Owned(event.to_bytes().into_owned()));
+            let wire = candid::encode_one(cksol_types_internal::event::Event::from(event)).unwrap();
+            let public: cksol_types_internal::event::Event = candid::decode_one(&wire).unwrap();
+            assert_eq!(Event::try_from(public).unwrap(), decoded);
+            decoded
+        });
+        let replayed = replay_events(prefix.chain(events));
+        read_state(|state| assert_eq!(state, &replayed));
+    }
+
+    fn rent_refund_event(kind: SplRefundKind, amount: Lamport) -> EventType {
+        EventType::QueuedSplCkSolRefund {
+            cksol_burn_block_index: 42.into(),
+            kind,
+            to: account_of_request(),
+            amount,
+            created_at_time: 2_000,
+        }
+    }
+
+    fn assert_no_refund_recorded() {
+        let recorded = crate::storage::with_event_iter(|events| events.collect::<Vec<_>>());
+        assert!(
+            !recorded
+                .iter()
+                .any(|event| matches!(event.payload, EventType::QueuedSplCkSolRefund { .. }))
+        );
+    }
+
+    #[tokio::test]
+    async fn should_settle_a_transfer_that_created_the_destination_account() {
+        let signature = setup_sent_withdrawal();
+        let events_before = EventsAssert::from_recorded();
+
+        let runtime = finalize(outcome(&signature, Some(RENT_RESERVE), true)).await;
+
+        assert_eq!(
+            runtime
+                .sent_update_calls()
+                .iter()
+                .map(|call| call.method.as_str())
+                .collect::<Vec<_>>(),
+            ["getAccountInfo", "getTransaction"]
+        );
+        // The whole reserve was spent, so the outcome is the only event.
+        assert_eq!(EventsAssert::from_recorded().len(), events_before.len() + 1);
+        EventsAssert::from_recorded().expect_contains_event_eq(
+            EventType::SucceededSplWithdrawalTransaction {
+                signature,
+                lamports_spent: SOL_COST,
+                rent_spent: RENT_RESERVE,
+            },
+        );
+        assert_no_refund_recorded();
+        read_state(|state| {
+            assert!(state.submitted_transactions().is_empty());
+            assert!(state.succeeded_transactions().contains(&signature));
+            assert!(state.sent_spl_withdrawal_requests().is_empty());
+            assert_eq!(state.nonce_pool().num_free_accounts(), 1);
+            // The reservation was spent in full; the fee less the transaction fee is
+            // the minter's own SOL.
+            assert_eq!(state.balance(), BALANCE - SOL_COST);
+            assert_eq!(state.operating_balance().balance(), FEE - FEE_PER_SIGNATURE);
+            assert_eq!(state.spl_treasury_balance(&mint()), TOKENS - TRANSFERRED);
+            assert_eq!(
+                state.collected_spl_withdrawal_fees(&mint()),
+                u128::from(TOKEN_FEE)
+            );
+            assert_eq!(
+                state.all_collected_spl_withdrawal_fees(),
+                [cksol_types::CollectedSplWithdrawalFees {
+                    mint: mint().into(),
+                    amount: u128::from(TOKEN_FEE),
+                }]
+            );
+        });
+        assert_eq!(
+            withdrawal_status(42),
+            WithdrawSplStatus::TxFinalized {
+                transaction: TxFinalizedStatus::Success {
+                    transaction_id: signature.into()
+                },
+                rent_refund: SplRentRefundStatus::NotDue,
+            }
+        );
+        assert_replay();
+        // A settled withdrawal is not read again.
+        let idle = TestCanisterRuntime::new().add_times([3_000; 30]);
+        finalize_transactions(idle.clone()).await;
+        assert!(idle.sent_update_calls().is_empty());
+    }
+
+    #[tokio::test]
+    async fn should_refund_the_rent_reserve_when_the_destination_account_existed() {
+        let signature = setup_sent_withdrawal();
+
+        finalize(outcome(&signature, Some(0), true)).await;
+
+        let recorded = crate::storage::with_event_iter(|events| events.collect::<Vec<_>>());
+        assert_eq!(
+            recorded[recorded.len() - 2..]
+                .iter()
+                .map(|event| event.payload.clone())
+                .collect::<Vec<_>>(),
+            [
+                EventType::SucceededSplWithdrawalTransaction {
+                    signature,
+                    lamports_spent: FEE_PER_SIGNATURE,
+                    rent_spent: 0,
+                },
+                rent_refund_event(SplRefundKind::UnusedRent, RENT_RESERVE),
+            ]
+        );
+        read_state(|state| {
+            // The rent returns to the balance: it backs the ckSOL that the refund mints.
+            assert_eq!(state.balance(), BALANCE - FEE_PER_SIGNATURE);
+            assert_eq!(state.operating_balance().balance(), FEE - FEE_PER_SIGNATURE);
+        });
+        let finalized = |rent_refund| WithdrawSplStatus::TxFinalized {
+            transaction: TxFinalizedStatus::Success {
+                transaction_id: signature.into(),
+            },
+            rent_refund,
+        };
+        assert_eq!(
+            withdrawal_status(42),
+            finalized(SplRentRefundStatus::Pending {
+                amount: RENT_RESERVE
+            })
+        );
+        assert_replay();
+
+        let ledger = reimbursement_runtime([Ok(Nat::from(8_u64))]);
+        process_pending_cksol_refunds(ledger.clone()).await;
+
+        let calls = ledger.sent_update_calls();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].canister_id, ledger_canister_id());
+        assert_eq!(
+            calls[0].single_arg::<TransferArg>(),
+            TransferArg {
+                from_subaccount: None,
+                to: account_of_request(),
+                fee: None,
+                created_at_time: Some(2_000),
+                memo: Some(
+                    Memo::from(MintMemo::spl_cksol_refund(42, SplRefundKind::UnusedRent)).into()
+                ),
+                amount: RENT_RESERVE.into(),
+            }
+        );
+        assert_eq!(
+            withdrawal_status(42),
+            finalized(SplRentRefundStatus::Reimbursed {
+                amount: RENT_RESERVE,
+                mint_block_index: 8,
+            })
+        );
+        assert_replay();
+    }
+
+    #[tokio::test]
+    async fn should_complete_a_transfer_whose_rent_is_above_the_reserve() {
+        let signature = setup_sent_withdrawal();
+        let excess = 160_720;
+
+        finalize(outcome(&signature, Some(RENT_RESERVE + excess), true)).await;
+
+        EventsAssert::from_recorded().expect_contains_event_eq(
+            EventType::SucceededSplWithdrawalTransaction {
+                signature,
+                lamports_spent: SOL_COST + excess,
+                rent_spent: RENT_RESERVE + excess,
+            },
+        );
+        assert_no_refund_recorded();
+        read_state(|state| {
+            // The fee absorbs the rent above the reserve.
+            assert_eq!(state.balance(), BALANCE - SOL_COST - excess);
+            assert_eq!(
+                state.operating_balance().balance(),
+                FEE - FEE_PER_SIGNATURE - excess
+            );
+        });
+        assert!(matches!(
+            withdrawal_status(42),
+            WithdrawSplStatus::TxFinalized {
+                rent_refund: SplRentRefundStatus::NotDue,
+                ..
+            }
+        ));
+        assert_replay();
+    }
+
+    #[tokio::test]
+    async fn should_take_a_rent_overrun_above_the_fee_from_the_operating_balance() {
+        // The fee less the transaction fee absorbs this much rent above the reserve.
+        let margin = FEE - FEE_PER_SIGNATURE;
+        for (operating, expected_operating, expected_shortfall) in
+            [(10, 9, 0), (1, 0, 0), (0, 0, 1)]
+        {
+            let signature = setup_sent_withdrawal();
+            if operating > 0 {
+                record_at(
+                    1,
+                    EventType::RequestedOperatingRefill {
+                        refill_id: 1,
+                        amount: operating,
+                        created_at_time: 1,
+                    },
+                );
+                record_at(
+                    1,
+                    EventType::CompletedOperatingRefill {
+                        refill_id: 1,
+                        burn_block_index: 9,
+                    },
+                );
+            }
+            let rent = RENT_RESERVE + margin + 1;
+
+            finalize(outcome(&signature, Some(rent), true)).await;
+
+            read_state(|state| {
+                // The main balance pays the real cost in every case.
+                assert_eq!(
+                    state.balance(),
+                    BALANCE - FEE_PER_SIGNATURE - rent,
+                    "operating {operating}"
+                );
+                // The one lamport above the fee is booked: it comes from the operating
+                // balance, and from the shortfall counter when that balance is empty.
+                assert_eq!(
+                    state.operating_balance().balance(),
+                    expected_operating,
+                    "operating {operating}"
+                );
+                assert_eq!(
+                    state.operating_balance().shortfall(),
+                    expected_shortfall,
+                    "operating {operating}"
+                );
+            });
+            assert!(matches!(
+                withdrawal_status(42),
+                WithdrawSplStatus::TxFinalized {
+                    rent_refund: SplRentRefundStatus::NotDue,
+                    ..
+                }
+            ));
+            assert_replay();
+        }
+    }
+
+    #[tokio::test]
+    async fn should_repair_a_shortfall_from_new_funding_before_it_is_spendable() {
+        let signature = setup_sent_withdrawal();
+        let margin = FEE - FEE_PER_SIGNATURE;
+        finalize(outcome(&signature, Some(RENT_RESERVE + margin + 1), true)).await;
+        read_state(|state| {
+            assert_eq!(state.operating_balance().balance(), 0);
+            assert_eq!(state.operating_balance().shortfall(), 1);
+            assert_eq!(state.spl_sweep_allowance(), 0);
+        });
+
+        // A refill of 10 lamports repairs the lamport that is owed and leaves 9.
+        record_at(
+            3_000,
+            EventType::RequestedOperatingRefill {
+                refill_id: 1,
+                amount: 10,
+                created_at_time: 3_000,
+            },
+        );
+        record_at(
+            3_000,
+            EventType::CompletedOperatingRefill {
+                refill_id: 1,
+                burn_block_index: 9,
+            },
+        );
+
+        read_state(|state| {
+            assert_eq!(state.operating_balance().balance(), 9);
+            assert_eq!(state.operating_balance().shortfall(), 0);
+            assert_eq!(state.spl_sweep_allowance(), 9);
+        });
+        assert_replay();
+    }
+
+    #[tokio::test]
+    async fn should_repair_a_shortfall_from_a_released_sweep_reservation() {
+        let signature = setup_sent_withdrawal();
+        // A second sweep is in flight, so its fee is reserved from the operating balance.
+        let sweep = fixture::plan(1);
+        let deposit = sweep.deposit();
+        let sweep_signature = fixture::transaction(&sweep).signatures[0];
+        record_at(
+            1,
+            EventType::RequestedOperatingRefill {
+                refill_id: 1,
+                amount: SPL_SWEEP_TRANSACTION_FEE,
+                created_at_time: 1,
+            },
+        );
+        record_at(
+            1,
+            EventType::CompletedOperatingRefill {
+                refill_id: 1,
+                burn_block_index: 8,
+            },
+        );
+        record_at(
+            1,
+            EventType::QueuedSplDeposit {
+                deposit_id: 1,
+                account: deposit.account,
+                mint: deposit.mint,
+                address: deposit.address,
+                balance: deposit.balance,
+                fee: deposit.fee,
+            },
+        );
+        record_at(
+            1,
+            EventType::SubmittedTransaction {
+                signature: sweep_signature,
+                message: sweep.sweep_message(Hash::new_from_array([0x42; 32])).into(),
+                signers: sweep.signers().to_vec(),
+                purpose: TransactionPurpose::SweepSplDeposit {
+                    deposit_id: 1,
+                    block_height: DEFAULT_BLOCK_HEIGHT,
+                },
+            },
+        );
+        read_state(|state| assert_eq!(state.operating_balance().balance(), 0));
+
+        // The reserved SOL cannot pay the overrun, so one lamport becomes a shortfall.
+        let margin = FEE - FEE_PER_SIGNATURE;
+        let rent = RENT_RESERVE + margin + 1;
+        record_at(
+            2_000,
+            EventType::SucceededSplWithdrawalTransaction {
+                signature,
+                lamports_spent: FEE_PER_SIGNATURE + rent,
+                rent_spent: rent,
+            },
+        );
+        read_state(|state| {
+            assert_eq!(state.operating_balance().balance(), 0);
+            assert_eq!(state.operating_balance().shortfall(), 1);
+        });
+
+        // The sweep expires and its reservation returns: it repairs the shortfall first.
+        record_at(
+            3_000,
+            EventType::ExpiredTransaction {
+                signature: sweep_signature,
+            },
+        );
+
+        read_state(|state| {
+            assert_eq!(state.operating_balance().shortfall(), 0);
+            assert_eq!(
+                state.operating_balance().balance(),
+                SPL_SWEEP_TRANSACTION_FEE - 1
+            );
+            assert_eq!(state.spl_sweep_allowance(), SPL_SWEEP_TRANSACTION_FEE - 1);
+        });
+        assert_replay();
+    }
+
+    #[tokio::test]
+    async fn should_repair_a_shortfall_from_the_fee_of_a_later_withdrawal() {
+        let signature = setup_sent_withdrawal();
+        let margin = FEE - FEE_PER_SIGNATURE;
+        finalize(outcome(&signature, Some(RENT_RESERVE + margin + 1), true)).await;
+        read_state(|state| assert_eq!(state.operating_balance().shortfall(), 1));
+
+        // A second withdrawal fails on-chain, so its fee less the transaction fee is kept.
+        record_at(
+            3_000,
+            EventType::AcceptedSplWithdrawalRequest(SplWithdrawalRequest {
+                terms: SplWithdrawalRequestTerms {
+                    amount: TOKEN_FEE + 1,
+                    ..terms()
+                },
+                cksol_burn_block_index: 43.into(),
+                ckspl_burn_block_index: 8.into(),
+            }),
+        );
+        record_at(
+            3_000,
+            EventType::CreatedSplWithdrawalTransaction {
+                cksol_burn_block_index: 43.into(),
+                nonce_account: NONCE_ACCOUNT,
+                nonce_value: durable_nonce(4),
+            },
+        );
+        let message = read_state(|state| {
+            let created = state.created_spl_withdrawal_txs()[&NONCE_ACCOUNT].clone();
+            state
+                .bound_spl_withdrawal_message(&NONCE_ACCOUNT, &created)
+                .unwrap()
+        });
+        let second = devnet_sweep::minter_signature_of(&message);
+        record_at(
+            3_000,
+            EventType::SubmittedTransaction {
+                signature: second,
+                message: message.into(),
+                signers: vec![Signer::Minter],
+                purpose: TransactionPurpose::SplWithdrawal {
+                    cksol_burn_block_index: 43.into(),
+                },
+            },
+        );
+        record_at(
+            4_000,
+            EventType::FailedSplWithdrawalTransaction {
+                signature: second,
+                lamports_spent: FEE_PER_SIGNATURE,
+            },
+        );
+
+        read_state(|state| {
+            assert_eq!(state.operating_balance().shortfall(), 0);
+            assert_eq!(state.operating_balance().balance(), margin - 1);
+        });
+        assert_replay();
+    }
+
+    #[tokio::test]
+    async fn should_credit_nothing_when_the_fee_equals_the_cost_of_the_withdrawal() {
+        let signature = setup_sent_withdrawal();
+        let margin = FEE - FEE_PER_SIGNATURE;
+
+        finalize(outcome(&signature, Some(RENT_RESERVE + margin), true)).await;
+
+        read_state(|state| {
+            assert_eq!(state.operating_balance().balance(), 0);
+            assert_eq!(state.operating_balance().shortfall(), 0);
+        });
+        assert_replay();
+    }
+
+    #[tokio::test]
+    async fn should_remint_the_tokens_and_refund_the_rent_after_a_failed_transfer() {
+        let signature = setup_sent_withdrawal();
+
+        finalize(outcome(&signature, None, true)).await;
+
+        let recorded = crate::storage::with_event_iter(|events| events.collect::<Vec<_>>());
+        assert_eq!(
+            recorded[recorded.len() - 2..]
+                .iter()
+                .map(|event| event.payload.clone())
+                .collect::<Vec<_>>(),
+            [
+                EventType::FailedSplWithdrawalTransaction {
+                    signature,
+                    lamports_spent: FEE_PER_SIGNATURE,
+                },
+                rent_refund_event(SplRefundKind::FailedTransferRent, RENT_RESERVE),
+            ]
+        );
+        read_state(|state| {
+            assert!(state.submitted_transactions().is_empty());
+            assert!(state.failed_transactions().contains_key(&signature));
+            assert_eq!(state.nonce_pool().num_free_accounts(), 1);
+            // The tokens return to the treasury and the rent to the balance. The fee is
+            // kept and pays the failed transaction.
+            assert_eq!(state.spl_treasury_balance(&mint()), TOKENS);
+            assert_eq!(state.balance(), BALANCE - FEE_PER_SIGNATURE);
+            assert_eq!(state.operating_balance().balance(), FEE - FEE_PER_SIGNATURE);
+            assert_eq!(state.collected_spl_withdrawal_fees(&mint()), 0);
+        });
+        let pending_rent = SplRentRefundStatus::Pending {
+            amount: RENT_RESERVE,
+        };
+        assert_eq!(
+            withdrawal_status(42),
+            WithdrawSplStatus::ReimbursementPending {
+                transaction_id: signature.into(),
+                reimbursed_amount: AMOUNT,
+                rent_refund: pending_rent.clone(),
+            }
+        );
+        assert_replay();
+
+        // The remint is the full burned amount, on the ledger of the token.
+        let token_ledger = reimbursement_runtime([Ok(Nat::from(5_u64))]);
+        process_pending_reimbursements(token_ledger.clone()).await;
+        let calls = token_ledger.sent_update_calls();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].canister_id, fixture::registration().ledger_id);
+        assert_eq!(
+            calls[0].single_arg::<TransferArg>(),
+            TransferArg {
+                from_subaccount: None,
+                to: account_of_request(),
+                fee: None,
+                created_at_time: Some(2_000),
+                memo: Some(Memo::from(MintMemo::spl_withdrawal_reimbursement(42)).into()),
+                amount: AMOUNT.into(),
+            }
+        );
+        assert_eq!(
+            withdrawal_status(42),
+            WithdrawSplStatus::Reimbursed {
+                transaction_id: signature.into(),
+                reimbursed_amount: AMOUNT,
+                mint_block_index: 5,
+                rent_refund: pending_rent,
+            }
+        );
+
+        // The rent refund is an independent obligation on the ckSOL ledger.
+        let cksol_ledger = reimbursement_runtime([Ok(Nat::from(8_u64))]);
+        process_pending_cksol_refunds(cksol_ledger.clone()).await;
+        assert_eq!(
+            cksol_ledger.sent_update_calls()[0]
+                .single_arg::<TransferArg>()
+                .memo,
+            Some(
+                Memo::from(MintMemo::spl_cksol_refund(
+                    42,
+                    SplRefundKind::FailedTransferRent
+                ))
+                .into()
+            )
+        );
+        assert_eq!(
+            withdrawal_status(42),
+            WithdrawSplStatus::Reimbursed {
+                transaction_id: signature.into(),
+                reimbursed_amount: AMOUNT,
+                mint_block_index: 5,
+                rent_refund: SplRentRefundStatus::Reimbursed {
+                    amount: RENT_RESERVE,
+                    mint_block_index: 8,
+                },
+            }
+        );
+        assert_replay();
+    }
+
+    #[tokio::test]
+    async fn should_quarantine_a_token_remint_that_cannot_be_retried_safely() {
+        let signature = setup_sent_withdrawal();
+        finalize(outcome(&signature, None, true)).await;
+
+        let token_ledger = reimbursement_runtime([Err(TransferError::TooOld)]);
+        process_pending_reimbursements(token_ledger).await;
+
+        EventsAssert::from_recorded().expect_contains_event_eq(
+            EventType::QuarantinedSplWithdrawalReimbursement {
+                cksol_burn_block_index: 42.into(),
+            },
+        );
+        assert!(matches!(
+            withdrawal_status(42),
+            WithdrawSplStatus::ReimbursementQuarantined {
+                reimbursed_amount: AMOUNT,
+                ..
+            }
+        ));
+        // A quarantined remint is not sent again.
+        let idle = reimbursement_runtime([]);
+        process_pending_reimbursements(idle.clone()).await;
+        assert!(idle.sent_update_calls().is_empty());
+        assert_replay();
+    }
+
+    #[tokio::test]
+    async fn should_keep_the_withdrawal_in_flight_until_its_metadata_is_complete() {
+        let signature = setup_sent_withdrawal();
+        let events_before = EventsAssert::from_recorded();
+
+        // The reply has no token balances, so the transfer is not proven.
+        finalize(outcome(&signature, Some(RENT_RESERVE), false)).await;
+
+        assert_eq!(EventsAssert::from_recorded(), events_before);
+        assert_eq!(
+            withdrawal_status(42),
+            WithdrawSplStatus::TxSent {
+                transaction_id: signature.into()
+            }
+        );
+        read_state(|state| {
+            assert_eq!(state.balance(), BALANCE - SOL_COST);
+            assert_eq!(state.nonce_pool().num_free_accounts(), 0);
+        });
+
+        // The next round reads the transaction again and settles it once.
+        finalize(outcome(&signature, Some(RENT_RESERVE), true)).await;
+        assert_eq!(EventsAssert::from_recorded().len(), events_before.len() + 1);
+        assert!(matches!(
+            withdrawal_status(42),
+            WithdrawSplStatus::TxFinalized { .. }
+        ));
+    }
+
+    #[tokio::test]
+    async fn should_rebroadcast_an_spl_withdrawal_whose_nonce_did_not_advance() {
+        let signature = setup_sent_withdrawal();
+        let events_before = EventsAssert::from_recorded();
+        let old_enough = SENT_AT + MIN_REBROADCAST_AGE.as_nanos() as u64;
+        let runtime = TestCanisterRuntime::new()
+            .add_times([old_enough; 30])
+            .add_stub_response(unchanged_nonce())
+            .add_stub_response(MultiRpcResult::<sol_rpc_types::Signature>::Consistent(Ok(
+                signature.into(),
+            )));
+
+        finalize_transactions(runtime.clone()).await;
+
+        assert_eq!(
+            runtime
+                .sent_update_calls()
+                .iter()
+                .map(|call| call.method.as_str())
+                .collect::<Vec<_>>(),
+            ["getAccountInfo", "sendTransaction"]
+        );
+        assert_eq!(EventsAssert::from_recorded(), events_before);
+        assert!(matches!(
+            withdrawal_status(42),
+            WithdrawSplStatus::TxSent { .. }
+        ));
+    }
+
+    #[tokio::test]
+    #[should_panic(expected = "another amount than the unused rent")]
+    async fn should_reject_a_rent_refund_of_another_amount_than_the_unused_rent() {
+        let signature = setup_sent_withdrawal();
+        record_at(
+            2_000,
+            EventType::SucceededSplWithdrawalTransaction {
+                signature,
+                lamports_spent: FEE_PER_SIGNATURE + 39_280,
+                rent_spent: 39_280,
+            },
+        );
+        record_at(
+            2_000,
+            rent_refund_event(SplRefundKind::UnusedRent, RENT_RESERVE),
+        );
+    }
+
+    #[tokio::test]
+    #[should_panic(expected = "another amount than the rent reserve")]
+    async fn should_reject_a_partial_rent_refund_after_a_failed_transfer() {
+        let signature = setup_sent_withdrawal();
+        record_at(
+            2_000,
+            EventType::FailedSplWithdrawalTransaction {
+                signature,
+                lamports_spent: FEE_PER_SIGNATURE,
+            },
+        );
+        record_at(
+            2_000,
+            rent_refund_event(SplRefundKind::FailedTransferRent, RENT_RESERVE - 1),
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "that is not an SPL withdrawal")]
+    fn should_reject_the_spl_outcome_event_for_another_transaction() {
+        setup_sent_withdrawal();
+        let sweep_signature = fixture::transaction(&fixture::plan(1)).signatures[0];
+        let sweep = fixture::plan(1);
+        let deposit = sweep.deposit();
+        record_at(
+            1,
+            EventType::RequestedOperatingRefill {
+                refill_id: 1,
+                amount: SPL_SWEEP_TRANSACTION_FEE,
+                created_at_time: 1,
+            },
+        );
+        record_at(
+            1,
+            EventType::CompletedOperatingRefill {
+                refill_id: 1,
+                burn_block_index: 8,
+            },
+        );
+        record_at(
+            1,
+            EventType::QueuedSplDeposit {
+                deposit_id: 1,
+                account: deposit.account,
+                mint: deposit.mint,
+                address: deposit.address,
+                balance: deposit.balance,
+                fee: deposit.fee,
+            },
+        );
+        record_at(
+            1,
+            EventType::SubmittedTransaction {
+                signature: sweep_signature,
+                message: sweep.sweep_message(Hash::new_from_array([0x42; 32])).into(),
+                signers: sweep.signers().to_vec(),
+                purpose: TransactionPurpose::SweepSplDeposit {
+                    deposit_id: 1,
+                    block_height: DEFAULT_BLOCK_HEIGHT,
+                },
+            },
+        );
+        record_at(
+            2_000,
+            EventType::SucceededSplWithdrawalTransaction {
+                signature: sweep_signature,
+                lamports_spent: FEE_PER_SIGNATURE,
+                rent_spent: 0,
+            },
+        );
+    }
+
+    #[test]
+    fn should_preserve_the_tags_of_the_outcome_and_remint_events() {
+        let signature = Signature::from([7; 64]);
+        for (payload, expected) in [
+            (
+                EventType::SucceededSplWithdrawalTransaction {
+                    signature,
+                    lamports_spent: 2,
+                    rent_spent: 1,
+                },
+                28,
+            ),
+            (
+                EventType::FailedSplWithdrawalTransaction {
+                    signature,
+                    lamports_spent: 1,
+                },
+                29,
+            ),
+            (
+                EventType::ReimbursedSplWithdrawal {
+                    cksol_burn_block_index: 42.into(),
+                    mint_block_index: 5.into(),
+                },
+                33,
+            ),
+            (
+                EventType::QuarantinedSplWithdrawalReimbursement {
+                    cksol_burn_block_index: 42.into(),
+                },
+                34,
+            ),
+        ] {
+            let encoded = minicbor::to_vec(payload).unwrap();
+            let mut decoder = minicbor::Decoder::new(&encoded);
+            assert_eq!(decoder.array().unwrap(), Some(2));
+            assert_eq!(decoder.u32().unwrap(), expected);
+        }
     }
 }

@@ -82,6 +82,13 @@ fn should_register_and_discover_tokens_without_changing_sol_configuration() {
             total_withdrawal_fee_cksol: 3_039_280,
         }
     );
+    assert_eq!(
+        state.all_collected_spl_withdrawal_fees(),
+        [cksol_types::CollectedSplWithdrawalFees {
+            mint: parse_address(&token.mint).unwrap().into(),
+            amount: 0,
+        }]
+    );
     state.supported_spl_tokens.clear();
     assert_eq!(state, before);
 }

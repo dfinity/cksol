@@ -11,6 +11,9 @@ use solana_transaction_status_client_types::{
 };
 use thiserror::Error;
 
+#[cfg(test)]
+mod tests;
+
 /// The validated outcome of the transaction of an SPL withdrawal.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SplWithdrawalOutcome {
