@@ -3,12 +3,17 @@ use crate::{
     constants::CKSOL_LEDGER_TRANSACTION_FEE,
     deposit::mint::{MintQueue, mint_pending, process_pending_mints_round},
     guard::{GuardError, TimerGuard, withdrawal_guard},
-    ledger::{self, BurnError, client::CkLedger, spl::SplBurnError},
+    ledger::{
+        self, BurnError,
+        client::{CkLedger, LedgerClient},
+        spl::SplBurnError,
+    },
     numeric::LedgerBurnIndex,
     runtime::CanisterRuntime,
     sol_transfer::CreateTransferError,
     state::{
-        CreatedSplWithdrawalTransaction, PendingSplCkSolRefund, State, SupportedSplToken, TaskType,
+        CreatedSplWithdrawalTransaction, PendingSplCkSolRefund, PendingSplWithdrawalReimbursement,
+        State, SupportedSplToken, TaskType,
         audit::process_event,
         event::{EventType, SplWithdrawalRequest, SplWithdrawalRequestTerms, TransactionPurpose},
         mutate_state, read_state,
@@ -28,6 +33,7 @@ use solana_address::Address;
 use solana_hash::Hash;
 use std::{str::FromStr, time::Duration};
 
+pub mod settlement;
 #[cfg(test)]
 mod tests;
 
@@ -478,6 +484,73 @@ async fn process_pending_cksol_refund<R: CanisterRuntime>(
             kind,
         },
         &format!("ckSOL refund of SPL withdrawal {cksol_burn_block_index}"),
+    )
+    .await;
+}
+
+/// Fixed arguments for reminting the full burned token amount to its original account.
+pub fn reimbursement_transfer_arg(
+    cksol_burn_block_index: WithdrawSplId,
+    pending: &PendingSplWithdrawalReimbursement,
+) -> TransferArg {
+    TransferArg {
+        from_subaccount: None,
+        to: pending.request.terms.account,
+        fee: None,
+        created_at_time: Some(pending.created_at),
+        memo: Some(
+            Memo::from(MintMemo::spl_withdrawal_reimbursement(
+                cksol_burn_block_index,
+            ))
+            .into(),
+        ),
+        amount: pending.request.terms.amount.into(),
+    }
+}
+
+/// Remints tokens only for withdrawals already recorded as definitively failed on Solana.
+pub async fn process_pending_reimbursements<R: CanisterRuntime>(runtime: R) {
+    let _guard = match TimerGuard::new(TaskType::ReimburseSplWithdrawals) {
+        Ok(guard) => guard,
+        Err(_) => return,
+    };
+
+    let run_again = process_pending_mints_round(
+        &runtime,
+        MintQueue::SplReimbursement,
+        |state: &State| state.pending_spl_withdrawal_reimbursements(),
+        process_pending_reimbursement,
+    )
+    .await;
+
+    if run_again {
+        runtime.set_timer(Duration::ZERO, process_pending_reimbursements);
+    }
+}
+
+async fn process_pending_reimbursement<R: CanisterRuntime>(
+    runtime: &R,
+    cksol_burn_block_index: WithdrawSplId,
+    pending: PendingSplWithdrawalReimbursement,
+) {
+    let client = LedgerClient::new(
+        runtime.inter_canister_call_runtime(),
+        pending.request.terms.ledger_id,
+    );
+    let burn_index = LedgerBurnIndex::new(cksol_burn_block_index);
+    mint_pending(
+        runtime,
+        MintQueue::SplReimbursement,
+        client,
+        reimbursement_transfer_arg(cksol_burn_block_index, &pending),
+        |mint_block_index| EventType::ReimbursedSplWithdrawal {
+            cksol_burn_block_index: burn_index,
+            mint_block_index,
+        },
+        EventType::QuarantinedSplWithdrawalReimbursement {
+            cksol_burn_block_index: burn_index,
+        },
+        &format!("token reimbursement of SPL withdrawal {cksol_burn_block_index}"),
     )
     .await;
 }

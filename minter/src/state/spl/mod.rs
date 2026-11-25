@@ -1,6 +1,6 @@
 use super::{InvalidStateError, State};
 use candid::Principal;
-use cksol_types::{CollectedSplDepositFees, Lamport, SplTokenInfo};
+use cksol_types::{CollectedSplDepositFees, CollectedSplWithdrawalFees, Lamport, SplTokenInfo};
 use cksol_types_internal::{SplTokenRegistration, SplTokenUpdate};
 use solana_address::{Address, address};
 use std::{
@@ -157,6 +157,17 @@ impl State {
             .map(|mint| CollectedSplDepositFees {
                 mint: (*mint).into(),
                 amount: self.spl_deposits.collected_deposit_fees(mint),
+            })
+            .collect()
+    }
+
+    /// The collected withdrawal fees of every supported SPL token, in mint-address order.
+    pub fn all_collected_spl_withdrawal_fees(&self) -> Vec<CollectedSplWithdrawalFees> {
+        self.supported_spl_tokens
+            .keys()
+            .map(|mint| CollectedSplWithdrawalFees {
+                mint: (*mint).into(),
+                amount: self.collected_spl_withdrawal_fees(mint),
             })
             .collect()
     }

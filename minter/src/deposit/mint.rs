@@ -21,12 +21,14 @@ pub(crate) enum MintQueue {
     Sol,
     Spl,
     SplCkSolRefund,
+    SplReimbursement,
 }
 
 thread_local! {
     static SOL_CURSOR: RefCell<QueueCursor<u64>> = const { RefCell::new(QueueCursor::new()) };
     static SPL_CURSOR: RefCell<QueueCursor<u64>> = const { RefCell::new(QueueCursor::new()) };
     static SPL_CKSOL_REFUND_CURSOR: RefCell<QueueCursor<u64>> = const { RefCell::new(QueueCursor::new()) };
+    static SPL_REIMBURSEMENT_CURSOR: RefCell<QueueCursor<u64>> = const { RefCell::new(QueueCursor::new()) };
 }
 
 impl MintQueue {
@@ -35,6 +37,7 @@ impl MintQueue {
             Self::Sol => &SOL_CURSOR,
             Self::Spl => &SPL_CURSOR,
             Self::SplCkSolRefund => &SPL_CKSOL_REFUND_CURSOR,
+            Self::SplReimbursement => &SPL_REIMBURSEMENT_CURSOR,
         };
         cursor.with(|cursor| f(&mut cursor.borrow_mut()))
     }
@@ -43,7 +46,7 @@ impl MintQueue {
     fn record_failed_mint(self, reason: FailedMintReason) {
         match self {
             Self::Sol => record_failed_mint_attempt(reason),
-            Self::Spl | Self::SplCkSolRefund => {}
+            Self::Spl | Self::SplCkSolRefund | Self::SplReimbursement => {}
         }
     }
 
@@ -51,14 +54,19 @@ impl MintQueue {
     fn unit(self) -> &'static str {
         match self {
             Self::Sol | Self::SplCkSolRefund => "lamports",
-            Self::Spl => "token units",
+            Self::Spl | Self::SplReimbursement => "token units",
         }
     }
 }
 
 #[cfg(any(test, feature = "canbench-rs"))]
 pub(crate) fn reset_cursors() {
-    for queue in [MintQueue::Sol, MintQueue::Spl, MintQueue::SplCkSolRefund] {
+    for queue in [
+        MintQueue::Sol,
+        MintQueue::Spl,
+        MintQueue::SplCkSolRefund,
+        MintQueue::SplReimbursement,
+    ] {
         queue.with_cursor(QueueCursor::clear);
     }
 }

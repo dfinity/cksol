@@ -17,8 +17,8 @@ use crate::{
 };
 use candid::Principal;
 use cksol_types::{
-    DepositSolId, DepositSplId, SplRefundKind, TxFinalizedStatus, WithdrawSolStatus, WithdrawSplId,
-    WithdrawSplStatus,
+    DepositSolId, DepositSplId, SplRefundKind, SplRentRefundStatus, TxFinalizedStatus,
+    WithdrawSolStatus, WithdrawSplId, WithdrawSplStatus,
 };
 use cksol_types_internal::SolanaNetwork;
 use cksol_types_internal::{Ed25519KeyName, InitArgs, UpgradeArgs};
@@ -157,8 +157,17 @@ pub struct State {
     created_spl_withdrawal_requests: BTreeMap<LedgerBurnIndex, PendingSplWithdrawalRequest>,
     created_spl_withdrawal_txs: BTreeMap<Address, CreatedSplWithdrawalTransaction>,
     sent_spl_withdrawal_requests: BTreeMap<LedgerBurnIndex, SentSplWithdrawalRequest>,
+    successful_spl_withdrawal_requests: BTreeMap<LedgerBurnIndex, SuccessfulSplWithdrawalRequest>,
+    failed_spl_withdrawal_requests: BTreeMap<LedgerBurnIndex, SentSplWithdrawalRequest>,
+    pending_spl_withdrawal_reimbursements:
+        BTreeMap<WithdrawSplId, PendingSplWithdrawalReimbursement>,
+    completed_spl_withdrawal_reimbursements:
+        BTreeMap<WithdrawSplId, CompletedSplWithdrawalReimbursement>,
+    quarantined_spl_withdrawal_reimbursements:
+        BTreeMap<WithdrawSplId, PendingSplWithdrawalReimbursement>,
+    collected_spl_withdrawal_fees: BTreeMap<Address, u128>,
     spl_withdrawal_token_burns: BTreeSet<(Principal, LedgerBurnIndex)>,
-    failed_spl_withdrawal_requests: BTreeSet<LedgerBurnIndex>,
+    rejected_spl_withdrawal_requests: BTreeMap<LedgerBurnIndex, RejectedSplWithdrawalRequest>,
     pending_spl_cksol_refunds: BTreeMap<WithdrawSplId, PendingSplCkSolRefund>,
     completed_spl_cksol_refunds: BTreeMap<WithdrawSplId, CompletedSplCkSolRefund>,
     quarantined_spl_cksol_refunds: BTreeMap<WithdrawSplId, PendingSplCkSolRefund>,
@@ -867,7 +876,49 @@ impl State {
                 transaction_id: sent.signature.into(),
             };
         }
-        if self.failed_spl_withdrawal_requests.contains(&burn_index) {
+        if let Some(successful) = self.successful_spl_withdrawal_requests.get(&burn_index) {
+            return WithdrawSplStatus::TxFinalized {
+                transaction: TxFinalizedStatus::Success {
+                    transaction_id: successful.signature.into(),
+                },
+                rent_refund: self.spl_rent_refund_status(cksol_burn_block_index),
+            };
+        }
+        if let Some(failed) = self.failed_spl_withdrawal_requests.get(&burn_index) {
+            let transaction_id = failed.signature.into();
+            let reimbursed_amount = failed.request.terms.amount;
+            let rent_refund = self.spl_rent_refund_status(cksol_burn_block_index);
+            if let Some(completed) = self
+                .completed_spl_withdrawal_reimbursements
+                .get(&cksol_burn_block_index)
+            {
+                return WithdrawSplStatus::Reimbursed {
+                    transaction_id,
+                    reimbursed_amount,
+                    mint_block_index: *completed.mint_block_index.get(),
+                    rent_refund,
+                };
+            }
+            if self
+                .quarantined_spl_withdrawal_reimbursements
+                .contains_key(&cksol_burn_block_index)
+            {
+                return WithdrawSplStatus::ReimbursementQuarantined {
+                    transaction_id,
+                    reimbursed_amount,
+                    rent_refund,
+                };
+            }
+            return WithdrawSplStatus::ReimbursementPending {
+                transaction_id,
+                reimbursed_amount,
+                rent_refund,
+            };
+        }
+        if self
+            .rejected_spl_withdrawal_requests
+            .contains_key(&burn_index)
+        {
             if let Some(pending) = self.pending_spl_cksol_refunds.get(&cksol_burn_block_index) {
                 return WithdrawSplStatus::FeeReimbursementPending {
                     reimbursed_amount: pending.amount,
@@ -912,6 +963,248 @@ impl State {
         &self.sent_spl_withdrawal_requests
     }
 
+    /// The progress of the ckSOL refund of the rent reserve of a settled withdrawal.
+    fn spl_rent_refund_status(&self, cksol_burn_block_index: WithdrawSplId) -> SplRentRefundStatus {
+        if let Some(pending) = self.pending_spl_cksol_refunds.get(&cksol_burn_block_index) {
+            return SplRentRefundStatus::Pending {
+                amount: pending.amount,
+            };
+        }
+        if let Some(completed) = self
+            .completed_spl_cksol_refunds
+            .get(&cksol_burn_block_index)
+        {
+            return SplRentRefundStatus::Reimbursed {
+                amount: completed.refund.amount,
+                mint_block_index: *completed.mint_block_index.get(),
+            };
+        }
+        if let Some(quarantined) = self
+            .quarantined_spl_cksol_refunds
+            .get(&cksol_burn_block_index)
+        {
+            return SplRentRefundStatus::Quarantined {
+                amount: quarantined.amount,
+            };
+        }
+        SplRentRefundStatus::NotDue
+    }
+
+    pub fn successful_spl_withdrawal_requests(
+        &self,
+    ) -> &BTreeMap<LedgerBurnIndex, SuccessfulSplWithdrawalRequest> {
+        &self.successful_spl_withdrawal_requests
+    }
+
+    pub fn failed_spl_withdrawal_requests(
+        &self,
+    ) -> &BTreeMap<LedgerBurnIndex, SentSplWithdrawalRequest> {
+        &self.failed_spl_withdrawal_requests
+    }
+
+    pub fn pending_spl_withdrawal_reimbursements(
+        &self,
+    ) -> &BTreeMap<WithdrawSplId, PendingSplWithdrawalReimbursement> {
+        &self.pending_spl_withdrawal_reimbursements
+    }
+
+    pub fn completed_spl_withdrawal_reimbursements(
+        &self,
+    ) -> &BTreeMap<WithdrawSplId, CompletedSplWithdrawalReimbursement> {
+        &self.completed_spl_withdrawal_reimbursements
+    }
+
+    pub fn quarantined_spl_withdrawal_reimbursements(
+        &self,
+    ) -> &BTreeMap<WithdrawSplId, PendingSplWithdrawalReimbursement> {
+        &self.quarantined_spl_withdrawal_reimbursements
+    }
+
+    /// The token withdrawal fees that stayed in the treasury of the mint.
+    pub fn collected_spl_withdrawal_fees(&self, mint: &Address) -> u128 {
+        self.collected_spl_withdrawal_fees
+            .get(mint)
+            .copied()
+            .unwrap_or(0)
+    }
+
+    /// The sent SPL withdrawal that the transaction with this signature serves.
+    pub fn sent_spl_withdrawal_of(
+        &self,
+        signature: &Signature,
+    ) -> Option<&SentSplWithdrawalRequest> {
+        self.sent_spl_withdrawal_requests
+            .values()
+            .find(|sent| &sent.signature == signature)
+    }
+
+    fn take_sent_spl_withdrawal(
+        &mut self,
+        signature: &Signature,
+    ) -> (LedgerBurnIndex, SentSplWithdrawalRequest, MinterTransaction) {
+        let transaction = self
+            .submitted_transactions
+            .remove(signature)
+            .unwrap_or_else(|| {
+                panic!("Attempted to settle unknown SPL withdrawal transaction {signature}")
+            });
+        let MinterTransaction::SplWithdrawal { nonce_account, .. } = &transaction else {
+            panic!("Attempted to settle transaction {signature} that is not an SPL withdrawal")
+        };
+        self.nonce_pool.free(nonce_account);
+        let burn_index = self
+            .sent_spl_withdrawal_requests
+            .iter()
+            .find_map(|(burn_index, sent)| (&sent.signature == signature).then_some(*burn_index))
+            .unwrap_or_else(|| {
+                panic!("BUG: SPL withdrawal transaction {signature} serves no sent request")
+            });
+        let sent = self
+            .sent_spl_withdrawal_requests
+            .remove(&burn_index)
+            .expect("BUG: the sent SPL withdrawal was found above");
+        (burn_index, sent, transaction)
+    }
+
+    /// Returns the part of the SOL reservation that the transaction did not spend. A
+    /// rent above the reserve is taken from the balance.
+    fn settle_spl_withdrawal_sol_cost(
+        &mut self,
+        terms: &SplWithdrawalRequestTerms,
+        lamports_spent: Lamport,
+    ) {
+        let reserved = spl_withdrawal_sol_cost(terms);
+        self.balance = self
+            .balance
+            .checked_add(reserved)
+            .and_then(|balance| balance.checked_sub(lamports_spent))
+            .expect("BUG: the minter balance does not cover the cost of an SPL withdrawal");
+    }
+
+    /// Books the result of the fee of a settled SPL withdrawal against the cost that the
+    /// minter paid itself. The rest of the fee is unbacked SOL for the minter's own costs.
+    /// A cost above the fee is taken from the operating balance, so that it does not
+    /// silently reduce the SOL that backs ckSOL. A remainder is a shortfall of the
+    /// operating balance, which later funding repairs first.
+    fn settle_spl_withdrawal_fee(&mut self, fee: Lamport, own_cost: Lamport) {
+        match fee.checked_sub(own_cost) {
+            Some(surplus) => self.operating_balance.credit(surplus),
+            None => self.operating_balance.debit(own_cost - fee),
+        }
+    }
+
+    fn process_spl_withdrawal_succeeded(
+        &mut self,
+        signature: &Signature,
+        lamports_spent: Lamport,
+        rent_spent: Lamport,
+    ) {
+        assert!(
+            !self.failed_transactions.contains_key(signature),
+            "Attempted to mark already failed transaction {signature} as succeeded"
+        );
+        let transaction_fee = lamports_spent
+            .checked_sub(rent_spent)
+            .expect("Attempted to settle an SPL withdrawal with a rent above its total cost");
+        let (burn_index, sent, _) = self.take_sent_spl_withdrawal(signature);
+        let terms = &sent.request.terms;
+        self.settle_spl_withdrawal_sol_cost(terms, lamports_spent);
+        // The fee pays the transaction fee and any rent above the reserve.
+        let own_cost = transaction_fee
+            .checked_add(rent_spent.saturating_sub(terms.rent_reserve))
+            .expect("BUG: SPL withdrawal cost overflows");
+        self.settle_spl_withdrawal_fee(terms.fee, own_cost);
+        let collected = self
+            .collected_spl_withdrawal_fees(&terms.mint)
+            .checked_add(u128::from(terms.token_fee))
+            .expect("BUG: collected SPL withdrawal fees overflow");
+        self.collected_spl_withdrawal_fees
+            .insert(terms.mint, collected);
+        assert!(
+            self.succeeded_transactions.insert(*signature),
+            "Attempted to mark transaction {signature} as succeeded twice"
+        );
+        self.successful_spl_withdrawal_requests.insert(
+            burn_index,
+            SuccessfulSplWithdrawalRequest {
+                request: sent.request,
+                signature: sent.signature,
+                created_at: sent.created_at,
+                lamports_spent,
+                rent_spent,
+            },
+        );
+    }
+
+    fn process_spl_withdrawal_failed(
+        &mut self,
+        signature: &Signature,
+        lamports_spent: Lamport,
+        failed_at: u64,
+    ) {
+        assert!(
+            !self.succeeded_transactions.contains(signature),
+            "Attempted to mark already succeeded transaction {signature} as failed"
+        );
+        let (burn_index, sent, transaction) = self.take_sent_spl_withdrawal(signature);
+        let terms = &sent.request.terms;
+        self.settle_spl_withdrawal_sol_cost(terms, lamports_spent);
+        // No token moved, so the reserved tokens return to the treasury.
+        let treasury = self.spl_treasury_balances.entry(terms.mint).or_default();
+        *treasury = treasury
+            .checked_add(spl_withdrawal_token_cost(terms))
+            .expect("BUG: SPL treasury balance overflow");
+        // The fee is kept. It pays the fee of the failed transaction.
+        self.settle_spl_withdrawal_fee(terms.fee, lamports_spent);
+        assert_eq!(
+            self.failed_transactions.insert(*signature, transaction),
+            None,
+            "Attempted to fail transaction {signature} twice"
+        );
+        self.pending_spl_withdrawal_reimbursements.insert(
+            *burn_index.get(),
+            PendingSplWithdrawalReimbursement {
+                request: sent.request.clone(),
+                created_at: failed_at,
+            },
+        );
+        self.failed_spl_withdrawal_requests.insert(burn_index, sent);
+    }
+
+    fn process_reimbursed_spl_withdrawal(
+        &mut self,
+        burn_index: LedgerBurnIndex,
+        mint_block_index: &LedgerMintIndex,
+        reimbursed_at: u64,
+    ) {
+        let pending = self
+            .pending_spl_withdrawal_reimbursements
+            .remove(burn_index.get())
+            .unwrap_or_else(|| {
+                panic!("Attempted to complete the reimbursement of SPL withdrawal {burn_index} that has no pending request")
+            });
+        self.completed_spl_withdrawal_reimbursements.insert(
+            *burn_index.get(),
+            CompletedSplWithdrawalReimbursement {
+                request: pending.request,
+                mint_block_index: *mint_block_index,
+                created_at: pending.created_at,
+                reimbursed_at,
+            },
+        );
+    }
+
+    fn process_quarantined_spl_withdrawal_reimbursement(&mut self, burn_index: LedgerBurnIndex) {
+        let pending = self
+            .pending_spl_withdrawal_reimbursements
+            .remove(burn_index.get())
+            .unwrap_or_else(|| {
+                panic!("Attempted to quarantine the reimbursement of SPL withdrawal {burn_index} that has no pending request")
+            });
+        self.quarantined_spl_withdrawal_reimbursements
+            .insert(*burn_index.get(), pending);
+    }
+
     pub fn pending_spl_cksol_refunds(&self) -> &BTreeMap<WithdrawSplId, PendingSplCkSolRefund> {
         &self.pending_spl_cksol_refunds
     }
@@ -952,14 +1245,47 @@ impl State {
             "Attempted to queue a ckSOL refund of zero for SPL withdrawal {burn_index}"
         );
         match kind {
-            SplRefundKind::FailedTokenBurn => assert!(
-                self.failed_spl_withdrawal_requests.contains(&burn_index),
-                "Attempted to refund the fee of SPL withdrawal {burn_index} whose token burn did not fail"
-            ),
-            SplRefundKind::UnusedRent | SplRefundKind::FailedTransferRent => {
-                panic!(
-                    "Attempted to refund the rent of SPL withdrawal {burn_index} that has no transfer outcome"
-                )
+            SplRefundKind::FailedTokenBurn => {
+                let rejected = self
+                    .rejected_spl_withdrawal_requests
+                    .get(&burn_index)
+                    .unwrap_or_else(|| {
+                        panic!("Attempted to refund the fee of SPL withdrawal {burn_index} whose token burn did not fail")
+                    });
+                assert_eq!(
+                    (to, amount),
+                    (rejected.to, rejected.reimbursed_amount),
+                    "Attempted to refund another account or amount than recorded for the failed SPL withdrawal request {burn_index}"
+                );
+            }
+            SplRefundKind::UnusedRent => {
+                let successful = self
+                    .successful_spl_withdrawal_requests
+                    .get(&burn_index)
+                    .unwrap_or_else(|| {
+                        panic!("Attempted to refund the rent of SPL withdrawal {burn_index} that has no transfer outcome")
+                    });
+                assert_eq!(
+                    amount,
+                    successful
+                        .request
+                        .terms
+                        .rent_reserve
+                        .saturating_sub(successful.rent_spent),
+                    "Attempted to refund another amount than the unused rent of SPL withdrawal {burn_index}"
+                );
+            }
+            SplRefundKind::FailedTransferRent => {
+                let failed = self
+                    .failed_spl_withdrawal_requests
+                    .get(&burn_index)
+                    .unwrap_or_else(|| {
+                        panic!("Attempted to refund the rent of SPL withdrawal {burn_index} that has no transfer outcome")
+                    });
+                assert_eq!(
+                    amount, failed.request.terms.rent_reserve,
+                    "Attempted to refund another amount than the rent reserve of SPL withdrawal {burn_index}"
+                );
             }
         }
         self.pending_spl_cksol_refunds.insert(
@@ -1049,7 +1375,13 @@ impl State {
                 .created_spl_withdrawal_requests
                 .contains_key(burn_index)
             || self.sent_spl_withdrawal_requests.contains_key(burn_index)
-            || self.failed_spl_withdrawal_requests.contains(burn_index)
+            || self
+                .successful_spl_withdrawal_requests
+                .contains_key(burn_index)
+            || self.failed_spl_withdrawal_requests.contains_key(burn_index)
+            || self
+                .rejected_spl_withdrawal_requests
+                .contains_key(burn_index)
     }
 
     fn process_accepted_spl_withdrawal(&mut self, request: &SplWithdrawalRequest, created_at: u64) {
@@ -1077,7 +1409,7 @@ impl State {
     fn process_failed_spl_withdrawal(
         &mut self,
         burn_index: LedgerBurnIndex,
-        _to: Account,
+        to: Account,
         reimbursed_amount: Lamport,
     ) {
         assert!(
@@ -1088,7 +1420,13 @@ impl State {
             reimbursed_amount > 0,
             "Attempted to reimburse an SPL withdrawal with a zero amount"
         );
-        self.failed_spl_withdrawal_requests.insert(burn_index);
+        self.rejected_spl_withdrawal_requests.insert(
+            burn_index,
+            RejectedSplWithdrawalRequest {
+                to,
+                reimbursed_amount,
+            },
+        );
     }
 
     fn process_accepted_withdrawal(&mut self, request: &WithdrawalRequest, created_at: u64) {
@@ -1656,8 +1994,14 @@ impl TryFrom<InitArgs> for State {
             created_spl_withdrawal_requests: BTreeMap::new(),
             created_spl_withdrawal_txs: BTreeMap::new(),
             sent_spl_withdrawal_requests: BTreeMap::new(),
+            successful_spl_withdrawal_requests: BTreeMap::new(),
+            failed_spl_withdrawal_requests: BTreeMap::new(),
+            pending_spl_withdrawal_reimbursements: BTreeMap::new(),
+            completed_spl_withdrawal_reimbursements: BTreeMap::new(),
+            quarantined_spl_withdrawal_reimbursements: BTreeMap::new(),
+            collected_spl_withdrawal_fees: BTreeMap::new(),
             spl_withdrawal_token_burns: BTreeSet::new(),
-            failed_spl_withdrawal_requests: BTreeSet::new(),
+            rejected_spl_withdrawal_requests: BTreeMap::new(),
             pending_spl_cksol_refunds: BTreeMap::new(),
             completed_spl_cksol_refunds: BTreeMap::new(),
             quarantined_spl_cksol_refunds: BTreeMap::new(),
@@ -1698,6 +2042,34 @@ pub struct SentSplWithdrawalRequest {
     pub created_at: u64,
 }
 
+/// An SPL withdrawal whose transfer succeeded, with its validated cost.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SuccessfulSplWithdrawalRequest {
+    pub request: SplWithdrawalRequest,
+    pub signature: Signature,
+    pub created_at: u64,
+    /// The lamports that the main account spent: the transaction fee and the rent.
+    pub lamports_spent: Lamport,
+    /// The part of `lamports_spent` that created the destination token account.
+    pub rent_spent: Lamport,
+}
+
+/// A failed SPL withdrawal whose burned tokens wait for their remint.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PendingSplWithdrawalReimbursement {
+    pub request: SplWithdrawalRequest,
+    pub created_at: u64,
+}
+
+/// A failed SPL withdrawal whose burned tokens were reminted.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CompletedSplWithdrawalReimbursement {
+    pub request: SplWithdrawalRequest,
+    pub mint_block_index: LedgerMintIndex,
+    pub created_at: u64,
+    pub reimbursed_at: u64,
+}
+
 /// The SOL that the transaction of an SPL withdrawal can spend: its fee and the rent of
 /// the destination token account.
 fn spl_withdrawal_sol_cost(terms: &SplWithdrawalRequestTerms) -> Lamport {
@@ -1711,6 +2083,13 @@ fn spl_withdrawal_token_cost(terms: &SplWithdrawalRequestTerms) -> u64 {
     terms
         .amount_to_transfer()
         .expect("BUG: an accepted SPL withdrawal transfers a positive amount")
+}
+
+/// An SPL withdrawal request whose token burn failed, with the refund of its fee burn.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RejectedSplWithdrawalRequest {
+    pub to: Account,
+    pub reimbursed_amount: Lamport,
 }
 
 /// A ckSOL refund of an SPL withdrawal that waits for its mint.
@@ -1880,6 +2259,7 @@ pub enum TaskType {
     SweepSplDeposits,
     MintSpl,
     RefundSplCkSol,
+    ReimburseSplWithdrawals,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

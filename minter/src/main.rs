@@ -19,7 +19,7 @@ use cksol_minter::{
     utils::timed_sized_map::Timestamp,
     withdraw::{
         WITHDRAWAL_PROCESSING_DELAY, process_pending_withdrawals,
-        spl::process_pending_cksol_refunds,
+        spl::{process_pending_cksol_refunds, process_pending_reimbursements},
     },
 };
 use cksol_types::{
@@ -197,6 +197,7 @@ fn get_minter_info() -> MinterInfo {
         deposit_spl_required_cycles: Some(s.deposit_spl_required_cycles()),
         spl_deposit_consolidation_fee: Some(s.spl_deposit_consolidation_fee()),
         collected_spl_deposit_fees: Some(s.collected_spl_deposit_fees()),
+        collected_spl_withdrawal_fees: Some(s.all_collected_spl_withdrawal_fees()),
     })
 }
 
@@ -359,6 +360,9 @@ fn setup_timers() {
     });
     ic_cdk_timers::set_timer_interval(PROCESS_PENDING_MINTS_DELAY, async || {
         process_pending_cksol_refunds(IcCanisterRuntime::new()).await;
+    });
+    ic_cdk_timers::set_timer_interval(PROCESS_PENDING_MINTS_DELAY, async || {
+        process_pending_reimbursements(IcCanisterRuntime::new()).await;
     });
     ic_cdk_timers::set_timer_interval(FINALIZE_TRANSACTIONS_DELAY, async || {
         finalize_transactions(IcCanisterRuntime::new()).await;

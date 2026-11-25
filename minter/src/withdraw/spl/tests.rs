@@ -1194,7 +1194,6 @@ mod transactions {
     use crate::{
         address::account_address,
         constants::{FEE_PER_SIGNATURE, RENT_EXEMPTION_THRESHOLD},
-        monitor::finalize_transactions,
         spl_transfer::{build_spl_withdrawal_message, withdrawal::SplWithdrawalTransfer},
         state::{
             MinterTransaction, QueuedSplDeposit, SPL_SWEEP_TRANSACTION_FEE, SplSweep,
@@ -1653,26 +1652,6 @@ mod transactions {
             assert_eq!(state.balance(), BALANCE - SOL_COST);
         });
         assert_replay();
-    }
-
-    #[tokio::test]
-    async fn should_leave_a_sent_spl_withdrawal_to_its_own_settlement() {
-        let token = setup_funded(BALANCE, TOKENS);
-        queue_withdrawal(&token, 42, 1_000);
-        let runtime = TestCanisterRuntime::new()
-            .add_times([200; 20])
-            .add_stub_response(nonce_read())
-            .add_stub_response(sent())
-            .add_signer(sign_as_minter());
-        process_pending_withdrawals(runtime).await;
-        let events_before = EventsAssert::from_recorded();
-
-        // The monitor of the SOL withdrawals does not finalize an SPL withdrawal.
-        let monitor = TestCanisterRuntime::new().add_times([10_000_000_000_000; 20]);
-        finalize_transactions(monitor.clone()).await;
-
-        assert!(monitor.sent_update_calls().is_empty());
-        assert_eq!(EventsAssert::from_recorded(), events_before);
     }
 
     #[test]

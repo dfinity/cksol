@@ -17,6 +17,7 @@ pub struct PendingOperatingRefill {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct OperatingBalance {
     balance: u64,
+    shortfall: u64,
     config: OperatingRefillConfig,
     next_refill_id: u64,
     pending: Option<PendingOperatingRefill>,
@@ -33,6 +34,11 @@ impl State {
 impl OperatingBalance {
     pub fn balance(&self) -> u64 {
         self.balance
+    }
+
+    /// The cost of SPL withdrawals that neither their fee nor the balance covered.
+    pub fn shortfall(&self) -> u64 {
+        self.shortfall
     }
 
     pub fn config(&self) -> OperatingRefillConfig {
@@ -76,10 +82,33 @@ impl OperatingBalance {
 
     /// Returns a reservation's unspent portion after a recorded outcome.
     pub(super) fn release(&mut self, amount: u64) {
+        self.add(amount);
+    }
+
+    /// Adds unbacked SOL that the minter keeps from the fee of an SPL withdrawal.
+    pub(super) fn credit(&mut self, amount: u64) {
+        self.add(amount);
+    }
+
+    /// Takes a cost of an SPL withdrawal that its fee did not cover. The part that the
+    /// balance does not cover becomes a shortfall.
+    pub(super) fn debit(&mut self, amount: u64) {
+        let covered = amount.min(self.balance);
+        self.balance -= covered;
+        self.shortfall = self
+            .shortfall
+            .checked_add(amount - covered)
+            .expect("BUG: operating SOL shortfall overflow");
+    }
+
+    /// Incoming operating SOL repairs the shortfall before it becomes spendable.
+    fn add(&mut self, amount: u64) {
+        let repaid = amount.min(self.shortfall);
+        self.shortfall -= repaid;
         self.balance = self
             .balance
-            .checked_add(amount)
-            .expect("BUG: operating SOL overflow while releasing a reservation");
+            .checked_add(amount - repaid)
+            .expect("BUG: operating SOL overflow");
     }
 
     pub(super) fn set_config(&mut self, config: OperatingRefillConfig) {
@@ -120,10 +149,7 @@ impl OperatingBalance {
 
     pub(super) fn complete_refill(&mut self, refill_id: u64) {
         let pending = self.pending_refill(refill_id);
-        self.balance = self
-            .balance
-            .checked_add(pending.amount)
-            .expect("BUG: operating balance overflow");
+        self.add(pending.amount);
         self.completed_refills += 1;
         self.pending = None;
     }

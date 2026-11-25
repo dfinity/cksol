@@ -196,6 +196,7 @@ mod lifecycle {
                 deposit_spl_required_cycles: Some(80_000_000_000),
                 spl_deposit_consolidation_fee: Some(70_000_000_000),
                 collected_spl_deposit_fees: Some(vec![]),
+                collected_spl_withdrawal_fees: Some(vec![]),
             }
         );
 
@@ -244,6 +245,7 @@ mod lifecycle {
                 deposit_spl_required_cycles: Some(80_000_000_000),
                 spl_deposit_consolidation_fee: Some(70_000_000_000),
                 collected_spl_deposit_fees: Some(vec![]),
+                collected_spl_withdrawal_fees: Some(vec![]),
             }
         );
 

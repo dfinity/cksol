@@ -246,6 +246,22 @@ pub enum EventType {
         /// The nonce value the transaction carries in place of a recent blockhash.
         nonce_value: Hash,
     },
+    /// The transaction of an SPL withdrawal succeeded and its validated cost is settled.
+    SucceededSplWithdrawalTransaction {
+        /// The signature of the finalized transaction.
+        signature: Signature,
+        /// The lamports that the main account spent: the transaction fee and the rent.
+        lamports_spent: Lamport,
+        /// The part of `lamports_spent` that created the destination token account.
+        rent_spent: Lamport,
+    },
+    /// The transaction of an SPL withdrawal failed on-chain; no token moved.
+    FailedSplWithdrawalTransaction {
+        /// The signature of the failed transaction.
+        signature: Signature,
+        /// The lamports that the main account spent on the transaction fee.
+        lamports_spent: Lamport,
+    },
     /// A ckSOL refund of an SPL withdrawal is owed, recorded before the ledger call.
     QueuedSplCkSolRefund {
         /// The ckSOL fee burn index, also the withdrawal identifier.
@@ -274,6 +290,18 @@ pub enum EventType {
         cksol_burn_block_index: u64,
         /// Why the refund was owed.
         kind: SplRefundKind,
+    },
+    /// The tokens of a failed SPL withdrawal were reminted.
+    ReimbursedSplWithdrawal {
+        /// The ckSOL fee burn index identifying the withdrawal.
+        cksol_burn_block_index: u64,
+        /// The mint block index on the ckSPL ledger.
+        mint_block_index: u64,
+    },
+    /// A token reimbursement cannot be safely retried and requires manual resolution.
+    QuarantinedSplWithdrawalReimbursement {
+        /// The ckSOL fee burn index identifying the withdrawal.
+        cksol_burn_block_index: u64,
     },
 }
 

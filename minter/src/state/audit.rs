@@ -255,6 +255,34 @@ fn apply_state_transition(state: &mut State, payload: &EventType, timestamp: u64
                 *nonce_value,
             );
         }
+        EventType::SucceededSplWithdrawalTransaction {
+            signature,
+            lamports_spent,
+            rent_spent,
+        } => {
+            state.process_spl_withdrawal_succeeded(signature, *lamports_spent, *rent_spent);
+        }
+        EventType::FailedSplWithdrawalTransaction {
+            signature,
+            lamports_spent,
+        } => {
+            state.process_spl_withdrawal_failed(signature, *lamports_spent, timestamp);
+        }
+        EventType::ReimbursedSplWithdrawal {
+            cksol_burn_block_index,
+            mint_block_index,
+        } => {
+            state.process_reimbursed_spl_withdrawal(
+                *cksol_burn_block_index,
+                mint_block_index,
+                timestamp,
+            );
+        }
+        EventType::QuarantinedSplWithdrawalReimbursement {
+            cksol_burn_block_index,
+        } => {
+            state.process_quarantined_spl_withdrawal_reimbursement(*cksol_burn_block_index);
+        }
         EventType::QueuedSplCkSolRefund {
             cksol_burn_block_index,
             kind,

@@ -447,6 +447,30 @@ pub struct WithdrawSplStatusArgs {
     pub cksol_burn_block_index: WithdrawSplId,
 }
 
+/// The progress of the ckSOL refund of the rent reserve of an SPL withdrawal.
+#[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize)]
+pub enum SplRentRefundStatus {
+    /// No refund is owed: the transaction spent the whole reserve.
+    NotDue,
+    /// The refund is queued.
+    Pending {
+        /// The ckSOL amount to mint back, in lamports.
+        amount: Lamport,
+    },
+    /// The refund was minted.
+    Reimbursed {
+        /// The ckSOL amount minted back, in lamports.
+        amount: Lamport,
+        /// The mint block index on the ckSOL ledger.
+        mint_block_index: u64,
+    },
+    /// The refund cannot be retried safely and requires manual resolution.
+    Quarantined {
+        /// The ckSOL amount that was to be minted back, in lamports.
+        amount: Lamport,
+    },
+}
+
 /// Status of an SPL withdrawal request.
 #[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize)]
 pub enum WithdrawSplStatus {
@@ -458,6 +482,43 @@ pub enum WithdrawSplStatus {
     TxSent {
         /// The unique identifier (signature) of the Solana transaction.
         transaction_id: Signature,
+    },
+    /// Solana transaction is finalized and the tokens were transferred. The withdrawal
+    /// stays successful while its rent refund is pending.
+    TxFinalized {
+        /// The finalized transaction.
+        transaction: TxFinalizedStatus,
+        /// The refund of the rent reserve that the transaction did not spend.
+        rent_refund: SplRentRefundStatus,
+    },
+    /// The Solana transfer failed definitively; its burned ckSPL is queued for reimbursement.
+    ReimbursementPending {
+        /// The failed Solana transaction signature.
+        transaction_id: Signature,
+        /// The token amount to remint, in the token's smallest units.
+        reimbursed_amount: u64,
+        /// The refund of the rent reserve.
+        rent_refund: SplRentRefundStatus,
+    },
+    /// The tokens of the failed Solana withdrawal were reminted.
+    Reimbursed {
+        /// The failed Solana transaction signature.
+        transaction_id: Signature,
+        /// The token amount reminted, in the token's smallest units.
+        reimbursed_amount: u64,
+        /// The mint block index on the ckSPL ledger.
+        mint_block_index: u64,
+        /// The refund of the rent reserve.
+        rent_refund: SplRentRefundStatus,
+    },
+    /// The token reimbursement cannot be retried safely and requires manual resolution.
+    ReimbursementQuarantined {
+        /// The failed Solana transaction signature.
+        transaction_id: Signature,
+        /// The token amount that was to be reminted, in its smallest units.
+        reimbursed_amount: u64,
+        /// The refund of the rent reserve.
+        rent_refund: SplRentRefundStatus,
     },
     /// The token burn failed after the fee burn; the ckSOL fee refund is queued.
     FeeReimbursementPending {
@@ -513,6 +574,9 @@ pub struct MinterInfo {
     /// The SPL deposit fees collected so far, with one entry per registered token in
     /// mint-address order. Absent in responses from older minter versions.
     pub collected_spl_deposit_fees: Option<Vec<CollectedSplDepositFees>>,
+    /// The SPL withdrawal fees collected so far in token units, with one entry per
+    /// registered token in mint-address order. Absent in responses from older minter versions.
+    pub collected_spl_withdrawal_fees: Option<Vec<CollectedSplWithdrawalFees>>,
 }
 
 /// An entry of the list returned by the [ICRC-10](https://github.com/dfinity/ICRC/blob/main/ICRCs/ICRC-10/ICRC-10.md)
@@ -561,6 +625,15 @@ pub struct SplTokenInfo {
     /// The ckSOL that a withdrawal burns: `withdrawal_fee_cksol + refundable_rent`. The
     /// allowance on the ckSOL ledger must cover it.
     pub total_withdrawal_fee_cksol: Lamport,
+}
+
+/// The withdrawal fees collected so far for one supported SPL token.
+#[derive(Clone, Debug, Eq, PartialEq, CandidType, Deserialize, Serialize)]
+pub struct CollectedSplWithdrawalFees {
+    /// Solana mint address.
+    pub mint: Address,
+    /// The sum of the collected fees in the token's smallest units.
+    pub amount: u128,
 }
 
 /// The deposit fees collected so far for one supported SPL token.

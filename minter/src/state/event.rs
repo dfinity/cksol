@@ -378,6 +378,31 @@ pub enum EventType {
         #[cbor(n(2), with = "cbor::hash")]
         nonce_value: Hash,
     },
+    /// The transaction of an SPL withdrawal succeeded and its validated cost is settled.
+    /// The token fee is counted and the unspent part of the reservation is returned.
+    #[n(28)]
+    SucceededSplWithdrawalTransaction {
+        /// The signature of the finalized transaction.
+        #[cbor(n(0), with = "cbor::signature")]
+        signature: Signature,
+        /// The lamports that the main account spent: the transaction fee and the rent.
+        #[n(1)]
+        lamports_spent: Lamport,
+        /// The part of `lamports_spent` that created the destination token account.
+        #[n(2)]
+        rent_spent: Lamport,
+    },
+    /// The transaction of an SPL withdrawal failed on-chain, so no token moved and no
+    /// account was created. The burned tokens are queued for reimbursement.
+    #[n(29)]
+    FailedSplWithdrawalTransaction {
+        /// The signature of the failed transaction.
+        #[cbor(n(0), with = "cbor::signature")]
+        signature: Signature,
+        /// The lamports that the main account spent on the transaction fee.
+        #[n(1)]
+        lamports_spent: Lamport,
+    },
     /// A ckSOL refund of an SPL withdrawal is owed. It is recorded before the ledger call,
     /// in the same message as the outcome that causes it.
     #[n(30)]
@@ -420,6 +445,23 @@ pub enum EventType {
         /// Why the refund was owed.
         #[n(1)]
         kind: SplRefundKind,
+    },
+    /// The tokens of a failed SPL withdrawal were reminted.
+    #[n(33)]
+    ReimbursedSplWithdrawal {
+        /// The ckSOL fee burn index identifying the withdrawal.
+        #[cbor(n(0), with = "cbor::id")]
+        cksol_burn_block_index: LedgerBurnIndex,
+        /// The mint block index on the ckSPL ledger.
+        #[cbor(n(1), with = "cbor::id")]
+        mint_block_index: LedgerMintIndex,
+    },
+    /// A token reimbursement cannot be safely retried and requires manual resolution.
+    #[n(34)]
+    QuarantinedSplWithdrawalReimbursement {
+        /// The ckSOL fee burn index identifying the withdrawal.
+        #[cbor(n(0), with = "cbor::id")]
+        cksol_burn_block_index: LedgerBurnIndex,
     },
     /// The actual cost of an SPL sweep recorded as failed by [`EventType::FailedTransaction`]
     /// was validated. The unspent reservation is returned and the deposit is dropped.
