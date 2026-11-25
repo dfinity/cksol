@@ -9,7 +9,7 @@ use crate::{
         mutate_state, read_state, reset_state,
     },
     storage::{
-        FailedCreditReason, FailedSplSweepReason, failed_credit_attempt_count,
+        FailedCreditReason, FailedSplTransferReason, failed_credit_attempt_count,
         failed_spl_sweep_count, reset_events, with_event_iter,
     },
     test_fixtures::{
@@ -146,7 +146,7 @@ fn upgrade() {
     mutate_state(|state| *state = replayed);
     crate::deposit::sweep::reset_cursors();
 }
-fn failed_spl_sweeps(reason: FailedSplSweepReason) -> u64 {
+fn failed_spl_sweeps(reason: FailedSplTransferReason) -> u64 {
     failed_spl_sweep_count(fixture::mint(), reason)
 }
 fn failed_status() -> sol_rpc_types::TransactionStatus {
@@ -327,14 +327,17 @@ async fn should_release_only_the_unspent_reservation_on_validated_failure() {
         assert_replay();
         // The counter is not part of the state, so it continues across the three cases.
         assert_eq!(
-            failed_spl_sweeps(FailedSplSweepReason::Other),
+            failed_spl_sweeps(FailedSplTransferReason::Other),
             count as u64 + 1
         );
         let mint = fixture::mint();
         assert_spl_deposit_metrics(&[&format!(r#"dropped_spl_deposits{{mint="{mint}"}} 1 "#)]);
     }
-    assert_eq!(failed_spl_sweeps(FailedSplSweepReason::FrozenAccount), 0);
-    assert_eq!(failed_spl_sweeps(FailedSplSweepReason::MissingAccount), 0);
+    assert_eq!(failed_spl_sweeps(FailedSplTransferReason::FrozenAccount), 0);
+    assert_eq!(
+        failed_spl_sweeps(FailedSplTransferReason::MissingAccount),
+        0
+    );
 }
 
 #[tokio::test]
@@ -352,9 +355,12 @@ async fn should_count_a_validated_failure_by_the_reason_in_its_metadata() {
     }
     finalize_transactions(runtime.clone()).await;
     read_state(|state| assert_eq!(state.spl_deposits().dropped().len(), 2));
-    assert_eq!(failed_spl_sweeps(FailedSplSweepReason::FrozenAccount), 1);
-    assert_eq!(failed_spl_sweeps(FailedSplSweepReason::MissingAccount), 1);
-    assert_eq!(failed_spl_sweeps(FailedSplSweepReason::Other), 0);
+    assert_eq!(failed_spl_sweeps(FailedSplTransferReason::FrozenAccount), 1);
+    assert_eq!(
+        failed_spl_sweeps(FailedSplTransferReason::MissingAccount),
+        1
+    );
+    assert_eq!(failed_spl_sweeps(FailedSplTransferReason::Other), 0);
     let mint = fixture::mint();
     assert_spl_deposit_metrics(&[
         &format!(r#"failed_spl_sweeps{{mint="{mint}",reason="frozen_account"}} 1 "#),
@@ -570,7 +576,7 @@ async fn should_keep_an_observed_failure_reserved_across_missing_statuses_and_up
         .expect_contains_event_eq(EventType::FailedTransaction { signature: sig });
     assert_reserved();
     // The failure is counted only when its cost is validated.
-    assert_eq!(failed_spl_sweeps(FailedSplSweepReason::Other), 0);
+    assert_eq!(failed_spl_sweeps(FailedSplTransferReason::Other), 0);
     assert_no_resubmission(&observed);
     assert_replay();
 
@@ -584,7 +590,7 @@ async fn should_keep_an_observed_failure_reserved_across_missing_statuses_and_up
     finalize_transactions(missing.clone()).await;
     assert_eq!(methods(&missing), vec!["getTransaction"]);
     assert_reserved();
-    assert_eq!(failed_spl_sweeps(FailedSplSweepReason::Other), 0);
+    assert_eq!(failed_spl_sweeps(FailedSplTransferReason::Other), 0);
     assert_rejected(
         EventType::ExpiredTransaction { signature: sig },
         "already failed transaction",
@@ -615,12 +621,12 @@ async fn should_keep_an_observed_failure_reserved_across_missing_statuses_and_up
     });
     assert_no_resubmission(&settled);
     assert_replay();
-    assert_eq!(failed_spl_sweeps(FailedSplSweepReason::Other), 1);
+    assert_eq!(failed_spl_sweeps(FailedSplTransferReason::Other), 1);
     // The settled failure is not read again.
     let idle = clock();
     finalize_transactions(idle.clone()).await;
     assert!(idle.sent_update_calls().is_empty());
-    assert_eq!(failed_spl_sweeps(FailedSplSweepReason::Other), 1);
+    assert_eq!(failed_spl_sweeps(FailedSplTransferReason::Other), 1);
 }
 
 #[tokio::test]

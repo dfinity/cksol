@@ -166,6 +166,8 @@ pub struct State {
     quarantined_spl_withdrawal_reimbursements:
         BTreeMap<WithdrawSplId, PendingSplWithdrawalReimbursement>,
     collected_spl_withdrawal_fees: BTreeMap<Address, u128>,
+    spl_withdrawals_above_rent_reserve: u64,
+    spl_rent_above_reserve: Lamport,
     spl_withdrawal_token_burns: BTreeSet<(Principal, LedgerBurnIndex)>,
     rejected_spl_withdrawal_requests: BTreeMap<LedgerBurnIndex, RejectedSplWithdrawalRequest>,
     pending_spl_cksol_refunds: BTreeMap<WithdrawSplId, PendingSplCkSolRefund>,
@@ -854,6 +856,33 @@ impl State {
         pending.chain(created).chain(sent).min()
     }
 
+    /// As [`Self::oldest_incomplete_withdrawal_created_at`], for SPL withdrawals.
+    pub fn oldest_incomplete_spl_withdrawal_created_at(&self) -> Option<u64> {
+        let pending = self
+            .pending_spl_withdrawal_requests
+            .values()
+            .map(|r| r.created_at);
+        let created = self
+            .created_spl_withdrawal_requests
+            .values()
+            .map(|r| r.created_at);
+        let sent = self
+            .sent_spl_withdrawal_requests
+            .values()
+            .map(|r| r.created_at);
+        pending.chain(created).chain(sent).min()
+    }
+
+    /// The number of SPL withdrawals whose rent was above their reserve.
+    pub fn spl_withdrawals_above_rent_reserve(&self) -> u64 {
+        self.spl_withdrawals_above_rent_reserve
+    }
+
+    /// The sum of the rent that SPL withdrawals spent above their reserve.
+    pub fn spl_rent_above_reserve(&self) -> Lamport {
+        self.spl_rent_above_reserve
+    }
+
     pub fn pending_spl_withdrawal_requests(
         &self,
     ) -> &BTreeMap<LedgerBurnIndex, PendingSplWithdrawalRequest> {
@@ -1110,10 +1139,18 @@ impl State {
         let terms = &sent.request.terms;
         self.settle_spl_withdrawal_sol_cost(terms, lamports_spent);
         // The fee pays the transaction fee and any rent above the reserve.
+        let rent_above_reserve = rent_spent.saturating_sub(terms.rent_reserve);
         let own_cost = transaction_fee
-            .checked_add(rent_spent.saturating_sub(terms.rent_reserve))
+            .checked_add(rent_above_reserve)
             .expect("BUG: SPL withdrawal cost overflows");
         self.settle_spl_withdrawal_fee(terms.fee, own_cost);
+        if rent_above_reserve > 0 {
+            self.spl_withdrawals_above_rent_reserve += 1;
+            self.spl_rent_above_reserve = self
+                .spl_rent_above_reserve
+                .checked_add(rent_above_reserve)
+                .expect("BUG: SPL rent above reserve overflows");
+        }
         let collected = self
             .collected_spl_withdrawal_fees(&terms.mint)
             .checked_add(u128::from(terms.token_fee))
@@ -2000,6 +2037,8 @@ impl TryFrom<InitArgs> for State {
             completed_spl_withdrawal_reimbursements: BTreeMap::new(),
             quarantined_spl_withdrawal_reimbursements: BTreeMap::new(),
             collected_spl_withdrawal_fees: BTreeMap::new(),
+            spl_withdrawals_above_rent_reserve: 0,
+            spl_rent_above_reserve: 0,
             spl_withdrawal_token_burns: BTreeSet::new(),
             rejected_spl_withdrawal_requests: BTreeMap::new(),
             pending_spl_cksol_refunds: BTreeMap::new(),

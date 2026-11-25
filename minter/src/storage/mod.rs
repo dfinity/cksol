@@ -52,7 +52,8 @@ pub(crate) struct Metrics {
     pub automatic_deposit_rearms: BTreeMap<RearmOutcome, u64>,
     pub operating_top_up_balance: Option<TopUpBalanceRead>,
     pub operating_refill_errors: BTreeMap<OperatingRefillErrorReason, u64>,
-    pub failed_spl_sweeps: BTreeMap<(Address, FailedSplSweepReason), u64>,
+    pub failed_spl_sweeps: BTreeMap<(Address, FailedSplTransferReason), u64>,
+    pub failed_spl_withdrawals: BTreeMap<(Address, FailedSplTransferReason), u64>,
 }
 
 impl Metrics {
@@ -68,6 +69,7 @@ impl Metrics {
             operating_top_up_balance: None,
             operating_refill_errors: BTreeMap::new(),
             failed_spl_sweeps: BTreeMap::new(),
+            failed_spl_withdrawals: BTreeMap::new(),
         }
     }
 }
@@ -261,15 +263,15 @@ pub(crate) fn failed_mint_attempt_count(reason: FailedMintReason) -> u64 {
     with_unstable_metrics(|m| m.failed_mint_attempts.get(&reason).copied().unwrap_or(0))
 }
 
-/// Why an SPL sweep failed: at its preflight simulation or on-chain.
+/// Why the token transfer of an SPL sweep or an SPL withdrawal failed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub enum FailedSplSweepReason {
+pub enum FailedSplTransferReason {
     FrozenAccount,
     MissingAccount,
     Other,
 }
 
-impl FailedSplSweepReason {
+impl FailedSplTransferReason {
     pub const ALL: [Self; 3] = [Self::FrozenAccount, Self::MissingAccount, Self::Other];
 
     pub fn label(self) -> &'static str {
@@ -281,13 +283,28 @@ impl FailedSplSweepReason {
     }
 }
 
-pub(crate) fn record_failed_spl_sweep(mint: Address, reason: FailedSplSweepReason) {
+pub(crate) fn record_failed_spl_sweep(mint: Address, reason: FailedSplTransferReason) {
     with_unstable_metrics_mut(|m| *m.failed_spl_sweeps.entry((mint, reason)).or_insert(0) += 1);
 }
 
-pub(crate) fn failed_spl_sweep_count(mint: Address, reason: FailedSplSweepReason) -> u64 {
+pub(crate) fn failed_spl_sweep_count(mint: Address, reason: FailedSplTransferReason) -> u64 {
     with_unstable_metrics(|m| {
         m.failed_spl_sweeps
+            .get(&(mint, reason))
+            .copied()
+            .unwrap_or(0)
+    })
+}
+
+pub(crate) fn record_failed_spl_withdrawal(mint: Address, reason: FailedSplTransferReason) {
+    with_unstable_metrics_mut(|m| {
+        *m.failed_spl_withdrawals.entry((mint, reason)).or_insert(0) += 1
+    });
+}
+
+pub(crate) fn failed_spl_withdrawal_count(mint: Address, reason: FailedSplTransferReason) -> u64 {
+    with_unstable_metrics(|m| {
+        m.failed_spl_withdrawals
             .get(&(mint, reason))
             .copied()
             .unwrap_or(0)

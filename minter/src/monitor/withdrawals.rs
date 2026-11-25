@@ -1,6 +1,7 @@
 use crate::{
     address::minter_address,
     constants::MAX_CONCURRENT_RPC_CALLS,
+    deposit::spl::failed_withdrawal_reason,
     monitor::MIN_REBROADCAST_AGE,
     rpc::{FetchedTransaction, get_transaction, submit_transaction_skipping_preflight},
     runtime::CanisterRuntime,
@@ -11,7 +12,8 @@ use crate::{
         mutate_state, read_state,
     },
     storage::{
-        UndecidedWithdrawalReason, set_undecided_withdrawal_transactions, with_unstable_metrics_mut,
+        UndecidedWithdrawalReason, record_failed_spl_withdrawal,
+        set_undecided_withdrawal_transactions, with_unstable_metrics_mut,
     },
     withdraw::{
         nonce::read_verified_nonce,
@@ -254,7 +256,17 @@ async fn finalize_landed_withdrawal<R: CanisterRuntime>(
             match (spl_request, &meta.err) {
                 (Some(request), _) => {
                     match spl_withdrawal_events(withdrawal, &meta, &request, runtime.time()) {
-                        Ok(events) => events,
+                        Ok(events) => {
+                            // The events remove the withdrawal from the in-flight set, so
+                            // the failure is counted once.
+                            if let Some(error) = meta.err.clone() {
+                                record_failed_spl_withdrawal(
+                                    request.terms.mint,
+                                    failed_withdrawal_reason(&error.into()),
+                                );
+                            }
+                            events
+                        }
                         Err(error) => {
                             log!(
                                 Priority::Error,

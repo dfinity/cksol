@@ -1,9 +1,11 @@
 use crate::state::{DepositOrigin, QuarantineCause, SplQuarantineCause, State};
 use crate::storage::{
-    self, FailedCreditReason, FailedMintReason, FailedSplSweepReason, OperatingRefillErrorReason,
-    RearmOutcome, ScanOutcome, TopUpBalanceRead, UndecidedWithdrawalReason,
+    self, FailedCreditReason, FailedMintReason, FailedSplTransferReason,
+    OperatingRefillErrorReason, RearmOutcome, ScanOutcome, TopUpBalanceRead,
+    UndecidedWithdrawalReason,
 };
 use crate::utils::timed_sized_map::Timestamp;
+use cksol_types::SplRefundKind;
 use ic_metrics_encoder::MetricsEncoder;
 
 const WASM_PAGE_SIZE_IN_BYTES: usize = 65536;
@@ -218,6 +220,81 @@ pub fn encode_metrics(w: &mut MetricsEncoder<Vec<u8>>, s: &State) -> std::io::Re
     }
     encode_operating_balance_metrics(w, s)?;
     encode_spl_deposit_metrics(w, s)?;
+    encode_spl_withdrawal_metrics(w, s, ic_cdk::api::time())?;
+    Ok(())
+}
+
+pub(crate) fn encode_spl_withdrawal_metrics(
+    w: &mut MetricsEncoder<Vec<u8>>,
+    s: &State,
+    now: u64,
+) -> std::io::Result<()> {
+    let oldest_age_seconds = s
+        .oldest_incomplete_spl_withdrawal_created_at()
+        .map(|created_at| now.saturating_sub(created_at) / NANOS_PER_SECOND)
+        .unwrap_or(0);
+    w.encode_gauge(
+        "oldest_incomplete_spl_withdrawal_age_seconds",
+        oldest_age_seconds.metric_value(),
+        "Age of the oldest incomplete SPL withdrawal request in seconds, from accepted until its transaction succeeded or failed. Returns 0 if there are no incomplete SPL withdrawals.",
+    )?;
+    w.encode_gauge(
+        "free_nonce_accounts",
+        s.nonce_pool().num_free_accounts().metric_value(),
+        "Number of durable nonce accounts that no withdrawal transaction uses. SOL and SPL withdrawals wait while it is 0.",
+    )?;
+    let mut failed_spl_withdrawals = w.counter_vec(
+        "failed_spl_withdrawals",
+        "Number of SPL withdrawals since the last upgrade whose transaction failed on-chain, by mint and reason: a frozen token account, a token account that does not exist, or another error.",
+    )?;
+    for mint in s.supported_spl_mints() {
+        for reason in FailedSplTransferReason::ALL {
+            failed_spl_withdrawals = failed_spl_withdrawals.value(
+                &[("mint", &mint.to_string()), ("reason", reason.label())],
+                storage::failed_spl_withdrawal_count(*mint, reason).metric_value(),
+            )?;
+        }
+    }
+    w.encode_counter(
+        "spl_withdrawals_above_rent_reserve",
+        s.spl_withdrawals_above_rent_reserve().metric_value(),
+        "Number of SPL withdrawals whose destination token account cost more rent than the reserve that the user paid.",
+    )?;
+    w.encode_counter(
+        "spl_rent_above_reserve",
+        s.spl_rent_above_reserve().metric_value(),
+        "Sum in Lamports of the rent that SPL withdrawals spent above their reserve. The withdrawal fee and then the operating balance pay it.",
+    )?;
+    let mut quarantined_spl_cksol_refunds = w.gauge_vec(
+        "quarantined_spl_cksol_refunds",
+        "Number of quarantined ckSOL refunds of SPL withdrawals by kind: the fee of a failed token burn, the unused rent of a successful transfer, or the rent of a failed transfer. The mint could no longer be retried and may have landed on the ledger.",
+    )?;
+    for (kind, label) in [
+        (SplRefundKind::FailedTokenBurn, "failed_token_burn"),
+        (SplRefundKind::UnusedRent, "unused_rent"),
+        (SplRefundKind::FailedTransferRent, "failed_transfer_rent"),
+    ] {
+        let quarantined = s
+            .quarantined_spl_cksol_refunds()
+            .values()
+            .filter(|refund| refund.kind == kind)
+            .count();
+        quarantined_spl_cksol_refunds =
+            quarantined_spl_cksol_refunds.value(&[("kind", label)], quarantined.metric_value())?;
+    }
+    let mut quarantined_spl_withdrawal_reimbursements = w.gauge_vec(
+        "quarantined_spl_withdrawal_reimbursements",
+        "Number of failed SPL withdrawals whose token remint is quarantined, by mint. The mint could no longer be retried and may have landed on the token ledger.",
+    )?;
+    for mint in s.supported_spl_mints() {
+        let quarantined = s
+            .quarantined_spl_withdrawal_reimbursements()
+            .values()
+            .filter(|reimbursement| reimbursement.request.terms.mint == *mint)
+            .count();
+        quarantined_spl_withdrawal_reimbursements = quarantined_spl_withdrawal_reimbursements
+            .value(&[("mint", &mint.to_string())], quarantined.metric_value())?;
+    }
     Ok(())
 }
 
@@ -271,7 +348,7 @@ pub(crate) fn encode_spl_deposit_metrics(
         "Number of SPL sweeps since the last upgrade that the preflight simulation rejected or that failed on-chain, by mint and reason: a frozen token account, a token account that does not exist, or another error.",
     )?;
     for mint in s.supported_spl_mints() {
-        for reason in FailedSplSweepReason::ALL {
+        for reason in FailedSplTransferReason::ALL {
             failed_spl_sweeps = failed_spl_sweeps.value(
                 &[("mint", &mint.to_string()), ("reason", reason.label())],
                 storage::failed_spl_sweep_count(*mint, reason).metric_value(),
@@ -296,7 +373,12 @@ pub(crate) fn encode_operating_balance_metrics(
         (
             "operating_balance",
             operating.balance(),
-            "Unbacked SOL credited by completed refill burns, in lamports.",
+            "Unbacked SOL credited by completed refill burns and by the fee surplus of SPL withdrawals, in lamports.",
+        ),
+        (
+            "operating_balance_shortfall",
+            operating.shortfall(),
+            "Lamports that settlements spent above the operating balance. Later funding repays it first.",
         ),
         (
             "operating_refill_enabled",

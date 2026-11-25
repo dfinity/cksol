@@ -15,7 +15,7 @@ fn json_rpc_error(code: i64, message: &str) -> SubmitTransactionError {
 
 #[test]
 fn should_classify_on_chain_errors_of_the_transfer_instruction() {
-    use FailedSplSweepReason::*;
+    use FailedSplTransferReason::*;
     for (error, expected) in [
         (
             TransactionError::InstructionError(0, InstructionError::Custom(17)),
@@ -48,7 +48,7 @@ fn should_classify_on_chain_errors_of_the_transfer_instruction() {
 
 #[test]
 fn should_classify_preflight_rejections_by_the_texts_of_the_validator() {
-    use FailedSplSweepReason::*;
+    use FailedSplTransferReason::*;
     // The first two texts are copied from a local solana-test-validator.
     for (message, expected) in [
         (

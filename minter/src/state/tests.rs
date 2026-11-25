@@ -1114,6 +1114,8 @@ mod state_from_init_args {
                 completed_spl_withdrawal_reimbursements: BTreeMap::new(),
                 quarantined_spl_withdrawal_reimbursements: BTreeMap::new(),
                 collected_spl_withdrawal_fees: BTreeMap::new(),
+                spl_withdrawals_above_rent_reserve: 0,
+                spl_rent_above_reserve: 0,
                 spl_withdrawal_token_burns: BTreeSet::new(),
                 rejected_spl_withdrawal_requests: BTreeMap::new(),
                 pending_spl_cksol_refunds: BTreeMap::new(),

@@ -21,6 +21,7 @@ use solana_address::Address;
 mod tests;
 
 mod failure;
+pub(crate) use failure::failed_withdrawal_reason;
 
 mod finalize;
 pub use finalize::{credit_finalized_spl_sweeps, settle_failed_spl_sweeps};

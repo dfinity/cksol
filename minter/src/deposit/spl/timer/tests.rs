@@ -223,7 +223,7 @@ async fn should_submit_one_transaction_per_deposit_and_replay_reserved_fees() {
 
 #[tokio::test]
 async fn should_count_a_preflight_rejection_once_for_its_mint_and_reason() {
-    use crate::storage::{FailedSplSweepReason, failed_spl_sweep_count};
+    use crate::storage::{FailedSplTransferReason, failed_spl_sweep_count};
     setup(30_000, 2_000_000);
     let first = queue(0, 2);
     let second = queue(1, 3);
@@ -257,12 +257,12 @@ async fn should_count_a_preflight_rejection_once_for_its_mint_and_reason() {
     let count = |mint: u8, reason| failed_spl_sweep_count([mint; 32].into(), reason);
     let assert_counts = || {
         for (mint, reason, expected) in [
-            (2, FailedSplSweepReason::FrozenAccount, 1),
-            (2, FailedSplSweepReason::MissingAccount, 0),
-            (2, FailedSplSweepReason::Other, 0),
-            (3, FailedSplSweepReason::FrozenAccount, 0),
-            (3, FailedSplSweepReason::MissingAccount, 1),
-            (3, FailedSplSweepReason::Other, 0),
+            (2, FailedSplTransferReason::FrozenAccount, 1),
+            (2, FailedSplTransferReason::MissingAccount, 0),
+            (2, FailedSplTransferReason::Other, 0),
+            (3, FailedSplTransferReason::FrozenAccount, 0),
+            (3, FailedSplTransferReason::MissingAccount, 1),
+            (3, FailedSplTransferReason::Other, 0),
         ] {
             assert_eq!(count(mint, reason), expected, "{mint} {reason:?}");
         }
@@ -291,7 +291,7 @@ async fn should_preserve_intent_and_reservation_when_submission_is_ambiguous() {
         .add_stub_error(IcError::CallPerformFailed);
     sweep_queued_spl_deposits(runtime.clone()).await;
     assert_eq!(runtime.sent_transactions().len(), 1);
-    for reason in crate::storage::FailedSplSweepReason::ALL {
+    for reason in crate::storage::FailedSplTransferReason::ALL {
         assert_eq!(
             crate::storage::failed_spl_sweep_count([2; 32].into(), reason),
             0
