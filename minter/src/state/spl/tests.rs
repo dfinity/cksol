@@ -292,6 +292,295 @@ fn should_replay_registration_and_updates_from_serialized_upgrade_events() {
 }
 
 #[test]
+fn should_register_and_update_the_token_withdrawal_fee() {
+    let mut state = state();
+    let token = registration();
+    assert_eq!(token.withdrawal_fee_token, None);
+    let other = SplTokenRegistration {
+        mint: "So11111111111111111111111111111111111111112".into(),
+        ledger_id: Principal::from_slice(&[44, 1]),
+        index_id: None,
+        withdrawal_fee_token: Some(25),
+        ..registration()
+    };
+    state
+        .upgrade(UpgradeArgs {
+            add_spl_tokens: Some(vec![token.clone(), other.clone()]),
+            ..Default::default()
+        })
+        .unwrap();
+    let fee = |state: &State, token: &SplTokenRegistration| {
+        state
+            .supported_spl_token(&parse_address(&token.mint).unwrap())
+            .unwrap()
+            .withdrawal_fee_token
+    };
+    // An omitted fee is no fee.
+    assert_eq!(fee(&state, &token), 0);
+    assert_eq!(fee(&state, &other), 25);
+
+    for (new_fee, expected) in [
+        (Some(7), 7),
+        (None, 7),
+        (Some(0), 0),
+        (Some(u64::MAX), u64::MAX),
+    ] {
+        let deposit_settings = state.supported_spl_tokens();
+        state
+            .upgrade(UpgradeArgs {
+                update_spl_tokens: Some(vec![SplTokenUpdate {
+                    withdrawal_fee_token: new_fee,
+                    ..update(&token)
+                }]),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(fee(&state, &token), expected);
+        // The other token and the deposit settings keep their values.
+        assert_eq!(fee(&state, &other), 25);
+        for (before, after) in deposit_settings.iter().zip(state.supported_spl_tokens()) {
+            assert_eq!(
+                SplTokenInfo {
+                    withdrawal_fee_token: after.withdrawal_fee_token,
+                    minimum_withdrawal_amount: after.minimum_withdrawal_amount,
+                    ..before.clone()
+                },
+                after
+            );
+        }
+    }
+    // An update of the deposit settings keeps the withdrawal fee.
+    state
+        .upgrade(UpgradeArgs {
+            update_spl_tokens: Some(vec![SplTokenUpdate {
+                minimum_deposit_amount: Some(500),
+                deposit_fee: Some(1),
+                deposits_paused: Some(true),
+                ..update(&token)
+            }]),
+            ..Default::default()
+        })
+        .unwrap();
+    assert_eq!(fee(&state, &token), u64::MAX);
+
+    // The discovery lists the tokens in mint-address order.
+    let info = state.supported_spl_tokens();
+    assert_eq!(
+        info.iter()
+            .map(|token| token.withdrawal_fee_token)
+            .collect::<Vec<_>>(),
+        [25, u64::MAX]
+    );
+}
+
+#[test]
+fn should_default_and_update_the_spl_withdrawal_fee_without_changing_the_sol_fee() {
+    use crate::constants::FEE_PER_SIGNATURE;
+    let mut state = state();
+    let sol_fee = state.withdrawal_fee();
+    assert_eq!(state.spl_withdrawal_fee(), 1_000_000);
+    assert_eq!(state.spl_withdrawal_rent_reserve(), 2_039_280);
+
+    // An omitted fee keeps the value.
+    state.upgrade(UpgradeArgs::default()).unwrap();
+    assert_eq!(state.spl_withdrawal_fee(), 1_000_000);
+    for fee in [FEE_PER_SIGNATURE, 2_000_000, u64::MAX] {
+        state
+            .upgrade(UpgradeArgs {
+                spl_withdrawal_fee: Some(fee),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(state.spl_withdrawal_fee(), fee);
+        assert_eq!(state.withdrawal_fee(), sol_fee);
+    }
+
+    // The fee must cover the transaction fee that the minter pays. A rejected upgrade
+    // traps in the canister, so each attempt starts from a copy of the valid state.
+    for fee in [0, FEE_PER_SIGNATURE - 1] {
+        assert_eq!(
+            state.clone().upgrade(UpgradeArgs {
+                spl_withdrawal_fee: Some(fee),
+                ..Default::default()
+            }),
+            Err(InvalidStateError::SplWithdrawalFeeTooLow {
+                spl_withdrawal_fee: fee,
+                transaction_fee: FEE_PER_SIGNATURE,
+            })
+        );
+    }
+}
+
+#[test]
+fn should_report_the_cksol_withdrawal_fees_with_each_token() {
+    let mut state = state();
+    state.upgrade(add(registration())).unwrap();
+    let fees = |state: &State| {
+        let info = &state.supported_spl_tokens()[0];
+        (
+            info.withdrawal_fee_cksol,
+            info.refundable_rent,
+            info.total_withdrawal_fee_cksol,
+        )
+    };
+    assert_eq!(fees(&state), (1_000_000, 2_039_280, 3_039_280));
+
+    // The token info follows the global fee setting.
+    for (fee, total) in [(2_000_000, 4_039_280), (u64::MAX, u64::MAX)] {
+        state
+            .upgrade(UpgradeArgs {
+                spl_withdrawal_fee: Some(fee),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(fees(&state), (fee, 2_039_280, total));
+    }
+}
+
+#[test]
+fn should_report_the_minimum_withdrawal_amount_with_each_token() {
+    for (withdrawal_fee_token, minimum) in [(None, 1), (Some(25), 26), (Some(u64::MAX), u64::MAX)] {
+        let mut state = state();
+        state
+            .upgrade(add(SplTokenRegistration {
+                withdrawal_fee_token,
+                ..registration()
+            }))
+            .unwrap();
+        assert_eq!(
+            state.supported_spl_tokens()[0].minimum_withdrawal_amount,
+            minimum
+        );
+    }
+}
+
+#[test]
+fn should_replay_withdrawal_settings_from_serialized_upgrade_events() {
+    let token = SplTokenRegistration {
+        withdrawal_fee_token: Some(3),
+        ..registration()
+    };
+    let upgrades = [
+        add(token.clone()),
+        UpgradeArgs {
+            update_spl_tokens: Some(vec![SplTokenUpdate {
+                withdrawal_fee_token: Some(9),
+                ..update(&token)
+            }]),
+            spl_withdrawal_fee: Some(1_500_000),
+            ..Default::default()
+        },
+    ];
+    let events: Vec<_> = std::iter::once(EventType::Init(valid_init_args()))
+        .chain(upgrades.iter().cloned().map(EventType::Upgrade))
+        .enumerate()
+        .map(|(timestamp, payload)| Event {
+            timestamp: timestamp as u64,
+            payload,
+        })
+        .collect();
+    let decoded = events
+        .iter()
+        .map(|event| Event::from_bytes(Cow::Owned(event.to_bytes().into_owned())));
+    let replayed = replay_events(decoded);
+    let mut expected = state();
+    for upgrade in upgrades {
+        expected.upgrade(upgrade).unwrap();
+    }
+    assert_eq!(replayed, expected);
+    assert_eq!(replayed.supported_spl_tokens()[0].withdrawal_fee_token, 9);
+    assert_eq!(replayed.spl_withdrawal_fee(), 1_500_000);
+}
+
+#[test]
+fn should_decode_registrations_and_updates_recorded_without_withdrawal_settings() {
+    #[derive(minicbor::Encode)]
+    struct LegacyRegistration {
+        #[n(0)]
+        mint: String,
+        #[n(1)]
+        token_program: String,
+        #[n(2)]
+        decimals: u8,
+        #[n(3)]
+        #[cbor(with = "icrc_cbor::principal")]
+        ledger_id: Principal,
+        #[n(5)]
+        symbol: String,
+        #[n(6)]
+        minimum_deposit_amount: u64,
+        #[n(7)]
+        deposit_fee: u64,
+        #[n(8)]
+        deposits_paused: bool,
+    }
+    #[derive(minicbor::Encode)]
+    struct LegacyUpdate {
+        #[n(0)]
+        mint: String,
+        #[n(2)]
+        deposit_fee: Option<u64>,
+    }
+    #[derive(minicbor::Encode)]
+    struct LegacyUpgradeArgs {
+        #[n(8)]
+        add_spl_tokens: Option<Vec<LegacyRegistration>>,
+        #[n(9)]
+        update_spl_tokens: Option<Vec<LegacyUpdate>>,
+        #[n(11)]
+        spl_deposit_consolidation_fee: Option<u64>,
+    }
+    let token = registration();
+    let decode = |legacy: LegacyUpgradeArgs| -> UpgradeArgs {
+        minicbor::decode(&minicbor::to_vec(legacy).unwrap()).unwrap()
+    };
+    let registered = decode(LegacyUpgradeArgs {
+        add_spl_tokens: Some(vec![LegacyRegistration {
+            mint: token.mint.clone(),
+            token_program: token.token_program.clone(),
+            decimals: token.decimals,
+            ledger_id: token.ledger_id,
+            symbol: token.symbol.clone(),
+            minimum_deposit_amount: token.minimum_deposit_amount,
+            deposit_fee: token.deposit_fee,
+            deposits_paused: token.deposits_paused,
+        }]),
+        update_spl_tokens: None,
+        spl_deposit_consolidation_fee: Some(1),
+    });
+    assert_eq!(registered.spl_withdrawal_fee, None);
+    assert_eq!(
+        registered.add_spl_tokens,
+        Some(vec![SplTokenRegistration {
+            index_id: None,
+            ..token.clone()
+        }])
+    );
+    let updated = decode(LegacyUpgradeArgs {
+        add_spl_tokens: None,
+        update_spl_tokens: Some(vec![LegacyUpdate {
+            mint: token.mint.clone(),
+            deposit_fee: Some(4),
+        }]),
+        spl_deposit_consolidation_fee: None,
+    });
+    assert_eq!(
+        updated.update_spl_tokens,
+        Some(vec![SplTokenUpdate {
+            deposit_fee: Some(4),
+            ..update(&token)
+        }])
+    );
+
+    let mut state = state();
+    state.upgrade(registered).unwrap();
+    state.upgrade(updated).unwrap();
+    assert_eq!(state.supported_spl_tokens()[0].withdrawal_fee_token, 0);
+    assert_eq!(state.supported_spl_tokens()[0].deposit_fee, 4);
+    assert_eq!(state.spl_withdrawal_fee(), 1_000_000);
+}
+
+#[test]
 fn should_decode_pre_spl_upgrade_arguments_with_an_empty_registry() {
     #[derive(minicbor::Encode)]
     struct LegacyUpgradeArgs {
