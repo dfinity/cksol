@@ -53,6 +53,16 @@ pub fn ledger_init_args(
     })
 }
 
+/// Reuses the ledger configuration with SPL-specific metadata and decimals.
+pub fn spl_ledger_init_args(minter_canister_id: Principal, decimals: u8) -> LedgerArgument {
+    let LedgerArgument::Init(mut args) = ledger_init_args(minter_canister_id, vec![]);
+    args.decimals = Some(decimals);
+    args.token_name = "ckSPL".to_string();
+    args.token_symbol = "ckSPL".to_string();
+    args.metadata.clear();
+    LedgerArgument::Init(args)
+}
+
 #[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize)]
 pub enum LedgerArgument {
     Init(InitArgs),
