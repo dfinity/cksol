@@ -593,6 +593,12 @@ impl State {
         operating_sol.min(spendable_main_sol)
     }
 
+    /// The queued SPL deposits whose sweep the allowance does not cover.
+    pub fn unfunded_queued_spl_deposits(&self) -> u64 {
+        let funded_sweeps = self.spl_sweep_allowance() / SPL_SWEEP_TRANSACTION_FEE;
+        (self.spl_deposits.queued().len() as u64).saturating_sub(funded_sweeps)
+    }
+
     pub fn covers_spl_sweep(&self, sweep: &SplSweep) -> bool {
         self.spl_sweep_allowance() >= SPL_SWEEP_TRANSACTION_FEE
             && self.spl_deposits.queued().get(&sweep.deposit_id()) == Some(sweep.deposit())

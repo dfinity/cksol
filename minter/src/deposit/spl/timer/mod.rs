@@ -1,6 +1,7 @@
 use crate::{
     address::minter_public_key,
     constants::MAX_CONCURRENT_SIGNATURES,
+    deposit::spl::failure::preflight_rejection_reason,
     guard::TimerGuard,
     queue_cursor::QueueCursor,
     rpc::{Block, SubmitTransactionError, get_recent_block, submit_transaction},
@@ -13,6 +14,7 @@ use crate::{
         event::{EventType, TransactionPurpose},
         mutate_state, read_state,
     },
+    storage::record_failed_spl_sweep,
 };
 use canlog::log;
 use cksol_types::DepositSplId;
@@ -93,10 +95,15 @@ pub async fn sweep_queued_spl_deposits<R: CanisterRuntime>(runtime: R) {
                     "Failed to create SPL sweep transaction: {error}"
                 )
             }
-            Err(SweepError::SubmitTransactionFailed(error)) => log!(
-                Priority::Info,
-                "Failed to submit SPL sweep transaction (awaiting finalization): {error}"
-            ),
+            Err(SweepError::SubmitTransactionFailed(error)) => {
+                if let Some(reason) = preflight_rejection_reason(&error) {
+                    record_failed_spl_sweep(sweep.deposit().mint, reason);
+                }
+                log!(
+                    Priority::Info,
+                    "Failed to submit SPL sweep transaction (awaiting finalization): {error}"
+                )
+            }
             Err(SweepError::BalanceNoLongerCovers) => log!(
                 Priority::Info,
                 "The balance no longer covers an SPL sweep, leaving its deposit queued"

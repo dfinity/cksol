@@ -129,6 +129,11 @@ impl State {
             .collect()
     }
 
+    /// Supported SPL mints in deterministic mint-address order.
+    pub fn supported_spl_mints(&self) -> impl Iterator<Item = &Address> {
+        self.supported_spl_tokens.keys()
+    }
+
     /// The collected deposit fees of every supported SPL token, in mint-address order.
     pub fn collected_spl_deposit_fees(&self) -> Vec<CollectedSplDepositFees> {
         self.supported_spl_tokens

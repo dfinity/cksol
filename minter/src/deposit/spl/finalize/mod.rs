@@ -1,7 +1,11 @@
 use crate::{
-    deposit::finalize::{FinalizedQueue, credit_finalized_sweep_round},
+    deposit::{
+        finalize::{FinalizedQueue, credit_finalized_sweep_round},
+        spl::failure::failed_sweep_reason,
+    },
     runtime::CanisterRuntime,
     state::{SubmittedSplSweep, SweepMismatch, event::EventType},
+    storage::record_failed_spl_sweep,
 };
 
 #[cfg(test)]
@@ -51,9 +55,14 @@ pub async fn settle_failed_spl_sweeps<R: CanisterRuntime>(runtime: &R) -> bool {
                 .sweep
                 .settle(&outcome.transaction, outcome.meta.as_ref())?;
             // The status reported a failure, so the metadata must not report a success.
-            if !settled.failed {
+            let Some(error) = outcome.meta.as_ref().and_then(|meta| meta.err.clone()) else {
                 return Err(SweepMismatch::TransactionSucceeded.into());
-            }
+            };
+            // The failure is validated and recorded once, so it is counted once.
+            record_failed_spl_sweep(
+                submitted.sweep.deposit().mint,
+                failed_sweep_reason(&error.into()),
+            );
             Ok(EventType::FailedSplSweep {
                 signature,
                 lamports_spent: settled.lamports_spent,

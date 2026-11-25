@@ -1,7 +1,7 @@
-use crate::state::{DepositOrigin, QuarantineCause, State};
+use crate::state::{DepositOrigin, QuarantineCause, SplQuarantineCause, State};
 use crate::storage::{
-    self, FailedCreditReason, FailedMintReason, OperatingRefillErrorReason, RearmOutcome,
-    ScanOutcome, TopUpBalanceRead, UndecidedWithdrawalReason,
+    self, FailedCreditReason, FailedMintReason, FailedSplSweepReason, OperatingRefillErrorReason,
+    RearmOutcome, ScanOutcome, TopUpBalanceRead, UndecidedWithdrawalReason,
 };
 use crate::utils::timed_sized_map::Timestamp;
 use ic_metrics_encoder::MetricsEncoder;
@@ -217,6 +217,72 @@ pub fn encode_metrics(w: &mut MetricsEncoder<Vec<u8>>, s: &State) -> std::io::Re
         )?;
     }
     encode_operating_balance_metrics(w, s)?;
+    encode_spl_deposit_metrics(w, s)?;
+    Ok(())
+}
+
+pub(crate) fn encode_spl_deposit_metrics(
+    w: &mut MetricsEncoder<Vec<u8>>,
+    s: &State,
+) -> std::io::Result<()> {
+    let mut quarantined_spl_deposits = w.gauge_vec(
+        "quarantined_spl_deposits",
+        "Number of quarantined SPL deposits by mint and cause: a sweep whose finalized outcome did not match its plan credited nothing and keeps its SOL reservation, while an unresolved mint was credited but could no longer be retried and may have landed on the token ledger.",
+    )?;
+    for mint in s.supported_spl_mints() {
+        let mut sweep_unreadable: usize = 0;
+        let mut mint_unresolved: usize = 0;
+        for quarantined in s.spl_deposits().quarantined().values() {
+            if quarantined.deposit.deposit.mint != *mint {
+                continue;
+            }
+            match quarantined.cause {
+                SplQuarantineCause::SweepUnreadable { .. } => sweep_unreadable += 1,
+                SplQuarantineCause::MintUnresolved { .. } => mint_unresolved += 1,
+            }
+        }
+        let mint = mint.to_string();
+        quarantined_spl_deposits = quarantined_spl_deposits
+            .value(
+                &[("mint", &mint), ("cause", "sweep_unreadable")],
+                sweep_unreadable.metric_value(),
+            )?
+            .value(
+                &[("mint", &mint), ("cause", "mint_unresolved")],
+                mint_unresolved.metric_value(),
+            )?;
+    }
+    let mut dropped_spl_deposits = w.gauge_vec(
+        "dropped_spl_deposits",
+        "Number of SPL deposits whose sweep transaction failed or expired, by mint.",
+    )?;
+    for mint in s.supported_spl_mints() {
+        let dropped = s
+            .spl_deposits()
+            .dropped()
+            .values()
+            .filter(|dropped| dropped.deposit.mint == *mint)
+            .count();
+        dropped_spl_deposits =
+            dropped_spl_deposits.value(&[("mint", &mint.to_string())], dropped.metric_value())?;
+    }
+    let mut failed_spl_sweeps = w.counter_vec(
+        "failed_spl_sweeps",
+        "Number of SPL sweeps since the last upgrade that the preflight simulation rejected or that failed on-chain, by mint and reason: a frozen token account, a token account that does not exist, or another error.",
+    )?;
+    for mint in s.supported_spl_mints() {
+        for reason in FailedSplSweepReason::ALL {
+            failed_spl_sweeps = failed_spl_sweeps.value(
+                &[("mint", &mint.to_string()), ("reason", reason.label())],
+                storage::failed_spl_sweep_count(*mint, reason).metric_value(),
+            )?;
+        }
+    }
+    w.encode_gauge(
+        "unfunded_queued_spl_deposits",
+        s.unfunded_queued_spl_deposits().metric_value(),
+        "Number of queued SPL deposits whose sweep is blocked because the SOL available for SPL sweep fees does not cover it. Returns 0 if the funds cover every queued deposit.",
+    )?;
     Ok(())
 }
 

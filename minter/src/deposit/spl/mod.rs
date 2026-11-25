@@ -20,6 +20,8 @@ use solana_address::Address;
 #[cfg(test)]
 mod tests;
 
+mod failure;
+
 mod finalize;
 pub use finalize::{credit_finalized_spl_sweeps, settle_failed_spl_sweeps};
 
