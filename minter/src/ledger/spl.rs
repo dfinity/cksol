@@ -12,6 +12,9 @@ use icrc_ledger_types::{
 use num_traits::ToPrimitive;
 use thiserror::Error;
 
+#[cfg(test)]
+mod tests;
+
 /// Keeps ledger replies separate from call failures for withdrawal error handling.
 #[derive(Debug, PartialEq, Error)]
 pub enum SplBurnError {

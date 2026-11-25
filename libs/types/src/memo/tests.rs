@@ -107,3 +107,92 @@ fn arb_burn_memo() -> impl Strategy<Value = BurnMemo> {
         any::<u64>().prop_map(|refill_id| BurnMemo::OperatingRefill { refill_id }),
     ]
 }
+
+#[test]
+fn should_encode_the_cksol_refund_memo_with_its_burn_index_and_kind() {
+    use crate::SplRefundKind;
+    for (kind, tag) in [
+        (SplRefundKind::FailedTokenBurn, 0),
+        (SplRefundKind::UnusedRent, 1),
+        (SplRefundKind::FailedTransferRent, 2),
+    ] {
+        let memo = CkSolMinterMemo::Mint(MintMemo::spl_cksol_refund(42, kind));
+        let encoded = Icrc1Memo::from(memo.clone());
+        assert_eq!(
+            encoded.0.as_ref(),
+            &[0x82, 0, 0x81, 0x82, 2, 0x82, 0x18, 42, 0x82, tag, 0x80]
+        );
+        assert_eq!(
+            minicbor::decode::<CkSolMinterMemo>(&encoded.0).unwrap(),
+            memo
+        );
+    }
+    assert_eq!(
+        encoded_len(CkSolMinterMemo::Mint(MintMemo::spl_cksol_refund(
+            u64::MAX,
+            SplRefundKind::FailedTransferRent
+        ))),
+        18
+    );
+}
+
+#[test]
+fn should_fit_the_maximum_token_amount_in_an_80_byte_fee_memo() {
+    let memo = CkSolMinterMemo::spl_withdrawal_fee([0xAB; 32].into(), u64::MAX, [0xCD; 32].into());
+    let encoded = Icrc1Memo::from(memo.clone());
+    assert_eq!(encoded.0.len(), 80);
+    assert!(encoded.0.len() <= MAX_SERIALIZED_MEMO_BYTES as usize);
+    assert_eq!(
+        minicbor::decode::<CkSolMinterMemo>(&encoded.0).unwrap(),
+        memo
+    );
+}
+
+#[test]
+fn should_fit_the_maximum_fee_burn_index_in_a_46_byte_token_memo() {
+    let memo = CkSolMinterMemo::spl_convert(u64::MAX, [0xFF; 32].into());
+    let encoded = Icrc1Memo::from(memo.clone());
+    assert_eq!(encoded.0.len(), 46);
+    assert_eq!(
+        minicbor::decode::<CkSolMinterMemo>(&encoded.0).unwrap(),
+        memo
+    );
+}
+
+#[test]
+fn should_encode_spl_burn_memos_with_new_tags_and_link_the_fee_index() {
+    let mut fee_bytes = vec![0x82, 2, 0x83, 0x58, 0x20];
+    fee_bytes.extend_from_slice(&[0x11; 32]);
+    fee_bytes.extend_from_slice(&[0x18, 42, 0x58, 0x20]);
+    fee_bytes.extend_from_slice(&[0x22; 32]);
+    let fee = CkSolMinterMemo::spl_withdrawal_fee([0x11; 32].into(), 42, [0x22; 32].into());
+    assert_eq!(
+        Icrc1Memo::from(fee.clone()).0.as_ref(),
+        fee_bytes.as_slice()
+    );
+    assert_eq!(
+        minicbor::decode::<CkSolMinterMemo>(&fee_bytes).unwrap(),
+        fee
+    );
+
+    let mut token_bytes = vec![0x82, 3, 0x82, 0x18, 42, 0x58, 0x20];
+    token_bytes.extend_from_slice(&[0x22; 32]);
+    let token = CkSolMinterMemo::spl_convert(42, [0x22; 32].into());
+    assert_eq!(
+        Icrc1Memo::from(token.clone()).0.as_ref(),
+        token_bytes.as_slice()
+    );
+    assert_eq!(
+        minicbor::decode::<CkSolMinterMemo>(&token_bytes).unwrap(),
+        token
+    );
+}
+
+#[test]
+fn should_preserve_the_existing_sol_burn_memo_encoding() {
+    let mut bytes = vec![0x82, 1, 0x81, 0x82, 0, 0x81, 0x58, 0x20];
+    bytes.extend_from_slice(&[0x11; 32]);
+    let memo = CkSolMinterMemo::from(BurnMemo::convert([0x11; 32].into()));
+    assert_eq!(Icrc1Memo::from(memo.clone()).0.as_ref(), bytes.as_slice());
+    assert_eq!(minicbor::decode::<CkSolMinterMemo>(&bytes).unwrap(), memo);
+}

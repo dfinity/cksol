@@ -25,6 +25,9 @@ use sol_rpc_types::Lamport;
 use solana_address::Address;
 use std::{str::FromStr, time::Duration};
 
+#[cfg(test)]
+mod tests;
+
 pub fn withdrawal_status(cksol_burn_block_index: WithdrawSplId) -> WithdrawSplStatus {
     read_state(|state| state.spl_withdrawal_status(cksol_burn_block_index))
 }
