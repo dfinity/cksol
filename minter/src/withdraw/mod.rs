@@ -287,7 +287,7 @@ async fn create_transaction<R: CanisterRuntime>(
     }
 }
 
-/// Builds the SOL batch message for the read nonce and records its binding.
+/// Builds the batch message for the read nonce, re-checks the balance, and records the binding.
 fn create_sol_transaction<R: CanisterRuntime>(
     runtime: &R,
     minter_address: &Address,
@@ -296,6 +296,14 @@ fn create_sol_transaction<R: CanisterRuntime>(
     requests: Vec<WithdrawalRequest>,
 ) -> bool {
     let burn_indices: Vec<_> = requests.iter().map(|r| r.burn_block_index).collect();
+    // An SPL sweep may have reserved part of the balance during the nonce read.
+    if !read_state(|state| state.covers_withdrawal_batch(&requests)) {
+        log!(
+            Priority::Info,
+            "The balance no longer covers the withdrawal batch for burn indices {burn_indices:?}, skipping it this round"
+        );
+        return false;
+    }
     if let Err(e) = build_batch_withdrawal_message(
         minter_address,
         &nonce_account,

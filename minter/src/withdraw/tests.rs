@@ -632,6 +632,141 @@ mod process_pending_withdrawals_tests {
     }
 
     #[tokio::test]
+    async fn should_skip_the_batch_when_an_spl_sweep_reserves_its_funds_during_the_nonce_read() {
+        init_state();
+        events::accept_withdrawal(account(1), 1, MINIMUM_WITHDRAWAL_AMOUNT);
+        // The balance covers exactly the withdrawal and the rent of the main address.
+        init_balance_to(
+            MINIMUM_WITHDRAWAL_AMOUNT - WITHDRAWAL_FEE
+                + FEE_PER_SIGNATURE
+                + RENT_EXEMPTION_THRESHOLD,
+        );
+        let sweep = spl_sweep::queue();
+        let events_before = EventsAssert::from_recorded();
+
+        let runtime = TestCanisterRuntime::new()
+            .with_increasing_time()
+            .add_stub_response(GetAccountInfoResult::Consistent(Ok(Some(
+                nonce_account_info(MINTER_ADDRESS, 1),
+            ))));
+        let processing = process_pending_withdrawals(runtime.clone());
+        tokio::pin!(processing);
+        // The mocked RPC runtime suspends once per call. Reserve during the nonce read.
+        while runtime.sent_update_calls().is_empty() {
+            assert!(futures::poll!(&mut processing).is_pending());
+        }
+        spl_sweep::submit(&sweep);
+        processing.await;
+
+        // No withdrawal transaction is created.
+        assert_eq!(
+            EventsAssert::from_recorded().len(),
+            events_before.len() + 1,
+            "only the SPL sweep submission is recorded"
+        );
+        assert_eq!(withdrawal_status(1), WithdrawSolStatus::Pending);
+        assert_nonce_account_free();
+    }
+
+    /// An SPL sweep whose submission reserves SOL from the minter balance.
+    mod spl_sweep {
+        use crate::{
+            address::{account_address, associated_token_address},
+            state::{
+                QueuedSplDeposit, SPL_SWEEP_TRANSACTION_FEE, SplSweep,
+                audit::process_event,
+                event::{EventType, TransactionPurpose},
+                mutate_state, read_state,
+            },
+            test_fixtures::{
+                DEFAULT_BLOCK_HEIGHT, account, runtime::TestCanisterRuntime, schnorr_master_key,
+                signature,
+            },
+        };
+        use candid::Principal;
+        use cksol_types_internal::{SplTokenRegistration, UpgradeArgs};
+        use solana_address::Address;
+
+        fn record(event: EventType) {
+            mutate_state(|state| {
+                process_event(
+                    state,
+                    event,
+                    &TestCanisterRuntime::new().add_times([100; 2]),
+                )
+            });
+        }
+
+        /// Registers a token, funds the operating balance and queues one deposit.
+        pub fn queue() -> SplSweep {
+            let mint = Address::from([2; 32]);
+            record(EventType::Upgrade(UpgradeArgs {
+                add_spl_tokens: Some(vec![SplTokenRegistration {
+                    mint: mint.to_string(),
+                    token_program: spl_token_interface::id().to_string(),
+                    decimals: 6,
+                    ledger_id: Principal::from_slice(&[2, 1]),
+                    index_id: None,
+                    symbol: "ckTest".to_string(),
+                    minimum_deposit_amount: 1,
+                    deposit_fee: 10,
+                    deposits_paused: false,
+                }]),
+                ..Default::default()
+            }));
+            record(EventType::RequestedOperatingRefill {
+                refill_id: 0,
+                amount: SPL_SWEEP_TRANSACTION_FEE,
+                created_at_time: 100,
+            });
+            record(EventType::CompletedOperatingRefill {
+                refill_id: 0,
+                burn_block_index: 42,
+            });
+            let account = account(7);
+            let deposit = QueuedSplDeposit {
+                account,
+                mint,
+                address: associated_token_address(
+                    &account_address(&schnorr_master_key(), &account),
+                    &mint,
+                ),
+                balance: 1_000,
+                fee: 10,
+            };
+            record(EventType::QueuedSplDeposit {
+                deposit_id: 0,
+                account,
+                mint,
+                address: deposit.address,
+                balance: deposit.balance,
+                fee: deposit.fee,
+            });
+            read_state(|state| {
+                SplSweep::plan(
+                    0,
+                    deposit,
+                    state.supported_spl_token(&mint).unwrap(),
+                    &schnorr_master_key(),
+                )
+                .unwrap()
+            })
+        }
+
+        pub fn submit(sweep: &SplSweep) {
+            record(EventType::SubmittedTransaction {
+                signature: signature(0x5B),
+                message: sweep.sweep_message(solana_hash::Hash::default()).into(),
+                signers: sweep.signers().to_vec(),
+                purpose: TransactionPurpose::SweepSplDeposit {
+                    deposit_id: sweep.deposit_id(),
+                    block_height: DEFAULT_BLOCK_HEIGHT,
+                },
+            });
+        }
+    }
+
+    #[tokio::test]
     async fn should_skip_the_batch_when_the_nonce_read_is_stale() {
         init_state();
         init_balance();

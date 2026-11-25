@@ -755,6 +755,15 @@ impl State {
         }
     }
 
+    pub fn covers_withdrawal_batch(&self, requests: &[WithdrawalRequest]) -> bool {
+        let cost = requests
+            .iter()
+            .fold(BATCH_WITHDRAWAL_TX_FEE, |cost, request| {
+                cost.saturating_add(request.amount_to_transfer)
+            });
+        self.spendable_balance() >= cost
+    }
+
     pub fn can_create_withdrawal_transaction(&self) -> bool {
         self.nonce_pool.num_free_accounts() > 0 && self.withdrawal_plans().next().is_some()
     }
