@@ -9,7 +9,9 @@ use cksol_int_tests::{
         get_memo,
     },
 };
-use cksol_types::{DepositSplArgs, DepositSplError, DepositSplStatus, Memo, MintMemo};
+use cksol_types::{
+    CollectedSplDepositFees, DepositSplArgs, DepositSplError, DepositSplStatus, Memo, MintMemo,
+};
 use cksol_types_internal::{SplTokenRegistration, UpgradeArgs, event::EventType};
 use icrc_ledger_types::icrc1::account::Account;
 use sol_rpc_types::{
@@ -50,6 +52,17 @@ async fn should_sweep_finalize_and_mint_queued_deposit_after_timers() {
         }
     );
     assert_eq!(
+        setup
+            .minter()
+            .get_minter_info()
+            .await
+            .collected_spl_deposit_fees,
+        Some(vec![CollectedSplDepositFees {
+            mint: MINT.into(),
+            amount: 0,
+        }])
+    );
+    assert_eq!(
         setup.minter().deposit_spl_status(deposit_id + 1).await,
         DepositSplStatus::NotFound
     );
@@ -87,6 +100,17 @@ async fn should_sweep_finalize_and_mint_queued_deposit_after_timers() {
             amount_to_mint: BALANCE_ABOVE_MINIMUM - DEPOSIT_FEE,
         }));
     });
+    assert_eq!(
+        setup
+            .minter()
+            .get_minter_info()
+            .await
+            .collected_spl_deposit_fees,
+        Some(vec![CollectedSplDepositFees {
+            mint: MINT.into(),
+            amount: u128::from(DEPOSIT_FEE),
+        }])
+    );
 
     run_mint_timer(&setup).await;
     assert_eq!(

@@ -49,8 +49,16 @@ fn should_register_and_discover_tokens_without_changing_sol_configuration() {
     let mut state = state();
     let before = state.clone();
     assert!(state.supported_spl_tokens().is_empty());
+    assert!(state.collected_spl_deposit_fees().is_empty());
     let token = registration();
     state.upgrade(add(token.clone())).unwrap();
+    assert_eq!(
+        state.collected_spl_deposit_fees(),
+        [CollectedSplDepositFees {
+            mint: parse_address(&token.mint).unwrap().into(),
+            amount: 0,
+        }]
+    );
     let info = state.supported_spl_tokens();
     assert_eq!(info.len(), 1);
     assert_eq!(

@@ -287,6 +287,8 @@ type MinterInfo = record {
     deposit_spl_required_cycles : opt nat;
     // Cycle fee charged when a new manual SPL deposit is queued.
     spl_deposit_consolidation_fee : opt nat;
+    // The SPL deposit fees collected so far, with one entry per supported token.
+    collected_spl_deposit_fees : opt vec CollectedSplDepositFees;
 };
 
 // The ckSOL minter service arguments.
@@ -806,6 +808,14 @@ type SplTokenUpdate = record {
     minimum_deposit_amount : opt nat64;
     deposit_fee : opt nat64;
     deposits_paused : opt bool;
+};
+
+// The deposit fees collected so far for one supported SPL token.
+type CollectedSplDepositFees = record {
+    // Solana mint address.
+    mint : Address;
+    // The sum of the collected fees in the token's smallest units.
+    amount : nat;
 };
 
 type SplTokenInfo = record {

@@ -173,6 +173,7 @@ fn get_minter_info() -> MinterInfo {
         supported_spl_tokens: Some(s.supported_spl_tokens()),
         deposit_spl_required_cycles: Some(s.deposit_spl_required_cycles()),
         spl_deposit_consolidation_fee: Some(s.spl_deposit_consolidation_fee()),
+        collected_spl_deposit_fees: Some(s.collected_spl_deposit_fees()),
     })
 }
 

@@ -364,6 +364,9 @@ pub struct MinterInfo {
     pub deposit_spl_required_cycles: Option<u128>,
     /// Cycle fee charged only when a new SPL deposit is queued; excludes the source-read cost.
     pub spl_deposit_consolidation_fee: Option<u128>,
+    /// The SPL deposit fees collected so far, with one entry per registered token in
+    /// mint-address order. Absent in responses from older minter versions.
+    pub collected_spl_deposit_fees: Option<Vec<CollectedSplDepositFees>>,
 }
 
 /// An entry of the list returned by the [ICRC-10](https://github.com/dfinity/ICRC/blob/main/ICRCs/ICRC-10/ICRC-10.md)
@@ -397,6 +400,15 @@ pub struct SplTokenInfo {
     pub deposit_fee: u64,
     /// Whether new deposit requests are paused.
     pub deposits_paused: bool,
+}
+
+/// The deposit fees collected so far for one supported SPL token.
+#[derive(Clone, Debug, Eq, PartialEq, CandidType, Deserialize, Serialize)]
+pub struct CollectedSplDepositFees {
+    /// Solana mint address.
+    pub mint: Address,
+    /// The sum of the collected fees in the token's smallest units.
+    pub amount: u128,
 }
 
 /// Unbacked SOL available for minter operating costs and its ckSOL funding account.

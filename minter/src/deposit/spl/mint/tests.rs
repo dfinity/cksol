@@ -18,7 +18,7 @@ use crate::{
     },
 };
 use candid::{Nat, Principal};
-use cksol_types::{DepositSplError, DepositSplStatus, Memo, MintMemo};
+use cksol_types::{CollectedSplDepositFees, DepositSplError, DepositSplStatus, Memo, MintMemo};
 use cksol_types_internal::{
     SplTokenRegistration, SplTokenUpdate, UpgradeArgs, event::Event as CandidEvent,
 };
@@ -286,6 +286,19 @@ async fn should_mint_the_net_amount_on_the_token_ledger_and_release_the_pair() {
         assert_eq!(
             deposits.collected_deposit_fees(&mint_a()),
             u128::from(TOKEN_FEE)
+        );
+        assert_eq!(
+            state.collected_spl_deposit_fees(),
+            [
+                CollectedSplDepositFees {
+                    mint: mint_a().into(),
+                    amount: u128::from(TOKEN_FEE),
+                },
+                CollectedSplDepositFees {
+                    mint: mint_b().into(),
+                    amount: 0,
+                },
+            ]
         );
         assert_eq!(state.balance(), balance);
         assert_eq!(state.operating_balance().balance(), operating);

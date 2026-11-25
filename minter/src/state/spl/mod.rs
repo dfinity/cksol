@@ -1,6 +1,6 @@
 use super::{InvalidStateError, State};
 use candid::Principal;
-use cksol_types::SplTokenInfo;
+use cksol_types::{CollectedSplDepositFees, SplTokenInfo};
 use cksol_types_internal::{SplTokenRegistration, SplTokenUpdate};
 use solana_address::{Address, address};
 use std::{
@@ -126,6 +126,17 @@ impl State {
         self.supported_spl_tokens
             .values()
             .map(SupportedSplToken::info)
+            .collect()
+    }
+
+    /// The collected deposit fees of every supported SPL token, in mint-address order.
+    pub fn collected_spl_deposit_fees(&self) -> Vec<CollectedSplDepositFees> {
+        self.supported_spl_tokens
+            .keys()
+            .map(|mint| CollectedSplDepositFees {
+                mint: (*mint).into(),
+                amount: self.spl_deposits.collected_deposit_fees(mint),
+            })
             .collect()
     }
 
