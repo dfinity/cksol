@@ -234,6 +234,49 @@ fn apply_state_transition(state: &mut State, payload: &EventType, timestamp: u64
         } => {
             state.process_failed_spl_sweep(signature, *lamports_spent);
         }
+        EventType::AcceptedSplWithdrawalRequest(request) => {
+            state.process_accepted_spl_withdrawal(request, timestamp);
+        }
+        EventType::FailedSplWithdrawalRequest {
+            cksol_burn_block_index,
+            to,
+            reimbursed_amount,
+        } => {
+            state.process_failed_spl_withdrawal(*cksol_burn_block_index, *to, *reimbursed_amount);
+        }
+        EventType::QueuedSplCkSolRefund {
+            cksol_burn_block_index,
+            kind,
+            to,
+            amount,
+            created_at_time,
+        } => {
+            state.process_queued_spl_cksol_refund(
+                *cksol_burn_block_index,
+                *kind,
+                *to,
+                *amount,
+                *created_at_time,
+            );
+        }
+        EventType::ReimbursedSplCkSol {
+            cksol_burn_block_index,
+            kind,
+            mint_block_index,
+        } => {
+            state.process_reimbursed_spl_cksol(
+                *cksol_burn_block_index,
+                *kind,
+                mint_block_index,
+                timestamp,
+            );
+        }
+        EventType::QuarantinedSplCkSolRefund {
+            cksol_burn_block_index,
+            kind,
+        } => {
+            state.process_quarantined_spl_cksol_refund(*cksol_burn_block_index, *kind);
+        }
     }
 }
 

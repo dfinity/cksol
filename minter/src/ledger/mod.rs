@@ -11,6 +11,7 @@ use sol_rpc_types::Lamport;
 use thiserror::Error;
 
 pub mod client;
+pub mod spl;
 
 pub async fn burn<R: CanisterRuntime>(
     runtime: &R,

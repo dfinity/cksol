@@ -47,7 +47,7 @@ serde = { workspace = true }
 sol_rpc_client = { workspace = true }
 sol_rpc_types = { workspace = true }
 solana-account-decoder-client-types = { workspace = true }
-solana-address = { workspace = true }
+solana-address = { workspace = true, features = ["curve25519"] }
 solana-hash = { workspace = true }
 solana-instruction = { workspace = true }
 solana-message = { workspace = true }

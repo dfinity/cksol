@@ -10,6 +10,13 @@ use icrc_ledger_types::{
 };
 use num_traits::ToPrimitive;
 
+/// The identity and configured symbol of a withdrawal ledger.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CkLedger {
+    pub token_symbol: String,
+    pub id: Principal,
+}
+
 pub struct LedgerClient<R> {
     pub runtime: R,
     pub ledger_canister_id: Principal,

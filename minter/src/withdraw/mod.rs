@@ -39,6 +39,7 @@ const _: () = assert!(MAX_CONCURRENT_SIGNATURES <= MAX_CONCURRENT_RPC_CALLS);
 
 pub mod nonce;
 mod reserved_account_keys;
+pub mod spl;
 #[cfg(test)]
 mod tests;
 

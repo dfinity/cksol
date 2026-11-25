@@ -1,7 +1,7 @@
 //! Candid-compatible event types for the ckSOL minter.
 
 use crate::{InitArgs, UpgradeArgs};
-use candid::CandidType;
+use candid::{CandidType, Principal};
 use icrc_ledger_types::icrc1::account::Account;
 use serde::Deserialize;
 use sol_rpc_types::{Hash, Lamport, Pubkey as Address, Signature};
@@ -218,6 +218,86 @@ pub enum EventType {
         /// Actual network cost in lamports.
         lamports_spent: u64,
     },
+    /// The token burn succeeded and the withdrawal was accepted for processing.
+    AcceptedSplWithdrawalRequest {
+        /// The terms confirmed by both ledger burns.
+        terms: SplWithdrawalRequestTerms,
+        /// The fee burn index on the ckSOL ledger, also the withdrawal ID.
+        cksol_burn_block_index: u64,
+        /// The amount burn index on the ckSPL ledger.
+        ckspl_burn_block_index: u64,
+    },
+    /// The token burn returned an error after the ckSOL fee burn, so no withdrawal is queued.
+    /// The refund of the burned ckSOL is recorded by `QueuedSplCkSolRefund`.
+    FailedSplWithdrawalRequest {
+        /// The ckSOL fee burn index, also the withdrawal identifier.
+        cksol_burn_block_index: u64,
+        /// The account from which the ckSOL fee was burned.
+        to: Account,
+        /// The ckSOL amount to mint back, in lamports.
+        reimbursed_amount: Lamport,
+    },
+    /// A ckSOL refund of an SPL withdrawal is owed, recorded before the ledger call.
+    QueuedSplCkSolRefund {
+        /// The ckSOL fee burn index, also the withdrawal identifier.
+        cksol_burn_block_index: u64,
+        /// Why the refund is owed.
+        kind: SplRefundKind,
+        /// The account from which the ckSOL was burned.
+        to: Account,
+        /// The ckSOL amount to mint back, in lamports.
+        amount: Lamport,
+        /// The timestamp of the mint, so that the ledger deduplicates each retry.
+        created_at_time: u64,
+    },
+    /// A ckSOL refund of an SPL withdrawal was minted.
+    ReimbursedSplCkSol {
+        /// The ckSOL fee burn index, also the withdrawal identifier.
+        cksol_burn_block_index: u64,
+        /// Why the refund was owed.
+        kind: SplRefundKind,
+        /// The refund mint index on the ckSOL ledger.
+        mint_block_index: u64,
+    },
+    /// A ckSOL refund cannot be safely retried and requires manual resolution.
+    QuarantinedSplCkSolRefund {
+        /// The ckSOL fee burn index, also the withdrawal identifier.
+        cksol_burn_block_index: u64,
+        /// Why the refund was owed.
+        kind: SplRefundKind,
+    },
+}
+
+/// The SPL withdrawal terms saved once its ckSOL fee burn is known.
+#[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]
+pub struct SplWithdrawalRequestTerms {
+    /// The IC account from which both burns are requested.
+    pub account: Account,
+    /// The registered Solana mint.
+    pub mint: Address,
+    /// The token ledger used for the amount burn.
+    pub ledger_id: Principal,
+    /// The destination wallet, from which its token account is derived.
+    pub address: Address,
+    /// The token amount to burn, in the mint's smallest units.
+    pub amount: u64,
+    /// The token fee deducted from the transferred amount, in the mint's smallest units.
+    pub token_fee: u64,
+    /// The ckSOL fee already burned, in lamports, without the rent reserve.
+    pub fee: Lamport,
+    /// The ckSOL burned with the fee for the rent of the destination token account.
+    pub rent_reserve: Lamport,
+}
+
+/// Why a ckSOL refund of an SPL withdrawal is owed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, CandidType, Deserialize)]
+pub enum SplRefundKind {
+    /// The token burn failed after the ckSOL fee burn.
+    FailedTokenBurn,
+    /// The transfer succeeded and spent less than the reserved rent.
+    UnusedRent,
+    /// The transfer failed on-chain, so no rent was spent.
+    FailedTransferRent,
 }
 
 /// One registration of a `WatchedDepositAddresses` event with its scan progress.

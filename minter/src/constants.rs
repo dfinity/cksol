@@ -112,6 +112,12 @@ pub const FEE_PER_SIGNATURE: u64 = 5_000;
 /// See <https://solana.com/docs/core/rent#rent-exempt-minimum>.
 pub const RENT_EXEMPTION_THRESHOLD: u64 = 890_880;
 
+/// Transfer fee of the ckSOL ledger in lamports.
+///
+/// Deducted from the fee reimbursement of an SPL withdrawal whose ckSPL
+/// burn the ledger rejected for a user-caused reason.
+pub const CKSOL_LEDGER_TRANSACTION_FEE: u64 = 500;
+
 /// Minimum lamport balance required to keep a classic SPL token account
 /// (165 bytes of data) rent-exempt.
 ///

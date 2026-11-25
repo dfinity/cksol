@@ -5,7 +5,8 @@ use crate::{
     rpc::BlockHeight,
     state::{DepositBalance, DepositOrigin},
 };
-use cksol_types::{DepositSolId, DepositSplId};
+use ::candid::Principal;
+use cksol_types::{DepositSolId, DepositSplId, SplRefundKind};
 use cksol_types_internal::{InitArgs, UpgradeArgs};
 use derive_more::From;
 use ic_ed25519::PublicKey;
@@ -345,6 +346,66 @@ pub enum EventType {
         #[n(0)]
         refill_id: u64,
     },
+    /// The token burn succeeded and the withdrawal was accepted for processing.
+    #[n(25)]
+    AcceptedSplWithdrawalRequest(#[n(0)] SplWithdrawalRequest),
+    /// The token burn returned an error after the ckSOL fee burn, so no withdrawal is queued.
+    /// The refund of the burned ckSOL is recorded by [`EventType::QueuedSplCkSolRefund`].
+    #[n(26)]
+    FailedSplWithdrawalRequest {
+        /// The ckSOL fee burn index, also the withdrawal identifier.
+        #[cbor(n(0), with = "cbor::id")]
+        cksol_burn_block_index: LedgerBurnIndex,
+        /// The account from which the ckSOL fee was burned.
+        #[n(1)]
+        to: Account,
+        /// The ckSOL amount to mint back, in lamports.
+        #[n(2)]
+        reimbursed_amount: Lamport,
+    },
+    /// A ckSOL refund of an SPL withdrawal is owed. It is recorded before the ledger call,
+    /// in the same message as the outcome that causes it.
+    #[n(30)]
+    QueuedSplCkSolRefund {
+        /// The ckSOL fee burn index, also the withdrawal identifier.
+        #[cbor(n(0), with = "cbor::id")]
+        cksol_burn_block_index: LedgerBurnIndex,
+        /// Why the refund is owed.
+        #[n(1)]
+        kind: SplRefundKind,
+        /// The account from which the ckSOL was burned.
+        #[n(2)]
+        to: Account,
+        /// The ckSOL amount to mint back, in lamports.
+        #[n(3)]
+        amount: Lamport,
+        /// The timestamp of the mint, so that the ledger deduplicates each retry.
+        #[n(4)]
+        created_at_time: u64,
+    },
+    /// A ckSOL refund of an SPL withdrawal was minted.
+    #[n(31)]
+    ReimbursedSplCkSol {
+        /// The ckSOL fee burn index, also the withdrawal identifier.
+        #[cbor(n(0), with = "cbor::id")]
+        cksol_burn_block_index: LedgerBurnIndex,
+        /// Why the refund was owed.
+        #[n(1)]
+        kind: SplRefundKind,
+        /// The refund mint index on the ckSOL ledger.
+        #[cbor(n(2), with = "cbor::id")]
+        mint_block_index: LedgerMintIndex,
+    },
+    /// A ckSOL refund cannot be safely retried and requires manual resolution.
+    #[n(32)]
+    QuarantinedSplCkSolRefund {
+        /// The ckSOL fee burn index, also the withdrawal identifier.
+        #[cbor(n(0), with = "cbor::id")]
+        cksol_burn_block_index: LedgerBurnIndex,
+        /// Why the refund was owed.
+        #[n(1)]
+        kind: SplRefundKind,
+    },
     /// The actual cost of an SPL sweep recorded as failed by [`EventType::FailedTransaction`]
     /// was validated. The unspent reservation is returned and the deposit is dropped.
     #[n(35)]
@@ -356,6 +417,58 @@ pub enum EventType {
         #[n(1)]
         lamports_spent: Lamport,
     },
+}
+
+/// The terms of an SPL withdrawal, captured before the ckSOL fee burn.
+#[derive(Clone, Eq, PartialEq, Debug, Decode, Encode)]
+pub struct SplWithdrawalRequestTerms {
+    #[n(0)]
+    pub account: Account,
+    #[cbor(n(1), with = "cbor::address")]
+    pub mint: Address,
+    #[cbor(n(2), with = "icrc_cbor::principal")]
+    pub ledger_id: Principal,
+    /// The destination wallet; its associated token account is derived later.
+    #[cbor(n(3), with = "cbor::address")]
+    pub address: Address,
+    /// The token amount to burn, in the mint's smallest units.
+    #[n(4)]
+    pub amount: u64,
+    /// The token fee deducted from the transferred amount, in the mint's smallest units.
+    #[n(5)]
+    pub token_fee: u64,
+    /// The ckSOL fee already burned, in lamports, without the rent reserve.
+    #[n(6)]
+    pub fee: Lamport,
+    /// The ckSOL burned with the fee for the rent of the destination token account.
+    #[n(7)]
+    pub rent_reserve: Lamport,
+}
+
+impl SplWithdrawalRequestTerms {
+    /// The ckSOL burned for the request: the fee and the rent reserve.
+    pub fn cksol_burn_amount(&self) -> Option<Lamport> {
+        self.fee.checked_add(self.rent_reserve)
+    }
+
+    /// The token amount that the destination receives.
+    pub fn amount_to_transfer(&self) -> Option<u64> {
+        self.amount.checked_sub(self.token_fee)
+    }
+}
+
+/// Payload of the `AcceptedSplWithdrawalRequest` event.
+#[derive(Clone, Eq, PartialEq, Debug, Decode, Encode)]
+pub struct SplWithdrawalRequest {
+    /// The terms recorded with the ckSOL fee burn.
+    #[n(0)]
+    pub terms: SplWithdrawalRequestTerms,
+    /// The ckSOL fee burn index, also the withdrawal identifier.
+    #[cbor(n(1), with = "cbor::id")]
+    pub cksol_burn_block_index: LedgerBurnIndex,
+    /// The amount burn index on the token ledger.
+    #[cbor(n(2), with = "cbor::id")]
+    pub ckspl_burn_block_index: LedgerBurnIndex,
 }
 
 /// Payload of the `WatchedDepositAddresses` event: every registration, live or expired but

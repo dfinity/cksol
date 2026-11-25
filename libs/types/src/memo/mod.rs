@@ -1,4 +1,4 @@
-use crate::DepositSolId;
+use crate::{DepositSolId, WithdrawSplId};
 use derive_more::From;
 use minicbor::{Decode, Encode, Encoder};
 use solana_address::Address;
@@ -56,6 +56,29 @@ pub enum Memo {
     /// The minter burned some ckSOL tokens.
     #[n(1)]
     Burn(#[n(0)] BurnMemo),
+    /// The minter burned ckSOL to pay for an SPL withdrawal.
+    #[n(2)]
+    SplWithdrawalFee {
+        /// The Solana mint of the token being withdrawn.
+        #[cbor(n(0), with = "minicbor::bytes")]
+        mint: [u8; 32],
+        /// The token amount to withdraw, in its smallest units.
+        #[n(1)]
+        withdrawal_amount: u64,
+        /// The destination Solana wallet.
+        #[cbor(n(2), with = "minicbor::bytes")]
+        to_address: [u8; 32],
+    },
+    /// The minter burned ckSPL after burning its ckSOL withdrawal fee.
+    #[n(3)]
+    SplConvert {
+        /// The ckSOL fee burn index, also the SPL withdrawal identifier.
+        #[n(0)]
+        cksol_burn_block_index: WithdrawSplId,
+        /// The destination Solana wallet.
+        #[cbor(n(1), with = "minicbor::bytes")]
+        to_address: [u8; 32],
+    },
 }
 
 /// The minter minted some ckSOL tokens.
@@ -71,6 +94,30 @@ pub enum MintMemo {
         #[n(1)]
         deposit_id: DepositSolId,
     },
+    /// The minter refunded ckSOL of an SPL withdrawal.
+    #[n(2)]
+    SplCkSolRefund {
+        /// The original fee burn index on the ckSOL ledger.
+        #[n(0)]
+        cksol_burn_block_index: WithdrawSplId,
+        /// Why the refund was owed.
+        #[n(1)]
+        kind: SplRefundKind,
+    },
+}
+
+/// Why the minter refunded ckSOL of an SPL withdrawal.
+#[derive(Clone, Copy, Eq, PartialEq, Debug, Decode, Encode)]
+pub enum SplRefundKind {
+    /// The token burn failed after the ckSOL fee burn.
+    #[n(0)]
+    FailedTokenBurn,
+    /// The transfer succeeded and spent less than the reserved rent.
+    #[n(1)]
+    UnusedRent,
+    /// The transfer failed on-chain, so no rent was spent.
+    #[n(2)]
+    FailedTransferRent,
 }
 
 /// The minter burned some ckSOL tokens.
@@ -106,6 +153,14 @@ impl MintMemo {
             deposit_id,
         }
     }
+
+    /// Creates the ckSOL refund memo, linked to the fee burn of its SPL withdrawal.
+    pub fn spl_cksol_refund(cksol_burn_block_index: WithdrawSplId, kind: SplRefundKind) -> Self {
+        Self::SplCkSolRefund {
+            cksol_burn_block_index,
+            kind,
+        }
+    }
 }
 
 impl BurnMemo {
@@ -114,6 +169,25 @@ impl BurnMemo {
     /// [`Address`]: to_address::Address
     pub fn convert(to_address: Address) -> Self {
         Self::Convert {
+            to_address: to_address.to_bytes(),
+        }
+    }
+}
+
+impl Memo {
+    /// Creates the ckSOL fee-burn memo for an SPL withdrawal.
+    pub fn spl_withdrawal_fee(mint: Address, withdrawal_amount: u64, to_address: Address) -> Self {
+        Self::SplWithdrawalFee {
+            mint: mint.to_bytes(),
+            withdrawal_amount,
+            to_address: to_address.to_bytes(),
+        }
+    }
+
+    /// Creates the ckSPL burn memo, linked to its ckSOL fee burn.
+    pub fn spl_convert(cksol_burn_block_index: WithdrawSplId, to_address: Address) -> Self {
+        Self::SplConvert {
+            cksol_burn_block_index,
             to_address: to_address.to_bytes(),
         }
     }

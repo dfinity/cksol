@@ -9,13 +9,16 @@ use crate::{
         build_batch_withdrawal_message,
     },
     state::event::{
-        CreditedDeposit, Signer, TransactionPurpose, VersionedMessage, WatchlistSnapshot,
-        WithdrawalRequest,
+        CreditedDeposit, Signer, SplWithdrawalRequest, SplWithdrawalRequestTerms,
+        TransactionPurpose, VersionedMessage, WatchlistSnapshot, WithdrawalRequest,
     },
     utils::insertion_ordered_map::InsertionOrderedMap,
 };
 use candid::Principal;
-use cksol_types::{DepositSolId, DepositSplId, TxFinalizedStatus, WithdrawSolStatus};
+use cksol_types::{
+    DepositSolId, DepositSplId, SplRefundKind, TxFinalizedStatus, WithdrawSolStatus, WithdrawSplId,
+    WithdrawSplStatus,
+};
 use cksol_types_internal::SolanaNetwork;
 use cksol_types_internal::{Ed25519KeyName, InitArgs, UpgradeArgs};
 use ic_canister_runtime::Runtime;
@@ -148,6 +151,14 @@ pub struct State {
     spl_deposits: SplDeposits,
     spl_deposit_consolidation_fee: u128,
     spl_withdrawal_fee: Lamport,
+    pending_spl_withdrawal_requests: BTreeMap<LedgerBurnIndex, PendingSplWithdrawalRequest>,
+    spl_withdrawal_token_burns: BTreeSet<(Principal, LedgerBurnIndex)>,
+    failed_spl_withdrawal_requests: BTreeSet<LedgerBurnIndex>,
+    // A withdrawal has at most one ckSOL refund, so the withdrawal ID is the key, like the
+    // pending mints of the shared mint round.
+    pending_spl_cksol_refunds: BTreeMap<WithdrawSplId, PendingSplCkSolRefund>,
+    completed_spl_cksol_refunds: BTreeMap<WithdrawSplId, CompletedSplCkSolRefund>,
+    quarantined_spl_cksol_refunds: BTreeMap<WithdrawSplId, PendingSplCkSolRefund>,
     pending_deposit_spl_request_guards: BTreeSet<(Account, Address)>,
 }
 
@@ -809,6 +820,222 @@ impl State {
         pending.chain(created).chain(sent).min()
     }
 
+    pub fn pending_spl_withdrawal_requests(
+        &self,
+    ) -> &BTreeMap<LedgerBurnIndex, PendingSplWithdrawalRequest> {
+        &self.pending_spl_withdrawal_requests
+    }
+
+    pub fn spl_withdrawal_status(&self, cksol_burn_block_index: u64) -> WithdrawSplStatus {
+        let burn_index = LedgerBurnIndex::from(cksol_burn_block_index);
+        if self
+            .pending_spl_withdrawal_requests
+            .contains_key(&burn_index)
+        {
+            return WithdrawSplStatus::Pending;
+        }
+        if self.failed_spl_withdrawal_requests.contains(&burn_index) {
+            if let Some(pending) = self.pending_spl_cksol_refunds.get(&cksol_burn_block_index) {
+                return WithdrawSplStatus::FeeReimbursementPending {
+                    reimbursed_amount: pending.amount,
+                };
+            }
+            if let Some(completed) = self
+                .completed_spl_cksol_refunds
+                .get(&cksol_burn_block_index)
+            {
+                return WithdrawSplStatus::FeeReimbursed {
+                    reimbursed_amount: completed.refund.amount,
+                    mint_block_index: *completed.mint_block_index.get(),
+                };
+            }
+            if let Some(quarantined) = self
+                .quarantined_spl_cksol_refunds
+                .get(&cksol_burn_block_index)
+            {
+                return WithdrawSplStatus::FeeReimbursementQuarantined {
+                    reimbursed_amount: quarantined.amount,
+                };
+            }
+        }
+        WithdrawSplStatus::NotFound
+    }
+
+    pub fn pending_spl_cksol_refunds(&self) -> &BTreeMap<WithdrawSplId, PendingSplCkSolRefund> {
+        &self.pending_spl_cksol_refunds
+    }
+
+    pub fn completed_spl_cksol_refunds(&self) -> &BTreeMap<WithdrawSplId, CompletedSplCkSolRefund> {
+        &self.completed_spl_cksol_refunds
+    }
+
+    pub fn quarantined_spl_cksol_refunds(&self) -> &BTreeMap<WithdrawSplId, PendingSplCkSolRefund> {
+        &self.quarantined_spl_cksol_refunds
+    }
+
+    fn has_spl_cksol_refund(&self, burn_index: &LedgerBurnIndex) -> bool {
+        self.pending_spl_cksol_refunds
+            .contains_key(burn_index.get())
+            || self
+                .completed_spl_cksol_refunds
+                .contains_key(burn_index.get())
+            || self
+                .quarantined_spl_cksol_refunds
+                .contains_key(burn_index.get())
+    }
+
+    fn process_queued_spl_cksol_refund(
+        &mut self,
+        burn_index: LedgerBurnIndex,
+        kind: SplRefundKind,
+        to: Account,
+        amount: Lamport,
+        created_at_time: u64,
+    ) {
+        assert!(
+            !self.has_spl_cksol_refund(&burn_index),
+            "Attempted to queue a second ckSOL refund for SPL withdrawal {burn_index}"
+        );
+        assert!(
+            amount > 0,
+            "Attempted to queue a ckSOL refund of zero for SPL withdrawal {burn_index}"
+        );
+        match kind {
+            SplRefundKind::FailedTokenBurn => assert!(
+                self.failed_spl_withdrawal_requests.contains(&burn_index),
+                "Attempted to refund the fee of SPL withdrawal {burn_index} whose token burn did not fail"
+            ),
+            SplRefundKind::UnusedRent | SplRefundKind::FailedTransferRent => {
+                panic!(
+                    "Attempted to refund the rent of SPL withdrawal {burn_index} that has no transfer outcome"
+                )
+            }
+        }
+        self.pending_spl_cksol_refunds.insert(
+            *burn_index.get(),
+            PendingSplCkSolRefund {
+                kind,
+                to,
+                amount,
+                created_at_time,
+            },
+        );
+    }
+
+    fn take_pending_spl_cksol_refund(
+        &mut self,
+        burn_index: LedgerBurnIndex,
+        kind: SplRefundKind,
+    ) -> PendingSplCkSolRefund {
+        let pending = self
+            .pending_spl_cksol_refunds
+            .remove(burn_index.get())
+            .unwrap_or_else(|| {
+                panic!("Attempted to resolve a ckSOL refund of SPL withdrawal {burn_index} that is not pending")
+            });
+        assert_eq!(
+            pending.kind, kind,
+            "Attempted to resolve a ckSOL refund of SPL withdrawal {burn_index} with another kind"
+        );
+        pending
+    }
+
+    fn process_reimbursed_spl_cksol(
+        &mut self,
+        burn_index: LedgerBurnIndex,
+        kind: SplRefundKind,
+        mint_block_index: &LedgerMintIndex,
+        reimbursed_at: u64,
+    ) {
+        let refund = self.take_pending_spl_cksol_refund(burn_index, kind);
+        self.completed_spl_cksol_refunds.insert(
+            *burn_index.get(),
+            CompletedSplCkSolRefund {
+                refund,
+                mint_block_index: *mint_block_index,
+                reimbursed_at,
+            },
+        );
+    }
+
+    fn process_quarantined_spl_cksol_refund(
+        &mut self,
+        burn_index: LedgerBurnIndex,
+        kind: SplRefundKind,
+    ) {
+        let refund = self.take_pending_spl_cksol_refund(burn_index, kind);
+        self.quarantined_spl_cksol_refunds
+            .insert(*burn_index.get(), refund);
+    }
+
+    fn assert_valid_spl_withdrawal_terms(&self, request: &SplWithdrawalRequestTerms) {
+        let token = self
+            .supported_spl_tokens
+            .get(&request.mint)
+            .expect("Attempted to accept an SPL withdrawal for an unsupported mint");
+        assert_eq!(
+            token.ledger_id, request.ledger_id,
+            "Attempted to accept an SPL withdrawal with a ledger different from the mint's registered ledger"
+        );
+        assert!(
+            request.amount > request.token_fee,
+            "Attempted to accept an SPL withdrawal that transfers no tokens"
+        );
+        assert!(
+            request.fee > 0,
+            "Attempted to accept an SPL withdrawal with a zero fee burn"
+        );
+        assert!(
+            request.cksol_burn_amount().is_some(),
+            "Attempted to accept an SPL withdrawal whose fee and rent reserve overflow"
+        );
+    }
+
+    fn has_spl_withdrawal_outcome(&self, burn_index: &LedgerBurnIndex) -> bool {
+        self.pending_spl_withdrawal_requests
+            .contains_key(burn_index)
+            || self.failed_spl_withdrawal_requests.contains(burn_index)
+    }
+
+    fn process_accepted_spl_withdrawal(&mut self, request: &SplWithdrawalRequest, created_at: u64) {
+        let cksol_burn_block_index = request.cksol_burn_block_index;
+        self.assert_valid_spl_withdrawal_terms(&request.terms);
+        assert!(
+            !self.has_spl_withdrawal_outcome(&cksol_burn_block_index),
+            "Attempted to accept an already accepted SPL withdrawal request: {cksol_burn_block_index}"
+        );
+        let token_burn = (request.terms.ledger_id, request.ckspl_burn_block_index);
+        assert!(
+            !self.spl_withdrawal_token_burns.contains(&token_burn),
+            "Attempted to reuse a token burn that already belongs to a withdrawal: {token_burn:?}"
+        );
+        self.spl_withdrawal_token_burns.insert(token_burn);
+        self.pending_spl_withdrawal_requests.insert(
+            cksol_burn_block_index,
+            PendingSplWithdrawalRequest {
+                request: request.clone(),
+                created_at,
+            },
+        );
+    }
+
+    fn process_failed_spl_withdrawal(
+        &mut self,
+        burn_index: LedgerBurnIndex,
+        _to: Account,
+        reimbursed_amount: Lamport,
+    ) {
+        assert!(
+            !self.has_spl_withdrawal_outcome(&burn_index),
+            "Attempted to record an already recorded SPL withdrawal request as failed: {burn_index}"
+        );
+        assert!(
+            reimbursed_amount > 0,
+            "Attempted to reimburse an SPL withdrawal with a zero amount"
+        );
+        self.failed_spl_withdrawal_requests.insert(burn_index);
+    }
+
     fn process_accepted_withdrawal(&mut self, request: &WithdrawalRequest, created_at: u64) {
         assert_eq!(
             self.pending_withdrawal_requests.insert(
@@ -1199,6 +1426,12 @@ impl TryFrom<InitArgs> for State {
             spl_deposits: SplDeposits::default(),
             spl_deposit_consolidation_fee: crate::constants::DEFAULT_SPL_DEPOSIT_CONSOLIDATION_FEE,
             spl_withdrawal_fee: crate::constants::DEFAULT_SPL_WITHDRAWAL_FEE,
+            pending_spl_withdrawal_requests: BTreeMap::new(),
+            spl_withdrawal_token_burns: BTreeSet::new(),
+            failed_spl_withdrawal_requests: BTreeSet::new(),
+            pending_spl_cksol_refunds: BTreeMap::new(),
+            completed_spl_cksol_refunds: BTreeMap::new(),
+            quarantined_spl_cksol_refunds: BTreeMap::new(),
             pending_deposit_spl_request_guards: BTreeSet::new(),
         };
         state.validate()?;
@@ -1211,6 +1444,30 @@ impl TryFrom<InitArgs> for State {
 pub struct PendingWithdrawalRequest {
     pub request: WithdrawalRequest,
     pub created_at: u64,
+}
+
+/// An accepted SPL withdrawal with both burns recorded, waiting for processing.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PendingSplWithdrawalRequest {
+    pub request: SplWithdrawalRequest,
+    pub created_at: u64,
+}
+
+/// A ckSOL refund of an SPL withdrawal that waits for its mint.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PendingSplCkSolRefund {
+    pub kind: SplRefundKind,
+    pub to: Account,
+    pub amount: Lamport,
+    pub created_at_time: u64,
+}
+
+/// A ckSOL refund of an SPL withdrawal that was minted.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CompletedSplCkSolRefund {
+    pub refund: PendingSplCkSolRefund,
+    pub mint_block_index: LedgerMintIndex,
+    pub reimbursed_at: u64,
 }
 
 /// A withdrawal transaction to create. SOL requests are batched; other payout kinds
@@ -1307,6 +1564,7 @@ pub enum TaskType {
     OperatingRefill,
     SweepSplDeposits,
     MintSpl,
+    RefundSplCkSol,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

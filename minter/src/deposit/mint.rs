@@ -20,11 +20,13 @@ use std::{cell::RefCell, collections::BTreeMap, time::Duration};
 pub(crate) enum MintQueue {
     Sol,
     Spl,
+    SplCkSolRefund,
 }
 
 thread_local! {
     static SOL_CURSOR: RefCell<QueueCursor<u64>> = const { RefCell::new(QueueCursor::new()) };
     static SPL_CURSOR: RefCell<QueueCursor<u64>> = const { RefCell::new(QueueCursor::new()) };
+    static SPL_CKSOL_REFUND_CURSOR: RefCell<QueueCursor<u64>> = const { RefCell::new(QueueCursor::new()) };
 }
 
 impl MintQueue {
@@ -32,6 +34,7 @@ impl MintQueue {
         let cursor = match self {
             Self::Sol => &SOL_CURSOR,
             Self::Spl => &SPL_CURSOR,
+            Self::SplCkSolRefund => &SPL_CKSOL_REFUND_CURSOR,
         };
         cursor.with(|cursor| f(&mut cursor.borrow_mut()))
     }
@@ -40,14 +43,14 @@ impl MintQueue {
     fn record_failed_mint(self, reason: FailedMintReason) {
         match self {
             Self::Sol => record_failed_mint_attempt(reason),
-            Self::Spl => {}
+            Self::Spl | Self::SplCkSolRefund => {}
         }
     }
 
     /// The unit of the minted amount, for logs.
     fn unit(self) -> &'static str {
         match self {
-            Self::Sol => "lamports",
+            Self::Sol | Self::SplCkSolRefund => "lamports",
             Self::Spl => "token units",
         }
     }
@@ -55,7 +58,7 @@ impl MintQueue {
 
 #[cfg(any(test, feature = "canbench-rs"))]
 pub(crate) fn reset_cursors() {
-    for queue in [MintQueue::Sol, MintQueue::Spl] {
+    for queue in [MintQueue::Sol, MintQueue::Spl, MintQueue::SplCkSolRefund] {
         queue.with_cursor(QueueCursor::clear);
     }
 }

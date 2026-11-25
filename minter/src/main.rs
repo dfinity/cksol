@@ -17,14 +17,18 @@ use cksol_minter::{
     runtime::IcCanisterRuntime,
     state::read_state,
     utils::timed_sized_map::Timestamp,
-    withdraw::{WITHDRAWAL_PROCESSING_DELAY, process_pending_withdrawals},
+    withdraw::{
+        WITHDRAWAL_PROCESSING_DELAY, process_pending_withdrawals,
+        spl::process_pending_cksol_refunds,
+    },
 };
 use cksol_types::{
     Address, DepositSolArgs, DepositSolError, DepositSolId, DepositSolStatus, DepositSplArgs,
     DepositSplError, DepositSplId, DepositSplStatus, GetDepositAddressArgs, MinterInfo,
     OperatingBalance, StandardRecord, WatchDepositAddressArgs, WatchDepositAddressError,
     WatchDepositAddressOk, WithdrawSolArgs, WithdrawSolError, WithdrawSolOk, WithdrawSolStatus,
-    WithdrawSolStatusArgs,
+    WithdrawSolStatusArgs, WithdrawSplArgs, WithdrawSplError, WithdrawSplOk, WithdrawSplStatus,
+    WithdrawSplStatusArgs,
 };
 use cksol_types_internal::{MinterArg, log::Priority};
 use ic_http_types::{HttpRequest, HttpResponse, HttpResponseBuilder};
@@ -117,6 +121,25 @@ async fn withdraw_sol(args: WithdrawSolArgs) -> Result<WithdrawSolOk, WithdrawSo
 #[ic_cdk::update]
 fn withdraw_sol_status(args: WithdrawSolStatusArgs) -> WithdrawSolStatus {
     cksol_minter::withdraw::withdrawal_status(args.block_index)
+}
+
+#[ic_cdk::update]
+async fn withdraw_spl(args: WithdrawSplArgs) -> Result<WithdrawSplOk, WithdrawSplError> {
+    let account = assert_non_anonymous_account(None, args.from_subaccount);
+
+    cksol_minter::withdraw::spl::withdraw(
+        &IcCanisterRuntime::new(),
+        account,
+        args.mint.into(),
+        args.amount,
+        &args.address,
+    )
+    .await
+}
+
+#[ic_cdk::update]
+fn withdraw_spl_status(args: WithdrawSplStatusArgs) -> WithdrawSplStatus {
+    cksol_minter::withdraw::spl::withdrawal_status(args.cksol_burn_block_index)
 }
 
 #[ic_cdk::update]
@@ -333,6 +356,9 @@ fn setup_timers() {
     });
     ic_cdk_timers::set_timer_interval(PROCESS_PENDING_MINTS_DELAY, async || {
         process_pending_spl_mints(IcCanisterRuntime::new()).await;
+    });
+    ic_cdk_timers::set_timer_interval(PROCESS_PENDING_MINTS_DELAY, async || {
+        process_pending_cksol_refunds(IcCanisterRuntime::new()).await;
     });
     ic_cdk_timers::set_timer_interval(FINALIZE_TRANSACTIONS_DELAY, async || {
         finalize_transactions(IcCanisterRuntime::new()).await;

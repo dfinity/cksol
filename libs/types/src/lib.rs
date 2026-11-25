@@ -3,9 +3,9 @@
 #![forbid(unsafe_code)]
 #![forbid(missing_docs)]
 
-use candid::{CandidType, Principal};
+use candid::{CandidType, Nat, Principal};
 use icrc_ledger_types::icrc1::account::{Account, Subaccount};
-pub use memo::{BurnMemo, MAX_SERIALIZED_MEMO_BYTES, Memo, MintMemo};
+pub use memo::{BurnMemo, MAX_SERIALIZED_MEMO_BYTES, Memo, MintMemo, SplRefundKind};
 use serde::{Deserialize, Serialize};
 pub use sol_rpc_types::{Lamport, Pubkey as Address, Signature};
 use thiserror::Error;
@@ -330,6 +330,147 @@ pub enum WithdrawSolStatus {
     },
     /// Solana transaction is finalized.
     TxFinalized(TxFinalizedStatus),
+}
+
+/// Arguments for a request to the `withdraw_spl` endpoint.
+#[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize, Serialize)]
+pub struct WithdrawSplArgs {
+    /// The Solana mint identifying the registered SPL token and its ckSPL ledger.
+    pub mint: Address,
+    /// The subaccount of the caller to burn ckSOL and ckSPL from.
+    pub from_subaccount: Option<Subaccount>,
+    /// The requested burn amount in the token's smallest units, not lamports.
+    pub amount: u64,
+    /// The destination wallet address on Solana, not a token account address.
+    pub address: String,
+}
+
+/// The block index of an SPL withdrawal's fee burn on the ckSOL ledger.
+///
+/// Using the common fee ledger makes the identifier unique across all supported mints.
+pub type WithdrawSplId = LedgerBurnIndex;
+
+/// The acceptance receipt of an SPL withdrawal request.
+///
+/// Acceptance records the burn and queues the withdrawal; it does not mean that the
+/// Solana transfer has been submitted or finalized.
+#[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize, Serialize)]
+pub struct WithdrawSplOk {
+    /// The ckSOL fee burn block index, also used to track the withdrawal.
+    pub cksol_burn_block_index: WithdrawSplId,
+    /// The amount burn block index on the ckSPL ledger selected by the request's mint.
+    pub ckspl_burn_block_index: u64,
+}
+
+/// The error result of an SPL withdrawal request.
+#[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize)]
+pub enum WithdrawSplError {
+    /// The mint is not registered with the minter.
+    TokenNotSupported {
+        /// The requested Solana mint.
+        mint: Address,
+    },
+    /// The token amount does not exceed the token's withdrawal fee, so nothing would be
+    /// transferred. The minter enforces no other minimum.
+    ValueTooSmall {
+        /// The minimum amount in the token's smallest units.
+        minimum_withdrawal_amount: u64,
+        /// The requested amount in the token's smallest units.
+        withdrawal_amount: u64,
+    },
+    /// Another withdrawal is being processed for this account.
+    AlreadyProcessing,
+    /// The destination cannot be parsed as a Solana address.
+    MalformedAddress(String),
+    /// The destination is not an allowed withdrawal address.
+    InvalidDestination(String),
+    /// The minter cannot currently accept the request.
+    TemporarilyUnavailable(String),
+    /// Burning the ckSOL withdrawal fee and rent reserve failed.
+    CkSolLedgerError {
+        /// The error from the ckSOL ledger.
+        error: WithdrawSplLedgerError,
+    },
+    /// Burning ckSPL failed after the ckSOL fee was burned.
+    CkSplLedgerError {
+        /// The successful ckSOL fee burn index, also the withdrawal ID.
+        cksol_burn_block_index: WithdrawSplId,
+        /// The error from the ckSPL ledger.
+        error: WithdrawSplLedgerError,
+    },
+}
+
+/// A withdrawal burn error from either the ckSOL or ckSPL ledger.
+#[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize)]
+pub enum WithdrawSplLedgerError {
+    /// The account cannot cover the burn amount.
+    InsufficientFunds {
+        /// The ledger balance in the token's smallest units.
+        balance: Nat,
+        /// The amount the minter attempted to burn.
+        failed_burn_amount: Nat,
+        /// The ledger's configured token symbol.
+        token_symbol: String,
+        /// The ledger that rejected the burn.
+        ledger_id: Principal,
+    },
+    /// The minter is not approved to burn the requested amount.
+    InsufficientAllowance {
+        /// The ledger allowance in the token's smallest units.
+        allowance: Nat,
+        /// The amount the minter attempted to burn.
+        failed_burn_amount: Nat,
+        /// The ledger's configured token symbol.
+        token_symbol: String,
+        /// The ledger that rejected the burn.
+        ledger_id: Principal,
+    },
+    /// The requested amount is below the ledger's minimum burn amount.
+    AmountTooLow {
+        /// The minimum burn amount in the token's smallest units.
+        minimum_burn_amount: Nat,
+        /// The amount the minter attempted to burn.
+        failed_burn_amount: Nat,
+        /// The ledger's configured token symbol.
+        token_symbol: String,
+        /// The ledger that rejected the burn.
+        ledger_id: Principal,
+    },
+    /// The ledger call failed or returned another error; the outcome may be unresolved.
+    TemporarilyUnavailable(String),
+}
+
+/// Arguments for a request to the `withdraw_spl_status` endpoint.
+#[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize)]
+pub struct WithdrawSplStatusArgs {
+    /// The ckSOL fee burn block index returned by the `withdraw_spl` endpoint.
+    pub cksol_burn_block_index: WithdrawSplId,
+}
+
+/// Status of an SPL withdrawal request.
+#[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize)]
+pub enum WithdrawSplStatus {
+    /// Withdrawal request is not found.
+    NotFound,
+    /// Withdrawal request is waiting to be processed.
+    Pending,
+    /// The token burn failed after the fee burn; the ckSOL fee refund is queued.
+    FeeReimbursementPending {
+        /// The ckSOL amount to mint back, in lamports.
+        reimbursed_amount: Lamport,
+    },
+    /// The ckSOL fee was minted back.
+    FeeReimbursed {
+        /// The ckSOL amount minted back, in lamports.
+        reimbursed_amount: Lamport,
+        /// The mint block index on the ckSOL ledger.
+        mint_block_index: u64,
+    },
+    /// The ckSOL fee refund cannot be retried safely and requires manual resolution.
+    FeeReimbursementQuarantined {
+        /// The ckSOL amount that was to be minted back, in lamports.
+        reimbursed_amount: Lamport,
+    },
 }
 
 /// Information about the ckSOL minter canister.
