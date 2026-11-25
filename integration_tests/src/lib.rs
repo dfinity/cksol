@@ -9,7 +9,8 @@ use cksol_types::{
     DepositSplError, DepositSplId, DepositSplStatus, GetDepositAddressArgs, MinterInfo,
     OperatingBalance, StandardRecord, WatchDepositAddressArgs, WatchDepositAddressError,
     WatchDepositAddressOk, WatchDepositAddressStatus, WithdrawSolArgs, WithdrawSolError,
-    WithdrawSolOk, WithdrawSolStatus, WithdrawSolStatusArgs,
+    WithdrawSolOk, WithdrawSolStatus, WithdrawSolStatusArgs, WithdrawSplArgs, WithdrawSplError,
+    WithdrawSplId, WithdrawSplOk, WithdrawSplStatus, WithdrawSplStatusArgs,
 };
 use cksol_types_internal::{
     MinterArg,
@@ -539,6 +540,27 @@ impl Setup {
         panic!("SPL deposit {deposit_id} was not minted within timeout");
     }
 
+    /// Runs the timers until the SPL withdrawal has an outcome that the predicate accepts.
+    pub async fn wait_for_spl_withdrawal(
+        &self,
+        cksol_burn_block_index: WithdrawSplId,
+        is_expected: impl Fn(&WithdrawSplStatus) -> bool,
+    ) -> WithdrawSplStatus {
+        const MAX_ITERATIONS: usize = 30;
+        let mut status = WithdrawSplStatus::NotFound;
+        for _ in 0..MAX_ITERATIONS {
+            status = self
+                .minter()
+                .withdraw_spl_status(cksol_burn_block_index)
+                .await;
+            if is_expected(&status) {
+                return status;
+            }
+            self.advance_time_and_settle(Duration::from_mins(2)).await;
+        }
+        panic!("SPL withdrawal {cksol_burn_block_index} stayed at {status:?} within timeout");
+    }
+
     /// Donates [`Self::OPERATING_TOP_UP`] of the default caller's ckSOL to the top-up
     /// account, then waits for the automatic refill to burn it into the operating balance.
     pub async fn top_up_operating_balance(&self) {
@@ -836,6 +858,29 @@ impl<'a> CkSolMinter<'a> {
         args: WithdrawSolArgs,
     ) -> PendingCall<'_, Result<WithdrawSolOk, WithdrawSolError>> {
         self.submit_update_call("withdraw_sol", (args,)).await
+    }
+
+    pub async fn withdraw_spl(
+        &self,
+        args: WithdrawSplArgs,
+    ) -> Result<WithdrawSplOk, WithdrawSplError> {
+        self.try_update_call("withdraw_spl", (args,), 0)
+            .await
+            .expect("withdraw_spl failed")
+    }
+
+    pub async fn withdraw_spl_status(
+        &self,
+        cksol_burn_block_index: WithdrawSplId,
+    ) -> WithdrawSplStatus {
+        self.update_call(
+            "withdraw_spl_status",
+            (WithdrawSplStatusArgs {
+                cksol_burn_block_index,
+            },),
+            0,
+        )
+        .await
     }
 
     pub async fn withdraw_sol_status(&self, block_index: u64) -> WithdrawSolStatus {

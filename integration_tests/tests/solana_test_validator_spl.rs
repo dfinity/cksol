@@ -2,15 +2,19 @@ use assert_matches::assert_matches;
 use assert2::check;
 use cksol_int_tests::{
     Ledger, Setup,
-    fixtures::MINTER_ADDRESS,
+    fixtures::{DEFAULT_CALLER_ACCOUNT, MINTER_ADDRESS},
     validator::{FEE_PER_SIGNATURE, SolanaTestValidator},
 };
-use cksol_types::{DepositSplArgs, DepositSplError, DepositSplId, DepositSplStatus, Signature};
+use cksol_types::{
+    DepositSplArgs, DepositSplError, DepositSplId, DepositSplStatus, Signature,
+    SplRentRefundStatus, TxFinalizedStatus, WithdrawSplArgs, WithdrawSplStatus,
+};
 use cksol_types_internal::{SplTokenRegistration, UpgradeArgs, event::EventType};
 use icrc_ledger_types::icrc1::account::Account;
 use solana_address::Address;
 use solana_keypair::{Keypair, Signer};
 use solana_native_token::LAMPORTS_PER_SOL;
+use spl_associated_token_account_interface::address::get_associated_token_address;
 use std::time::Duration;
 
 const DECIMALS: u8 = 6;
@@ -172,6 +176,176 @@ async fn should_drop_an_spl_deposit_when_its_sweep_expires_on_the_validator() {
         .into()
         .drop()
         .await;
+}
+
+/// The real transaction metadata of the validator settles both rent cases: a destination
+/// token account that the withdrawal creates, and one that exists.
+#[tokio::test(flavor = "multi_thread")]
+async fn should_withdraw_spl_to_a_new_and_then_an_existing_token_account_on_the_validator() {
+    const FEE: u64 = 1_000_000;
+    const RENT_RESERVE: u64 = 2_039_280;
+
+    let validator = SolanaTestValidator::start().await;
+    let setup = validator.setup().await;
+    let (ledger, funder, mint, treasury) = register_mint(&validator, &setup).await;
+
+    // The default caller holds ckSOL from the funding deposit. It deposits the tokens.
+    let account = DEFAULT_CALLER_ACCOUNT;
+    let owner: Address = setup.minter().get_deposit_address(account).await.into();
+    validator
+        .mint_to(&funder, &mint, &owner, DEPOSIT_AMOUNT)
+        .await;
+    let deposit_id = setup
+        .minter()
+        .deposit_spl(DepositSplArgs {
+            owner: None,
+            subaccount: None,
+            mint: mint.into(),
+        })
+        .await
+        .expect("deposit_spl should queue the deposit");
+    setup.advance_time(Duration::from_mins(1)).await;
+    validator
+        .wait_for_finalized_token_balance(&treasury, DEPOSIT_AMOUNT)
+        .await;
+    assert_eq!(
+        setup.wait_for_spl_deposit_minted(deposit_id).await,
+        DEPOSIT_AMOUNT - DEPOSIT_FEE
+    );
+    setup
+        .ledger()
+        .approve(None, 100 * FEE, setup.minter_account())
+        .await;
+    ledger
+        .approve(None, DEPOSIT_AMOUNT, setup.minter_account())
+        .await;
+
+    let destination = Keypair::new().pubkey();
+    let destination_token_account =
+        get_associated_token_address(&destination.to_bytes().into(), &mint.to_bytes().into())
+            .to_bytes()
+            .into();
+    let finalized = |status: &WithdrawSplStatus| {
+        matches!(
+            status,
+            WithdrawSplStatus::TxFinalized {
+                rent_refund: SplRentRefundStatus::NotDue | SplRentRefundStatus::Reimbursed { .. },
+                ..
+            }
+        )
+    };
+
+    // 1. The destination has no token account: the transaction creates it.
+    let cksol_before = setup.ledger().balance_of(account).await;
+    let ckspl_before = ledger.balance_of(account).await;
+    let sol_before = validator.get_balance(&MINTER_ADDRESS).await;
+    let operating_before = setup.minter().get_operating_balance().await.balance;
+    let first = setup
+        .minter()
+        .withdraw_spl(WithdrawSplArgs {
+            mint: mint.into(),
+            from_subaccount: None,
+            amount: 1_000_000,
+            address: destination.to_string(),
+        })
+        .await
+        .expect("withdraw_spl should accept the request");
+    assert_eq!(
+        setup.ledger().balance_of(account).await,
+        cksol_before - FEE - RENT_RESERVE
+    );
+    assert_eq!(
+        ledger.balance_of(account).await,
+        ckspl_before - 1_000_000_u64
+    );
+    let status = setup
+        .wait_for_spl_withdrawal(first.cksol_burn_block_index, finalized)
+        .await;
+    assert_matches!(
+        status,
+        WithdrawSplStatus::TxFinalized {
+            transaction: TxFinalizedStatus::Success { .. },
+            rent_refund: SplRentRefundStatus::NotDue,
+        }
+    );
+    assert_eq!(
+        validator
+            .get_token_balance(&destination_token_account)
+            .await,
+        1_000_000
+    );
+    assert_eq!(
+        validator.get_token_balance(&treasury).await,
+        DEPOSIT_AMOUNT - 1_000_000
+    );
+    // The minter paid the transaction fee and the rent of the new account.
+    assert_eq!(
+        validator.get_balance(&MINTER_ADDRESS).await,
+        sol_before - FEE_PER_SIGNATURE - RENT_RESERVE
+    );
+    assert_eq!(
+        validator.get_balance(&destination_token_account).await,
+        RENT_RESERVE
+    );
+    assert_eq!(
+        setup.minter().get_operating_balance().await.balance,
+        operating_before + FEE - FEE_PER_SIGNATURE
+    );
+    // The whole reserve was spent, so no ckSOL comes back.
+    assert_eq!(
+        setup.ledger().balance_of(account).await,
+        cksol_before - FEE - RENT_RESERVE
+    );
+
+    // 2. The destination token account exists now: the rent reserve is refunded.
+    let cksol_before = setup.ledger().balance_of(account).await;
+    let sol_before = validator.get_balance(&MINTER_ADDRESS).await;
+    let second = setup
+        .minter()
+        .withdraw_spl(WithdrawSplArgs {
+            mint: mint.into(),
+            from_subaccount: None,
+            amount: 500_000,
+            address: destination.to_string(),
+        })
+        .await
+        .expect("withdraw_spl should accept the second request");
+    assert_eq!(
+        ledger.balance_of(account).await,
+        ckspl_before - 1_500_000_u64
+    );
+    let status = setup
+        .wait_for_spl_withdrawal(second.cksol_burn_block_index, finalized)
+        .await;
+    assert_matches!(
+        status,
+        WithdrawSplStatus::TxFinalized {
+            transaction: TxFinalizedStatus::Success { .. },
+            rent_refund: SplRentRefundStatus::Reimbursed {
+                amount: RENT_RESERVE,
+                ..
+            },
+        }
+    );
+    assert_eq!(
+        validator
+            .get_token_balance(&destination_token_account)
+            .await,
+        1_500_000
+    );
+    assert_eq!(
+        validator.get_balance(&MINTER_ADDRESS).await,
+        sol_before - FEE_PER_SIGNATURE
+    );
+    // The settlement mints no ckSPL back.
+    assert_eq!(
+        ledger.balance_of(account).await,
+        ckspl_before - 1_500_000_u64
+    );
+    // Only the fee is kept: the rent reserve is minted back.
+    assert_eq!(setup.ledger().balance_of(account).await, cksol_before - FEE);
+
+    setup.drop().await;
 }
 
 /// Waits for the validator to pass the expiry window of the sweep, in real time.
