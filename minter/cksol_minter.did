@@ -359,6 +359,11 @@ type WithdrawSplStatus = variant {
     NotFound;
     // Withdrawal request is waiting to be processed.
     Pending;
+    // Solana transaction was signed and is sent to the network.
+    TxSent : record {
+        // The unique identifier (signature) of the Solana transaction.
+        transaction_id : Signature;
+    };
     // The token burn failed after the fee burn; the ckSOL fee refund is queued.
     FeeReimbursementPending : record {
         // The ckSOL amount to mint back, in lamports.
@@ -654,6 +659,11 @@ type TransactionPurpose = variant {
         deposit_id: DepositSplId;
         block_height: nat64;
     };
+    // Withdraw SPL tokens for one request, with the durable nonce bound to it.
+    SplWithdrawal : record {
+        // The ckSOL fee burn index of the withdrawal request served by this transaction.
+        cksol_burn_block_index : nat64;
+    };
     // Withdraw SOL to users' Solana addresses. The transaction carries the
     // nonce value of a durable nonce account instead of a recent blockhash,
     // so it never expires.
@@ -891,6 +901,15 @@ type EventType = variant {
         to : Account;
         // The ckSOL amount to mint back, in lamports.
         reimbursed_amount : Lamport;
+    };
+    // A durable nonce was bound to one SPL withdrawal request before signing.
+    CreatedSplWithdrawalTransaction : record {
+        // The ckSOL fee burn index of the withdrawal request served by this transaction.
+        cksol_burn_block_index : nat64;
+        // The durable nonce account bound to this transaction.
+        nonce_account : Address;
+        // The nonce value the transaction carries in place of a recent blockhash.
+        nonce_value : Hash;
     };
     // A ckSOL refund of an SPL withdrawal is owed, recorded before the ledger call.
     QueuedSplCkSolRefund : record {

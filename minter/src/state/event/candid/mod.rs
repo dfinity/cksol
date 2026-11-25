@@ -90,6 +90,15 @@ impl From<EventType> for CandidEventType {
                 to,
                 reimbursed_amount,
             },
+            EventType::CreatedSplWithdrawalTransaction {
+                cksol_burn_block_index,
+                nonce_account,
+                nonce_value,
+            } => CandidEventType::CreatedSplWithdrawalTransaction {
+                cksol_burn_block_index: *cksol_burn_block_index.get(),
+                nonce_account: CandidAddress::from(nonce_account),
+                nonce_value: CandidHash::from(nonce_value),
+            },
             EventType::QueuedSplCkSolRefund {
                 cksol_burn_block_index,
                 kind,
@@ -300,6 +309,11 @@ impl From<TransactionPurpose> for CandidTransactionPurpose {
                 deposit_id,
                 block_height: block_height.get(),
             },
+            TransactionPurpose::SplWithdrawal {
+                cksol_burn_block_index,
+            } => CandidTransactionPurpose::SplWithdrawal {
+                cksol_burn_block_index: *cksol_burn_block_index.get(),
+            },
             TransactionPurpose::Withdrawal { burn_indices } => {
                 CandidTransactionPurpose::Withdrawal {
                     burn_indices: burn_indices.iter().map(|idx| *idx.get()).collect(),
@@ -382,6 +396,15 @@ impl TryFrom<CandidEventType> for EventType {
                 cksol_burn_block_index: LedgerBurnIndex::new(cksol_burn_block_index),
                 to,
                 reimbursed_amount,
+            },
+            CandidEventType::CreatedSplWithdrawalTransaction {
+                cksol_burn_block_index,
+                nonce_account,
+                nonce_value,
+            } => EventType::CreatedSplWithdrawalTransaction {
+                cksol_burn_block_index: LedgerBurnIndex::new(cksol_burn_block_index),
+                nonce_account: Address::from(nonce_account),
+                nonce_value: Hash::from(nonce_value),
             },
             CandidEventType::QueuedSplCkSolRefund {
                 cksol_burn_block_index,
@@ -673,6 +696,11 @@ impl From<CandidTransactionPurpose> for TransactionPurpose {
             } => TransactionPurpose::SweepSplDeposit {
                 deposit_id,
                 block_height: BlockHeight::new(block_height),
+            },
+            CandidTransactionPurpose::SplWithdrawal {
+                cksol_burn_block_index,
+            } => TransactionPurpose::SplWithdrawal {
+                cksol_burn_block_index: LedgerBurnIndex::new(cksol_burn_block_index),
             },
             CandidTransactionPurpose::Withdrawal { burn_indices } => {
                 TransactionPurpose::Withdrawal {

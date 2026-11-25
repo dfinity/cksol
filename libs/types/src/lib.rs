@@ -454,6 +454,11 @@ pub enum WithdrawSplStatus {
     NotFound,
     /// Withdrawal request is waiting to be processed.
     Pending,
+    /// Solana transaction was signed and is sent to the network.
+    TxSent {
+        /// The unique identifier (signature) of the Solana transaction.
+        transaction_id: Signature,
+    },
     /// The token burn failed after the fee burn; the ckSOL fee refund is queued.
     FeeReimbursementPending {
         /// The ckSOL amount to mint back, in lamports.

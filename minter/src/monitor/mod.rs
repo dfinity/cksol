@@ -94,7 +94,9 @@ async fn check_sweep_transactions<R: CanisterRuntime>(runtime: &R) -> bool {
                 | MinterTransaction::SweepSplDeposit { block_height } => {
                     Some((*signature, *block_height))
                 }
-                MinterTransaction::Withdrawal { .. } => None,
+                MinterTransaction::Withdrawal { .. } | MinterTransaction::SplWithdrawal { .. } => {
+                    None
+                }
             })
             .collect()
     });

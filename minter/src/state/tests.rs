@@ -1103,7 +1103,11 @@ mod state_from_init_args {
                 spl_deposit_consolidation_fee:
                     crate::constants::DEFAULT_SPL_DEPOSIT_CONSOLIDATION_FEE,
                 spl_withdrawal_fee: crate::constants::DEFAULT_SPL_WITHDRAWAL_FEE,
+                spl_treasury_balances: BTreeMap::new(),
                 pending_spl_withdrawal_requests: BTreeMap::new(),
+                created_spl_withdrawal_requests: BTreeMap::new(),
+                created_spl_withdrawal_txs: BTreeMap::new(),
+                sent_spl_withdrawal_requests: BTreeMap::new(),
                 spl_withdrawal_token_burns: BTreeSet::new(),
                 failed_spl_withdrawal_requests: BTreeSet::new(),
                 pending_spl_cksol_refunds: BTreeMap::new(),

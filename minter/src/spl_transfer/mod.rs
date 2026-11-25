@@ -10,6 +10,23 @@ use solana_transaction::Transaction;
 
 #[cfg(test)]
 mod tests;
+pub mod withdrawal;
+
+pub use withdrawal::build_spl_withdrawal_message;
+
+/// Creates the classic associated token account of `owner` for `mint` unless it exists.
+pub fn create_associated_token_account_instruction(
+    payer: &Address,
+    owner: &Address,
+    mint: &Address,
+) -> Instruction {
+    spl_associated_token_account_interface::instruction::create_associated_token_account_idempotent(
+        &payer.to_bytes().into(),
+        &owner.to_bytes().into(),
+        &mint.to_bytes().into(),
+        &spl_token_interface::id(),
+    )
+}
 
 /// Builds one classic SPL Token `TransferChecked`, signed by the source owner.
 /// Account creation, closing and transaction signing are separate operations.

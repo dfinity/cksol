@@ -237,6 +237,15 @@ pub enum EventType {
         /// The ckSOL amount to mint back, in lamports.
         reimbursed_amount: Lamport,
     },
+    /// A durable nonce was bound to one SPL withdrawal request before signing.
+    CreatedSplWithdrawalTransaction {
+        /// The ckSOL fee burn index of the withdrawal request served by this transaction.
+        cksol_burn_block_index: u64,
+        /// The durable nonce account bound to this transaction.
+        nonce_account: Address,
+        /// The nonce value the transaction carries in place of a recent blockhash.
+        nonce_value: Hash,
+    },
     /// A ckSOL refund of an SPL withdrawal is owed, recorded before the ledger call.
     QueuedSplCkSolRefund {
         /// The ckSOL fee burn index, also the withdrawal identifier.
@@ -373,6 +382,11 @@ pub enum TransactionPurpose {
         deposit_id: u64,
         /// Height of the block supplying the recent blockhash.
         block_height: u64,
+    },
+    /// Withdraw SPL tokens for one request, with the durable nonce bound to it.
+    SplWithdrawal {
+        /// The ckSOL fee burn index of the withdrawal request served by this transaction.
+        cksol_burn_block_index: u64,
     },
 }
 

@@ -5,9 +5,10 @@ use crate::{
     numeric::{LedgerBurnIndex, LedgerMintIndex},
     rpc::BlockHeight,
     sol_transfer::{
-        BATCH_WITHDRAWAL_TX_FEE, MAX_SIGNATURES, MAX_WITHDRAWALS_PER_NONCE_TX,
+        BATCH_WITHDRAWAL_TX_FEE, CreateTransferError, MAX_SIGNATURES, MAX_WITHDRAWALS_PER_NONCE_TX,
         build_batch_withdrawal_message,
     },
+    spl_transfer::{build_spl_withdrawal_message, withdrawal::SplWithdrawalTransfer},
     state::event::{
         CreditedDeposit, Signer, SplWithdrawalRequest, SplWithdrawalRequestTerms,
         TransactionPurpose, VersionedMessage, WatchlistSnapshot, WithdrawalRequest,
@@ -151,11 +152,13 @@ pub struct State {
     spl_deposits: SplDeposits,
     spl_deposit_consolidation_fee: u128,
     spl_withdrawal_fee: Lamport,
+    spl_treasury_balances: BTreeMap<Address, u64>,
     pending_spl_withdrawal_requests: BTreeMap<LedgerBurnIndex, PendingSplWithdrawalRequest>,
+    created_spl_withdrawal_requests: BTreeMap<LedgerBurnIndex, PendingSplWithdrawalRequest>,
+    created_spl_withdrawal_txs: BTreeMap<Address, CreatedSplWithdrawalTransaction>,
+    sent_spl_withdrawal_requests: BTreeMap<LedgerBurnIndex, SentSplWithdrawalRequest>,
     spl_withdrawal_token_burns: BTreeSet<(Principal, LedgerBurnIndex)>,
     failed_spl_withdrawal_requests: BTreeSet<LedgerBurnIndex>,
-    // A withdrawal has at most one ckSOL refund, so the withdrawal ID is the key, like the
-    // pending mints of the shared mint round.
     pending_spl_cksol_refunds: BTreeMap<WithdrawSplId, PendingSplCkSolRefund>,
     completed_spl_cksol_refunds: BTreeMap<WithdrawSplId, CompletedSplCkSolRefund>,
     quarantined_spl_cksol_refunds: BTreeMap<WithdrawSplId, PendingSplCkSolRefund>,
@@ -312,7 +315,7 @@ impl State {
                 let sweep = self.spl_deposits.drop_swept(signature);
                 self.return_spl_sweep_cost(sweep.reserved_lamports);
             }
-            MinterTransaction::Withdrawal { .. } => {
+            MinterTransaction::Withdrawal { .. } | MinterTransaction::SplWithdrawal { .. } => {
                 panic!("BUG: durable-nonce withdrawal transaction {signature} cannot expire")
             }
         }
@@ -704,9 +707,16 @@ impl State {
                 panic!("Attempted to credit SPL sweep {signature} that is not finalized")
             });
         let unspent = unspent_spl_sweep_cost(sweep, lamports_spent);
+        let deposit = sweep.sweep.deposit();
+        let (mint, swept_tokens) = (deposit.mint, deposit.balance);
         self.spl_deposits
             .credit_sweep(signature, deposit_id, amount_to_mint, timestamp);
         self.return_spl_sweep_cost(unspent);
+        // The treasury received the gross amount: the minted part and the deposit fee.
+        let treasury = self.spl_treasury_balances.entry(mint).or_default();
+        *treasury = treasury
+            .checked_add(swept_tokens)
+            .expect("BUG: SPL treasury balance overflow");
     }
 
     /// Settles the validated cost of an SPL sweep whose failure was observed before.
@@ -784,8 +794,23 @@ impl State {
     pub fn withdrawal_plans(&self) -> WithdrawalPlans<'_> {
         WithdrawalPlans {
             pending_requests: self.pending_withdrawal_requests.values().peekable(),
+            pending_spl_requests: self.pending_spl_withdrawal_requests.values().peekable(),
             available_balance: self.spendable_balance(),
+            available_tokens: self.spl_treasury_balances.clone(),
+            sol_blocked: false,
         }
+    }
+
+    /// The tokens of the mint that no created or sent withdrawal has reserved.
+    pub fn spl_treasury_balance(&self, mint: &Address) -> u64 {
+        self.spl_treasury_balances.get(mint).copied().unwrap_or(0)
+    }
+
+    /// Whether the SOL for the fee and the rent, and the treasury tokens, cover the request.
+    pub fn covers_spl_withdrawal(&self, request: &SplWithdrawalRequest) -> bool {
+        self.spendable_balance() >= spl_withdrawal_sol_cost(&request.terms)
+            && self.spl_treasury_balance(&request.terms.mint)
+                >= spl_withdrawal_token_cost(&request.terms)
     }
 
     pub fn covers_withdrawal_batch(&self, requests: &[WithdrawalRequest]) -> bool {
@@ -802,7 +827,7 @@ impl State {
     }
 
     pub fn has_unsigned_withdrawal_transaction(&self) -> bool {
-        !self.created_withdrawal_txs.is_empty()
+        !self.created_withdrawal_txs.is_empty() || !self.created_spl_withdrawal_txs.is_empty()
     }
 
     /// Returns the creation timestamp (in nanoseconds) of the oldest incomplete withdrawal request.
@@ -831,8 +856,16 @@ impl State {
         if self
             .pending_spl_withdrawal_requests
             .contains_key(&burn_index)
+            || self
+                .created_spl_withdrawal_requests
+                .contains_key(&burn_index)
         {
             return WithdrawSplStatus::Pending;
+        }
+        if let Some(sent) = self.sent_spl_withdrawal_requests.get(&burn_index) {
+            return WithdrawSplStatus::TxSent {
+                transaction_id: sent.signature.into(),
+            };
         }
         if self.failed_spl_withdrawal_requests.contains(&burn_index) {
             if let Some(pending) = self.pending_spl_cksol_refunds.get(&cksol_burn_block_index) {
@@ -859,6 +892,24 @@ impl State {
             }
         }
         WithdrawSplStatus::NotFound
+    }
+
+    pub fn created_spl_withdrawal_requests(
+        &self,
+    ) -> &BTreeMap<LedgerBurnIndex, PendingSplWithdrawalRequest> {
+        &self.created_spl_withdrawal_requests
+    }
+
+    pub fn created_spl_withdrawal_txs(
+        &self,
+    ) -> &BTreeMap<Address, CreatedSplWithdrawalTransaction> {
+        &self.created_spl_withdrawal_txs
+    }
+
+    pub fn sent_spl_withdrawal_requests(
+        &self,
+    ) -> &BTreeMap<LedgerBurnIndex, SentSplWithdrawalRequest> {
+        &self.sent_spl_withdrawal_requests
     }
 
     pub fn pending_spl_cksol_refunds(&self) -> &BTreeMap<WithdrawSplId, PendingSplCkSolRefund> {
@@ -994,6 +1045,10 @@ impl State {
     fn has_spl_withdrawal_outcome(&self, burn_index: &LedgerBurnIndex) -> bool {
         self.pending_spl_withdrawal_requests
             .contains_key(burn_index)
+            || self
+                .created_spl_withdrawal_requests
+                .contains_key(burn_index)
+            || self.sent_spl_withdrawal_requests.contains_key(burn_index)
             || self.failed_spl_withdrawal_requests.contains(burn_index)
     }
 
@@ -1084,6 +1139,15 @@ impl State {
                 burn_indices,
                 timestamp,
             ),
+            TransactionPurpose::SplWithdrawal {
+                cksol_burn_block_index,
+            } => self.send_spl_nonce_withdrawal(
+                signature,
+                transaction.clone(),
+                signers,
+                *cksol_burn_block_index,
+                timestamp,
+            ),
             TransactionPurpose::SweepDeposit {
                 deposit_ids,
                 block_height,
@@ -1104,6 +1168,161 @@ impl State {
             None,
             "Attempted to submit transaction with signature {signature:?} twice"
         );
+    }
+
+    fn process_spl_transaction_created(
+        &mut self,
+        burn_index: LedgerBurnIndex,
+        nonce_account: &Address,
+        nonce_value: Hash,
+    ) {
+        self.nonce_pool.bind(nonce_account, nonce_value);
+        let pending = self
+            .pending_spl_withdrawal_requests
+            .remove(&burn_index)
+            .unwrap_or_else(|| {
+                panic!("Attempted to create transaction for unknown SPL withdrawal request: {burn_index}")
+            });
+        let terms = &pending.request.terms;
+        // The SOL for the transaction fee and the rent, and the tokens to transfer, stay
+        // reserved until the outcome of the transaction is settled.
+        self.balance = self
+            .balance
+            .checked_sub(spl_withdrawal_sol_cost(terms))
+            .expect("BUG: insufficient minter balance for SPL withdrawal");
+        let treasury = self.spl_treasury_balances.entry(terms.mint).or_default();
+        *treasury = treasury
+            .checked_sub(spl_withdrawal_token_cost(terms))
+            .expect("BUG: insufficient treasury tokens for SPL withdrawal");
+        assert_eq!(
+            self.created_spl_withdrawal_requests
+                .insert(burn_index, pending),
+            None,
+            "Attempted to create transaction for already created SPL withdrawal request: {burn_index}"
+        );
+        assert_eq!(
+            self.created_spl_withdrawal_txs.insert(
+                *nonce_account,
+                CreatedSplWithdrawalTransaction {
+                    nonce_value,
+                    cksol_burn_block_index: burn_index,
+                }
+            ),
+            None,
+            "BUG: nonce account {nonce_account} already has a created SPL transaction"
+        );
+    }
+
+    fn send_spl_nonce_withdrawal(
+        &mut self,
+        signature: &Signature,
+        message: VersionedMessage,
+        signers: &[Signer],
+        burn_index: LedgerBurnIndex,
+        submitted_at: u64,
+    ) -> MinterTransaction {
+        let nonce_account = message.advanced_nonce_account().unwrap_or_else(|| {
+            panic!("BUG: SPL withdrawal transaction {signature} does not start with an AdvanceNonceAccount instruction")
+        });
+        let created = self
+            .created_spl_withdrawal_txs
+            .get(&nonce_account)
+            .unwrap_or_else(|| {
+                panic!(
+                    "BUG: no SPL withdrawal transaction was created for nonce account {nonce_account}"
+                )
+            })
+            .clone();
+        assert_eq!(
+            burn_index, created.cksol_burn_block_index,
+            "BUG: SPL withdrawal transaction {signature} does not serve the request bound to nonce account {nonce_account}"
+        );
+        let bound = self
+            .bound_spl_withdrawal_message(&nonce_account, &created)
+            .unwrap_or_else(|e| {
+                panic!("BUG: cannot rebuild the SPL withdrawal message bound to nonce account {nonce_account}: {e}")
+            });
+        assert_eq!(
+            message,
+            VersionedMessage::Legacy(bound),
+            "BUG: SPL withdrawal transaction {signature} does not carry the message bound to nonce account {nonce_account}"
+        );
+        assert_eq!(
+            signers,
+            [Signer::Minter],
+            "BUG: SPL withdrawal transaction {signature} must be signed by the minter only"
+        );
+        self.created_spl_withdrawal_txs.remove(&nonce_account);
+        let pending = self
+            .created_spl_withdrawal_requests
+            .remove(&burn_index)
+            .unwrap_or_else(|| {
+                panic!("BUG: SPL withdrawal request {burn_index} of a created transaction is not in the created bucket")
+            });
+        assert_eq!(
+            self.sent_spl_withdrawal_requests.insert(
+                burn_index,
+                SentSplWithdrawalRequest {
+                    request: pending.request,
+                    signature: *signature,
+                    created_at: pending.created_at,
+                },
+            ),
+            None,
+            "Attempted to send transaction for already sent SPL withdrawal request: {burn_index}"
+        );
+        MinterTransaction::SplWithdrawal {
+            message,
+            nonce_account,
+            nonce_value: created.nonce_value,
+            submitted_at,
+        }
+    }
+
+    /// Rebuilds the message of the SPL withdrawal bound to this nonce account from
+    /// recorded state only, so a new signing attempt and replay produce the same message.
+    pub fn bound_spl_withdrawal_message(
+        &self,
+        nonce_account: &Address,
+        created: &CreatedSplWithdrawalTransaction,
+    ) -> Result<Message, CreateTransferError> {
+        let burn_index = created.cksol_burn_block_index;
+        let request = &self
+            .created_spl_withdrawal_requests
+            .get(&burn_index)
+            .unwrap_or_else(|| {
+                panic!("BUG: SPL withdrawal request {burn_index} of a created transaction is not in the created bucket")
+            })
+            .request;
+        let minter_address = minter_address(self.minter_public_key.as_ref().expect(
+            "BUG: an SPL withdrawal message was rebuilt before the minter public key was recorded",
+        ));
+        self.spl_withdrawal_message(&minter_address, nonce_account, created.nonce_value, request)
+    }
+
+    /// The message that transfers the net amount of the request to its destination.
+    pub fn spl_withdrawal_message(
+        &self,
+        minter_address: &Address,
+        nonce_account: &Address,
+        nonce_value: Hash,
+        request: &SplWithdrawalRequest,
+    ) -> Result<Message, CreateTransferError> {
+        let terms = &request.terms;
+        let token = self
+            .supported_spl_tokens
+            .get(&terms.mint)
+            .expect("BUG: an accepted SPL withdrawal has a registered mint");
+        build_spl_withdrawal_message(
+            minter_address,
+            nonce_account,
+            nonce_value,
+            &SplWithdrawalTransfer {
+                token,
+                destination: &terms.address,
+                amount: spl_withdrawal_token_cost(terms),
+            },
+        )
     }
 
     fn process_transaction_created(
@@ -1271,6 +1490,9 @@ impl State {
             MinterTransaction::Withdrawal { nonce_account, .. } => {
                 self.nonce_pool.free(&nonce_account)
             }
+            MinterTransaction::SplWithdrawal { .. } => {
+                panic!("BUG: SPL withdrawal transaction {signature} is settled by its own events")
+            }
         }
         assert!(
             self.succeeded_transactions.insert(*signature),
@@ -1300,6 +1522,9 @@ impl State {
             MinterTransaction::SweepSplDeposit { .. } => self.spl_deposits.fail_swept(signature),
             MinterTransaction::Withdrawal { nonce_account, .. } => {
                 self.nonce_pool.free(nonce_account)
+            }
+            MinterTransaction::SplWithdrawal { .. } => {
+                panic!("BUG: SPL withdrawal transaction {signature} is settled by its own events")
             }
         }
         assert_eq!(
@@ -1426,7 +1651,11 @@ impl TryFrom<InitArgs> for State {
             spl_deposits: SplDeposits::default(),
             spl_deposit_consolidation_fee: crate::constants::DEFAULT_SPL_DEPOSIT_CONSOLIDATION_FEE,
             spl_withdrawal_fee: crate::constants::DEFAULT_SPL_WITHDRAWAL_FEE,
+            spl_treasury_balances: BTreeMap::new(),
             pending_spl_withdrawal_requests: BTreeMap::new(),
+            created_spl_withdrawal_requests: BTreeMap::new(),
+            created_spl_withdrawal_txs: BTreeMap::new(),
+            sent_spl_withdrawal_requests: BTreeMap::new(),
             spl_withdrawal_token_burns: BTreeSet::new(),
             failed_spl_withdrawal_requests: BTreeSet::new(),
             pending_spl_cksol_refunds: BTreeMap::new(),
@@ -1453,6 +1682,37 @@ pub struct PendingSplWithdrawalRequest {
     pub created_at: u64,
 }
 
+/// The binding of a durable nonce account and its nonce value to one SPL withdrawal
+/// request, as [`CreatedWithdrawalTransaction`] is for SOL withdrawals.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CreatedSplWithdrawalTransaction {
+    pub nonce_value: Hash,
+    pub cksol_burn_block_index: LedgerBurnIndex,
+}
+
+/// An SPL withdrawal request that has been submitted in a Solana transaction.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SentSplWithdrawalRequest {
+    pub request: SplWithdrawalRequest,
+    pub signature: Signature,
+    pub created_at: u64,
+}
+
+/// The SOL that the transaction of an SPL withdrawal can spend: its fee and the rent of
+/// the destination token account.
+fn spl_withdrawal_sol_cost(terms: &SplWithdrawalRequestTerms) -> Lamport {
+    BATCH_WITHDRAWAL_TX_FEE
+        .checked_add(terms.rent_reserve)
+        .expect("BUG: SPL withdrawal SOL cost overflows")
+}
+
+/// The tokens that the transaction of an SPL withdrawal takes from the treasury.
+fn spl_withdrawal_token_cost(terms: &SplWithdrawalRequestTerms) -> u64 {
+    terms
+        .amount_to_transfer()
+        .expect("BUG: an accepted SPL withdrawal transfers a positive amount")
+}
+
 /// A ckSOL refund of an SPL withdrawal that waits for its mint.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PendingSplCkSolRefund {
@@ -1470,35 +1730,71 @@ pub struct CompletedSplCkSolRefund {
     pub reimbursed_at: u64,
 }
 
-/// A withdrawal transaction to create. SOL requests are batched; other payout kinds
-/// can be added as separate variants.
+/// A withdrawal transaction to create. SOL requests are batched; an SPL request has a
+/// transaction of its own.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum WithdrawalPlan {
     Sol(Vec<WithdrawalRequest>),
+    Spl(SplWithdrawalRequest),
 }
 
-/// Groups pending withdrawal requests, oldest first, into batches that the
-/// minter balance can pay for, including one transaction fee per batch and
-/// holding back the rent exemption threshold so a withdrawal transaction can
-/// never leave the main address below it.
+/// Groups pending withdrawal requests, oldest ckSOL burn index first, into transactions
+/// that the minter can pay for: SOL requests in batches with one transaction fee per
+/// batch, and each SPL request alone with its fee, its rent and its treasury tokens.
+/// The rent exemption threshold is held back, so a withdrawal transaction can never
+/// leave the main address below it.
 ///
-/// Iteration stops at the first request the remaining balance cannot cover,
-/// so requests are never reordered or skipped.
+/// SOL requests are never reordered or skipped: the first one that the remaining
+/// balance cannot cover stops the SOL requests. An SPL request that the funds cannot
+/// cover is skipped, so it blocks neither later SPL requests nor SOL requests.
 pub struct WithdrawalPlans<'a> {
     pending_requests: Peekable<btree_map::Values<'a, LedgerBurnIndex, PendingWithdrawalRequest>>,
+    pending_spl_requests:
+        Peekable<btree_map::Values<'a, LedgerBurnIndex, PendingSplWithdrawalRequest>>,
     available_balance: Lamport,
+    available_tokens: BTreeMap<Address, u64>,
+    sol_blocked: bool,
 }
 
 impl Iterator for WithdrawalPlans<'_> {
     type Item = WithdrawalPlan;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.next_sol_batch()
+        loop {
+            let next_sol = self.next_burn_index_of_sol();
+            let next_spl = self.next_burn_index_of_spl();
+            let plan = match (next_sol, next_spl) {
+                (None, None) => return None,
+                (Some(sol), Some(spl)) if spl < sol => self.next_spl_request(),
+                (Some(_), _) => self.next_sol_batch(next_spl),
+                (None, Some(_)) => self.next_spl_request(),
+            };
+            if plan.is_some() {
+                return plan;
+            }
+        }
     }
 }
 
 impl WithdrawalPlans<'_> {
-    fn next_sol_batch(&mut self) -> Option<WithdrawalPlan> {
+    fn next_burn_index_of_sol(&mut self) -> Option<LedgerBurnIndex> {
+        if self.sol_blocked {
+            return None;
+        }
+        self.pending_requests
+            .peek()
+            .map(|pending| pending.request.burn_block_index)
+    }
+
+    fn next_burn_index_of_spl(&mut self) -> Option<LedgerBurnIndex> {
+        self.pending_spl_requests
+            .peek()
+            .map(|pending| pending.request.cksol_burn_block_index)
+    }
+
+    /// Batches SOL requests up to the next SPL request, so a batch never serves a
+    /// request newer than an SPL request still waiting.
+    fn next_sol_batch(&mut self, next_spl: Option<LedgerBurnIndex>) -> Option<WithdrawalPlan> {
         let mut batch = Vec::new();
         while batch.len() < MAX_WITHDRAWALS_PER_NONCE_TX {
             let reserved_fee = if batch.is_empty() {
@@ -1509,6 +1805,9 @@ impl WithdrawalPlans<'_> {
             let Some(pending) = self.pending_requests.peek() else {
                 break;
             };
+            if next_spl.is_some_and(|spl| spl < pending.request.burn_block_index) {
+                break;
+            }
             let Some(remaining_balance) = pending
                 .request
                 .amount_to_transfer
@@ -1522,10 +1821,26 @@ impl WithdrawalPlans<'_> {
             self.pending_requests.next();
         }
         if batch.is_empty() {
+            self.sol_blocked = true;
             None
         } else {
             Some(WithdrawalPlan::Sol(batch))
         }
+    }
+
+    /// Takes the next SPL request and reserves its funds, or skips it if they do not
+    /// cover it.
+    fn next_spl_request(&mut self) -> Option<WithdrawalPlan> {
+        let request = &self.pending_spl_requests.next()?.request;
+        let terms = &request.terms;
+        let remaining_balance = self
+            .available_balance
+            .checked_sub(spl_withdrawal_sol_cost(terms))?;
+        let tokens = self.available_tokens.get(&terms.mint).copied().unwrap_or(0);
+        let remaining_tokens = tokens.checked_sub(spl_withdrawal_token_cost(terms))?;
+        self.available_balance = remaining_balance;
+        self.available_tokens.insert(terms.mint, remaining_tokens);
+        Some(WithdrawalPlan::Spl(request.clone()))
     }
 }
 
@@ -1580,6 +1895,17 @@ pub enum MinterTransaction {
     /// A durable-nonce withdrawal transaction, which never expires: it stays
     /// in flight until it is finalized.
     Withdrawal {
+        message: VersionedMessage,
+        /// The durable nonce account whose nonce value the transaction uses.
+        nonce_account: Address,
+        /// The durable nonce value the transaction uses instead of a recent blockhash.
+        nonce_value: Hash,
+        /// The time, in nanoseconds since the epoch, at which the transaction was recorded as submitted.
+        submitted_at: u64,
+    },
+    /// A durable-nonce transaction of one SPL withdrawal. Like [`Self::Withdrawal`], it
+    /// never expires. Its outcome is settled by its own events.
+    SplWithdrawal {
         message: VersionedMessage,
         /// The durable nonce account whose nonce value the transaction uses.
         nonce_account: Address,

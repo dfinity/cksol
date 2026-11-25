@@ -363,6 +363,21 @@ pub enum EventType {
         #[n(2)]
         reimbursed_amount: Lamport,
     },
+    /// A durable nonce account and its nonce value were bound to one SPL withdrawal
+    /// request, before the transaction is signed. The binding determines the message, as
+    /// for [`EventType::CreatedWithdrawalTransaction`].
+    #[n(27)]
+    CreatedSplWithdrawalTransaction {
+        /// The ckSOL fee burn index of the withdrawal request served by this transaction.
+        #[cbor(n(0), with = "cbor::id")]
+        cksol_burn_block_index: LedgerBurnIndex,
+        /// The durable nonce account bound to this transaction.
+        #[cbor(n(1), with = "cbor::address")]
+        nonce_account: Address,
+        /// The nonce value the transaction carries in place of a recent blockhash.
+        #[cbor(n(2), with = "cbor::hash")]
+        nonce_value: Hash,
+    },
     /// A ckSOL refund of an SPL withdrawal is owed. It is recorded before the ledger call,
     /// in the same message as the outcome that causes it.
     #[n(30)]
@@ -589,6 +604,13 @@ pub enum TransactionPurpose {
         deposit_id: DepositSplId,
         #[n(1)]
         block_height: BlockHeight,
+    },
+    /// Withdraw SPL tokens for one request, with the durable nonce bound to it.
+    #[n(6)]
+    SplWithdrawal {
+        /// The ckSOL fee burn index of the withdrawal request served by this transaction.
+        #[cbor(n(0), with = "cbor::id")]
+        cksol_burn_block_index: LedgerBurnIndex,
     },
 }
 

@@ -205,10 +205,10 @@ struct ReservedPlan {
 }
 
 /// A created transaction, rebuilt from state for signing.
-struct BoundWithdrawal {
-    nonce_account: Address,
-    purpose: TransactionPurpose,
-    message: Message,
+pub(super) struct BoundWithdrawal {
+    pub(super) nonce_account: Address,
+    pub(super) purpose: TransactionPurpose,
+    pub(super) message: Message,
 }
 
 async fn create_transactions_batch<R: CanisterRuntime>(
@@ -216,8 +216,9 @@ async fn create_transactions_batch<R: CanisterRuntime>(
     minter_address: Address,
 ) -> usize {
     let reserved_plans: Vec<ReservedPlan> = read_state(|state| {
-        let max_plans = MAX_CONCURRENT_RPC_CALLS
-            .min(MAX_CONCURRENT_SIGNATURES.saturating_sub(state.created_withdrawal_txs().len()));
+        let max_plans = MAX_CONCURRENT_RPC_CALLS.min(MAX_CONCURRENT_SIGNATURES.saturating_sub(
+            state.created_withdrawal_txs().len() + state.created_spl_withdrawal_txs().len(),
+        ));
         state
             .nonce_pool()
             .free_accounts()
@@ -259,6 +260,10 @@ async fn create_transaction<R: CanisterRuntime>(
                 .map(|request| request.burn_block_index)
                 .collect::<Vec<_>>()
         ),
+        WithdrawalPlan::Spl(request) => format!(
+            "SPL withdrawal for burn index {}",
+            request.cksol_burn_block_index
+        ),
     };
     let nonce_value = match read_verified_nonce(runtime, nonce_account, minter_address).await {
         Ok(nonce_value) => nonce_value,
@@ -284,6 +289,13 @@ async fn create_transaction<R: CanisterRuntime>(
             nonce_account,
             nonce_value,
             requests,
+        ),
+        WithdrawalPlan::Spl(request) => spl::create_spl_transaction(
+            runtime,
+            &minter_address,
+            nonce_account,
+            nonce_value,
+            &request,
         ),
     }
 }
@@ -348,15 +360,35 @@ async fn sign_transactions_batch<R: CanisterRuntime>(
     .collect()
 }
 
-/// The created transactions, oldest ckSOL burn index first.
+/// The created transactions of both kinds, oldest ckSOL burn index first.
 fn bound_withdrawals(state: &State, minter_address: &Address) -> Vec<BoundWithdrawal> {
-    let mut created_withdrawal_txs: Vec<_> = state.created_withdrawal_txs().iter().collect();
-    created_withdrawal_txs.sort_by_key(|(_, created)| created.burn_indices.iter().min().copied());
-    created_withdrawal_txs
+    let sol = state
+        .created_withdrawal_txs()
+        .iter()
+        .map(|(nonce_account, created)| {
+            (
+                created.burn_indices.iter().min().copied(),
+                nonce_account,
+                bound_withdrawal(state, minter_address, nonce_account, created),
+            )
+        });
+    let spl = state
+        .created_spl_withdrawal_txs()
+        .iter()
+        .map(|(nonce_account, created)| {
+            (
+                Some(created.cksol_burn_block_index),
+                nonce_account,
+                spl::bound_withdrawal(state, nonce_account, created),
+            )
+        });
+    let mut bound: Vec<_> = sol.chain(spl).collect();
+    bound.sort_by_key(|(oldest_burn_index, _, _)| *oldest_burn_index);
+    bound
         .into_iter()
         .take(MAX_CONCURRENT_SIGNATURES)
-        .filter_map(|(nonce_account, created)| {
-            bound_withdrawal(state, minter_address, nonce_account, created)
+        .filter_map(|(_, nonce_account, bound)| {
+            bound
                 .inspect_err(|e| {
                     log!(
                         Priority::Error,
