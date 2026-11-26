@@ -45,6 +45,7 @@ pub fn sign_for(account: &Account) -> SignerExpectation {
         derivation_path: derivation_path(account),
         message: None,
         answers: Answers::Derived(1),
+        before_reply: None,
     }
 }
 
@@ -55,6 +56,7 @@ pub fn sign_as_minter() -> SignerExpectation {
         derivation_path: MINTER_DERIVATION_PATH,
         message: None,
         answers: Answers::Derived(1),
+        before_reply: None,
     }
 }
 
@@ -64,9 +66,16 @@ pub struct SignerExpectation {
     derivation_path: DerivationPath,
     message: Option<Vec<u8>>,
     answers: Answers,
+    before_reply: Option<fn()>,
 }
 
 impl SignerExpectation {
+    /// Runs another message's state change before this signing call returns.
+    pub fn before_reply(mut self, hook: fn()) -> Self {
+        self.before_reply = Some(hook);
+        self
+    }
+
     /// Expects `count` signing requests, each answered with the account's next derived
     /// signature, so no two of them are alike.
     pub fn times(mut self, count: usize) -> Self {
@@ -182,6 +191,7 @@ impl MockSchnorrSigner {
                 *occurrence += signatures.len();
 
                 for signature in signatures {
+                    let before_reply = expectation.before_reply;
                     let expected_path = expectation.derivation_path.clone();
                     let expected_message = expectation.message.clone();
                     mock.expect_sign()
@@ -193,6 +203,9 @@ impl MockSchnorrSigner {
                         })
                         .times(1)
                         .return_once(move |_message, _path| {
+                            if let Some(hook) = before_reply {
+                                hook();
+                            }
                             signature.map(|signature| signature.as_ref().to_vec())
                         });
                 }

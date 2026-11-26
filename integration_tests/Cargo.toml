@@ -32,6 +32,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 sol_rpc_client = { workspace = true }
 sol_rpc_types = { workspace = true }
+solana-account-decoder-client-types = { workspace = true }
 solana-address = { workspace = true }
 solana-client = { workspace = true }
 solana-hash = { workspace = true }
@@ -39,10 +40,13 @@ solana-keypair = { workspace = true }
 solana-message = { workspace = true }
 solana-native-token = { workspace = true }
 solana-nonce = { workspace = true }
+solana-program-pack = { workspace = true }
 solana-signature = { workspace = true }
 solana-system-interface = { workspace = true, features = ["bincode"] }
 solana-system-transaction = { workspace = true }
 solana-transaction = { workspace = true, features = ["bincode"] }
+spl-associated-token-account-interface = { workspace = true }
+spl-token-interface = { workspace = true }
 tar = { workspace = true }
 tempfile = { workspace = true }
 tokio = { workspace = true }

@@ -26,6 +26,8 @@ use std::{
     time::Duration,
 };
 
+mod spl;
+
 /// Solana base fee per signature included in a transaction.
 pub const FEE_PER_SIGNATURE: Lamport = 5_000;
 

@@ -54,6 +54,7 @@ pub enum EventType {
         signature: Signature,
     },
     /// A previously submitted Solana transaction has failed.
+    /// An SPL sweep stays reserved until `FailedSplSweep` records its actual cost.
     FailedTransaction {
         /// The signature of the failed Solana transaction.
         signature: Signature,
@@ -151,6 +152,72 @@ pub enum EventType {
         /// Every registration, live or expired but not yet evicted.
         entries: Vec<WatchedDepositAddress>,
     },
+    /// A refill intent recorded before the ckSOL burn. Its source is always the
+    /// minter's 0xbeef subaccount; its memo is OperatingRefill { refill_id }.
+    RequestedOperatingRefill {
+        refill_id: u64,
+        amount: u64,
+        created_at_time: u64,
+    },
+    /// The ledger accepted or deduplicated the recorded burn.
+    CompletedOperatingRefill {
+        refill_id: u64,
+        burn_block_index: u64,
+    },
+    /// The first burn attempt was definitively rejected; no operating SOL is credited.
+    FailedOperatingRefill { refill_id: u64, reason: String },
+    /// The unresolved intent remains reserved for manual ledger reconciliation.
+    QuarantinedOperatingRefill { refill_id: u64 },
+    /// Captured terms of one manually queued SPL deposit.
+    QueuedSplDeposit {
+        /// Sequence number independent of SOL deposit IDs.
+        deposit_id: u64,
+        /// The ledger account to receive the eventual net mint.
+        account: Account,
+        /// Classic SPL mint address.
+        mint: Address,
+        /// Source associated token account.
+        address: Address,
+        /// Gross source balance in token units.
+        balance: u64,
+        /// Captured fee in token units.
+        fee: u64,
+    },
+    /// A validated successful SPL sweep and its net token obligation.
+    CreditedSplSweep {
+        /// Sweep transaction signature.
+        signature: Signature,
+        /// Actual network cost in lamports.
+        lamports_spent: u64,
+        /// The accepted deposit.
+        deposit_id: u64,
+        /// Captured net token amount to mint.
+        amount_to_mint: u64,
+    },
+    /// A contradictory outcome retains the sweep's pair and SOL reservation.
+    QuarantinedSplSweep {
+        /// Sweep transaction signature.
+        signature: Signature,
+    },
+    /// The net amount of a credited SPL deposit was minted on the ledger of its token.
+    MintedSweptSplDeposit {
+        /// The identifier of the minted SPL deposit.
+        deposit_id: u64,
+        /// The mint transaction index on the ledger of the token.
+        mint_block_index: u64,
+    },
+    /// The pending mint of an SPL deposit cannot be retried safely. The pair stays locked.
+    QuarantinedPendingSplMint {
+        /// The identifier of the SPL deposit whose pending mint was quarantined.
+        deposit_id: u64,
+    },
+    /// The validated actual network cost of an SPL sweep recorded as failed by `FailedTransaction`.
+    FailedSplSweep {
+        /// Sweep transaction signature.
+        signature: Signature,
+        /// Actual network cost in lamports.
+        lamports_spent: u64,
+    },
 }
 
 /// One registration of a `WatchedDepositAddresses` event with its scan progress.
@@ -219,6 +286,13 @@ pub enum TransactionPurpose {
     Withdrawal {
         /// The burn transaction indices on the ckSOL ledger.
         burn_indices: Vec<u64>,
+    },
+    /// Sweep one classic SPL deposit into its pre-created treasury ATA.
+    SweepSplDeposit {
+        /// The one queued SPL deposit served by the transaction.
+        deposit_id: u64,
+        /// Height of the block supplying the recent blockhash.
+        block_height: u64,
     },
 }
 
