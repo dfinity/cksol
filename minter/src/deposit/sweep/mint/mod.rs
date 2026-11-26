@@ -3,6 +3,7 @@ use crate::{
     guard::TimerGuard,
     ledger::client::to_ledger_mint_index,
     numeric::LedgerMintIndex,
+    queue_cursor::QueueCursor,
     runtime::CanisterRuntime,
     state::{
         PendingMint, State, TaskType, audit::process_event, event::EventType, mutate_state,
@@ -15,7 +16,16 @@ use cksol_types::{DepositSolId, Memo, MintMemo};
 use cksol_types_internal::log::Priority;
 use icrc_ledger_types::icrc1::transfer::{NumTokens, TransferArg, TransferError};
 use scopeguard::ScopeGuard;
-use std::time::Duration;
+use std::{cell::RefCell, time::Duration};
+
+thread_local! {
+    static CURSOR: RefCell<QueueCursor<DepositSolId>> = const { RefCell::new(QueueCursor::new()) };
+}
+
+#[cfg(any(test, feature = "canbench-rs"))]
+pub(super) fn reset_cursor() {
+    CURSOR.with(|cursor| cursor.borrow_mut().clear());
+}
 
 #[cfg(test)]
 mod tests;
@@ -41,6 +51,8 @@ pub async fn process_pending_mints<R: CanisterRuntime>(runtime: R) {
         .collect();
 
     for (deposit_id, pending) in pending_mints {
+        // Advance before the ledger call, including when its outcome remains retryable.
+        CURSOR.with(|cursor| cursor.borrow_mut().advance(deposit_id));
         process_pending_mint(&runtime, deposit_id, pending).await;
     }
 
@@ -49,6 +61,11 @@ pub async fn process_pending_mints<R: CanisterRuntime>(runtime: R) {
             .iter()
             .any(|deposit_id| !state.deposits().pending_mints().contains_key(deposit_id))
     });
+
+    if read_state(|state| state.deposits().pending_mints().is_empty()) {
+        CURSOR.with(|cursor| cursor.borrow_mut().clear());
+    }
+
     if round_made_progress && more_pending_mints_than_one_round {
         runtime.set_timer(Duration::ZERO, process_pending_mints);
     }
@@ -62,12 +79,15 @@ struct MintRound {
 impl MintRound {
     fn next(state: &State) -> Self {
         Self {
-            pending_mints: state
-                .deposits()
-                .pending_mints()
-                .iter()
+            pending_mints: CURSOR
+                .with(|cursor| {
+                    cursor.borrow().round(
+                        state.deposits().pending_mints(),
+                        MAX_PENDING_MINTS_PER_ROUND,
+                    )
+                })
+                .into_iter()
                 .map(|(deposit_id, pending)| (*deposit_id, *pending))
-                .take(MAX_PENDING_MINTS_PER_ROUND)
                 .collect(),
             more_pending_mints_than_one_round: state.deposits().pending_mints().len()
                 > MAX_PENDING_MINTS_PER_ROUND,

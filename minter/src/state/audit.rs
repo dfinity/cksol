@@ -155,6 +155,30 @@ fn apply_state_transition(state: &mut State, payload: &EventType, timestamp: u64
         } => {
             state.process_transaction_created(burn_indices, nonce_account, *nonce_value);
         }
+        EventType::RequestedOperatingRefill {
+            refill_id,
+            amount,
+            created_at_time,
+        } => {
+            state
+                .operating_balance
+                .request_refill(*refill_id, *amount, *created_at_time);
+        }
+        EventType::CompletedOperatingRefill {
+            refill_id,
+            burn_block_index: _,
+        } => {
+            state.operating_balance.complete_refill(*refill_id);
+        }
+        EventType::FailedOperatingRefill {
+            refill_id,
+            reason: _,
+        } => {
+            state.operating_balance.fail_refill(*refill_id);
+        }
+        EventType::QuarantinedOperatingRefill { refill_id } => {
+            state.operating_balance.quarantine_refill(*refill_id);
+        }
         EventType::WatchedDepositAddresses(snapshot) => {
             state.restore_watchlist(snapshot);
         }
