@@ -151,6 +151,22 @@ pub enum EventType {
         /// Every registration, live or expired but not yet evicted.
         entries: Vec<WatchedDepositAddress>,
     },
+    /// A refill intent recorded before the ckSOL burn. Its source is always the
+    /// minter's 0xbeef subaccount; its memo is OperatingRefill { refill_id }.
+    RequestedOperatingRefill {
+        refill_id: u64,
+        amount: u64,
+        created_at_time: u64,
+    },
+    /// The ledger accepted or deduplicated the recorded burn.
+    CompletedOperatingRefill {
+        refill_id: u64,
+        burn_block_index: u64,
+    },
+    /// The first burn attempt was definitively rejected; no operating SOL is credited.
+    FailedOperatingRefill { refill_id: u64, reason: String },
+    /// The unresolved intent remains reserved for manual ledger reconciliation.
+    QuarantinedOperatingRefill { refill_id: u64 },
 }
 
 /// One registration of a `WatchedDepositAddresses` event with its scan progress.

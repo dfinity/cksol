@@ -1,7 +1,7 @@
 use crate::state::{DepositOrigin, QuarantineCause, State};
 use crate::storage::{
-    self, FailedCreditReason, FailedMintReason, RearmOutcome, ScanOutcome,
-    UndecidedWithdrawalReason,
+    self, FailedCreditReason, FailedMintReason, OperatingRefillErrorReason, RearmOutcome,
+    ScanOutcome, TopUpBalanceRead, UndecidedWithdrawalReason,
 };
 use crate::utils::timed_sized_map::Timestamp;
 use ic_metrics_encoder::MetricsEncoder;
@@ -214,6 +214,104 @@ pub fn encode_metrics(w: &mut MetricsEncoder<Vec<u8>>, s: &State) -> std::io::Re
         undecided_withdrawal_transactions = undecided_withdrawal_transactions.value(
             &[("reason", reason.label())],
             storage::undecided_withdrawal_transaction_count(reason).metric_value(),
+        )?;
+    }
+    encode_operating_balance_metrics(w, s)?;
+    Ok(())
+}
+
+pub(crate) fn encode_operating_balance_metrics(
+    w: &mut MetricsEncoder<Vec<u8>>,
+    s: &State,
+) -> std::io::Result<()> {
+    let operating = s.operating_balance();
+    let config = operating.config();
+    for (name, value, help) in [
+        (
+            "operating_balance",
+            operating.balance(),
+            "Unbacked SOL credited by completed refill burns, in lamports.",
+        ),
+        (
+            "operating_refill_enabled",
+            u64::from(config.enabled),
+            "Whether new automatic operating refills are enabled.",
+        ),
+        (
+            "operating_refill_low_water_mark",
+            config.low_water_mark,
+            "Operating SOL refill threshold in lamports.",
+        ),
+        (
+            "operating_refill_target",
+            config.target,
+            "Operating SOL refill target in lamports.",
+        ),
+        (
+            "operating_refill_pending",
+            u64::from(operating.pending().is_some()),
+            "Whether an operating refill is unresolved.",
+        ),
+        (
+            "operating_refill_quarantined",
+            u64::from(operating.pending().is_some_and(|p| p.quarantined)),
+            "Whether the unresolved refill needs manual reconciliation.",
+        ),
+        (
+            "operating_balance_low",
+            u64::from(config.enabled && operating.balance() < config.low_water_mark),
+            "Whether enabled operating funding is below its low-water mark.",
+        ),
+    ] {
+        w.encode_gauge(name, value.metric_value(), help)?;
+    }
+    w.encode_counter(
+        "operating_refills_completed",
+        operating.completed_refills().metric_value(),
+        "Completed refill burns, including deduplicated burns.",
+    )?;
+    w.encode_counter(
+        "operating_refills_failed",
+        operating.failed_refills().metric_value(),
+        "Definitively rejected first refill attempts.",
+    )?;
+    storage::with_unstable_metrics(|m| -> std::io::Result<()> {
+        // Absence after upgrade means no fresh read, not an empty top-up account.
+        w.encode_gauge(
+            "operating_top_up_balance_known",
+            u64::from(m.operating_top_up_balance.is_some()).metric_value(),
+            "Whether the top-up balance has been read since upgrade.",
+        )?;
+        if let Some(TopUpBalanceRead { balance, read_at }) = m.operating_top_up_balance {
+            w.encode_gauge(
+                "operating_top_up_balance",
+                balance.metric_value(),
+                "Last-read ckSOL top-up balance in lamports.",
+            )?;
+            w.encode_gauge(
+                "operating_top_up_underfunded",
+                u64::from(
+                    config.enabled && balance < config.target,
+                )
+                .metric_value(),
+                "Whether the last-read top-up account cannot fund a full refill from zero to target.",
+            )?;
+            w.encode_gauge(
+                "operating_top_up_balance_read_timestamp_seconds",
+                (read_at / NANOS_PER_SECOND).metric_value(),
+                "Time of the last successful top-up balance read, in Unix seconds.",
+            )?;
+        }
+        Ok(())
+    })?;
+    let mut errors = w.counter_vec(
+        "operating_refill_errors",
+        "Refill errors since upgrade, by reason.",
+    )?;
+    for reason in OperatingRefillErrorReason::ALL {
+        errors = errors.value(
+            &[("reason", reason.label())],
+            storage::operating_refill_error_count(reason).metric_value(),
         )?;
     }
     Ok(())
