@@ -1,14 +1,18 @@
 use crate::{
     constants::MAX_CONCURRENT_RPC_CALLS,
-    deposit::sweep::credit_finalized_sweeps,
+    deposit::{
+        spl::{credit_finalized_spl_sweeps, settle_failed_spl_sweeps},
+        sweep::credit_finalized_sweeps,
+    },
     guard::TimerGuard,
     monitor::withdrawals::{
         finalize_transactions_batch, read_in_flight_nonces, resubmit_transactions_batch,
     },
+    queue_cursor::QueueCursor,
     rpc::{BlockHeight, get_recent_block, get_signature_statuses},
     runtime::CanisterRuntime,
     state::{
-        MinterTransaction, TaskType,
+        MinterTransaction, State, TaskType,
         audit::{process_dropped_sweep, process_event},
         event::EventType,
         mutate_state, read_state,
@@ -20,6 +24,7 @@ use itertools::Itertools;
 use sol_rpc_types::CommitmentLevel;
 use solana_signature::Signature;
 use solana_transaction_status_client_types::TransactionConfirmationStatus;
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
@@ -49,10 +54,22 @@ const MAX_BLOCKHASH_AGE_IN_BLOCKS: BlockHeight = BlockHeight::new(150);
 /// Maximum number of signatures per `getSignatureStatuses` RPC call.
 /// See https://solana.com/docs/rpc/http/getsignaturestatuses
 const MAX_SIGNATURES_PER_STATUS_CHECK: usize = 256;
+/// Maximum number of sweep signatures whose status one round checks.
+const MAX_SIGNATURES_PER_ROUND: usize = MAX_CONCURRENT_RPC_CALLS * MAX_SIGNATURES_PER_STATUS_CHECK;
 
-/// Check the status of all submitted sweeps, finalize succeeded/failed ones and drop
-/// expired ones, then finalize the withdrawals whose nonce advanced and re-broadcast
-/// the withdrawals whose nonce did not.
+thread_local! {
+    // Rotates the status checks only when the in-flight sweeps exceed one round.
+    static STATUS_CURSOR: RefCell<QueueCursor<Signature>> = const { RefCell::new(QueueCursor::new()) };
+}
+
+#[cfg(any(test, feature = "canbench-rs"))]
+pub(crate) fn reset_cursor() {
+    STATUS_CURSOR.with(|cursor| cursor.borrow_mut().clear());
+}
+
+/// Check the status of all submitted SOL and SPL sweeps, finalize succeeded/failed ones and
+/// drop expired ones, then finalize the withdrawals whose nonce advanced and re-broadcast
+/// the withdrawals whose nonce did not. Finalized sweeps settle in separate steps.
 pub async fn finalize_transactions<R: CanisterRuntime>(runtime: R) {
     let _guard = match TimerGuard::new(TaskType::FinalizeTransactions) {
         Ok(guard) => guard,
@@ -68,8 +85,14 @@ pub async fn finalize_transactions<R: CanisterRuntime>(runtime: R) {
     resubmit_transactions_batch(&runtime, &nonces).await;
     finalize_transactions_batch(&runtime, &nonces).await;
     let more_sweeps_to_credit = credit_finalized_sweeps(&runtime).await;
+    let more_spl_sweeps_to_settle = settle_failed_spl_sweeps(&runtime).await;
+    let more_spl_sweeps_to_credit = credit_finalized_spl_sweeps(&runtime).await;
 
-    if !more_transactions_to_check && !more_sweeps_to_credit {
+    if !more_transactions_to_check
+        && !more_sweeps_to_credit
+        && !more_spl_sweeps_to_settle
+        && !more_spl_sweeps_to_credit
+    {
         scopeguard::ScopeGuard::into_inner(reschedule);
     }
 }
@@ -81,10 +104,13 @@ async fn check_sweep_transactions<R: CanisterRuntime>(runtime: &R) -> bool {
             .submitted_transactions()
             .iter()
             .filter_map(|(signature, transaction)| match transaction {
-                MinterTransaction::SweepDeposit { block_height } => {
+                MinterTransaction::SweepDeposit { block_height }
+                | MinterTransaction::SweepSplDeposit { block_height } => {
                     Some((*signature, *block_height))
                 }
-                MinterTransaction::Withdrawal { .. } => None,
+                MinterTransaction::Withdrawal { .. } | MinterTransaction::SplWithdrawal { .. } => {
+                    None
+                }
             })
             .collect()
     });
@@ -98,23 +124,17 @@ async fn check_sweep_transactions<R: CanisterRuntime>(runtime: &R) -> bool {
     let current_block_height = fetch_current_block_height(runtime).await;
 
     let num_transactions = blockhash_transactions.len();
-    let statuses =
-        check_transaction_statuses(runtime, blockhash_transactions.keys().copied().collect()).await;
+    let statuses = check_transaction_statuses(runtime, status_round(&blockhash_transactions)).await;
 
     for (signature, error) in &statuses.errored {
         log!(
             Priority::Error,
             "Transaction {signature} finalized with on-chain error: {error}"
         );
-        mutate_state(|state| {
-            process_dropped_sweep(
-                state,
-                EventType::FailedTransaction {
-                    signature: *signature,
-                },
-                runtime,
-            )
-        });
+        let event = EventType::FailedTransaction {
+            signature: *signature,
+        };
+        mutate_state(|state| record_unsuccessful_sweep(state, signature, event, runtime));
     }
 
     for signature in &statuses.succeeded {
@@ -139,7 +159,7 @@ async fn check_sweep_transactions<R: CanisterRuntime>(runtime: &R) -> bool {
         );
     }
 
-    num_transactions > MAX_CONCURRENT_RPC_CALLS * MAX_SIGNATURES_PER_STATUS_CHECK
+    num_transactions > MAX_SIGNATURES_PER_ROUND
 }
 
 async fn fetch_current_block_height<R: CanisterRuntime>(runtime: &R) -> Option<BlockHeight> {
@@ -169,16 +189,45 @@ fn expire_transactions<R: CanisterRuntime>(
             continue;
         }
         log!(Priority::Info, "Transaction {signature} expired");
-        mutate_state(|state| {
-            process_dropped_sweep(
-                state,
-                EventType::ExpiredTransaction {
-                    signature: *signature,
-                },
-                runtime,
-            )
-        });
+        let event = EventType::ExpiredTransaction {
+            signature: *signature,
+        };
+        mutate_state(|state| record_unsuccessful_sweep(state, signature, event, runtime));
     }
+}
+
+/// Records a failed or expired sweep. Only a SOL sweep re-arms its automatic deposits.
+fn record_unsuccessful_sweep<R: CanisterRuntime>(
+    state: &mut State,
+    signature: &Signature,
+    event: EventType,
+    runtime: &R,
+) {
+    if state.deposits().swept().get(signature).is_some() {
+        process_dropped_sweep(state, event, runtime);
+    } else {
+        process_event(state, event, runtime);
+    }
+}
+
+/// The signatures to check this round. All of them, in order, when one round covers them.
+fn status_round(transactions: &BTreeMap<Signature, BlockHeight>) -> Vec<Signature> {
+    STATUS_CURSOR.with(|cursor| {
+        let mut cursor = cursor.borrow_mut();
+        if transactions.len() <= MAX_SIGNATURES_PER_ROUND {
+            cursor.clear();
+            return transactions.keys().copied().collect();
+        }
+        let round: Vec<Signature> = cursor
+            .round(transactions, MAX_SIGNATURES_PER_ROUND)
+            .into_iter()
+            .map(|(signature, _)| *signature)
+            .collect();
+        if let Some(last) = round.last() {
+            cursor.advance(*last);
+        }
+        round
+    })
 }
 
 fn is_blockhash_expired(
@@ -220,7 +269,17 @@ async fn check_transaction_statuses<R: CanisterRuntime>(
 
     let batch_results: Vec<_> = futures::future::join_all(batches.into_iter().map(async |batch| {
         match get_signature_statuses(runtime, &batch).await {
-            Ok(statuses) => Some((batch, statuses)),
+            Ok(statuses) if statuses.len() == batch.len() => Some((batch, statuses)),
+            Ok(statuses) => {
+                // A malformed reply gives no status and no proof of expiry.
+                log!(
+                    Priority::Error,
+                    "Ignoring {} statuses returned for {} signatures",
+                    statuses.len(),
+                    batch.len()
+                );
+                None
+            }
             Err(e) => {
                 log!(Priority::Info, "Failed to check transaction statuses: {e}");
                 None

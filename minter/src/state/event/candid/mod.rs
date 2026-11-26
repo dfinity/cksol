@@ -7,14 +7,18 @@ use crate::{
     state::{
         DepositBalance, DepositOrigin,
         event::{
-            CreditedDeposit, Event, EventType, Signer, TransactionPurpose, VersionedMessage,
-            WatchedDepositAddress, WatchlistSnapshot, WithdrawalRequest,
+            CreditedDeposit, Event, EventType, Signer, SplWithdrawalRequest,
+            SplWithdrawalRequestTerms, TransactionPurpose, VersionedMessage, WatchedDepositAddress,
+            WatchlistSnapshot, WithdrawalRequest,
         },
     },
 };
+use cksol_types::SplRefundKind;
 use cksol_types_internal::event::{
     CreditedDeposit as CandidCreditedDeposit, DepositOrigin as CandidDepositOrigin,
     Event as CandidEvent, EventType as CandidEventType, Signer as CandidSigner,
+    SplRefundKind as CandidSplRefundKind,
+    SplWithdrawalRequestTerms as CandidSplWithdrawalRequestTerms,
     TransactionPurpose as CandidTransactionPurpose, VersionedTransactionMessage,
     WatchedDepositAddress as CandidWatchedDepositAddress,
 };
@@ -39,6 +43,150 @@ impl From<Event> for CandidEvent {
 impl From<EventType> for CandidEventType {
     fn from(event_type: EventType) -> Self {
         match event_type {
+            EventType::CreditedSplSweep {
+                signature,
+                lamports_spent,
+                deposit_id,
+                amount_to_mint,
+            } => CandidEventType::CreditedSplSweep {
+                signature: CandidSignature::from(signature),
+                lamports_spent,
+                deposit_id,
+                amount_to_mint,
+            },
+            EventType::QuarantinedSplSweep { signature } => CandidEventType::QuarantinedSplSweep {
+                signature: CandidSignature::from(signature),
+            },
+            EventType::MintedSweptSplDeposit {
+                deposit_id,
+                mint_block_index,
+            } => CandidEventType::MintedSweptSplDeposit {
+                deposit_id,
+                mint_block_index: *mint_block_index.get(),
+            },
+            EventType::QuarantinedPendingSplMint { deposit_id } => {
+                CandidEventType::QuarantinedPendingSplMint { deposit_id }
+            }
+            EventType::FailedSplSweep {
+                signature,
+                lamports_spent,
+            } => CandidEventType::FailedSplSweep {
+                signature: CandidSignature::from(signature),
+                lamports_spent,
+            },
+            EventType::AcceptedSplWithdrawalRequest(request) => {
+                CandidEventType::AcceptedSplWithdrawalRequest {
+                    terms: request.terms.into(),
+                    cksol_burn_block_index: *request.cksol_burn_block_index.get(),
+                    ckspl_burn_block_index: *request.ckspl_burn_block_index.get(),
+                }
+            }
+            EventType::FailedSplWithdrawalRequest {
+                cksol_burn_block_index,
+                to,
+                reimbursed_amount,
+            } => CandidEventType::FailedSplWithdrawalRequest {
+                cksol_burn_block_index: *cksol_burn_block_index.get(),
+                to,
+                reimbursed_amount,
+            },
+            EventType::CreatedSplWithdrawalTransaction {
+                cksol_burn_block_index,
+                nonce_account,
+                nonce_value,
+            } => CandidEventType::CreatedSplWithdrawalTransaction {
+                cksol_burn_block_index: *cksol_burn_block_index.get(),
+                nonce_account: CandidAddress::from(nonce_account),
+                nonce_value: CandidHash::from(nonce_value),
+            },
+            EventType::SucceededSplWithdrawalTransaction {
+                signature,
+                lamports_spent,
+                rent_spent,
+            } => CandidEventType::SucceededSplWithdrawalTransaction {
+                signature: CandidSignature::from(signature),
+                lamports_spent,
+                rent_spent,
+            },
+            EventType::FailedSplWithdrawalTransaction {
+                signature,
+                lamports_spent,
+            } => CandidEventType::FailedSplWithdrawalTransaction {
+                signature: CandidSignature::from(signature),
+                lamports_spent,
+            },
+            EventType::ReimbursedSplWithdrawal {
+                cksol_burn_block_index,
+                mint_block_index,
+            } => CandidEventType::ReimbursedSplWithdrawal {
+                cksol_burn_block_index: *cksol_burn_block_index.get(),
+                mint_block_index: *mint_block_index.get(),
+            },
+            EventType::QuarantinedSplWithdrawalReimbursement {
+                cksol_burn_block_index,
+            } => CandidEventType::QuarantinedSplWithdrawalReimbursement {
+                cksol_burn_block_index: *cksol_burn_block_index.get(),
+            },
+            EventType::QueuedSplCkSolRefund {
+                cksol_burn_block_index,
+                kind,
+                to,
+                amount,
+                created_at_time,
+            } => CandidEventType::QueuedSplCkSolRefund {
+                cksol_burn_block_index: *cksol_burn_block_index.get(),
+                kind: candid_refund_kind(kind),
+                to,
+                amount,
+                created_at_time,
+            },
+            EventType::ReimbursedSplCkSol {
+                cksol_burn_block_index,
+                kind,
+                mint_block_index,
+            } => CandidEventType::ReimbursedSplCkSol {
+                cksol_burn_block_index: *cksol_burn_block_index.get(),
+                kind: candid_refund_kind(kind),
+                mint_block_index: *mint_block_index.get(),
+            },
+            EventType::HaltedSplWithdrawals {
+                signature,
+                rent_spent,
+                rent_reserve,
+            } => CandidEventType::HaltedSplWithdrawals {
+                signature: signature.into(),
+                rent_spent,
+                rent_reserve,
+            },
+            EventType::QuarantinedSplCkSolRefund {
+                cksol_burn_block_index,
+                kind,
+            } => CandidEventType::QuarantinedSplCkSolRefund {
+                cksol_burn_block_index: *cksol_burn_block_index.get(),
+                kind: candid_refund_kind(kind),
+            },
+            EventType::RequestedOperatingRefill {
+                refill_id,
+                amount,
+                created_at_time,
+            } => CandidEventType::RequestedOperatingRefill {
+                refill_id,
+                amount,
+                created_at_time,
+            },
+            EventType::CompletedOperatingRefill {
+                refill_id,
+                burn_block_index,
+            } => CandidEventType::CompletedOperatingRefill {
+                refill_id,
+                burn_block_index,
+            },
+            EventType::FailedOperatingRefill { refill_id, reason } => {
+                CandidEventType::FailedOperatingRefill { refill_id, reason }
+            }
+            EventType::QuarantinedOperatingRefill { refill_id } => {
+                CandidEventType::QuarantinedOperatingRefill { refill_id }
+            }
             EventType::Init(args) => CandidEventType::Init(args),
             EventType::Upgrade(args) => CandidEventType::Upgrade(args),
             EventType::AcceptedWithdrawalRequest(request) => {
@@ -134,6 +282,21 @@ impl From<EventType> for CandidEventType {
                         .collect(),
                 }
             }
+            EventType::QueuedSplDeposit {
+                deposit_id,
+                account,
+                mint,
+                address,
+                balance,
+                fee,
+            } => CandidEventType::QueuedSplDeposit {
+                deposit_id,
+                account,
+                mint: CandidAddress::from(mint),
+                address: CandidAddress::from(address),
+                balance,
+                fee,
+            },
         }
     }
 }
@@ -176,6 +339,18 @@ impl From<TransactionPurpose> for CandidTransactionPurpose {
                 deposit_ids,
                 block_height: block_height.get(),
             },
+            TransactionPurpose::SweepSplDeposit {
+                deposit_id,
+                block_height,
+            } => CandidTransactionPurpose::SweepSplDeposit {
+                deposit_id,
+                block_height: block_height.get(),
+            },
+            TransactionPurpose::SplWithdrawal {
+                cksol_burn_block_index,
+            } => CandidTransactionPurpose::SplWithdrawal {
+                cksol_burn_block_index: *cksol_burn_block_index.get(),
+            },
             TransactionPurpose::Withdrawal { burn_indices } => {
                 CandidTransactionPurpose::Withdrawal {
                     burn_indices: burn_indices.iter().map(|idx| *idx.get()).collect(),
@@ -210,6 +385,152 @@ impl TryFrom<CandidEventType> for EventType {
 
     fn try_from(event_type: CandidEventType) -> Result<Self, Self::Error> {
         Ok(match event_type {
+            CandidEventType::CreditedSplSweep {
+                signature,
+                lamports_spent,
+                deposit_id,
+                amount_to_mint,
+            } => EventType::CreditedSplSweep {
+                signature: Signature::from(signature),
+                lamports_spent,
+                deposit_id,
+                amount_to_mint,
+            },
+            CandidEventType::QuarantinedSplSweep { signature } => EventType::QuarantinedSplSweep {
+                signature: Signature::from(signature),
+            },
+            CandidEventType::MintedSweptSplDeposit {
+                deposit_id,
+                mint_block_index,
+            } => EventType::MintedSweptSplDeposit {
+                deposit_id,
+                mint_block_index: LedgerMintIndex::new(mint_block_index),
+            },
+            CandidEventType::QuarantinedPendingSplMint { deposit_id } => {
+                EventType::QuarantinedPendingSplMint { deposit_id }
+            }
+            CandidEventType::FailedSplSweep {
+                signature,
+                lamports_spent,
+            } => EventType::FailedSplSweep {
+                signature: Signature::from(signature),
+                lamports_spent,
+            },
+            CandidEventType::AcceptedSplWithdrawalRequest {
+                terms,
+                cksol_burn_block_index,
+                ckspl_burn_block_index,
+            } => EventType::AcceptedSplWithdrawalRequest(SplWithdrawalRequest {
+                terms: terms.into(),
+                cksol_burn_block_index: LedgerBurnIndex::new(cksol_burn_block_index),
+                ckspl_burn_block_index: LedgerBurnIndex::new(ckspl_burn_block_index),
+            }),
+            CandidEventType::FailedSplWithdrawalRequest {
+                cksol_burn_block_index,
+                to,
+                reimbursed_amount,
+            } => EventType::FailedSplWithdrawalRequest {
+                cksol_burn_block_index: LedgerBurnIndex::new(cksol_burn_block_index),
+                to,
+                reimbursed_amount,
+            },
+            CandidEventType::CreatedSplWithdrawalTransaction {
+                cksol_burn_block_index,
+                nonce_account,
+                nonce_value,
+            } => EventType::CreatedSplWithdrawalTransaction {
+                cksol_burn_block_index: LedgerBurnIndex::new(cksol_burn_block_index),
+                nonce_account: Address::from(nonce_account),
+                nonce_value: Hash::from(nonce_value),
+            },
+            CandidEventType::SucceededSplWithdrawalTransaction {
+                signature,
+                lamports_spent,
+                rent_spent,
+            } => EventType::SucceededSplWithdrawalTransaction {
+                signature: Signature::from(signature),
+                lamports_spent,
+                rent_spent,
+            },
+            CandidEventType::FailedSplWithdrawalTransaction {
+                signature,
+                lamports_spent,
+            } => EventType::FailedSplWithdrawalTransaction {
+                signature: Signature::from(signature),
+                lamports_spent,
+            },
+            CandidEventType::ReimbursedSplWithdrawal {
+                cksol_burn_block_index,
+                mint_block_index,
+            } => EventType::ReimbursedSplWithdrawal {
+                cksol_burn_block_index: LedgerBurnIndex::new(cksol_burn_block_index),
+                mint_block_index: LedgerMintIndex::new(mint_block_index),
+            },
+            CandidEventType::QuarantinedSplWithdrawalReimbursement {
+                cksol_burn_block_index,
+            } => EventType::QuarantinedSplWithdrawalReimbursement {
+                cksol_burn_block_index: LedgerBurnIndex::new(cksol_burn_block_index),
+            },
+            CandidEventType::QueuedSplCkSolRefund {
+                cksol_burn_block_index,
+                kind,
+                to,
+                amount,
+                created_at_time,
+            } => EventType::QueuedSplCkSolRefund {
+                cksol_burn_block_index: LedgerBurnIndex::new(cksol_burn_block_index),
+                kind: refund_kind(kind),
+                to,
+                amount,
+                created_at_time,
+            },
+            CandidEventType::ReimbursedSplCkSol {
+                cksol_burn_block_index,
+                kind,
+                mint_block_index,
+            } => EventType::ReimbursedSplCkSol {
+                cksol_burn_block_index: LedgerBurnIndex::new(cksol_burn_block_index),
+                kind: refund_kind(kind),
+                mint_block_index: LedgerMintIndex::new(mint_block_index),
+            },
+            CandidEventType::HaltedSplWithdrawals {
+                signature,
+                rent_spent,
+                rent_reserve,
+            } => EventType::HaltedSplWithdrawals {
+                signature: signature.into(),
+                rent_spent,
+                rent_reserve,
+            },
+            CandidEventType::QuarantinedSplCkSolRefund {
+                cksol_burn_block_index,
+                kind,
+            } => EventType::QuarantinedSplCkSolRefund {
+                cksol_burn_block_index: LedgerBurnIndex::new(cksol_burn_block_index),
+                kind: refund_kind(kind),
+            },
+            CandidEventType::RequestedOperatingRefill {
+                refill_id,
+                amount,
+                created_at_time,
+            } => EventType::RequestedOperatingRefill {
+                refill_id,
+                amount,
+                created_at_time,
+            },
+            CandidEventType::CompletedOperatingRefill {
+                refill_id,
+                burn_block_index,
+            } => EventType::CompletedOperatingRefill {
+                refill_id,
+                burn_block_index,
+            },
+            CandidEventType::FailedOperatingRefill { refill_id, reason } => {
+                EventType::FailedOperatingRefill { refill_id, reason }
+            }
+            CandidEventType::QuarantinedOperatingRefill { refill_id } => {
+                EventType::QuarantinedOperatingRefill { refill_id }
+            }
             CandidEventType::Init(args) => EventType::Init(args),
             CandidEventType::Upgrade(args) => EventType::Upgrade(args),
             CandidEventType::AcceptedWithdrawalRequest {
@@ -312,6 +633,21 @@ impl TryFrom<CandidEventType> for EventType {
                         .collect(),
                 })
             }
+            CandidEventType::QueuedSplDeposit {
+                deposit_id,
+                account,
+                mint,
+                address,
+                balance,
+                fee,
+            } => EventType::QueuedSplDeposit {
+                deposit_id,
+                account,
+                mint: Address::from(mint),
+                address: Address::from(address),
+                balance,
+                fee,
+            },
         })
     }
 }
@@ -338,6 +674,52 @@ impl From<CandidWatchedDepositAddress> for WatchedDepositAddress {
             scheduled_from: entry.scheduled_from,
             scan_count: entry.scan_count,
             last_scanned_at: entry.last_scanned_at,
+        }
+    }
+}
+
+fn candid_refund_kind(kind: SplRefundKind) -> CandidSplRefundKind {
+    match kind {
+        SplRefundKind::FailedTokenBurn => CandidSplRefundKind::FailedTokenBurn,
+        SplRefundKind::UnusedRent => CandidSplRefundKind::UnusedRent,
+        SplRefundKind::FailedTransferRent => CandidSplRefundKind::FailedTransferRent,
+    }
+}
+
+fn refund_kind(kind: CandidSplRefundKind) -> SplRefundKind {
+    match kind {
+        CandidSplRefundKind::FailedTokenBurn => SplRefundKind::FailedTokenBurn,
+        CandidSplRefundKind::UnusedRent => SplRefundKind::UnusedRent,
+        CandidSplRefundKind::FailedTransferRent => SplRefundKind::FailedTransferRent,
+    }
+}
+
+impl From<SplWithdrawalRequestTerms> for CandidSplWithdrawalRequestTerms {
+    fn from(request: SplWithdrawalRequestTerms) -> Self {
+        Self {
+            account: request.account,
+            mint: request.mint.into(),
+            ledger_id: request.ledger_id,
+            address: request.address.into(),
+            amount: request.amount,
+            fee: request.fee,
+            rent_reserve: request.rent_reserve,
+            token_fee: request.token_fee,
+        }
+    }
+}
+
+impl From<CandidSplWithdrawalRequestTerms> for SplWithdrawalRequestTerms {
+    fn from(request: CandidSplWithdrawalRequestTerms) -> Self {
+        Self {
+            account: request.account,
+            mint: request.mint.into(),
+            ledger_id: request.ledger_id,
+            address: request.address.into(),
+            amount: request.amount,
+            fee: request.fee,
+            rent_reserve: request.rent_reserve,
+            token_fee: request.token_fee,
         }
     }
 }
@@ -381,6 +763,18 @@ impl From<CandidTransactionPurpose> for TransactionPurpose {
             } => TransactionPurpose::SweepDeposit {
                 deposit_ids,
                 block_height: BlockHeight::new(block_height),
+            },
+            CandidTransactionPurpose::SweepSplDeposit {
+                deposit_id,
+                block_height,
+            } => TransactionPurpose::SweepSplDeposit {
+                deposit_id,
+                block_height: BlockHeight::new(block_height),
+            },
+            CandidTransactionPurpose::SplWithdrawal {
+                cksol_burn_block_index,
+            } => TransactionPurpose::SplWithdrawal {
+                cksol_burn_block_index: LedgerBurnIndex::new(cksol_burn_block_index),
             },
             CandidTransactionPurpose::Withdrawal { burn_indices } => {
                 TransactionPurpose::Withdrawal {

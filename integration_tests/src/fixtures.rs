@@ -9,7 +9,8 @@ use icrc_ledger_types::{
     icrc1::account::Account,
 };
 use serde_json::json;
-use sol_rpc_types::{GetBlockCommitmentLevel, Lamport};
+use sol_rpc_types::{AccountInfo, GetBlockCommitmentLevel, Lamport};
+use solana_account_decoder_client_types::UiAccount;
 use solana_address::{Address, address};
 use solana_hash::Hash;
 use solana_nonce::{
@@ -34,6 +35,19 @@ pub const DEPOSIT_AMOUNT: Lamport = 500_000_000;
 pub const RENT_EXEMPTION_THRESHOLD: Lamport = 890_880;
 pub const WATCH_WINDOW: Duration = Duration::from_hours(24);
 pub const WATCH_WINDOW_NANOS: u64 = WATCH_WINDOW.as_nanos() as u64;
+
+/// The timer periods of the minter, so that a test can advance time past them.
+pub const WITHDRAWAL_PROCESSING_DELAY: Duration = Duration::from_mins(1);
+pub const SWEEP_DEPOSITS_DELAY: Duration = Duration::from_mins(1);
+pub const PROCESS_PENDING_MINTS_DELAY: Duration = Duration::from_mins(1);
+pub const FINALIZE_TRANSACTIONS_DELAY: Duration = Duration::from_mins(2);
+/// Height of the block whose blockhash the mocks hand a timer for a first submission.
+pub const SUBMISSION_BLOCK_HEIGHT: u64 = 100_000_000;
+/// Number of blocks a blockhash stays valid for, as the minter counts them.
+const MAX_BLOCKHASH_AGE_IN_BLOCKS: u64 = 150;
+/// First height at which the blockhash of a transaction submitted at
+/// [`SUBMISSION_BLOCK_HEIGHT`] is no longer accepted.
+pub const EXPIRY_BLOCK_HEIGHT: u64 = SUBMISSION_BLOCK_HEIGHT + MAX_BLOCKHASH_AGE_IN_BLOCKS + 1;
 
 /// The slot the mocked `getSlot` reports. A test says which block height the mocked
 /// `getBlock` then reports, since that is what the minter records and what it judges
@@ -126,6 +140,14 @@ impl MockBuilder {
         )
     }
 
+    /// Mock for a finalized account read, including a missing account.
+    pub fn get_account_info(self, address: &Address, account: Option<AccountInfo>) -> Self {
+        self.expect(
+            get_account_info_request_for(address),
+            get_account_info_response(account),
+        )
+    }
+
     /// Mocks for a timer submitting a transaction built on the block at `block_height`:
     /// `getSlot` → `getBlock` → `sendTransaction`.
     pub fn submit_transaction(self, block_height: u64) -> Self {
@@ -149,6 +171,15 @@ impl MockBuilder {
         )
     }
 
+    /// Mock for `getAccountInfo` reporting that the submitted withdrawal transaction
+    /// advanced its nonce account.
+    pub fn get_advanced_nonce_account(self) -> Self {
+        self.expect(
+            get_account_info_request(),
+            get_account_info_nonce_response(ADVANCED_NONCE_SEED),
+        )
+    }
+
     /// Mocks for the withdrawal timer submitting a durable-nonce transaction:
     /// `getAccountInfo` reading the nonce account → `sendTransaction`.
     pub fn submit_withdrawal_transaction(self) -> Self {
@@ -163,11 +194,39 @@ impl MockBuilder {
     /// `getAccountInfo` reporting its nonce account advanced → `getTransaction`
     /// reporting it as succeeded.
     pub fn finalize_withdrawal_transaction(self, withdrawal: &Transaction) -> Self {
+        self.get_advanced_nonce_account().expect(
+            get_transaction_request(&withdrawal.signatures[0]),
+            withdrawal_transaction_response(withdrawal),
+        )
+    }
+
+    /// Mock for a read of the nonce account. Each withdrawal transaction changes the
+    /// nonce value, so `advances` is the number of withdrawal transactions before this read.
+    pub fn get_nonce_account_after(self, advances: u8) -> Self {
         self.expect(
             get_account_info_request(),
-            get_account_info_nonce_response(ADVANCED_NONCE_SEED),
+            get_account_info_nonce_response([SUBMITTED_NONCE_SEED[0] + advances; 32]),
         )
-        .expect(
+    }
+
+    /// Mocks for the withdrawal timer when it sends one more transaction on the same
+    /// nonce account: the nonce read, then `sendTransaction`. `advances` is the number of
+    /// withdrawal transactions that this nonce account served before.
+    pub fn submit_withdrawal_transaction_after(self, advances: u8) -> Self {
+        self.get_nonce_account_after(advances).expect(
+            send_transaction_request(),
+            send_transaction_response(SUBMITTED_SIGNATURE),
+        )
+    }
+
+    /// Mocks for the finalization timer when it settles that transaction: a nonce read
+    /// that shows one more change, then `getTransaction` with a successful result.
+    pub fn finalize_withdrawal_transaction_after(
+        self,
+        withdrawal: &Transaction,
+        advances: u8,
+    ) -> Self {
+        self.get_nonce_account_after(advances + 1).expect(
             get_transaction_request(&withdrawal.signatures[0]),
             withdrawal_transaction_response(withdrawal),
         )
@@ -204,6 +263,23 @@ impl MockBuilder {
             get_transaction_request(&sweep.signatures[0]),
             sweep_transaction_response(sweep, sweepable_amount),
         )
+    }
+
+    /// Mocks for `finalize_transactions` finding the pending transaction with the given
+    /// signature finalized with an on-chain error at `block_height`: `getSlot` → `getBlock` →
+    /// `getSignatureStatuses`.
+    pub fn fail_transaction(self, signature: &Signature, block_height: u64) -> Self {
+        self.get_current_block(
+            block_height,
+            IGNORED_BLOCKHASH,
+            GetBlockCommitmentLevel::Finalized,
+        )
+        .check_signature_statuses(signature, get_signature_statuses_failed_response())
+    }
+
+    /// Mock for a finalized transaction outcome under the given signature.
+    pub fn get_transaction(self, signature: &Signature, response: JsonRpcResponse) -> Self {
+        self.expect(get_transaction_request(&signature.clone().into()), response)
     }
 
     fn check_signature_statuses(self, signature: &Signature, response: JsonRpcResponse) -> Self {
@@ -381,6 +457,22 @@ fn get_balance_response(balance: Lamport) -> JsonRpcResponse {
     }))
 }
 
+fn get_account_info_request_for(address: &Address) -> JsonRpcRequestMatcher {
+    JsonRpcRequestMatcher::with_method("getAccountInfo").with_params(json!([
+        address.to_string(),
+        { "encoding": "base64", "commitment": "finalized" }
+    ]))
+}
+
+fn get_account_info_response(account: Option<AccountInfo>) -> JsonRpcResponse {
+    let account = account.map(UiAccount::from);
+    JsonRpcResponse::from(json!({
+        "jsonrpc": "2.0",
+        "result": { "context": { "slot": MOCK_SLOT }, "value": account },
+        "id": 1
+    }))
+}
+
 fn get_slot_request() -> JsonRpcRequestMatcher {
     JsonRpcRequestMatcher::with_method("getSlot")
 }
@@ -451,6 +543,26 @@ fn get_signature_statuses_finalized_response() -> JsonRpcResponse {
                 "confirmations": null,
                 "status": { "Ok": null },
                 "err": null,
+                "confirmationStatus": "finalized"
+            }]
+        },
+        "id": 1
+    }))
+}
+
+/// Response to a `getSignatureStatuses` request for the single pending transaction,
+/// reporting that its token transfer failed on chain.
+fn get_signature_statuses_failed_response() -> JsonRpcResponse {
+    let error = json!({ "InstructionError": [0, { "Custom": 17 }] });
+    JsonRpcResponse::from(json!({
+        "jsonrpc": "2.0",
+        "result": {
+            "context": { "slot": 0 },
+            "value": [{
+                "slot": 350_000_000_u64,
+                "confirmations": null,
+                "status": { "Err": error },
+                "err": error,
                 "confirmationStatus": "finalized"
             }]
         },

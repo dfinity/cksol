@@ -155,8 +155,169 @@ fn apply_state_transition(state: &mut State, payload: &EventType, timestamp: u64
         } => {
             state.process_transaction_created(burn_indices, nonce_account, *nonce_value);
         }
+        EventType::RequestedOperatingRefill {
+            refill_id,
+            amount,
+            created_at_time,
+        } => {
+            state
+                .operating_balance
+                .request_refill(*refill_id, *amount, *created_at_time);
+        }
+        EventType::CompletedOperatingRefill {
+            refill_id,
+            burn_block_index: _,
+        } => {
+            state.operating_balance.complete_refill(*refill_id);
+        }
+        EventType::FailedOperatingRefill {
+            refill_id,
+            reason: _,
+        } => {
+            state.operating_balance.fail_refill(*refill_id);
+        }
+        EventType::QuarantinedOperatingRefill { refill_id } => {
+            state.operating_balance.quarantine_refill(*refill_id);
+        }
         EventType::WatchedDepositAddresses(snapshot) => {
             state.restore_watchlist(snapshot);
+        }
+        EventType::QueuedSplDeposit {
+            deposit_id,
+            account,
+            mint,
+            address,
+            balance,
+            fee,
+        } => {
+            state.process_queued_spl_deposit(
+                *deposit_id,
+                crate::state::QueuedSplDeposit {
+                    account: *account,
+                    mint: *mint,
+                    address: *address,
+                    balance: *balance,
+                    fee: *fee,
+                },
+                timestamp,
+            );
+        }
+        EventType::CreditedSplSweep {
+            signature,
+            lamports_spent,
+            deposit_id,
+            amount_to_mint,
+        } => {
+            state.process_credited_spl_sweep(
+                signature,
+                *lamports_spent,
+                *deposit_id,
+                *amount_to_mint,
+                timestamp,
+            );
+        }
+        EventType::QuarantinedSplSweep { signature } => {
+            state.process_quarantined_spl_sweep(signature)
+        }
+        EventType::MintedSweptSplDeposit {
+            deposit_id,
+            mint_block_index,
+        } => {
+            state.process_minted_swept_spl_deposit(*deposit_id, mint_block_index);
+        }
+        EventType::QuarantinedPendingSplMint { deposit_id } => {
+            state.process_quarantined_pending_spl_mint(*deposit_id);
+        }
+        EventType::FailedSplSweep {
+            signature,
+            lamports_spent,
+        } => {
+            state.process_failed_spl_sweep(signature, *lamports_spent);
+        }
+        EventType::AcceptedSplWithdrawalRequest(request) => {
+            state.process_accepted_spl_withdrawal(request, timestamp);
+        }
+        EventType::FailedSplWithdrawalRequest {
+            cksol_burn_block_index,
+            to,
+            reimbursed_amount,
+        } => {
+            state.process_failed_spl_withdrawal(*cksol_burn_block_index, *to, *reimbursed_amount);
+        }
+        EventType::CreatedSplWithdrawalTransaction {
+            cksol_burn_block_index,
+            nonce_account,
+            nonce_value,
+        } => {
+            state.process_spl_transaction_created(
+                *cksol_burn_block_index,
+                nonce_account,
+                *nonce_value,
+            );
+        }
+        EventType::SucceededSplWithdrawalTransaction {
+            signature,
+            lamports_spent,
+            rent_spent,
+        } => {
+            state.process_spl_withdrawal_succeeded(signature, *lamports_spent, *rent_spent);
+        }
+        EventType::FailedSplWithdrawalTransaction {
+            signature,
+            lamports_spent,
+        } => {
+            state.process_spl_withdrawal_failed(signature, *lamports_spent, timestamp);
+        }
+        EventType::ReimbursedSplWithdrawal {
+            cksol_burn_block_index,
+            mint_block_index,
+        } => {
+            state.process_reimbursed_spl_withdrawal(
+                *cksol_burn_block_index,
+                mint_block_index,
+                timestamp,
+            );
+        }
+        EventType::QuarantinedSplWithdrawalReimbursement {
+            cksol_burn_block_index,
+        } => {
+            state.process_quarantined_spl_withdrawal_reimbursement(*cksol_burn_block_index);
+        }
+        EventType::QueuedSplCkSolRefund {
+            cksol_burn_block_index,
+            kind,
+            to,
+            amount,
+            created_at_time,
+        } => {
+            state.process_queued_spl_cksol_refund(
+                *cksol_burn_block_index,
+                *kind,
+                *to,
+                *amount,
+                *created_at_time,
+            );
+        }
+        EventType::ReimbursedSplCkSol {
+            cksol_burn_block_index,
+            kind,
+            mint_block_index,
+        } => {
+            state.process_reimbursed_spl_cksol(
+                *cksol_burn_block_index,
+                *kind,
+                mint_block_index,
+                timestamp,
+            );
+        }
+        EventType::QuarantinedSplCkSolRefund {
+            cksol_burn_block_index,
+            kind,
+        } => {
+            state.process_quarantined_spl_cksol_refund(*cksol_burn_block_index, *kind);
+        }
+        EventType::HaltedSplWithdrawals { .. } => {
+            state.process_halted_spl_withdrawals();
         }
     }
 }

@@ -1,21 +1,29 @@
 use crate::{
     address::minter_address,
     constants::MAX_CONCURRENT_RPC_CALLS,
+    deposit::spl::failed_withdrawal_reason,
     monitor::MIN_REBROADCAST_AGE,
     rpc::{FetchedTransaction, get_transaction, submit_transaction_skipping_preflight},
     runtime::CanisterRuntime,
     state::{
         MinterTransaction, NonceRead,
         audit::process_event,
-        event::{EventType, VersionedMessage},
+        event::{EventType, SplWithdrawalRequest, VersionedMessage},
         mutate_state, read_state,
     },
     storage::{
-        UndecidedWithdrawalReason, set_undecided_withdrawal_transactions, with_unstable_metrics_mut,
+        UndecidedWithdrawalReason, record_failed_spl_withdrawal,
+        set_undecided_withdrawal_transactions, with_unstable_metrics_mut,
     },
-    withdraw::nonce::read_verified_nonce,
+    withdraw::{
+        nonce::read_verified_nonce,
+        spl::settlement::{
+            SplWithdrawalOutcome, SplWithdrawalSettlementError, settle_spl_withdrawal,
+        },
+    },
 };
 use canlog::log;
+use cksol_types::SplRefundKind;
 use cksol_types_internal::log::Priority;
 use itertools::Itertools;
 use solana_address::Address;
@@ -23,6 +31,7 @@ use solana_hash::Hash;
 use solana_message::Message;
 use solana_signature::Signature;
 use solana_transaction::{Transaction, versioned::VersionedTransaction};
+use solana_transaction_status_client_types::UiTransactionStatusMeta;
 use std::{collections::BTreeMap, time::Duration};
 
 #[derive(Default)]
@@ -154,6 +163,12 @@ fn in_flight_withdrawals() -> Vec<InFlightWithdrawal> {
                     nonce_account,
                     nonce_value,
                     submitted_at,
+                }
+                | MinterTransaction::SplWithdrawal {
+                    message: VersionedMessage::Legacy(message),
+                    nonce_account,
+                    nonce_value,
+                    submitted_at,
                 } => Some(InFlightWithdrawal {
                     signature: *signature,
                     message: message.clone(),
@@ -161,7 +176,8 @@ fn in_flight_withdrawals() -> Vec<InFlightWithdrawal> {
                     nonce_value: *nonce_value,
                     submitted_at: *submitted_at,
                 }),
-                MinterTransaction::SweepDeposit { .. } => None,
+                MinterTransaction::SweepDeposit { .. }
+                | MinterTransaction::SweepSplDeposit { .. } => None,
             })
             .collect()
     })
@@ -219,7 +235,7 @@ async fn finalize_landed_withdrawal<R: CanisterRuntime>(
     withdrawal: &InFlightWithdrawal,
 ) -> Finalization {
     let signature = withdrawal.signature;
-    let event = match get_transaction(runtime, signature).await {
+    let events = match get_transaction(runtime, signature).await {
         Ok(Some(FetchedTransaction { transaction, .. }))
             if !withdrawal.carries_message_of(&transaction) =>
         {
@@ -231,19 +247,45 @@ async fn finalize_landed_withdrawal<R: CanisterRuntime>(
         }
         Ok(Some(FetchedTransaction {
             meta: Some(meta), ..
-        })) => match meta.err {
-            None => {
-                log!(Priority::Info, "Transaction {signature} finalized");
-                EventType::SucceededTransaction { signature }
+        })) => {
+            let spl_request = read_state(|state| {
+                state
+                    .sent_spl_withdrawal_of(&signature)
+                    .map(|sent| sent.request.clone())
+            });
+            match (spl_request, &meta.err) {
+                (Some(request), _) => {
+                    // The halt is recorded in a message of its own, so that a trap in the
+                    // settlement cannot undo it. The next round settles the withdrawal.
+                    if let Some(halt) = spl_withdrawal_halt(withdrawal, &meta, &request) {
+                        mutate_state(|state| process_event(state, halt, runtime));
+                        return Finalization::UnresolvedOutcome;
+                    }
+                    match spl_withdrawal_events(withdrawal, &meta, &request, runtime.time()) {
+                        Ok(events) => {
+                            // The events remove the withdrawal from the in-flight set, so
+                            // the failure is counted once.
+                            if let Some(error) = meta.err.clone() {
+                                record_failed_spl_withdrawal(
+                                    request.terms.mint,
+                                    failed_withdrawal_reason(&error.into()),
+                                );
+                            }
+                            events
+                        }
+                        Err(error) => {
+                            log!(
+                                Priority::Error,
+                                "Cannot settle SPL withdrawal transaction {signature}, retrying next round: {error}"
+                            );
+                            return Finalization::UnresolvedOutcome;
+                        }
+                    }
+                }
+                (None, None) => vec![successful_withdrawal_event(withdrawal)],
+                (None, Some(error)) => vec![failed_withdrawal_event(withdrawal, error)],
             }
-            Some(error) => {
-                log!(
-                    Priority::Error,
-                    "Transaction {signature} finalized with on-chain error: {error:?}"
-                );
-                EventType::FailedTransaction { signature }
-            }
-        },
+        }
         Ok(Some(FetchedTransaction { meta: None, .. })) => {
             log!(
                 Priority::Error,
@@ -271,8 +313,136 @@ async fn finalize_landed_withdrawal<R: CanisterRuntime>(
             return Finalization::UnresolvedOutcome;
         }
     };
-    mutate_state(|state| process_event(state, event, runtime));
+    mutate_state(|state| {
+        for event in events {
+            process_event(state, event, runtime);
+        }
+    });
     Finalization::Finalized
+}
+
+/// The event that halts SPL withdrawals, if this withdrawal succeeded with a rent above
+/// the reserve and SPL withdrawals are not halted yet.
+fn spl_withdrawal_halt(
+    withdrawal: &InFlightWithdrawal,
+    meta: &UiTransactionStatusMeta,
+    request: &SplWithdrawalRequest,
+) -> Option<EventType> {
+    if read_state(|state| state.spl_withdrawals_halted()) {
+        return None;
+    }
+    let terms = &request.terms;
+    let rent_spent = match settle_spl_withdrawal(&withdrawal.message, meta, terms) {
+        Ok(SplWithdrawalOutcome::Succeeded { rent_spent, .. }) => rent_spent,
+        // A failed transfer creates no token account, so it pays no rent.
+        Ok(SplWithdrawalOutcome::Failed { .. }) => return None,
+        // The settlement reports the error and tries again in the next round.
+        Err(_) => return None,
+    };
+    // An upgrade can raise the reserve while a request with the old reserve waits.
+    // That request must not halt the minter again after the resume.
+    let current_reserve = read_state(|state| state.spl_withdrawal_rent_reserve());
+    let rent_reserve = terms.rent_reserve.max(current_reserve);
+    if rent_spent <= rent_reserve {
+        return None;
+    }
+    let signature = withdrawal.signature;
+    log!(
+        Priority::Error,
+        "Halting SPL withdrawals: transaction {signature} spent {rent_spent} lamports of rent, above the reserve of {rent_reserve}"
+    );
+    Some(EventType::HaltedSplWithdrawals {
+        signature,
+        rent_spent,
+        rent_reserve,
+    })
+}
+
+/// The outcome event of a finalized SPL withdrawal with the refund of its rent reserve.
+/// The refund is recorded in the same message as the outcome, before any ledger call.
+fn spl_withdrawal_events(
+    withdrawal: &InFlightWithdrawal,
+    meta: &UiTransactionStatusMeta,
+    request: &SplWithdrawalRequest,
+    now: u64,
+) -> Result<Vec<EventType>, SplWithdrawalSettlementError> {
+    let signature = withdrawal.signature;
+    let terms = &request.terms;
+    let (outcome, kind, rent_refund) = match settle_spl_withdrawal(
+        &withdrawal.message,
+        meta,
+        terms,
+    )? {
+        SplWithdrawalOutcome::Succeeded {
+            lamports_spent,
+            rent_spent,
+        } => {
+            log!(
+                Priority::Info,
+                "SPL withdrawal transaction {signature} finalized with {lamports_spent} lamports spent, of which {rent_spent} for rent"
+            );
+            if rent_spent > terms.rent_reserve {
+                log!(
+                    Priority::Error,
+                    "SPL withdrawal transaction {signature} spent {rent_spent} lamports of rent, above the reserve of {}",
+                    terms.rent_reserve
+                );
+            }
+            (
+                EventType::SucceededSplWithdrawalTransaction {
+                    signature,
+                    lamports_spent,
+                    rent_spent,
+                },
+                SplRefundKind::UnusedRent,
+                terms.rent_reserve.saturating_sub(rent_spent),
+            )
+        }
+        SplWithdrawalOutcome::Failed { lamports_spent } => {
+            log!(
+                Priority::Error,
+                "SPL withdrawal transaction {signature} finalized with on-chain error: {:?}",
+                meta.err
+            );
+            (
+                EventType::FailedSplWithdrawalTransaction {
+                    signature,
+                    lamports_spent,
+                },
+                SplRefundKind::FailedTransferRent,
+                terms.rent_reserve,
+            )
+        }
+    };
+    let mut events = vec![outcome];
+    if rent_refund > 0 {
+        events.push(EventType::QueuedSplCkSolRefund {
+            cksol_burn_block_index: request.cksol_burn_block_index,
+            kind,
+            to: terms.account,
+            amount: rent_refund,
+            created_at_time: now,
+        });
+    }
+    Ok(events)
+}
+
+fn successful_withdrawal_event(withdrawal: &InFlightWithdrawal) -> EventType {
+    let signature = withdrawal.signature;
+    log!(Priority::Info, "Transaction {signature} finalized");
+    EventType::SucceededTransaction { signature }
+}
+
+fn failed_withdrawal_event(
+    withdrawal: &InFlightWithdrawal,
+    error: &impl std::fmt::Debug,
+) -> EventType {
+    let signature = withdrawal.signature;
+    log!(
+        Priority::Error,
+        "Transaction {signature} finalized with on-chain error: {error:?}"
+    );
+    EventType::FailedTransaction { signature }
 }
 
 async fn rebroadcast<R: CanisterRuntime>(runtime: &R, withdrawal: &InFlightWithdrawal) {

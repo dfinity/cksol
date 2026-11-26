@@ -1,9 +1,11 @@
-use crate::state::{DepositOrigin, QuarantineCause, State};
+use crate::state::{DepositOrigin, QuarantineCause, SplQuarantineCause, State};
 use crate::storage::{
-    self, FailedCreditReason, FailedMintReason, RearmOutcome, ScanOutcome,
+    self, FailedCreditReason, FailedMintReason, FailedSplTransferReason,
+    OperatingRefillErrorReason, RearmOutcome, ScanOutcome, TopUpBalanceRead,
     UndecidedWithdrawalReason,
 };
 use crate::utils::timed_sized_map::Timestamp;
+use cksol_types::SplRefundKind;
 use ic_metrics_encoder::MetricsEncoder;
 
 const WASM_PAGE_SIZE_IN_BYTES: usize = 65536;
@@ -214,6 +216,255 @@ pub fn encode_metrics(w: &mut MetricsEncoder<Vec<u8>>, s: &State) -> std::io::Re
         undecided_withdrawal_transactions = undecided_withdrawal_transactions.value(
             &[("reason", reason.label())],
             storage::undecided_withdrawal_transaction_count(reason).metric_value(),
+        )?;
+    }
+    encode_operating_balance_metrics(w, s)?;
+    encode_spl_deposit_metrics(w, s)?;
+    encode_spl_withdrawal_metrics(w, s, ic_cdk::api::time())?;
+    Ok(())
+}
+
+pub(crate) fn encode_spl_withdrawal_metrics(
+    w: &mut MetricsEncoder<Vec<u8>>,
+    s: &State,
+    now: u64,
+) -> std::io::Result<()> {
+    let oldest_age_seconds = s
+        .oldest_incomplete_spl_withdrawal_created_at()
+        .map(|created_at| now.saturating_sub(created_at) / NANOS_PER_SECOND)
+        .unwrap_or(0);
+    w.encode_gauge(
+        "oldest_incomplete_spl_withdrawal_age_seconds",
+        oldest_age_seconds.metric_value(),
+        "Age of the oldest incomplete SPL withdrawal request in seconds, from accepted until its transaction succeeded or failed. Returns 0 if there are no incomplete SPL withdrawals.",
+    )?;
+    w.encode_gauge(
+        "free_nonce_accounts",
+        s.nonce_pool().num_free_accounts().metric_value(),
+        "Number of durable nonce accounts that no withdrawal transaction uses. SOL and SPL withdrawals wait while it is 0.",
+    )?;
+    let mut failed_spl_withdrawals = w.counter_vec(
+        "failed_spl_withdrawals",
+        "Number of SPL withdrawals since the last upgrade whose transaction failed on-chain, by mint and reason: a frozen token account, a token account that does not exist, or another error.",
+    )?;
+    for mint in s.supported_spl_mints() {
+        for reason in FailedSplTransferReason::ALL {
+            failed_spl_withdrawals = failed_spl_withdrawals.value(
+                &[("mint", &mint.to_string()), ("reason", reason.label())],
+                storage::failed_spl_withdrawal_count(*mint, reason).metric_value(),
+            )?;
+        }
+    }
+    w.encode_counter(
+        "spl_withdrawals_above_rent_reserve",
+        s.spl_withdrawals_above_rent_reserve().metric_value(),
+        "Number of SPL withdrawals whose destination token account cost more rent than the reserve that the user paid.",
+    )?;
+    w.encode_counter(
+        "spl_rent_above_reserve",
+        s.spl_rent_above_reserve().metric_value(),
+        "Sum in Lamports of the rent that SPL withdrawals spent above their reserve. The withdrawal fee and then the operating balance pay it.",
+    )?;
+    w.encode_gauge(
+        "spl_withdrawals_halted",
+        u64::from(s.spl_withdrawals_halted()).metric_value(),
+        "Set to 1 while SPL withdrawals are halted because a withdrawal paid more rent than the reserve, else 0. The minter rejects new SPL withdrawals and keeps the accepted ones in the queue until an upgrade resumes them.",
+    )?;
+    let mut quarantined_spl_cksol_refunds = w.gauge_vec(
+        "quarantined_spl_cksol_refunds",
+        "Number of quarantined ckSOL refunds of SPL withdrawals by kind: the fee of a failed token burn, the unused rent of a successful transfer, or the rent of a failed transfer. The mint could no longer be retried and may have landed on the ledger.",
+    )?;
+    for (kind, label) in [
+        (SplRefundKind::FailedTokenBurn, "failed_token_burn"),
+        (SplRefundKind::UnusedRent, "unused_rent"),
+        (SplRefundKind::FailedTransferRent, "failed_transfer_rent"),
+    ] {
+        let quarantined = s
+            .quarantined_spl_cksol_refunds()
+            .values()
+            .filter(|refund| refund.kind == kind)
+            .count();
+        quarantined_spl_cksol_refunds =
+            quarantined_spl_cksol_refunds.value(&[("kind", label)], quarantined.metric_value())?;
+    }
+    let mut quarantined_spl_withdrawal_reimbursements = w.gauge_vec(
+        "quarantined_spl_withdrawal_reimbursements",
+        "Number of failed SPL withdrawals whose token remint is quarantined, by mint. The mint could no longer be retried and may have landed on the token ledger.",
+    )?;
+    for mint in s.supported_spl_mints() {
+        let quarantined = s
+            .quarantined_spl_withdrawal_reimbursements()
+            .values()
+            .filter(|reimbursement| reimbursement.request.terms.mint == *mint)
+            .count();
+        quarantined_spl_withdrawal_reimbursements = quarantined_spl_withdrawal_reimbursements
+            .value(&[("mint", &mint.to_string())], quarantined.metric_value())?;
+    }
+    Ok(())
+}
+
+pub(crate) fn encode_spl_deposit_metrics(
+    w: &mut MetricsEncoder<Vec<u8>>,
+    s: &State,
+) -> std::io::Result<()> {
+    let mut quarantined_spl_deposits = w.gauge_vec(
+        "quarantined_spl_deposits",
+        "Number of quarantined SPL deposits by mint and cause: a sweep whose finalized outcome did not match its plan credited nothing and keeps its SOL reservation, while an unresolved mint was credited but could no longer be retried and may have landed on the token ledger.",
+    )?;
+    for mint in s.supported_spl_mints() {
+        let mut sweep_unreadable: usize = 0;
+        let mut mint_unresolved: usize = 0;
+        for quarantined in s.spl_deposits().quarantined().values() {
+            if quarantined.deposit.deposit.mint != *mint {
+                continue;
+            }
+            match quarantined.cause {
+                SplQuarantineCause::SweepUnreadable { .. } => sweep_unreadable += 1,
+                SplQuarantineCause::MintUnresolved { .. } => mint_unresolved += 1,
+            }
+        }
+        let mint = mint.to_string();
+        quarantined_spl_deposits = quarantined_spl_deposits
+            .value(
+                &[("mint", &mint), ("cause", "sweep_unreadable")],
+                sweep_unreadable.metric_value(),
+            )?
+            .value(
+                &[("mint", &mint), ("cause", "mint_unresolved")],
+                mint_unresolved.metric_value(),
+            )?;
+    }
+    let mut dropped_spl_deposits = w.gauge_vec(
+        "dropped_spl_deposits",
+        "Number of SPL deposits whose sweep transaction failed or expired, by mint.",
+    )?;
+    for mint in s.supported_spl_mints() {
+        let dropped = s
+            .spl_deposits()
+            .dropped()
+            .values()
+            .filter(|dropped| dropped.deposit.mint == *mint)
+            .count();
+        dropped_spl_deposits =
+            dropped_spl_deposits.value(&[("mint", &mint.to_string())], dropped.metric_value())?;
+    }
+    let mut failed_spl_sweeps = w.counter_vec(
+        "failed_spl_sweeps",
+        "Number of SPL sweeps since the last upgrade that the preflight simulation rejected or that failed on-chain, by mint and reason: a frozen token account, a token account that does not exist, or another error.",
+    )?;
+    for mint in s.supported_spl_mints() {
+        for reason in FailedSplTransferReason::ALL {
+            failed_spl_sweeps = failed_spl_sweeps.value(
+                &[("mint", &mint.to_string()), ("reason", reason.label())],
+                storage::failed_spl_sweep_count(*mint, reason).metric_value(),
+            )?;
+        }
+    }
+    w.encode_gauge(
+        "unfunded_queued_spl_deposits",
+        s.unfunded_queued_spl_deposits().metric_value(),
+        "Number of queued SPL deposits whose sweep is blocked because the SOL available for SPL sweep fees does not cover it. Returns 0 if the funds cover every queued deposit.",
+    )?;
+    Ok(())
+}
+
+pub(crate) fn encode_operating_balance_metrics(
+    w: &mut MetricsEncoder<Vec<u8>>,
+    s: &State,
+) -> std::io::Result<()> {
+    let operating = s.operating_balance();
+    let config = operating.config();
+    for (name, value, help) in [
+        (
+            "operating_balance",
+            operating.balance(),
+            "Unbacked SOL credited by completed refill burns and by the fee surplus of SPL withdrawals, in lamports.",
+        ),
+        (
+            "operating_balance_shortfall",
+            operating.shortfall(),
+            "Lamports that settlements spent above the operating balance. Later funding repays it first.",
+        ),
+        (
+            "operating_refill_enabled",
+            u64::from(config.enabled),
+            "Whether new automatic operating refills are enabled.",
+        ),
+        (
+            "operating_refill_low_water_mark",
+            config.low_water_mark,
+            "Operating SOL refill threshold in lamports.",
+        ),
+        (
+            "operating_refill_target",
+            config.target,
+            "Operating SOL refill target in lamports.",
+        ),
+        (
+            "operating_refill_pending",
+            u64::from(operating.pending().is_some()),
+            "Whether an operating refill is unresolved.",
+        ),
+        (
+            "operating_refill_quarantined",
+            u64::from(operating.pending().is_some_and(|p| p.quarantined)),
+            "Whether the unresolved refill needs manual reconciliation.",
+        ),
+        (
+            "operating_balance_low",
+            u64::from(config.enabled && operating.balance() < config.low_water_mark),
+            "Whether enabled operating funding is below its low-water mark.",
+        ),
+    ] {
+        w.encode_gauge(name, value.metric_value(), help)?;
+    }
+    w.encode_counter(
+        "operating_refills_completed",
+        operating.completed_refills().metric_value(),
+        "Completed refill burns, including deduplicated burns.",
+    )?;
+    w.encode_counter(
+        "operating_refills_failed",
+        operating.failed_refills().metric_value(),
+        "Definitively rejected first refill attempts.",
+    )?;
+    storage::with_unstable_metrics(|m| -> std::io::Result<()> {
+        // Absence after upgrade means no fresh read, not an empty top-up account.
+        w.encode_gauge(
+            "operating_top_up_balance_known",
+            u64::from(m.operating_top_up_balance.is_some()).metric_value(),
+            "Whether the top-up balance has been read since upgrade.",
+        )?;
+        if let Some(TopUpBalanceRead { balance, read_at }) = m.operating_top_up_balance {
+            w.encode_gauge(
+                "operating_top_up_balance",
+                balance.metric_value(),
+                "Last-read ckSOL top-up balance in lamports.",
+            )?;
+            w.encode_gauge(
+                "operating_top_up_underfunded",
+                u64::from(
+                    config.enabled && balance < config.target,
+                )
+                .metric_value(),
+                "Whether the last-read top-up account cannot fund a full refill from zero to target.",
+            )?;
+            w.encode_gauge(
+                "operating_top_up_balance_read_timestamp_seconds",
+                (read_at / NANOS_PER_SECOND).metric_value(),
+                "Time of the last successful top-up balance read, in Unix seconds.",
+            )?;
+        }
+        Ok(())
+    })?;
+    let mut errors = w.counter_vec(
+        "operating_refill_errors",
+        "Refill errors since upgrade, by reason.",
+    )?;
+    for reason in OperatingRefillErrorReason::ALL {
+        errors = errors.value(
+            &[("reason", reason.label())],
+            storage::operating_refill_error_count(reason).metric_value(),
         )?;
     }
     Ok(())

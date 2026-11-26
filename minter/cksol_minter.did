@@ -266,6 +266,167 @@ type InitArgs = record {
     automatic_deposit_fee : opt Lamport;
 };
 
+// Arguments for a request to the `withdraw_spl` endpoint.
+type WithdrawSplArgs = record {
+    // The Solana mint identifying the registered SPL token and its ckSPL ledger.
+    mint : Address;
+    // The subaccount of the caller to burn ckSOL and ckSPL from.
+    from_subaccount : opt blob;
+    // The requested burn amount in the token's smallest units, not lamports.
+    amount : nat64;
+    // The destination wallet address on Solana, not a token account address.
+    address : text;
+};
+
+// The ckSOL fee burn block index of an SPL withdrawal, unique across all mints.
+type WithdrawSplId = LedgerBurnIndex;
+
+// The acceptance receipt of an SPL withdrawal: both burns are recorded and the
+// withdrawal is queued. The Solana transfer is not yet submitted.
+type WithdrawSplOk = record {
+    // The ckSOL fee burn block index, also used to track the withdrawal.
+    cksol_burn_block_index : WithdrawSplId;
+    // The amount burn block index on the ckSPL ledger selected by the mint.
+    ckspl_burn_block_index : nat64;
+};
+
+// A withdrawal burn error from either the ckSOL or the ckSPL ledger.
+type WithdrawSplLedgerError = variant {
+    // The account cannot cover the burn amount.
+    InsufficientFunds : record {
+        balance : nat;
+        failed_burn_amount : nat;
+        token_symbol : text;
+        ledger_id : principal;
+    };
+    // The minter is not approved to burn the requested amount.
+    InsufficientAllowance : record {
+        allowance : nat;
+        failed_burn_amount : nat;
+        token_symbol : text;
+        ledger_id : principal;
+    };
+    // The requested amount is below the ledger's minimum burn amount.
+    AmountTooLow : record {
+        minimum_burn_amount : nat;
+        failed_burn_amount : nat;
+        token_symbol : text;
+        ledger_id : principal;
+    };
+    // The ledger call failed or returned another error; the outcome may be unresolved.
+    TemporarilyUnavailable : text;
+};
+
+type WithdrawSplError = variant {
+    // The mint is not registered with the minter.
+    TokenNotSupported : record { mint : Address };
+    // The token amount does not exceed the token's withdrawal fee, so nothing would
+    // be transferred. The minter enforces no other minimum.
+    ValueTooSmall : record {
+        minimum_withdrawal_amount : nat64;
+        withdrawal_amount : nat64;
+    };
+    // Another withdrawal is being processed for this account.
+    AlreadyProcessing;
+    // The destination cannot be parsed as a Solana address.
+    MalformedAddress : text;
+    // The destination is not an allowed withdrawal address.
+    InvalidDestination : text;
+    // The minter cannot currently accept the request.
+    TemporarilyUnavailable : text;
+    // SPL withdrawals are halted until an upgrade of the minter resumes them, because
+    // a destination token account cost more rent than the reserve. Nothing was burned.
+    WithdrawalsHalted;
+    // Burning the ckSOL withdrawal fee and rent reserve failed.
+    CkSolLedgerError : record { error : WithdrawSplLedgerError };
+    // Burning ckSPL failed after the ckSOL fee was burned; the fee is reimbursed
+    // when the failure is definitive.
+    CkSplLedgerError : record {
+        cksol_burn_block_index : WithdrawSplId;
+        error : WithdrawSplLedgerError;
+    };
+};
+
+// The result of a call to the `withdraw_spl` endpoint.
+type WithdrawSplResult = variant { Ok : WithdrawSplOk; Err : WithdrawSplError };
+
+// Arguments for a request to the `withdraw_spl_status` endpoint.
+type WithdrawSplStatusArgs = record {
+    // The ckSOL fee burn block index returned by the `withdraw_spl` endpoint.
+    cksol_burn_block_index : WithdrawSplId;
+};
+
+// The progress of the ckSOL refund of the rent reserve of an SPL withdrawal.
+type SplRentRefundStatus = variant {
+    // No refund is owed: the transaction spent the whole reserve.
+    NotDue;
+    // The refund is queued.
+    Pending : record { amount : Lamport };
+    // The refund was minted.
+    Reimbursed : record { amount : Lamport; mint_block_index : nat64 };
+    // The refund cannot be retried safely and requires manual resolution.
+    Quarantined : record { amount : Lamport };
+};
+
+// Retrieve the status of an SPL withdrawal request.
+type WithdrawSplStatus = variant {
+    // Withdrawal request is not found.
+    NotFound;
+    // Withdrawal request is waiting to be processed.
+    Pending;
+    // Solana transaction was signed and is sent to the network.
+    TxSent : record {
+        // The unique identifier (signature) of the Solana transaction.
+        transaction_id : Signature;
+    };
+    // Solana transaction is finalized and the tokens were transferred. The withdrawal
+    // stays successful while its rent refund is pending.
+    TxFinalized : record {
+        // The finalized transaction.
+        transaction : TxFinalizedStatus;
+        // The refund of the rent reserve that the transaction did not spend.
+        rent_refund : SplRentRefundStatus;
+    };
+    // The Solana transfer failed definitively; its burned ckSPL is queued for reimbursement.
+    ReimbursementPending : record {
+        transaction_id : Signature;
+        // The token amount to remint, in the token's smallest units.
+        reimbursed_amount : nat64;
+        rent_refund : SplRentRefundStatus;
+    };
+    // The tokens of the failed Solana withdrawal were reminted.
+    Reimbursed : record {
+        transaction_id : Signature;
+        reimbursed_amount : nat64;
+        // The mint block index on the ckSPL ledger.
+        mint_block_index : nat64;
+        rent_refund : SplRentRefundStatus;
+    };
+    // The token reimbursement cannot be retried safely and requires manual resolution.
+    ReimbursementQuarantined : record {
+        transaction_id : Signature;
+        reimbursed_amount : nat64;
+        rent_refund : SplRentRefundStatus;
+    };
+    // The token burn failed after the fee burn; the ckSOL fee refund is queued.
+    FeeReimbursementPending : record {
+        // The ckSOL amount to mint back, in lamports.
+        reimbursed_amount : Lamport;
+    };
+    // The ckSOL fee was minted back.
+    FeeReimbursed : record {
+        // The ckSOL amount minted back, in lamports.
+        reimbursed_amount : Lamport;
+        // The mint block index on the ckSOL ledger.
+        mint_block_index : nat64;
+    };
+    // The ckSOL fee refund cannot be retried safely and requires manual resolution.
+    FeeReimbursementQuarantined : record {
+        // The ckSOL amount that was to be minted back, in lamports.
+        reimbursed_amount : Lamport;
+    };
+};
+
 // Information about the ckSOL minter canister.
 type MinterInfo = record {
     deposit_sol_fee : nat;
@@ -281,6 +442,20 @@ type MinterInfo = record {
     automatic_deposit_fee : opt Lamport;
     // The sum in lamports of the automatic deposit fees collected so far.
     collected_automatic_deposit_fees : opt Lamport;
+    // Supported classic SPL tokens, with registry and deposit settings.
+    supported_spl_tokens : opt vec SplTokenInfo;
+    // Source-account read budget plus the SPL consolidation fee, in cycles.
+    deposit_spl_required_cycles : opt nat;
+    // Cycle fee charged when a new manual SPL deposit is queued.
+    spl_deposit_consolidation_fee : opt nat;
+    // The SPL deposit fees collected so far, with one entry per supported token.
+    collected_spl_deposit_fees : opt vec CollectedSplDepositFees;
+    // The SPL withdrawal fees collected so far in token units, with one entry per
+    // supported token.
+    collected_spl_withdrawal_fees : opt vec CollectedSplWithdrawalFees;
+    // Whether SPL withdrawals are halted until an upgrade resumes them. SOL
+    // withdrawals continue.
+    spl_withdrawals_halted : opt bool;
 };
 
 // The ckSOL minter service arguments.
@@ -305,6 +480,16 @@ type UpgradeArgs = record {
     deposit_sol_required_cycles : opt nat64;
     nonce_accounts_to_add : opt vec text;
     automatic_deposit_fee : opt Lamport;
+    add_spl_tokens : opt vec SplTokenRegistration;
+    update_spl_tokens : opt vec SplTokenUpdate;
+    operating_balance_refill : opt OperatingRefillConfig;
+    spl_deposit_consolidation_fee : opt nat64;
+    // The fee in lamports of ckSOL charged for an SPL withdrawal, excluding the rent
+    // reserve of the destination token account.
+    spl_withdrawal_fee : opt Lamport;
+    // Halts or resumes SPL withdrawals. The minter halts them by itself when a
+    // withdrawal pays more rent than the reserve, and only `opt false` resumes them.
+    spl_withdrawals_halted : opt bool;
 };
 
 type WithdrawSolArgs = record {
@@ -522,6 +707,16 @@ type TransactionPurpose = variant {
         // The block height of the block whose blockhash the transaction uses.
         block_height: nat64;
     };
+    // Sweep one classic SPL deposit into its pre-created treasury ATA.
+    SweepSplDeposit : record {
+        deposit_id: DepositSplId;
+        block_height: nat64;
+    };
+    // Withdraw SPL tokens for one request, with the durable nonce bound to it.
+    SplWithdrawal : record {
+        // The ckSOL fee burn index of the withdrawal request served by this transaction.
+        cksol_burn_block_index : nat64;
+    };
     // Withdraw SOL to users' Solana addresses. The transaction carries the
     // nonce value of a durable nonce account instead of a recent blockhash,
     // so it never expires.
@@ -582,6 +777,7 @@ type EventType = variant {
         signature: Signature;
     };
     // A previously submitted Solana transaction has failed.
+    // An SPL sweep stays reserved until FailedSplSweep records its actual cost.
     FailedTransaction : record {
         // The signature of the failed Solana transaction.
         signature: Signature;
@@ -682,6 +878,188 @@ type EventType = variant {
         // Every registration, live or expired but not yet evicted.
         entries: vec WatchedDepositAddress;
     };
+    RequestedOperatingRefill : record { refill_id : nat64; amount : nat64; created_at_time : nat64 };
+    CompletedOperatingRefill : record { refill_id : nat64; burn_block_index : nat64 };
+    FailedOperatingRefill : record { refill_id : nat64; reason : text };
+    QuarantinedOperatingRefill : record { refill_id : nat64 };
+    // An SPL token-account balance was accepted for a sweep, by a user via `deposit_spl`.
+    // The account and mint pair is locked until the deposit is minted or dropped.
+    QueuedSplDeposit : record {
+        // The identifier of the queued SPL deposit.
+        deposit_id : DepositSplId;
+        // The account to which the minter should mint ckSPL once the sweep is credited.
+        account : Account;
+        // The classic SPL mint of the deposited token.
+        mint : Address;
+        // The associated token account of the deposit address for the mint.
+        address : Address;
+        // The token-account balance when the deposit was queued, in the mint's smallest units.
+        balance : nat64;
+        // The fee deducted from the ledger mint, in the mint's smallest units.
+        fee : nat64;
+    };
+    // A finalized SPL sweep was validated and its deposit queued for ledger minting.
+    CreditedSplSweep : record {
+        // The signature of the finalized sweep transaction.
+        signature : Signature;
+        // The main account's actual spend on the transaction fee.
+        lamports_spent : Lamport;
+        // The identifier of the swept SPL deposit.
+        deposit_id : DepositSplId;
+        // The amount to mint: the swept balance minus the fee, in the mint's smallest units.
+        amount_to_mint : nat64;
+    };
+    // The observed outcome of an SPL sweep did not match its plan, so its deposit stays
+    // locked and its SOL reservation stays withheld.
+    QuarantinedSplSweep : record {
+        // The signature of the sweep transaction.
+        signature : Signature;
+    };
+    // The token ledger minted a swept SPL deposit. The account and mint pair is released.
+    MintedSweptSplDeposit : record {
+        // The identifier of the minted SPL deposit.
+        deposit_id : DepositSplId;
+        // The mint transaction index on the ledger of the token.
+        mint_block_index : LedgerMintIndex;
+    };
+    // The pending mint of an SPL deposit cannot be retried safely, as for
+    // `QuarantinedPendingMint`. The owed amount is retained and the pair stays locked.
+    QuarantinedPendingSplMint : record {
+        // The identifier of the SPL deposit whose pending mint was quarantined.
+        deposit_id : DepositSplId;
+    };
+    // The actual cost of an SPL sweep recorded as failed by `FailedTransaction` was
+    // validated. The unspent reservation is returned and the deposit is dropped.
+    FailedSplSweep : record {
+        // The signature of the failed sweep transaction.
+        signature : Signature;
+        // The main account's actual spend on the transaction fee.
+        lamports_spent : Lamport;
+    };
+    // The token burn succeeded and the withdrawal was accepted for processing.
+    AcceptedSplWithdrawalRequest : record {
+        // The terms confirmed by both ledger burns.
+        terms : SplWithdrawalRequestTerms;
+        // The fee burn index on the ckSOL ledger, also the withdrawal ID.
+        cksol_burn_block_index : nat64;
+        // The amount burn index on the ckSPL ledger.
+        ckspl_burn_block_index : nat64;
+    };
+    // The token burn returned an error after the ckSOL fee burn, so no withdrawal is
+    // queued. The refund of the burned ckSOL is recorded by `QueuedSplCkSolRefund`.
+    FailedSplWithdrawalRequest : record {
+        // The ckSOL fee burn index, also the withdrawal identifier.
+        cksol_burn_block_index : nat64;
+        // The account from which the ckSOL fee was burned.
+        to : Account;
+        // The ckSOL amount to mint back, in lamports.
+        reimbursed_amount : Lamport;
+    };
+    // A durable nonce was bound to one SPL withdrawal request before signing.
+    CreatedSplWithdrawalTransaction : record {
+        // The ckSOL fee burn index of the withdrawal request served by this transaction.
+        cksol_burn_block_index : nat64;
+        // The durable nonce account bound to this transaction.
+        nonce_account : Address;
+        // The nonce value the transaction carries in place of a recent blockhash.
+        nonce_value : Hash;
+    };
+    // The transaction of an SPL withdrawal succeeded and its validated cost is settled.
+    SucceededSplWithdrawalTransaction : record {
+        // The signature of the finalized transaction.
+        signature : Signature;
+        // The lamports that the main account spent: the transaction fee and the rent.
+        lamports_spent : Lamport;
+        // The part of `lamports_spent` that created the destination token account.
+        rent_spent : Lamport;
+    };
+    // An SPL withdrawal paid more rent than the reserve, so SPL withdrawals are halted.
+    HaltedSplWithdrawals : record {
+        // The signature of the transaction that paid the rent.
+        signature : Signature;
+        // The rent that the transaction paid for the destination token account.
+        rent_spent : Lamport;
+        // The rent reserve that the transaction exceeded.
+        rent_reserve : Lamport;
+    };
+    // The transaction of an SPL withdrawal failed on-chain; no token moved.
+    FailedSplWithdrawalTransaction : record {
+        // The signature of the failed transaction.
+        signature : Signature;
+        // The lamports that the main account spent on the transaction fee.
+        lamports_spent : Lamport;
+    };
+    // A ckSOL refund of an SPL withdrawal is owed, recorded before the ledger call.
+    QueuedSplCkSolRefund : record {
+        // The ckSOL fee burn index, also the withdrawal identifier.
+        cksol_burn_block_index : nat64;
+        // Why the refund is owed.
+        kind : SplRefundKind;
+        // The account from which the ckSOL was burned.
+        to : Account;
+        // The ckSOL amount to mint back, in lamports.
+        amount : Lamport;
+        // The timestamp of the mint, so that the ledger deduplicates each retry.
+        created_at_time : nat64;
+    };
+    // A ckSOL refund of an SPL withdrawal was minted.
+    ReimbursedSplCkSol : record {
+        // The ckSOL fee burn index, also the withdrawal identifier.
+        cksol_burn_block_index : nat64;
+        // Why the refund was owed.
+        kind : SplRefundKind;
+        // The refund mint index on the ckSOL ledger.
+        mint_block_index : nat64;
+    };
+    // A ckSOL refund cannot be safely retried and requires manual resolution.
+    QuarantinedSplCkSolRefund : record {
+        // The ckSOL fee burn index, also the withdrawal identifier.
+        cksol_burn_block_index : nat64;
+        // Why the refund was owed.
+        kind : SplRefundKind;
+    };
+    // The tokens of a failed SPL withdrawal were reminted.
+    ReimbursedSplWithdrawal : record {
+        // The ckSOL fee burn index identifying the withdrawal.
+        cksol_burn_block_index : nat64;
+        // The mint block index on the ckSPL ledger.
+        mint_block_index : nat64;
+    };
+    // A token reimbursement cannot be safely retried and requires manual resolution.
+    QuarantinedSplWithdrawalReimbursement : record {
+        // The ckSOL fee burn index identifying the withdrawal.
+        cksol_burn_block_index : nat64;
+    };
+};
+
+// The SPL withdrawal terms saved once its ckSOL fee burn is known.
+type SplWithdrawalRequestTerms = record {
+    // The IC account from which both burns are requested.
+    account : Account;
+    // The registered Solana mint.
+    mint : Address;
+    // The token ledger used for the amount burn.
+    ledger_id : principal;
+    // The destination wallet, from which its token account is derived.
+    address : Address;
+    // The token amount to burn, in the mint's smallest units.
+    amount : nat64;
+    // The token fee deducted from the transferred amount, in the mint's smallest units.
+    token_fee : nat64;
+    // The ckSOL fee already burned, in lamports, without the rent reserve.
+    fee : Lamport;
+    // The ckSOL burned with the fee for the rent of the destination token account.
+    rent_reserve : Lamport;
+};
+
+// Why a ckSOL refund of an SPL withdrawal is owed.
+type SplRefundKind = variant {
+    // The token burn failed after the ckSOL fee burn.
+    FailedTokenBurn;
+    // The transfer succeeded and spent less than the reserved rent.
+    UnusedRent;
+    // The transfer failed on-chain, so no rent was spent.
+    FailedTransferRent;
 };
 
 // A minter event.
@@ -711,8 +1089,166 @@ type GetEventsResult = record {
     total_event_count : nat64;
 };
 
+// Sequence number of a manually queued SPL deposit, independent of SOL deposit IDs.
+type DepositSplId = nat64;
+
+// Proposal-supplied SPL registration; verified locally without RPC or ledger calls.
+type SplTokenRegistration = record {
+    mint : text;
+    token_program : text;
+    decimals : nat8;
+    ledger_id : principal;
+    index_id : opt principal;
+    symbol : text;
+    minimum_deposit_amount : nat64;
+    deposit_fee : nat64;
+    deposits_paused : bool;
+    // Withdrawal fee in the token's smallest units. Omitted means no fee.
+    withdrawal_fee_token : opt nat64;
+};
+
+type SplTokenUpdate = record {
+    mint : text;
+    minimum_deposit_amount : opt nat64;
+    deposit_fee : opt nat64;
+    deposits_paused : opt bool;
+    withdrawal_fee_token : opt nat64;
+};
+
+// The withdrawal fees collected so far for one supported SPL token.
+type CollectedSplWithdrawalFees = record {
+    // Solana mint address.
+    mint : Address;
+    // The sum of the collected fees in the token's smallest units.
+    amount : nat;
+};
+
+// The deposit fees collected so far for one supported SPL token.
+type CollectedSplDepositFees = record {
+    // Solana mint address.
+    mint : Address;
+    // The sum of the collected fees in the token's smallest units.
+    amount : nat;
+};
+
+type SplTokenInfo = record {
+    mint : Address;
+    token_program : Address;
+    decimals : nat8;
+    ledger_id : principal;
+    index_id : opt principal;
+    symbol : text;
+    minimum_deposit_amount : nat64;
+    deposit_fee : nat64;
+    deposits_paused : bool;
+    // Withdrawal fee in the token's smallest units, deducted from the withdrawn amount.
+    withdrawal_fee_token : nat64;
+    // The smallest amount that a withdrawal request can have, in the token's smallest
+    // units: `withdrawal_fee_token + 1`. It is derived, not a setting. The token ledger
+    // can reject a burn below its own minimum.
+    minimum_withdrawal_amount : nat64;
+    // The fee in lamports of ckSOL that a withdrawal of this token burns and keeps.
+    withdrawal_fee_cksol : Lamport;
+    // The lamports of ckSOL that a withdrawal burns for the rent of the destination token
+    // account. The part that is not spent is refunded in ckSOL.
+    refundable_rent : Lamport;
+    // The ckSOL that a withdrawal burns: `withdrawal_fee_cksol + refundable_rent`. The
+    // allowance on the ckSOL ledger must cover it.
+    total_withdrawal_fee_cksol : Lamport;
+};
+
+type OperatingRefillConfig = record {
+    enabled : bool;
+    low_water_mark : nat64;
+    target : nat64;
+};
+
+type OperatingBalance = record {
+    balance : nat64;
+    top_up_account : Account;
+};
+
+type DepositSplArgs = record {
+    owner : opt principal;
+    subaccount : opt blob;
+    mint : Address;
+};
+
+type DepositSplError = variant {
+    AlreadyProcessing;
+    InsufficientCycles : InsufficientCyclesError;
+    ValueTooSmall : record { balance : nat64; minimum_balance : nat64 };
+    UnsupportedToken : record { mint : Address };
+    TokenPaused : record { mint : Address };
+    InvalidTokenAccount : text;
+    // The latest deposit of this account and mint is quarantined. The pair stays
+    // rejected until a minter upgrade resolves the deposit.
+    Quarantined : record {
+        // The identifier of the quarantined deposit.
+        deposit_id : DepositSplId;
+    };
+    TemporarilyUnavailable : text;
+};
+
+// The status of a deposit queued by `deposit_spl`.
+type DepositSplStatus = variant {
+    // No deposit with this identifier was queued.
+    NotFound;
+    // The token account is queued for a sweep to the minter's treasury token account.
+    Queued : record {
+        // The recorded balance that will be swept, in the mint's smallest units.
+        balance : nat64;
+        // The fee recorded at acceptance, in the mint's smallest units.
+        fee : nat64;
+    };
+    // A Solana transaction sweeping the token account to the treasury has been
+    // submitted but its outcome is not settled yet.
+    Swept : record {
+        // The signature of the sweep transaction.
+        signature : Signature;
+    };
+    // The sweep transaction was finalized successfully, so the tokens reached the
+    // treasury, but the ckSPL mint has not landed yet.
+    Finalized : record {
+        // The signature of the sweep transaction.
+        signature : Signature;
+    };
+    // The minter minted ckSPL for the deposit on its token ledger.
+    Minted : record {
+        // The mint transaction index on the token ledger.
+        block_index : LedgerMintIndex;
+        // The minted amount: the swept balance minus the fee, in the mint's smallest units.
+        minted_amount : nat64;
+    };
+    // The sweep transaction failed, or expired without ever being seen on chain, so no
+    // ckSPL is owed. Calling `deposit_spl` again queues a new sweep of whatever balance
+    // the token account holds.
+    Dropped : record {
+        // The signature of the sweep transaction.
+        signature : Signature;
+    };
+    // Either the outcome of the sweep did not match its plan, so no ckSPL was minted, or
+    // the mint could not be retried safely, so the mint outcome requires manual
+    // verification. Releasing or crediting the deposit requires a minter upgrade.
+    // Meanwhile the account and mint pair stays in flight, so `deposit_spl` keeps
+    // rejecting it and a new deposit has to use a different subaccount.
+    Quarantined : record {
+        // The signature of the sweep transaction.
+        signature : Signature;
+    };
+};
+
 service : (MinterArg) -> {
-    // Returns the Solana address to which the owner should send SOL.
+    // Manually queue a classic SPL deposit; the caller may sponsor another owner.
+    deposit_spl : (DepositSplArgs) -> (variant { Ok : DepositSplId; Err : DepositSplError });
+    // Returns the status of the SPL deposit with the given identifier,
+    // or `NotFound` if no deposit with this identifier was queued.
+    deposit_spl_status : (DepositSplId) -> (DepositSplStatus) query;
+    // Unbacked operating SOL and the ckSOL account used to fund automatic refills.
+    get_operating_balance : () -> (OperatingBalance) query;
+    // Returns the Solana address to which the owner should send SOL, or the supported
+    // SPL tokens listed in `get_minter_info`. For an SPL token, the tokens go to the
+    // associated token account of this address.
     //
     // If the owner is not set, it defaults to the caller's principal.
     // The resolved owner must be a non-anonymous principal.
@@ -739,6 +1275,7 @@ service : (MinterArg) -> {
     // the minter reads the balance of the address on a schedule for about
     // a day and queues a sweep once it reaches the minimum deposit amount,
     // deducting the automatic deposit fee from the minted amount.
+    // The automatic flow detects SOL only; an SPL deposit needs `deposit_spl`.
     //
     // The owner is always the caller, who must be a non-anonymous principal.
     watch_deposit_address: (WatchDepositAddressArgs) -> (WatchDepositAddressResult);
@@ -748,6 +1285,14 @@ service : (MinterArg) -> {
 
     // Retrieve the status of a Solana withdrawal request.
     withdraw_sol_status : (WithdrawSolStatusArgs) -> (WithdrawSolStatus);
+
+    // Submits a request to convert ckSPL to SPL tokens on Solana. The caller pays the
+    // Solana costs in ckSOL: the minter burns the fee and the rent reserve first, then
+    // the token amount.
+    withdraw_spl : (WithdrawSplArgs) -> (WithdrawSplResult);
+
+    // Retrieve the status of an SPL withdrawal request.
+    withdraw_spl_status : (WithdrawSplStatusArgs) -> (WithdrawSplStatus);
 
     // Returns the list of supported ICRC standards.
     icrc10_supported_standards : () -> (vec Icrc10StandardRecord) query;
