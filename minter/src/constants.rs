@@ -111,3 +111,6 @@ pub const FEE_PER_SIGNATURE: u64 = 5_000;
 ///
 /// See <https://solana.com/docs/core/rent#rent-exempt-minimum>.
 pub const RENT_EXEMPTION_THRESHOLD: u64 = 890_880;
+
+/// Initial manual SPL consolidation fee. Later changes are recorded through UpgradeArgs.
+pub const DEFAULT_SPL_DEPOSIT_CONSOLIDATION_FEE: u128 = 70_000_000_000;

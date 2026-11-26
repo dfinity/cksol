@@ -19,6 +19,9 @@ pub type LedgerMintIndex = u64;
 pub type LedgerBurnIndex = u64;
 
 /// Arguments for a request to the `get_deposit_address` ckSOL minter endpoint.
+/// The result is the derived Solana owner address shared by SOL and supported SPL
+/// deposits. SPL senders use a token transfer to this owner, whose associated token
+/// account is derived for the mint.
 #[derive(Clone, Eq, PartialEq, Debug, Default, CandidType, Deserialize, Serialize)]
 pub struct GetDepositAddressArgs {
     /// The principal to deposit funds to.
@@ -354,6 +357,16 @@ pub struct MinterInfo {
     pub automatic_deposit_fee: Option<Lamport>,
     /// The sum in lamports of the automatic deposit fees collected so far.
     pub collected_automatic_deposit_fees: Option<Lamport>,
+    /// Registered SPL tokens in mint-address order; empty when none are registered.
+    /// Absent in responses from older minter versions.
+    pub supported_spl_tokens: Option<Vec<SplTokenInfo>>,
+    /// Cycles to attach for a new manual SPL deposit: the source-read budget plus consolidation.
+    pub deposit_spl_required_cycles: Option<u128>,
+    /// Cycle fee charged only when a new SPL deposit is queued; excludes the source-read cost.
+    pub spl_deposit_consolidation_fee: Option<u128>,
+    /// The SPL deposit fees collected so far, with one entry per registered token in
+    /// mint-address order. Absent in responses from older minter versions.
+    pub collected_spl_deposit_fees: Option<Vec<CollectedSplDepositFees>>,
 }
 
 /// An entry of the list returned by the [ICRC-10](https://github.com/dfinity/ICRC/blob/main/ICRCs/ICRC-10/ICRC-10.md)
@@ -364,4 +377,154 @@ pub struct StandardRecord {
     pub name: String,
     /// The URL of the specification of the standard.
     pub url: String,
+}
+
+/// Registry and deposit settings for one supported SPL token.
+#[derive(Clone, Debug, Eq, PartialEq, CandidType, Deserialize, Serialize)]
+pub struct SplTokenInfo {
+    /// Solana mint address.
+    pub mint: Address,
+    /// Classic SPL Token program address.
+    pub token_program: Address,
+    /// Token and ledger decimals.
+    pub decimals: u8,
+    /// The ckSPL ledger canister.
+    pub ledger_id: Principal,
+    /// Optional index canister.
+    pub index_id: Option<Principal>,
+    /// The ckSPL ledger symbol.
+    pub symbol: String,
+    /// Minimum net deposit in the token's smallest units.
+    pub minimum_deposit_amount: u64,
+    /// Fixed deposit fee in the token's smallest units.
+    pub deposit_fee: u64,
+    /// Whether new deposit requests are paused.
+    pub deposits_paused: bool,
+}
+
+/// The deposit fees collected so far for one supported SPL token.
+#[derive(Clone, Debug, Eq, PartialEq, CandidType, Deserialize, Serialize)]
+pub struct CollectedSplDepositFees {
+    /// Solana mint address.
+    pub mint: Address,
+    /// The sum of the collected fees in the token's smallest units.
+    pub amount: u128,
+}
+
+/// Unbacked SOL available for minter operating costs and its ckSOL funding account.
+#[derive(Clone, Debug, Eq, PartialEq, CandidType, Deserialize, Serialize)]
+pub struct OperatingBalance {
+    /// Lamports credited by completed refill burns; excludes unresolved burns.
+    pub balance: u64,
+    /// Donate ckSOL here to fund automatic operating-SOL refills.
+    pub top_up_account: Account,
+}
+
+/// Sequence number of a manually queued SPL deposit, independent of SOL deposit IDs.
+pub type DepositSplId = u64;
+
+/// Arguments for a manual SPL deposit. The caller may sponsor another owner's deposit.
+#[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize, Serialize)]
+pub struct DepositSplArgs {
+    /// Beneficiary principal; defaults to the caller.
+    pub owner: Option<Principal>,
+    /// Beneficiary subaccount; defaults to the all-zero subaccount.
+    pub subaccount: Option<Subaccount>,
+    /// Registered classic SPL mint.
+    pub mint: Address,
+}
+
+/// The status of a deposit queued by the `deposit_spl` ckSOL minter endpoint.
+#[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize, Serialize)]
+pub enum DepositSplStatus {
+    /// No deposit with this identifier was queued.
+    NotFound,
+    /// The token account is queued for a sweep to the minter's treasury token account.
+    Queued {
+        /// The recorded balance that will be swept, in the mint's smallest units.
+        balance: u64,
+        /// The fee recorded at acceptance, in the mint's smallest units.
+        fee: u64,
+    },
+    /// A Solana transaction sweeping the token account to the treasury has been submitted
+    /// but its outcome is not settled yet.
+    Swept {
+        /// The signature of the sweep transaction.
+        signature: Signature,
+    },
+    /// The sweep transaction was finalized successfully, so the tokens reached the
+    /// treasury, but the ckSPL mint has not landed yet.
+    Finalized {
+        /// The signature of the sweep transaction.
+        signature: Signature,
+    },
+    /// The minter minted ckSPL for the deposit on its token ledger.
+    Minted {
+        /// The mint transaction index on the token ledger.
+        block_index: LedgerMintIndex,
+        /// The minted amount: the swept balance minus the fee, in the mint's smallest units.
+        minted_amount: u64,
+    },
+    /// The sweep transaction failed, or expired without ever being seen on chain, so no
+    /// ckSPL is owed. Calling `deposit_spl` again queues a new sweep of whatever balance
+    /// the token account holds.
+    Dropped {
+        /// The signature of the sweep transaction.
+        signature: Signature,
+    },
+    /// Either the outcome of the sweep did not match its plan, so no ckSPL was minted, or
+    /// the mint could not be retried safely, so the mint outcome requires manual
+    /// verification. Releasing or crediting the deposit requires a minter upgrade.
+    /// Meanwhile the account and mint pair stays in flight, so `deposit_spl` keeps
+    /// rejecting it and a new deposit has to use a different subaccount.
+    Quarantined {
+        /// The signature of the sweep transaction.
+        signature: Signature,
+    },
+}
+
+/// A manual SPL deposit could not be queued.
+#[derive(Debug, Clone, PartialEq, CandidType, Deserialize, Error)]
+pub enum DepositSplError {
+    /// Another request for the same account and mint is awaiting its balance read.
+    #[error("There is already a concurrent SPL deposit request for this account and mint")]
+    AlreadyProcessing,
+    /// Attach the reported cycle budget before making the source-account RPC call.
+    #[error(transparent)]
+    InsufficientCycles(#[from] InsufficientCyclesError),
+    /// Source tokens do not cover the minimum net deposit plus captured token fee.
+    #[error("Balance {balance} is below the minimum required balance {minimum_balance}")]
+    ValueTooSmall {
+        /// Gross source token balance.
+        balance: u64,
+        /// Required gross token balance, including the token fee.
+        minimum_balance: u64,
+    },
+    /// The mint has no registry entry.
+    #[error("Unsupported SPL token: {mint}")]
+    UnsupportedToken {
+        /// Requested mint address.
+        mint: Address,
+    },
+    /// New deposits are paused for this mint.
+    #[error("SPL deposits are paused for token {mint}")]
+    TokenPaused {
+        /// Requested mint address.
+        mint: Address,
+    },
+    /// Wrong program, token owner, mint, state or account encoding.
+    #[error("Invalid SPL token account: {0}")]
+    InvalidTokenAccount(String),
+    /// The latest deposit of this account and mint is quarantined: the outcome of its sweep
+    /// did not match the plan, or its mint could not be retried safely. The pair stays
+    /// rejected until a minter upgrade resolves the deposit; a new deposit has to use a
+    /// different subaccount.
+    #[error("The latest deposit {deposit_id} of this account and mint is quarantined")]
+    Quarantined {
+        /// The identifier of the quarantined deposit.
+        deposit_id: DepositSplId,
+    },
+    /// A key or RPC result is unavailable, or concurrent request capacity was reached.
+    #[error("SPL deposit is temporarily unavailable: {0}")]
+    TemporarilyUnavailable(String),
 }

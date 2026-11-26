@@ -42,6 +42,17 @@ pub fn account_address(master_key: &SchnorrPublicKey, account: &Account) -> Addr
         .into()
 }
 
+/// Derives the classic SPL associated token account of an owner and mint.
+/// This does not create the account on Solana or change the shared deposit owner.
+pub fn associated_token_address(owner: &Address, mint: &Address) -> Address {
+    spl_associated_token_account_interface::address::get_associated_token_address(
+        &owner.to_bytes().into(),
+        &mint.to_bytes().into(),
+    )
+    .to_bytes()
+    .into()
+}
+
 /// The minter's Schnorr master public key is only unavailable in the short window
 /// between the first initialization of the minter and the completion of the
 /// key fetch scheduled by `init`.

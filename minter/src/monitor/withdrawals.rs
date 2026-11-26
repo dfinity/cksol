@@ -161,7 +161,8 @@ fn in_flight_withdrawals() -> Vec<InFlightWithdrawal> {
                     nonce_value: *nonce_value,
                     submitted_at: *submitted_at,
                 }),
-                MinterTransaction::SweepDeposit { .. } => None,
+                MinterTransaction::SweepDeposit { .. }
+                | MinterTransaction::SweepSplDeposit { .. } => None,
             })
             .collect()
     })

@@ -592,6 +592,13 @@ pub mod devnet_sweep {
         sign_on(crate::address::derivation_path(account), message)
     }
 
+    pub fn account_signature_of(
+        account: &Account,
+        message: &Message,
+    ) -> solana_signature::Signature {
+        sign_as(account, &message.serialize())
+    }
+
     pub fn minter_signature_of(message: &Message) -> solana_signature::Signature {
         sign_on(crate::address::MINTER_DERIVATION_PATH, &message.serialize())
     }
@@ -1359,7 +1366,9 @@ pub mod arb {
     };
     use candid::Principal;
     use cksol_types::DepositSolId;
-    use cksol_types_internal::{Ed25519KeyName, InitArgs, SolanaNetwork, UpgradeArgs};
+    use cksol_types_internal::{
+        Ed25519KeyName, InitArgs, OperatingRefillConfig, SolanaNetwork, UpgradeArgs,
+    };
     use ic_ed25519::{PrivateKey, PublicKey};
     use icrc_ledger_types::icrc1::account::Account;
     use proptest::prelude::{Just, Strategy, any, prop, prop_oneof};
@@ -1567,6 +1576,8 @@ pub mod arb {
             prop::option::of(any::<u64>()),
             prop::option::of(arb_nonce_accounts()),
             prop::option::of(any::<u64>()),
+            prop::option::of(arb_operating_refill_config()),
+            prop::option::of(any::<u64>()),
         )
             .prop_map(
                 |(
@@ -1578,6 +1589,8 @@ pub mod arb {
                     deposit_sol_fee,
                     nonce_accounts_to_add,
                     automatic_deposit_fee,
+                    operating_balance_refill,
+                    spl_deposit_consolidation_fee,
                 )| UpgradeArgs {
                     sol_rpc_canister_id,
                     minimum_withdrawal_amount,
@@ -1587,8 +1600,21 @@ pub mod arb {
                     deposit_sol_fee,
                     nonce_accounts_to_add,
                     automatic_deposit_fee,
+                    operating_balance_refill,
+                    spl_deposit_consolidation_fee,
+                    ..Default::default()
                 },
             )
+    }
+
+    fn arb_operating_refill_config() -> impl Strategy<Value = OperatingRefillConfig> {
+        (any::<bool>(), any::<u64>(), any::<u64>()).prop_map(|(enabled, low_water_mark, target)| {
+            OperatingRefillConfig {
+                enabled,
+                low_water_mark,
+                target,
+            }
+        })
     }
 
     pub fn arb_ledger_burn_index() -> impl Strategy<Value = LedgerBurnIndex> {
@@ -1696,7 +1722,67 @@ pub mod arb {
                         nonce_value,
                     }
                 }),
+            (arb_signature(), any::<u64>(), any::<u64>(), any::<u64>()).prop_map(
+                |(signature, lamports_spent, deposit_id, amount_to_mint)| {
+                    EventType::CreditedSplSweep {
+                        signature,
+                        lamports_spent,
+                        deposit_id,
+                        amount_to_mint,
+                    }
+                }
+            ),
+            arb_signature().prop_map(|signature| EventType::QuarantinedSplSweep { signature }),
+            (any::<u64>(), arb_ledger_mint_index()).prop_map(|(deposit_id, mint_block_index)| {
+                EventType::MintedSweptSplDeposit {
+                    deposit_id,
+                    mint_block_index,
+                }
+            }),
+            any::<u64>().prop_map(|deposit_id| EventType::QuarantinedPendingSplMint { deposit_id }),
+            (arb_signature(), any::<u64>()).prop_map(|(signature, lamports_spent)| {
+                EventType::FailedSplSweep {
+                    signature,
+                    lamports_spent,
+                }
+            }),
             arb_watchlist_snapshot().prop_map(EventType::WatchedDepositAddresses),
+            (
+                any::<u64>(),
+                arb_account(),
+                arb_address(),
+                arb_address(),
+                any::<u64>(),
+                any::<u64>()
+            )
+                .prop_map(|(deposit_id, account, mint, address, balance, fee)| {
+                    EventType::QueuedSplDeposit {
+                        deposit_id,
+                        account,
+                        mint,
+                        address,
+                        balance,
+                        fee,
+                    }
+                }),
+            (any::<u64>(), any::<u64>(), any::<u64>()).prop_map(
+                |(refill_id, amount, created_at_time)| EventType::RequestedOperatingRefill {
+                    refill_id,
+                    amount,
+                    created_at_time
+                }
+            ),
+            (any::<u64>(), any::<u64>()).prop_map(|(refill_id, burn_block_index)| {
+                EventType::CompletedOperatingRefill {
+                    refill_id,
+                    burn_block_index,
+                }
+            }),
+            (any::<u64>(), ".*").prop_map(|(refill_id, reason)| EventType::FailedOperatingRefill {
+                refill_id,
+                reason
+            }),
+            any::<u64>().prop_map(|refill_id| EventType::QuarantinedOperatingRefill { refill_id }),
         ]
     }
 
@@ -1737,6 +1823,12 @@ pub mod arb {
 
     fn arb_transaction_purpose() -> impl Strategy<Value = TransactionPurpose> {
         prop_oneof![
+            (any::<u64>(), arb_block_height()).prop_map(|(deposit_id, block_height)| {
+                TransactionPurpose::SweepSplDeposit {
+                    deposit_id,
+                    block_height,
+                }
+            }),
             (
                 prop::collection::vec(any::<u64>(), 1..10),
                 arb_block_height()
@@ -1876,3 +1968,35 @@ impl EventsAssert {
         assert!(self.0.is_empty());
     }
 }
+
+/// A classic SPL source account, packed as the token program's 165-byte account layout.
+pub fn spl_token_account_info(
+    owner: Address,
+    mint: Address,
+    amount: u64,
+) -> sol_rpc_types::AccountInfo {
+    use solana_program_pack::Pack;
+    use spl_token_interface::state::{Account as TokenAccount, AccountState};
+    let token = TokenAccount {
+        owner: owner.to_bytes().into(),
+        mint: mint.to_bytes().into(),
+        amount,
+        state: AccountState::Initialized,
+        ..Default::default()
+    };
+    let mut bytes = vec![0; TokenAccount::LEN];
+    TokenAccount::pack(token, &mut bytes).unwrap();
+    sol_rpc_types::AccountInfo {
+        lamports: 2_039_280,
+        data: sol_rpc_types::AccountData::Binary(
+            STANDARD.encode(bytes),
+            sol_rpc_types::AccountEncoding::Base64,
+        ),
+        owner: spl_token_interface::id().to_string(),
+        executable: false,
+        rent_epoch: u64::MAX,
+        space: TokenAccount::LEN as u64,
+    }
+}
+
+pub mod spl_sweep;

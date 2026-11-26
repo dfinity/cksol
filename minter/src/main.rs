@@ -4,22 +4,27 @@ use cksol_minter::{
     address::{fetch_and_record_minter_public_key, minter_address},
     deposit::{
         automatic::{SCAN_WATCHED_ADDRESSES_DELAY, scan_watched_addresses},
+        spl::{SWEEP_SPL_DEPOSITS_DELAY, process_pending_spl_mints, sweep_queued_spl_deposits},
         sweep::{
             PROCESS_PENDING_MINTS_DELAY, SWEEP_DEPOSITS_DELAY, process_pending_mints,
             sweep_queued_deposits,
         },
     },
     monitor::{FINALIZE_TRANSACTIONS_DELAY, finalize_transactions},
+    operating_balance::{
+        OPERATING_REFILL_DELAY, operating_top_up_account, refill_operating_balance,
+    },
     runtime::IcCanisterRuntime,
     state::read_state,
     utils::timed_sized_map::Timestamp,
     withdraw::{WITHDRAWAL_PROCESSING_DELAY, process_pending_withdrawals},
 };
 use cksol_types::{
-    Address, DepositSolArgs, DepositSolError, DepositSolId, DepositSolStatus,
-    GetDepositAddressArgs, MinterInfo, StandardRecord, WatchDepositAddressArgs,
-    WatchDepositAddressError, WatchDepositAddressOk, WithdrawSolArgs, WithdrawSolError,
-    WithdrawSolOk, WithdrawSolStatus, WithdrawSolStatusArgs,
+    Address, DepositSolArgs, DepositSolError, DepositSolId, DepositSolStatus, DepositSplArgs,
+    DepositSplError, DepositSplId, DepositSplStatus, GetDepositAddressArgs, MinterInfo,
+    OperatingBalance, StandardRecord, WatchDepositAddressArgs, WatchDepositAddressError,
+    WatchDepositAddressOk, WithdrawSolArgs, WithdrawSolError, WithdrawSolOk, WithdrawSolStatus,
+    WithdrawSolStatusArgs,
 };
 use cksol_types_internal::{MinterArg, log::Priority};
 use ic_http_types::{HttpRequest, HttpResponse, HttpResponseBuilder};
@@ -165,6 +170,10 @@ fn get_minter_info() -> MinterInfo {
             .collect(),
         automatic_deposit_fee: s.automatic_deposit_fee(),
         collected_automatic_deposit_fees: Some(s.collected_automatic_deposit_fees()),
+        supported_spl_tokens: Some(s.supported_spl_tokens()),
+        deposit_spl_required_cycles: Some(s.deposit_spl_required_cycles()),
+        spl_deposit_consolidation_fee: Some(s.spl_deposit_consolidation_fee()),
+        collected_spl_deposit_fees: Some(s.collected_spl_deposit_fees()),
     })
 }
 
@@ -287,6 +296,25 @@ fn assert_valid_deposit_account(
     account
 }
 
+#[ic_cdk::query]
+fn get_operating_balance() -> OperatingBalance {
+    OperatingBalance {
+        balance: read_state(|s| s.operating_balance().balance()),
+        top_up_account: operating_top_up_account(ic_cdk::api::canister_self()),
+    }
+}
+
+#[ic_cdk::update]
+async fn deposit_spl(args: DepositSplArgs) -> Result<DepositSplId, DepositSplError> {
+    let account = resolve_account(args.owner, args.subaccount);
+    cksol_minter::deposit::spl::deposit_spl(&IcCanisterRuntime::new(), account, args.mint).await
+}
+
+#[ic_cdk::query]
+fn deposit_spl_status(deposit_id: DepositSplId) -> DepositSplStatus {
+    cksol_minter::deposit::spl::deposit_spl_status(deposit_id)
+}
+
 fn setup_timers() {
     ic_cdk_timers::set_timer(Duration::from_secs(0), async {
         fetch_and_record_minter_public_key(IcCanisterRuntime::new()).await;
@@ -297,14 +325,23 @@ fn setup_timers() {
     ic_cdk_timers::set_timer_interval(SWEEP_DEPOSITS_DELAY, async || {
         sweep_queued_deposits(IcCanisterRuntime::new()).await;
     });
+    ic_cdk_timers::set_timer_interval(SWEEP_SPL_DEPOSITS_DELAY, async || {
+        sweep_queued_spl_deposits(IcCanisterRuntime::new()).await;
+    });
     ic_cdk_timers::set_timer_interval(PROCESS_PENDING_MINTS_DELAY, async || {
         process_pending_mints(IcCanisterRuntime::new()).await;
+    });
+    ic_cdk_timers::set_timer_interval(PROCESS_PENDING_MINTS_DELAY, async || {
+        process_pending_spl_mints(IcCanisterRuntime::new()).await;
     });
     ic_cdk_timers::set_timer_interval(FINALIZE_TRANSACTIONS_DELAY, async || {
         finalize_transactions(IcCanisterRuntime::new()).await;
     });
     ic_cdk_timers::set_timer_interval(SCAN_WATCHED_ADDRESSES_DELAY, async || {
         scan_watched_addresses(IcCanisterRuntime::new()).await;
+    });
+    ic_cdk_timers::set_timer_interval(OPERATING_REFILL_DELAY, async || {
+        refill_operating_balance(IcCanisterRuntime::new()).await;
     });
 }
 

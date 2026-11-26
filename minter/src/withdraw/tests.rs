@@ -765,7 +765,8 @@ mod process_pending_withdrawals_tests {
                 .iter()
                 .map(|(_, tx)| match tx {
                     MinterTransaction::Withdrawal { nonce_account, .. } => *nonce_account,
-                    MinterTransaction::SweepDeposit { .. } => {
+                    MinterTransaction::SweepDeposit { .. }
+                    | MinterTransaction::SweepSplDeposit { .. } => {
                         panic!("expected a withdrawal transaction, got {tx:?}")
                     }
                 })
