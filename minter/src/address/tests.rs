@@ -268,3 +268,24 @@ fn test_key_result() -> SchnorrPublicKeyResult {
         chain_code: key.chain_code.to_vec(),
     }
 }
+
+mod associated_token_address_tests {
+    use super::*;
+    use crate::address::associated_token_address;
+
+    fn owner(account: &Account) -> Address {
+        account_address(&test_key(), account)
+    }
+
+    #[test]
+    fn should_match_the_existing_classic_ata_vector() {
+        // Vector retained from the original SPL implementation: owner
+        // ALA4bv2qnUr5H81zcZM3FnEzMeEvh4ErZU3nbqHnghFK, mint [2; 32].
+        assert_eq!(
+            associated_token_address(&owner(&account(1)), &[2; 32].into()),
+            "EEpHwkSW9e3qA4mSAU9FHUpXev2exT7cofkumm4NYLe6"
+                .parse::<Address>()
+                .unwrap(),
+        );
+    }
+}

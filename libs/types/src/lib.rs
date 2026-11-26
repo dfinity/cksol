@@ -3,9 +3,9 @@
 #![forbid(unsafe_code)]
 #![forbid(missing_docs)]
 
-use candid::{CandidType, Principal};
+use candid::{CandidType, Nat, Principal};
 use icrc_ledger_types::icrc1::account::{Account, Subaccount};
-pub use memo::{BurnMemo, MAX_SERIALIZED_MEMO_BYTES, Memo, MintMemo};
+pub use memo::{BurnMemo, MAX_SERIALIZED_MEMO_BYTES, Memo, MintMemo, SplRefundKind};
 use serde::{Deserialize, Serialize};
 pub use sol_rpc_types::{Lamport, Pubkey as Address, Signature};
 use thiserror::Error;
@@ -19,6 +19,9 @@ pub type LedgerMintIndex = u64;
 pub type LedgerBurnIndex = u64;
 
 /// Arguments for a request to the `get_deposit_address` ckSOL minter endpoint.
+/// The result is the derived Solana owner address shared by SOL and supported SPL
+/// deposits. SPL senders use a token transfer to this owner, whose associated token
+/// account is derived for the mint.
 #[derive(Clone, Eq, PartialEq, Debug, Default, CandidType, Deserialize, Serialize)]
 pub struct GetDepositAddressArgs {
     /// The principal to deposit funds to.
@@ -329,6 +332,213 @@ pub enum WithdrawSolStatus {
     TxFinalized(TxFinalizedStatus),
 }
 
+/// Arguments for a request to the `withdraw_spl` endpoint.
+#[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize, Serialize)]
+pub struct WithdrawSplArgs {
+    /// The Solana mint identifying the registered SPL token and its ckSPL ledger.
+    pub mint: Address,
+    /// The subaccount of the caller to burn ckSOL and ckSPL from.
+    pub from_subaccount: Option<Subaccount>,
+    /// The requested burn amount in the token's smallest units, not lamports.
+    pub amount: u64,
+    /// The destination wallet address on Solana, not a token account address.
+    pub address: String,
+}
+
+/// The block index of an SPL withdrawal's fee burn on the ckSOL ledger.
+///
+/// Using the common fee ledger makes the identifier unique across all supported mints.
+pub type WithdrawSplId = LedgerBurnIndex;
+
+/// The acceptance receipt of an SPL withdrawal request.
+///
+/// Acceptance records the burn and queues the withdrawal; it does not mean that the
+/// Solana transfer has been submitted or finalized.
+#[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize, Serialize)]
+pub struct WithdrawSplOk {
+    /// The ckSOL fee burn block index, also used to track the withdrawal.
+    pub cksol_burn_block_index: WithdrawSplId,
+    /// The amount burn block index on the ckSPL ledger selected by the request's mint.
+    pub ckspl_burn_block_index: u64,
+}
+
+/// The error result of an SPL withdrawal request.
+#[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize)]
+pub enum WithdrawSplError {
+    /// The mint is not registered with the minter.
+    TokenNotSupported {
+        /// The requested Solana mint.
+        mint: Address,
+    },
+    /// The token amount does not exceed the token's withdrawal fee, so nothing would be
+    /// transferred. The minter enforces no other minimum.
+    ValueTooSmall {
+        /// The minimum amount in the token's smallest units.
+        minimum_withdrawal_amount: u64,
+        /// The requested amount in the token's smallest units.
+        withdrawal_amount: u64,
+    },
+    /// Another withdrawal is being processed for this account.
+    AlreadyProcessing,
+    /// The destination cannot be parsed as a Solana address.
+    MalformedAddress(String),
+    /// The destination is not an allowed withdrawal address.
+    InvalidDestination(String),
+    /// The minter cannot currently accept the request.
+    TemporarilyUnavailable(String),
+    /// Burning the ckSOL withdrawal fee and rent reserve failed.
+    CkSolLedgerError {
+        /// The error from the ckSOL ledger.
+        error: WithdrawSplLedgerError,
+    },
+    /// Burning ckSPL failed after the ckSOL fee was burned.
+    CkSplLedgerError {
+        /// The successful ckSOL fee burn index, also the withdrawal ID.
+        cksol_burn_block_index: WithdrawSplId,
+        /// The error from the ckSPL ledger.
+        error: WithdrawSplLedgerError,
+    },
+}
+
+/// A withdrawal burn error from either the ckSOL or ckSPL ledger.
+#[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize)]
+pub enum WithdrawSplLedgerError {
+    /// The account cannot cover the burn amount.
+    InsufficientFunds {
+        /// The ledger balance in the token's smallest units.
+        balance: Nat,
+        /// The amount the minter attempted to burn.
+        failed_burn_amount: Nat,
+        /// The ledger's configured token symbol.
+        token_symbol: String,
+        /// The ledger that rejected the burn.
+        ledger_id: Principal,
+    },
+    /// The minter is not approved to burn the requested amount.
+    InsufficientAllowance {
+        /// The ledger allowance in the token's smallest units.
+        allowance: Nat,
+        /// The amount the minter attempted to burn.
+        failed_burn_amount: Nat,
+        /// The ledger's configured token symbol.
+        token_symbol: String,
+        /// The ledger that rejected the burn.
+        ledger_id: Principal,
+    },
+    /// The requested amount is below the ledger's minimum burn amount.
+    AmountTooLow {
+        /// The minimum burn amount in the token's smallest units.
+        minimum_burn_amount: Nat,
+        /// The amount the minter attempted to burn.
+        failed_burn_amount: Nat,
+        /// The ledger's configured token symbol.
+        token_symbol: String,
+        /// The ledger that rejected the burn.
+        ledger_id: Principal,
+    },
+    /// The ledger call failed or returned another error; the outcome may be unresolved.
+    TemporarilyUnavailable(String),
+}
+
+/// Arguments for a request to the `withdraw_spl_status` endpoint.
+#[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize)]
+pub struct WithdrawSplStatusArgs {
+    /// The ckSOL fee burn block index returned by the `withdraw_spl` endpoint.
+    pub cksol_burn_block_index: WithdrawSplId,
+}
+
+/// The progress of the ckSOL refund of the rent reserve of an SPL withdrawal.
+#[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize)]
+pub enum SplRentRefundStatus {
+    /// No refund is owed: the transaction spent the whole reserve.
+    NotDue,
+    /// The refund is queued.
+    Pending {
+        /// The ckSOL amount to mint back, in lamports.
+        amount: Lamport,
+    },
+    /// The refund was minted.
+    Reimbursed {
+        /// The ckSOL amount minted back, in lamports.
+        amount: Lamport,
+        /// The mint block index on the ckSOL ledger.
+        mint_block_index: u64,
+    },
+    /// The refund cannot be retried safely and requires manual resolution.
+    Quarantined {
+        /// The ckSOL amount that was to be minted back, in lamports.
+        amount: Lamport,
+    },
+}
+
+/// Status of an SPL withdrawal request.
+#[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize)]
+pub enum WithdrawSplStatus {
+    /// Withdrawal request is not found.
+    NotFound,
+    /// Withdrawal request is waiting to be processed.
+    Pending,
+    /// Solana transaction was signed and is sent to the network.
+    TxSent {
+        /// The unique identifier (signature) of the Solana transaction.
+        transaction_id: Signature,
+    },
+    /// Solana transaction is finalized and the tokens were transferred. The withdrawal
+    /// stays successful while its rent refund is pending.
+    TxFinalized {
+        /// The finalized transaction.
+        transaction: TxFinalizedStatus,
+        /// The refund of the rent reserve that the transaction did not spend.
+        rent_refund: SplRentRefundStatus,
+    },
+    /// The Solana transfer failed definitively; its burned ckSPL is queued for reimbursement.
+    ReimbursementPending {
+        /// The failed Solana transaction signature.
+        transaction_id: Signature,
+        /// The token amount to remint, in the token's smallest units.
+        reimbursed_amount: u64,
+        /// The refund of the rent reserve.
+        rent_refund: SplRentRefundStatus,
+    },
+    /// The tokens of the failed Solana withdrawal were reminted.
+    Reimbursed {
+        /// The failed Solana transaction signature.
+        transaction_id: Signature,
+        /// The token amount reminted, in the token's smallest units.
+        reimbursed_amount: u64,
+        /// The mint block index on the ckSPL ledger.
+        mint_block_index: u64,
+        /// The refund of the rent reserve.
+        rent_refund: SplRentRefundStatus,
+    },
+    /// The token reimbursement cannot be retried safely and requires manual resolution.
+    ReimbursementQuarantined {
+        /// The failed Solana transaction signature.
+        transaction_id: Signature,
+        /// The token amount that was to be reminted, in its smallest units.
+        reimbursed_amount: u64,
+        /// The refund of the rent reserve.
+        rent_refund: SplRentRefundStatus,
+    },
+    /// The token burn failed after the fee burn; the ckSOL fee refund is queued.
+    FeeReimbursementPending {
+        /// The ckSOL amount to mint back, in lamports.
+        reimbursed_amount: Lamport,
+    },
+    /// The ckSOL fee was minted back.
+    FeeReimbursed {
+        /// The ckSOL amount minted back, in lamports.
+        reimbursed_amount: Lamport,
+        /// The mint block index on the ckSOL ledger.
+        mint_block_index: u64,
+    },
+    /// The ckSOL fee refund cannot be retried safely and requires manual resolution.
+    FeeReimbursementQuarantined {
+        /// The ckSOL amount that was to be minted back, in lamports.
+        reimbursed_amount: Lamport,
+    },
+}
+
 /// Information about the ckSOL minter canister.
 #[derive(Clone, Debug, Eq, PartialEq, CandidType, Deserialize, Serialize)]
 pub struct MinterInfo {
@@ -354,6 +564,19 @@ pub struct MinterInfo {
     pub automatic_deposit_fee: Option<Lamport>,
     /// The sum in lamports of the automatic deposit fees collected so far.
     pub collected_automatic_deposit_fees: Option<Lamport>,
+    /// Registered SPL tokens in mint-address order; empty when none are registered.
+    /// Absent in responses from older minter versions.
+    pub supported_spl_tokens: Option<Vec<SplTokenInfo>>,
+    /// Cycles to attach for a new manual SPL deposit: the source-read budget plus consolidation.
+    pub deposit_spl_required_cycles: Option<u128>,
+    /// Cycle fee charged only when a new SPL deposit is queued; excludes the source-read cost.
+    pub spl_deposit_consolidation_fee: Option<u128>,
+    /// The SPL deposit fees collected so far, with one entry per registered token in
+    /// mint-address order. Absent in responses from older minter versions.
+    pub collected_spl_deposit_fees: Option<Vec<CollectedSplDepositFees>>,
+    /// The SPL withdrawal fees collected so far in token units, with one entry per
+    /// registered token in mint-address order. Absent in responses from older minter versions.
+    pub collected_spl_withdrawal_fees: Option<Vec<CollectedSplWithdrawalFees>>,
 }
 
 /// An entry of the list returned by the [ICRC-10](https://github.com/dfinity/ICRC/blob/main/ICRCs/ICRC-10/ICRC-10.md)
@@ -364,4 +587,178 @@ pub struct StandardRecord {
     pub name: String,
     /// The URL of the specification of the standard.
     pub url: String,
+}
+
+/// Registry and deposit settings for one supported SPL token.
+#[derive(Clone, Debug, Eq, PartialEq, CandidType, Deserialize, Serialize)]
+pub struct SplTokenInfo {
+    /// Solana mint address.
+    pub mint: Address,
+    /// Classic SPL Token program address.
+    pub token_program: Address,
+    /// Token and ledger decimals.
+    pub decimals: u8,
+    /// The ckSPL ledger canister.
+    pub ledger_id: Principal,
+    /// Optional index canister.
+    pub index_id: Option<Principal>,
+    /// The ckSPL ledger symbol.
+    pub symbol: String,
+    /// Minimum net deposit in the token's smallest units.
+    pub minimum_deposit_amount: u64,
+    /// Fixed deposit fee in the token's smallest units.
+    pub deposit_fee: u64,
+    /// Whether new deposit requests are paused.
+    pub deposits_paused: bool,
+    /// Withdrawal fee in the token's smallest units. A withdrawal of `amount` burns `amount`
+    /// and transfers `amount - withdrawal_fee_token`. The minter enforces no minimum amount; the
+    /// token ledger rejects a burn below its own minimum.
+    pub withdrawal_fee_token: u64,
+    /// The smallest amount that a withdrawal request can have, in the token's smallest
+    /// units: `withdrawal_fee_token + 1`. It is derived, not a setting.
+    pub minimum_withdrawal_amount: u64,
+    /// The fee in lamports of ckSOL that a withdrawal of this token burns and keeps.
+    pub withdrawal_fee_cksol: Lamport,
+    /// The lamports of ckSOL that a withdrawal burns for the rent of the destination token
+    /// account. The part that is not spent is refunded in ckSOL.
+    pub refundable_rent: Lamport,
+    /// The ckSOL that a withdrawal burns: `withdrawal_fee_cksol + refundable_rent`. The
+    /// allowance on the ckSOL ledger must cover it.
+    pub total_withdrawal_fee_cksol: Lamport,
+}
+
+/// The withdrawal fees collected so far for one supported SPL token.
+#[derive(Clone, Debug, Eq, PartialEq, CandidType, Deserialize, Serialize)]
+pub struct CollectedSplWithdrawalFees {
+    /// Solana mint address.
+    pub mint: Address,
+    /// The sum of the collected fees in the token's smallest units.
+    pub amount: u128,
+}
+
+/// The deposit fees collected so far for one supported SPL token.
+#[derive(Clone, Debug, Eq, PartialEq, CandidType, Deserialize, Serialize)]
+pub struct CollectedSplDepositFees {
+    /// Solana mint address.
+    pub mint: Address,
+    /// The sum of the collected fees in the token's smallest units.
+    pub amount: u128,
+}
+
+/// Unbacked SOL available for minter operating costs and its ckSOL funding account.
+#[derive(Clone, Debug, Eq, PartialEq, CandidType, Deserialize, Serialize)]
+pub struct OperatingBalance {
+    /// Lamports credited by completed refill burns; excludes unresolved burns.
+    pub balance: u64,
+    /// Donate ckSOL here to fund automatic operating-SOL refills.
+    pub top_up_account: Account,
+}
+
+/// Sequence number of a manually queued SPL deposit, independent of SOL deposit IDs.
+pub type DepositSplId = u64;
+
+/// Arguments for a manual SPL deposit. The caller may sponsor another owner's deposit.
+#[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize, Serialize)]
+pub struct DepositSplArgs {
+    /// Beneficiary principal; defaults to the caller.
+    pub owner: Option<Principal>,
+    /// Beneficiary subaccount; defaults to the all-zero subaccount.
+    pub subaccount: Option<Subaccount>,
+    /// Registered classic SPL mint.
+    pub mint: Address,
+}
+
+/// The status of a deposit queued by the `deposit_spl` ckSOL minter endpoint.
+#[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize, Serialize)]
+pub enum DepositSplStatus {
+    /// No deposit with this identifier was queued.
+    NotFound,
+    /// The token account is queued for a sweep to the minter's treasury token account.
+    Queued {
+        /// The recorded balance that will be swept, in the mint's smallest units.
+        balance: u64,
+        /// The fee recorded at acceptance, in the mint's smallest units.
+        fee: u64,
+    },
+    /// A Solana transaction sweeping the token account to the treasury has been submitted
+    /// but its outcome is not settled yet.
+    Swept {
+        /// The signature of the sweep transaction.
+        signature: Signature,
+    },
+    /// The sweep transaction was finalized successfully, so the tokens reached the
+    /// treasury, but the ckSPL mint has not landed yet.
+    Finalized {
+        /// The signature of the sweep transaction.
+        signature: Signature,
+    },
+    /// The minter minted ckSPL for the deposit on its token ledger.
+    Minted {
+        /// The mint transaction index on the token ledger.
+        block_index: LedgerMintIndex,
+        /// The minted amount: the swept balance minus the fee, in the mint's smallest units.
+        minted_amount: u64,
+    },
+    /// The sweep transaction failed, or expired without ever being seen on chain, so no
+    /// ckSPL is owed. Calling `deposit_spl` again queues a new sweep of whatever balance
+    /// the token account holds.
+    Dropped {
+        /// The signature of the sweep transaction.
+        signature: Signature,
+    },
+    /// Either the outcome of the sweep did not match its plan, so no ckSPL was minted, or
+    /// the mint could not be retried safely, so the mint outcome requires manual
+    /// verification. Releasing or crediting the deposit requires a minter upgrade.
+    /// Meanwhile the account and mint pair stays in flight, so `deposit_spl` keeps
+    /// rejecting it and a new deposit has to use a different subaccount.
+    Quarantined {
+        /// The signature of the sweep transaction.
+        signature: Signature,
+    },
+}
+
+/// A manual SPL deposit could not be queued.
+#[derive(Debug, Clone, PartialEq, CandidType, Deserialize, Error)]
+pub enum DepositSplError {
+    /// Another request for the same account and mint is awaiting its balance read.
+    #[error("There is already a concurrent SPL deposit request for this account and mint")]
+    AlreadyProcessing,
+    /// Attach the reported cycle budget before making the source-account RPC call.
+    #[error(transparent)]
+    InsufficientCycles(#[from] InsufficientCyclesError),
+    /// Source tokens do not cover the minimum net deposit plus captured token fee.
+    #[error("Balance {balance} is below the minimum required balance {minimum_balance}")]
+    ValueTooSmall {
+        /// Gross source token balance.
+        balance: u64,
+        /// Required gross token balance, including the token fee.
+        minimum_balance: u64,
+    },
+    /// The mint has no registry entry.
+    #[error("Unsupported SPL token: {mint}")]
+    UnsupportedToken {
+        /// Requested mint address.
+        mint: Address,
+    },
+    /// New deposits are paused for this mint.
+    #[error("SPL deposits are paused for token {mint}")]
+    TokenPaused {
+        /// Requested mint address.
+        mint: Address,
+    },
+    /// Wrong program, token owner, mint, state or account encoding.
+    #[error("Invalid SPL token account: {0}")]
+    InvalidTokenAccount(String),
+    /// The latest deposit of this account and mint is quarantined: the outcome of its sweep
+    /// did not match the plan, or its mint could not be retried safely. The pair stays
+    /// rejected until a minter upgrade resolves the deposit; a new deposit has to use a
+    /// different subaccount.
+    #[error("The latest deposit {deposit_id} of this account and mint is quarantined")]
+    Quarantined {
+        /// The identifier of the quarantined deposit.
+        deposit_id: DepositSplId,
+    },
+    /// A key or RPC result is unavailable, or concurrent request capacity was reached.
+    #[error("SPL deposit is temporarily unavailable: {0}")]
+    TemporarilyUnavailable(String),
 }

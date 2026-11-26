@@ -3,6 +3,7 @@ use crate::{
     state::{
         DepositOrigin, QueuedDeposit,
         event::{CreditedDeposit, VersionedMessage},
+        sweep::validate_sweep_transaction,
     },
 };
 use cksol_types::DepositSolId;
@@ -31,6 +32,10 @@ pub struct Sweeps {
 }
 
 impl Sweeps {
+    pub(crate) fn by_signature(&self) -> &BTreeMap<Signature, Sweep> {
+        &self.by_signature
+    }
+
     pub fn get(&self, signature: &Signature) -> Option<&Sweep> {
         self.by_signature.get(signature)
     }
@@ -234,24 +239,8 @@ impl Sweep {
         transaction: &VersionedTransaction,
         meta: Option<&UiTransactionStatusMeta>,
     ) -> Result<SettledSweep, SweepSettlementError> {
-        let meta = meta.ok_or(UnreadableOutcome::NoMetaField)?;
-        if let Some(error) = &meta.err {
-            return Err(SweepMismatch::TransactionFailed {
-                error: error.to_string(),
-            }
-            .into());
-        }
-        let solana_message::VersionedMessage::Legacy(message) = &transaction.message else {
-            return Err(SweepMismatch::UnexpectedMessage.into());
-        };
-        if message != &self.sweep_message(message.recent_blockhash) {
-            return Err(SweepMismatch::UnexpectedMessage.into());
-        }
-        if meta.pre_balances.len() != message.account_keys.len()
-            || meta.post_balances.len() != message.account_keys.len()
-        {
-            return Err(UnreadableOutcome::IncompleteBalances.into());
-        }
+        let (message, meta) =
+            validate_sweep_transaction(transaction, meta, |hash| self.sweep_message(hash))?;
         if meta.fee > self.fee() {
             return Err(SweepMismatch::UnexpectedFee {
                 expected: self.fee(),
@@ -399,6 +388,10 @@ pub enum UnreadableOutcome {
     NoMetaField,
     #[error("the balances in the metadata do not cover all account keys")]
     IncompleteBalances,
+    #[error("the token balances in the metadata do not cover the sweep accounts")]
+    IncompleteTokenBalances,
+    #[error("the token balances could not be read: {reason}")]
+    InvalidTokenBalances { reason: String },
 }
 
 #[derive(Debug, PartialEq, Eq, Error)]
@@ -428,6 +421,19 @@ pub enum SweepMismatch {
     UnexpectedAmountReceived { expected: Lamport, actual: Lamport },
     #[error(transparent)]
     Mint(#[from] SweepMintError),
+    #[error("the token balance metadata for {address} does not match the planned token account")]
+    UnexpectedTokenAccount { address: Address },
+    #[error(
+        "the token account {address} went from {pre} to {post} tokens instead of changing by {expected_change}"
+    )]
+    UnexpectedTokenBalanceChange {
+        address: Address,
+        pre: u64,
+        post: u64,
+        expected_change: i128,
+    },
+    #[error("the sweep transaction succeeded, but its status reported a failure")]
+    TransactionSucceeded,
 }
 
 #[derive(Debug, PartialEq, Eq, Error)]

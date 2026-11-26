@@ -1,11 +1,16 @@
-use crate::{events::MinterEventAssert, ledger_init_args::ledger_init_args};
+use crate::{
+    events::MinterEventAssert,
+    ledger_init_args::{ledger_init_args, spl_ledger_init_args},
+};
 use candid::{CandidType, Decode, Encode, Nat, Principal, utils::ArgumentEncoder};
 use canlog::{Log, LogEntry};
 use cksol_types::{
-    Address, DepositSolArgs, DepositSolError, DepositSolId, DepositSolStatus,
-    GetDepositAddressArgs, MinterInfo, StandardRecord, WatchDepositAddressArgs,
-    WatchDepositAddressError, WatchDepositAddressOk, WatchDepositAddressStatus, WithdrawSolArgs,
-    WithdrawSolError, WithdrawSolOk, WithdrawSolStatus, WithdrawSolStatusArgs,
+    Address, DepositSolArgs, DepositSolError, DepositSolId, DepositSolStatus, DepositSplArgs,
+    DepositSplError, DepositSplId, DepositSplStatus, GetDepositAddressArgs, MinterInfo,
+    OperatingBalance, StandardRecord, WatchDepositAddressArgs, WatchDepositAddressError,
+    WatchDepositAddressOk, WatchDepositAddressStatus, WithdrawSolArgs, WithdrawSolError,
+    WithdrawSolOk, WithdrawSolStatus, WithdrawSolStatusArgs, WithdrawSplArgs, WithdrawSplError,
+    WithdrawSplId, WithdrawSplOk, WithdrawSplStatus, WithdrawSplStatusArgs,
 };
 use cksol_types_internal::{
     MinterArg,
@@ -17,7 +22,10 @@ use ic_http_types::{HttpRequest, HttpResponse};
 use ic_management_canister_types::{CanisterId, CanisterSettings};
 use ic_pocket_canister_runtime::{ExecuteHttpOutcallMocks, PocketIcRuntime};
 use icrc_ledger_types::{
-    icrc1::account::{Account, Subaccount},
+    icrc1::{
+        account::{Account, Subaccount},
+        transfer::{TransferArg, TransferError},
+    },
     icrc2::approve::{ApproveArgs, ApproveError},
     icrc3::blocks::{GetBlocksRequest, GetBlocksResult, ICRC3GenericBlock},
     icrc21::{errors::Icrc21Error, requests::ConsentMessageRequest, responses::ConsentInfo},
@@ -154,6 +162,9 @@ impl Setup {
     pub const DEFAULT_CONTROLLER: Principal = Principal::from_slice(&[0x9d, 0xf7, 0x01]);
     pub const DEFAULT_MINIMUM_DEPOSIT_AMOUNT: Lamport = 20_000_000; // 0.02 SOL
     pub const DEFAULT_DEPOSIT_SOL_REQUIRED_CYCLES: u128 = 1_000_000_000_000;
+    pub const DEFAULT_DEPOSIT_SPL_REQUIRED_CYCLES: u128 = 1_000_000_000_000;
+    pub const FUNDED_BALANCE: Lamport = fixtures::DEPOSIT_AMOUNT - validator::FEE_PER_SIGNATURE;
+    pub const OPERATING_TOP_UP: Lamport = 100_000_000; // 0.1 SOL
     pub const DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT: Lamport = 2_000_000; // 0.002 SOL
     pub const DEFAULT_AUTOMATIC_DEPOSIT_FEE: Lamport = 2_000_000; // 0.002 SOL
     pub const DEFAULT_CALLER: Principal =
@@ -283,6 +294,52 @@ impl Setup {
         }
     }
 
+    /// Credits the minter balance with [`Self::FUNDED_BALANCE`] on a fresh setup: deposits SOL
+    /// through `deposit_sol`, sweeps it, credits the sweep and mints the ckSOL to the default
+    /// caller. Needs the proxy canister. The calls use RPC IDs 0 to 31.
+    pub async fn fund_minter(&self) {
+        use fixtures::{
+            DEFAULT_CALLER_ACCOUNT, DEPOSIT_AMOUNT, FINALIZE_TRANSACTIONS_DELAY, MockBuilder,
+            RENT_EXEMPTION_THRESHOLD, SUBMISSION_BLOCK_HEIGHT, SWEEP_DEPOSITS_DELAY,
+        };
+        let deposit_id = self
+            .minter()
+            .with_http_mocks(
+                MockBuilder::new()
+                    .get_balance(DEPOSIT_AMOUNT + RENT_EXEMPTION_THRESHOLD)
+                    .build(),
+            )
+            .deposit_sol(DEFAULT_CALLER_ACCOUNT)
+            .await
+            .expect("deposit_sol should queue the funding deposit");
+
+        self.advance_time(SWEEP_DEPOSITS_DELAY).await;
+        self.execute_http_mocks(
+            MockBuilder::with_start_id(4)
+                .submit_transaction(SUBMISSION_BLOCK_HEIGHT)
+                .build(),
+        )
+        .await;
+        let sweep_signature = match self.minter().deposit_sol_status(deposit_id).await {
+            DepositSolStatus::Swept { signature } => signature,
+            status => panic!("the funding deposit should be swept, got {status:?}"),
+        };
+
+        self.advance_time(FINALIZE_TRANSACTIONS_DELAY).await;
+        let sweep = self.minter().signed_transaction(&sweep_signature).await;
+        self.execute_http_mocks(
+            MockBuilder::with_start_id(16)
+                .finalize_transaction(&sweep_signature, SUBMISSION_BLOCK_HEIGHT)
+                .get_sweep_transaction(&sweep, DEPOSIT_AMOUNT)
+                .build(),
+        )
+        .await;
+        assert_eq!(
+            self.wait_for_deposit_minted(deposit_id).await,
+            Self::FUNDED_BALANCE
+        );
+    }
+
     async fn mock_sol_rpc_api_keys(env: &PocketIc, sol_rpc_canister_id: Principal) {
         const MOCK_API_KEY: &str = "mock-api-key";
 
@@ -347,6 +404,30 @@ impl Setup {
 
     pub fn ledger(&self) -> Ledger<'_> {
         Ledger(self.canister(self.ledger_canister_id, Setup::DEFAULT_CALLER))
+    }
+
+    /// Installs a separate SPL ledger with the minter as its minting account.
+    pub async fn install_spl_ledger(&self, decimals: u8) -> Ledger<'_> {
+        let env = self.env.as_ref().unwrap();
+        let ledger_canister_id = env
+            .create_canister_with_settings(
+                None,
+                Some(CanisterSettings {
+                    controllers: Some(vec![Self::DEFAULT_CONTROLLER]),
+                    ..CanisterSettings::default()
+                }),
+            )
+            .await;
+        env.add_cycles(ledger_canister_id, u64::MAX as u128).await;
+        env.install_canister(
+            ledger_canister_id,
+            ledger_wasm().await,
+            Encode!(&spl_ledger_init_args(self.minter_canister_id, decimals)).unwrap(),
+            Some(Self::DEFAULT_CONTROLLER),
+        )
+        .await;
+
+        Ledger(self.canister(ledger_canister_id, Self::DEFAULT_CALLER))
     }
 
     pub fn proxy(&self) -> Canister<'_> {
@@ -443,6 +524,62 @@ impl Setup {
             self.advance_time_and_settle(Duration::from_mins(1)).await;
         }
         panic!("Deposit {deposit_id} was not minted within timeout");
+    }
+
+    /// Advances time until the SPL deposit is minted and returns the minted amount.
+    pub async fn wait_for_spl_deposit_minted(&self, deposit_id: DepositSplId) -> u64 {
+        const MAX_ITERATIONS: usize = 30;
+        for _ in 0..MAX_ITERATIONS {
+            if let DepositSplStatus::Minted { minted_amount, .. } =
+                self.minter().deposit_spl_status(deposit_id).await
+            {
+                return minted_amount;
+            }
+            self.advance_time_and_settle(Duration::from_mins(1)).await;
+        }
+        panic!("SPL deposit {deposit_id} was not minted within timeout");
+    }
+
+    /// Runs the timers until the SPL withdrawal has an outcome that the predicate accepts.
+    pub async fn wait_for_spl_withdrawal(
+        &self,
+        cksol_burn_block_index: WithdrawSplId,
+        is_expected: impl Fn(&WithdrawSplStatus) -> bool,
+    ) -> WithdrawSplStatus {
+        const MAX_ITERATIONS: usize = 30;
+        let mut status = WithdrawSplStatus::NotFound;
+        for _ in 0..MAX_ITERATIONS {
+            status = self
+                .minter()
+                .withdraw_spl_status(cksol_burn_block_index)
+                .await;
+            if is_expected(&status) {
+                return status;
+            }
+            self.advance_time_and_settle(Duration::from_mins(2)).await;
+        }
+        panic!("SPL withdrawal {cksol_burn_block_index} stayed at {status:?} within timeout");
+    }
+
+    /// Donates [`Self::OPERATING_TOP_UP`] of the default caller's ckSOL to the top-up
+    /// account, then waits for the automatic refill to burn it into the operating balance.
+    pub async fn top_up_operating_balance(&self) {
+        const MAX_ITERATIONS: usize = 30;
+        let top_up_account = self.minter().get_operating_balance().await.top_up_account;
+        self.ledger()
+            .transfer(top_up_account, Self::OPERATING_TOP_UP)
+            .await;
+        for _ in 0..MAX_ITERATIONS {
+            if self.minter().get_operating_balance().await.balance == Self::OPERATING_TOP_UP {
+                return;
+            }
+            self.advance_time_and_settle(Duration::from_mins(1)).await;
+        }
+        panic!("The operating balance was not refilled within timeout");
+    }
+
+    pub async fn pending_http_outcalls(&self) -> usize {
+        self.env.as_ref().unwrap().get_canister_http().await.len()
     }
 
     pub async fn execute_http_mocks(&self, mut mocks: impl ExecuteHttpOutcallMocks) {
@@ -609,8 +746,48 @@ impl<'a> CkSolMinter<'a> {
             .await
     }
 
+    pub async fn deposit_spl(
+        &self,
+        args: impl Into<DepositSplArgs>,
+    ) -> Result<DepositSplId, DepositSplError> {
+        self.try_deposit_spl(args)
+            .await
+            .expect("deposit_spl failed")
+    }
+
+    pub async fn deposit_spl_with_cycles(
+        &self,
+        args: impl Into<DepositSplArgs>,
+        cycles: u128,
+    ) -> Result<DepositSplId, DepositSplError> {
+        self.try_deposit_spl_with_cycles(args, cycles)
+            .await
+            .expect("deposit_spl failed")
+    }
+
+    pub async fn try_deposit_spl(
+        &self,
+        args: impl Into<DepositSplArgs>,
+    ) -> Result<Result<DepositSplId, DepositSplError>, String> {
+        self.try_deposit_spl_with_cycles(args, Setup::DEFAULT_DEPOSIT_SPL_REQUIRED_CYCLES)
+            .await
+    }
+
+    pub async fn try_deposit_spl_with_cycles(
+        &self,
+        args: impl Into<DepositSplArgs>,
+        cycles: u128,
+    ) -> Result<Result<DepositSplId, DepositSplError>, String> {
+        self.try_update_call("deposit_spl", (args.into(),), cycles)
+            .await
+    }
+
     pub async fn deposit_sol_status(&self, deposit_id: DepositSolId) -> DepositSolStatus {
         self.query_call("deposit_sol_status", (deposit_id,)).await
+    }
+
+    pub async fn deposit_spl_status(&self, deposit_id: DepositSplId) -> DepositSplStatus {
+        self.query_call("deposit_spl_status", (deposit_id,)).await
     }
 
     pub async fn watch_deposit_address(
@@ -683,6 +860,29 @@ impl<'a> CkSolMinter<'a> {
         self.submit_update_call("withdraw_sol", (args,)).await
     }
 
+    pub async fn withdraw_spl(
+        &self,
+        args: WithdrawSplArgs,
+    ) -> Result<WithdrawSplOk, WithdrawSplError> {
+        self.try_update_call("withdraw_spl", (args,), 0)
+            .await
+            .expect("withdraw_spl failed")
+    }
+
+    pub async fn withdraw_spl_status(
+        &self,
+        cksol_burn_block_index: WithdrawSplId,
+    ) -> WithdrawSplStatus {
+        self.update_call(
+            "withdraw_spl_status",
+            (WithdrawSplStatusArgs {
+                cksol_burn_block_index,
+            },),
+            0,
+        )
+        .await
+    }
+
     pub async fn withdraw_sol_status(&self, block_index: u64) -> WithdrawSolStatus {
         self.update_call(
             "withdraw_sol_status",
@@ -706,6 +906,10 @@ impl<'a> CkSolMinter<'a> {
     ) -> Result<ConsentInfo, Icrc21Error> {
         self.update_call("icrc21_canister_call_consent_message", (request,), 0)
             .await
+    }
+
+    pub async fn get_operating_balance(&self) -> OperatingBalance {
+        self.query_call("get_operating_balance", ()).await
     }
 
     pub async fn state(&self) -> MinterState {
@@ -808,9 +1012,30 @@ impl<'a> Deref for Ledger<'a> {
 }
 
 impl Ledger<'_> {
+    pub fn canister_id(&self) -> Principal {
+        self.0.id
+    }
+
     pub async fn balance_of(&self, account: Account) -> u64 {
         self.update_call::<_, Nat>("icrc1_balance_of", (account,), 0)
             .await
+            .0
+            .to_u64()
+            .unwrap()
+    }
+
+    pub async fn transfer(&self, to: Account, amount: u64) -> u64 {
+        let args = TransferArg {
+            from_subaccount: None,
+            to,
+            fee: None,
+            created_at_time: None,
+            memo: None,
+            amount: Nat::from(amount),
+        };
+        self.update_call::<_, Result<Nat, TransferError>>("icrc1_transfer", (args,), 0)
+            .await
+            .expect("transfer call failed")
             .0
             .to_u64()
             .unwrap()
