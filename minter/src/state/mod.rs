@@ -41,6 +41,7 @@ pub mod audit;
 mod deposits;
 pub mod event;
 mod nonce_pool;
+mod spl;
 mod watchlist;
 
 pub use deposits::{
@@ -72,6 +73,7 @@ pub fn init_once_state(state: State) {
 
 #[cfg(any(test, feature = "canbench-rs"))]
 pub fn reset_state() {
+    crate::deposit::sweep::reset_cursors();
     STATE.with(|s| {
         *s.borrow_mut() = None;
     });
@@ -131,6 +133,7 @@ pub struct State {
     nonce_pool: DurableNoncePool,
     active_tasks: BTreeSet<TaskType>,
     balance: Lamport,
+    supported_spl_tokens: BTreeMap<Address, spl::SupportedSplToken>,
 }
 
 impl State {
@@ -365,7 +368,11 @@ impl State {
                 max_automatic_deposit_fee: self.max_automatic_deposit_fee(),
             });
         }
-        Ok(())
+        spl::validate_tokens(
+            &self.supported_spl_tokens,
+            self.ledger_canister_id,
+            self.sol_rpc_canister_id,
+        )
     }
 
     fn max_automatic_deposit_fee(&self) -> Lamport {
@@ -386,6 +393,8 @@ impl State {
             deposit_sol_fee,
             nonce_accounts_to_add,
             automatic_deposit_fee,
+            add_spl_tokens,
+            update_spl_tokens,
         }: UpgradeArgs,
     ) -> Result<(), InvalidStateError> {
         if let Some(sol_rpc_canister_id) = sol_rpc_canister_id {
@@ -414,6 +423,7 @@ impl State {
             self.ensure_no_incomplete_withdrawal_to(&nonce_accounts)?;
             self.nonce_pool.add_accounts(nonce_accounts)?;
         }
+        self.supported_spl_tokens = self.updated_spl_tokens(add_spl_tokens, update_spl_tokens)?;
         self.validate()
     }
 
@@ -545,15 +555,15 @@ impl State {
         &self.created_withdrawal_requests
     }
 
-    pub fn withdrawal_batches(&self) -> WithdrawalBatches<'_> {
-        WithdrawalBatches {
+    pub fn withdrawal_plans(&self) -> WithdrawalPlans<'_> {
+        WithdrawalPlans {
             pending_requests: self.pending_withdrawal_requests.values().peekable(),
             available_balance: self.balance.saturating_sub(RENT_EXEMPTION_THRESHOLD),
         }
     }
 
     pub fn can_create_withdrawal_transaction(&self) -> bool {
-        self.nonce_pool.num_free_accounts() > 0 && self.withdrawal_batches().next().is_some()
+        self.nonce_pool.num_free_accounts() > 0 && self.withdrawal_plans().next().is_some()
     }
 
     pub fn has_unsigned_withdrawal_transaction(&self) -> bool {
@@ -870,6 +880,7 @@ pub enum InvalidStateError {
     InvalidNonceAccount(String),
     DuplicateNonceAccount(Address),
     NonceAccountIsWithdrawalDestination(Address),
+    InvalidSplToken(String),
 }
 
 impl From<NoncePoolError> for InvalidStateError {
@@ -940,6 +951,7 @@ impl TryFrom<InitArgs> for State {
             nonce_pool,
             active_tasks: BTreeSet::new(),
             balance: 0,
+            supported_spl_tokens: BTreeMap::new(),
         };
         state.validate()?;
         Ok(state)
@@ -953,6 +965,13 @@ pub struct PendingWithdrawalRequest {
     pub created_at: u64,
 }
 
+/// A withdrawal transaction to create. SOL requests are batched; other payout kinds
+/// can be added as separate variants.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum WithdrawalPlan {
+    Sol(Vec<WithdrawalRequest>),
+}
+
 /// Groups pending withdrawal requests, oldest first, into batches that the
 /// minter balance can pay for, including one transaction fee per batch and
 /// holding back the rent exemption threshold so a withdrawal transaction can
@@ -960,15 +979,21 @@ pub struct PendingWithdrawalRequest {
 ///
 /// Iteration stops at the first request the remaining balance cannot cover,
 /// so requests are never reordered or skipped.
-pub struct WithdrawalBatches<'a> {
+pub struct WithdrawalPlans<'a> {
     pending_requests: Peekable<btree_map::Values<'a, LedgerBurnIndex, PendingWithdrawalRequest>>,
     available_balance: Lamport,
 }
 
-impl Iterator for WithdrawalBatches<'_> {
-    type Item = Vec<WithdrawalRequest>;
+impl Iterator for WithdrawalPlans<'_> {
+    type Item = WithdrawalPlan;
 
     fn next(&mut self) -> Option<Self::Item> {
+        self.next_sol_batch()
+    }
+}
+
+impl WithdrawalPlans<'_> {
+    fn next_sol_batch(&mut self) -> Option<WithdrawalPlan> {
         let mut batch = Vec::new();
         while batch.len() < MAX_WITHDRAWALS_PER_NONCE_TX {
             let reserved_fee = if batch.is_empty() {
@@ -991,7 +1016,11 @@ impl Iterator for WithdrawalBatches<'_> {
             batch.push(pending.request.clone());
             self.pending_requests.next();
         }
-        if batch.is_empty() { None } else { Some(batch) }
+        if batch.is_empty() {
+            None
+        } else {
+            Some(WithdrawalPlan::Sol(batch))
+        }
     }
 }
 

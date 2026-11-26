@@ -281,6 +281,8 @@ type MinterInfo = record {
     automatic_deposit_fee : opt Lamport;
     // The sum in lamports of the automatic deposit fees collected so far.
     collected_automatic_deposit_fees : opt Lamport;
+    // Supported classic SPL tokens, with registry and deposit settings.
+    supported_spl_tokens : opt vec SplTokenInfo;
 };
 
 // The ckSOL minter service arguments.
@@ -305,6 +307,8 @@ type UpgradeArgs = record {
     deposit_sol_required_cycles : opt nat64;
     nonce_accounts_to_add : opt vec text;
     automatic_deposit_fee : opt Lamport;
+    add_spl_tokens : opt vec SplTokenRegistration;
+    update_spl_tokens : opt vec SplTokenUpdate;
 };
 
 type WithdrawSolArgs = record {
@@ -709,6 +713,38 @@ type GetEventsArgs = record {
 type GetEventsResult = record {
     events : vec Event;
     total_event_count : nat64;
+};
+
+// Proposal-supplied SPL registration; verified locally without RPC or ledger calls.
+type SplTokenRegistration = record {
+    mint : text;
+    token_program : text;
+    decimals : nat8;
+    ledger_id : principal;
+    index_id : opt principal;
+    symbol : text;
+    minimum_deposit_amount : nat64;
+    deposit_fee : nat64;
+    deposits_paused : bool;
+};
+
+type SplTokenUpdate = record {
+    mint : text;
+    minimum_deposit_amount : opt nat64;
+    deposit_fee : opt nat64;
+    deposits_paused : opt bool;
+};
+
+type SplTokenInfo = record {
+    mint : Address;
+    token_program : Address;
+    decimals : nat8;
+    ledger_id : principal;
+    index_id : opt principal;
+    symbol : text;
+    minimum_deposit_amount : nat64;
+    deposit_fee : nat64;
+    deposits_paused : bool;
 };
 
 service : (MinterArg) -> {

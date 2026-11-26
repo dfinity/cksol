@@ -201,6 +201,7 @@ mod lifecycle {
                 nonce_accounts: vec![Setup::DEFAULT_NONCE_ACCOUNT.to_string()],
                 automatic_deposit_fee: Some(Setup::DEFAULT_AUTOMATIC_DEPOSIT_FEE),
                 collected_automatic_deposit_fees: Some(0),
+                supported_spl_tokens: Some(vec![]),
             }
         );
 
@@ -226,6 +227,7 @@ mod lifecycle {
                 deposit_sol_fee: None,
                 nonce_accounts_to_add: None,
                 automatic_deposit_fee: Some(NEW_AUTOMATIC_DEPOSIT_FEE),
+                ..Default::default()
             })
             .await
             .expect("upgrade failed");
@@ -244,6 +246,7 @@ mod lifecycle {
                 nonce_accounts: vec![Setup::DEFAULT_NONCE_ACCOUNT.to_string()],
                 automatic_deposit_fee: Some(NEW_AUTOMATIC_DEPOSIT_FEE),
                 collected_automatic_deposit_fees: Some(0),
+                supported_spl_tokens: Some(vec![]),
             }
         );
 

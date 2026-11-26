@@ -40,6 +40,7 @@ async fn should_load_staging_snapshot_and_upgrade_to_current_wasm() {
         state_after.info,
         MinterInfo {
             collected_automatic_deposit_fees: Some(0),
+            supported_spl_tokens: Some(vec![]),
             ..state_before.info.clone()
         }
     );

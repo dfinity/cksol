@@ -1587,6 +1587,7 @@ pub mod arb {
                     deposit_sol_fee,
                     nonce_accounts_to_add,
                     automatic_deposit_fee,
+                    ..Default::default()
                 },
             )
     }
