@@ -5,7 +5,7 @@ use crate::{
     rpc::BlockHeight,
     state::{DepositBalance, DepositOrigin},
 };
-use cksol_types::DepositSolId;
+use cksol_types::{DepositSolId, DepositSplId};
 use cksol_types_internal::{InitArgs, UpgradeArgs};
 use derive_more::From;
 use ic_ed25519::PublicKey;
@@ -115,6 +115,7 @@ pub enum EventType {
     /// A previously submitted Solana transaction has failed.
     /// The deposits of a failed sweep transaction are dropped. For a sweep, the event is
     /// recorded by [`process_dropped_sweep`], which also re-arms the automatic deposits.
+    /// A failed SPL sweep keeps its deposit and reservation until `FailedSplSweep` settles it.
     ///
     /// [`process_dropped_sweep`]: crate::state::audit::process_dropped_sweep
     #[n(6)]
@@ -243,6 +244,118 @@ pub enum EventType {
     /// which replay restores verbatim, since registrations are not recorded as events.
     #[n(15)]
     WatchedDepositAddresses(#[n(0)] WatchlistSnapshot),
+    /// An SPL token-account balance was accepted for a sweep, by a user via `deposit_spl`.
+    /// The account and mint pair is locked until the deposit is minted or dropped.
+    /// The deposit id is the next SPL sequence number of the minter at the time of the event.
+    #[n(16)]
+    QueuedSplDeposit {
+        /// The identifier of the queued SPL deposit.
+        #[n(0)]
+        deposit_id: DepositSplId,
+        /// The account to which the minter should mint ckSPL once the sweep is credited.
+        #[n(1)]
+        account: Account,
+        /// The classic SPL mint of the deposited token.
+        #[cbor(n(2), with = "cbor::address")]
+        mint: Address,
+        /// The associated token account of the deposit address for the mint.
+        #[cbor(n(3), with = "cbor::address")]
+        address: Address,
+        /// The token-account balance when the deposit was queued, in the mint's smallest units.
+        #[n(4)]
+        balance: u64,
+        /// The fee deducted from the ledger mint, in the mint's smallest units.
+        #[n(5)]
+        fee: u64,
+    },
+    /// A finalized SPL sweep was validated and its deposit queued for ledger minting.
+    /// The unspent part of its SOL reservation is returned and its token fee is counted.
+    #[n(17)]
+    CreditedSplSweep {
+        /// The signature of the finalized sweep transaction.
+        #[cbor(n(0), with = "cbor::signature")]
+        signature: Signature,
+        /// The main account's actual spend on the transaction fee.
+        #[n(1)]
+        lamports_spent: Lamport,
+        /// The identifier of the swept SPL deposit.
+        #[n(2)]
+        deposit_id: DepositSplId,
+        /// The amount to mint: the swept balance minus the fee, in the mint's smallest units.
+        #[n(3)]
+        amount_to_mint: u64,
+    },
+    /// The observed outcome of an SPL sweep did not match its plan, so its deposit stays
+    /// locked and its SOL reservation stays withheld.
+    #[n(18)]
+    QuarantinedSplSweep {
+        /// The signature of the sweep transaction.
+        #[cbor(n(0), with = "cbor::signature")]
+        signature: Signature,
+    },
+    /// The token ledger minted a swept SPL deposit. The account and mint pair is released.
+    #[n(19)]
+    MintedSweptSplDeposit {
+        /// The identifier of the minted SPL deposit.
+        #[n(0)]
+        deposit_id: DepositSplId,
+        /// The mint transaction index on the ledger of the token.
+        #[cbor(n(1), with = "cbor::id")]
+        mint_block_index: LedgerMintIndex,
+    },
+    /// The pending mint of an SPL deposit cannot be retried safely, as for
+    /// [`EventType::QuarantinedPendingMint`]. The owed amount is retained and the pair stays
+    /// locked for manual resolution.
+    #[n(20)]
+    QuarantinedPendingSplMint {
+        /// The identifier of the SPL deposit whose pending mint was quarantined.
+        #[n(0)]
+        deposit_id: DepositSplId,
+    },
+    /// A refill intent recorded before the ckSOL burn. Its source is always the
+    /// minter's 0xbeef subaccount; its memo is OperatingRefill { refill_id }.
+    #[n(21)]
+    RequestedOperatingRefill {
+        #[n(0)]
+        refill_id: u64,
+        #[n(1)]
+        amount: u64,
+        #[n(2)]
+        created_at_time: u64,
+    },
+    /// The ledger accepted or deduplicated the recorded burn.
+    #[n(22)]
+    CompletedOperatingRefill {
+        #[n(0)]
+        refill_id: u64,
+        #[n(1)]
+        burn_block_index: u64,
+    },
+    /// The first burn attempt was definitively rejected; no operating SOL is credited.
+    #[n(23)]
+    FailedOperatingRefill {
+        #[n(0)]
+        refill_id: u64,
+        #[n(1)]
+        reason: String,
+    },
+    /// The unresolved intent remains reserved for manual ledger reconciliation.
+    #[n(24)]
+    QuarantinedOperatingRefill {
+        #[n(0)]
+        refill_id: u64,
+    },
+    /// The actual cost of an SPL sweep recorded as failed by [`EventType::FailedTransaction`]
+    /// was validated. The unspent reservation is returned and the deposit is dropped.
+    #[n(35)]
+    FailedSplSweep {
+        /// The signature of the failed sweep transaction.
+        #[cbor(n(0), with = "cbor::signature")]
+        signature: Signature,
+        /// The main account's actual spend on the transaction fee.
+        #[n(1)]
+        lamports_spent: Lamport,
+    },
 }
 
 /// Payload of the `WatchedDepositAddresses` event: every registration, live or expired but
@@ -355,6 +468,14 @@ pub enum TransactionPurpose {
         /// The ledger burn indices of the withdrawal requests included in this transaction.
         #[cbor(n(0), with = "cbor::id_vec")]
         burn_indices: Vec<LedgerBurnIndex>,
+    },
+    /// Sweep one classic SPL deposit into its pre-created treasury ATA.
+    #[n(5)]
+    SweepSplDeposit {
+        #[n(0)]
+        deposit_id: DepositSplId,
+        #[n(1)]
+        block_height: BlockHeight,
     },
 }
 

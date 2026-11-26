@@ -39,6 +39,59 @@ impl From<Event> for CandidEvent {
 impl From<EventType> for CandidEventType {
     fn from(event_type: EventType) -> Self {
         match event_type {
+            EventType::CreditedSplSweep {
+                signature,
+                lamports_spent,
+                deposit_id,
+                amount_to_mint,
+            } => CandidEventType::CreditedSplSweep {
+                signature: CandidSignature::from(signature),
+                lamports_spent,
+                deposit_id,
+                amount_to_mint,
+            },
+            EventType::QuarantinedSplSweep { signature } => CandidEventType::QuarantinedSplSweep {
+                signature: CandidSignature::from(signature),
+            },
+            EventType::MintedSweptSplDeposit {
+                deposit_id,
+                mint_block_index,
+            } => CandidEventType::MintedSweptSplDeposit {
+                deposit_id,
+                mint_block_index: *mint_block_index.get(),
+            },
+            EventType::QuarantinedPendingSplMint { deposit_id } => {
+                CandidEventType::QuarantinedPendingSplMint { deposit_id }
+            }
+            EventType::FailedSplSweep {
+                signature,
+                lamports_spent,
+            } => CandidEventType::FailedSplSweep {
+                signature: CandidSignature::from(signature),
+                lamports_spent,
+            },
+            EventType::RequestedOperatingRefill {
+                refill_id,
+                amount,
+                created_at_time,
+            } => CandidEventType::RequestedOperatingRefill {
+                refill_id,
+                amount,
+                created_at_time,
+            },
+            EventType::CompletedOperatingRefill {
+                refill_id,
+                burn_block_index,
+            } => CandidEventType::CompletedOperatingRefill {
+                refill_id,
+                burn_block_index,
+            },
+            EventType::FailedOperatingRefill { refill_id, reason } => {
+                CandidEventType::FailedOperatingRefill { refill_id, reason }
+            }
+            EventType::QuarantinedOperatingRefill { refill_id } => {
+                CandidEventType::QuarantinedOperatingRefill { refill_id }
+            }
             EventType::Init(args) => CandidEventType::Init(args),
             EventType::Upgrade(args) => CandidEventType::Upgrade(args),
             EventType::AcceptedWithdrawalRequest(request) => {
@@ -134,6 +187,21 @@ impl From<EventType> for CandidEventType {
                         .collect(),
                 }
             }
+            EventType::QueuedSplDeposit {
+                deposit_id,
+                account,
+                mint,
+                address,
+                balance,
+                fee,
+            } => CandidEventType::QueuedSplDeposit {
+                deposit_id,
+                account,
+                mint: CandidAddress::from(mint),
+                address: CandidAddress::from(address),
+                balance,
+                fee,
+            },
         }
     }
 }
@@ -176,6 +244,13 @@ impl From<TransactionPurpose> for CandidTransactionPurpose {
                 deposit_ids,
                 block_height: block_height.get(),
             },
+            TransactionPurpose::SweepSplDeposit {
+                deposit_id,
+                block_height,
+            } => CandidTransactionPurpose::SweepSplDeposit {
+                deposit_id,
+                block_height: block_height.get(),
+            },
             TransactionPurpose::Withdrawal { burn_indices } => {
                 CandidTransactionPurpose::Withdrawal {
                     burn_indices: burn_indices.iter().map(|idx| *idx.get()).collect(),
@@ -210,6 +285,59 @@ impl TryFrom<CandidEventType> for EventType {
 
     fn try_from(event_type: CandidEventType) -> Result<Self, Self::Error> {
         Ok(match event_type {
+            CandidEventType::CreditedSplSweep {
+                signature,
+                lamports_spent,
+                deposit_id,
+                amount_to_mint,
+            } => EventType::CreditedSplSweep {
+                signature: Signature::from(signature),
+                lamports_spent,
+                deposit_id,
+                amount_to_mint,
+            },
+            CandidEventType::QuarantinedSplSweep { signature } => EventType::QuarantinedSplSweep {
+                signature: Signature::from(signature),
+            },
+            CandidEventType::MintedSweptSplDeposit {
+                deposit_id,
+                mint_block_index,
+            } => EventType::MintedSweptSplDeposit {
+                deposit_id,
+                mint_block_index: LedgerMintIndex::new(mint_block_index),
+            },
+            CandidEventType::QuarantinedPendingSplMint { deposit_id } => {
+                EventType::QuarantinedPendingSplMint { deposit_id }
+            }
+            CandidEventType::FailedSplSweep {
+                signature,
+                lamports_spent,
+            } => EventType::FailedSplSweep {
+                signature: Signature::from(signature),
+                lamports_spent,
+            },
+            CandidEventType::RequestedOperatingRefill {
+                refill_id,
+                amount,
+                created_at_time,
+            } => EventType::RequestedOperatingRefill {
+                refill_id,
+                amount,
+                created_at_time,
+            },
+            CandidEventType::CompletedOperatingRefill {
+                refill_id,
+                burn_block_index,
+            } => EventType::CompletedOperatingRefill {
+                refill_id,
+                burn_block_index,
+            },
+            CandidEventType::FailedOperatingRefill { refill_id, reason } => {
+                EventType::FailedOperatingRefill { refill_id, reason }
+            }
+            CandidEventType::QuarantinedOperatingRefill { refill_id } => {
+                EventType::QuarantinedOperatingRefill { refill_id }
+            }
             CandidEventType::Init(args) => EventType::Init(args),
             CandidEventType::Upgrade(args) => EventType::Upgrade(args),
             CandidEventType::AcceptedWithdrawalRequest {
@@ -312,6 +440,21 @@ impl TryFrom<CandidEventType> for EventType {
                         .collect(),
                 })
             }
+            CandidEventType::QueuedSplDeposit {
+                deposit_id,
+                account,
+                mint,
+                address,
+                balance,
+                fee,
+            } => EventType::QueuedSplDeposit {
+                deposit_id,
+                account,
+                mint: Address::from(mint),
+                address: Address::from(address),
+                balance,
+                fee,
+            },
         })
     }
 }
@@ -380,6 +523,13 @@ impl From<CandidTransactionPurpose> for TransactionPurpose {
                 block_height,
             } => TransactionPurpose::SweepDeposit {
                 deposit_ids,
+                block_height: BlockHeight::new(block_height),
+            },
+            CandidTransactionPurpose::SweepSplDeposit {
+                deposit_id,
+                block_height,
+            } => TransactionPurpose::SweepSplDeposit {
+                deposit_id,
                 block_height: BlockHeight::new(block_height),
             },
             CandidTransactionPurpose::Withdrawal { burn_indices } => {

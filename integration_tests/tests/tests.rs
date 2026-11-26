@@ -4,8 +4,10 @@ use candid::{Nat, Principal};
 use cksol_int_tests::{
     CkSolMinter, Setup, SetupBuilder,
     fixtures::{
-        DEFAULT_CALLER_ACCOUNT, DEFAULT_CALLER_DEPOSIT_ADDRESS, DEPOSIT_AMOUNT, MINTER_ADDRESS,
-        MockBuilder, RENT_EXEMPTION_THRESHOLD, WATCH_WINDOW_NANOS,
+        DEFAULT_CALLER_ACCOUNT, DEFAULT_CALLER_DEPOSIT_ADDRESS, DEPOSIT_AMOUNT,
+        EXPIRY_BLOCK_HEIGHT, FINALIZE_TRANSACTIONS_DELAY, MINTER_ADDRESS, MockBuilder,
+        RENT_EXEMPTION_THRESHOLD, SUBMISSION_BLOCK_HEIGHT, SWEEP_DEPOSITS_DELAY,
+        WATCH_WINDOW_NANOS, WITHDRAWAL_PROCESSING_DELAY,
     },
     validator::FEE_PER_SIGNATURE,
 };
@@ -22,17 +24,6 @@ use cksol_types_internal::{
 use icrc_ledger_types::icrc1::account::{Account, Subaccount};
 use sol_rpc_types::{CommitmentLevel, ConsensusStrategy, RpcConfig};
 use std::time::Duration;
-
-const WITHDRAWAL_PROCESSING_DELAY: Duration = Duration::from_mins(1);
-const FINALIZE_TRANSACTIONS_DELAY: Duration = Duration::from_mins(2);
-const SWEEP_DEPOSITS_DELAY: Duration = Duration::from_mins(1);
-/// Number of blocks a blockhash stays valid for, as the minter counts them.
-const MAX_BLOCKHASH_AGE_IN_BLOCKS: u64 = 150;
-/// Height of the block whose blockhash the mocks hand a timer for a first submission.
-const SUBMISSION_BLOCK_HEIGHT: u64 = 100_000_000;
-/// First height at which the blockhash of a transaction submitted at
-/// [`SUBMISSION_BLOCK_HEIGHT`] is no longer accepted.
-const EXPIRY_BLOCK_HEIGHT: u64 = SUBMISSION_BLOCK_HEIGHT + MAX_BLOCKHASH_AGE_IN_BLOCKS + 1;
 
 /// Deposits funds into the minter via `deposit_sol`, sweeps them, and finalizes
 /// and credits the sweep so the minter's internal balance is credited.
@@ -201,6 +192,10 @@ mod lifecycle {
                 nonce_accounts: vec![Setup::DEFAULT_NONCE_ACCOUNT.to_string()],
                 automatic_deposit_fee: Some(Setup::DEFAULT_AUTOMATIC_DEPOSIT_FEE),
                 collected_automatic_deposit_fees: Some(0),
+                supported_spl_tokens: Some(vec![]),
+                deposit_spl_required_cycles: Some(80_000_000_000),
+                spl_deposit_consolidation_fee: Some(70_000_000_000),
+                collected_spl_deposit_fees: Some(vec![]),
             }
         );
 
@@ -226,6 +221,7 @@ mod lifecycle {
                 deposit_sol_fee: None,
                 nonce_accounts_to_add: None,
                 automatic_deposit_fee: Some(NEW_AUTOMATIC_DEPOSIT_FEE),
+                ..Default::default()
             })
             .await
             .expect("upgrade failed");
@@ -244,6 +240,10 @@ mod lifecycle {
                 nonce_accounts: vec![Setup::DEFAULT_NONCE_ACCOUNT.to_string()],
                 automatic_deposit_fee: Some(NEW_AUTOMATIC_DEPOSIT_FEE),
                 collected_automatic_deposit_fees: Some(0),
+                supported_spl_tokens: Some(vec![]),
+                deposit_spl_required_cycles: Some(80_000_000_000),
+                spl_deposit_consolidation_fee: Some(70_000_000_000),
+                collected_spl_deposit_fees: Some(vec![]),
             }
         );
 
