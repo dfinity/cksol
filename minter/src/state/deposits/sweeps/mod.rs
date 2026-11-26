@@ -3,6 +3,7 @@ use crate::{
     state::{
         DepositOrigin, QueuedDeposit,
         event::{CreditedDeposit, VersionedMessage},
+        sweep::validate_sweep_transaction,
     },
 };
 use cksol_types::DepositSolId;
@@ -31,6 +32,10 @@ pub struct Sweeps {
 }
 
 impl Sweeps {
+    pub(crate) fn by_signature(&self) -> &BTreeMap<Signature, Sweep> {
+        &self.by_signature
+    }
+
     pub fn get(&self, signature: &Signature) -> Option<&Sweep> {
         self.by_signature.get(signature)
     }
@@ -234,24 +239,8 @@ impl Sweep {
         transaction: &VersionedTransaction,
         meta: Option<&UiTransactionStatusMeta>,
     ) -> Result<SettledSweep, SweepSettlementError> {
-        let meta = meta.ok_or(UnreadableOutcome::NoMetaField)?;
-        if let Some(error) = &meta.err {
-            return Err(SweepMismatch::TransactionFailed {
-                error: error.to_string(),
-            }
-            .into());
-        }
-        let solana_message::VersionedMessage::Legacy(message) = &transaction.message else {
-            return Err(SweepMismatch::UnexpectedMessage.into());
-        };
-        if message != &self.sweep_message(message.recent_blockhash) {
-            return Err(SweepMismatch::UnexpectedMessage.into());
-        }
-        if meta.pre_balances.len() != message.account_keys.len()
-            || meta.post_balances.len() != message.account_keys.len()
-        {
-            return Err(UnreadableOutcome::IncompleteBalances.into());
-        }
+        let (message, meta) =
+            validate_sweep_transaction(transaction, meta, |hash| self.sweep_message(hash))?;
         if meta.fee > self.fee() {
             return Err(SweepMismatch::UnexpectedFee {
                 expected: self.fee(),

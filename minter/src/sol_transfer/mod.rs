@@ -115,8 +115,8 @@ pub async fn sign_batch_withdrawal_message<R: CanisterRuntime>(
     Ok(transaction)
 }
 
-// Sign transaction, return error if it exceeds the maximum transaction size.
-async fn sign_transaction(
+/// Signs the transaction, unless it exceeds the maximum transaction size.
+pub(crate) async fn sign_transaction(
     transaction: &mut Transaction,
     signer_derivation_paths: impl IntoIterator<Item = DerivationPath>,
     signer: &impl SchnorrSigner,

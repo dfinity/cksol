@@ -95,6 +95,15 @@ pub struct UpgradeArgs {
     /// automatic flow.
     #[cfg_attr(feature = "event", n(7))]
     pub automatic_deposit_fee: Option<Lamport>,
+    /// Registers classic SPL tokens. Existing registrations cannot be replaced.
+    #[cfg_attr(feature = "event", n(8))]
+    pub add_spl_tokens: Option<Vec<SplTokenRegistration>>,
+    /// Updates deposit settings of registered SPL tokens.
+    #[cfg_attr(feature = "event", n(9))]
+    pub update_spl_tokens: Option<Vec<SplTokenUpdate>>,
+    /// Automatic operating-SOL refill settings. Omitted values retain the configuration.
+    #[cfg_attr(feature = "event", n(10))]
+    pub operating_balance_refill: Option<OperatingRefillConfig>,
 }
 
 /// The Solana network to connect to via the SOL RPC canister.
@@ -147,6 +156,85 @@ impl fmt::Display for Ed25519KeyName {
             Self::LocalDevelopment => write!(f, "dfx_test_key"),
             Self::MainnetTestKey1 => write!(f, "test_key_1"),
             Self::MainnetProdKey1 => write!(f, "key_1"),
+        }
+    }
+}
+
+/// Proposal-supplied configuration of a classic SPL token.
+/// Mint and ledger properties are verified outside the minter before registration.
+#[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize)]
+#[cfg_attr(feature = "event", derive(minicbor::Encode, minicbor::Decode))]
+pub struct SplTokenRegistration {
+    /// Base58 mint address.
+    #[cfg_attr(feature = "event", n(0))]
+    pub mint: String,
+    /// Base58 classic SPL Token program address.
+    #[cfg_attr(feature = "event", n(1))]
+    pub token_program: String,
+    /// Decimals shared by the mint and ckSPL ledger.
+    #[cfg_attr(feature = "event", n(2))]
+    pub decimals: u8,
+    /// The token's ckSPL ledger canister.
+    #[cfg_attr(feature = "event", n(3), cbor(with = "icrc_cbor::principal"))]
+    pub ledger_id: Principal,
+    /// Optional index canister for client discovery.
+    #[cfg_attr(feature = "event", n(4), cbor(with = "icrc_cbor::principal::option"))]
+    pub index_id: Option<Principal>,
+    /// The ckSPL ledger symbol.
+    #[cfg_attr(feature = "event", n(5))]
+    pub symbol: String,
+    /// Minimum net deposit in the token's smallest units.
+    #[cfg_attr(feature = "event", n(6))]
+    pub minimum_deposit_amount: u64,
+    /// Fixed deposit fee in the token's smallest units.
+    #[cfg_attr(feature = "event", n(7))]
+    pub deposit_fee: u64,
+    /// Whether new deposits are paused.
+    #[cfg_attr(feature = "event", n(8))]
+    pub deposits_paused: bool,
+}
+
+/// Changes to deposit settings. Omitted fields retain their existing values.
+#[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize)]
+#[cfg_attr(feature = "event", derive(minicbor::Encode, minicbor::Decode))]
+pub struct SplTokenUpdate {
+    /// Base58 mint address of an already registered token.
+    #[cfg_attr(feature = "event", n(0))]
+    pub mint: String,
+    /// New minimum net deposit in the token's smallest units.
+    #[cfg_attr(feature = "event", n(1))]
+    pub minimum_deposit_amount: Option<u64>,
+    /// New deposit fee; zero disables the fee.
+    #[cfg_attr(feature = "event", n(2))]
+    pub deposit_fee: Option<u64>,
+    /// Whether new deposits are paused.
+    #[cfg_attr(feature = "event", n(3))]
+    pub deposits_paused: Option<bool>,
+}
+
+/// Automatic conversion of donated ckSOL into unbacked operating SOL.
+#[derive(Clone, Copy, Eq, PartialEq, Debug, CandidType, Deserialize)]
+#[cfg_attr(feature = "event", derive(minicbor::Encode, minicbor::Decode))]
+pub struct OperatingRefillConfig {
+    /// Stops new refills when false; an unresolved burn is still tracked.
+    #[cfg_attr(feature = "event", n(0))]
+    pub enabled: bool,
+    /// Refill when the operating balance is strictly below this many lamports.
+    #[cfg_attr(feature = "event", n(1))]
+    pub low_water_mark: u64,
+    /// Desired operating balance in lamports after a refill.
+    #[cfg_attr(feature = "event", n(2))]
+    pub target: u64,
+}
+
+// Initial defaults are part of event replay. Change live settings through UpgradeArgs,
+// rather than changing these values when tuning refills in a later release.
+impl Default for OperatingRefillConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            low_water_mark: 10_000_000, // 0.01 SOL
+            target: 100_000_000,        // 0.1 SOL
         }
     }
 }
