@@ -10,6 +10,9 @@ use cksol_minter::{
         },
     },
     monitor::{FINALIZE_TRANSACTIONS_DELAY, finalize_transactions},
+    operating_balance::{
+        OPERATING_REFILL_DELAY, operating_top_up_account, refill_operating_balance,
+    },
     runtime::IcCanisterRuntime,
     state::read_state,
     utils::timed_sized_map::Timestamp,
@@ -17,7 +20,7 @@ use cksol_minter::{
 };
 use cksol_types::{
     Address, DepositSolArgs, DepositSolError, DepositSolId, DepositSolStatus,
-    GetDepositAddressArgs, MinterInfo, StandardRecord, WatchDepositAddressArgs,
+    GetDepositAddressArgs, MinterInfo, OperatingBalance, StandardRecord, WatchDepositAddressArgs,
     WatchDepositAddressError, WatchDepositAddressOk, WithdrawSolArgs, WithdrawSolError,
     WithdrawSolOk, WithdrawSolStatus, WithdrawSolStatusArgs,
 };
@@ -165,6 +168,7 @@ fn get_minter_info() -> MinterInfo {
             .collect(),
         automatic_deposit_fee: s.automatic_deposit_fee(),
         collected_automatic_deposit_fees: Some(s.collected_automatic_deposit_fees()),
+        supported_spl_tokens: Some(s.supported_spl_tokens()),
     })
 }
 
@@ -287,6 +291,14 @@ fn assert_valid_deposit_account(
     account
 }
 
+#[ic_cdk::query]
+fn get_operating_balance() -> OperatingBalance {
+    OperatingBalance {
+        balance: read_state(|s| s.operating_balance().balance()),
+        top_up_account: operating_top_up_account(ic_cdk::api::canister_self()),
+    }
+}
+
 fn setup_timers() {
     ic_cdk_timers::set_timer(Duration::from_secs(0), async {
         fetch_and_record_minter_public_key(IcCanisterRuntime::new()).await;
@@ -305,6 +317,9 @@ fn setup_timers() {
     });
     ic_cdk_timers::set_timer_interval(SCAN_WATCHED_ADDRESSES_DELAY, async || {
         scan_watched_addresses(IcCanisterRuntime::new()).await;
+    });
+    ic_cdk_timers::set_timer_interval(OPERATING_REFILL_DELAY, async || {
+        refill_operating_balance(IcCanisterRuntime::new()).await;
     });
 }
 
