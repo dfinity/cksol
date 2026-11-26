@@ -11,7 +11,8 @@ use cksol_int_tests::{
 };
 use cksol_types::{
     CollectedSplWithdrawalFees, Lamport, Memo, Signature, SplRentRefundStatus, TxFinalizedStatus,
-    WithdrawSplArgs, WithdrawSplError, WithdrawSplLedgerError, WithdrawSplOk, WithdrawSplStatus,
+    WithdrawSolArgs, WithdrawSolStatus, WithdrawSplArgs, WithdrawSplError, WithdrawSplLedgerError,
+    WithdrawSplOk, WithdrawSplStatus,
 };
 use cksol_types_internal::{
     UpgradeArgs,
@@ -100,11 +101,21 @@ async fn submit_withdrawal(setup: &Setup, cksol_burn_block_index: u64) -> Signat
 /// Runs the finalization timer, which reads the advanced nonce account and the landed
 /// transaction with RPC IDs 72 to 79.
 async fn finalize_withdrawal(setup: &Setup, signature: &Signature, outcome: WithdrawalOutcome) {
+    finalize_withdrawal_from(setup, signature, outcome, 72).await;
+}
+
+/// As [`finalize_withdrawal`], with RPC IDs `start_id` to `start_id + 7`.
+async fn finalize_withdrawal_from(
+    setup: &Setup,
+    signature: &Signature,
+    outcome: WithdrawalOutcome,
+    start_id: u64,
+) {
     let withdrawal = setup.minter().signed_transaction(signature).await;
     setup.advance_time(FINALIZE_TRANSACTIONS_DELAY).await;
     setup
         .execute_http_mocks(
-            MockBuilder::with_start_id(72)
+            MockBuilder::with_start_id(start_id)
                 .get_advanced_nonce_account()
                 .get_transaction(
                     signature,
@@ -356,6 +367,439 @@ async fn should_remint_the_tokens_and_refund_the_rent_when_the_transfer_fails_on
         .into()
         .drop()
         .await;
+}
+
+/// A rent above the reserve halts SPL withdrawals. Only an upgrade with
+/// `spl_withdrawals_halted = false` resumes them.
+#[tokio::test]
+async fn should_halt_withdrawals_after_a_rent_above_the_reserve_until_an_upgrade_resumes() {
+    let (setup, account) = setup_with_tokens().await;
+    let token_ledger = setup.install_spl_ledger(DECIMALS).await;
+    deposit_tokens_and_approve(&setup, &token_ledger, account).await;
+    assert_eq!(
+        setup
+            .minter()
+            .get_minter_info()
+            .await
+            .spl_withdrawals_halted,
+        Some(false)
+    );
+    let WithdrawSplOk {
+        cksol_burn_block_index,
+        ..
+    } = setup
+        .minter()
+        .withdraw_spl(withdrawal_args(AMOUNT))
+        .await
+        .expect("withdraw_spl should accept the request");
+    let signature = submit_withdrawal(&setup, cksol_burn_block_index).await;
+
+    finalize_withdrawal(
+        &setup,
+        &signature,
+        WithdrawalOutcome::CreatedAccountAboveReserve,
+    )
+    .await;
+
+    // Round 1: the minter halts. The withdrawal is not settled yet.
+    assert_eq!(
+        setup
+            .minter()
+            .get_minter_info()
+            .await
+            .spl_withdrawals_halted,
+        Some(true)
+    );
+    assert_eq!(
+        setup
+            .minter()
+            .withdraw_spl_status(cksol_burn_block_index)
+            .await,
+        WithdrawSplStatus::TxSent {
+            transaction_id: signature.clone()
+        }
+    );
+
+    // Round 2: the withdrawal is settled.
+    finalize_withdrawal_from(
+        &setup,
+        &signature,
+        WithdrawalOutcome::CreatedAccountAboveReserve,
+        80,
+    )
+    .await;
+    setup.minter().assert_that_events().await.satisfy(|events| {
+        check!(
+            events.contains(&EventType::SucceededSplWithdrawalTransaction {
+                signature: signature.clone(),
+                lamports_spent: FEE_PER_SIGNATURE + RENT_RESERVE + 1,
+                rent_spent: RENT_RESERVE + 1,
+            })
+        );
+        check!(events.contains(&EventType::HaltedSplWithdrawals {
+            signature: signature.clone(),
+            rent_spent: RENT_RESERVE + 1,
+            rent_reserve: RENT_RESERVE,
+        }));
+    });
+    assert_matches!(
+        setup
+            .minter()
+            .withdraw_spl_status(cksol_burn_block_index)
+            .await,
+        WithdrawSplStatus::TxFinalized {
+            rent_refund: SplRentRefundStatus::NotDue,
+            ..
+        }
+    );
+    assert_eq!(
+        setup
+            .minter()
+            .get_minter_info()
+            .await
+            .spl_withdrawals_halted,
+        Some(true)
+    );
+
+    // A new request is rejected, and nothing is burned.
+    let cksol_before = setup.ledger().balance_of(account).await;
+    let tokens_before = token_ledger.balance_of(account).await;
+    assert_eq!(
+        setup.minter().withdraw_spl(withdrawal_args(1_000)).await,
+        Err(WithdrawSplError::WithdrawalsHalted)
+    );
+    assert_eq!(setup.ledger().balance_of(account).await, cksol_before);
+    assert_eq!(token_ledger.balance_of(account).await, tokens_before);
+
+    // A normal upgrade does not resume.
+    setup
+        .minter()
+        .upgrade(UpgradeArgs::default())
+        .await
+        .expect("upgrade should succeed");
+    assert_eq!(
+        setup
+            .minter()
+            .get_minter_info()
+            .await
+            .spl_withdrawals_halted,
+        Some(true)
+    );
+    assert_eq!(
+        setup.minter().withdraw_spl(withdrawal_args(1_000)).await,
+        Err(WithdrawSplError::WithdrawalsHalted)
+    );
+    let setup = setup
+        .check_metrics()
+        .await
+        .assert_contains_metric_matching(r"spl_withdrawals_halted 1 \d+")
+        .assert_contains_metric_matching(r"spl_withdrawals_above_rent_reserve 1 \d+")
+        .assert_contains_metric_matching(r"spl_rent_above_reserve 1 \d+")
+        .into();
+
+    setup
+        .minter()
+        .upgrade(UpgradeArgs {
+            spl_withdrawals_halted: Some(false),
+            ..Default::default()
+        })
+        .await
+        .expect("upgrade should succeed");
+
+    assert_eq!(
+        setup
+            .minter()
+            .get_minter_info()
+            .await
+            .spl_withdrawals_halted,
+        Some(false)
+    );
+    let WithdrawSplOk {
+        cksol_burn_block_index,
+        ..
+    } = setup
+        .minter()
+        .withdraw_spl(withdrawal_args(1_000))
+        .await
+        .expect("withdraw_spl should accept the request after the resume");
+    assert_eq!(
+        setup
+            .minter()
+            .withdraw_spl_status(cksol_burn_block_index)
+            .await,
+        WithdrawSplStatus::Pending
+    );
+
+    setup.drop().await;
+}
+
+/// A rent far above the reserve makes the settlement trap. The minter must stay halted.
+#[tokio::test]
+async fn should_keep_the_halt_when_the_settlement_traps_on_a_low_balance() {
+    let (setup, account) = setup_with_tokens().await;
+    let token_ledger = setup.install_spl_ledger(DECIMALS).await;
+    deposit_tokens_and_approve(&setup, &token_ledger, account).await;
+    let WithdrawSplOk {
+        cksol_burn_block_index,
+        ..
+    } = setup
+        .minter()
+        .withdraw_spl(withdrawal_args(AMOUNT))
+        .await
+        .expect("withdraw_spl should accept the request");
+    let signature = submit_withdrawal(&setup, cksol_burn_block_index).await;
+    let unreserved_balance = setup.minter().get_minter_info().await.balance;
+    let rent = RENT_RESERVE + unreserved_balance + 1;
+    let in_flight = WithdrawSplStatus::TxSent {
+        transaction_id: signature.clone(),
+    };
+
+    // Round 1: the minter halts.
+    finalize_withdrawal(
+        &setup,
+        &signature,
+        WithdrawalOutcome::CreatedAccountWithRent(rent),
+    )
+    .await;
+    assert_eq!(
+        setup
+            .minter()
+            .get_minter_info()
+            .await
+            .spl_withdrawals_halted,
+        Some(true)
+    );
+    let events_after_the_halt = setup.minter().get_all_events().await.len();
+
+    // Round 2: the settlement traps.
+    finalize_withdrawal_from(
+        &setup,
+        &signature,
+        WithdrawalOutcome::CreatedAccountWithRent(rent),
+        80,
+    )
+    .await;
+
+    // The trap undid round 2 only. The withdrawal is not settled, and the minter is
+    // still halted.
+    assert_eq!(
+        setup
+            .minter()
+            .withdraw_spl_status(cksol_burn_block_index)
+            .await,
+        in_flight
+    );
+    assert_eq!(
+        setup.minter().get_minter_info().await.balance,
+        unreserved_balance
+    );
+    assert_eq!(
+        setup.minter().get_all_events().await.len(),
+        events_after_the_halt
+    );
+    setup.minter().assert_that_events().await.satisfy(|events| {
+        check!(events.contains(&EventType::HaltedSplWithdrawals {
+            signature: signature.clone(),
+            rent_spent: rent,
+            rent_reserve: RENT_RESERVE,
+        }));
+        check!(
+            !events
+                .iter()
+                .any(|event| matches!(event, EventType::SucceededSplWithdrawalTransaction { .. }))
+        );
+    });
+    assert_eq!(
+        setup
+            .minter()
+            .get_minter_info()
+            .await
+            .spl_withdrawals_halted,
+        Some(true)
+    );
+    assert_eq!(
+        setup.minter().withdraw_spl(withdrawal_args(1_000)).await,
+        Err(WithdrawSplError::WithdrawalsHalted)
+    );
+
+    // The halt also survives an upgrade.
+    setup
+        .minter()
+        .upgrade(UpgradeArgs::default())
+        .await
+        .expect("upgrade should succeed");
+    assert_eq!(
+        setup
+            .minter()
+            .withdraw_spl_status(cksol_burn_block_index)
+            .await,
+        in_flight
+    );
+    setup
+        .check_metrics()
+        .await
+        .assert_contains_metric_matching(r"spl_withdrawals_halted 1 \d+")
+        .assert_contains_metric_matching(r"spl_withdrawals_above_rent_reserve 0 \d+")
+        .into()
+        .drop()
+        .await;
+}
+
+/// While halted, the minter keeps a queued SPL withdrawal and still sends a SOL
+/// withdrawal. After the resume it sends the SPL withdrawal.
+#[tokio::test]
+async fn should_hold_a_queued_withdrawal_during_a_halt_and_send_it_after_the_resume() {
+    const HELD_AMOUNT: u64 = 1_000;
+    let (setup, account) = setup_with_tokens().await;
+    let token_ledger = setup.install_spl_ledger(DECIMALS).await;
+    deposit_tokens_and_approve(&setup, &token_ledger, account).await;
+    let first = setup
+        .minter()
+        .withdraw_spl(withdrawal_args(AMOUNT))
+        .await
+        .expect("withdraw_spl should accept the first request")
+        .cksol_burn_block_index;
+    let first_signature = submit_withdrawal(&setup, first).await;
+    // The first withdrawal uses the only nonce account, so the next two requests wait.
+    let held = setup
+        .minter()
+        .withdraw_spl(withdrawal_args(HELD_AMOUNT))
+        .await
+        .expect("withdraw_spl should accept the second request")
+        .cksol_burn_block_index;
+    let sol = setup
+        .minter()
+        .withdraw_sol(WithdrawSolArgs {
+            from_subaccount: None,
+            amount: Setup::DEFAULT_MINIMUM_WITHDRAWAL_AMOUNT,
+            address: DESTINATION.to_string(),
+        })
+        .await
+        .expect("withdraw_sol should accept the request")
+        .block_index;
+
+    finalize_withdrawal(
+        &setup,
+        &first_signature,
+        WithdrawalOutcome::CreatedAccountAboveReserve,
+    )
+    .await;
+    // Round 1 halted the minter. Round 2 settles the first withdrawal.
+    finalize_withdrawal_from(
+        &setup,
+        &first_signature,
+        WithdrawalOutcome::CreatedAccountAboveReserve,
+        80,
+    )
+    .await;
+    assert_eq!(
+        setup
+            .minter()
+            .get_minter_info()
+            .await
+            .spl_withdrawals_halted,
+        Some(true)
+    );
+
+    // The SOL withdrawal is sent. The older SPL withdrawal is not.
+    setup.advance_time(WITHDRAWAL_PROCESSING_DELAY).await;
+    setup
+        .execute_http_mocks(
+            MockBuilder::with_start_id(88)
+                .submit_withdrawal_transaction_after(1)
+                .build(),
+        )
+        .await;
+    let sol_signature = assert_matches!(
+        setup.minter().withdraw_sol_status(sol).await,
+        WithdrawSolStatus::TxSent { transaction_id } => transaction_id
+    );
+    assert_eq!(
+        setup.minter().withdraw_spl_status(held).await,
+        WithdrawSplStatus::Pending
+    );
+    let sol_withdrawal = setup.minter().signed_transaction(&sol_signature).await;
+    setup.advance_time(FINALIZE_TRANSACTIONS_DELAY).await;
+    setup
+        .execute_http_mocks(
+            MockBuilder::with_start_id(96)
+                .finalize_withdrawal_transaction_after(&sol_withdrawal, 1)
+                .build(),
+        )
+        .await;
+    assert_matches!(
+        setup.minter().withdraw_sol_status(sol).await,
+        WithdrawSolStatus::TxFinalized(TxFinalizedStatus::Success { .. })
+    );
+    // The nonce account is free, but the SPL withdrawal still waits.
+    setup.advance_time(WITHDRAWAL_PROCESSING_DELAY).await;
+    assert_eq!(
+        setup.minter().withdraw_spl_status(held).await,
+        WithdrawSplStatus::Pending
+    );
+
+    setup
+        .minter()
+        .upgrade(UpgradeArgs {
+            spl_withdrawals_halted: Some(false),
+            ..Default::default()
+        })
+        .await
+        .expect("upgrade should succeed");
+
+    setup.advance_time(WITHDRAWAL_PROCESSING_DELAY).await;
+    setup
+        .execute_http_mocks(
+            MockBuilder::with_start_id(104)
+                .submit_withdrawal_transaction_after(2)
+                .build(),
+        )
+        .await;
+    let held_signature = assert_matches!(
+        setup.minter().withdraw_spl_status(held).await,
+        WithdrawSplStatus::TxSent { transaction_id } => transaction_id
+    );
+    let held_withdrawal = setup.minter().signed_transaction(&held_signature).await;
+    setup.advance_time(FINALIZE_TRANSACTIONS_DELAY).await;
+    setup
+        .execute_http_mocks(
+            MockBuilder::with_start_id(112)
+                .get_nonce_account_after(3)
+                .get_transaction(
+                    &held_signature,
+                    withdrawal_transaction_response(
+                        &held_withdrawal,
+                        &DESTINATION,
+                        HELD_AMOUNT,
+                        WithdrawalOutcome::CreatedAccount,
+                    ),
+                )
+                .build(),
+        )
+        .await;
+
+    assert_matches!(
+        setup.minter().withdraw_spl_status(held).await,
+        WithdrawSplStatus::TxFinalized {
+            transaction: TxFinalizedStatus::Success { transaction_id },
+            rent_refund: SplRentRefundStatus::NotDue,
+        } if transaction_id == held_signature
+    );
+    // This rent is within the reserve, so the minter does not halt again.
+    assert_eq!(
+        setup
+            .minter()
+            .get_minter_info()
+            .await
+            .spl_withdrawals_halted,
+        Some(false)
+    );
+    assert_eq!(
+        token_ledger.balance_of(account).await,
+        TOKENS - AMOUNT - HELD_AMOUNT
+    );
+
+    setup.drop().await;
 }
 
 #[tokio::test]

@@ -230,6 +230,10 @@ fn sweep_outcome_response(
 pub enum WithdrawalOutcome {
     /// The transfer succeeded and created the destination token account.
     CreatedAccount,
+    /// As [`Self::CreatedAccount`], with a rent of one lamport above the reserve.
+    CreatedAccountAboveReserve,
+    /// As [`Self::CreatedAccount`], with the given rent.
+    CreatedAccountWithRent(Lamport),
     /// The transfer failed on-chain, so only the transaction fee was paid.
     Failed,
 }
@@ -254,10 +258,12 @@ pub fn withdrawal_transaction_response(
     let destination_index = index(&associated_token_address(destination));
     let rent = match outcome {
         WithdrawalOutcome::CreatedAccount => RENT_EXEMPT_LAMPORTS,
+        WithdrawalOutcome::CreatedAccountAboveReserve => RENT_EXEMPT_LAMPORTS + 1,
+        WithdrawalOutcome::CreatedAccountWithRent(rent) => rent,
         WithdrawalOutcome::Failed => 0,
     };
     let mut pre_balances = vec![1; message.account_keys.len()];
-    pre_balances[0] = 5_000_000_000;
+    pre_balances[0] = 1_000_000_000_000;
     pre_balances[treasury_index] = RENT_EXEMPT_LAMPORTS;
     pre_balances[destination_index] = 0;
     let mut post_balances = pre_balances.clone();
@@ -283,7 +289,9 @@ pub fn withdrawal_transaction_response(
         BALANCE_ABOVE_MINIMUM,
     )];
     let (error, status, post_token_balances) = match outcome {
-        WithdrawalOutcome::CreatedAccount => (
+        WithdrawalOutcome::CreatedAccount
+        | WithdrawalOutcome::CreatedAccountAboveReserve
+        | WithdrawalOutcome::CreatedAccountWithRent(_) => (
             json!(null),
             json!({"Ok": null}),
             vec![

@@ -200,6 +200,38 @@ impl MockBuilder {
         )
     }
 
+    /// Mock for a read of the nonce account. Each withdrawal transaction changes the
+    /// nonce value, so `advances` is the number of withdrawal transactions before this read.
+    pub fn get_nonce_account_after(self, advances: u8) -> Self {
+        self.expect(
+            get_account_info_request(),
+            get_account_info_nonce_response([SUBMITTED_NONCE_SEED[0] + advances; 32]),
+        )
+    }
+
+    /// Mocks for the withdrawal timer when it sends one more transaction on the same
+    /// nonce account: the nonce read, then `sendTransaction`. `advances` is the number of
+    /// withdrawal transactions that this nonce account served before.
+    pub fn submit_withdrawal_transaction_after(self, advances: u8) -> Self {
+        self.get_nonce_account_after(advances).expect(
+            send_transaction_request(),
+            send_transaction_response(SUBMITTED_SIGNATURE),
+        )
+    }
+
+    /// Mocks for the finalization timer when it settles that transaction: a nonce read
+    /// that shows one more change, then `getTransaction` with a successful result.
+    pub fn finalize_withdrawal_transaction_after(
+        self,
+        withdrawal: &Transaction,
+        advances: u8,
+    ) -> Self {
+        self.get_nonce_account_after(advances + 1).expect(
+            get_transaction_request(&withdrawal.signatures[0]),
+            withdrawal_transaction_response(withdrawal),
+        )
+    }
+
     /// Mocks for `finalize_transactions` finding the pending transaction with the given
     /// signature expired at `block_height`: `getSlot` → `getBlock` → `getSignatureStatuses`
     /// reporting it as not found.

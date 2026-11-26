@@ -59,6 +59,25 @@ fn setup() -> SupportedSplToken {
     register_token(None)
 }
 
+fn halt() {
+    record(EventType::HaltedSplWithdrawals {
+        signature: solana_signature::Signature::from([9; 64]),
+        rent_spent: RENT_RESERVE + 1,
+        rent_reserve: RENT_RESERVE,
+    });
+}
+
+fn set_halted(halted: bool) {
+    record(EventType::Upgrade(UpgradeArgs {
+        spl_withdrawals_halted: Some(halted),
+        ..Default::default()
+    }));
+}
+
+fn halted() -> bool {
+    read_state(|state| state.spl_withdrawals_halted())
+}
+
 fn withdrawal_terms(token: &SupportedSplToken) -> SplWithdrawalRequestTerms {
     SplWithdrawalRequestTerms {
         account: Account {
@@ -1039,6 +1058,95 @@ mod fee_reimbursements {
     }
 }
 
+mod halt {
+    use super::*;
+
+    #[tokio::test]
+    async fn should_reject_a_new_withdrawal_before_either_burn_while_halted() {
+        let token = setup();
+        let request = withdrawal_terms(&token);
+        halt();
+        let events_before = EventsAssert::from_recorded();
+        let runtime = TestCanisterRuntime::new();
+
+        assert_eq!(
+            withdraw_request(&runtime, &request).await,
+            Err(WithdrawSplError::WithdrawalsHalted)
+        );
+
+        assert!(runtime.sent_update_calls().is_empty());
+        assert_nothing_recorded(events_before);
+        assert!(withdrawal_guard(request.account).is_ok());
+    }
+
+    #[tokio::test]
+    async fn should_accept_a_withdrawal_whose_burns_ran_when_the_halt_began() {
+        // The halt begins during the ckSOL burn (1) or during the ckSPL burn (2).
+        for burn_in_progress in [1, 2] {
+            let token = setup();
+            let request = withdrawal_terms(&token);
+            let runtime = TestCanisterRuntime::new()
+                .add_stub_response(burned(42))
+                .add_stub_response(burned(7))
+                .add_times([123; 10]);
+            let withdrawal = withdraw_request(&runtime, &request);
+            tokio::pin!(withdrawal);
+            while runtime.sent_update_calls().len() < burn_in_progress {
+                assert!(futures::poll!(&mut withdrawal).is_pending());
+            }
+            halt();
+
+            assert_eq!(
+                withdrawal.await,
+                Ok(WithdrawSplOk {
+                    cksol_burn_block_index: 42,
+                    ckspl_burn_block_index: 7,
+                })
+            );
+
+            assert_eq!(withdrawal_status(42), WithdrawSplStatus::Pending);
+            read_state(|state| {
+                assert!(state.pending_spl_cksol_refunds().is_empty());
+                assert!(
+                    state
+                        .pending_spl_withdrawal_requests()
+                        .contains_key(&42.into())
+                );
+            });
+            assert!(halted());
+            assert_replay();
+        }
+    }
+
+    #[test]
+    fn should_keep_the_halt_across_upgrades_until_one_resumes() {
+        setup();
+        assert!(!halted());
+        halt();
+        assert!(halted());
+
+        record(EventType::Upgrade(UpgradeArgs::default()));
+        assert!(halted());
+        set_halted(true);
+        assert!(halted());
+        assert_replay();
+
+        set_halted(false);
+        assert!(!halted());
+        assert_replay();
+    }
+
+    #[test]
+    fn should_halt_by_an_upgrade_argument() {
+        setup();
+
+        set_halted(true);
+
+        assert!(halted());
+        assert_replay();
+    }
+}
+
 mod withdrawal {
     use super::*;
 
@@ -1231,7 +1339,7 @@ mod transactions {
     use super::*;
     use crate::{
         address::account_address,
-        constants::{FEE_PER_SIGNATURE, RENT_EXEMPTION_THRESHOLD},
+        constants::{FEE_PER_SIGNATURE, MAX_CONCURRENT_SIGNATURES, RENT_EXEMPTION_THRESHOLD},
         spl_transfer::{build_spl_withdrawal_message, withdrawal::SplWithdrawalTransfer},
         state::{
             MinterTransaction, QueuedSplDeposit, SPL_SWEEP_TRANSACTION_FEE, SplSweep,
@@ -1815,6 +1923,373 @@ mod transactions {
         assert_eq!(decoder.array().unwrap(), Some(1));
         assert_eq!(decoder.u64().unwrap(), 42);
     }
+
+    mod halt {
+        use super::*;
+
+        #[test]
+        fn should_plan_only_sol_withdrawals_while_spl_withdrawals_are_halted() {
+            let token = setup_funded(BALANCE, TOKENS);
+            queue_withdrawal(&token, 100, 1_000);
+            queue_sol_withdrawal(101, 1_000_000);
+            queue_withdrawal(&token, 102, 1_000);
+            queue_sol_withdrawal(103, 1_000_000);
+
+            halt();
+
+            // With no SPL request in the plans, the SOL requests form one batch.
+            assert_eq!(plan_ids(&plans()), [("sol", sol_plan(&[101, 103]))]);
+            read_state(|state| assert_eq!(state.pending_spl_withdrawal_requests().len(), 2));
+
+            set_halted(false);
+
+            assert_eq!(
+                plan_ids(&plans()),
+                [
+                    ("spl", sol_plan(&[100])),
+                    ("sol", sol_plan(&[101])),
+                    ("spl", sol_plan(&[102])),
+                    ("sol", sol_plan(&[103])),
+                ]
+            );
+        }
+
+        #[tokio::test]
+        async fn should_hold_spl_withdrawals_and_send_sol_withdrawals_while_halted() {
+            let token = setup_funded(BALANCE, TOKENS);
+            queue_withdrawal(&token, 42, 1_000);
+            queue_sol_withdrawal(43, 1_000_000);
+            halt();
+            let runtime = TestCanisterRuntime::new()
+                .add_times([200; 20])
+                .add_stub_response(nonce_read())
+                .add_stub_response(sent())
+                .add_signer(sign_as_minter());
+
+            process_pending_withdrawals(runtime.clone()).await;
+
+            assert_eq!(
+                runtime
+                    .sent_update_calls()
+                    .iter()
+                    .map(|call| call.method.as_str())
+                    .collect::<Vec<_>>(),
+                ["getAccountInfo", "sendTransaction"]
+            );
+            assert_eq!(withdrawal_status(42), WithdrawSplStatus::Pending);
+            read_state(|state| {
+                assert!(state.sent_withdrawal_requests().contains_key(&43.into()));
+                assert!(state.created_spl_withdrawal_txs().is_empty());
+                assert_eq!(state.spl_treasury_balance(&mint()), TOKENS);
+            });
+
+            set_halted(false);
+
+            assert_eq!(plan_ids(&plans()), [("spl", sol_plan(&[42]))]);
+            assert_replay();
+        }
+
+        #[tokio::test]
+        async fn should_hold_an_spl_withdrawal_while_halted_without_a_nonce_read() {
+            let token = setup_funded(BALANCE, TOKENS);
+            queue_withdrawal(&token, 42, 1_000);
+            halt();
+            let events_before = EventsAssert::from_recorded();
+            let runtime = TestCanisterRuntime::new().add_times([200; 20]);
+
+            process_pending_withdrawals(runtime.clone()).await;
+
+            assert!(runtime.sent_update_calls().is_empty());
+            assert_eq!(EventsAssert::from_recorded(), events_before);
+            assert_eq!(withdrawal_status(42), WithdrawSplStatus::Pending);
+        }
+
+        #[tokio::test]
+        async fn should_recheck_the_halt_after_the_nonce_read() {
+            let token = setup_funded(BALANCE, TOKENS);
+            queue_withdrawal(&token, 42, 1_000);
+            let events_before = EventsAssert::from_recorded();
+            let runtime = TestCanisterRuntime::new()
+                .add_times([200; 20])
+                .add_stub_response(nonce_read());
+            let processing = process_pending_withdrawals(runtime.clone());
+            tokio::pin!(processing);
+            while runtime.sent_update_calls().is_empty() {
+                assert!(futures::poll!(&mut processing).is_pending());
+            }
+            halt();
+            processing.await;
+
+            // Only the halt is recorded. No transaction is created.
+            assert_eq!(EventsAssert::from_recorded().len(), events_before.len() + 1);
+            assert_eq!(runtime.sent_update_calls().len(), 1);
+            assert_eq!(withdrawal_status(42), WithdrawSplStatus::Pending);
+            read_state(|state| {
+                assert_eq!(state.nonce_pool().num_free_accounts(), 1);
+                assert_eq!(state.spl_treasury_balance(&mint()), TOKENS);
+            });
+        }
+
+        #[tokio::test]
+        async fn should_hold_a_created_spl_transaction_while_halted_and_send_it_after_the_resume() {
+            let token = setup_funded(BALANCE, TOKENS);
+            queue_withdrawal(&token, 42, 1_000);
+            let failing = TestCanisterRuntime::new()
+                .add_times([200; 20])
+                .add_stub_response(nonce_read())
+                .add_signer(sign_as_minter().expect([Err(SignCallError::CallFailed(
+                    ic_cdk::call::CallPerformFailed.into(),
+                ))]));
+            process_pending_withdrawals(failing.clone()).await;
+            let bound = read_state(|state| {
+                let created = state.created_spl_withdrawal_txs()[&NONCE_ACCOUNT].clone();
+                state
+                    .bound_spl_withdrawal_message(&NONCE_ACCOUNT, &created)
+                    .unwrap()
+            });
+            halt();
+            let events_before = EventsAssert::from_recorded();
+
+            // The runtime has no signer, so a signing request fails the test.
+            let halted_round = TestCanisterRuntime::new().add_times([300; 20]);
+            process_pending_withdrawals(halted_round.clone()).await;
+
+            // The transaction is not signed or sent. Its nonce and its funds stay reserved.
+            assert!(halted_round.sent_update_calls().is_empty());
+            assert_eq!(EventsAssert::from_recorded(), events_before);
+            read_state(|state| {
+                assert!(state.submitted_transactions().is_empty());
+                assert!(
+                    state
+                        .created_spl_withdrawal_txs()
+                        .contains_key(&NONCE_ACCOUNT)
+                );
+                assert_eq!(state.nonce_pool().num_free_accounts(), 0);
+                assert_eq!(state.balance(), BALANCE - SOL_COST);
+                assert_eq!(state.spl_treasury_balance(&mint()), TOKENS - 1_000);
+            });
+
+            set_halted(false);
+            let resumed = TestCanisterRuntime::new()
+                .add_times([400; 20])
+                .add_stub_response(sent())
+                .add_signer(sign_as_minter());
+            process_pending_withdrawals(resumed.clone()).await;
+
+            // After the resume, the round signs and sends the same message. It reads no nonce.
+            assert_eq!(
+                resumed
+                    .sent_update_calls()
+                    .iter()
+                    .map(|call| call.method.as_str())
+                    .collect::<Vec<_>>(),
+                ["sendTransaction"]
+            );
+            read_state(|state| {
+                assert!(matches!(
+                    state.submitted_transactions().get(&minter_signature()),
+                    Some(MinterTransaction::SplWithdrawal { message, .. }) if *message == bound.clone().into()
+                ));
+            });
+            assert_replay();
+        }
+
+        #[tokio::test]
+        async fn should_send_a_transaction_whose_signing_began_before_the_halt() {
+            let token = setup_funded(BALANCE, TOKENS);
+            queue_withdrawal(&token, 42, 1_000);
+            // The halt begins during the signing call.
+            let runtime = TestCanisterRuntime::new()
+                .add_times([200; 20])
+                .add_stub_response(nonce_read())
+                .add_stub_response(sent())
+                .add_signer(sign_as_minter().before_reply(halt));
+
+            process_pending_withdrawals(runtime.clone()).await;
+
+            assert!(halted());
+            assert_eq!(
+                runtime
+                    .sent_update_calls()
+                    .iter()
+                    .map(|call| call.method.as_str())
+                    .collect::<Vec<_>>(),
+                ["getAccountInfo", "sendTransaction"]
+            );
+            assert_eq!(
+                withdrawal_status(42),
+                WithdrawSplStatus::TxSent {
+                    transaction_id: minter_signature().into()
+                }
+            );
+            assert_replay();
+        }
+
+        #[tokio::test]
+        async fn should_send_the_whole_signing_batch_when_the_halt_begins_during_a_later_signature()
+        {
+            let token = setup_funded(BALANCE, TOKENS);
+            let second_nonce = Address::from([101; 32]);
+            record(EventType::Upgrade(UpgradeArgs {
+                nonce_accounts_to_add: Some(vec![second_nonce.to_string()]),
+                ..Default::default()
+            }));
+            queue_withdrawal(&token, 42, 1_000);
+            queue_withdrawal(&token, 43, 1_000);
+            let runtime = TestCanisterRuntime::new()
+                .add_times([200; 40])
+                .add_stub_response(nonce_read())
+                .add_stub_response(nonce_read())
+                .add_stub_response(sent())
+                .add_stub_response(sent())
+                .add_signer(sign_as_minter())
+                .add_signer(sign_as_minter().before_reply(halt));
+
+            process_pending_withdrawals(runtime.clone()).await;
+
+            assert!(halted());
+            assert_eq!(
+                runtime
+                    .sent_update_calls()
+                    .iter()
+                    .map(|call| call.method.as_str())
+                    .collect::<Vec<_>>(),
+                [
+                    "getAccountInfo",
+                    "getAccountInfo",
+                    "sendTransaction",
+                    "sendTransaction"
+                ]
+            );
+            read_state(|state| {
+                let first = &state.sent_spl_withdrawal_requests()[&42.into()];
+                let second = &state.sent_spl_withdrawal_requests()[&43.into()];
+                assert_ne!(first.signature, second.signature);
+                assert_eq!(state.submitted_transactions().len(), 2);
+                assert!(state.created_spl_withdrawal_txs().is_empty());
+                assert_eq!(state.nonce_pool().num_free_accounts(), 0);
+            });
+            assert_replay();
+        }
+
+        #[tokio::test]
+        async fn should_restore_sol_progress_by_adding_a_nonce_while_spl_is_halted() {
+            let token = setup_funded(BALANCE, TOKENS);
+            queue_withdrawal(&token, 42, 1_000);
+            record(EventType::CreatedSplWithdrawalTransaction {
+                cksol_burn_block_index: 42.into(),
+                nonce_account: NONCE_ACCOUNT,
+                nonce_value: durable_nonce(1),
+            });
+            queue_sol_withdrawal(43, 1_000_000);
+            halt();
+            // The held SPL transaction uses the only nonce account, so the SOL withdrawal waits.
+            let idle = TestCanisterRuntime::new().add_times([200; 20]);
+            process_pending_withdrawals(idle.clone()).await;
+            assert!(idle.sent_update_calls().is_empty());
+            read_state(|state| {
+                assert_eq!(state.nonce_pool().num_free_accounts(), 0);
+                assert!(state.pending_withdrawal_requests().contains_key(&43.into()));
+            });
+            let added_nonce = Address::from([101; 32]);
+            record(EventType::Upgrade(UpgradeArgs {
+                nonce_accounts_to_add: Some(vec![added_nonce.to_string()]),
+                ..Default::default()
+            }));
+            let runtime = TestCanisterRuntime::new()
+                .add_times([300; 20])
+                .add_stub_response(nonce_read())
+                .add_stub_response(sent())
+                .add_signer(sign_as_minter());
+            process_pending_withdrawals(runtime.clone()).await;
+            assert!(halted());
+            assert_eq!(runtime.sent_update_calls().len(), 2);
+            read_state(|state| {
+                assert!(state.sent_withdrawal_requests().contains_key(&43.into()));
+                assert!(
+                    state
+                        .created_spl_withdrawal_txs()
+                        .contains_key(&NONCE_ACCOUNT)
+                );
+                assert!(
+                    !state
+                        .created_spl_withdrawal_txs()
+                        .contains_key(&added_nonce)
+                );
+                assert_eq!(state.nonce_pool().num_free_accounts(), 0);
+            });
+            assert_replay();
+        }
+
+        #[tokio::test]
+        async fn should_not_count_held_spl_transactions_in_the_capacity_of_a_round() {
+            let token = setup_funded(BALANCE, TOKENS);
+            let held_nonce_accounts: Vec<Address> = (0..MAX_CONCURRENT_SIGNATURES as u8)
+                .map(|index| Address::from([100 + index; 32]))
+                .collect();
+            record(EventType::Upgrade(UpgradeArgs {
+                nonce_accounts_to_add: Some(
+                    held_nonce_accounts
+                        .iter()
+                        .map(ToString::to_string)
+                        .collect(),
+                ),
+                ..Default::default()
+            }));
+            for (id, nonce_account) in (0..).zip(&held_nonce_accounts) {
+                queue_withdrawal(&token, id, 1_000);
+                record(EventType::CreatedSplWithdrawalTransaction {
+                    cksol_burn_block_index: id.into(),
+                    nonce_account: *nonce_account,
+                    nonce_value: durable_nonce(1),
+                });
+            }
+            queue_sol_withdrawal(100, 1_000_000);
+            halt();
+            read_state(|state| {
+                assert_eq!(
+                    state.created_spl_withdrawal_txs().len(),
+                    MAX_CONCURRENT_SIGNATURES
+                );
+                assert_eq!(state.nonce_pool().num_free_accounts(), 1);
+                assert_eq!(state.num_unsigned_withdrawal_transactions(), 0);
+            });
+            let runtime = TestCanisterRuntime::new()
+                .add_times([200; 20])
+                .add_stub_response(nonce_read())
+                .add_stub_response(sent())
+                .add_signer(sign_as_minter());
+
+            process_pending_withdrawals(runtime.clone()).await;
+
+            // The free nonce account serves the SOL withdrawal.
+            assert_eq!(
+                runtime
+                    .sent_update_calls()
+                    .iter()
+                    .map(|call| call.method.as_str())
+                    .collect::<Vec<_>>(),
+                ["getAccountInfo", "sendTransaction"]
+            );
+            read_state(|state| {
+                assert!(state.sent_withdrawal_requests().contains_key(&100.into()));
+                assert_eq!(
+                    state.created_spl_withdrawal_txs().len(),
+                    MAX_CONCURRENT_SIGNATURES
+                );
+            });
+
+            set_halted(false);
+
+            read_state(|state| {
+                assert_eq!(
+                    state.num_unsigned_withdrawal_transactions(),
+                    MAX_CONCURRENT_SIGNATURES
+                )
+            });
+            assert_replay();
+        }
+    }
 }
 
 mod settlement {
@@ -1882,6 +2357,10 @@ mod settlement {
     /// Funds the minter and the treasury, then accepts, binds and submits withdrawal 42
     /// with a signature of the minter key. Returns that signature.
     fn setup_sent_withdrawal() -> Signature {
+        setup_sent_withdrawal_with_reserve(RENT_RESERVE)
+    }
+
+    fn setup_sent_withdrawal_with_reserve(rent_reserve: Lamport) -> Signature {
         reset_state();
         reset_events();
         init_state();
@@ -1958,7 +2437,10 @@ mod settlement {
         record_at(
             1,
             EventType::AcceptedSplWithdrawalRequest(SplWithdrawalRequest {
-                terms: terms(),
+                terms: SplWithdrawalRequestTerms {
+                    rent_reserve,
+                    ..terms()
+                },
                 cksol_burn_block_index: 42.into(),
                 ckspl_burn_block_index: 7.into(),
             }),
@@ -1990,7 +2472,7 @@ mod settlement {
             },
         );
         read_state(|state| {
-            assert_eq!(state.balance(), BALANCE - SOL_COST);
+            assert_eq!(state.balance(), BALANCE - FEE_PER_SIGNATURE - rent_reserve);
             assert_eq!(state.spl_treasury_balance(&mint()), TOKENS - TRANSFERRED);
         });
         signature
@@ -2424,6 +2906,8 @@ mod settlement {
             assert_eq!(state.spl_sweep_allowance(), 0);
         });
 
+        assert!(halted());
+
         // A refill of 10 lamports repairs the lamport that is owed and leaves 9.
         record_at(
             3_000,
@@ -2446,6 +2930,7 @@ mod settlement {
             assert_eq!(state.operating_balance().shortfall(), 0);
             assert_eq!(state.spl_sweep_allowance(), 9);
         });
+        assert!(halted(), "a refill must not resume withdrawals");
         assert_replay();
     }
 
@@ -2913,11 +3398,239 @@ mod settlement {
                 },
                 34,
             ),
+            (
+                EventType::HaltedSplWithdrawals {
+                    signature,
+                    rent_spent: 2,
+                    rent_reserve: 1,
+                },
+                36,
+            ),
         ] {
             let encoded = minicbor::to_vec(payload).unwrap();
             let mut decoder = minicbor::Decoder::new(&encoded);
             assert_eq!(decoder.array().unwrap(), Some(2));
             assert_eq!(decoder.u32().unwrap(), expected);
+        }
+    }
+
+    mod halt {
+        use super::*;
+        use crate::test_fixtures::assert_spl_withdrawal_metrics;
+
+        fn halt_event(signature: Signature, rent_spent: Lamport) -> EventType {
+            EventType::HaltedSplWithdrawals {
+                signature,
+                rent_spent,
+                rent_reserve: RENT_RESERVE,
+            }
+        }
+
+        fn recorded_halts() -> usize {
+            crate::storage::with_event_iter(|events| {
+                events
+                    .filter(|event| matches!(event.payload, EventType::HaltedSplWithdrawals { .. }))
+                    .count()
+            })
+        }
+
+        #[tokio::test]
+        async fn should_halt_when_the_rent_is_above_the_reserve() {
+            let signature = setup_sent_withdrawal();
+            assert_spl_withdrawal_metrics(0, &["spl_withdrawals_halted 0 "]);
+
+            let events_before = EventsAssert::from_recorded();
+
+            finalize(outcome(&signature, Some(RENT_RESERVE + 1), true)).await;
+
+            // Round 1 records only the halt. The withdrawal is not settled yet.
+            let events_after = EventsAssert::from_recorded();
+            assert_eq!(events_after.len(), events_before.len() + 1);
+            events_after.expect_contains_event_eq(halt_event(signature, RENT_RESERVE + 1));
+            assert!(halted());
+            assert!(matches!(
+                withdrawal_status(42),
+                WithdrawSplStatus::TxSent { .. }
+            ));
+            assert_spl_withdrawal_metrics(0, &["spl_withdrawals_halted 1 "]);
+            assert_replay();
+
+            finalize(outcome(&signature, Some(RENT_RESERVE + 1), true)).await;
+
+            // Round 2 settles the withdrawal. There is still one halt event.
+            EventsAssert::from_recorded().expect_contains_event_eq(
+                EventType::SucceededSplWithdrawalTransaction {
+                    signature,
+                    lamports_spent: SOL_COST + 1,
+                    rent_spent: RENT_RESERVE + 1,
+                },
+            );
+            assert_eq!(recorded_halts(), 1);
+            assert!(halted());
+            assert!(matches!(
+                withdrawal_status(42),
+                WithdrawSplStatus::TxFinalized { .. }
+            ));
+            assert_replay();
+        }
+
+        #[tokio::test]
+        async fn should_not_halt_when_the_rent_is_within_the_reserve_or_the_transfer_failed() {
+            for rent in [Some(0), Some(RENT_RESERVE), None] {
+                let signature = setup_sent_withdrawal();
+
+                finalize(outcome(&signature, rent, true)).await;
+
+                read_state(|state| assert!(state.sent_spl_withdrawal_requests().is_empty()));
+                assert_eq!(recorded_halts(), 0, "rent {rent:?}");
+                assert!(!halted(), "rent {rent:?}");
+                assert_spl_withdrawal_metrics(0, &["spl_withdrawals_halted 0 "]);
+            }
+        }
+
+        #[tokio::test]
+        async fn should_compare_the_rent_of_an_older_request_with_the_current_reserve() {
+            // The reserve of the request is lower than the current reserve. This happens
+            // when an upgrade raises the reserve while the request waits.
+            let captured = RENT_RESERVE - 100_000;
+            for (rent, halts) in [(RENT_RESERVE, 0), (RENT_RESERVE + 1, 1)] {
+                let signature = setup_sent_withdrawal_with_reserve(captured);
+
+                if halts == 1 {
+                    finalize_in_two_rounds(outcome(&signature, Some(rent), true)).await;
+                } else {
+                    finalize(outcome(&signature, Some(rent), true)).await;
+                }
+
+                read_state(|state| {
+                    assert_eq!(state.spl_withdrawals_above_rent_reserve(), 1);
+                    assert_eq!(state.spl_rent_above_reserve(), rent - captured);
+                    assert_eq!(state.spl_withdrawals_halted(), halts == 1);
+                });
+                assert_eq!(recorded_halts(), halts);
+                if halts == 1 {
+                    EventsAssert::from_recorded()
+                        .expect_contains_event_eq(halt_event(signature, rent));
+                }
+                assert_replay();
+            }
+        }
+
+        #[tokio::test]
+        async fn should_not_halt_for_a_rent_within_a_captured_reserve_above_the_current_one() {
+            // The reserve of the request is higher than the current reserve, and the rent
+            // is within it.
+            let captured = RENT_RESERVE + 100_000;
+            let signature = setup_sent_withdrawal_with_reserve(captured);
+
+            finalize(outcome(&signature, Some(RENT_RESERVE + 1), true)).await;
+
+            read_state(|state| {
+                assert!(state.sent_spl_withdrawal_requests().is_empty());
+                assert_eq!(state.spl_withdrawals_above_rent_reserve(), 0);
+            });
+            assert_eq!(recorded_halts(), 0);
+            assert!(!halted());
+            assert_replay();
+        }
+
+        #[tokio::test]
+        async fn should_settle_and_refund_sent_withdrawals_while_halted() {
+            for (rent, refund) in [
+                (Some(0), Some(SplRefundKind::UnusedRent)),
+                (None, Some(SplRefundKind::FailedTransferRent)),
+                (Some(RENT_RESERVE + 1), None),
+            ] {
+                let signature = setup_sent_withdrawal();
+                halt();
+
+                finalize(outcome(&signature, rent, true)).await;
+
+                read_state(|state| assert!(state.sent_spl_withdrawal_requests().is_empty()));
+                match refund {
+                    Some(kind) => {
+                        EventsAssert::from_recorded()
+                            .expect_contains_event_eq(rent_refund_event(kind, RENT_RESERVE));
+                    }
+                    None => assert_no_refund_recorded(),
+                }
+                // The halt is recorded once.
+                assert_eq!(recorded_halts(), 1, "rent {rent:?}");
+                assert!(halted());
+                assert_replay();
+
+                if rent.is_none() {
+                    let token_ledger = reimbursement_runtime([Ok(Nat::from(5_u64))]);
+                    process_pending_reimbursements(token_ledger.clone()).await;
+                    let calls = token_ledger.sent_update_calls();
+                    assert_eq!(calls.len(), 1);
+                    assert_eq!(calls[0].canister_id, fixture::registration().ledger_id);
+                    assert_eq!(
+                        calls[0].single_arg::<TransferArg>().amount,
+                        Nat::from(AMOUNT)
+                    );
+                }
+                if refund.is_some() {
+                    let fee_ledger = reimbursement_runtime([Ok(Nat::from(8_u64))]);
+                    process_pending_cksol_refunds(fee_ledger.clone()).await;
+                    let calls = fee_ledger.sent_update_calls();
+                    assert_eq!(calls.len(), 1);
+                    assert_eq!(calls[0].canister_id, ledger_canister_id());
+                    assert_eq!(
+                        calls[0].single_arg::<TransferArg>().amount,
+                        Nat::from(RENT_RESERVE)
+                    );
+                    assert_eq!(
+                        calls[0].single_arg::<TransferArg>().to,
+                        account_of_request()
+                    );
+                    let expected_rent = SplRentRefundStatus::Reimbursed {
+                        amount: RENT_RESERVE,
+                        mint_block_index: 8,
+                    };
+                    match withdrawal_status(42) {
+                        WithdrawSplStatus::Reimbursed {
+                            mint_block_index,
+                            rent_refund,
+                            ..
+                        } => {
+                            assert!(rent.is_none());
+                            assert_eq!(mint_block_index, 5);
+                            assert_eq!(rent_refund, expected_rent);
+                        }
+                        WithdrawSplStatus::TxFinalized { rent_refund, .. } => {
+                            assert!(rent.is_some());
+                            assert_eq!(rent_refund, expected_rent);
+                        }
+                        other => panic!("refund did not complete while halted: {other:?}"),
+                    }
+                }
+                // A second run of the two refund timers sends no ledger call.
+                let idle = reimbursement_runtime([]);
+                process_pending_reimbursements(idle.clone()).await;
+                process_pending_cksol_refunds(idle.clone()).await;
+                assert!(idle.sent_update_calls().is_empty());
+                assert!(halted());
+                assert_replay();
+            }
+        }
+
+        #[test]
+        fn should_not_decide_the_halt_again_on_replay() {
+            let signature = setup_sent_withdrawal();
+
+            record_at(
+                2_000,
+                EventType::SucceededSplWithdrawalTransaction {
+                    signature,
+                    lamports_spent: SOL_COST + 1,
+                    rent_spent: RENT_RESERVE + 1,
+                },
+            );
+
+            read_state(|state| assert_eq!(state.spl_withdrawals_above_rent_reserve(), 1));
+            assert!(!halted());
+            assert_replay();
         }
     }
 
