@@ -316,6 +316,9 @@ fn apply_state_transition(state: &mut State, payload: &EventType, timestamp: u64
         } => {
             state.process_quarantined_spl_cksol_refund(*cksol_burn_block_index, *kind);
         }
+        EventType::HaltedSplWithdrawals { .. } => {
+            state.process_halted_spl_withdrawals();
+        }
     }
 }
 

@@ -255,6 +255,15 @@ pub enum EventType {
         /// The part of `lamports_spent` that created the destination token account.
         rent_spent: Lamport,
     },
+    /// An SPL withdrawal paid more rent than the reserve, so SPL withdrawals are halted.
+    HaltedSplWithdrawals {
+        /// The signature of the transaction that paid the rent.
+        signature: Signature,
+        /// The rent that the transaction paid for the destination token account.
+        rent_spent: Lamport,
+        /// The rent reserve that the transaction exceeded.
+        rent_reserve: Lamport,
+    },
     /// The transaction of an SPL withdrawal failed on-chain; no token moved.
     FailedSplWithdrawalTransaction {
         /// The signature of the failed transaction.

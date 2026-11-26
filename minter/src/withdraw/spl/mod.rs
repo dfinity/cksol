@@ -51,6 +51,14 @@ pub(super) fn create_spl_transaction<R: CanisterRuntime>(
     request: &SplWithdrawalRequest,
 ) -> bool {
     let cksol_burn_block_index = request.cksol_burn_block_index;
+    // A settlement may have halted SPL withdrawals during the nonce read.
+    if read_state(|state| state.spl_withdrawals_halted()) {
+        log!(
+            Priority::Info,
+            "SPL withdrawals are halted, keeping SPL withdrawal {cksol_burn_block_index} in the queue"
+        );
+        return false;
+    }
     // A sweep may have reserved SOL during the nonce read.
     if !read_state(|state| state.covers_spl_withdrawal(request)) {
         log!(
@@ -244,6 +252,9 @@ pub async fn withdraw<R: CanisterRuntime>(
     address: &str,
 ) -> Result<WithdrawSplOk, WithdrawSplError> {
     let _guard = withdrawal_guard(account)?;
+    if read_state(|state| state.spl_withdrawals_halted()) {
+        return Err(WithdrawSplError::WithdrawalsHalted);
+    }
     let token = validate_token(mint, amount)?;
     let address = validate_destination(&token, address)?;
     super::validate_nonce_pool_not_empty()?;

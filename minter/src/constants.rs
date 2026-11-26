@@ -124,6 +124,17 @@ pub const CKSOL_LEDGER_TRANSACTION_FEE: u64 = 500;
 /// See <https://solana.com/docs/core/rent#rent-exempt-minimum>.
 pub const CLASSIC_TOKEN_ACCOUNT_RENT_EXEMPTION: u64 = 2_039_280;
 
+// The reserve must cover the highest rent that Solana charged for a classic token account.
+const _: () = {
+    const CLASSIC_TOKEN_ACCOUNT_SIZE: u64 = 165;
+    const ACCOUNT_STORAGE_OVERHEAD: u64 = 128;
+    const HIGHEST_LAMPORTS_PER_BYTE: u64 = 6_960;
+    assert!(
+        CLASSIC_TOKEN_ACCOUNT_RENT_EXEMPTION
+            >= (CLASSIC_TOKEN_ACCOUNT_SIZE + ACCOUNT_STORAGE_OVERHEAD) * HIGHEST_LAMPORTS_PER_BYTE
+    );
+};
+
 /// Initial ckSOL fee in lamports charged for an SPL withdrawal, excluding
 /// the rent of the destination token account.
 ///

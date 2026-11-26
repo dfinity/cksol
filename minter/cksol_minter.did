@@ -334,6 +334,9 @@ type WithdrawSplError = variant {
     InvalidDestination : text;
     // The minter cannot currently accept the request.
     TemporarilyUnavailable : text;
+    // SPL withdrawals are halted until an upgrade of the minter resumes them, because
+    // a destination token account cost more rent than the reserve. Nothing was burned.
+    WithdrawalsHalted;
     // Burning the ckSOL withdrawal fee and rent reserve failed.
     CkSolLedgerError : record { error : WithdrawSplLedgerError };
     // Burning ckSPL failed after the ckSOL fee was burned; the fee is reimbursed
@@ -450,6 +453,9 @@ type MinterInfo = record {
     // The SPL withdrawal fees collected so far in token units, with one entry per
     // supported token.
     collected_spl_withdrawal_fees : opt vec CollectedSplWithdrawalFees;
+    // Whether SPL withdrawals are halted until an upgrade resumes them. SOL
+    // withdrawals continue.
+    spl_withdrawals_halted : opt bool;
 };
 
 // The ckSOL minter service arguments.
@@ -481,6 +487,9 @@ type UpgradeArgs = record {
     // The fee in lamports of ckSOL charged for an SPL withdrawal, excluding the rent
     // reserve of the destination token account.
     spl_withdrawal_fee : opt Lamport;
+    // Halts or resumes SPL withdrawals. The minter halts them by itself when a
+    // withdrawal pays more rent than the reserve, and only `opt false` resumes them.
+    spl_withdrawals_halted : opt bool;
 };
 
 type WithdrawSolArgs = record {
@@ -963,6 +972,15 @@ type EventType = variant {
         lamports_spent : Lamport;
         // The part of `lamports_spent` that created the destination token account.
         rent_spent : Lamport;
+    };
+    // An SPL withdrawal paid more rent than the reserve, so SPL withdrawals are halted.
+    HaltedSplWithdrawals : record {
+        // The signature of the transaction that paid the rent.
+        signature : Signature;
+        // The rent that the transaction paid for the destination token account.
+        rent_spent : Lamport;
+        // The rent reserve that the transaction exceeded.
+        rent_reserve : Lamport;
     };
     // The transaction of an SPL withdrawal failed on-chain; no token moved.
     FailedSplWithdrawalTransaction : record {

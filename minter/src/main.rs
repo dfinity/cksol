@@ -198,6 +198,7 @@ fn get_minter_info() -> MinterInfo {
         spl_deposit_consolidation_fee: Some(s.spl_deposit_consolidation_fee()),
         collected_spl_deposit_fees: Some(s.collected_spl_deposit_fees()),
         collected_spl_withdrawal_fees: Some(s.all_collected_spl_withdrawal_fees()),
+        spl_withdrawals_halted: Some(s.spl_withdrawals_halted()),
     })
 }
 

@@ -45,6 +45,7 @@ async fn should_load_staging_snapshot_and_upgrade_to_current_wasm() {
             spl_deposit_consolidation_fee: Some(70_000_000_000),
             collected_spl_deposit_fees: Some(vec![]),
             collected_spl_withdrawal_fees: Some(vec![]),
+            spl_withdrawals_halted: Some(false),
             ..state_before.info.clone()
         }
     );

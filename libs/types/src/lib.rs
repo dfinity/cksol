@@ -386,6 +386,9 @@ pub enum WithdrawSplError {
     InvalidDestination(String),
     /// The minter cannot currently accept the request.
     TemporarilyUnavailable(String),
+    /// SPL withdrawals are halted until an upgrade of the minter resumes them, because
+    /// a destination token account cost more rent than the reserve. Nothing was burned.
+    WithdrawalsHalted,
     /// Burning the ckSOL withdrawal fee and rent reserve failed.
     CkSolLedgerError {
         /// The error from the ckSOL ledger.
@@ -577,6 +580,9 @@ pub struct MinterInfo {
     /// The SPL withdrawal fees collected so far in token units, with one entry per
     /// registered token in mint-address order. Absent in responses from older minter versions.
     pub collected_spl_withdrawal_fees: Option<Vec<CollectedSplWithdrawalFees>>,
+    /// Whether SPL withdrawals are halted until an upgrade resumes them. SOL withdrawals
+    /// continue. Absent in responses from older minter versions.
+    pub spl_withdrawals_halted: Option<bool>,
 }
 
 /// An entry of the list returned by the [ICRC-10](https://github.com/dfinity/ICRC/blob/main/ICRCs/ICRC-10/ICRC-10.md)

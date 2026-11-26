@@ -111,6 +111,10 @@ pub struct UpgradeArgs {
     /// of the destination token account.
     #[cfg_attr(feature = "event", n(12))]
     pub spl_withdrawal_fee: Option<Lamport>,
+    /// Halts or resumes SPL withdrawals. The minter halts them by itself when a withdrawal
+    /// pays more rent than the reserve, and only `Some(false)` resumes them.
+    #[cfg_attr(feature = "event", n(13))]
+    pub spl_withdrawals_halted: Option<bool>,
 }
 
 /// The Solana network to connect to via the SOL RPC canister.

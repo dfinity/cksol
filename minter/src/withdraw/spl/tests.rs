@@ -2129,6 +2129,14 @@ mod settlement {
         runtime
     }
 
+    /// Runs the finalization timer twice for a rent that halts SPL withdrawals: the first
+    /// round records the halt, the second settles the withdrawal.
+    async fn finalize_in_two_rounds(reply: GetTransactionResult) -> TestCanisterRuntime {
+        finalize(reply.clone()).await;
+        read_state(|state| assert!(state.spl_withdrawals_halted()));
+        finalize(reply).await
+    }
+
     /// Replays the recorded log with the signing key of this module as the minter key.
     fn assert_replay() {
         use crate::{
@@ -2317,7 +2325,7 @@ mod settlement {
         let signature = setup_sent_withdrawal();
         let excess = 160_720;
 
-        finalize(outcome(&signature, Some(RENT_RESERVE + excess), true)).await;
+        finalize_in_two_rounds(outcome(&signature, Some(RENT_RESERVE + excess), true)).await;
 
         EventsAssert::from_recorded().expect_contains_event_eq(
             EventType::SucceededSplWithdrawalTransaction {
@@ -2372,7 +2380,7 @@ mod settlement {
             }
             let rent = RENT_RESERVE + margin + 1;
 
-            finalize(outcome(&signature, Some(rent), true)).await;
+            finalize_in_two_rounds(outcome(&signature, Some(rent), true)).await;
 
             read_state(|state| {
                 // The main balance pays the real cost in every case.
@@ -2409,7 +2417,7 @@ mod settlement {
     async fn should_repair_a_shortfall_from_new_funding_before_it_is_spendable() {
         let signature = setup_sent_withdrawal();
         let margin = FEE - FEE_PER_SIGNATURE;
-        finalize(outcome(&signature, Some(RENT_RESERVE + margin + 1), true)).await;
+        finalize_in_two_rounds(outcome(&signature, Some(RENT_RESERVE + margin + 1), true)).await;
         read_state(|state| {
             assert_eq!(state.operating_balance().balance(), 0);
             assert_eq!(state.operating_balance().shortfall(), 1);
@@ -2527,7 +2535,7 @@ mod settlement {
     async fn should_repair_a_shortfall_from_the_fee_of_a_later_withdrawal() {
         let signature = setup_sent_withdrawal();
         let margin = FEE - FEE_PER_SIGNATURE;
-        finalize(outcome(&signature, Some(RENT_RESERVE + margin + 1), true)).await;
+        finalize_in_two_rounds(outcome(&signature, Some(RENT_RESERVE + margin + 1), true)).await;
         read_state(|state| assert_eq!(state.operating_balance().shortfall(), 1));
 
         // A second withdrawal fails on-chain, so its fee less the transaction fee is kept.
@@ -2588,7 +2596,7 @@ mod settlement {
         let signature = setup_sent_withdrawal();
         let margin = FEE - FEE_PER_SIGNATURE;
 
-        finalize(outcome(&signature, Some(RENT_RESERVE + margin), true)).await;
+        finalize_in_two_rounds(outcome(&signature, Some(RENT_RESERVE + margin), true)).await;
 
         read_state(|state| {
             assert_eq!(state.operating_balance().balance(), 0);
@@ -3009,7 +3017,11 @@ mod settlement {
             ] {
                 let signature = setup_sent_withdrawal();
 
-                finalize(outcome(&signature, Some(rent), true)).await;
+                if rent > RENT_RESERVE {
+                    finalize_in_two_rounds(outcome(&signature, Some(rent), true)).await;
+                } else {
+                    finalize(outcome(&signature, Some(rent), true)).await;
+                }
 
                 let mut expected = failed_withdrawals(0).to_vec();
                 expected.push(format!("spl_withdrawals_above_rent_reserve {count} "));
@@ -3123,7 +3135,7 @@ mod settlement {
             // The fee less the transaction fee absorbs the rent above the reserve.
             let rent = RENT_RESERVE + FEE - FEE_PER_SIGNATURE + 7;
 
-            finalize(outcome(&signature, Some(rent), true)).await;
+            finalize_in_two_rounds(outcome(&signature, Some(rent), true)).await;
 
             let mut encoder = ic_metrics_encoder::MetricsEncoder::new(Vec::new(), 0);
             read_state(|state| {

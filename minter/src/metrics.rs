@@ -265,6 +265,11 @@ pub(crate) fn encode_spl_withdrawal_metrics(
         s.spl_rent_above_reserve().metric_value(),
         "Sum in Lamports of the rent that SPL withdrawals spent above their reserve. The withdrawal fee and then the operating balance pay it.",
     )?;
+    w.encode_gauge(
+        "spl_withdrawals_halted",
+        u64::from(s.spl_withdrawals_halted()).metric_value(),
+        "Set to 1 while SPL withdrawals are halted because a withdrawal paid more rent than the reserve, else 0. The minter rejects new SPL withdrawals and keeps the accepted ones in the queue until an upgrade resumes them.",
+    )?;
     let mut quarantined_spl_cksol_refunds = w.gauge_vec(
         "quarantined_spl_cksol_refunds",
         "Number of quarantined ckSOL refunds of SPL withdrawals by kind: the fee of a failed token burn, the unused rent of a successful transfer, or the rent of a failed transfer. The mint could no longer be retried and may have landed on the ledger.",

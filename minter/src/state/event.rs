@@ -474,6 +474,21 @@ pub enum EventType {
         #[n(1)]
         lamports_spent: Lamport,
     },
+    /// An SPL withdrawal paid more rent than the reserve, so SPL withdrawals are halted.
+    /// The minter decides the halt when it settles the transaction; a replay does not
+    /// decide it again.
+    #[n(36)]
+    HaltedSplWithdrawals {
+        /// The signature of the transaction that paid the rent.
+        #[cbor(n(0), with = "cbor::signature")]
+        signature: Signature,
+        /// The rent that the transaction paid for the destination token account.
+        #[n(1)]
+        rent_spent: Lamport,
+        /// The rent reserve that the transaction exceeded.
+        #[n(2)]
+        rent_reserve: Lamport,
+    },
 }
 
 /// The terms of an SPL withdrawal, captured before the ckSOL fee burn.

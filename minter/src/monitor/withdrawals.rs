@@ -255,6 +255,12 @@ async fn finalize_landed_withdrawal<R: CanisterRuntime>(
             });
             match (spl_request, &meta.err) {
                 (Some(request), _) => {
+                    // The halt is recorded in a message of its own, so that a trap in the
+                    // settlement cannot undo it. The next round settles the withdrawal.
+                    if let Some(halt) = spl_withdrawal_halt(withdrawal, &meta, &request) {
+                        mutate_state(|state| process_event(state, halt, runtime));
+                        return Finalization::UnresolvedOutcome;
+                    }
                     match spl_withdrawal_events(withdrawal, &meta, &request, runtime.time()) {
                         Ok(events) => {
                             // The events remove the withdrawal from the in-flight set, so
@@ -313,6 +319,43 @@ async fn finalize_landed_withdrawal<R: CanisterRuntime>(
         }
     });
     Finalization::Finalized
+}
+
+/// The event that halts SPL withdrawals, if this withdrawal succeeded with a rent above
+/// the reserve and SPL withdrawals are not halted yet.
+fn spl_withdrawal_halt(
+    withdrawal: &InFlightWithdrawal,
+    meta: &UiTransactionStatusMeta,
+    request: &SplWithdrawalRequest,
+) -> Option<EventType> {
+    if read_state(|state| state.spl_withdrawals_halted()) {
+        return None;
+    }
+    let terms = &request.terms;
+    let rent_spent = match settle_spl_withdrawal(&withdrawal.message, meta, terms) {
+        Ok(SplWithdrawalOutcome::Succeeded { rent_spent, .. }) => rent_spent,
+        // A failed transfer creates no token account, so it pays no rent.
+        Ok(SplWithdrawalOutcome::Failed { .. }) => return None,
+        // The settlement reports the error and tries again in the next round.
+        Err(_) => return None,
+    };
+    // An upgrade can raise the reserve while a request with the old reserve waits.
+    // That request must not halt the minter again after the resume.
+    let current_reserve = read_state(|state| state.spl_withdrawal_rent_reserve());
+    let rent_reserve = terms.rent_reserve.max(current_reserve);
+    if rent_spent <= rent_reserve {
+        return None;
+    }
+    let signature = withdrawal.signature;
+    log!(
+        Priority::Error,
+        "Halting SPL withdrawals: transaction {signature} spent {rent_spent} lamports of rent, above the reserve of {rent_reserve}"
+    );
+    Some(EventType::HaltedSplWithdrawals {
+        signature,
+        rent_spent,
+        rent_reserve,
+    })
 }
 
 /// The outcome event of a finalized SPL withdrawal with the refund of its rent reserve.

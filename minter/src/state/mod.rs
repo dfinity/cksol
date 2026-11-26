@@ -169,6 +169,7 @@ pub struct State {
     collected_spl_withdrawal_fees: BTreeMap<Address, u128>,
     spl_withdrawals_above_rent_reserve: u64,
     spl_rent_above_reserve: Lamport,
+    spl_withdrawals_halted: bool,
     spl_withdrawal_token_burns: BTreeSet<(Principal, LedgerBurnIndex)>,
     rejected_spl_withdrawal_requests: BTreeMap<LedgerBurnIndex, RejectedSplWithdrawalRequest>,
     pending_spl_cksol_refunds: BTreeMap<WithdrawSplId, PendingSplCkSolRefund>,
@@ -480,6 +481,7 @@ impl State {
             operating_balance_refill,
             spl_deposit_consolidation_fee,
             spl_withdrawal_fee,
+            spl_withdrawals_halted,
         }: UpgradeArgs,
     ) -> Result<(), InvalidStateError> {
         if let Some(sol_rpc_canister_id) = sol_rpc_canister_id {
@@ -517,6 +519,9 @@ impl State {
         }
         if let Some(fee) = spl_withdrawal_fee {
             self.spl_withdrawal_fee = fee;
+        }
+        if let Some(halted) = spl_withdrawals_halted {
+            self.spl_withdrawals_halted = halted;
         }
         self.validate()
     }
@@ -810,6 +815,7 @@ impl State {
             available_balance: self.spendable_balance(),
             available_tokens: self.spl_treasury_balances.clone(),
             sol_blocked: false,
+            spl_halted: self.spl_withdrawals_halted,
         }
     }
 
@@ -838,8 +844,19 @@ impl State {
         self.nonce_pool.num_free_accounts() > 0 && self.withdrawal_plans().next().is_some()
     }
 
+    /// The number of created transactions that a round can sign. A halt holds the
+    /// created SPL transactions, so they take no place in a round.
+    pub fn num_unsigned_withdrawal_transactions(&self) -> usize {
+        let spl = if self.spl_withdrawals_halted {
+            0
+        } else {
+            self.created_spl_withdrawal_txs.len()
+        };
+        self.created_withdrawal_txs.len() + spl
+    }
+
     pub fn has_unsigned_withdrawal_transaction(&self) -> bool {
-        !self.created_withdrawal_txs.is_empty() || !self.created_spl_withdrawal_txs.is_empty()
+        self.num_unsigned_withdrawal_transactions() > 0
     }
 
     /// Returns the creation timestamp (in nanoseconds) of the oldest incomplete withdrawal request.
@@ -882,6 +899,15 @@ impl State {
     /// The sum of the rent that SPL withdrawals spent above their reserve.
     pub fn spl_rent_above_reserve(&self) -> Lamport {
         self.spl_rent_above_reserve
+    }
+
+    /// Whether the minter accepts and sends no SPL withdrawal until an upgrade resumes them.
+    pub fn spl_withdrawals_halted(&self) -> bool {
+        self.spl_withdrawals_halted
+    }
+
+    pub fn process_halted_spl_withdrawals(&mut self) {
+        self.spl_withdrawals_halted = true;
     }
 
     pub fn pending_spl_withdrawal_requests(
@@ -2040,6 +2066,7 @@ impl TryFrom<InitArgs> for State {
             collected_spl_withdrawal_fees: BTreeMap::new(),
             spl_withdrawals_above_rent_reserve: 0,
             spl_rent_above_reserve: 0,
+            spl_withdrawals_halted: false,
             spl_withdrawal_token_burns: BTreeSet::new(),
             rejected_spl_withdrawal_requests: BTreeMap::new(),
             pending_spl_cksol_refunds: BTreeMap::new(),
@@ -2173,6 +2200,7 @@ pub struct WithdrawalPlans<'a> {
     available_balance: Lamport,
     available_tokens: BTreeMap<Address, u64>,
     sol_blocked: bool,
+    spl_halted: bool,
 }
 
 impl Iterator for WithdrawalPlans<'_> {
@@ -2206,6 +2234,9 @@ impl WithdrawalPlans<'_> {
     }
 
     fn next_burn_index_of_spl(&mut self) -> Option<LedgerBurnIndex> {
+        if self.spl_halted {
+            return None;
+        }
         self.pending_spl_requests
             .peek()
             .map(|pending| pending.request.cksol_burn_block_index)

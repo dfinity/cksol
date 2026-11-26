@@ -216,9 +216,9 @@ async fn create_transactions_batch<R: CanisterRuntime>(
     minter_address: Address,
 ) -> usize {
     let reserved_plans: Vec<ReservedPlan> = read_state(|state| {
-        let max_plans = MAX_CONCURRENT_RPC_CALLS.min(MAX_CONCURRENT_SIGNATURES.saturating_sub(
-            state.created_withdrawal_txs().len() + state.created_spl_withdrawal_txs().len(),
-        ));
+        let max_plans = MAX_CONCURRENT_RPC_CALLS.min(
+            MAX_CONCURRENT_SIGNATURES.saturating_sub(state.num_unsigned_withdrawal_transactions()),
+        );
         state
             .nonce_pool()
             .free_accounts()
@@ -382,7 +382,12 @@ fn bound_withdrawals(state: &State, minter_address: &Address) -> Vec<BoundWithdr
                 spl::bound_withdrawal(state, nonce_account, created),
             )
         });
-    let mut bound: Vec<_> = sol.chain(spl).collect();
+    let mut bound: Vec<_> = sol.collect();
+    // A halt holds the created SPL transactions with their nonce bindings. A transaction
+    // whose signing began before the halt is in flight, so the round still sends it.
+    if !state.spl_withdrawals_halted() {
+        bound.extend(spl);
+    }
     bound.sort_by_key(|(oldest_burn_index, _, _)| *oldest_burn_index);
     bound
         .into_iter()

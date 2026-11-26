@@ -149,6 +149,15 @@ impl From<EventType> for CandidEventType {
                 kind: candid_refund_kind(kind),
                 mint_block_index: *mint_block_index.get(),
             },
+            EventType::HaltedSplWithdrawals {
+                signature,
+                rent_spent,
+                rent_reserve,
+            } => CandidEventType::HaltedSplWithdrawals {
+                signature: signature.into(),
+                rent_spent,
+                rent_reserve,
+            },
             EventType::QuarantinedSplCkSolRefund {
                 cksol_burn_block_index,
                 kind,
@@ -483,6 +492,15 @@ impl TryFrom<CandidEventType> for EventType {
                 cksol_burn_block_index: LedgerBurnIndex::new(cksol_burn_block_index),
                 kind: refund_kind(kind),
                 mint_block_index: LedgerMintIndex::new(mint_block_index),
+            },
+            CandidEventType::HaltedSplWithdrawals {
+                signature,
+                rent_spent,
+                rent_reserve,
+            } => EventType::HaltedSplWithdrawals {
+                signature: signature.into(),
+                rent_spent,
+                rent_reserve,
             },
             CandidEventType::QuarantinedSplCkSolRefund {
                 cksol_burn_block_index,
