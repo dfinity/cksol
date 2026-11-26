@@ -344,6 +344,47 @@ async fn should_not_reschedule_after_a_round_of_transient_failures() {
     assert_eq!(runtime.set_timer_call_count(), 0);
 }
 
+#[tokio::test]
+async fn should_rotate_past_failed_mints_and_wrap_around() {
+    setup();
+    let pending = credit_sweeps_of_deposits(MAX_PENDING_MINTS_PER_ROUND + 1);
+    let first = mint_runtime(
+        (0..MAX_PENDING_MINTS_PER_ROUND).map(|_| Err(TransferError::TemporarilyUnavailable)),
+    );
+    process_pending_mints(first.clone()).await;
+    assert_eq!(first.set_timer_call_count(), 0);
+    assert_eq!(
+        transfer_args_sent_by(&first),
+        pending[..MAX_PENDING_MINTS_PER_ROUND]
+            .iter()
+            .map(expected_transfer_arg)
+            .collect::<Vec<_>>()
+    );
+
+    let second = mint_runtime((0..MAX_PENDING_MINTS_PER_ROUND).map(|id| Ok(id.into())));
+    process_pending_mints(second.clone()).await;
+    let expected = std::iter::once(&pending[MAX_PENDING_MINTS_PER_ROUND])
+        .chain(pending[..MAX_PENDING_MINTS_PER_ROUND - 1].iter())
+        .map(expected_transfer_arg)
+        .collect::<Vec<_>>();
+    assert_eq!(transfer_args_sent_by(&second), expected);
+    assert_eq!(second.set_timer_call_count(), 1);
+
+    let third = mint_runtime([Ok(BLOCK_INDEX.into())]);
+    process_pending_mints(third.clone()).await;
+    assert_eq!(
+        transfer_args_sent_by(&third),
+        vec![expected_transfer_arg(
+            &pending[MAX_PENDING_MINTS_PER_ROUND - 1]
+        )]
+    );
+    assert_eq!(third.set_timer_call_count(), 0);
+    read_state(|state| {
+        assert!(state.deposits().pending_mints().is_empty());
+        assert_eq!(state.deposits().minted().len(), pending.len());
+    });
+}
+
 fn setup() {
     reset_state();
     reset_events();

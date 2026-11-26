@@ -212,6 +212,93 @@ async fn should_quarantine_deposits_if_the_outcome_does_not_match_the_plan() {
     assert_eq!(failed_credit_attempt_count(FailedCreditReason::Mismatch), 1);
 }
 
+#[tokio::test]
+async fn should_credit_a_later_sweep_after_a_round_of_unavailable_outcomes() {
+    for (deviation, expected_reason) in [
+        (0, FailedCreditReason::NotFound),
+        (1, FailedCreditReason::RpcError),
+        (2, FailedCreditReason::InvalidResponse),
+    ] {
+        setup();
+        let healthy_signature = finalize_devnet_sweep();
+        for index in 0..MAX_CONCURRENT_RPC_CALLS {
+            let deposit_id = (devnet_sweep::DEPOSITS.len() + index) as DepositSolId;
+            queue(
+                deposit_id,
+                devnet_sweep::fresh_deposit(account(deposit_id as usize + 1), 25_000_000),
+            );
+            let signature = signature(index);
+            submit_sweep_to(
+                signature,
+                vec![deposit_id],
+                devnet_sweep::minter_main_address(),
+            );
+            succeed_transaction(signature);
+        }
+        let unavailable = || match deviation {
+            0 => GetTransactionResult::Consistent(Ok(None)),
+            1 => GetTransactionResult::Inconsistent(vec![]),
+            // The response belongs to the healthy sweep, not to any blocked sweep.
+            _ => transaction_response(devnet_sweep::derived_outcome()),
+        };
+        let mut first = TestCanisterRuntime::new().with_increasing_time();
+        for _ in 0..MAX_CONCURRENT_RPC_CALLS {
+            first = first.add_stub_response(unavailable());
+        }
+        let failed_before =
+            FailedCreditReason::ALL.map(|reason| (reason, failed_credit_attempt_count(reason)));
+        assert!(!credit_finalized_sweeps(&first).await);
+        let first_calls = first.sent_update_calls();
+        assert_eq!(first_calls.len(), MAX_CONCURRENT_RPC_CALLS);
+        for (reason, before) in failed_before {
+            let expected_increase = if reason == expected_reason {
+                MAX_CONCURRENT_RPC_CALLS as u64
+            } else {
+                0
+            };
+            assert_eq!(
+                failed_credit_attempt_count(reason) - before,
+                expected_increase
+            );
+        }
+
+        let mut second = runtime_returning(devnet_sweep::derived_outcome());
+        for _ in 1..MAX_CONCURRENT_RPC_CALLS {
+            second = second.add_stub_response(unavailable());
+        }
+        assert!(credit_finalized_sweeps(&second).await);
+        assert_eq!(second.sent_update_calls().len(), MAX_CONCURRENT_RPC_CALLS);
+        assert_eq!(
+            second.sent_update_calls()[1..],
+            first_calls[..MAX_CONCURRENT_RPC_CALLS - 1]
+        );
+        EventsAssert::from_recorded().expect_contains_event_eq(EventType::CreditedSweep {
+            signature: healthy_signature,
+            amount_received: devnet_sweep::AMOUNT_RECEIVED,
+            mints: devnet_sweep::mints(),
+        });
+        read_state(|state| {
+            assert_eq!(state.deposits().finalized().len(), MAX_CONCURRENT_RPC_CALLS);
+            assert_eq!(
+                state.deposits().pending_mints().len(),
+                devnet_sweep::DEPOSITS.len()
+            );
+            assert!(state.deposits().quarantined().is_empty());
+        });
+
+        let mut third = TestCanisterRuntime::new().with_increasing_time();
+        for _ in 0..MAX_CONCURRENT_RPC_CALLS {
+            third = third.add_stub_response(unavailable());
+        }
+        assert!(!credit_finalized_sweeps(&third).await);
+        let expected: Vec<_> = std::iter::once(first_calls.last().unwrap())
+            .chain(first_calls[..MAX_CONCURRENT_RPC_CALLS - 1].iter())
+            .cloned()
+            .collect();
+        assert_eq!(third.sent_update_calls(), expected);
+    }
+}
+
 fn setup() {
     reset_state();
     reset_events();
