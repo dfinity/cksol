@@ -47,7 +47,7 @@ Each ckSOL is backed by exactly 1 SOL held by the ckSOL minter canister. ckSOL c
 
 ## 🤝 Contributing
 
-At this point we do not accept external contributions yet. External contributions will be accepted after the initial release.
+External contributions are welcome! Please read the [contributor guidelines](.github/CONTRIBUTING.md) before opening a pull request.
 
 ## 📄 License
 

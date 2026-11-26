@@ -1,5 +1,8 @@
 # Building and Testing
 
+> [!TIP]
+> Want to contribute? See the [contributor guidelines](https://github.com/dfinity/cksol/blob/main/.github/CONTRIBUTING.md).
+
 ## Prerequisites
 
 Install [`mise`](https://mise.jdx.dev/) and then provision the pinned toolchain
