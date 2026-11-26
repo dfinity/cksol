@@ -260,6 +260,7 @@ struct RecordingStubRuntime {
 /// An inter-canister update call recorded by [`TestCanisterRuntime`].
 #[derive(Clone, Debug, PartialEq)]
 pub struct SentUpdateCall {
+    pub canister_id: Principal,
     pub method: String,
     pub cycles: u128,
     args: Vec<u8>,
@@ -292,6 +293,7 @@ impl Runtime for RecordingStubRuntime {
         Out: CandidType + DeserializeOwned,
     {
         self.sent_update_calls.lock().unwrap().push(SentUpdateCall {
+            canister_id: id,
             method: method.to_string(),
             cycles,
             args: encode_args(args).expect("Failed to encode the call arguments"),

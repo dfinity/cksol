@@ -5,7 +5,8 @@ use crate::{
     rpc::BlockHeight,
     state::{DepositBalance, DepositOrigin},
 };
-use cksol_types::DepositSolId;
+use ::candid::Principal;
+use cksol_types::{DepositSolId, DepositSplId, SplRefundKind};
 use cksol_types_internal::{InitArgs, UpgradeArgs};
 use derive_more::From;
 use ic_ed25519::PublicKey;
@@ -115,6 +116,7 @@ pub enum EventType {
     /// A previously submitted Solana transaction has failed.
     /// The deposits of a failed sweep transaction are dropped. For a sweep, the event is
     /// recorded by [`process_dropped_sweep`], which also re-arms the automatic deposits.
+    /// A failed SPL sweep keeps its deposit and reservation until `FailedSplSweep` settles it.
     ///
     /// [`process_dropped_sweep`]: crate::state::audit::process_dropped_sweep
     #[n(6)]
@@ -243,6 +245,287 @@ pub enum EventType {
     /// which replay restores verbatim, since registrations are not recorded as events.
     #[n(15)]
     WatchedDepositAddresses(#[n(0)] WatchlistSnapshot),
+    /// An SPL token-account balance was accepted for a sweep, by a user via `deposit_spl`.
+    /// The account and mint pair is locked until the deposit is minted or dropped.
+    /// The deposit id is the next SPL sequence number of the minter at the time of the event.
+    #[n(16)]
+    QueuedSplDeposit {
+        /// The identifier of the queued SPL deposit.
+        #[n(0)]
+        deposit_id: DepositSplId,
+        /// The account to which the minter should mint ckSPL once the sweep is credited.
+        #[n(1)]
+        account: Account,
+        /// The classic SPL mint of the deposited token.
+        #[cbor(n(2), with = "cbor::address")]
+        mint: Address,
+        /// The associated token account of the deposit address for the mint.
+        #[cbor(n(3), with = "cbor::address")]
+        address: Address,
+        /// The token-account balance when the deposit was queued, in the mint's smallest units.
+        #[n(4)]
+        balance: u64,
+        /// The fee deducted from the ledger mint, in the mint's smallest units.
+        #[n(5)]
+        fee: u64,
+    },
+    /// A finalized SPL sweep was validated and its deposit queued for ledger minting.
+    /// The unspent part of its SOL reservation is returned and its token fee is counted.
+    #[n(17)]
+    CreditedSplSweep {
+        /// The signature of the finalized sweep transaction.
+        #[cbor(n(0), with = "cbor::signature")]
+        signature: Signature,
+        /// The main account's actual spend on the transaction fee.
+        #[n(1)]
+        lamports_spent: Lamport,
+        /// The identifier of the swept SPL deposit.
+        #[n(2)]
+        deposit_id: DepositSplId,
+        /// The amount to mint: the swept balance minus the fee, in the mint's smallest units.
+        #[n(3)]
+        amount_to_mint: u64,
+    },
+    /// The observed outcome of an SPL sweep did not match its plan, so its deposit stays
+    /// locked and its SOL reservation stays withheld.
+    #[n(18)]
+    QuarantinedSplSweep {
+        /// The signature of the sweep transaction.
+        #[cbor(n(0), with = "cbor::signature")]
+        signature: Signature,
+    },
+    /// The token ledger minted a swept SPL deposit. The account and mint pair is released.
+    #[n(19)]
+    MintedSweptSplDeposit {
+        /// The identifier of the minted SPL deposit.
+        #[n(0)]
+        deposit_id: DepositSplId,
+        /// The mint transaction index on the ledger of the token.
+        #[cbor(n(1), with = "cbor::id")]
+        mint_block_index: LedgerMintIndex,
+    },
+    /// The pending mint of an SPL deposit cannot be retried safely, as for
+    /// [`EventType::QuarantinedPendingMint`]. The owed amount is retained and the pair stays
+    /// locked for manual resolution.
+    #[n(20)]
+    QuarantinedPendingSplMint {
+        /// The identifier of the SPL deposit whose pending mint was quarantined.
+        #[n(0)]
+        deposit_id: DepositSplId,
+    },
+    /// A refill intent recorded before the ckSOL burn. Its source is always the
+    /// minter's 0xbeef subaccount; its memo is OperatingRefill { refill_id }.
+    #[n(21)]
+    RequestedOperatingRefill {
+        #[n(0)]
+        refill_id: u64,
+        #[n(1)]
+        amount: u64,
+        #[n(2)]
+        created_at_time: u64,
+    },
+    /// The ledger accepted or deduplicated the recorded burn.
+    #[n(22)]
+    CompletedOperatingRefill {
+        #[n(0)]
+        refill_id: u64,
+        #[n(1)]
+        burn_block_index: u64,
+    },
+    /// The first burn attempt was definitively rejected; no operating SOL is credited.
+    #[n(23)]
+    FailedOperatingRefill {
+        #[n(0)]
+        refill_id: u64,
+        #[n(1)]
+        reason: String,
+    },
+    /// The unresolved intent remains reserved for manual ledger reconciliation.
+    #[n(24)]
+    QuarantinedOperatingRefill {
+        #[n(0)]
+        refill_id: u64,
+    },
+    /// The token burn succeeded and the withdrawal was accepted for processing.
+    #[n(25)]
+    AcceptedSplWithdrawalRequest(#[n(0)] SplWithdrawalRequest),
+    /// The token burn returned an error after the ckSOL fee burn, so no withdrawal is queued.
+    /// The refund of the burned ckSOL is recorded by [`EventType::QueuedSplCkSolRefund`].
+    #[n(26)]
+    FailedSplWithdrawalRequest {
+        /// The ckSOL fee burn index, also the withdrawal identifier.
+        #[cbor(n(0), with = "cbor::id")]
+        cksol_burn_block_index: LedgerBurnIndex,
+        /// The account from which the ckSOL fee was burned.
+        #[n(1)]
+        to: Account,
+        /// The ckSOL amount to mint back, in lamports.
+        #[n(2)]
+        reimbursed_amount: Lamport,
+    },
+    /// A durable nonce account and its nonce value were bound to one SPL withdrawal
+    /// request, before the transaction is signed. The binding determines the message, as
+    /// for [`EventType::CreatedWithdrawalTransaction`].
+    #[n(27)]
+    CreatedSplWithdrawalTransaction {
+        /// The ckSOL fee burn index of the withdrawal request served by this transaction.
+        #[cbor(n(0), with = "cbor::id")]
+        cksol_burn_block_index: LedgerBurnIndex,
+        /// The durable nonce account bound to this transaction.
+        #[cbor(n(1), with = "cbor::address")]
+        nonce_account: Address,
+        /// The nonce value the transaction carries in place of a recent blockhash.
+        #[cbor(n(2), with = "cbor::hash")]
+        nonce_value: Hash,
+    },
+    /// The transaction of an SPL withdrawal succeeded and its validated cost is settled.
+    /// The token fee is counted and the unspent part of the reservation is returned.
+    #[n(28)]
+    SucceededSplWithdrawalTransaction {
+        /// The signature of the finalized transaction.
+        #[cbor(n(0), with = "cbor::signature")]
+        signature: Signature,
+        /// The lamports that the main account spent: the transaction fee and the rent.
+        #[n(1)]
+        lamports_spent: Lamport,
+        /// The part of `lamports_spent` that created the destination token account.
+        #[n(2)]
+        rent_spent: Lamport,
+    },
+    /// The transaction of an SPL withdrawal failed on-chain, so no token moved and no
+    /// account was created. The burned tokens are queued for reimbursement.
+    #[n(29)]
+    FailedSplWithdrawalTransaction {
+        /// The signature of the failed transaction.
+        #[cbor(n(0), with = "cbor::signature")]
+        signature: Signature,
+        /// The lamports that the main account spent on the transaction fee.
+        #[n(1)]
+        lamports_spent: Lamport,
+    },
+    /// A ckSOL refund of an SPL withdrawal is owed. It is recorded before the ledger call,
+    /// in the same message as the outcome that causes it.
+    #[n(30)]
+    QueuedSplCkSolRefund {
+        /// The ckSOL fee burn index, also the withdrawal identifier.
+        #[cbor(n(0), with = "cbor::id")]
+        cksol_burn_block_index: LedgerBurnIndex,
+        /// Why the refund is owed.
+        #[n(1)]
+        kind: SplRefundKind,
+        /// The account from which the ckSOL was burned.
+        #[n(2)]
+        to: Account,
+        /// The ckSOL amount to mint back, in lamports.
+        #[n(3)]
+        amount: Lamport,
+        /// The timestamp of the mint, so that the ledger deduplicates each retry.
+        #[n(4)]
+        created_at_time: u64,
+    },
+    /// A ckSOL refund of an SPL withdrawal was minted.
+    #[n(31)]
+    ReimbursedSplCkSol {
+        /// The ckSOL fee burn index, also the withdrawal identifier.
+        #[cbor(n(0), with = "cbor::id")]
+        cksol_burn_block_index: LedgerBurnIndex,
+        /// Why the refund was owed.
+        #[n(1)]
+        kind: SplRefundKind,
+        /// The refund mint index on the ckSOL ledger.
+        #[cbor(n(2), with = "cbor::id")]
+        mint_block_index: LedgerMintIndex,
+    },
+    /// A ckSOL refund cannot be safely retried and requires manual resolution.
+    #[n(32)]
+    QuarantinedSplCkSolRefund {
+        /// The ckSOL fee burn index, also the withdrawal identifier.
+        #[cbor(n(0), with = "cbor::id")]
+        cksol_burn_block_index: LedgerBurnIndex,
+        /// Why the refund was owed.
+        #[n(1)]
+        kind: SplRefundKind,
+    },
+    /// The tokens of a failed SPL withdrawal were reminted.
+    #[n(33)]
+    ReimbursedSplWithdrawal {
+        /// The ckSOL fee burn index identifying the withdrawal.
+        #[cbor(n(0), with = "cbor::id")]
+        cksol_burn_block_index: LedgerBurnIndex,
+        /// The mint block index on the ckSPL ledger.
+        #[cbor(n(1), with = "cbor::id")]
+        mint_block_index: LedgerMintIndex,
+    },
+    /// A token reimbursement cannot be safely retried and requires manual resolution.
+    #[n(34)]
+    QuarantinedSplWithdrawalReimbursement {
+        /// The ckSOL fee burn index identifying the withdrawal.
+        #[cbor(n(0), with = "cbor::id")]
+        cksol_burn_block_index: LedgerBurnIndex,
+    },
+    /// The actual cost of an SPL sweep recorded as failed by [`EventType::FailedTransaction`]
+    /// was validated. The unspent reservation is returned and the deposit is dropped.
+    #[n(35)]
+    FailedSplSweep {
+        /// The signature of the failed sweep transaction.
+        #[cbor(n(0), with = "cbor::signature")]
+        signature: Signature,
+        /// The main account's actual spend on the transaction fee.
+        #[n(1)]
+        lamports_spent: Lamport,
+    },
+}
+
+/// The terms of an SPL withdrawal, captured before the ckSOL fee burn.
+#[derive(Clone, Eq, PartialEq, Debug, Decode, Encode)]
+pub struct SplWithdrawalRequestTerms {
+    #[n(0)]
+    pub account: Account,
+    #[cbor(n(1), with = "cbor::address")]
+    pub mint: Address,
+    #[cbor(n(2), with = "icrc_cbor::principal")]
+    pub ledger_id: Principal,
+    /// The destination wallet; its associated token account is derived later.
+    #[cbor(n(3), with = "cbor::address")]
+    pub address: Address,
+    /// The token amount to burn, in the mint's smallest units.
+    #[n(4)]
+    pub amount: u64,
+    /// The token fee deducted from the transferred amount, in the mint's smallest units.
+    #[n(5)]
+    pub token_fee: u64,
+    /// The ckSOL fee already burned, in lamports, without the rent reserve.
+    #[n(6)]
+    pub fee: Lamport,
+    /// The ckSOL burned with the fee for the rent of the destination token account.
+    #[n(7)]
+    pub rent_reserve: Lamport,
+}
+
+impl SplWithdrawalRequestTerms {
+    /// The ckSOL burned for the request: the fee and the rent reserve.
+    pub fn cksol_burn_amount(&self) -> Option<Lamport> {
+        self.fee.checked_add(self.rent_reserve)
+    }
+
+    /// The token amount that the destination receives.
+    pub fn amount_to_transfer(&self) -> Option<u64> {
+        self.amount.checked_sub(self.token_fee)
+    }
+}
+
+/// Payload of the `AcceptedSplWithdrawalRequest` event.
+#[derive(Clone, Eq, PartialEq, Debug, Decode, Encode)]
+pub struct SplWithdrawalRequest {
+    /// The terms recorded with the ckSOL fee burn.
+    #[n(0)]
+    pub terms: SplWithdrawalRequestTerms,
+    /// The ckSOL fee burn index, also the withdrawal identifier.
+    #[cbor(n(1), with = "cbor::id")]
+    pub cksol_burn_block_index: LedgerBurnIndex,
+    /// The amount burn index on the token ledger.
+    #[cbor(n(2), with = "cbor::id")]
+    pub ckspl_burn_block_index: LedgerBurnIndex,
 }
 
 /// Payload of the `WatchedDepositAddresses` event: every registration, live or expired but
@@ -355,6 +638,21 @@ pub enum TransactionPurpose {
         /// The ledger burn indices of the withdrawal requests included in this transaction.
         #[cbor(n(0), with = "cbor::id_vec")]
         burn_indices: Vec<LedgerBurnIndex>,
+    },
+    /// Sweep one classic SPL deposit into its pre-created treasury ATA.
+    #[n(5)]
+    SweepSplDeposit {
+        #[n(0)]
+        deposit_id: DepositSplId,
+        #[n(1)]
+        block_height: BlockHeight,
+    },
+    /// Withdraw SPL tokens for one request, with the durable nonce bound to it.
+    #[n(6)]
+    SplWithdrawal {
+        /// The ckSOL fee burn index of the withdrawal request served by this transaction.
+        #[cbor(n(0), with = "cbor::id")]
+        cksol_burn_block_index: LedgerBurnIndex,
     },
 }
 

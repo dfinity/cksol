@@ -6,6 +6,7 @@ use ic_stable_structures::{
     DefaultMemoryImpl, StableLog,
     memory_manager::{MemoryId, MemoryManager, VirtualMemory},
 };
+use solana_address::Address;
 use std::{cell::RefCell, collections::BTreeMap};
 
 const EVENT_LOG_INDEX_MEMORY_ID: MemoryId = MemoryId::new(0);
@@ -33,6 +34,13 @@ thread_local! {
     static UNSTABLE_METRICS: RefCell<Metrics> = const { RefCell::new(Metrics::new()) };
 }
 
+/// The last successful read of the ckSOL top-up balance.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct TopUpBalanceRead {
+    pub balance: u64,
+    pub read_at: u64,
+}
+
 #[derive(Default)]
 pub(crate) struct Metrics {
     pub post_upgrade_instructions_consumed: u64,
@@ -42,6 +50,10 @@ pub(crate) struct Metrics {
     pub undecided_withdrawal_transactions: BTreeMap<UndecidedWithdrawalReason, u64>,
     pub deposit_address_scans: BTreeMap<ScanOutcome, u64>,
     pub automatic_deposit_rearms: BTreeMap<RearmOutcome, u64>,
+    pub operating_top_up_balance: Option<TopUpBalanceRead>,
+    pub operating_refill_errors: BTreeMap<OperatingRefillErrorReason, u64>,
+    pub failed_spl_sweeps: BTreeMap<(Address, FailedSplTransferReason), u64>,
+    pub failed_spl_withdrawals: BTreeMap<(Address, FailedSplTransferReason), u64>,
 }
 
 impl Metrics {
@@ -54,8 +66,62 @@ impl Metrics {
             undecided_withdrawal_transactions: BTreeMap::new(),
             deposit_address_scans: BTreeMap::new(),
             automatic_deposit_rearms: BTreeMap::new(),
+            operating_top_up_balance: None,
+            operating_refill_errors: BTreeMap::new(),
+            failed_spl_sweeps: BTreeMap::new(),
+            failed_spl_withdrawals: BTreeMap::new(),
         }
     }
+}
+
+/// Why an operating refill could not proceed or complete.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum OperatingRefillErrorReason {
+    BalanceOverflow,
+    BalanceRead,
+    DeduplicationExpired,
+    TooOld,
+    Rejected,
+    RejectedAfterUnknownOutcome,
+    CreatedInFuture,
+    LedgerError,
+    CallError,
+}
+
+impl OperatingRefillErrorReason {
+    pub const ALL: [Self; 9] = [
+        Self::BalanceOverflow,
+        Self::BalanceRead,
+        Self::DeduplicationExpired,
+        Self::TooOld,
+        Self::Rejected,
+        Self::RejectedAfterUnknownOutcome,
+        Self::CreatedInFuture,
+        Self::LedgerError,
+        Self::CallError,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::BalanceOverflow => "balance_overflow",
+            Self::BalanceRead => "balance_read",
+            Self::DeduplicationExpired => "deduplication_expired",
+            Self::TooOld => "too_old",
+            Self::Rejected => "rejected",
+            Self::RejectedAfterUnknownOutcome => "rejected_after_unknown_outcome",
+            Self::CreatedInFuture => "created_in_future",
+            Self::LedgerError => "ledger_error",
+            Self::CallError => "call_error",
+        }
+    }
+}
+
+pub(crate) fn record_operating_refill_error(reason: OperatingRefillErrorReason) {
+    with_unstable_metrics_mut(|m| *m.operating_refill_errors.entry(reason).or_insert(0) += 1);
+}
+
+pub(crate) fn operating_refill_error_count(reason: OperatingRefillErrorReason) -> u64 {
+    with_unstable_metrics(|m| m.operating_refill_errors.get(&reason).copied().unwrap_or(0))
 }
 
 /// What the balance scan of one watched deposit address led to.
@@ -195,6 +261,54 @@ pub(crate) fn record_failed_mint_attempt(reason: FailedMintReason) {
 
 pub(crate) fn failed_mint_attempt_count(reason: FailedMintReason) -> u64 {
     with_unstable_metrics(|m| m.failed_mint_attempts.get(&reason).copied().unwrap_or(0))
+}
+
+/// Why the token transfer of an SPL sweep or an SPL withdrawal failed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum FailedSplTransferReason {
+    FrozenAccount,
+    MissingAccount,
+    Other,
+}
+
+impl FailedSplTransferReason {
+    pub const ALL: [Self; 3] = [Self::FrozenAccount, Self::MissingAccount, Self::Other];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::FrozenAccount => "frozen_account",
+            Self::MissingAccount => "missing_account",
+            Self::Other => "other",
+        }
+    }
+}
+
+pub(crate) fn record_failed_spl_sweep(mint: Address, reason: FailedSplTransferReason) {
+    with_unstable_metrics_mut(|m| *m.failed_spl_sweeps.entry((mint, reason)).or_insert(0) += 1);
+}
+
+pub(crate) fn failed_spl_sweep_count(mint: Address, reason: FailedSplTransferReason) -> u64 {
+    with_unstable_metrics(|m| {
+        m.failed_spl_sweeps
+            .get(&(mint, reason))
+            .copied()
+            .unwrap_or(0)
+    })
+}
+
+pub(crate) fn record_failed_spl_withdrawal(mint: Address, reason: FailedSplTransferReason) {
+    with_unstable_metrics_mut(|m| {
+        *m.failed_spl_withdrawals.entry((mint, reason)).or_insert(0) += 1
+    });
+}
+
+pub(crate) fn failed_spl_withdrawal_count(mint: Address, reason: FailedSplTransferReason) -> u64 {
+    with_unstable_metrics(|m| {
+        m.failed_spl_withdrawals
+            .get(&(mint, reason))
+            .copied()
+            .unwrap_or(0)
+    })
 }
 
 /// Why an in-flight withdrawal transaction was left undecided by a finalization round.
