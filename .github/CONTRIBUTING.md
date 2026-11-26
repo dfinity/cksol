@@ -4,7 +4,7 @@ Thank you for your interest in contributing to ckSOL! Bug reports, suggestions, 
 
 ## Reporting issues
 
-- **Security vulnerabilities:** do **not** open a public issue. Follow the instructions in [SECURITY.md](../SECURITY.md) instead.
+- **Security vulnerabilities:** do **not** open a public issue. Follow the instructions in [SECURITY.md](/SECURITY.md) instead.
 - **Bugs and feature requests:** open a [GitHub issue](https://github.com/dfinity/cksol/issues) with as much detail as possible (version or commit, steps to reproduce, expected vs. actual behavior).
 - **General questions:** ask on the [DFINITY developer forum](https://forum.dfinity.org/).
 
@@ -20,11 +20,11 @@ Thank you for your interest in contributing to ckSOL! Bug reports, suggestions, 
    just unit-tests
    ```
 
-5. **Use a conventional PR title.** CI enforces titles of the form `type(scope): description`, where `type` is one of `feat`, `fix`, `chore`, `build`, `ci`, `docs`, `style`, `refactor`, `perf`, or `test`, e.g. `fix(minter): handle expired blockhash`.
+5. **Use a conventional PR title.** CI enforces titles of the form `type(scope): description`, where `type` is one of `feat`, `fix`, `chore`, `build`, `ci`, `docs`, `style`, `refactor`, `perf`, or `test`, e.g. `fix(minter): handle expired blockhash`. The scope is optional and may only contain letters, digits, `-`, `_` and `,`, so e.g. `docs(README.md): ...` is rejected. Mark breaking changes with `!`, e.g. `feat(minter)!: ...`.
 6. **Open the pull request** against `main` and describe what it changes and why.
 
-All pull requests are reviewed by the code owners in [CODEOWNERS](CODEOWNERS) and must pass CI before they can be merged. CI workflows for pull requests from forks only run after a maintainer approves them.
+All pull requests are reviewed by the code owners in [CODEOWNERS](/.github/CODEOWNERS) and must pass CI before they can be merged. CI workflows for pull requests from forks only run after a maintainer approves them.
 
 ## License
 
-By contributing, you agree that your contributions will be licensed under the [Apache License 2.0](../LICENSE).
+By contributing, you agree that your contributions will be licensed under the [Apache License 2.0](/LICENSE).
